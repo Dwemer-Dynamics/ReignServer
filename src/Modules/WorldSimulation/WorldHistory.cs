@@ -29,7 +29,7 @@ namespace ReignBetaServer
             "tournament", "travel", "meeting", "generic_participation"
         };
 
-        private static void EnsureWorldHistorySchema(ReignDbConnection connection)
+        internal static void EnsureWorldHistorySchema(ReignDbConnection connection)
         {
             const string marker =
                 "postgresql_world_history_schema_revision";
@@ -216,7 +216,7 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
             return existing;
         }
 
-        private static Dictionary<string, object> WorldHistoryIngestBatchApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> WorldHistoryIngestBatchApi(Dictionary<string, object> payload)
         {
             Stopwatch ingestTimer = Stopwatch.StartNew();
             payload = payload ?? new Dictionary<string, object>();
@@ -400,7 +400,7 @@ VALUES($client,$timeline,$sequence,$event,$now) ON CONFLICT(client_id,timeline_i
                 }
             }
 
-            SchedulePendingSocialWorldHistoryOutcomes(campaignId, timelineId);
+            ReputationService.SchedulePendingSocialWorldHistoryOutcomes(campaignId, timelineId);
 
             lock (WorldHistoryCacheLock) WorldHistoryClaimCache.Clear();
             ingestTimer.Stop();
@@ -445,7 +445,7 @@ VALUES($client,$timeline,$sequence,$event,$now) ON CONFLICT(client_id,timeline_i
                 .ToList();
             if (directOutcomes.Count == 0) return 0;
 
-            EnsureSocialReputationSchema(connection);
+            ReputationService.EnsureSocialReputationSchema(connection);
             int acknowledged = 0;
             foreach (Dictionary<string, object> item in directOutcomes)
             {
@@ -453,13 +453,13 @@ VALUES($client,$timeline,$sequence,$event,$now) ON CONFLICT(client_id,timeline_i
                 if (string.IsNullOrWhiteSpace(eventId)) continue;
                 try
                 {
-                    ProcessSocialWorldHistoryEvent(campaignId, timelineId,
+                    ReputationService.ProcessSocialWorldHistoryEvent(campaignId, timelineId,
                         item, true, connection);
                     acknowledged++;
                 }
                 catch (Exception ex)
                 {
-                    RecordSocialWorldHistoryFailure(campaignId, timelineId,
+                    ReputationService.RecordSocialWorldHistoryFailure(campaignId, timelineId,
                         eventId, ex, connection);
                     errors.Add("Direct social outcome " + eventId
                         + " failed before acknowledgment: "
@@ -525,7 +525,7 @@ ON CONFLICT(timeline_id) DO UPDATE SET is_active=1,updated_utc=$now;", new Dicti
                     ["savedSequence"] = savedSequence, ["previousServerHeadSequence"] = serverHead, ["historyCompleteFromWorldDay"] = completeFrom
                 };
             }
-            ResumePendingSocialWorldHistoryOutcomes(campaignId, timelineId);
+            ReputationService.ResumePendingSocialWorldHistoryOutcomes(campaignId, timelineId);
             return result;
         }
 
@@ -597,7 +597,7 @@ VALUES($event,$ordinal,$id,$type,$name,$role,$side,$party,$clan,$kingdom,$quanti
                 result.Add(new Dictionary<string, object>
                 {
                     ["entityId"] = "aggregate:" + entityType + ":"
-                        + DeterministicSocialId(group.Key),
+                        + ReputationService.DeterministicSocialId(group.Key),
                     ["entityType"] = "aggregate",
                     ["name"] = role + " aggregate",
                     ["role"] = role,
@@ -1124,7 +1124,7 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
             }
         }
 
-        private static List<Dictionary<string, object>> QueryWorldHistoryEntities(ReignDbConnection connection, string eventId)
+        internal static List<Dictionary<string, object>> QueryWorldHistoryEntities(ReignDbConnection connection, string eventId)
         {
             return QuerySql(connection, "SELECT * FROM world_history_entities WHERE event_id=$id ORDER BY ordinal;", new Dictionary<string, object> { ["id"] = eventId });
         }
@@ -1228,7 +1228,7 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
             return family.Replace('_', ' ') + " historical evidence, including exact actor, target, participant role, outcome, quantity, location, and time.";
         }
 
-        private static double ParseDoubleInvariant(string value, double fallback) { return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed) ? parsed : fallback; }
+        internal static double ParseDoubleInvariant(string value, double fallback) { return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed) ? parsed : fallback; }
         private static int ParseIntInvariant(string value, int fallback) { return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) ? parsed : fallback; }
 
 #if !REIGN_EXCLUDE_VERIFICATION

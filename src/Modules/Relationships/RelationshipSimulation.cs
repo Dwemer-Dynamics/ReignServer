@@ -949,11 +949,11 @@ namespace ReignBetaServer
             double romanceMultiplier=RelationshipSimulationPairStoryMultiplier(run,edge.A,edge.B,"romance",day);
             List<KeyValuePair<string, double>> eligible = new List<KeyValuePair<string, double>>
             {
-                new KeyValuePair<string, double>("practical_favor", (24d + 14d * Math.Max(0d, edge.AmbientAffinity) + 8d * Math.Min(1d, edge.AmbientExposure / 30d))*favorMultiplier*CourtCharacterEventWeight(postureA,postureB,"favors","bargaining")),
-                new KeyValuePair<string, double>("shared_confidence", (18d + 24d * Math.Max(0d, edge.AmbientAffinity) + 12d * Math.Min(1d, edge.AmbientExposure / 30d))*secretMultiplier*CourtCharacterEventWeight(postureA,postureB,"secrets","information"))
+                new KeyValuePair<string, double>("practical_favor", (24d + 14d * Math.Max(0d, edge.AmbientAffinity) + 8d * Math.Min(1d, edge.AmbientExposure / 30d))*favorMultiplier*CourtService.CourtCharacterEventWeight(postureA,postureB,"favors","bargaining")),
+                new KeyValuePair<string, double>("shared_confidence", (18d + 24d * Math.Max(0d, edge.AmbientAffinity) + 12d * Math.Min(1d, edge.AmbientExposure / 30d))*secretMultiplier*CourtService.CourtCharacterEventWeight(postureA,postureB,"secrets","information"))
             };
-            if (edge.SameClan || edge.Family) eligible.Add(new KeyValuePair<string, double>("family_duty_cooperation", (20d + 18d * Math.Max(0d, edge.AmbientAffinity))*CourtCharacterEventWeight(postureA,postureB,"protection","favors")));
-            if (edge.Spouses) eligible.Add(new KeyValuePair<string, double>("private_spousal_confidence", (18d + 22d * Math.Max(0d, edge.AmbientAffinity))*CourtCharacterEventWeight(postureA,postureB,"secrets","mediation")));
+            if (edge.SameClan || edge.Family) eligible.Add(new KeyValuePair<string, double>("family_duty_cooperation", (20d + 18d * Math.Max(0d, edge.AmbientAffinity))*CourtService.CourtCharacterEventWeight(postureA,postureB,"protection","favors")));
+            if (edge.Spouses) eligible.Add(new KeyValuePair<string, double>("private_spousal_confidence", (18d + 22d * Math.Max(0d, edge.AmbientAffinity))*CourtService.CourtCharacterEventWeight(postureA,postureB,"secrets","mediation")));
             RelationshipSimulationRelation ab = EnsureRelationshipSimulationRelation(run, edge.A, edge.B);
             RelationshipSimulationRelation ba = EnsureRelationshipSimulationRelation(run, edge.B, edge.A);
             double rivalryThread=RelationshipSimulationPairStoryIntensity(run,edge.A,edge.B,"rivalry",day,false);
@@ -963,22 +963,22 @@ namespace ReignBetaServer
                 Math.Max(Math.Max(ab.Facets["envy"], ba.Facets["envy"]), Math.Max(ab.Facets["resentment"], ba.Facets["resentment"]))) / 100d;
             if (edge.AmbientTension >= 0.025d || ambition >= 0.25d || competition >= 0.10d || rivalryThread>0d)
                 eligible.Add(new KeyValuePair<string, double>(rivalryThread>=50d?"political_obstruction":"political_rivalry_argument",
-                    (10d + 45d * Math.Max(edge.AmbientTension, competition) + 20d * ambition)*rivalryMultiplier*CourtCharacterEventWeight(postureA,postureB,"rivalry","threats","schemes")));
+                    (10d + 45d * Math.Max(edge.AmbientTension, competition) + 20d * ambition)*rivalryMultiplier*CourtService.CourtCharacterEventWeight(postureA,postureB,"rivalry","threats","schemes")));
             if(edge.Spouses&&(edge.AmbientTension>=0.025d||competition>=0.10d||maritalThread>0d))
                 eligible.Add(new KeyValuePair<string,double>("marital_argument",(8d+35d*Math.Max(edge.AmbientTension,competition))*maritalMultiplier));
             if (edge.Spouses && (maritalThread>=60d || ab.Facets["resentment"] >= 25d || ba.Facets["resentment"] >= 25d || edge.NativeRelation <= -15
                 || ((ab.Facets["resentment"] >= 15d || ba.Facets["resentment"] >= 15d) && (ab.Facets["affection"] <= 0d || ba.Facets["affection"] <= 0d))))
                 eligible.Add(new KeyValuePair<string, double>("marital_separation", ((maritalThread>=80d?45d:20d) + 45d * Math.Max(0d, edge.AmbientTension))*maritalMultiplier));
             bool flirt = edge.CoLocated && DirectorRomanceEligible(postureA, 40d) && DirectorRomanceEligible(postureB, 40d);
-            if (flirt) eligible.Add(new KeyValuePair<string, double>("mutual_romantic_flirtation", (16d + 12d * Math.Min(1d, edge.AmbientExposure / 30d))*romanceMultiplier*CourtCharacterEventWeight(postureA,postureB,"flirtation","strategic_seduction")));
+            if (flirt) eligible.Add(new KeyValuePair<string, double>("mutual_romantic_flirtation", (16d + 12d * Math.Min(1d, edge.AmbientExposure / 30d))*romanceMultiplier*CourtService.CourtCharacterEventWeight(postureA,postureB,"flirtation","strategic_seduction")));
             bool confidence=DirectorRomanceEligible(postureA,40d)&&DirectorRomanceEligible(postureB,40d);
-            if(confidence&&romanceThread>=25d)eligible.Add(new KeyValuePair<string,double>("romantic_confidence",(14d+10d*Math.Min(1d,edge.AmbientExposure/30d))*romanceMultiplier*CourtCharacterEventWeight(postureA,postureB,"flirtation","strategic_seduction","secrets")));
+            if(confidence&&romanceThread>=25d)eligible.Add(new KeyValuePair<string,double>("romantic_confidence",(14d+10d*Math.Min(1d,edge.AmbientExposure/30d))*romanceMultiplier*CourtService.CourtCharacterEventWeight(postureA,postureB,"flirtation","strategic_seduction","secrets")));
             string spouseA=ReadString(run.Heroes[edge.A].Data,"spouseId",""),spouseB=ReadString(run.Heroes[edge.B].Data,"spouseId","");
             bool outsideMarriage=(!string.IsNullOrWhiteSpace(spouseA)&&!spouseA.Equals(edge.B,StringComparison.OrdinalIgnoreCase))
                 ||(!string.IsNullOrWhiteSpace(spouseB)&&!spouseB.Equals(edge.A,StringComparison.OrdinalIgnoreCase));
             bool bothUnmarried=string.IsNullOrWhiteSpace(spouseA)&&string.IsNullOrWhiteSpace(spouseB);
-            if(StoryPhysicalRomanceEligible(edge.CoLocated,bothUnmarried,romanceThread,50d,postureA,postureB))eligible.Add(new KeyValuePair<string,double>("romantic_intimacy",(12d+8d*Math.Min(1d,edge.AmbientExposure/30d))*romanceMultiplier*CourtCharacterEventWeight(postureA,postureB,"strategic_seduction","flirtation")));
-            if (StoryPhysicalRomanceEligible(edge.CoLocated,outsideMarriage,romanceThread,75d,postureA,postureB)) eligible.Add(new KeyValuePair<string, double>("secret_affair_intimacy", (10d + 8d * Math.Min(1d, edge.AmbientExposure / 30d))*romanceMultiplier*CourtCharacterEventWeight(postureA,postureB,"strategic_seduction")));
+            if(StoryPhysicalRomanceEligible(edge.CoLocated,bothUnmarried,romanceThread,50d,postureA,postureB))eligible.Add(new KeyValuePair<string,double>("romantic_intimacy",(12d+8d*Math.Min(1d,edge.AmbientExposure/30d))*romanceMultiplier*CourtService.CourtCharacterEventWeight(postureA,postureB,"strategic_seduction","flirtation")));
+            if (StoryPhysicalRomanceEligible(edge.CoLocated,outsideMarriage,romanceThread,75d,postureA,postureB)) eligible.Add(new KeyValuePair<string, double>("secret_affair_intimacy", (10d + 8d * Math.Min(1d, edge.AmbientExposure / 30d))*romanceMultiplier*CourtService.CourtCharacterEventWeight(postureA,postureB,"strategic_seduction")));
             return SelectWeightedPassiveEvent(eligible, run.Seed.ToString(CultureInfo.InvariantCulture) + "|" + edge.PairKey + "|" + Math.Floor(day / DirectorRunIntervalDays));
         }
 

@@ -81,7 +81,7 @@ namespace ReignBetaServer
                 ["definitions"] = TraitDefinitions()
             };
             EnsureTraitPercentageData(document, ReadString(hero, "heroStringId", ReadString(hero, "characterObjectId", "unknown")));
-            EnsureCourtCharacterData(document, hero, ReadString(hero, "heroStringId", ReadString(hero, "characterObjectId", "unknown")));
+            CourtService.EnsureCourtCharacterData(document, hero, ReadString(hero, "heroStringId", ReadString(hero, "characterObjectId", "unknown")));
             RebuildPersonalityPortrait(document, ReadString(hero, "name", "This character"), "", "deterministic_trait_foundation");
             return document;
         }

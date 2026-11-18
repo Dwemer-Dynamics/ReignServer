@@ -671,8 +671,8 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
                 EnsureConversationRelationshipSchema(connection);
                 // Schema and its one-time legacy migration (own BEGIN) run before the
                 // acceptance transaction; in-transaction recompute skips them.
-                EnsureSocialReputationSchema(connection);
-                EnsureCourtSocialReputationSchema(connection);
+                ReputationService.EnsureSocialReputationSchema(connection);
+                ReputationService.EnsureCourtSocialReputationSchema(connection);
                 using (var transaction = connection.BeginTransaction())
                 {
                     // The receipt/memory triggers later UPDATE this row; a shared lock here could be held
@@ -819,7 +819,7 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
             }
             // Nontransactional scheduling stays after commit (currently a no-op).
             if (popularityChanged && !campaign.StartsWith("__", StringComparison.Ordinal))
-                SchedulePendingReputationReasonJobs(campaign);
+                ReputationService.SchedulePendingReputationReasonJobs(campaign);
             if (firstAcceptance)
                 try
                 {

@@ -26,7 +26,7 @@ refusal_key TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,proposal_id TEXT NOT NULL
                 ReadString(k,"leaderId","")!="" && (ReadString(k,"leaderId","")==ReadString(hero,"fatherId","")
                     || ReadString(k,"leaderId","")==ReadString(hero,"motherId","")));
 
-        private static Dictionary<string, object> MarriageQuote(string campaign, Dictionary<string, object> a,
+        internal static Dictionary<string, object> MarriageQuote(string campaign, Dictionary<string, object> a,
             Dictionary<string, object> b, Dictionary<string, object> ca, Dictionary<string, object> cb,
             List<Dictionary<string, object>> kingdoms, int year)
         {
@@ -139,7 +139,7 @@ VALUES($id,$t,$p,$l,$clan,$day,$chance,$roll,$u,$status,'{}',$ts);",new Dictiona
                 .Any(row=> {var terms=ReadDictionary(TryParseJsonObject(ReadString(row,"payload_json","{}")),"marriageTerms");return terms!=null&&ReadInt(terms,"nativeYear",-1)==year&&ReadBool(terms,"royalException",false)
                     &&new[]{ReadString(a,"heroStringId",""),ReadString(b,"heroStringId","")}.Any(id=>id==ReadString(row,"hero_a_id","")||id==ReadString(row,"hero_b_id",""));});
 
-        private static void ApplyMarriageLeaderEffect(ReignDbConnection c,string campaign,string timeline,string proposal,string from,string to,int delta,double day)
+        internal static void ApplyMarriageLeaderEffect(ReignDbConnection c,string campaign,string timeline,string proposal,string from,string to,int delta,double day)
         {
             string key=proposal+"|leaders|"+from+"|"+to;
             if(from==""||to==""||from==to||QuerySql(c,"SELECT effect_id FROM arranged_marriage_effects WHERE effect_id=$k;",new Dictionary<string,object>{{"k",key}}).Any())return;
@@ -214,7 +214,7 @@ WHERE n.nspname=current_schema() AND t.relname=$table AND NOT i.indisprimary;",
                         actualColumns.SetEquals(declaration.Value.Columns.Split(','))
                         && actualIndexes.SetEquals(declaration.Value.Indexes.Split(',',StringSplitOptions.RemoveEmptyEntries)));
                 }
-                EnsureWorldTestSchema(c); EnsureRumorSchema(c); EnsureClanConflictSchema(c);
+                EnsureWorldTestSchema(c); ReputationService.EnsureRumorSchema(c); EnsureClanConflictSchema(c);
                 var priorRetryScope=CurrentSqlRetrySuppression;
                 bool nestedRetryRestored=false;
                 using(var independent=OpenCampaignConnection(campaign))

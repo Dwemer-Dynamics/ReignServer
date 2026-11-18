@@ -804,7 +804,7 @@ VALUES('summary','linked_summary','memory','intermediate_memory'),('memory','int
             {
                 var capacity = ResolveConversationPromptCapacity(TestDict(), requestType, envelopeSettings);
                 certificates[ReadString(capacity, "routeKey", "")] = TestDict(
-                    "endpoint", NanoGptChatCompletionsUrl, "model", "recent-window-fixture",
+                    "endpoint", PortraitsService.NanoGptChatCompletionsUrl, "model", "recent-window-fixture",
                     "contextTokens", 1000000, "maxOutputTokens", 131072,
                     "source", "isolated recent-window fixture", "validUntilUtc", DateTimeOffset.UtcNow.AddHours(1).ToString("o"));
             }
@@ -878,7 +878,7 @@ UPDATE summaries SET hidden_from_json='[""observer""]' WHERE summary_id='hidden_
                         var body = TestDict("model", "recent-window-fixture", "messages", envelope.Messages,
                             "max_tokens", ReadInt(preflight, "outputReserve", 8192));
                         var final = BuildContinuityProviderPreflight(envelopeSettings,
-                            TestDict("promptEnvelope", envelope.Diagnostics), body, NanoGptChatCompletionsUrl, "recent-window-fixture");
+                            TestDict("promptEnvelope", envelope.Diagnostics), body, PortraitsService.NanoGptChatCompletionsUrl, "recent-window-fixture");
                         Check("final_provider_capacity_and_content_" + route, ReadBool(final, "fits", false)
                             && ReadBool(final, "capacityVerified", false) && packet.Selected.All(e => actual.Contains(NormalizePromptSegment(e.Text))), final);
                     }

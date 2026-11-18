@@ -133,16 +133,16 @@ namespace ReignBetaServer
                 var payload = new Dictionary<string, object> { ["campaignId"] = "resident-test", ["heroStringId"] = "person",
                     ["promptPurpose"] = "portrait", ["gender"] = "female", ["ageYears"] = 30, ["cultureId"] = "empire",
                     ["physicalConfidence"] = new Dictionary<string, object> { ["score"] = 100 }, ["nativeCharacterSnapshot"] = snapshot };
-                Require(PreserveResidentClothing(payload) && !UsesAdultPortraitClothingEdit(payload), "Initial outfit must bypass the second pass at maximum confidence.");
-                string prompt = BuildPortraitPrompt(payload, "change clothes", true);
+                Require(PortraitsService.PreserveResidentClothing(payload) && !PortraitsService.UsesAdultPortraitClothingEdit(payload), "Initial outfit must bypass the second pass at maximum confidence.");
+                string prompt = PortraitsService.BuildPortraitPrompt(payload, "change clothes", true);
                 Require(prompt.Contains("Retain exactly the clothes") && prompt.Contains("Retain any encountered armor")
                     && !prompt.Contains("Their clan is tier") && !prompt.Contains("No extreme close-up") && !prompt.Contains("change clothes"), "Ordinary identity, exclusion or caller clothing layers leaked.");
                 snapshot["heroStringId"] = "wrong";
-                Require(!PreserveResidentClothing(payload), "A mismatched snapshot may not set the clothing policy.");
+                Require(!PortraitsService.PreserveResidentClothing(payload), "A mismatched snapshot may not set the clothing policy.");
                 snapshot["heroStringId"] = "person"; resident["initialPortraitCompleted"] = true;
-                Require(PreserveResidentClothing(payload) && !UsesAdultPortraitClothingEdit(payload), "Regeneration must still preserve the resident's current equipment.");
+                Require(PortraitsService.PreserveResidentClothing(payload) && !PortraitsService.UsesAdultPortraitClothingEdit(payload), "Regeneration must still preserve the resident's current equipment.");
                 resident["initialPortraitCompleted"] = false; payload["promptPurpose"] = "castle_scene";
-                Require(!PreserveResidentClothing(payload), "Scenery must not enter the portrait exception.");
+                Require(!PortraitsService.PreserveResidentClothing(payload), "Scenery must not enter the portrait exception.");
                 return true;
             });
             Check("commoner_prompt_roles_and_persistent_personality", () => {

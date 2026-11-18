@@ -99,7 +99,7 @@ ON CONFLICT(key) DO UPDATE SET value=$value;",
             string timelineId = ReadString(payload, "timelineId", "main");
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             Dictionary<string, object> startupGrace =
-                Program.BuildAutonomousWorldStartupGrace(payload);
+                DiplomacyService.BuildAutonomousWorldStartupGrace(payload);
             if (ReadBool(startupGrace, "locked", false))
             {
                 return new Dictionary<string, object>
@@ -154,7 +154,7 @@ ON CONFLICT(key) DO UPDATE SET value=$value;",
                         campaignId, timelineId, kingdom, candidate, ruler, worldDay);
                     double oldPressure = ReadDouble(existing, "pressure", 0d);
                     double readiness = ReadDouble(scores, "readiness", 50d);
-                    double pressure = Program.Clamp(0d, 100d, oldPressure + Program.Clamp(-5d, 5d, (readiness - 50d) / 8d));
+                    double pressure = Clamp(0d, 100d, oldPressure + Clamp(-5d, 5d, (readiness - 50d) / 8d));
                     string oldStage = ReadString(existing, "stage", "none");
                     string stage = string.Equals(oldStage, "civil_war", StringComparison.OrdinalIgnoreCase) ? "civil_war" : RebellionStageForPressure(pressure);
                     bool isPlayerKingdom = string.Equals(kingdomId, playerKingdomId, StringComparison.OrdinalIgnoreCase) || ReadBool(kingdom, "isPlayerKingdom", false);
@@ -306,7 +306,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement 
                     worldDay, rebelKingdomId, parentKingdomId, rebelRulerId, parentRulerId,
                     "no_eligible_backer", "No established NPC ruler met the +30 friendship threshold.");
                 InsertRebellionBackingRequest(connection, none);
-                Program.RecordRulerActivity(connection, campaignId, timelineId, worldDay, rebelRulerId, parentRulerId,
+                DiplomacyService.RecordRulerActivity(connection, campaignId, timelineId, worldDay, rebelRulerId, parentRulerId,
                     "rebellion_backing", "", "no_eligible_backer", 0, 0, 0, 0, 0, "",
                     "rebellion-backing:" + movementId, ReadString(none, "reason", ""), none);
                 return none;
@@ -326,13 +326,13 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement 
             int askedToParent = ReadInt(Program.ResolveRulerDiplomaticAttitude(connection, campaignId, timelineId,
                 askedRulerId, parentRulerId, "rebellion_backing_opposed_parent"), "effectiveAttitude", 0);
             int dayKey = (int)Math.Floor(worldDay);
-            int rebelRoll = Program.StableRulerD100(campaignId, timelineId, dayKey, movementId + "|opposed|rebel");
-            int parentRoll = Program.StableRulerD100(campaignId, timelineId, dayKey, movementId + "|opposed|parent");
+            int rebelRoll = DiplomacyService.StableRulerD100(campaignId, timelineId, dayKey, movementId + "|opposed|rebel");
+            int parentRoll = DiplomacyService.StableRulerD100(campaignId, timelineId, dayKey, movementId + "|opposed|parent");
             int rebelScore = rebelRoll + askedToRebel;
             int parentScore = parentRoll + askedToParent;
             bool relationshipPass = rebelScore > parentScore;
             int militaryChance = ReadInt(militaryEvidence, "chance", 5);
-            int militaryRoll = Program.StableRulerD100(campaignId, timelineId, dayKey, movementId + "|military_safety");
+            int militaryRoll = DiplomacyService.StableRulerD100(campaignId, timelineId, dayKey, movementId + "|military_safety");
             bool militaryPass = militaryRoll <= militaryChance;
             bool accepted = relationshipPass && militaryPass;
             string reason = !relationshipPass ? "The opposed relationship score did not favor the rebel; ties refuse."
@@ -372,10 +372,10 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement 
             string correlation = "rebellion-backing:" + movementId;
             if (accepted)
             {
-                Program.ApplyRulerDiplomaticIncident(campaignId, timelineId, worldDay, "rebellion_backing_accepted",
+                DiplomacyService.ApplyRulerDiplomaticIncident(campaignId, timelineId, worldDay, "rebellion_backing_accepted",
                     "backing:" + movementId + ":rebel", movementId, rebelRulerId, askedRulerId,
                     rebelKingdomId, askedKingdomId, 25, "", 0, true, correlation, row);
-                Program.ApplyRulerDiplomaticIncident(campaignId, timelineId, worldDay, "rebellion_backing_accepted",
+                DiplomacyService.ApplyRulerDiplomaticIncident(campaignId, timelineId, worldDay, "rebellion_backing_accepted",
                     "backing:" + movementId + ":sponsor", movementId, askedRulerId, rebelRulerId,
                     askedKingdomId, rebelKingdomId, 10, "", 0, true, correlation, row);
                 Dictionary<string, object> terms = new Dictionary<string, object>
@@ -397,7 +397,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement 
             }
             else
             {
-                Program.ApplyRulerDiplomaticIncident(campaignId, timelineId, worldDay, "rebellion_backing_refused",
+                DiplomacyService.ApplyRulerDiplomaticIncident(campaignId, timelineId, worldDay, "rebellion_backing_refused",
                     "backing:" + movementId + ":refusal", movementId, rebelRulerId, askedRulerId,
                     rebelKingdomId, askedKingdomId, -25, "", 0, true, correlation, row);
             }
@@ -421,8 +421,8 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement 
                 ["executionStatus"] = accepted ? "pending" : "not_required",
                 ["announcementReady"] = !accepted, ["delivered"] = false, ["acknowledged"] = false
             };
-            Program.QueueDiplomaticEvent(campaignId, diplomaticEvent);
-            Program.RecordRulerDiplomacyEventActivity(campaignId, diplomaticEvent,
+            DiplomacyService.QueueDiplomaticEvent(campaignId, diplomaticEvent);
+            DiplomacyService.RecordRulerDiplomacyEventActivity(campaignId, diplomaticEvent,
                 "rebellion_backing", accepted ? "accepted" : "refused");
             return row;
         }
@@ -544,7 +544,7 @@ ORDER BY attempt_index DESC LIMIT 1;", new Dictionary<string, object>
             int chance = CalculateRebellionRecognitionChance(leveragePoints,
                 territoryPoints, warPressurePoints, relationshipPoints,
                 personalityPoints);
-            int roll = Program.StableRulerD100(campaignId, timelineId,
+            int roll = DiplomacyService.StableRulerD100(campaignId, timelineId,
                 attemptIndex, movementId + "|recognize_independence");
             bool accepted = roll <= chance;
             string attemptId = "rebellion-recognition:"
@@ -720,7 +720,7 @@ $parentFiefs,$otherWars,$judgment,$pragmatism,$mercy,$pride,$reason,$negotiation
             // an exceptional rebel position can reach the approved 30% ceiling.
             // Adverse relationship/personality evidence still drives the roll
             // back to the hard 1% floor.
-            return Program.Clamp(1 + 2 * (leveragePoints + territoryPoints
+            return Clamp(1 + 2 * (leveragePoints + territoryPoints
                 + warPressurePoints + relationshipPoints + personalityPoints),
                 1, RebellionRecognitionMaximumChancePercent);
         }
@@ -740,7 +740,7 @@ $parentFiefs,$otherWars,$judgment,$pragmatism,$mercy,$pride,$reason,$negotiation
             double supportPower = support.Select(id => ReadDouble(FindBackingKingdom(kingdoms, id), "strength", 0d)).Sum();
             double oppositionPower = opposition.Select(id => ReadDouble(FindBackingKingdom(kingdoms, id), "strength", 0d)).Sum();
             double denominator = supportPower + oppositionPower;
-            int chance = denominator <= 0d ? 5 : Program.Clamp((int)Math.Round(100d * supportPower / denominator,
+            int chance = denominator <= 0d ? 5 : Clamp((int)Math.Round(100d * supportPower / denominator,
                 MidpointRounding.AwayFromZero), 5, 95);
             return new Dictionary<string, object>
             {
@@ -866,7 +866,7 @@ VALUES($transition,$movement,$day,$from,$to,'game_state_mirror',$actor,$payload,
             int rulerStanding = ReadInt(politicalAttitude, "targetPublicStanding", 0);
             int effectiveAttitude = ReadInt(politicalAttitude,
                 "effectiveAttitude", 0);
-            double relationshipPressure = Program.Clamp(0d, 100d, 50d - effectiveAttitude);
+            double relationshipPressure = Clamp(0d, 100d, 50d - effectiveAttitude);
 
             Dictionary<string, object> traits = ReadDictionary(Program.ReadJsonObject(Program.CharacterFile(campaignId, leaderId, "traits.json")), "foundationTraits")
                 ?? ReadDictionary(clan, "traits") ?? new Dictionary<string, object>();
@@ -875,18 +875,18 @@ VALUES($transition,$movement,$day,$from,$to,'game_state_mirror',$actor,$payload,
                 + 0.10d * Trait100(traits, "pride") + 0.10d * Trait100(traits, "assertiveness")
                 + 0.10d * Trait100(traits, "vengefulness") + 0.10d * Trait100(traits, "riskTolerance")
                 + 0.08d * Trait100(traits, "aggression") + 0.08d * Trait100(traits, "confidence")
-                + 0.12d * Program.Clamp(0d, 100d, ReadDouble(pressureDoc, "rebellionTemptation", 50d));
-            double survivalConfidence = Program.Clamp(0d, 100d, ReadDouble(pressureDoc, "survivalConfidence", Trait100(traits, "confidence")));
+                + 0.12d * Clamp(0d, 100d, ReadDouble(pressureDoc, "rebellionTemptation", 50d));
+            double survivalConfidence = Clamp(0d, 100d, ReadDouble(pressureDoc, "survivalConfidence", Trait100(traits, "confidence")));
             double restraint = 0.30d * Trait100(traits, "authorityRespect") + 0.25d * Trait100(traits, "loyalty")
                 + 0.20d * Trait100(traits, "dutyMotivation") + 0.25d * (100d - survivalConfidence);
-            double traitPressure = Program.Clamp(0d, 100d, drive - 0.5d * restraint + 25d);
+            double traitPressure = Clamp(0d, 100d, drive - 0.5d * restraint + 25d);
             double factualPressure = FactualRebellionPressure(connection, leaderId, ReadString(clan, "clanId", ""), ReadString(kingdom, "kingdomId", ""), clan, worldDay);
             double motive = 0.50d * relationshipPressure + 0.35d * traitPressure + 0.15d * factualPressure;
             double totalPower = Math.Max(1d, ReadDouble(kingdom, "totalClanPower", 1d));
-            double powerShare = Program.Clamp(0d, 100d, 100d * ReadDouble(clan, "power", 0d) / totalPower);
-            double territorial = Program.Clamp(0d, 100d, 25d * ReadInt(clan, "fortificationCount", 0));
-            double viability = Program.Clamp(0d, 100d, 0.55d * powerShare + 0.30d * territorial + 0.15d * Trait100(traits, "confidence"));
-            double readiness = Program.Clamp(0d, 100d, 0.75d * motive + 0.25d * viability);
+            double powerShare = Clamp(0d, 100d, 100d * ReadDouble(clan, "power", 0d) / totalPower);
+            double territorial = Clamp(0d, 100d, 25d * ReadInt(clan, "fortificationCount", 0));
+            double viability = Clamp(0d, 100d, 0.55d * powerShare + 0.30d * territorial + 0.15d * Trait100(traits, "confidence"));
+            double readiness = Clamp(0d, 100d, 0.75d * motive + 0.25d * viability);
             return new Dictionary<string, object>
             {
                 ["relationshipPressure"] = Math.Round(relationshipPressure, 2), ["traitPressure"] = Math.Round(traitPressure, 2),
@@ -916,7 +916,7 @@ WHERE n.entity_id IN ($hero,$clan,$kingdom) AND e.world_day >= $from AND e.world
                 foreach (Dictionary<string, object> fact in facts)
                 {
                     string type = Program.NormalizeLookup(ReadString(fact, "event_type", ""));
-                    double decay = Program.Clamp(0d, 1d, 1d - (worldDay - ReadDouble(fact, "world_day", worldDay)) / 126d);
+                    double decay = Clamp(0d, 1d, 1d - (worldDay - ReadDouble(fact, "world_day", worldDay)) / 126d);
                     double modifier = 0d;
                     if (Program.ContainsAny(type, "execution", "hero killed", "family punishment")) modifier = 18d;
                     else if (Program.ContainsAny(type, "confisc", "settlement owner changed")) modifier = 12d;
@@ -934,7 +934,7 @@ WHERE n.entity_id IN ($hero,$clan,$kingdom) AND e.world_day >= $from AND e.world
             {
                 // Older campaigns can evaluate safely before every optional history table has populated.
             }
-            return Program.Clamp(0d, 100d, score);
+            return Clamp(0d, 100d, score);
         }
 
         private static List<Dictionary<string, object>> ScoreRebellionMemberships(ReignDbConnection connection, string campaignId,
@@ -962,10 +962,10 @@ WHERE n.entity_id IN ($hero,$clan,$kingdom) AND e.world_day >= $from AND e.world
                     ReadInt(ReadDictionary(clan, "relationsToLeaders"), candidateId, ReadInt(clan, "relationToCandidate", 0)));
                 double rulerRelation = RelationshipAlignment(connection, campaignId,
                     timelineId, heroId, rulerId, ReadInt(clan, "relationToRuler", 0));
-                double relationshipAdvantage = Program.Clamp(0d, 100d, 50d + 0.5d * (candidateRelation - rulerRelation));
+                double relationshipAdvantage = Clamp(0d, 100d, 50d + 0.5d * (candidateRelation - rulerRelation));
                 double objectiveBenefit = ReadInt(clan, "fortificationCount", 0) == 0 && ReadInt(clan, "tier", 0) >= 3 ? 70d : 50d;
                 double coalitionViability = ReadDouble(candidateScores, "viability", 50d);
-                double support = Program.Clamp(0d, 100d, 0.40d * ownPressure + 0.25d * relationshipAdvantage + 0.15d * objectiveBenefit + 0.20d * coalitionViability);
+                double support = Clamp(0d, 100d, 0.40d * ownPressure + 0.25d * relationshipAdvantage + 0.15d * objectiveBenefit + 0.20d * coalitionViability);
                 Dictionary<string, object> prior = ReadDictionaryList(existing, "memberships").FirstOrDefault(x => string.Equals(ReadString(x, "clanId", ""), clanId, StringComparison.OrdinalIgnoreCase));
                 int switches = ReadInt(prior, "switchCount", 0);
                 double threshold = openWar ? Math.Min(95d, 80d + 5d * switches) : 65d;
@@ -1044,8 +1044,8 @@ WHERE n.entity_id IN ($hero,$clan,$kingdom) AND e.world_day >= $from AND e.world
             string rulerId = ReadString(ruler, "leaderHeroId", "");
             Dictionary<string, object> traits = ReadDictionary(Program.ReadJsonObject(Program.CharacterFile(campaignId, rulerId, "traits.json")), "foundationTraits")
                 ?? ReadDictionary(ruler, "traits") ?? new Dictionary<string, object>();
-            double ratio = Program.Clamp(0d, 100d, 100d * rebelPower / Math.Max(1d, rebelPower + loyalistPower));
-            return Program.Clamp(0d, 100d, 25d + 0.30d * ratio + 0.20d * Trait100(traits, "pragmatism")
+            double ratio = Clamp(0d, 100d, 100d * rebelPower / Math.Max(1d, rebelPower + loyalistPower));
+            return Clamp(0d, 100d, 25d + 0.30d * ratio + 0.20d * Trait100(traits, "pragmatism")
                 + 0.15d * Trait100(traits, "mercy") - 0.15d * Trait100(traits, "pride") - 0.10d * Trait100(traits, "assertiveness"));
         }
 
@@ -1542,10 +1542,10 @@ WHERE campaign_id=$campaign AND action_id=$action;", new Dictionary<string, obje
                     && -35 <= RebellionRelationshipThreshold
                     && !(-34 <= RebellionRelationshipThreshold),
                 "the clan leader's directional effective attitude toward the ruler qualifies at -35 and below");
-            Dictionary<string, object> lockedGrace = Program.BuildAutonomousWorldStartupGrace(
+            Dictionary<string, object> lockedGrace = DiplomacyService.BuildAutonomousWorldStartupGrace(
                 new Dictionary<string, object> { ["worldDay"] = 104d,
                     ["campaignStartDay"] = 100d });
-            Dictionary<string, object> openGrace = Program.BuildAutonomousWorldStartupGrace(
+            Dictionary<string, object> openGrace = DiplomacyService.BuildAutonomousWorldStartupGrace(
                 new Dictionary<string, object> { ["worldDay"] = 105d,
                     ["campaignStartDay"] = 100d });
             add("startup_grace_boundary",
@@ -1918,7 +1918,7 @@ WHERE campaign_id=$campaign AND action_id=$action;", new Dictionary<string, obje
             return new Dictionary<string, object> { ["ok"] = tests.All(x => ReadBool(x, "passed", false)), ["passed"] = tests.Count(x => ReadBool(x, "passed", false)), ["total"] = tests.Count, ["languageCaseCount"] = languageCases.Length, ["tests"] = tests };
         }
 
-        internal static double Trait100(Dictionary<string, object> traits, string key) => Program.Clamp(0d, 100d, 50d + 25d * ReadDouble(traits, key, 0d));
+        internal static double Trait100(Dictionary<string, object> traits, string key) => Clamp(0d, 100d, 50d + 25d * ReadDouble(traits, key, 0d));
 
         private static double RelationshipAlignment(ReignDbConnection connection,
             string campaignId, string timelineId, string subjectId,
@@ -1930,7 +1930,7 @@ WHERE campaign_id=$campaign AND action_id=$action;", new Dictionary<string, obje
             int directional = ReadBool(attitude, "hasPair", false)
                 ? ReadInt(attitude, "effectiveAttitude", 0)
                 : 0;
-            return Program.Clamp(0d, 100d, 50d + 0.5d * directional);
+            return Clamp(0d, 100d, 50d + 0.5d * directional);
         }
 
         private static string RebellionStageForPressure(double pressure)

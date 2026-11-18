@@ -21,26 +21,26 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static readonly object FileLock = new object();
-        private static readonly ReaderWriterLockSlim CampaignDataGate = new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion);
+        internal static readonly object FileLock = new object();
+        internal static readonly ReaderWriterLockSlim CampaignDataGate = new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion);
 
-        private enum CampaignRequestAccess
+        internal enum CampaignRequestAccess
         {
             None,
             Read,
             Write
         }
-        private static readonly string DataDir = ResolveRuntimeDataDirectory(
+        internal static readonly string DataDir = ResolveRuntimeDataDirectory(
             Environment.GetEnvironmentVariable("REIGN_DATA_ROOT"),
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
-        private static readonly string LogsDir = Path.Combine(DataDir, "logs");
-        private static readonly string PromptsDir = Path.Combine(DataDir, "prompts");
+        internal static readonly string LogsDir = Path.Combine(DataDir, "logs");
+        internal static readonly string PromptsDir = Path.Combine(DataDir, "prompts");
         private static readonly string CharacterTemplatesDir = Path.Combine(DataDir, "character_templates");
-        private static readonly string TestsDir = Path.Combine(DataDir, "tests");
+        internal static readonly string TestsDir = Path.Combine(DataDir, "tests");
         private static readonly string SettingsPath = Path.Combine(DataDir, "settings.json");
         private static readonly Lazy<NativeProviderTestGuard> NativeProviderTestGuardInstance =
             new Lazy<NativeProviderTestGuard>(() => new NativeProviderTestGuard(DataDir));
-        private static NativeProviderTestGuard ProviderTestGuard => NativeProviderTestGuardInstance.Value;
+        internal static NativeProviderTestGuard ProviderTestGuard => NativeProviderTestGuardInstance.Value;
 
         private static string ResolveRuntimeDataDirectory(
             string configuredRoot,
@@ -71,7 +71,7 @@ namespace ReignBetaServer
             PostgreSqlComponentSchemaFastPaths =
                 new ConcurrentDictionary<string, byte>(
                     StringComparer.OrdinalIgnoreCase);
-        private static volatile bool ShutdownRequested;
+        internal static volatile bool ShutdownRequested;
         private static volatile bool DeleteAllCampaignDataPending;
         private static readonly ManualResetEventSlim DeleteAllCampaignResponseSent = new ManualResetEventSlim(true);
         // Innermost lock (after CampaignDataGate, then CampaignBackupMutationLock). Guards only the
@@ -80,7 +80,7 @@ namespace ReignBetaServer
         private static readonly object DeleteAllScheduleLock = new object();
         private static bool DeleteAllSchedulingClosed;
         private static Dictionary<string, object> DeleteAllScheduledSettings;
-        private static readonly AsyncLocal<string> CampaignsRootOverride = new AsyncLocal<string>();
+        internal static readonly AsyncLocal<string> CampaignsRootOverride = new AsyncLocal<string>();
         private static int InteractiveRequestCount;
         private static long LastInteractiveRequestCompletedUtcTicks;
         private static readonly object CharacterEnrichmentLock = new object();
@@ -162,7 +162,7 @@ namespace ReignBetaServer
             "action_leave_kingdom.txt",
             "action_hire_mercenary_clan.txt"
         };
-        private static string[] PromptFileNames
+        internal static string[] PromptFileNames
         {
             get { return new[]
             {
@@ -205,7 +205,7 @@ namespace ReignBetaServer
             "portrait_composition.txt",
             "portrait_prompt_style.txt",
             "portrait_output_rules.txt"
-		    }.Concat(RelationshipPromptFileNames()).Concat(PortraitClothingPromptFileNames).Concat(PortraitPhysicalConfidencePromptFileNames).Concat(ActionPromptFileNames).Concat(CastleChatPromptFileNames()).Concat(TavernHousePromptFileNames).ToArray(); }
+		    }.Concat(RelationshipPromptFileNames()).Concat(PortraitsService.PortraitClothingPromptFileNames).Concat(PortraitsService.PortraitPhysicalConfidencePromptFileNames).Concat(ActionPromptFileNames).Concat(CourtService.CastleChatPromptFileNames()).Concat(TavernHousePromptFileNames).ToArray(); }
         }
         internal static readonly string[] ContextPullIds =
         {
@@ -243,7 +243,7 @@ namespace ReignBetaServer
 
         private static void Main(string[] args)
         {
-            if (TryRunPreparedTavernSourceCommand(args ?? new string[0])) return;
+            if (PortraitsService.TryRunPreparedTavernSourceCommand(args ?? new string[0])) return;
             ConfigureVerificationDatabaseIsolation(args ?? new string[0]);
             try
             {
@@ -344,7 +344,7 @@ namespace ReignBetaServer
 
             if (HasArg(args, "--run-diplomacy-tests"))
             {
-                Dictionary<string, object> result = RunWorldDiplomacySelfTests();
+                Dictionary<string, object> result = DiplomacyService.RunWorldDiplomacySelfTests();
                 Console.WriteLine(Json.Serialize(result));
                 Environment.ExitCode = ReadBool(result, "passed", false) ? 0 : 1;
                 return;
@@ -391,7 +391,7 @@ namespace ReignBetaServer
 
             if (HasArg(args, "--run-social-balance-harness-tests"))
             {
-                Dictionary<string, object> result = RunSocialBalanceHarnessSelfTests();
+                Dictionary<string, object> result = ReputationService.RunSocialBalanceHarnessSelfTests();
                 Console.WriteLine(Json.Serialize(result));
                 Environment.ExitCode = ReadBool(result, "passed", false) ? 0 : 1;
                 return;
@@ -400,7 +400,7 @@ namespace ReignBetaServer
 #if !REIGN_EXCLUDE_COURT
             if (HasArg(args, "--run-court-tests"))
             {
-                List<Dictionary<string, object>> rows = RunCourtSelfTests();
+                List<Dictionary<string, object>> rows = CourtService.RunCourtSelfTests();
                 Dictionary<string, object> result = new Dictionary<string, object>
                 {
                     ["ok"] = rows.Count > 0 && rows.All(x => ReadBool(x, "passed", false)),
@@ -418,7 +418,7 @@ namespace ReignBetaServer
             if (HasArg(args, "--run-trait-percentage-tests"))
             {
                 List<Dictionary<string, object>> rows = RunTraitPercentageSelfTests();
-                rows.AddRange(RunCourtCharacterSelfTests());
+                rows.AddRange(CourtService.RunCourtCharacterSelfTests());
                 Dictionary<string, object> result = new Dictionary<string, object>
                 {
                     ["ok"] = rows.Count > 0 && rows.All(x => ReadBool(x, "passed", false)),
@@ -499,7 +499,7 @@ namespace ReignBetaServer
 
             if (HasArg(args, "--run-rumor-tests"))
             {
-                List<Dictionary<string, object>> rows = RunRumorSubsystemSelfTests();
+                List<Dictionary<string, object>> rows = ReputationService.RunRumorSubsystemSelfTests();
                 Dictionary<string, object> result = new Dictionary<string, object>
                 {
                     ["ok"] = rows.Count > 0 && rows.All(x => ReadBool(x, "passed", false)),
@@ -617,7 +617,7 @@ namespace ReignBetaServer
 
             if (HasArg(args, "--run-portrait-derivative-tests"))
             {
-                List<Dictionary<string, object>> rows = RunPortraitDerivativeSelfTests();
+                List<Dictionary<string, object>> rows = PortraitsService.RunPortraitDerivativeSelfTests();
                 Dictionary<string, object> result = new Dictionary<string, object>
                 {
                     ["ok"] = rows.Count > 0 && rows.All(x => ReadBool(x, "passed", false)),
@@ -632,7 +632,7 @@ namespace ReignBetaServer
 
             if (HasArg(args, "--run-shared-portrait-generation-tests"))
             {
-                List<Dictionary<string, object>> rows = RunSharedPortraitGenerationSelfTests();
+                List<Dictionary<string, object>> rows = PortraitsService.RunSharedPortraitGenerationSelfTests();
                 Dictionary<string, object> result = new Dictionary<string, object>
                 {
                     ["ok"] = rows.Count > 0 && rows.All(x => ReadBool(x, "passed", false)),
@@ -647,7 +647,7 @@ namespace ReignBetaServer
 
             if (HasArg(args, "--run-portrait-provider-adapter-tests"))
             {
-                List<Dictionary<string, object>> rows = RunPortraitProviderAdapterContractTests();
+                List<Dictionary<string, object>> rows = PortraitsService.RunPortraitProviderAdapterContractTests();
                 Dictionary<string, object> result = new Dictionary<string, object>
                 {
                     ["ok"] = rows.Count > 0 && rows.All(x => ReadBool(x, "passed", false)),
@@ -730,7 +730,7 @@ namespace ReignBetaServer
             ShutdownRequested = false;
             StartPriorityBackgroundScheduler();
             // Startup maintenance is admitted first, ahead of every other producer and memory fan-out.
-            ResumePendingReputationReasonJobs();
+            ReputationService.ResumePendingReputationReasonJobs();
             StartContinuousRelationshipWorker();
             StartWorldTestRollupWorker();
             ResumePendingMemoryBackgroundJobs();
@@ -1040,7 +1040,7 @@ namespace ReignBetaServer
             return ReadInt(settings, "port", 5101);
         }
 
-        private static bool HasArg(string[] args, string value)
+        internal static bool HasArg(string[] args, string value)
         {
             return args.Any(x => x.Equals(value, StringComparison.OrdinalIgnoreCase));
         }
@@ -1184,7 +1184,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static CampaignRequestAccess EnterCampaignRequestAccess(string path)
+        internal static CampaignRequestAccess EnterCampaignRequestAccess(string path)
         {
             path = path ?? string.Empty;
             // Exemptions are declared on the routes (WithoutCampaignGate) and as exempt areas in each module's
@@ -1200,7 +1200,7 @@ namespace ReignBetaServer
             return CampaignRequestAccess.Read;
         }
 
-        private static void ExitCampaignRequestAccess(CampaignRequestAccess access)
+        internal static void ExitCampaignRequestAccess(CampaignRequestAccess access)
         {
             if (access == CampaignRequestAccess.Write) CampaignDataGate.ExitWriteLock();
             else if (access == CampaignRequestAccess.Read) CampaignDataGate.ExitReadLock();
@@ -1426,7 +1426,7 @@ namespace ReignBetaServer
                 + ReignPostgreSqlStorage.CampaignSchemaName(campaignId);
         }
 
-        private static bool HasCampaignPostgreSqlStorage(string campaignId)
+        internal static bool HasCampaignPostgreSqlStorage(string campaignId)
         {
             try
             {
@@ -1615,7 +1615,7 @@ WHERE table_schema=current_schema() AND table_name IN (
             }
         }
 
-        private static void EnsureMemorySchema(ReignDbConnection connection)
+        internal static void EnsureMemorySchema(ReignDbConnection connection)
         {
             ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,
@@ -1761,7 +1761,7 @@ WHERE table_schema=current_schema() AND table_name IN (
             EnsureDatabaseColumn(connection, "summaries", "embedding_status", "TEXT NOT NULL DEFAULT 'not_indexed'");
             ExecuteSql(connection, @"CREATE VIRTUAL TABLE IF NOT EXISTS summary_fts USING fts5(summary_id UNINDEXED, text, tags, entities);");
             EnsureRelationshipAndCorrespondenceSchema(connection);
-            EnsureSocialReputationSchema(connection);
+            ReputationService.EnsureSocialReputationSchema(connection);
             EnsureCharacterEditorSchema(connection);
             EnsureDynamicCharacteristicsSchema(connection);
             EnsureIdentitySchema(connection);
@@ -1777,13 +1777,13 @@ WHERE table_schema=current_schema() AND table_name IN (
             // it must not depend on a rebellion endpoint having run first.
             RebellionService.EnsureRebellionSchema(connection);
 #if !REIGN_EXCLUDE_COURT
-            EnsureCourtSchema(connection);
+            CourtService.EnsureCourtSchema(connection);
 #endif
             EnsurePrecisionProjectionTracking(connection);
             ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key, value) VALUES('version', '5');");
         }
 
-        private static void EnsureDatabaseColumn(ReignDbConnection connection, string table, string column, string definition)
+        internal static void EnsureDatabaseColumn(ReignDbConnection connection, string table, string column, string definition)
         {
             if (!Regex.IsMatch(table ?? string.Empty, @"^[A-Za-z_][A-Za-z0-9_]*$")
                 || !Regex.IsMatch(column ?? string.Empty, @"^[A-Za-z_][A-Za-z0-9_]*$"))
@@ -1918,7 +1918,7 @@ WHERE table_schema=current_schema()
 
         [ThreadStatic] private static SqlReadTimingContext CurrentSqlReadTiming;
 
-        private sealed class SqlReadTimingContext : IDisposable
+        internal sealed class SqlReadTimingContext : IDisposable
         {
             private readonly SqlReadTimingContext previous;
             public long SetupTicks, ExecuteTicks, MaterializeTicks, Rows;
@@ -3355,7 +3355,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
                         LoadSemanticRows(connection, "beliefs", "belief_id", "belief", semanticRetrieval, knowledge), "belief_id"), queryTerms, 30)
                     : new List<Dictionary<string, object>>();
                 if (RouteHasLane(retrievalRoute, "beliefs_and_rumors"))
-                    beliefs.AddRange(LoadKnownSocialContextCandidates(connection, campaignId,
+                    beliefs.AddRange(ReputationService.LoadKnownSocialContextCandidates(connection, campaignId,
                         ReadString(routeContext, "timelineId", "main"), npcId,
                         ReadDouble(routeContext, "worldDay", 0d), topic));
                 comprehension = RouteHasLane(retrievalRoute, "personal_state") || RouteHasLane(retrievalRoute, "interpersonal_history")
@@ -5111,7 +5111,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
             }
         }
 
-        private static List<string> TextListFromJson(string json)
+        internal static List<string> TextListFromJson(string json)
         {
             if (string.IsNullOrWhiteSpace(json))
             {
@@ -5144,7 +5144,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
             return ContainsAny(eventType ?? "", "private", "conversation", "trade", "bargain", "secret", "promise", "threat", "blackmail", "oath");
         }
 
-        private static double ClampDouble(double value, double min, double max)
+        internal static double ClampDouble(double value, double min, double max)
         {
             if (double.IsNaN(value) || double.IsInfinity(value))
             {
@@ -6123,7 +6123,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
             return response;
         }
 
-        private static Dictionary<string, object> EnsureCharacterConstructed(string campaignId, string heroId, Dictionary<string, object> hero, string source)
+        internal static Dictionary<string, object> EnsureCharacterConstructed(string campaignId, string heroId, Dictionary<string, object> hero, string source)
             => WithCharacterConstructionGate(campaignId, heroId, source,
                 () => EnsureCharacterConstructedCore(campaignId, heroId, hero, source));
 
@@ -6489,7 +6489,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
                 {
                     ApplyGeneratedTraitConstruction(traits, generated, hero);
                 }
-                EnsureCourtCharacterData(traits, hero, heroId);
+                CourtService.EnsureCourtCharacterData(traits, hero, heroId);
                 WriteJsonObject(CharacterFile(campaignId, heroId, "traits.json"), traits);
 
                 Dictionary<string, object> background = DictionaryOrDefault(generated, "background", DefaultBackground(hero, traits));
@@ -6606,7 +6606,7 @@ The previous attempt did not complete a JSON object within its output budget.
 - Close every object and array. A complete compact object is more important than decorative detail.";
         }
 
-        private static bool IsCharacterConstructionReady(Dictionary<string, object> construction)
+        internal static bool IsCharacterConstructionReady(Dictionary<string, object> construction)
         {
             return ReadBool(construction, "ok", false)
                 && IsUsableCharacterStatus(ReadString(construction, "status", ""));
@@ -6881,7 +6881,7 @@ The previous attempt did not complete a JSON object within its output budget.
             };
         }
 
-        private static Dictionary<string, object> DialogueRespond(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> DialogueRespond(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             BeginSinglePassConversation(payload);
@@ -6949,7 +6949,7 @@ The previous attempt did not complete a JSON object within its output budget.
             string playerText = ReadFirstString(payload, "playerText", "text", "message");
             Dictionary<string, object> visitorPromptContext = ReadDictionary(payload, "nobleVisitorContext");
             if (visitorPromptContext != null)
-                payload["sceneContext"] = ReadString(payload, "sceneContext", "") + "\n" + BuildNobleVisitorPrompt(campaignId, heroId, visitorPromptContext);
+                payload["sceneContext"] = ReadString(payload, "sceneContext", "") + "\n" + CourtService.BuildNobleVisitorPrompt(campaignId, heroId, visitorPromptContext);
             string playerPromptLabel = NormalizePregnancyChoiceToken(ReadFirstString(payload, "playerPromptLabel", "player_prompt_label"));
             if (string.IsNullOrWhiteSpace(heroId))
             {
@@ -6965,7 +6965,7 @@ The previous attempt did not complete a JSON object within its output budget.
             playerText = ReadString(payload, "playerText", "");
             if (officialAmbassador)
             {
-                Dictionary<string, object> officialContextError = ValidateOfficialAmbassadorContext(campaignId, payload);
+                Dictionary<string, object> officialContextError = CourtService.ValidateOfficialAmbassadorContext(campaignId, payload);
                 if (officialContextError != null) return officialContextError;
                 payload["officialMemoryFirewall"] = true;
                 payload["suppressConceptionGate"] = true;
@@ -7064,7 +7064,7 @@ The previous attempt did not complete a JSON object within its output budget.
             }
             if (officialAmbassador)
             {
-                List<Dictionary<string, object>> officialHistory = ReadOfficialAmbassadorArchiveLines(campaignId, payload, Math.Max(8, liveHistoryLimit));
+                List<Dictionary<string, object>> officialHistory = CourtService.ReadOfficialAmbassadorArchiveLines(campaignId, payload, Math.Max(8, liveHistoryLimit));
                 priorLines = CanonicalizePromptTranscript(officialHistory.Concat(priorLines).ToList(), liveHistoryLimit);
             }
             else if (priorLines.Count == 0 && string.IsNullOrWhiteSpace(requestedConversationSessionId))
@@ -7305,9 +7305,9 @@ The previous attempt did not complete a JSON object within its output budget.
             bool actionAcceptanceGateRepaired = EnforceActionAcceptanceCooperationGate(
                 actionAcceptanceCooperation, actionGate, playerText, ref reply,
                 UsesStructuredActions(payload));
-            Dictionary<string, object> chancellorDecision = NormalizeChancellorDecision(
+            Dictionary<string, object> chancellorDecision = CourtService.NormalizeChancellorDecision(
                 parsed, payload, playerText, reply, correlationId);
-            Dictionary<string, object> nobleDocketTurn = NormalizeNobleDocketTurn(
+            Dictionary<string, object> nobleDocketTurn = CourtService.NormalizeNobleDocketTurn(
                 parsed, payload, reply);
             Dictionary<string, object> conceptionGate = NormalizeConceptionGate(
                 parsed == null ? null : ReadDictionary(parsed, "conceptionGate") ?? ReadDictionary(parsed, "conception_gate"),
@@ -7320,7 +7320,7 @@ The previous attempt did not complete a JSON object within its output budget.
                 ShouldPersistGovernmentCertificationConversationSideEffects(
                     governmentCertificationMemoryIsolation)
                     && !actionAcceptanceCooperation
-                    ? NormalizeAndPersistConversationSocialSignals(
+                    ? ReputationService.NormalizeAndPersistConversationSocialSignals(
                         campaignId, parsed, payload, heroId, socialPlayerId,
                         playerText, reply, conceptionGate, decisionId,
                         socialWorldDay, persist: false)
@@ -7521,7 +7521,7 @@ The previous attempt did not complete a JSON object within its output budget.
                 reply, playerPromptLabel == "pull_out" || ReadBool(payload, "suppressConceptionGate", false));
             bool publishContextEffects = !agencyVisibleFailure && !governmentCertificationMemoryIsolation && !actionAcceptanceCooperation;
             if (publishContextEffects)
-                socialSignalValidation = NormalizeAndPersistConversationSocialSignals(campaignId, parsed, payload,
+                socialSignalValidation = ReputationService.NormalizeAndPersistConversationSocialSignals(campaignId, parsed, payload,
                     heroId, socialPlayerId, playerText, reply, conceptionGate, decisionId, socialWorldDay, persist: false);
             actionShadowPreview = BuildActionShadowPreview(queuedTestDirectiveActions, queuedDialogueActions, testDirectiveErrors, dialogueActionErrors);
             Dictionary<string, object> playerLine = npcOpening ? null : DialogueLine(ts, "player", playerName, playerText);
@@ -7574,7 +7574,7 @@ The previous attempt did not complete a JSON object within its output budget.
                 AcceptPersonalGossip(campaignId, payload, parsed, conversationExchange, heroId, dialoguePlayerId, playerText, reply);
             string conversationSessionId = ReadString(conversationExchange, "sessionId", "");
             double dialogueWorldDay = ReadDouble(payload, "worldDay", 0d);
-            Dictionary<string, object> immediateSocialIncidents = ProcessImmediatePlayerIntimacySignals(
+            Dictionary<string, object> immediateSocialIncidents = ReputationService.ProcessImmediatePlayerIntimacySignals(
                 campaignId, ReadString(socialSignalValidation, "timelineId", "main"),
                 conversationSessionId, ReadDictionaryList(socialSignalValidation, "signals"), dialogueWorldDay);
             string dialogueLocationId = FirstNonEmpty(ReadFirstString(payload, "locationId", "currentSettlementId", "settlementId"), ReadFirstString(profile, "currentSettlementId", "settlementId"));
@@ -7590,10 +7590,10 @@ The previous attempt did not complete a JSON object within its output budget.
             npcLine["worldDay"] = dialogueWorldDay;
             npcLine["locationId"] = dialogueLocationId;
             Dictionary<string, object> ambassadorDecision = officialAmbassador
-                ? PersistOfficialAmbassadorDecision(campaignId, payload, conversationExchange, ts)
+                ? CourtService.PersistOfficialAmbassadorDecision(campaignId, payload, conversationExchange, ts)
                 : new Dictionary<string, object>();
             if (officialAmbassador)
-                RecordOfficialAmbassadorExchange(campaignId, payload, heroId, dialoguePlayerId, playerLine, npcLine, conversationExchange, ts);
+                CourtService.RecordOfficialAmbassadorExchange(campaignId, payload, heroId, dialoguePlayerId, playerLine, npcLine, conversationExchange, ts);
             if (playerLine != null) AppendJsonLineToPath(CharacterFile(campaignId, heroId, "history", "dialogue.jsonl"), playerLine);
             AppendJsonLineToPath(CharacterFile(campaignId, heroId, "history", "dialogue.jsonl"), npcLine);
             foreach (Dictionary<string, object> memoryWrite in memoryWrites)
@@ -8772,7 +8772,7 @@ The previous attempt did not complete a JSON object within its output budget.
             bool familyChambers = ReadBool(payload, "familyChambers", false);
             if (ReadBool(ReadDictionary(payload, "speaker"), "isChild", false))
             {
-                return FamilyChambersChildRespond(payload);
+                return CourtService.FamilyChambersChildRespond(payload);
             }
             if (familyChambers)
             {
@@ -8833,13 +8833,13 @@ The previous attempt did not complete a JSON object within its output budget.
             string castlePrompt = ReadString(payload, "castleDialoguePrompt", "");
             Dictionary<string, object> partyVisitorContext = ReadDictionary(payload, "nobleVisitorContext");
             if (partyVisitorContext != null)
-                payload["sceneContext"] = ReadString(payload, "sceneContext", "") + "\n" + BuildNobleVisitorPrompt(
+                payload["sceneContext"] = ReadString(payload, "sceneContext", "") + "\n" + CourtService.BuildNobleVisitorPrompt(
                     ReadString(payload, "campaignId", "default"), ReadString(payload, "speakerHeroStringId", ""), partyVisitorContext);
             ApplyCastleChatMode(payload, castlePrompt);
 
             Dictionary<string, object> response = SocialEventRespond(payload);
             response["mode"] = string.IsNullOrWhiteSpace(castlePrompt) ? "party_chat" : "castle_chat";
-            if (familyChambers && ReadBool(response, "ok", false)) ProcessFamilyReconciliationReply(payload, response);
+            if (familyChambers && ReadBool(response, "ok", false)) CourtService.ProcessFamilyReconciliationReply(payload, response);
             return response;
         }
 
@@ -9325,7 +9325,7 @@ The previous attempt did not complete a JSON object within its output budget.
             return new Dictionary<string, object> { ["ok"] = true, ["request"] = row };
         }
 
-        private static Dictionary<string, object> UpsertCharacterProfile(string campaignId, Dictionary<string, object> hero)
+        internal static Dictionary<string, object> UpsertCharacterProfile(string campaignId, Dictionary<string, object> hero)
         {
             if (hero == null)
             {
@@ -9376,7 +9376,7 @@ The previous attempt did not complete a JSON object within its output budget.
             PreserveWandererIdentity(profile, existingProfile);
             lock (FileLock)
             {
-                PreserveConfirmedOutfit(campaignId, heroId, profile);
+                PortraitsService.PreserveConfirmedOutfit(campaignId, heroId, profile);
                 WriteJsonObject(profilePath, profile);
             }
             WriteCampaignMetadata(campaignId, profile);
@@ -9876,7 +9876,7 @@ The previous attempt did not complete a JSON object within its output budget.
             }
         }
 
-        private static Dictionary<string, object> ActionCatalog()
+        internal static Dictionary<string, object> ActionCatalog()
         {
             List<Dictionary<string, object>> commands = new List<Dictionary<string, object>>
             {
@@ -10028,7 +10028,7 @@ The previous attempt did not complete a JSON object within its output budget.
             }
         }
 
-        private static List<Dictionary<string, object>> CompactActionCatalog(Dictionary<string, object> catalog)
+        internal static List<Dictionary<string, object>> CompactActionCatalog(Dictionary<string, object> catalog)
         {
             List<Dictionary<string, object>> commands = ReadDictionaryList(catalog, "commands");
             List<Dictionary<string, object>> compact = new List<Dictionary<string, object>>();
@@ -10476,7 +10476,7 @@ The previous attempt did not complete a JSON object within its output budget.
                 evidence["reason"] = "owning_affair_command_not_authorized";
                 return false;
             }
-            if (!ValidateSocialBalanceLiveEnrollment(owner, campaignId,
+            if (!ReputationService.ValidateSocialBalanceLiveEnrollment(owner, campaignId,
                     out string enrollmentError))
             {
                 evidence["reason"] = "social_balance_enrollment_invalid";
@@ -10793,10 +10793,10 @@ The previous attempt did not complete a JSON object within its output budget.
             }
 
             string dialogueHeroId = ReadFirstString(payload, "speakerHeroStringId", "heroStringId", "heroId");
-            if (HasActiveAmbassadorPosting(campaignId, ReadString(payload, "timelineId", "main"), dialogueHeroId,
+            if (CourtService.HasActiveAmbassadorPosting(campaignId, ReadString(payload, "timelineId", "main"), dialogueHeroId,
                 ReadString(ReadDictionary(payload, "ambassadorContext") ?? new Dictionary<string, object>(), "postingId", "")))
             {
-                candidates = FilterOfficialAmbassadorActionCandidates(campaignId, payload, candidates, actionGate, playerText, visibleReply, out Dictionary<string, object> ambassadorDecision);
+                candidates = CourtService.FilterOfficialAmbassadorActionCandidates(campaignId, payload, candidates, actionGate, playerText, visibleReply, out Dictionary<string, object> ambassadorDecision);
                 payload["ambassadorDecision"] = ambassadorDecision;
             }
 
@@ -10827,7 +10827,7 @@ The previous attempt did not complete a JSON object within its output budget.
                     BindAcceptedItemDelivery(candidate, dialogueHeroId);
             queued = EvaluateAndQueueActionCandidates(campaignId, payload, actionResolutionText, candidates, out errors, out rejected);
             if (payload.ContainsKey("ambassadorDecision"))
-                CompleteOfficialAmbassadorDecision(payload, queued, errors);
+                CourtService.CompleteOfficialAmbassadorDecision(payload, queued, errors);
             errors.AddRange(fallbackErrors.Where(error => !string.IsNullOrWhiteSpace(error)));
             errors = errors.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
@@ -12964,7 +12964,7 @@ The previous attempt did not complete a JSON object within its output budget.
             return route;
         }
 
-        private static string BuildRouterResolutionText(string playerText, string npcReply)
+        internal static string BuildRouterResolutionText(string playerText, string npcReply)
         {
             StringBuilder builder = new StringBuilder();
             if (!string.IsNullOrWhiteSpace(playerText))
@@ -15495,7 +15495,7 @@ The previous attempt did not complete a JSON object within its output budget.
             return string.Empty;
         }
 
-        private static IEnumerable<object> ObjectsFromValue(object value)
+        internal static IEnumerable<object> ObjectsFromValue(object value)
         {
             if (value == null)
             {
@@ -15649,7 +15649,7 @@ The previous attempt did not complete a JSON object within its output budget.
             return proposed;
         }
 
-        private static Dictionary<string, object> RetryMalformedStructuredResponse(
+        internal static Dictionary<string, object> RetryMalformedStructuredResponse(
             Dictionary<string, object> llm,
             Dictionary<string, object> request,
             string campaignId,
@@ -16702,7 +16702,7 @@ The previous attempt did not complete a JSON object within its output budget.
             throw new InvalidOperationException("Transient LLM retry loop exhausted unexpectedly.");
         }
 
-        private static bool IsTransientLlmFailure(string message)
+        internal static bool IsTransientLlmFailure(string message)
         {
             string value = (message ?? "").ToLowerInvariant();
             return value.Contains("billing reservation failed")
@@ -16760,7 +16760,7 @@ The previous attempt did not complete a JSON object within its output budget.
                 + ") and no credential was forwarded. Configure the provider's final URL.";
         }
 
-        private static string PostJsonToLlm(string apiUrl, string apiKey, string requestJson, Dictionary<string, object> settings)
+        internal static string PostJsonToLlm(string apiUrl, string apiKey, string requestJson, Dictionary<string, object> settings)
         {
             HttpWebRequest request = CreateProviderRequest(apiUrl, apiKey, settings, "application/json");
             ProviderTestGuard.BeforeDispatch("http_text_or_image");
@@ -18393,7 +18393,7 @@ The previous attempt did not complete a JSON object within its output budget.
             ApplyTemporaryPartyGuestActorBinding(raw, terms, payload,
                 ReadDictionary(payload, "hero") ?? new Dictionary<string, object>(), command);
             BindAndValidateResidentAgreement(raw, terms, payload, resolutionText, command, errors);
-            BindAndValidateClanAccord(raw, terms, payload, resolutionText, command, errors);
+            DiplomacyService.BindAndValidateClanAccord(raw, terms, payload, resolutionText, command, errors);
             ResolveActionReferences(raw, terms, payload, resolutionText, command, errors, resolverTrace);
             BindDialogueMarriageParticipants(raw, terms, payload, command, errors);
             GovernmentService.ValidateGovernmentPaymentOwnership(raw, terms, command, errors);
@@ -18923,7 +18923,7 @@ The previous attempt did not complete a JSON object within its output budget.
                         if (!Enum.TryParse(ReadString(terms, "accordType", ""), true, out Reign.Core.Contracts.ClanAccords.ClanAccordType accordType)
                             || !Reign.Core.Contracts.ClanAccords.ClanAccordLedger.IsSupportedType(accordType)) errors.Add("Unsupported clan accord type.");
                     }
-                    else if (!ValidClanAccordId(ReadString(terms, "accordId", ""))) errors.Add("An active accordId is required.");
+                    else if (!DiplomacyService.ValidClanAccordId(ReadString(terms, "accordId", ""))) errors.Add("An active accordId is required.");
                     return;
                 case "recruit_encountered_resident":
                     Require(record, "actorHeroStringId", errors);
@@ -19476,14 +19476,14 @@ The previous attempt did not complete a JSON object within its output budget.
             if(found)FinalizeDiplomaticMarriageEffects(campaignId,id,authoritativeStatus,matchedRecord,payload);
             Dictionary<string, object> memoryStore = StoreActionResultMemory(payload, "actions_report");
             List<Dictionary<string, object>> nativeRelationChanges = EvaluateCompletedActionRelationships(payload);
-            UpdateDiplomaticEventForAction(campaignId, id, status, payload);
+            DiplomacyService.UpdateDiplomaticEventForAction(campaignId, id, status, payload);
             RebellionService.UpdateNegotiationFromActionReport(campaignId, id, status, payload);
             RebellionService.UpdateRebellionBackingFromActionReport(campaignId, id, status, payload);
             Dictionary<string, object> ambassadorReceiptPayload = new Dictionary<string, object>(payload, StringComparer.OrdinalIgnoreCase)
             {
                 ["record"] = matchedRecord ?? new Dictionary<string, object>()
             };
-            UpdateAmbassadorReferralActionReceipt(campaignId, ambassadorReceiptPayload, status);
+            CourtService.UpdateAmbassadorReferralActionReceipt(campaignId, ambassadorReceiptPayload, status);
             return new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaignId, ["correlationId"] = correlationId, ["id"] = id, ["status"] = status, ["reportedStatus"] = reportedStatus, ["found"] = found, ["memoryStore"] = memoryStore, ["nativeRelationChanges"] = nativeRelationChanges };
         }
 
@@ -19523,7 +19523,7 @@ The previous attempt did not complete a JSON object within its output budget.
                         StringComparison.OrdinalIgnoreCase));
         }
 
-        private static bool IsRecordedGovernmentRefusalResult(Dictionary<string, object> result)
+        internal static bool IsRecordedGovernmentRefusalResult(Dictionary<string, object> result)
         {
             var diagnostics = ReadDictionaryList(result, "diagnostics");
             Func<string, string> value = key => ReadString(diagnostics.FirstOrDefault(x =>
@@ -19555,7 +19555,7 @@ The previous attempt did not complete a JSON object within its output budget.
                 && IsResolvedNpcGovernmentRefusal(record, payload, reportedStatus);
         }
 
-        private static bool ShouldAcceptActionStatusTransition(string currentStatus, string incomingStatus)
+        internal static bool ShouldAcceptActionStatusTransition(string currentStatus, string incomingStatus)
         {
             string current = NormalizeLookup(currentStatus).Replace(' ', '_');
             string incoming = NormalizeLookup(incomingStatus).Replace(' ', '_');
@@ -19646,7 +19646,7 @@ The previous attempt did not complete a JSON object within its output budget.
             };
         }
 
-        private static List<Dictionary<string, object>> ReadActionQueueUnlocked(string campaignId)
+        internal static List<Dictionary<string, object>> ReadActionQueueUnlocked(string campaignId)
         {
             string path = CampaignFile(campaignId, "actions", "action-queue.json");
             var durable = ReadDurableConversationActions(campaignId);
@@ -19725,7 +19725,7 @@ The previous attempt did not complete a JSON object within its output budget.
             {
                 WriteActionQueueUnlocked(campaignId, queue);
                 foreach (Tuple<string, string, Dictionary<string, object>> item in healed)
-                    UpdateDiplomaticEventForAction(campaignId, item.Item1, item.Item2, item.Item3);
+                    DiplomacyService.UpdateDiplomaticEventForAction(campaignId, item.Item1, item.Item2, item.Item3);
             }
             return queue;
         }
@@ -19772,7 +19772,7 @@ The previous attempt did not complete a JSON object within its output budget.
             File.WriteAllText(path, Json.Serialize(queue ?? new List<Dictionary<string, object>>()), Encoding.UTF8);
         }
 
-        private static string ModelForRequest(Dictionary<string, object> settings, string requestType)
+        internal static string ModelForRequest(Dictionary<string, object> settings, string requestType)
         {
             string key;
             switch ((requestType ?? "").ToLowerInvariant())
@@ -19803,7 +19803,7 @@ The previous attempt did not complete a JSON object within its output budget.
             return string.IsNullOrWhiteSpace(model) ? ReadString(settings, "dialogueModel", "") : model;
         }
 
-        private static string CanonicalCommand(string command)
+        internal static string CanonicalCommand(string command)
         {
             string value = (command ?? "").Trim();
             if (value.Length == 0)
@@ -20405,7 +20405,7 @@ The previous attempt did not complete a JSON object within its output budget.
             return Math.Max(0d, Math.Min(100d, value));
         }
 
-        private static int TraitInt(Dictionary<string, object> traits, string key)
+        internal static int TraitInt(Dictionary<string, object> traits, string key)
         {
             return ClampTrait(ReadInt(traits, key, 0));
         }
@@ -20413,11 +20413,6 @@ The previous attempt did not complete a JSON object within its output budget.
         private static int ClampTrait(int value)
         {
             return Clamp(value, -2, 2);
-        }
-
-        internal static int Clamp(int value, int min, int max)
-        {
-            return Math.Max(min, Math.Min(max, value));
         }
 
         private static string BuildCharacterConstructionPrompt(string campaignId, string heroId, Dictionary<string, object> hero, Dictionary<string, object> traits)
@@ -20530,7 +20525,7 @@ Return exactly this JSON shape:
 }";
         }
 
-        private static Dictionary<string, object> DictionaryOrDefault(Dictionary<string, object> source, string key, Dictionary<string, object> fallback)
+        internal static Dictionary<string, object> DictionaryOrDefault(Dictionary<string, object> source, string key, Dictionary<string, object> fallback)
         {
             Dictionary<string, object> value = ReadDictionary(source, key);
             return value == null || value.Count == 0 ? fallback : value;
@@ -20706,7 +20701,7 @@ Return exactly this JSON shape:
             if (traits.Count > 0)
             {
                 bool changed = EnsureTraitPercentageData(traits, heroId);
-                changed = EnsureCourtCharacterData(traits, profile, heroId) || changed;
+                changed = CourtService.EnsureCourtCharacterData(traits, profile, heroId) || changed;
                 if (changed) WriteJsonObject(CharacterFile(campaignId, heroId, "traits.json"), traits);
             }
             stack["traits"] = traits;
@@ -20748,7 +20743,7 @@ Return exactly this JSON shape:
             return ReadString(hero, "occupation", "person");
         }
 
-        private static Dictionary<string, object> DefaultSettings()
+        internal static Dictionary<string, object> DefaultSettings()
         {
             var settings = new Dictionary<string, object>
             {
@@ -20834,7 +20829,7 @@ Return exactly this JSON shape:
                 ["portraitGenerationMethod"] = "text",
                 ["portraitVisionProvider"] = "Codex",
                 ["portraitVisionModel"] = "runtime-default",
-                ["portraitVisionNanoGptModel"] = DefaultNanoPortraitVisionModel,
+                ["portraitVisionNanoGptModel"] = PortraitsService.DefaultNanoPortraitVisionModel,
                 ["portraitNanoGptImageGenerationsUrl"] = "https://nano-gpt.com/api/v1/images/generations",
                 ["portraitNanoGptChatCompletionsUrl"] = "https://nano-gpt.com/api/v1/chat/completions",
                 ["portraitNanoGptApiKey"] = "",
@@ -20844,7 +20839,7 @@ Return exactly this JSON shape:
                 ["portraitAtlasPredictionUrlPrefix"] = "https://api.atlascloud.ai/api/v1/model/prediction/",
                 ["portraitAtlasApiKey"] = "",
                 ["portraitAtlasImageModel"] = "xai/grok-imagine-image/edit",
-                ["portraitAtlasWanNegativePrompt"] = DefaultAtlasWan25NegativePrompt,
+                ["portraitAtlasWanNegativePrompt"] = PortraitsService.DefaultAtlasWan25NegativePrompt,
                 ["portraitImageStrength"] = 0.75d,
                 ["portraitInferenceSteps"] = 28,
                 ["portraitGuidanceScale"] = 3.5d,
@@ -20854,7 +20849,7 @@ Return exactly this JSON shape:
                 ["sceneryProvider"] = "NanoGPT",
                 ["sceneryNanoGptImageModel"] = "gpt-image-1.5",
                 ["sceneryAtlasImageModel"] = "xai/grok-imagine-image/edit",
-                ["sceneryAtlasWanNegativePrompt"] = DefaultAtlasWan25NegativePrompt,
+                ["sceneryAtlasWanNegativePrompt"] = PortraitsService.DefaultAtlasWan25NegativePrompt,
                 ["sceneryImageStrength"] = 0.75d,
                 ["sceneryInferenceSteps"] = 28,
                 ["sceneryGuidanceScale"] = 3.5d,
@@ -20906,7 +20901,7 @@ Return exactly this JSON shape:
             return settings;
         }
 
-        private static Dictionary<string, object> LoadSettings()
+        internal static Dictionary<string, object> LoadSettings()
         {
             if (Monitor.IsEntered(CampaignSchemaLock) && !Monitor.IsEntered(FileLock))
                 throw new InvalidOperationException("Settings require FileLock before CampaignSchemaLock.");
@@ -21021,10 +21016,10 @@ Return exactly this JSON shape:
             string xpError = ValidateReignXpOptions(incoming);
             if (!string.IsNullOrEmpty(xpError))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = xpError };
-            string imageProviderError = ValidateCodexImageSettings(incoming);
+            string imageProviderError = PortraitsService.ValidateCodexImageSettings(incoming);
             if (!string.IsNullOrEmpty(imageProviderError))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = imageProviderError };
-            string visionError = ValidatePortraitVisionSettings(incoming);
+            string visionError = PortraitsService.ValidatePortraitVisionSettings(incoming);
             if (!string.IsNullOrEmpty(visionError)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = visionError };
             Dictionary<string, object> settings = DefaultSettings();
             if (File.Exists(settingsPath))
@@ -21117,7 +21112,7 @@ Return exactly this JSON shape:
             return result;
         }
 
-        private static bool NormalizePortraitImageSettings(Dictionary<string, object> settings)
+        internal static bool NormalizePortraitImageSettings(Dictionary<string, object> settings)
         {
             if (settings == null)
             {
@@ -21162,21 +21157,21 @@ Return exactly this JSON shape:
                 changed = true;
             }
 
-            foreach (string prefix in ImageProfilePrefixes)
+            foreach (string prefix in PortraitsService.ImageProfilePrefixes)
             {
                 bool adult = prefix.StartsWith("adult", StringComparison.Ordinal);
                 if (adult)
                 {
                     var defaults = new Dictionary<string, object> { ["Provider"] = "AtlasCloud",
-                        ["NanoGptImageModel"] = "gpt-image-1.5", ["AtlasImageModel"] = AtlasModelSeedreamV5ProEdit,
-                        ["AtlasWanNegativePrompt"] = DefaultAtlasWan25NegativePrompt };
+                        ["NanoGptImageModel"] = "gpt-image-1.5", ["AtlasImageModel"] = PortraitsService.AtlasModelSeedreamV5ProEdit,
+                        ["AtlasWanNegativePrompt"] = PortraitsService.DefaultAtlasWan25NegativePrompt };
                     foreach (var pair in defaults)
                         if (!settings.ContainsKey(prefix + pair.Key)) { settings[prefix + pair.Key] = pair.Value; changed = true; }
                 }
-                if (IsRetiredImageProvider(ReadString(settings, prefix + "Provider", "")))
+                if (PortraitsService.IsRetiredImageProvider(ReadString(settings, prefix + "Provider", "")))
                 {
                     settings[prefix + "Provider"] = "AtlasCloud";
-                    settings[prefix + "AtlasImageModel"] = AtlasModelSeedreamV5ProEdit;
+                    settings[prefix + "AtlasImageModel"] = PortraitsService.AtlasModelSeedreamV5ProEdit;
                     changed = true;
                 }
                 foreach (string retired in new[] { "ReignGeneratorNegativePrompt", "ReignGeneratorSteps", "ReignGeneratorCfg" })
@@ -21187,7 +21182,7 @@ Return exactly this JSON shape:
                     settings[modelKey] = "gpt-image-1.5";
                     changed = true;
                 }
-                HashSet<string> supportedNanoModels = new HashSet<string>(NanoImageModels, StringComparer.OrdinalIgnoreCase);
+                HashSet<string> supportedNanoModels = new HashSet<string>(PortraitsService.NanoImageModels, StringComparer.OrdinalIgnoreCase);
                 if (!supportedNanoModels.Contains(ReadString(settings, modelKey, "")))
                 {
                     settings[modelKey] = "gpt-image-1.5";
@@ -21195,19 +21190,19 @@ Return exactly this JSON shape:
                 }
 
                 string openRouterModelKey = prefix + "OpenRouterImageModel";
-                if (!OpenRouterImageModels.Contains(ReadString(settings, openRouterModelKey, "")))
-                { settings[openRouterModelKey] = DefaultOpenRouterImageModel; changed = true; }
+                if (!PortraitsService.OpenRouterImageModels.Contains(ReadString(settings, openRouterModelKey, "")))
+                { settings[openRouterModelKey] = PortraitsService.DefaultOpenRouterImageModel; changed = true; }
 
                 string atlasModelKey = prefix + "AtlasImageModel";
-                HashSet<string> supportedAtlasModels = new HashSet<string>(AtlasImageModels, StringComparer.OrdinalIgnoreCase);
+                HashSet<string> supportedAtlasModels = new HashSet<string>(PortraitsService.AtlasImageModels, StringComparer.OrdinalIgnoreCase);
                 if (!supportedAtlasModels.Contains(ReadString(settings, atlasModelKey, "")))
                 {
-                    settings[atlasModelKey] = adult ? AtlasModelSeedreamV5ProEdit : DefaultAtlasImageModel;
+                    settings[atlasModelKey] = adult ? PortraitsService.AtlasModelSeedreamV5ProEdit : PortraitsService.DefaultAtlasImageModel;
                     changed = true;
                 }
 
                 string providerKey = prefix + "Provider";
-                string normalizedProvider = NormalizeImageProvider(ReadString(settings, providerKey, "NanoGPT"));
+                string normalizedProvider = PortraitsService.NormalizeImageProvider(ReadString(settings, providerKey, "NanoGPT"));
                 if (!string.Equals(ReadString(settings, providerKey, ""), normalizedProvider, StringComparison.Ordinal))
                 {
                     settings[providerKey] = normalizedProvider;
@@ -21436,12 +21431,12 @@ Return exactly this JSON shape:
                 ["apiKeyLength"] = apiKey.Length,
                 ["portraitProvider"] = ReadString(settings, "portraitProvider", "NanoGPT"),
                 ["portraitNanoGptImageModel"] = ReadString(settings, "portraitNanoGptImageModel", "gpt-image-1.5"),
-                ["portraitAtlasImageModel"] = ReadString(settings, "portraitAtlasImageModel", DefaultAtlasImageModel),
+                ["portraitAtlasImageModel"] = ReadString(settings, "portraitAtlasImageModel", PortraitsService.DefaultAtlasImageModel),
                 ["portraitNativeSourceMode"] = ReadString(settings, "portraitNativeSourceMode", "required"),
                 ["portraitNativeSourceGeneratorPath"] = ReadString(settings, "portraitNativeSourceGeneratorPath", ""),
                 ["sceneryProvider"] = ReadString(settings, "sceneryProvider", "NanoGPT"),
                 ["sceneryNanoGptImageModel"] = ReadString(settings, "sceneryNanoGptImageModel", "gpt-image-1.5"),
-                ["sceneryAtlasImageModel"] = ReadString(settings, "sceneryAtlasImageModel", DefaultAtlasImageModel),
+                ["sceneryAtlasImageModel"] = ReadString(settings, "sceneryAtlasImageModel", PortraitsService.DefaultAtlasImageModel),
                 ["portraitNanoGptKeyPresent"] = !string.IsNullOrWhiteSpace(nanoKey),
                 ["portraitNanoGptKeyLength"] = nanoKey.Length,
                 ["portraitAtlasKeyPresent"] = !string.IsNullOrWhiteSpace(atlasKey),
@@ -21525,7 +21520,7 @@ Return exactly this JSON shape:
             };
         }
 
-        private static string LatestCampaignId()
+        internal static string LatestCampaignId()
         {
             try
             {
@@ -21597,7 +21592,7 @@ Return exactly this JSON shape:
             }
         }
 
-        private static void EnsurePromptTemplates()
+        internal static void EnsurePromptTemplates()
         {
             Dictionary<string, string> defaults = DefaultPromptTemplates();
             lock (FileLock)
@@ -21615,7 +21610,7 @@ Return exactly this JSON shape:
                         File.WriteAllText(path, DefaultPromptText(name, defaults), Encoding.UTF8);
                     }
                 }
-                RemoveSavedPortraitClothingColorGuidance();
+                PortraitsService.RemoveSavedPortraitClothingColorGuidance();
             }
         }
 
@@ -21709,12 +21704,12 @@ Treat the name, age, gender, and culture as private generation guidance. They de
 			}
 		}
 
-        private static string LoadPromptTemplate(string name)
+        internal static string LoadPromptTemplate(string name)
         {
             return LoadPromptTemplateFromRuntimeCache(name);
         }
 
-        private static string PromptPath(string name)
+        internal static string PromptPath(string name)
         {
             return Path.Combine(PromptsDir, Path.GetFileName(name));
         }
@@ -21793,7 +21788,7 @@ Treat the name, age, gender, and culture as private generation guidance. They de
             return catalog;
         }
 
-        private static Dictionary<string, Dictionary<string, object>> PromptMetadataByName()
+        internal static Dictionary<string, Dictionary<string, object>> PromptMetadataByName()
         {
             List<Dictionary<string, object>> entries = new List<Dictionary<string, object>>
             {
@@ -21807,9 +21802,9 @@ Treat the name, age, gender, and culture as private generation guidance. They de
                 PromptMeta("tavern_house_look_again_summary.txt", "Tavern House: Look Again Summary", "image", true, "Summarizes the complete completed conversation into a faithful non-explicit visual moment."),
                 PromptMeta("tavern_house_look_again_image.txt", "Tavern House: Look Again Image", "image", true, "Non-explicit scene from the conversation summary and every participant reference. Tokens: {townName}, {participants}, {summary}."),
                 PromptMeta("tavern_house_portrait_clothing.txt", "Tavern House: Portrait Clothing", "image", true, "One clothing-only edit for every adult madam and worker, regardless of culture or gender. Uses the configured Adult Portraits provider after the identity portrait. Token: [TAVERN ROLE]."),
-                PromptMeta(OutfitPromptName, "Conversation: New Clothes", "image", true, "Dedicated clothing-only edit of the current full-body portrait. The player's exact outfit description is appended as quoted garment data. Normal Portraits at Physical Confidence 0-39; Adult Portraits at 40-100. No automatic fallback between profiles."),
-                PromptMeta(ChatViewSelectionPromptName, "Chat View: Moment Selection", "image", true, "Selects one evidenced high point from four complete exchanges using the selected dialogue model."),
-                PromptMeta(ChatViewPhotoPromptName, "Chat View: Documentary Photograph", "image", true, "Photographic rendering instructions for the selected instant and complete full-body identity references."),
+                PromptMeta(PortraitsService.OutfitPromptName, "Conversation: New Clothes", "image", true, "Dedicated clothing-only edit of the current full-body portrait. The player's exact outfit description is appended as quoted garment data. Normal Portraits at Physical Confidence 0-39; Adult Portraits at 40-100. No automatic fallback between profiles."),
+                PromptMeta(PortraitsService.ChatViewSelectionPromptName, "Chat View: Moment Selection", "image", true, "Selects one evidenced high point from four complete exchanges using the selected dialogue model."),
+                PromptMeta(PortraitsService.ChatViewPhotoPromptName, "Chat View: Documentary Photograph", "image", true, "Photographic rendering instructions for the selected instant and complete full-body identity references."),
                 PromptMeta("context_pull_check_inventory_appearance.txt", "Check Inventory And Appearance", "context", true, "Selector-readable header for NPC inventory, equipment, and material presentation."),
                 PromptMeta("context_pull_check_player_appearance_status.txt", "Check Player Appearance Status", "context", true, "Selector-readable header for the player's visible clothing, status, and disguise cues."),
                 PromptMeta("context_pull_nearby_settlements.txt", "Nearby Settlements", "context", true, "Selector-readable header for nearby towns, castles, villages, and routes."),
@@ -21864,15 +21859,15 @@ Treat the name, age, gender, and culture as private generation guidance. They de
                 PromptMeta("portrait_prompt_style.txt", "Portrait Photographic Style", "image", true, "Realism, lighting, lens, skin, hair, and photographic finish guidance."),
                 PromptMeta("portrait_output_rules.txt", "Portrait Output Exclusions", "image", true, "Elements that must not appear, including text, captions, labels, white footer panels, card layouts, watermarks, and war gear.")
             };
-			entries.AddRange(PortraitClothingPromptMetadata());
-			entries.AddRange(PortraitPhysicalConfidencePromptMetadata());
-            entries.Add(PromptMeta(PortraitBodyPromptFile, "Native Portrait Body Appearance", "image", true, "Independent native weight and muscle-build guidance for all character portrait stages; 0–1 values, not percentages."));
+			entries.AddRange(PortraitsService.PortraitClothingPromptMetadata());
+			entries.AddRange(PortraitsService.PortraitPhysicalConfidencePromptMetadata());
+            entries.Add(PromptMeta(PortraitsService.PortraitBodyPromptFile, "Native Portrait Body Appearance", "image", true, "Independent native weight and muscle-build guidance for all character portrait stages; 0–1 values, not percentages."));
 			entries.AddRange(RelationshipPromptMetadata());
 
             return entries.ToDictionary(x => ReadString(x, "name", ""), x => x, StringComparer.OrdinalIgnoreCase);
         }
 
-        private static Dictionary<string, object> PromptMeta(string name, string label, string category, bool visible, string description)
+        internal static Dictionary<string, object> PromptMeta(string name, string label, string category, bool visible, string description)
         {
             return new Dictionary<string, object>
             {
@@ -22270,7 +22265,7 @@ terms: duelMode must be ""practice"", ""training_together"", ""honor"" or ""leth
 
         private const string SocialSignalPromptContract = @"Always include socialSignals; use an empty array when no qualifying signal occurred. Propose a signal only for an explicit current flirtation or a sexual act completed in this exchange. A first-person present-tense statement that the speaker is flirting now is explicit current flirtation even when it also states attraction or admiration. A compliment without present flirtation intent is not enough. Copy an exact supportingQuote from the current player input or your visible reply. Do not signal proposals, hypotheticals, refusals, kisses, compliments alone, or incomplete acts. The server independently validates every proposal.";
 
-        private static Dictionary<string, string> DefaultPromptTemplates()
+        internal static Dictionary<string, string> DefaultPromptTemplates()
         {
             Dictionary<string, string> defaults = new Dictionary<string, string>
             {
@@ -23076,20 +23071,20 @@ Return only the portrait image itself.
 Do not render words, letters, numbers, captions, labels, names, ages, cultures, subtitles, signatures, logos, watermarks, interface elements, portrait cards, decorative title blocks, borders, banners, blank caption areas, white strips, white footer panels, or metadata panels anywhere in the image.
 No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, weapons, shields, quivers, chainmail, helmets, fur war gear, plastic skin, over-smoothed face, CGI, cartoon, anime, painterly style, or modern clothing."
 			};
-			foreach (KeyValuePair<string, string> pair in PortraitClothingPromptDefaults())
+			foreach (KeyValuePair<string, string> pair in PortraitsService.PortraitClothingPromptDefaults())
 			{
 				defaults[pair.Key] = pair.Value;
 			}
-			foreach (KeyValuePair<string, string> pair in PortraitPhysicalConfidencePromptDefaults())
+			foreach (KeyValuePair<string, string> pair in PortraitsService.PortraitPhysicalConfidencePromptDefaults())
 			{
 				defaults[pair.Key] = pair.Value;
 			}
-            defaults[PortraitBodyPromptFile] = PortraitBodyPromptDefault;
+            defaults[PortraitsService.PortraitBodyPromptFile] = PortraitsService.PortraitBodyPromptDefault;
 			foreach (KeyValuePair<string, string> pair in RelationshipPromptDefaults())
 			{
 				defaults[pair.Key] = pair.Value;
 			}
-			foreach (KeyValuePair<string, string> pair in CastleChatPromptDefaults())
+			foreach (KeyValuePair<string, string> pair in CourtService.CastleChatPromptDefaults())
 			{
 				defaults[pair.Key] = pair.Value;
 			}
@@ -23097,8 +23092,8 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
 			{
 				defaults[pair.Key] = pair.Value;
 			}
-            foreach (var pair in ChatViewPromptDefaults()) defaults[pair.Key] = pair.Value;
-			defaults[OutfitPromptName] = OutfitPromptDefault;
+            foreach (var pair in PortraitsService.ChatViewPromptDefaults()) defaults[pair.Key] = pair.Value;
+			defaults[PortraitsService.OutfitPromptName] = PortraitsService.OutfitPromptDefault;
 			return defaults;
         }
 
@@ -23271,7 +23266,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             return correlationId;
         }
 
-        private static void WriteAudit(
+        internal static void WriteAudit(
             string campaignId,
             string correlationId,
             string source,
@@ -23601,7 +23596,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             }
             if (string.IsNullOrWhiteSpace(suite) || suite.Equals("rumor_system", StringComparison.OrdinalIgnoreCase))
             {
-                results.AddRange(RunRumorSubsystemSelfTests());
+                results.AddRange(ReputationService.RunRumorSubsystemSelfTests());
             }
             if (string.IsNullOrWhiteSpace(suite) || suite.Equals("character_editor", StringComparison.OrdinalIgnoreCase))
             {
@@ -23627,7 +23622,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             {
                 results.AddRange(RunCharacterProfileLibrarySelfTests());
                 results.AddRange(RunTraitPercentageSelfTests());
-                results.AddRange(RunCourtCharacterSelfTests());
+                results.AddRange(CourtService.RunCourtCharacterSelfTests());
                 results.AddRange(RunFoundationTraitRangeVNextSelfTests());
             }
             if (string.IsNullOrWhiteSpace(suite) || suite.Equals("identity_system", StringComparison.OrdinalIgnoreCase))
@@ -24438,7 +24433,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             return Path.Combine(TestsDir, "snapshots", SafePathSegment(campaignId, "default"), SafePathSegment(correlationId, "snapshot") + ".json");
         }
 
-        private static string ArgValue(string[] args, string key, string fallback)
+        internal static string ArgValue(string[] args, string key, string fallback)
         {
             if (args == null)
             {
@@ -25828,7 +25823,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             stream.Write(body, 0, body.Length);
         }
 
-        private static List<Dictionary<string, object>> ReadJsonLinesFromPath(string path)
+        internal static List<Dictionary<string, object>> ReadJsonLinesFromPath(string path)
         {
             if (!File.Exists(path))
             {
@@ -25873,9 +25868,9 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             return result;
         }
 
-        private static string ControlCenterHtml()
+        internal static string ControlCenterHtml()
         {
-            string html = File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui", "index.html")).Replace("@IMAGE_PROFILE_CARDS@", ImageProfileCards())
+            string html = File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui", "index.html")).Replace("@IMAGE_PROFILE_CARDS@", PortraitsService.ImageProfileCards())
                 .Replace("@CHAT_PROVIDER_KEYS@", ChatProviderKeysHtml()).Replace("@CHAT_PROVIDER_SCRIPT@", ChatProviderScript())
                 .Replace("@CODEX_PERFORMANCE_CONTROLS@", CodexPerformanceControlCenterHtml())
                 .Replace("@CODEX_MODEL_AVAILABILITY@", CodexModelAvailabilityHtml())
@@ -26052,7 +26047,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             });
         }
 
-        private static string LlmFailureForDisplay(Dictionary<string, object> llm)
+        internal static string LlmFailureForDisplay(Dictionary<string, object> llm)
         {
             if (ReadBool(llm, "approachOpeningFailed", false))
                 return "The NPC's approach could not be verified. Please try again.";
@@ -26281,7 +26276,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             return unique.Skip(start).ToList();
         }
 
-        private static string ResolveHeroIdByCharacterObjectId(string campaignId, string characterObjectId)
+        internal static string ResolveHeroIdByCharacterObjectId(string campaignId, string characterObjectId)
         {
             if (string.IsNullOrWhiteSpace(characterObjectId))
             {
@@ -26354,7 +26349,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
                 string text = ReadString(packet, "memoryPacket", "");
                 Dictionary<string, object> accordContext = ReadDictionary(npcContext, "clanAccords");
                 if (accordContext != null)
-                    text += "\n" + BuildClanAccordsPrompt(campaignId, ReadString(npcContext, "timelineId", "main"), heroId,
+                    text += "\n" + DiplomacyService.BuildClanAccordsPrompt(campaignId, ReadString(npcContext, "timelineId", "main"), heroId,
                         ReadString(accordContext, "partnerClanId", ""));
                 return string.IsNullOrWhiteSpace(text) ? "" : "REIGN KNOWLEDGE PACKET\n" + text;
             }
@@ -27106,7 +27101,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             return Convert.ToString(value);
         }
 
-        private static string HumanizeKey(string key)
+        internal static string HumanizeKey(string key)
         {
             if (string.IsNullOrWhiteSpace(key))
             {
@@ -27315,7 +27310,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             return Path.Combine(CampaignsRoot(), SafePathSegment(campaignId, "default"));
         }
 
-        private static string CampaignsRoot()
+        internal static string CampaignsRoot()
         {
             string overridden = CampaignsRootOverride.Value;
             return string.IsNullOrWhiteSpace(overridden)
@@ -27432,14 +27427,14 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             catch { return false; }
         }
 
-        private static string CampaignFile(string campaignId, params string[] segments)
+        internal static string CampaignFile(string campaignId, params string[] segments)
         {
             List<string> parts = new List<string> { CampaignDirectory(campaignId) };
             parts.AddRange(segments ?? new string[0]);
             return Path.Combine(parts.ToArray());
         }
 
-        private static string CharacterDirectory(string campaignId, string heroId)
+        internal static string CharacterDirectory(string campaignId, string heroId)
         {
             return Path.Combine(CampaignDirectory(campaignId), "characters", SafePathSegment(heroId, "unknown"));
         }
@@ -27451,7 +27446,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             return Path.Combine(parts.ToArray());
         }
 
-        private static string SafePathSegment(string value, string fallback)
+        internal static string SafePathSegment(string value, string fallback)
         {
             string clean = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
             foreach (char invalid in Path.GetInvalidFileNameChars())
@@ -27824,7 +27819,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             }
         }
 
-        private static void AppendJsonLineToPath(string path, Dictionary<string, object> row)
+        internal static void AppendJsonLineToPath(string path, Dictionary<string, object> row)
         {
             ThrowIfCampaignRequestReplaced();
             lock (FileLock)
@@ -27848,7 +27843,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             MarkSaveSyncActiveStateDirtyForPath(path);
         }
 
-        private static void AppendBoundedJsonLineToPathLocked(
+        internal static void AppendBoundedJsonLineToPathLocked(
             string path,
             Dictionary<string, object> row,
             long maximumBytes,

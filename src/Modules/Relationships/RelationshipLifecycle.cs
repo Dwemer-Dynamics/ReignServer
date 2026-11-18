@@ -1042,8 +1042,8 @@ VALUES($id,$attempt,$mother,$father,$legal,$day,$due,'pending_game',$secrecy,$pa
                         conceptionQueued = true;
                         if (affair)
                         {
-                            Dictionary<string, object> promotedAffair = RegisterSocialOccurrence(connection, campaignId,
-                                BuildRelationshipSocialOccurrence(pair, day, "affair", heroA, heroB, spouseA, spouseB, true, true,
+                            Dictionary<string, object> promotedAffair = ReputationService.RegisterSocialOccurrence(connection, campaignId,
+                                ReputationService.BuildRelationshipSocialOccurrence(pair, day, "affair", heroA, heroB, spouseA, spouseB, true, true,
                                     "The affair resulted in a conception and could no longer remain socially containable.",
                                     timelineId), worldTestSchemaReady: rowPreloaded,
                                 useExistingTransaction: rowPreloaded);
@@ -1060,8 +1060,8 @@ VALUES($id,$attempt,$mother,$father,$legal,$day,$due,'pending_game',$secrecy,$pa
 
             if (affair)
             {
-                Dictionary<string, object> occurrence = RegisterSocialOccurrence(connection, campaignId,
-                    BuildRelationshipSocialOccurrence(pair, day, "affair", heroA, heroB, spouseA, spouseB, false, false,
+                Dictionary<string, object> occurrence = ReputationService.RegisterSocialOccurrence(connection, campaignId,
+                    ReputationService.BuildRelationshipSocialOccurrence(pair, day, "affair", heroA, heroB, spouseA, spouseB, false, false,
                         "Secondhand reports describe an affair between the two participants.", timelineId),
                     worldTestSchemaReady: rowPreloaded,
                     useExistingTransaction: rowPreloaded);
@@ -1071,8 +1071,8 @@ VALUES($id,$attempt,$mother,$father,$legal,$day,$due,'pending_game',$secrecy,$pa
             }
             if (isEstranged)
             {
-                Dictionary<string, object> occurrence = RegisterSocialOccurrence(connection, campaignId,
-                    BuildRelationshipSocialOccurrence(pair, day, "marital_strife", heroA, heroB, spouseA, spouseB, false, false,
+                Dictionary<string, object> occurrence = ReputationService.RegisterSocialOccurrence(connection, campaignId,
+                    ReputationService.BuildRelationshipSocialOccurrence(pair, day, "marital_strife", heroA, heroB, spouseA, spouseB, false, false,
                         "Secondhand reports describe serious and continuing strife in the marriage.", timelineId),
                     worldTestSchemaReady: rowPreloaded,
                     useExistingTransaction: rowPreloaded);
@@ -1807,7 +1807,7 @@ VALUES($id,$pair,$kind,$a,$b,$day,$summary,$rumor,$payload,$ts);",
                 {
                     EnsureRelationshipDirectorSchema(connection);
                     EnsureMbtiRelationshipSchema(connection);
-                    EnsureSocialReputationSchema(connection);
+                    ReputationService.EnsureSocialReputationSchema(connection);
                     HashSet<string> lifecycleColumns = new HashSet<string>(
                         QuerySql(connection,
                             "PRAGMA table_info(relationship_pair_lifecycle);")
@@ -2407,7 +2407,7 @@ WHERE pair_key=$pair LIMIT 1;",
                         ReadBool(RelationshipLifecycleView(connection, "spouse_a", "spouse_b"), "estranged", false),
                         "A marriage becomes estranged when either spouse reaches negative thirty.");
                     int estrangedRumorDay = Enumerable.Range(2, 5000).First(day =>
-                        DeterministicSocialRoll(string.Join("|", campaignId, "main", "marital_strife", spousePair.PairKey,
+                        ReputationService.DeterministicSocialRoll(string.Join("|", campaignId, "main", "marital_strife", spousePair.PairKey,
                             day.ToString(CultureInfo.InvariantCulture), "exposure")) < 0.025d);
                     ProcessRelationshipLifecycle(connection, campaignId, spousePair, estrangedRumorDay,
                         spouseA, spouseB, -30, 10);
@@ -2582,8 +2582,8 @@ ORDER BY created_ts DESC LIMIT 1;").FirstOrDefault(), "director_action_id", "");
 					add("divorce_action_carries_timeline",
 						ReadString(stagedPayload,"timelineId","")=="main",
 						"Every queued lifecycle divorce carries its authoritative timeline into native completion.");
-					RegisterSocialOccurrence(connection,campaignId,
-						BuildRelationshipSocialOccurrence(new AmbientPairContext
+					ReputationService.RegisterSocialOccurrence(connection,campaignId,
+						ReputationService.BuildRelationshipSocialOccurrence(new AmbientPairContext
 						{
 							PairKey=AmbientPairKey("spouse_a","spouse_b"),
 							HeroAId="spouse_a",HeroBId="spouse_b"

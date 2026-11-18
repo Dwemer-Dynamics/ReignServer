@@ -166,7 +166,7 @@ VALUES('hero_0|hero_1','hero_0','hero_1','INTJ','ENFP',1,5,42,1,123);");
                     add("late_receipt_cannot_clear_new_projection", CountUnrepresentedNativeFlags(connection, "") == 1,
                         "An older aligned receipt cannot erase new chemistry work that arrived after its target was retired.");
 
-                    EnsureSocialReputationSchema(connection);
+                    ReputationService.EnsureSocialReputationSchema(connection);
                     var beforePopularity = QuerySql(connection, "SELECT * FROM identity_roster;");
                     ExecuteSql(connection, "UPDATE identity_roster SET current_charm=current_charm+1;");
                     add("identity_charm_does_not_recompute_popularity", SelectIdentityPopularitySubjects(connection, beforePopularity,
@@ -182,7 +182,7 @@ VALUES('hero_0|hero_1','hero_0','hero_1','INTJ','ENFP',1,5,42,1,123);");
 affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts)
 SELECT 'hero_0|'||hero_id,'hero_0',hero_id,'ENFP','INTJ',0,60,1,5,123 FROM identity_roster
 WHERE is_lord=1 AND hero_id<>'hero_0' ON CONFLICT(pair_key) DO NOTHING;");
-                    RecomputeAllCourtPopularityReputations(connection, campaign, "main", 5, "scope_baseline");
+                    ReputationService.RecomputeAllCourtPopularityReputations(connection, campaign, "main", 5, "scope_baseline");
                     var popularityBaseline = QuerySql(connection, "SELECT * FROM identity_roster;");
                     Func<string> popularityState = () => Json.Serialize(new object[]
                     {
@@ -199,12 +199,12 @@ WHERE is_lord=1 AND hero_id<>'hero_0' ON CONFLICT(pair_key) DO NOTHING;");
                             ExecuteSql(connection, "UPDATE identity_roster SET kingdom_id='elsewhere' WHERE hero_id='hero_4';");
                             ExecuteSql(connection, "UPDATE identity_roster SET is_alive=0 WHERE hero_id='hero_6';");
                             ExecuteSql(connection, "UPDATE identity_roster SET is_notable=1 WHERE hero_id='hero_8';");
-                            if (route == 0) RecomputeAllCourtPopularityReputations(connection, campaign, "main", 6, "scope_compare");
+                            if (route == 0) ReputationService.RecomputeAllCourtPopularityReputations(connection, campaign, "main", 6, "scope_compare");
                             else
                             {
                                 var affected = SelectIdentityPopularitySubjects(connection, popularityBaseline, QuerySql(connection, "SELECT * FROM identity_roster;"));
-                                var changed = RecomputeCourtPopularityReputationsBatch(connection, campaign, "main", affected, 6, "scope_compare");
-                                ReconcileSocialRelationshipsForSubjects(connection, campaign, "main", changed, 6);
+                                var changed = ReputationService.RecomputeCourtPopularityReputationsBatch(connection, campaign, "main", affected, 6, "scope_compare");
+                                ReputationService.ReconcileSocialRelationshipsForSubjects(connection, campaign, "main", changed, 6);
                             }
                             if (route == 0) fullPopularity = popularityState(); else scopedPopularity = popularityState();
                         }
@@ -234,7 +234,7 @@ VALUES($campaign,'main',7,7,'processing',1,$now);", new Dictionary<string, objec
                     // Readiness is now strictly read-only. The fixture must model
                     // normal writer initialization before observing its counters.
                     EnsureWorldTestSchema(connection);
-                    EnsureRumorSchema(connection);
+                    ReputationService.EnsureRumorSchema(connection);
                     EnsureClanConflictSchema(connection);
                     var readinessA = BuildWorldTestReadiness(campaign, "main");
                     var readinessB = BuildWorldTestReadiness(campaign, "main");

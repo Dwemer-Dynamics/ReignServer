@@ -46,7 +46,7 @@ namespace ReignBetaServer
             return bound;
         }
 
-        private static string LatestResidentReply(string resolution)
+        internal static string LatestResidentReply(string resolution)
         {
             // Earlier accepted offers in dialogue history cannot authorize the current refusal.
             string value = resolution ?? "";

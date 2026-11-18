@@ -12,7 +12,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static void EnsureIdentitySchema(ReignDbConnection connection)
+        internal static void EnsureIdentitySchema(ReignDbConnection connection)
         {
             ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS acquaintances (
 observer_id TEXT NOT NULL,
@@ -259,7 +259,7 @@ family_ids_json TEXT NOT NULL DEFAULT '[]',updated_ts INTEGER NOT NULL DEFAULT 0
                         try { ExecuteSql(connection, "ROLLBACK;"); } catch { }
                         throw;
                     }
-                    EnsureSocialReputationSchema(connection);
+                    ReputationService.EnsureSocialReputationSchema(connection);
                     // A brand-new roster cannot have stale court-popularity
                     // projections. Those are created incrementally by relationship
                     // processing. Recomputing every lord here made first startup
@@ -272,20 +272,20 @@ family_ids_json TEXT NOT NULL DEFAULT '[]',updated_ts INTEGER NOT NULL DEFAULT 0
                         ? SelectIdentityPopularitySubjects(connection, previousRoster,
                             QuerySql(connection, "SELECT * FROM identity_roster;")) : new List<string>();
                     syncPhases["popularitySubjects"] = popularitySubjects.Count;
-                    int courtPopularityChanges = RecomputeCourtPopularityReputationsBatch(connection, campaignId,
+                    int courtPopularityChanges = ReputationService.RecomputeCourtPopularityReputationsBatch(connection, campaignId,
                         ReadString(payload, "timelineId", "main"), popularitySubjects, worldDay,
                         correlationId + "|court_popularity").Count;
                     if (courtPopularityChanges > 0
                         && !campaignId.StartsWith("__", StringComparison.Ordinal))
-                        SchedulePendingReputationReasonJobs(campaignId);
+                        ReputationService.SchedulePendingReputationReasonJobs(campaignId);
                     // Expiration remains day-sensitive. The roster standing pass below
                     // reconciles the union of current and historical subjects once.
-                    ExpireSocialRumors(connection, campaignId,
+                    ReputationService.ExpireSocialRumors(connection, campaignId,
                         ReadString(payload, "timelineId", "main"), worldDay);
                     syncPhases["reputationReconciliationMs"] = phaseTimer.ElapsedMilliseconds;
                 }
                 phaseTimer.Restart();
-                EnsurePublicStandingForRoster(connection, campaignId,
+                ReputationService.EnsurePublicStandingForRoster(connection, campaignId,
                     ReadString(payload, "timelineId", "main"), worldDay);
                 syncPhases["publicStandingMs"] = phaseTimer.ElapsedMilliseconds;
                 phaseTimer.Restart();
@@ -414,7 +414,7 @@ AND NOT EXISTS (
             }
         }
 
-        private static void UpsertIdentityRosterHero(ReignDbConnection connection, Dictionary<string, object> hero, long ts)
+        internal static void UpsertIdentityRosterHero(ReignDbConnection connection, Dictionary<string, object> hero, long ts)
         {
             string heroId = IdentityHeroId(hero);
             if (string.IsNullOrWhiteSpace(heroId)) return;
@@ -724,7 +724,7 @@ WHERE acquaintances.identity_state<>'verified';",
             Dictionary<string, object> subject = ReadDictionary(payload, "subject") ?? new Dictionary<string, object> { ["heroStringId"] = subjectId, ["name"] = ReadString(payload, "canonicalName", "") };
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
-                EnsureSocialReputationSchema(connection);
+                ReputationService.EnsureSocialReputationSchema(connection);
                 Dictionary<string, object> stored =
                     ReadStoredAcquaintance(
                         connection, observerId, subjectId);
@@ -862,14 +862,14 @@ WHERE acquaintances.identity_state<>'verified';",
                 }
                 Dictionary<string, object> view = BuildIdentityView(row, payload);
                 if (IdentityStateVerified(row))
-                    ReconcileSocialRelationshipForObserverSubject(
+                    ReputationService.ReconcileSocialRelationshipForObserverSubject(
                         connection,
                         campaignId,
                         ReadString(payload, "timelineId", "main"),
                         observerId,
                         subjectId,
                         worldDay);
-                view["socialStandingView"] = BuildKnownSocialStandingView(connection,
+                view["socialStandingView"] = ReputationService.BuildKnownSocialStandingView(connection,
                     campaignId, ReadString(payload, "timelineId", "main"), observerId, subjectId,
                     IdentityStateVerified(row), worldDay);
                 Dictionary<string, object> response = new Dictionary<string, object>
@@ -1960,7 +1960,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                     authority, "instruction",
                     "Do not infer unsupported political office."));
             builder.AppendLine("Mechanical hero IDs and resolver names are server plumbing, not facts this NPC knows. Never reveal an unknown canonical identity from them.");
-            builder.AppendLine(BuildKnownSocialStandingPromptBlock(
+            builder.AppendLine(ReputationService.BuildKnownSocialStandingPromptBlock(
                 ReadDictionary(identityView, "socialStandingView") ?? new Dictionary<string, object>()));
             return builder.ToString().TrimEnd();
         }
@@ -2173,7 +2173,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             return results;
         }
 
-        private static string UpsertVerifiedIdentity(ReignDbConnection connection, Dictionary<string, object> observer, Dictionary<string, object> subject, string source, string sourceEntityId, double worldDay, string correlationId)
+        internal static string UpsertVerifiedIdentity(ReignDbConnection connection, Dictionary<string, object> observer, Dictionary<string, object> subject, string source, string sourceEntityId, double worldDay, string correlationId)
         {
             string observerId = IdentityHeroId(observer), subjectId = IdentityHeroId(subject), canonicalName = ReadString(subject, "name", "");
             if (string.IsNullOrWhiteSpace(observerId) || string.IsNullOrWhiteSpace(subjectId) || string.Equals(observerId, subjectId, StringComparison.OrdinalIgnoreCase)) return "unchanged";
@@ -2913,12 +2913,12 @@ WHERE observer_id=$observer AND subject_id=$subject AND identity_state<>'verifie
             return true;
         }
 
-        private static bool IdentityStateVerified(Dictionary<string, object> row)
+        internal static bool IdentityStateVerified(Dictionary<string, object> row)
         {
             return row != null && string.Equals(ReadString(row, "identity_state", ""), "verified", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static Dictionary<string, object> ReadAcquaintance(ReignDbConnection connection, string observerId, string subjectId)
+        internal static Dictionary<string, object> ReadAcquaintance(ReignDbConnection connection, string observerId, string subjectId)
         {
             Dictionary<string, object> stored = ReadStoredAcquaintance(connection, observerId, subjectId);
             List<Dictionary<string, object>> roster = QuerySql(connection,
@@ -2948,7 +2948,7 @@ WHERE observer_id=$observer AND subject_id=$subject AND identity_state<>'verifie
             };
         }
 
-        private static Dictionary<string, object> ReadStoredAcquaintance(
+        internal static Dictionary<string, object> ReadStoredAcquaintance(
             ReignDbConnection connection,
             string observerId,
             string subjectId)

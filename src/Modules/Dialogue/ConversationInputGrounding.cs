@@ -116,7 +116,7 @@ VALUES($id,$timeline,$session,$player,$source,$hash,$generation,'received',$now,
             return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(text ?? ""))).Replace("-", "").ToLowerInvariant();
         }
 
-        private static Dictionary<string, object> ReadConversationInputReplay(string campaign,
+        internal static Dictionary<string, object> ReadConversationInputReplay(string campaign,
             Dictionary<string, object> payload, string observer)
         {
             var source = CapturePlayerInput(payload);

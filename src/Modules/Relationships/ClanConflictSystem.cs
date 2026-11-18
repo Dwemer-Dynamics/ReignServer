@@ -86,7 +86,7 @@ ON clan_conflict_relationship_effects(campaign_id,timeline_id,status,world_day);
         private static Dictionary<string, object> EvaluatePoliticalIncidentsCombined(
             Dictionary<string, object> payload)
         {
-            Dictionary<string, object> pressure = EvaluatePoliticalPressure(payload);
+            Dictionary<string, object> pressure = DiplomacyService.EvaluatePoliticalPressure(payload);
             Dictionary<string, object> conflicts = EvaluateClanConflicts(payload);
             Dictionary<string, object> result = new Dictionary<string, object>(pressure,
                 StringComparer.OrdinalIgnoreCase);
@@ -106,7 +106,7 @@ ON clan_conflict_relationship_effects(campaign_id,timeline_id,status,world_day);
             string campaignId = ReadString(payload, "campaignId", "default");
             string timelineId = ReadString(payload, "timelineId", "main");
             double worldDay = ReadDouble(payload, "worldDay", 0d);
-            Dictionary<string, object> startupGrace = BuildAutonomousWorldStartupGrace(payload);
+            Dictionary<string, object> startupGrace = DiplomacyService.BuildAutonomousWorldStartupGrace(payload);
             if (ReadBool(startupGrace, "locked", false))
             {
                 return new Dictionary<string, object>
@@ -275,7 +275,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND kingd
                     ["kingdomId"] = kingdomId, ["incidentId"] = incidentId
                 };
             }
-            int roll = StableRulerD100(campaignId, timelineId, day,
+            int roll = DiplomacyService.StableRulerD100(campaignId, timelineId, day,
                 "clan-conflict:daily:" + kingdomId);
             bool passed = roll <= ClanConflictIncidentChance;
             string status = !passed ? "roll_failed"
@@ -352,14 +352,14 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND kingd
                 "pair:" + kingdomId, pairs.Count);
             Dictionary<string, object> clanA = pairs[pairIndex].Item1;
             Dictionary<string, object> clanB = pairs[pairIndex].Item2;
-            if (StableRulerD100(campaignId, timelineId, day,
+            if (DiplomacyService.StableRulerD100(campaignId, timelineId, day,
                 "side-swap:" + kingdomId) <= 50)
             {
                 Dictionary<string, object> swap = clanA; clanA = clanB; clanB = swap;
             }
             string incidentId = "clan-conflict:" + timelineId + ":" + day.ToString(
                 CultureInfo.InvariantCulture) + ":" + kingdomId;
-            bool addLords = StableRulerD100(campaignId, timelineId, day,
+            bool addLords = DiplomacyService.StableRulerD100(campaignId, timelineId, day,
                 incidentId + ":additional-lords") <= ClanConflictAdditionalLordsChance;
             List<string> involvedA = SelectClanConflictParticipants(campaignId,
                 timelineId, day, incidentId, clanA, "a", addLords);
@@ -512,7 +512,7 @@ ON CONFLICT(effect_id) DO NOTHING;", new Dictionary<string, object>
             Dictionary<string, object> kingdom, ClanConflictArchetype archetype,
             double averageA, double averageB)
         {
-            Dictionary<string, object> virtues = LoadDirectorTraits(campaignId, kingdom);
+            Dictionary<string, object> virtues = DiplomacyService.LoadDirectorTraits(campaignId, kingdom);
             List<Tuple<string, string, string>> routes = new List<Tuple<string, string, string>>
             {
                 Tuple.Create(archetype.TraitA, archetype.TraitAHighSide, "The first case-specific virtue."),
@@ -530,7 +530,7 @@ ON CONFLICT(effect_id) DO NOTHING;", new Dictionary<string, object>
                 int baseScore = Clamp((int)Math.Round(ReadDouble(virtues, trait, 50d),
                     MidpointRounding.AwayFromZero), 0, 100);
                 int threshold = Clamp(baseScore + modifier, 0, 100);
-                int roll = StableRulerD100(campaignId, timelineId, day,
+                int roll = DiplomacyService.StableRulerD100(campaignId, timelineId, day,
                     incidentId + ":vote:" + trait);
                 string vote = roll <= threshold ? highSide : highSide == "a" ? "b" : "a";
                 votes.Add(new Dictionary<string, object>
@@ -681,7 +681,7 @@ WHERE incident_id=$incident AND status IN ('pending','applying') ORDER BY effect
                                 ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["effect"] = effectId
                             });
                     }
-                    ApplyRulerDiplomaticIncident(campaignId, timelineId, worldDay,
+                    DiplomacyService.ApplyRulerDiplomaticIncident(campaignId, timelineId, worldDay,
                         "clan_conflict_" + ReadString(effect, "effect_kind", "relationship"),
                         effectId, incidentId, observer, target, kingdomId, kingdomId,
                         amount, "", 0, false, incidentId,
@@ -1184,7 +1184,7 @@ WHERE e.campaign_id=$campaign AND e.timeline_id=$timeline;",
             int day, string subject, int count)
         {
             if (count <= 1) return 0;
-            uint value = (uint)StableDirectorSeed(campaignId + "|" + timelineId,
+            uint value = (uint)DiplomacyService.StableDirectorSeed(campaignId + "|" + timelineId,
                 day, subject ?? "");
             return (int)(value % (uint)count);
         }
@@ -1192,7 +1192,7 @@ WHERE e.campaign_id=$campaign AND e.timeline_id=$timeline;",
         private static int StableClanConflictD10000(string campaignId,
             string timelineId, int day, string subject)
         {
-            uint value = (uint)StableDirectorSeed(campaignId + "|" + timelineId,
+            uint value = (uint)DiplomacyService.StableDirectorSeed(campaignId + "|" + timelineId,
                 day, subject ?? "");
             return 1 + (int)(value % 10000u);
         }
@@ -1329,7 +1329,7 @@ WHERE e.campaign_id=$campaign AND e.timeline_id=$timeline;",
             {
                 const string persistenceKingdom = "kingdom_contract";
                 int persistenceDay = Enumerable.Range(6, 512).First(day =>
-                    StableRulerD100(persistenceCampaign, persistenceTimeline, day,
+                    DiplomacyService.StableRulerD100(persistenceCampaign, persistenceTimeline, day,
                         "clan-conflict:daily:" + persistenceKingdom)
                     <= ClanConflictIncidentChance);
                 persistenceWorldDay = persistenceDay;

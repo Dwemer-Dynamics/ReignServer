@@ -148,7 +148,7 @@ namespace ReignBetaServer
                 { ["allChecksCleared"] = false, ["stageCount"] = 1 };
         }
 
-        private static bool ConversationRepairFailed(Dictionary<string, object> parsed, string fallbackText = "")
+        internal static bool ConversationRepairFailed(Dictionary<string, object> parsed, string fallbackText = "")
         {
             var status = ReadDictionary(parsed, "repairStatus");
             return status != null ? !ReadBool(status, "allChecksCleared", true)

@@ -165,7 +165,7 @@ AND restore_generation=(SELECT restore_generation FROM memory_precision_state WH
                 TestDict("session", loadSessionId ?? "", "source", source, "point", savePointId ?? ""));
         }
 
-        private static void BindRecoveredMemorySources(ReignDbConnection connection, string requested, string recovered, long sequence, string head)
+        internal static void BindRecoveredMemorySources(ReignDbConnection connection, string requested, string recovered, long sequence, string head)
         {
             ExecuteSql(connection, @"UPDATE memory_restored_source_context SET timeline_id=$recovered
 WHERE state_id='current' AND restore_generation=(SELECT restore_generation FROM memory_precision_state WHERE state_id='current')

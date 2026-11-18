@@ -28,6 +28,16 @@ still in `Platform/Program.cs`.
   `--import-tavern-native-sources` command, handled before normal startup).
 - `portrait-profile-ui-contract.mjs`: Control Center UI contract script.
 
+## Service class
+
+Every file except `Program.PortraitsRoutes.cs` and `LinuxImageCodec.cs` (its own `LinuxImageCodec` class) holds
+`internal static partial class PortraitsService` (not a `Program` partial). It calls `Program` members with an
+explicit `Program.` qualifier, and `Program` and the other modules call it as `PortraitsService.X`; the members used
+across that boundary are `internal`. `Program.PortraitsRoutes.cs` stays part of `Program` and registers the service
+handlers; the portrait registration, status, request and diagnosis routes in `Platform/Program.cs` call the service
+the same way. The module's static state (generation and derivative job state, the chat view and Codex image gates,
+outfit change operations, the face-detection session and the vision model catalog) lives in `PortraitsService`.
+
 ## Routes
 
 `/portraits/generate`, `/portraits/generate/status`, `GET /portraits/vision/models`, `/portraits/outfit/*`
@@ -49,7 +59,7 @@ and `chat_view_requests` are created in Dialogue (`ChatViewSources.cs`). Generat
 (`--run-portrait-provider-adapter-tests`), `RunPortraitRefreshContractTests`, `RunPortraitVisionContractTests`,
 `RunPortraitPhysiqueContractTests`, `RunOutfitChangeContractTests`, `RunAdultPortraitContractTests`,
 `RunCodexImageProviderContractTests`, `RunOpenRouterImageProviderContractTests`, `RunPreparedTavernPortraitSourceTests`,
-`RunChatViewContractTests` and the chat view checks.
+`RunChatViewContractTests` and the chat view checks, all `PortraitsService` members.
 
 Test files compiled into the server: `AdultPortraitContractTests.cs`, `BackgroundPortraitContracts.cs`,
 `ChatViewSelfTests.cs`, `ChatViewWardrobeCoverageSelfTests.cs`, `ChatViewWardrobeSelfTests.cs`,

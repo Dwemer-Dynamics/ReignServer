@@ -245,7 +245,7 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                 Check("team_winner_not_merely_champion", NativePerformanceOutcome("tournament_finished", TestDict(), TestDict("role", "tournament winner teammate actor")) == "win");
                 Check("duel_native_ids_not_prose", NativePerformanceOutcome("social_outcome", TestDict("sourceEventId", "duel|action|winner", "winnerHeroId", "player", "loserHeroId", "npc"), TestDict("entity_id", "player")) == "win"
                     && NativePerformanceOutcome("social_outcome", TestDict("sourceEventId", "rumor|duel", "winnerHeroId", "player", "loserHeroId", "npc"), TestDict("entity_id", "player")) == "");
-                EnsureSocialReputationSchema(connection);
+                ReputationService.EnsureSocialReputationSchema(connection);
                 int rumorsBeforePractice = QuerySql(connection, "SELECT * FROM rumor_occurrences;").Count;
                 int reputationsBeforePractice = QuerySql(connection, "SELECT * FROM character_reputations;").Count;
                 foreach (bool playerWon in new[] { true, false })

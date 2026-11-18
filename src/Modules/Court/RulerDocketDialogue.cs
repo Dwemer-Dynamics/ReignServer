@@ -9,21 +9,21 @@ using Reign.Core.Contracts.Court;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CourtService
     {
         private static void EnsureRulerPetitionDialogueSchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ruler_petition_turns (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ruler_petition_turns (
 turn_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,transcript_id TEXT NOT NULL,
 petition_id TEXT NOT NULL,phase TEXT NOT NULL,petitioner_hero_id TEXT NOT NULL DEFAULT '',
 petitioner_name TEXT NOT NULL DEFAULT '',petition_kind TEXT NOT NULL,severity TEXT NOT NULL,
 outcome TEXT NOT NULL DEFAULT '',player_text TEXT NOT NULL DEFAULT '',reply_text TEXT NOT NULL,created_ts INTEGER NOT NULL);" );
-            EnsureDatabaseColumn(connection, "ruler_petition_turns", "player_text",
+            Program.EnsureDatabaseColumn(connection, "ruler_petition_turns", "player_text",
                 "TEXT NOT NULL DEFAULT ''");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_ruler_petition_transcript ON ruler_petition_turns(campaign_id,timeline_id,transcript_id,created_ts);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_ruler_petition_transcript ON ruler_petition_turns(campaign_id,timeline_id,transcript_id,created_ts);");
         }
 
-        private static Dictionary<string, object> RulerPetitionRespond(Dictionary<string, object> payload,
+        internal static Dictionary<string, object> RulerPetitionRespond(Dictionary<string, object> payload,
             Dictionary<string, object> settingsOverride = null, Func<Dictionary<string, object>, Dictionary<string, object>> responder = null)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -34,23 +34,23 @@ outcome TEXT NOT NULL DEFAULT '',player_text TEXT NOT NULL DEFAULT '',reply_text
             string timelineId = ReadString(payload, "timelineId", "main");
             string petitionId = ReadString(payload, "petitionId", "");
             string petitionerHeroId = ReadString(payload, "petitionerHeroId", "");
-            string petitionerName = LimitText(ReadString(payload, "petitionerName", "Petitioner"), 120);
-            string kind = LimitText(ReadString(payload, "kind", "petition"), 40);
-            string severity = LimitText(ReadString(payload, "severity", "minor"), 40);
+            string petitionerName = Program.LimitText(ReadString(payload, "petitionerName", "Petitioner"), 120);
+            string kind = Program.LimitText(ReadString(payload, "kind", "petition"), 40);
+            string severity = Program.LimitText(ReadString(payload, "severity", "minor"), 40);
             string playerText = phase == "conversation"
                 ? ReadString(payload, "playerText", "")
                 : string.Empty;
             if (phase == "conversation" && string.IsNullOrWhiteSpace(playerText))
                 return new Dictionary<string, object> { ["ok"] = false,
                     ["error"] = "A ruler message is required for a petition conversation turn." };
-            string outcome = phase == "closing" ? LimitText(ReadString(payload, "outcome", ""), 80) : string.Empty;
+            string outcome = phase == "closing" ? Program.LimitText(ReadString(payload, "outcome", ""), 80) : string.Empty;
             string transcriptId = FirstNonEmpty(ReadString(payload, "transcriptId", ""),
                 "ruler_petition_" + Guid.NewGuid().ToString("N"));
             if (string.IsNullOrWhiteSpace(petitionId) || string.IsNullOrWhiteSpace(petitionerHeroId))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "petitionId and petitionerHeroId are required." };
             string turnId = FirstNonEmpty(ReadString(payload, "turnId", ""),
                 transcriptId + "_" + phase + "_" + Guid.NewGuid().ToString("N"));
-            var memory = PrepareRouteConversationMemory(payload, petitionerHeroId, "ruler_petition", transcriptId, turnId,
+            var memory = Program.PrepareRouteConversationMemory(payload, petitionerHeroId, "ruler_petition", transcriptId, turnId,
                 new[] { petitionerHeroId }, settingsOverride: settingsOverride);
             payload = memory.Payload;
             playerText = phase == "conversation" ? ReadString(payload, "playerText", "") : "";
@@ -58,10 +58,10 @@ outcome TEXT NOT NULL DEFAULT '',player_text TEXT NOT NULL DEFAULT '',reply_text
             var facts = new Dictionary<string, object>
             {
                 ["kind"] = kind, ["severity"] = severity,
-                ["problem"] = LimitText(ReadString(payload, "problem", ""), 600),
-                ["targetSettlement"] = LimitText(ReadString(payload, "targetSettlementName", ""), 120),
-                ["requestTerms"] = LimitText(ReadString(payload, "requestTerms", ""), 400),
-                ["danger"] = LimitText(ReadString(payload, "danger", ""), 120),
+                ["problem"] = Program.LimitText(ReadString(payload, "problem", ""), 600),
+                ["targetSettlement"] = Program.LimitText(ReadString(payload, "targetSettlementName", ""), 120),
+                ["requestTerms"] = Program.LimitText(ReadString(payload, "requestTerms", ""), 400),
+                ["danger"] = Program.LimitText(ReadString(payload, "danger", ""), 120),
                 ["outcome"] = outcome,
                 ["playerText"] = playerText
             };
@@ -79,12 +79,12 @@ outcome TEXT NOT NULL DEFAULT '',player_text TEXT NOT NULL DEFAULT '',reply_text
             Dictionary<string, object> request = new Dictionary<string, object>
             {
                 ["requestType"] = "ruler_petition_reaction", ["campaignId"] = campaignId,
-                ["correlationId"] = EnsureCorrelationId(payload),
-                ["messages"] = BuildSimplePromptEnvelope("ruler_petition_reaction", phase,
+                ["correlationId"] = Program.EnsureCorrelationId(payload),
+                ["messages"] = Program.BuildSimplePromptEnvelope("ruler_petition_reaction", phase,
                     "Write the petitioner's bounded visible line and return valid JSON.", prompt.ToString()).Messages,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
             };
-            Dictionary<string, object> llm = GenerateRouteConversation(memory, request,
+            Dictionary<string, object> llm = Program.GenerateRouteConversation(memory, request,
                 "Private petition: one or two concise sentences, supplied facts and snapshotted terms control. Do not decide for the ruler, execute actions or reopen a completed decision. Current authoritative facts: " + Json.Serialize(facts), 600, responder);
             if (!ReadBool(llm, "ok", false)) return new Dictionary<string, object>
             { ["ok"] = false, ["error"] = ReadString(llm, "error", "Petitioner reaction failed."),
@@ -96,10 +96,10 @@ outcome TEXT NOT NULL DEFAULT '',player_text TEXT NOT NULL DEFAULT '',reply_text
             { ["ok"] = false, ["error"] = "The petitioner returned no visible reaction.",
                 ["transcriptId"] = transcriptId, ["providerCallCount"] = 1 };
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            PublishRouteConversation(memory, reply, petitionerName, connection =>
+            Program.PublishRouteConversation(memory, reply, petitionerName, connection =>
             {
                 EnsureRulerPetitionDialogueSchema(connection);
-                ExecuteSql(connection, @"INSERT OR IGNORE INTO ruler_petition_turns(
+                Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO ruler_petition_turns(
 turn_id,campaign_id,timeline_id,transcript_id,petition_id,phase,petitioner_hero_id,petitioner_name,petition_kind,severity,outcome,player_text,reply_text,created_ts)
 VALUES($turn,$campaign,$timeline,$transcript,$petition,$phase,$hero,$name,$kind,$severity,$outcome,$player,$reply,$ts);",
                     new Dictionary<string, object> { ["turn"] = turnId, ["campaign"] = campaignId,
@@ -108,13 +108,13 @@ VALUES($turn,$campaign,$timeline,$transcript,$petition,$phase,$hero,$name,$kind,
                         ["kind"] = kind, ["severity"] = severity, ["outcome"] = outcome,
                         ["player"] = playerText, ["reply"] = reply, ["ts"] = ts });
             });
-            return CompleteRouteConversationDelivery(memory, new Dictionary<string, object> { ["ok"] = true, ["reply"] = reply,
+            return Program.CompleteRouteConversationDelivery(memory, new Dictionary<string, object> { ["ok"] = true, ["reply"] = reply,
                 ["transcriptId"] = transcriptId, ["turnId"] = turnId, ["phase"] = phase,
                 ["providerCallCount"] = memory.ProviderCalls, ["nativeActions"] = new ArrayList(),
                 ["relationshipAssessments"] = new ArrayList(), ["reputationChanges"] = new ArrayList() });
         }
 
-        private static Dictionary<string, object> NormalizeChancellorDecision(
+        internal static Dictionary<string, object> NormalizeChancellorDecision(
             Dictionary<string, object> parsed,
             Dictionary<string, object> payload,
             string playerText,
@@ -215,7 +215,7 @@ VALUES($turn,$campaign,$timeline,$transcript,$petition,$phase,$hero,$name,$kind,
             };
         }
 
-        private static Dictionary<string, object> NormalizeNobleDocketTurn(
+        internal static Dictionary<string, object> NormalizeNobleDocketTurn(
             Dictionary<string, object> parsed,
             Dictionary<string, object> payload,
             string visibleReply)
@@ -299,7 +299,7 @@ VALUES($turn,$campaign,$timeline,$transcript,$petition,$phase,$hero,$name,$kind,
         private static bool IsExplicitChancellorOffer(string text)
         {
             string value = (text ?? string.Empty).ToLowerInvariant();
-            return value.Contains("chancellor") && ContainsAny(value,
+            return value.Contains("chancellor") && Program.ContainsAny(value,
                 "appoint", "offer you", "serve as", "be my", "become my",
                 "take the office", "take office");
         }
@@ -307,10 +307,10 @@ VALUES($turn,$campaign,$timeline,$transcript,$petition,$phase,$hero,$name,$kind,
         private static bool IsExplicitChancellorAcceptance(string text)
         {
             string value = (text ?? string.Empty).ToLowerInvariant();
-            if (ContainsAny(value, "i refuse", "i decline", "cannot accept",
+            if (Program.ContainsAny(value, "i refuse", "i decline", "cannot accept",
                     "won't accept", "will not accept", "not accept"))
                 return false;
-            return ContainsAny(value, "i accept", "i agree", "i will serve",
+            return Program.ContainsAny(value, "i accept", "i agree", "i will serve",
                 "i'll serve", "i shall serve", "i will be your chancellor",
                 "i'll be your chancellor", "i accept the office",
                 "i take the office");
@@ -319,7 +319,7 @@ VALUES($turn,$campaign,$timeline,$transcript,$petition,$phase,$hero,$name,$kind,
         private static bool IsDirectChancellorDismissal(string text)
         {
             string value = (text ?? string.Empty).ToLowerInvariant();
-            return value.Contains("chancellor") && ContainsAny(value,
+            return value.Contains("chancellor") && Program.ContainsAny(value,
                 "dismiss", "remove you", "relieve you", "you are fired",
                 "your service is ended", "your service has ended",
                 "no longer my");
@@ -330,7 +330,7 @@ VALUES($turn,$campaign,$timeline,$transcript,$petition,$phase,$hero,$name,$kind,
         {
             string combined = (playerText ?? string.Empty) + " "
                 + (visibleReply ?? string.Empty);
-            if (salary == 0 && ContainsAny(combined.ToLowerInvariant(),
+            if (salary == 0 && Program.ContainsAny(combined.ToLowerInvariant(),
                     "without pay", "no pay", "unpaid", "zero denar", "0 denar"))
                 return true;
             string digits = salary.ToString(CultureInfo.InvariantCulture);

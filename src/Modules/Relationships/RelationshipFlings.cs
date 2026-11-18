@@ -283,7 +283,7 @@ ON CONFLICT(hero_id) DO UPDATE SET judgment=$judgment,source=$source,updated_ts=
                 EnsureRelationshipFlingSchemaCore(connection);
             EnsureRelationshipDirectorSchema(connection);
             if (!TableExists(connection, "rumor_occurrences"))
-                EnsureSocialReputationSchema(connection);
+                ReputationService.EnsureSocialReputationSchema(connection);
             timelineId = string.IsNullOrWhiteSpace(timelineId)
                 ? "main" : timelineId;
             Dictionary<string, object> aggregate =
@@ -371,7 +371,7 @@ WHERE status='pending_game';")
                     .Where(value => !string.IsNullOrWhiteSpace(value)),
                 StringComparer.OrdinalIgnoreCase);
             Dictionary<string, object> socialCatalog =
-                ReadActiveSocialCatalog(connection);
+                ReputationService.ReadActiveSocialCatalog(connection);
             aggregate["preparationMs"] = preparationTimer.ElapsedMilliseconds;
 
             foreach (int day in (groupsByDay
@@ -733,7 +733,7 @@ AND timeline_id=$timeline AND world_day=$day AND status='completed';",
             string pairKey = AmbientPairKey(first.HeroId, second.HeroId);
             string locationKind = first.LocationKind;
             string locationId = first.LocationId;
-            string encounterId = "fling_" + DeterministicSocialId(
+            string encounterId = "fling_" + ReputationService.DeterministicSocialId(
                 string.Join("|", campaignId, timelineId,
                     day.ToString(CultureInfo.InvariantCulture),
                     locationKind, locationId, pairKey, "fling_encounter_v1"));
@@ -786,7 +786,7 @@ $shortAffair,'processing',$ts,$ts);", new Dictionary<string, object>
             if (shortAffair)
             {
                 Dictionary<string, object> occurrencePayload =
-                    BuildRelationshipSocialOccurrence(pair, day, "affair",
+                    ReputationService.BuildRelationshipSocialOccurrence(pair, day, "affair",
                         first.Hero, second.Hero, spouseA, spouseB, false,
                         false,
                         "A brief fling involving a married participant was discovered.",
@@ -796,7 +796,7 @@ $shortAffair,'processing',$ts,$ts);", new Dictionary<string, object>
                     + "|fixed_twenty_percent_discovery";
                 occurrencePayload["exposureChanceOverride"] = fixedChance;
                 Dictionary<string, object> occurrence =
-                    RegisterSocialOccurrence(connection, campaignId,
+                    ReputationService.RegisterSocialOccurrence(connection, campaignId,
                         occurrencePayload, socialCatalog,
                         worldTestSchemaReady: true,
                         useExistingTransaction: true);
@@ -821,7 +821,7 @@ $shortAffair,'processing',$ts,$ts);", new Dictionary<string, object>
             if (marriedWomanConceived)
             {
                 Dictionary<string, object> occurrencePayload =
-                    BuildRelationshipSocialOccurrence(pair, day, "affair",
+                    ReputationService.BuildRelationshipSocialOccurrence(pair, day, "affair",
                         first.Hero, second.Hero, spouseA, spouseB, false,
                         false,
                         "A married woman's pregnancy created an additional chance for the brief affair to be discovered.",
@@ -830,7 +830,7 @@ $shortAffair,'processing',$ts,$ts);", new Dictionary<string, object>
                 occurrencePayload["exposureSeedKey"] = encounterId
                     + "|pregnancy_discovery";
                 Dictionary<string, object> occurrence =
-                    RegisterSocialOccurrence(connection, campaignId,
+                    ReputationService.RegisterSocialOccurrence(connection, campaignId,
                         occurrencePayload, socialCatalog,
                         worldTestSchemaReady: true,
                         useExistingTransaction: true);
@@ -991,7 +991,7 @@ $day,$payload,$ts,'resolved');", new Dictionary<string, object>
             }
 
             string conceptionId = "conception_fling_"
-                + DeterministicSocialId(encounterId + "|conception");
+                + ReputationService.DeterministicSocialId(encounterId + "|conception");
             string legalFatherId = motherMarriedElsewhere
                 ? motherSpouse : father.HeroId;
             double secrecy = illegitimate ? 0.75d : 0d;
@@ -1193,7 +1193,7 @@ $payload,$ts,$ts);", new Dictionary<string, object>
                 {
                     EnsureRelationshipDirectorSchema(connection);
                     EnsureMbtiRelationshipSchema(connection);
-                    EnsureSocialReputationSchema(connection);
+                    ReputationService.EnsureSocialReputationSchema(connection);
                     EnsureWorldTestTelemetrySchema(connection);
                     const int day = 50;
                     const string timeline = "fling_test_timeline";

@@ -12,23 +12,23 @@ using AIPortraits;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
         private const string NanoGptImageGenerationsUrl = "https://nano-gpt.com/api/v1/images/generations";
-        private const string NanoGptChatCompletionsUrl = "https://nano-gpt.com/api/v1/chat/completions";
+        internal const string NanoGptChatCompletionsUrl = "https://nano-gpt.com/api/v1/chat/completions";
         private const string AtlasGenerateImageUrl = "https://api.atlascloud.ai/api/v1/model/generateImage";
         private const string AtlasUploadMediaUrl = "https://api.atlascloud.ai/api/v1/model/uploadMedia";
         private const string AtlasPredictionUrlPrefix = "https://api.atlascloud.ai/api/v1/model/prediction/";
         private const string AtlasModelFluxKontextDev = "black-forest-labs/flux-kontext-dev";
         private const string AtlasModelSeedreamEdit = "bytedance/seedream-v4.5/edit";
-        private const string AtlasModelSeedreamV5ProEdit = "bytedance/seedream-v5.0-pro/edit";
+        internal const string AtlasModelSeedreamV5ProEdit = "bytedance/seedream-v5.0-pro/edit";
         private const string AtlasSeedreamV5ProLandscapeSize = "2720*1530";
         private const string AtlasSeedreamV5ProPortraitSize = "1530*2720";
         private const string AtlasModelWan25ImageEdit = "alibaba/wan-2.5/image-edit";
         private const string AtlasModelWan27ImageEdit = "alibaba/wan-2.7-pro/image-edit";
         private const string AtlasModelGrokImagineImageEdit = "xai/grok-imagine-image/edit";
-        private const string DefaultAtlasImageModel = AtlasModelGrokImagineImageEdit;
-        private const string DefaultAtlasWan25NegativePrompt = "illustration, painting, oil painting, watercolor, drawing, sketch, concept art, digital art, fantasy art, graphic novel, comic, cartoon, anime, cel shading, stylized image, 3D render, CGI, video game graphics, game screenshot, game model, synthetic person, doll, mannequin, wax figure, plastic skin, waxy skin, airbrushed skin, over-smoothed skin, artificial eyes, uncanny face, distorted anatomy, malformed hands, extra fingers, text, words, letters, numbers, captions, labels, names, ages, cultures, subtitles, signatures, logos, watermarks, interface elements, borders, banners, white strips, footer panels, metadata panels, armor, weapons, helmets, chainmail, modern clothing";
+        internal const string DefaultAtlasImageModel = AtlasModelGrokImagineImageEdit;
+        internal const string DefaultAtlasWan25NegativePrompt = "illustration, painting, oil painting, watercolor, drawing, sketch, concept art, digital art, fantasy art, graphic novel, comic, cartoon, anime, cel shading, stylized image, 3D render, CGI, video game graphics, game screenshot, game model, synthetic person, doll, mannequin, wax figure, plastic skin, waxy skin, airbrushed skin, over-smoothed skin, artificial eyes, uncanny face, distorted anatomy, malformed hands, extra fingers, text, words, letters, numbers, captions, labels, names, ages, cultures, subtitles, signatures, logos, watermarks, interface elements, borders, banners, white strips, footer panels, metadata panels, armor, weapons, helmets, chainmail, modern clothing";
         private const int AtlasPollIntervalMs = 2500;
         private const int AtlasPollTimeoutMs = 300000;
         private static readonly ConcurrentDictionary<string, PortraitGenerationOperationState> PortraitGenerationOperations =
@@ -47,7 +47,7 @@ namespace ReignBetaServer
             public Dictionary<string, object> Failure;
         }
 
-        private sealed class ImageGenerationProfile
+        internal sealed class ImageGenerationProfile
         {
             public bool ChatView;
             public string Name;
@@ -62,7 +62,7 @@ namespace ReignBetaServer
             public double GuidanceScale;
         }
 
-        private static string ImageGenerationProfileName(string promptPurpose)
+        internal static string ImageGenerationProfileName(string promptPurpose)
         {
             if (string.Equals(promptPurpose, "adultPortrait", StringComparison.OrdinalIgnoreCase)) return "adultPortrait";
             if (string.Equals(promptPurpose, "adultScenery", StringComparison.OrdinalIgnoreCase)) return "adultScenery";
@@ -72,7 +72,7 @@ namespace ReignBetaServer
                 : "scenery";
         }
 
-        private static ImageGenerationProfile ResolveImageGenerationProfile(
+        internal static ImageGenerationProfile ResolveImageGenerationProfile(
             Dictionary<string, object> settings,
             string promptPurpose,
             string providerOverride = null)
@@ -98,16 +98,16 @@ namespace ReignBetaServer
                 NanoGptModel = readString("NanoGptImageModel", "gpt-image-1.5"),
                 AtlasModel = readString("AtlasImageModel", name.StartsWith("adult", StringComparison.Ordinal) ? AtlasModelSeedreamV5ProEdit : DefaultAtlasImageModel),
                 AtlasWanNegativePrompt = readString("AtlasWanNegativePrompt", DefaultAtlasWan25NegativePrompt),
-                ImageStrength = ClampDouble(readDouble("ImageStrength", 0.75d), 0.4d, 1d),
+                ImageStrength = Program.ClampDouble(readDouble("ImageStrength", 0.75d), 0.4d, 1d),
                 InferenceSteps = Math.Max(10, Math.Min(50, readInt("InferenceSteps", 28))),
-                GuidanceScale = ClampDouble(readDouble("GuidanceScale", 3.5d), 1d, 10d)
+                GuidanceScale = Program.ClampDouble(readDouble("GuidanceScale", 3.5d), 1d, 10d)
             };
         }
 
         private static readonly ConcurrentDictionary<string, Lazy<Dictionary<string, object>>> ActivePortraitRequests =
             new ConcurrentDictionary<string, Lazy<Dictionary<string, object>>>(StringComparer.Ordinal);
 
-        private static Dictionary<string, object> PortraitGenerate(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> PortraitGenerate(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             if (ImageGenerationProfileName(ReadString(payload, "promptPurpose", "portrait")) != "portrait")
@@ -137,7 +137,7 @@ namespace ReignBetaServer
             payload = payload ?? new Dictionary<string, object>();
             payload.Remove("resolvedPortraitPhysique");
             payload.Remove("resolvedPortraitVision");
-            Dictionary<string, object> settings = LoadSettings();
+            Dictionary<string, object> settings = Program.LoadSettings();
             Stopwatch total = Stopwatch.StartNew();
 
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -211,7 +211,7 @@ namespace ReignBetaServer
                     var nativePhysique = ValidateNativePhysique(ReadDictionary(sourceProvenance, "physique"), sourceImage);
                     payload["resolvedPortraitPhysique"] = BuildPortraitPhysiqueEvidence(
                         nativePhysique,
-                        LoadPromptTemplate(PortraitBodyPromptFile),
+                        Program.LoadPromptTemplate(PortraitBodyPromptFile),
                         IsFemalePortraitSubject(payload));
                     bool sharedRebuild = ReadString(sourceProvenance, "kind", "") == "shared_ai_portrait_reference";
                     if (PreserveResidentClothing(payload))
@@ -322,7 +322,7 @@ namespace ReignBetaServer
                             ReadInt(edit.Evidence, "promptChars", 0), call.ImageBytes.Length,
                             ReadString(edit.Evidence, "outcome", "") == "completed",
                             new Dictionary<string, object> { ["providerCallMs"] = edit.Evidence["durationMs"] });
-                    LogOperational("portrait.clothing_edit", new Dictionary<string, object> {
+                    Program.LogOperational("portrait.clothing_edit", new Dictionary<string, object> {
                         ["campaignId"] = campaignId, ["heroStringId"] = heroId,
                         ["generationOperationId"] = generationOperationId, ["stage"] = edit.Evidence });
                     if (ReadString(edit.Evidence, "outcome", "") == "completed")
@@ -488,7 +488,7 @@ namespace ReignBetaServer
             return response;
         }
 
-        private static Dictionary<string, object> PortraitGenerationStatus(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> PortraitGenerationStatus(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -572,10 +572,10 @@ namespace ReignBetaServer
                 };
             }
 
-            string portraitPath = CharacterFile(campaignId, heroId, "portraits", "portrait.png");
-            string sourcePath = CharacterFile(campaignId, heroId, "portraits", "source.png");
-            string promptPath = CharacterFile(campaignId, heroId, "portraits", "prompt.txt");
-            string metadataPath = CharacterFile(campaignId, heroId, "portraits", "portrait.json");
+            string portraitPath = Program.CharacterFile(campaignId, heroId, "portraits", "portrait.png");
+            string sourcePath = Program.CharacterFile(campaignId, heroId, "portraits", "source.png");
+            string promptPath = Program.CharacterFile(campaignId, heroId, "portraits", "prompt.txt");
+            string metadataPath = Program.CharacterFile(campaignId, heroId, "portraits", "portrait.json");
             return BuildStoredPortraitGenerationResponseFromPaths(
                 campaignId, heroId, operationId, portraitPath, sourcePath, promptPath, metadataPath);
         }
@@ -593,9 +593,9 @@ namespace ReignBetaServer
             byte[] portraitBytes;
             byte[] sourceBytes;
             string prompt;
-            lock (FileLock)
+            lock (Program.FileLock)
             {
-                metadata = ReadJsonObject(metadataPath);
+                metadata = Program.ReadJsonObject(metadataPath);
                 if (!string.Equals(ReadString(metadata, "generationOperationId", ""), operationId, StringComparison.OrdinalIgnoreCase)
                     || !File.Exists(portraitPath)
                     || !File.Exists(sourcePath)
@@ -701,7 +701,7 @@ namespace ReignBetaServer
 			return "high noble";
 		}
 
-        private static string BuildPortraitPrompt(Dictionary<string, object> payload, string clientPrompt, bool includePhysicalConfidence = true)
+        internal static string BuildPortraitPrompt(Dictionary<string, object> payload, string clientPrompt, bool includePhysicalConfidence = true)
         {
             if (PreserveResidentClothing(payload)) return ReadDictionary(payload, "resolvedPortraitVision") == null ? BuildResidentPortraitPrompt(payload)
                 : PortraitVisionIdentityPrompt(payload) + "\n" + BuildResidentPortraitPrompt(payload)
@@ -728,7 +728,7 @@ namespace ReignBetaServer
             foreach (string layer in layers)
             {
                 string text = layer == "portrait_identity.txt" && ReadDictionary(payload, "resolvedPortraitVision") != null
-                    ? PortraitVisionIdentityPrompt(payload) : LoadPromptTemplate(layer).Trim();
+                    ? PortraitVisionIdentityPrompt(payload) : Program.LoadPromptTemplate(layer).Trim();
                 if (!string.IsNullOrWhiteSpace(text))
                 {
                     parts.Add(text);
@@ -773,7 +773,7 @@ namespace ReignBetaServer
                 ["error"] = string.IsNullOrWhiteSpace(error) ? "Image generation failed." : error,
                 ["timing"] = timing ?? new Dictionary<string, object>()
             };
-            LogOperational("portrait.generate_failed", row);
+            Program.LogOperational("portrait.generate_failed", row);
             row["generationStages"] = new[] { new Dictionary<string, object> {
                 ["profile"] = imageProfile == null ? "portrait" : imageProfile.Name,
                 ["provider"] = imageProfile == null ? "" : imageProfile.Provider, ["model"] = model ?? "",
@@ -789,12 +789,12 @@ namespace ReignBetaServer
             byte[] sourceImagePng,
             string outputSizeOverride)
         {
-            string apiKey = ProviderSecret(settings, "portraitNanoGptApiKey", ReadString(settings, "portraitNanoGptImageGenerationsUrl", NanoGptImageGenerationsUrl),
+            string apiKey = Program.ProviderSecret(settings, "portraitNanoGptApiKey", ReadString(settings, "portraitNanoGptImageGenerationsUrl", NanoGptImageGenerationsUrl),
                 ReadString(settings, "portraitNanoGptChatCompletionsUrl", NanoGptChatCompletionsUrl));
             string model = imageProfile.NanoGptModel;
             if (string.IsNullOrWhiteSpace(apiKey))
             {
-                return PortraitImageCallResult.Fail("NanoGPT", model, ProviderKeyUnavailable(settings, "portraitNanoGptApiKey", apiKey) ? GlobalKeyUnavailableError : "No NanoGPT image API key is set in the server AI Image Generation tab.");
+                return PortraitImageCallResult.Fail("NanoGPT", model, Program.ProviderKeyUnavailable(settings, "portraitNanoGptApiKey", apiKey) ? Program.GlobalKeyUnavailableError : "No NanoGPT image API key is set in the server AI Image Generation tab.");
             }
 
             if (UsesGeminiChatImageAdapter(model))
@@ -900,12 +900,12 @@ namespace ReignBetaServer
             byte[] sourceImagePng,
             string outputSizeOverride)
         {
-            string apiKey = ProviderSecret(settings, "portraitAtlasApiKey", ReadString(settings, "portraitAtlasUploadMediaUrl", AtlasUploadMediaUrl),
+            string apiKey = Program.ProviderSecret(settings, "portraitAtlasApiKey", ReadString(settings, "portraitAtlasUploadMediaUrl", AtlasUploadMediaUrl),
                 ReadString(settings, "portraitAtlasGenerateImageUrl", AtlasGenerateImageUrl), ReadString(settings, "portraitAtlasPredictionUrlPrefix", AtlasPredictionUrlPrefix));
             string model = imageProfile.AtlasModel;
             if (string.IsNullOrWhiteSpace(apiKey))
             {
-                return PortraitImageCallResult.Fail("AtlasCloud", model, ProviderKeyUnavailable(settings, "portraitAtlasApiKey", apiKey) ? GlobalKeyUnavailableError : "No AtlasCloud API key is set in the server AI Image Generation tab.");
+                return PortraitImageCallResult.Fail("AtlasCloud", model, Program.ProviderKeyUnavailable(settings, "portraitAtlasApiKey", apiKey) ? Program.GlobalKeyUnavailableError : "No AtlasCloud API key is set in the server AI Image Generation tab.");
             }
 
             Stopwatch total = Stopwatch.StartNew();
@@ -934,7 +934,7 @@ namespace ReignBetaServer
                 string json = Json.Serialize(body);
                 requestChars += json.Length;
                 string generateUrl = ReadString(settings, "portraitAtlasGenerateImageUrl", AtlasGenerateImageUrl);
-                string response = PostJsonToLlm(generateUrl, apiKey, json, settings);
+                string response = Program.PostJsonToLlm(generateUrl, apiKey, json, settings);
                 responseChars += response.Length;
                 string predictionId = ExtractAtlasPredictionId(response);
                 if (string.IsNullOrWhiteSpace(predictionId))
@@ -1002,7 +1002,7 @@ namespace ReignBetaServer
             string json = Json.Serialize(body);
             try
             {
-                string response = PostJsonToLlm(url, apiKey, json, settings);
+                string response = Program.PostJsonToLlm(url, apiKey, json, settings);
                 timer.Stop();
                 byte[] imageBytes = ExtractImageBytesFromJson(response);
                 if (imageBytes == null || imageBytes.Length == 0)
@@ -1145,7 +1145,7 @@ namespace ReignBetaServer
 
         private static string UploadAtlasMedia(string uploadUrl, string apiKey, byte[] sourceImagePng, out int responseChars)
         {
-            ProviderTestGuard.BeforeDispatch("atlas_reference_upload");
+            Program.ProviderTestGuard.BeforeDispatch("atlas_reference_upload");
             responseChars = 0;
             string boundary = "----BannerlordReign" + Guid.NewGuid().ToString("N");
             byte[] prefix = Encoding.UTF8.GetBytes("--" + boundary + "\r\n"
@@ -1238,7 +1238,7 @@ namespace ReignBetaServer
         {
             if (string.IsNullOrWhiteSpace(heroId))
             {
-                heroId = ResolveHeroIdByCharacterObjectId(campaignId, characterObjectId);
+                heroId = Program.ResolveHeroIdByCharacterObjectId(campaignId, characterObjectId);
             }
 
             if (string.IsNullOrWhiteSpace(heroId))
@@ -1246,16 +1246,16 @@ namespace ReignBetaServer
                 return "";
             }
 
-            string portraitPath = CharacterFile(campaignId, heroId, "portraits", "portrait.png");
-            string sourcePath = CharacterFile(campaignId, heroId, "portraits", "source.png");
-            string promptPath = CharacterFile(campaignId, heroId, "portraits", "prompt.txt");
+            string portraitPath = Program.CharacterFile(campaignId, heroId, "portraits", "portrait.png");
+            string sourcePath = Program.CharacterFile(campaignId, heroId, "portraits", "source.png");
+            string promptPath = Program.CharacterFile(campaignId, heroId, "portraits", "prompt.txt");
             Directory.CreateDirectory(Path.GetDirectoryName(portraitPath));
-            lock (FileLock)
+            lock (Program.FileLock)
             {
                 File.WriteAllBytes(portraitPath, imageBytes);
                 File.WriteAllBytes(sourcePath, sourceImage);
                 File.WriteAllText(promptPath, prompt ?? "", Encoding.UTF8);
-                WriteJsonObject(CharacterFile(campaignId, heroId, "portraits", "portrait.json"), new Dictionary<string, object>
+                Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "portraits", "portrait.json"), new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["heroStringId"] = heroId,
@@ -1307,16 +1307,16 @@ namespace ReignBetaServer
                 row["error"] = call.Error;
             }
 
-            LogOperational(ok ? "portrait.generate" : "portrait.generate_failed", row);
-            Dictionary<string, object> settings = LoadSettings();
+            Program.LogOperational(ok ? "portrait.generate" : "portrait.generate_failed", row);
+            Dictionary<string, object> settings = Program.LoadSettings();
             if (!ReadBool(settings, "enableLlmLogging", true))
             {
                 return;
             }
 
-            lock (FileLock)
+            lock (Program.FileLock)
             {
-                AppendBoundedJsonLineToPathLocked(Path.Combine(LogsDir, "llm-log.jsonl"), new Dictionary<string, object>
+                Program.AppendBoundedJsonLineToPathLocked(Path.Combine(Program.LogsDir, "llm-log.jsonl"), new Dictionary<string, object>
                 {
                     ["ts"] = DateTimeOffset.UtcNow.ToString("o"),
                     ["ok"] = ok,
@@ -1596,7 +1596,7 @@ namespace ReignBetaServer
 
         private static string GetTextWithBearer(string url, string apiKey)
         {
-            ProviderTestGuard.BeforeDispatch("image_prediction_poll");
+            Program.ProviderTestGuard.BeforeDispatch("image_prediction_poll");
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
             request.Method = "GET";
             request.Accept = "application/json";
@@ -1607,7 +1607,7 @@ namespace ReignBetaServer
 
         private static byte[] DownloadBytes(string url)
         {
-            ProviderTestGuard.BeforeDispatch("image_download");
+            Program.ProviderTestGuard.BeforeDispatch("image_download");
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
             request.Method = "GET";
             request.Timeout = 360000;
@@ -1705,7 +1705,7 @@ namespace ReignBetaServer
             return current;
         }
 
-        private static string NormalizeImageProvider(string provider)
+        internal static string NormalizeImageProvider(string provider)
         {
             if (string.Equals(provider, "OpenRouter", StringComparison.OrdinalIgnoreCase)) return "OpenRouter";
             if (IsCodexImageProvider(provider)) return CodexImageProvider;

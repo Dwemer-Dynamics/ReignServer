@@ -21,14 +21,14 @@ namespace ReignBetaServer
                     InitializationReadinessSealVersion, "campaignId is required.");
             if (ReadBool(payload, "resumeWorkers", true))
             {
-                ResumePendingSocialWorldHistoryOutcomes(campaignId, timelineId);
+                ReputationService.ResumePendingSocialWorldHistoryOutcomes(campaignId, timelineId);
                 SignalContinuousRelationshipWorker();
             }
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
                 EnsureWorldHistorySchema(connection);
-                EnsureSocialReputationSchema(connection);
-                EnsureSocialSubjectWorkSchema(connection);
+                ReputationService.EnsureSocialReputationSchema(connection);
+                ReputationService.EnsureSocialSubjectWorkSchema(connection);
                 EnsureWorldRelationshipSchema(connection);
                 EnsureMbtiRelationshipSchema(connection);
                 int pending = ReadInt(QuerySql(connection, @"
@@ -107,9 +107,9 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                     && ReadInt(lanes, "pending", 0) == 0
                     && standingInvalidations == 0 && standingFailures == 0
                     && nativeTargets == 0 && nativeFailures == 0;
-                long lastBatchMs = Interlocked.Read(ref SocialOutcomeLastBatchMs);
+                long lastBatchMs = Interlocked.Read(ref ReputationService.SocialOutcomeLastBatchMs);
                 long lastBatchCompleted = Interlocked.Read(
-                    ref SocialOutcomeLastBatchCompleted);
+                    ref ReputationService.SocialOutcomeLastBatchCompleted);
                 double outcomesPerSecond = lastBatchMs > 0
                     ? lastBatchCompleted * 1000d / lastBatchMs : 0d;
                 return new Dictionary<string, object>
@@ -122,29 +122,29 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                     ["pendingSubjectLanes"] = ReadInt(lanes, "pending", 0),
                     ["activeSubjectLanes"] = ReadInt(lanes, "processing", 0),
                     ["expiredSubjectClaims"] = ReadInt(lanes, "expired", 0),
-                    ["activeWorkers"] = Volatile.Read(ref SocialOutcomeActiveWorkers),
-                    ["configuredWorkers"] = SocialOutcomeConfiguredWorkers,
-                    ["completedTotal"] = Interlocked.Read(ref SocialOutcomeCompletedTotal),
-                    ["lastBatchMs"] = Interlocked.Read(ref SocialOutcomeLastBatchMs),
+                    ["activeWorkers"] = Volatile.Read(ref ReputationService.SocialOutcomeActiveWorkers),
+                    ["configuredWorkers"] = ReputationService.SocialOutcomeConfiguredWorkers,
+                    ["completedTotal"] = Interlocked.Read(ref ReputationService.SocialOutcomeCompletedTotal),
+                    ["lastBatchMs"] = Interlocked.Read(ref ReputationService.SocialOutcomeLastBatchMs),
                     ["lastBatchCompleted"] = lastBatchCompleted,
                     ["outcomesPerSecond"] = outcomesPerSecond,
                     ["estimatedSecondsRemaining"] = outcomesPerSecond > 0d
                         ? Math.Ceiling(pending / outcomesPerSecond) : 0d,
                     ["lastTransactionMs"] = Interlocked.Read(
-                        ref SocialOutcomeLastTransactionMs),
+                        ref ReputationService.SocialOutcomeLastTransactionMs),
                     ["lastTransactionPerEventMs"] = Interlocked.Read(
-                        ref SocialOutcomeLastTransactionPerEventMs),
+                        ref ReputationService.SocialOutcomeLastTransactionPerEventMs),
                     ["transactionConflicts"] = Interlocked.Read(
-                        ref SocialOutcomeTransactionConflicts),
+                        ref ReputationService.SocialOutcomeTransactionConflicts),
                     ["transactionAttempts"] = Interlocked.Read(
-                        ref SocialOutcomeTransactionAttempts),
+                        ref ReputationService.SocialOutcomeTransactionAttempts),
                     ["transactionConflictRate"] =
-                        Interlocked.Read(ref SocialOutcomeTransactionAttempts) > 0
-                            ? Interlocked.Read(ref SocialOutcomeTransactionConflicts)
+                        Interlocked.Read(ref ReputationService.SocialOutcomeTransactionAttempts) > 0
+                            ? Interlocked.Read(ref ReputationService.SocialOutcomeTransactionConflicts)
                                 / (double)Interlocked.Read(
-                                    ref SocialOutcomeTransactionAttempts)
+                                    ref ReputationService.SocialOutcomeTransactionAttempts)
                             : 0d,
-                    ["lastWorkerError"] = SocialOutcomeLastError,
+                    ["lastWorkerError"] = ReputationService.SocialOutcomeLastError,
                     ["standingInvalidations"] = standingInvalidations,
                     ["standingFailures"] = standingFailures,
                     ["nativeTargets"] = nativeTargets,
@@ -166,8 +166,8 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                     InitializationReadinessSealVersion, "campaignId is required.");
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
-                EnsureSocialReputationSchema(connection);
-                EnsureSocialSubjectWorkSchema(connection);
+                ReputationService.EnsureSocialReputationSchema(connection);
+                ReputationService.EnsureSocialSubjectWorkSchema(connection);
                 ExecuteSql(connection, @"UPDATE social_outcome_receipts
 SET completed=0,attempt_count=0,last_error='',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline
@@ -187,7 +187,7 @@ AND status<>'completed';",
                         ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                     });
             }
-            ResumePendingSocialWorldHistoryOutcomes(campaignId, timelineId);
+            ReputationService.ResumePendingSocialWorldHistoryOutcomes(campaignId, timelineId);
             SignalContinuousRelationshipWorker();
             return new Dictionary<string, object>
             {

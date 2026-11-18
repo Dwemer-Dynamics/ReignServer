@@ -86,15 +86,15 @@ namespace ReignBetaServer
                 openingPayload);
 
             add("castle_opening_detects_implied_player_speech",
-                Program.CastleOpeningReplyImpliesPlayerSpeech(
+                CourtService.CastleOpeningReplyImpliesPlayerSpeech(
                     "Your Grace, I hear you. I ask leave to state my concern.")
-                && Program.CastleOpeningReplyImpliesPlayerSpeech(
+                && CourtService.CastleOpeningReplyImpliesPlayerSpeech(
                     "Your Grace, as you asked, I have brought the dispatches.")
-                && Program.CastleOpeningReplyImpliesPlayerSpeech(
+                && CourtService.CastleOpeningReplyImpliesPlayerSpeech(
                     "The ruler's request will be obeyed.")
-                && !Program.CastleOpeningReplyImpliesPlayerSpeech(
+                && !CourtService.CastleOpeningReplyImpliesPlayerSpeech(
                     "Your Grace. I was reviewing correspondence when you entered.")
-                && !Program.CastleOpeningReplyImpliesPlayerSpeech(
+                && !CourtService.CastleOpeningReplyImpliesPlayerSpeech(
                     "Lady Asta, I hear you. I will wait until you have finished."),
                 "Castle openings detect replies that invent silent-ruler speech without rejecting legitimate NPC initiative or NPC-to-NPC continuity.",
                 null);
@@ -121,7 +121,7 @@ namespace ReignBetaServer
             };
             string foreignLayer = "[KEEP OWNERSHIP MODE: FOREIGN] {{player_name}} visits {{settlement_name}}. "
                 + "The holding belongs to {{settlement_owner_name}} and the realm is ruled by {{realm_ruler_name}}.";
-            string composedForeign = Program.ComposeForeignCastleChatPrompt(
+            string composedForeign = CourtService.ComposeForeignCastleChatPrompt(
                 "The player is the regent who governs this fortress.", foreignLayer, foreignRuntime);
             add("castle_foreign_keep_prompt_overrides_player_ruler_assumption",
                 composedForeign.Contains("[KEEP OWNERSHIP MODE: FOREIGN]")
@@ -132,21 +132,21 @@ namespace ReignBetaServer
                 "A concrete foreign-ownership layer is appended after the room prompt so its later instructions override legacy player-ruler wording.",
                 new Dictionary<string, object> { { "prompt", composedForeign } });
 
-            Dictionary<string, string> promptDefaults = Program.CastleChatPromptDefaults();
+            Dictionary<string, string> promptDefaults = CourtService.CastleChatPromptDefaults();
             string defaultForeignImage = promptDefaults["castle_chat_foreign_keep_image.txt"];
             string defaultForeignDialogue = promptDefaults["castle_chat_foreign_keep_dialogue.txt"];
             int testedOwnershipPromptPairs = 0;
             var ownershipPromptFailures = new List<string>();
-            foreach (string culture in Program.CastleChatCultures)
+            foreach (string culture in CourtService.CastleChatCultures)
             {
-                foreach (string roomName in Program.CastleChatRooms)
+                foreach (string roomName in CourtService.CastleChatRooms)
                 {
                     string imageName = "castle_chat_" + culture + "_" + roomName + "_image.txt";
                     string dialogueName = "castle_chat_" + culture + "_" + roomName + "_dialogue.txt";
                     string playerImage = promptDefaults[imageName];
                     string playerDialogue = promptDefaults[dialogueName];
-                    string foreignImage = Program.ComposeForeignCastleChatPrompt(playerImage, defaultForeignImage, foreignRuntime);
-                    string foreignDialogue = Program.ComposeForeignCastleChatPrompt(playerDialogue, defaultForeignDialogue, foreignRuntime);
+                    string foreignImage = CourtService.ComposeForeignCastleChatPrompt(playerImage, defaultForeignImage, foreignRuntime);
+                    string foreignDialogue = CourtService.ComposeForeignCastleChatPrompt(playerDialogue, defaultForeignDialogue, foreignRuntime);
                     testedOwnershipPromptPairs += 2;
                     if (string.IsNullOrWhiteSpace(playerImage)
                         || string.IsNullOrWhiteSpace(playerDialogue)
@@ -168,14 +168,14 @@ namespace ReignBetaServer
                 }
             }
             add("castle_all_cultures_rooms_support_player_and_foreign_ownership",
-                testedOwnershipPromptPairs == Program.CastleChatCultures.Length * Program.CastleChatRooms.Length * 2
+                testedOwnershipPromptPairs == CourtService.CastleChatCultures.Length * CourtService.CastleChatRooms.Length * 2
                 && ownershipPromptFailures.Count == 0,
                 "Every culture and Castle Layout room retains its player-ruled prompt and produces a concrete foreign-visitor image/dialogue override.",
                 new Dictionary<string, object>
                 {
                     { "testedPromptPairs", testedOwnershipPromptPairs },
-                    { "cultureCount", Program.CastleChatCultures.Length },
-                    { "roomCount", Program.CastleChatRooms.Length },
+                    { "cultureCount", CourtService.CastleChatCultures.Length },
+                    { "roomCount", CourtService.CastleChatRooms.Length },
                     { "failures", ownershipPromptFailures }
                 });
         }

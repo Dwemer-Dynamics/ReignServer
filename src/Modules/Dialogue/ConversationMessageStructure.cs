@@ -264,7 +264,7 @@ The final LATEST PLAYER TURN contains the current contribution, including its co
                 end - "LATEST PLAYER TURN ".Length)), "engineStage");
         }
 
-        private static string ConversationEvidenceText(Dictionary<string, object> diagnostics, List<Dictionary<string, object>> messages)
+        internal static string ConversationEvidenceText(Dictionary<string, object> diagnostics, List<Dictionary<string, object>> messages)
         {
             string text = string.Join("\n", messages.Select(m => ReadString(m, "content", "")));
             // Reconstruct a whole exchange across message boundaries only after its

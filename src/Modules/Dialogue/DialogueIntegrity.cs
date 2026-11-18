@@ -291,7 +291,7 @@ namespace ReignBetaServer
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static List<Dictionary<string, object>> RunDialogueIntegrityAssertions()
+        internal static List<Dictionary<string, object>> RunDialogueIntegrityAssertions()
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
             Action<string, bool, string> add = (name, pass, detail) => rows.Add(new Dictionary<string, object> { ["name"] = name, ["passed"] = pass, ["detail"] = detail });

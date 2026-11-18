@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DiplomacyService
     {
         private static List<Dictionary<string, object>> RunClanAccordServerSelfTests()
         {
@@ -68,7 +68,7 @@ namespace ReignBetaServer
             };
             var bindErrors = new List<string>();
             BindAndValidateClanAccord(action, terms, bindPayload,
-                BuildRouterResolutionText(ReadString(bindPayload, "playerText", ""), "I agree to trade."), "create_clan_accord", bindErrors);
+                Program.BuildRouterResolutionText(ReadString(bindPayload, "playerText", ""), "I agree to trade."), "create_clan_accord", bindErrors);
             add("multiline_actual_player_turn_preserved", bindErrors.Contains("clan_accord_conditional_or_refused"));
             terms.Remove("playerConfirmed");
             add("no_inferred_player_consent", validate("Agreed to trade.", "I agree to trade.") != "");
@@ -95,10 +95,10 @@ namespace ReignBetaServer
                 ["evidence"] = new Dictionary<string, object> { ["layer"] = "isolated-campaign-database", ["campaignId"] = campaign } });
             try
             {
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
-                    EnsureMbtiRelationshipSchema(connection);
-                    ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
+                    Program.EnsureMbtiRelationshipSchema(connection);
+                    Program.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
 pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,affinity_a_to_b,affinity_b_to_a,
 tag_a_to_b,tag_b_to_a,first_day,last_day,projected_native_relation,updated_ts)
 VALUES('npc|player','npc','player','INTJ','ESFP',18,25,'neutral','neutral',1,1,18,1);");
@@ -112,7 +112,7 @@ VALUES('npc|player','npc','player','INTJ','ESFP',18,25,'neutral','neutral',1,1,1
                 };
                 var evt = new Dictionary<string, object> {
                     ["eventId"] = "formed:test", ["kind"] = "formed", ["worldDay"] = 1d,
-                    ["playerHeroId"] = "player", ["record"] = CloneDictionary(record),
+                    ["playerHeroId"] = "player", ["record"] = Program.CloneDictionary(record),
                     ["knownHeroIds"] = new[] { "player", "npc", "clan_leader" }, ["partnerMemberIds"] = new[] { "npc" }
                 };
                 var payload = new Dictionary<string, object> {
@@ -122,33 +122,33 @@ VALUES('npc|player','npc','player','INTJ','ESFP',18,25,'neutral','neutral',1,1,1
                 };
                 add("formation", ReadBool(ClanAccordsSyncApi(payload), "ok", false), "Native formation commits a server snapshot and scoped attributed memory.");
                 string originalMemory;
-                using (var connection = OpenCampaignConnection(campaign))
-                    originalMemory = Json.Serialize(QuerySql(connection, "SELECT memory_id FROM memories ORDER BY memory_id;"));
+                using (var connection = Program.OpenCampaignConnection(campaign))
+                    originalMemory = Json.Serialize(Program.QuerySql(connection, "SELECT memory_id FROM memories ORDER BY memory_id;"));
                 add("retry_ack", ReadBool(ClanAccordsSyncApi(payload), "ok", false), "Lost native acknowledgement can replay the exact event.");
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
-                    add("memory_identity_stable", originalMemory == Json.Serialize(QuerySql(connection, "SELECT memory_id FROM memories ORDER BY memory_id;")), "Replay retains memory identities without delete/regenerate.");
-                    var memory = QuerySql(connection, "SELECT visibility,known_by_json,summary FROM events WHERE event_id='clan_accord:main:formed:test';").FirstOrDefault();
+                    add("memory_identity_stable", originalMemory == Json.Serialize(Program.QuerySql(connection, "SELECT memory_id FROM memories ORDER BY memory_id;")), "Replay retains memory identities without delete/regenerate.");
+                    var memory = Program.QuerySql(connection, "SELECT visibility,known_by_json,summary FROM events WHERE event_id='clan_accord:main:formed:test';").FirstOrDefault();
                     add("memory_scope_attribution", ReadString(memory, "visibility", "") == "private"
                         && ReadString(memory, "known_by_json", "").Contains("clan_leader")
                         && ReadString(memory, "summary", "").Contains("Lesser Noble"), "Private clan knowledge names the actual lesser-member arranger.");
-                    ExecuteSql(connection, "UPDATE clan_accord_event_receipts SET memory_done=0 WHERE event_id='formed:test';");
+                    Program.ExecuteSql(connection, "UPDATE clan_accord_event_receipts SET memory_done=0 WHERE event_id='formed:test';");
                 }
                 ClanAccordsSyncApi(payload);
-                using (var connection = OpenCampaignConnection(campaign))
-                    add("receipt_crash_recovery", originalMemory == Json.Serialize(QuerySql(connection, "SELECT memory_id FROM memories ORDER BY memory_id;")), "Crash between memory storage and receipt completion preserves existing complete projection.");
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
+                    add("receipt_crash_recovery", originalMemory == Json.Serialize(Program.QuerySql(connection, "SELECT memory_id FROM memories ORDER BY memory_id;")), "Crash between memory storage and receipt completion preserves existing complete projection.");
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
-                    ExecuteSql(connection, "DELETE FROM knowledge_receipts WHERE event_id='clan_accord:main:formed:test' AND npc_id='clan_leader';");
-                    ExecuteSql(connection, "UPDATE clan_accord_event_receipts SET memory_done=0 WHERE event_id='formed:test';");
+                    Program.ExecuteSql(connection, "DELETE FROM knowledge_receipts WHERE event_id='clan_accord:main:formed:test' AND npc_id='clan_leader';");
+                    Program.ExecuteSql(connection, "UPDATE clan_accord_event_receipts SET memory_done=0 WHERE event_id='formed:test';");
                 }
                 ClanAccordsSyncApi(payload);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
                     add("failure_after_participants_restores_clan_knowledge",
-                        QuerySql(connection, "SELECT receipt_id FROM knowledge_receipts WHERE event_id='clan_accord:main:formed:test' AND npc_id='clan_leader' AND status='active';").Count == 1
-                        && originalMemory == Json.Serialize(QuerySql(connection, "SELECT memory_id FROM memories ORDER BY memory_id;"))
-                        && ReadInt(QuerySql(connection, "SELECT memory_done FROM clan_accord_event_receipts WHERE event_id='formed:test';").First(), "memory_done", 0) == 1,
+                        Program.QuerySql(connection, "SELECT receipt_id FROM knowledge_receipts WHERE event_id='clan_accord:main:formed:test' AND npc_id='clan_leader' AND status='active';").Count == 1
+                        && originalMemory == Json.Serialize(Program.QuerySql(connection, "SELECT memory_id FROM memories ORDER BY memory_id;"))
+                        && ReadInt(Program.QuerySql(connection, "SELECT memory_done FROM clan_accord_event_receipts WHERE event_id='formed:test';").First(), "memory_done", 0) == 1,
                         "Interrupted knowledge tail is completed for the clan leader before acknowledgement, without regenerating participant memories.");
                 }
                 evt = new Dictionary<string, object> {
@@ -160,26 +160,26 @@ VALUES('npc|player','npc','player','INTJ','ESFP',18,25,'neutral','neutral',1,1,1
                 add("season_commits", ReadBool(ClanAccordsSyncApi(payload), "ok", false), "Season event is accepted without a record object.");
                 evt["eventId"] = "season:same-tick-new-id";
                 ClanAccordsSyncApi(payload);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
-                    var pair = QuerySql(connection, "SELECT affinity_a_to_b,affinity_b_to_a FROM relationship_pair_chemistry WHERE pair_key='npc|player';").First();
+                    var pair = Program.QuerySql(connection, "SELECT affinity_a_to_b,affinity_b_to_a FROM relationship_pair_chemistry WHERE pair_key='npc|player';").First();
                     add("directional_cap_and_season_receipts", ReadInt(pair, "affinity_a_to_b", 0) == 20 && ReadInt(pair, "affinity_b_to_a", 0) == 25,
                         "18 becomes 20, 25 stays 25; duplicate member and alternate event ID cannot double-award a season.");
-                    add("native_target_projection", QuerySql(connection, "SELECT pair_key FROM relationship_native_targets WHERE pair_key='npc|player';").Count == 1,
+                    add("native_target_projection", Program.QuerySql(connection, "SELECT pair_key FROM relationship_native_targets WHERE pair_key='npc|player';").Count == 1,
                         "Authoritative relationships publish one native target for the pair, not direct native deltas.");
                 }
                 record["IsActive"] = false; record["EndReason"] = 1; record["EndDay"] = 22d;
                 record["EndActionId"] = "cancel:test"; record["EndActorId"] = "player"; record["EndActorName"] = "Player";
                 evt = new Dictionary<string, object> {
                     ["eventId"] = "cancel:test", ["kind"] = "ended", ["worldDay"] = 22d, ["playerHeroId"] = "player",
-                    ["record"] = CloneDictionary(record), ["endReason"] = "Cancelled", ["partnerMemberIds"] = new[] { "npc" },
+                    ["record"] = Program.CloneDictionary(record), ["endReason"] = "Cancelled", ["partnerMemberIds"] = new[] { "npc" },
                     ["knownHeroIds"] = new[] { "player", "npc", "clan_leader" }
                 };
                 payload["events"] = new[] { evt };
                 ClanAccordsSyncApi(payload); ClanAccordsSyncApi(payload);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
-                    var pair = QuerySql(connection, "SELECT affinity_a_to_b,affinity_b_to_a FROM relationship_pair_chemistry WHERE pair_key='npc|player';").First();
+                    var pair = Program.QuerySql(connection, "SELECT affinity_a_to_b,affinity_b_to_a FROM relationship_pair_chemistry WHERE pair_key='npc|player';").First();
                     add("cancellation_once", ReadInt(pair, "affinity_a_to_b", 0) == 10 && ReadInt(pair, "affinity_b_to_a", 0) == 15,
                         "One cancellation costs ten in each direction despite replay.");
                 }
@@ -187,10 +187,10 @@ VALUES('npc|player','npc','player','INTJ','ESFP',18,25,'neutral','neutral',1,1,1
                     "A fresh database connection reloads the persisted ledger.");
                 add("timeline_isolation", !ReadBool(ClanAccordsSnapshot(campaign, "other"), "available", true), "A different timeline cannot read this snapshot.");
                 var history = Enumerable.Range(0, 105).Select(i => {
-                    var ended = CloneDictionary(record); ended["Id"] = "history:" + i; ended["ActionId"] = "history-action:" + i;
+                    var ended = Program.CloneDictionary(record); ended["Id"] = "history:" + i; ended["ActionId"] = "history-action:" + i;
                     ended["StartDay"] = 30d + i; ended["EndDay"] = 31d + i; return ended;
                 }).ToList();
-                var oldActive = CloneDictionary(record);
+                var oldActive = Program.CloneDictionary(record);
                 oldActive["Id"] = "accord:old-active"; oldActive["ActionId"] = "old-active-action";
                 oldActive["IsActive"] = true; oldActive["EndReason"] = 0; oldActive["EndDay"] = null;
                 oldActive["EndActionId"] = ""; oldActive["EndActorId"] = ""; oldActive["EndActorName"] = "";
@@ -208,10 +208,10 @@ VALUES('npc|player','npc','player','INTJ','ESFP',18,25,'neutral','neutral',1,1,1
                 // Drop only this freshly generated internal fixture, never a caller-supplied ID.
                 try { ReignPostgreSqlStorage.DropCampaign(campaign); }
                 catch (Exception ex) { add("fixture_cleanup", false, "Could not remove isolated fixture storage: " + ex.Message); }
-                string root = Path.GetFullPath(CampaignsRoot()) + Path.DirectorySeparatorChar;
-                string path = Path.GetFullPath(CampaignDirectory(campaign));
+                string root = Path.GetFullPath(Program.CampaignsRoot()) + Path.DirectorySeparatorChar;
+                string path = Path.GetFullPath(Program.CampaignDirectory(campaign));
                 if (path.StartsWith(root, StringComparison.OrdinalIgnoreCase) && Path.GetFileName(path) == campaign)
-                    TryDeleteDirectory(path);
+                    Program.TryDeleteDirectory(path);
             }
         }
     }

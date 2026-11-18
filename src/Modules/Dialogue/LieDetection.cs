@@ -576,14 +576,6 @@ FROM world_history_events WHERE event_id=$id LIMIT 1;", new Dictionary<string, o
             return ClampDouble(50d + 0.2d * (claimantAverage - targetAverage), 10d, 80d);
         }
 
-        private static string Sha256Hex(string value)
-        {
-            using (SHA256 sha = SHA256.Create())
-            {
-                return string.Concat(sha.ComputeHash(Encoding.UTF8.GetBytes(value ?? "")).Select(x => x.ToString("x2", CultureInfo.InvariantCulture)));
-            }
-        }
-
         private static Dictionary<string, object> SelectLieReaction(ReignDbConnection connection, string campaignId, string claimantId, string targetId, Dictionary<string, object> payload)
         {
             Dictionary<string, object> traitDocument = ReadJsonObject(CharacterFile(campaignId, targetId, "traits.json"));

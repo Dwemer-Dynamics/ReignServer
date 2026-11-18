@@ -105,7 +105,7 @@ BEGIN UPDATE memory_precision_state SET source_revision=source_revision+1 WHERE 
                         + table + " FOR EACH STATEMENT EXECUTE FUNCTION memory_precision_source_changed(); END IF; END $$;");
         }
 
-        private static Dictionary<string, object> ReadMemoryPrecisionState(ReignDbConnection connection) =>
+        internal static Dictionary<string, object> ReadMemoryPrecisionState(ReignDbConnection connection) =>
             QuerySql(connection, "SELECT * FROM memory_precision_state WHERE state_id='current';").Single();
 
         private static bool IsIsolatedMemoryValidation => ReignPostgreSqlStorage.Options.IsValidation
@@ -128,7 +128,7 @@ BEGIN UPDATE memory_precision_state SET source_revision=source_revision+1 WHERE 
 
         // Only the Save Sync rollback passes its load session; any other restore stays
         // unproven for terminal report recovery (fail closed).
-        private static void AdvanceMemoryRestoreGeneration(string campaignId, Dictionary<string, object> restoredPoint = null, string snapshotSchema = "",
+        internal static void AdvanceMemoryRestoreGeneration(string campaignId, Dictionary<string, object> restoredPoint = null, string snapshotSchema = "",
             string loadSessionId = "")
         {
             using (var connection = OpenCampaignConnection(campaignId))
@@ -1458,7 +1458,7 @@ ORDER BY t.ts,t.turn_order,t.turn_id;", TestDict("type", documentType, "id", id,
             && (knowledge == null || MemoryTimeVisible(turn,knowledge,connection)) && (ReadString(turn,"speaker_id","") == observer
             || TextListFromJson(ReadString(turn,"participants_json","[]")).Contains(observer,StringComparer.OrdinalIgnoreCase));
 
-        private static bool MemoryTimeVisible(Dictionary<string, object> row, KnowledgeAccessContext knowledge, ReignDbConnection connection = null)
+        internal static bool MemoryTimeVisible(Dictionary<string, object> row, KnowledgeAccessContext knowledge, ReignDbConnection connection = null)
         {
             if (IsUnsupportedRecallAbsenceDerived(row, connection, knowledge)) return false;
             if (connection != null && row.ContainsKey("record_id") && row.ContainsKey("kind")

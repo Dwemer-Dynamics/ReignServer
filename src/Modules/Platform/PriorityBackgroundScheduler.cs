@@ -348,7 +348,7 @@ namespace ReignBetaServer
         /// lock, iff the work never starts: on this thread before a Busy/Stopping return, or on the
         /// stopping thread for queued work. It must be a cheap, non-blocking ownership release.
         /// </summary>
-        private static PriorityWorkAdmission TryEnqueuePriorityBackgroundWork(string name, string priority, Action work,
+        internal static PriorityWorkAdmission TryEnqueuePriorityBackgroundWork(string name, string priority, Action work,
             Action<string> notStarted, out Task completion)
         {
             return PriorityWork.TryEnqueue(name ?? "background_work", NormalizeWorkPriority(priority), work, notStarted, out completion);
@@ -360,7 +360,7 @@ namespace ReignBetaServer
             return value == "interactive" || value == "high" ? 0 : value == "maintenance" || value == "low" ? 2 : 1;
         }
 
-        private static bool PriorityBackgroundWorkShouldYield()
+        internal static bool PriorityBackgroundWorkShouldYield()
         {
             if (ShutdownRequested || InteractiveRequestActiveOrRecent()) return true;
             return PriorityWork.HasQueuedInteractiveOrStopping();
@@ -370,9 +370,9 @@ namespace ReignBetaServer
         {
             Dictionary<string, object> status = PriorityWork.Status();
             status["ok"] = true;
-            status["chatViewPending"] = ChatViewWorkers.Count;
+            status["chatViewPending"] = PortraitsService.ChatViewWorkers.Count;
             status["interactiveRequests"] = Volatile.Read(ref InteractiveRequestCount);
-            status["reputationReasonResumeOutcome"] = Volatile.Read(ref ReputationReasonResumeOutcome) ?? "";
+            status["reputationReasonResumeOutcome"] = Volatile.Read(ref ReputationService.ReputationReasonResumeOutcome) ?? "";
             return status;
         }
     }

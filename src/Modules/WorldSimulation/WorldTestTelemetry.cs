@@ -9,7 +9,7 @@ namespace ReignBetaServer
     {
         private const int PostgreSqlWorldTestTelemetrySchemaRevision = 1;
 
-        private static void EnsureWorldTestTelemetrySchema(ReignDbConnection connection)
+        internal static void EnsureWorldTestTelemetrySchema(ReignDbConnection connection)
         {
             if (connection == null)
                 throw new ArgumentNullException(nameof(connection));
@@ -100,7 +100,7 @@ report_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts IN
 PRIMARY KEY(campaign_id,timeline_id,checkpoint_day));");
         }
 
-        private static void RecordWorldTestCounter(
+        internal static void RecordWorldTestCounter(
             ReignDbConnection connection,
             string campaignId,
             string timelineId,
@@ -114,7 +114,7 @@ PRIMARY KEY(campaign_id,timeline_id,checkpoint_day));");
                 timelineId, dayKey, subsystem, chunkKey, counters);
         }
 
-        private static void RecordWorldTestCounterSchemaReady(
+        internal static void RecordWorldTestCounterSchemaReady(
             ReignDbConnection connection,
             string campaignId,
             string timelineId,
@@ -596,7 +596,7 @@ updated_day=$day,updated_ts=$ts;",
                 });
         }
 
-        private static void IncrementWorldTestObjectCounter(
+        internal static void IncrementWorldTestObjectCounter(
             Dictionary<string, object> counters,
             string key,
             int amount)
@@ -605,7 +605,7 @@ updated_day=$day,updated_ts=$ts;",
             counters[key] = ReadInt(counters, key, 0) + amount;
         }
 
-        private static void AddSocialRumorTelemetryDimensions(
+        internal static void AddSocialRumorTelemetryDimensions(
             Dictionary<string, object> counters,
             string archetypeId,
             IEnumerable<Dictionary<string, object>> participants,
@@ -634,7 +634,7 @@ updated_day=$day,updated_ts=$ts;",
             }
         }
 
-        private static string SocialRumorDurationBucket(double days)
+        internal static string SocialRumorDurationBucket(double days)
         {
             if (days <= 0.000001d) return "same_day";
             if (days <= 7d) return "1-7";
@@ -643,7 +643,7 @@ updated_day=$day,updated_ts=$ts;",
             return "46+";
         }
 
-        private static void RecordWorldTestDiplomacyEvaluation(
+        internal static void RecordWorldTestDiplomacyEvaluation(
             string campaignId,
             string timelineId,
             int dayKey,
@@ -978,7 +978,7 @@ FROM world_test_rollup_queue WHERE campaign_id=$campaign AND timeline_id='main' 
             return results;
         }
 
-        private static int WorldTestCounterValue(
+        internal static int WorldTestCounterValue(
             ReignDbConnection connection,
             string campaignId,
             string timelineId,

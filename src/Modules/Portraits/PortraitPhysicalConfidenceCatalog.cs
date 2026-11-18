@@ -3,11 +3,11 @@ using System.Collections.Generic;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
         private const string PortraitPhysicalConfidenceDefinition = "physical_confidence";
 
-        private static readonly string[] PortraitPhysicalConfidencePromptFileNames =
+        internal static readonly string[] PortraitPhysicalConfidencePromptFileNames =
         {
             "portrait_female_physical_confidence_00_20.txt",
             "portrait_female_physical_confidence_21_40.txt",
@@ -16,7 +16,7 @@ namespace ReignBetaServer
             "portrait_female_physical_confidence_81_100.txt"
         };
 
-        private static string SelectPortraitPhysicalConfidencePromptFile(Dictionary<string, object> payload)
+        internal static string SelectPortraitPhysicalConfidencePromptFile(Dictionary<string, object> payload)
         {
             if (!IsFemalePortraitSubject(payload))
             {
@@ -63,10 +63,10 @@ namespace ReignBetaServer
             {
                 Dictionary<string, object> traitDocument = string.IsNullOrWhiteSpace(heroId)
                     ? new Dictionary<string, object>()
-                    : ReadJsonObject(CharacterFile(campaignId, heroId, "traits.json"));
+                    : Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"));
                 if (traitDocument.Count == 0 && !string.IsNullOrWhiteSpace(heroId))
                 {
-                    Dictionary<string, Dictionary<string, object>> profiles = LoadCharacterProfileLibrary();
+                    Dictionary<string, Dictionary<string, object>> profiles = Program.LoadCharacterProfileLibrary();
                     if (profiles.TryGetValue(heroId, out Dictionary<string, object> profile))
                     {
                         traitDocument = ReadDictionary(profile, "traits") ?? new Dictionary<string, object>();
@@ -93,12 +93,12 @@ namespace ReignBetaServer
                     ?? new Dictionary<string, object>();
                 if (flirtatiousness < 0 && foundation.ContainsKey("flirtatiousness"))
                 {
-                    flirtatiousness = StableTraitPercentage(heroId, "flirtatiousness", TraitInt(foundation, "flirtatiousness"));
+                    flirtatiousness = Program.StableTraitPercentage(heroId, "flirtatiousness", Program.TraitInt(foundation, "flirtatiousness"));
                     source += "+stable_percentage_fallback";
                 }
                 if (confidence < 0 && foundation.ContainsKey("confidence"))
                 {
-                    confidence = StableTraitPercentage(heroId, "confidence", TraitInt(foundation, "confidence"));
+                    confidence = Program.StableTraitPercentage(heroId, "confidence", Program.TraitInt(foundation, "confidence"));
                     source += "+stable_percentage_fallback";
                 }
             }
@@ -147,19 +147,19 @@ namespace ReignBetaServer
             return "81-100";
         }
 
-        private static List<Dictionary<string, object>> PortraitPhysicalConfidencePromptMetadata()
+        internal static List<Dictionary<string, object>> PortraitPhysicalConfidencePromptMetadata()
         {
             return new List<Dictionary<string, object>>
             {
-                PromptMeta(PortraitPhysicalConfidencePromptFileNames[0], "Female Physical Confidence 00-20", "image", true, "Female clothing modifier for a physical_confidence score from 0 through 20."),
-                PromptMeta(PortraitPhysicalConfidencePromptFileNames[1], "Female Physical Confidence 21-40", "image", true, "Female clothing modifier for a physical_confidence score from 21 through 40."),
-                PromptMeta(PortraitPhysicalConfidencePromptFileNames[2], "Female Physical Confidence 41-60", "image", true, "Female clothing modifier for a physical_confidence score from 41 through 60."),
-                PromptMeta(PortraitPhysicalConfidencePromptFileNames[3], "Female Physical Confidence 61-80", "image", true, "Female clothing modifier for a physical_confidence score from 61 through 80."),
-                PromptMeta(PortraitPhysicalConfidencePromptFileNames[4], "Female Physical Confidence 81-100", "image", true, "Female clothing modifier for a physical_confidence score from 81 through 100.")
+                Program.PromptMeta(PortraitPhysicalConfidencePromptFileNames[0], "Female Physical Confidence 00-20", "image", true, "Female clothing modifier for a physical_confidence score from 0 through 20."),
+                Program.PromptMeta(PortraitPhysicalConfidencePromptFileNames[1], "Female Physical Confidence 21-40", "image", true, "Female clothing modifier for a physical_confidence score from 21 through 40."),
+                Program.PromptMeta(PortraitPhysicalConfidencePromptFileNames[2], "Female Physical Confidence 41-60", "image", true, "Female clothing modifier for a physical_confidence score from 41 through 60."),
+                Program.PromptMeta(PortraitPhysicalConfidencePromptFileNames[3], "Female Physical Confidence 61-80", "image", true, "Female clothing modifier for a physical_confidence score from 61 through 80."),
+                Program.PromptMeta(PortraitPhysicalConfidencePromptFileNames[4], "Female Physical Confidence 81-100", "image", true, "Female clothing modifier for a physical_confidence score from 81 through 100.")
             };
         }
 
-        private static Dictionary<string, string> PortraitPhysicalConfidencePromptDefaults()
+        internal static Dictionary<string, string> PortraitPhysicalConfidencePromptDefaults()
         {
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {

@@ -120,8 +120,8 @@ namespace ReignBetaServer
                 SanitizeConversationStateForVerifiedIdentity(
                     state, identityView, opportunity);
             sanitizedState = ReconcileConversationPlanForPrompt(sanitizedState, playerText, payload);
-            Dictionary<string, object> courtCharacter = CourtCharacterDecisionSnapshot(characteristics, opportunity);
-            courtCharacter["activeScheme"] = LoadCourtCharacterScheme(campaignId, subjectId, targetId, ReadDouble(payload, "worldDay", 0d));
+            Dictionary<string, object> courtCharacter = CourtService.CourtCharacterDecisionSnapshot(characteristics, opportunity);
+            courtCharacter["activeScheme"] = CourtService.LoadCourtCharacterScheme(campaignId, subjectId, targetId, ReadDouble(payload, "worldDay", 0d));
             Dictionary<string, object> romance = CalculateRomanticPosture(campaignId, subjectId, targetId, profile, characteristics, relationship, spouseRelationship, opportunity, payload, mode, playerText);
             Dictionary<string, object> percentages = TraitPercentageSnapshot(ReadDictionary(characteristics, "traits") ?? new Dictionary<string, object>());
             Dictionary<string, object> scene = ConversationSceneSnapshot(mode, payload);
@@ -578,7 +578,7 @@ namespace ReignBetaServer
             double tact = Trait01FromPercent(p, "tact");
             double safety = 100d * ClampDouble(1d - exposure * (1d - 0.65d * tact), 0d, 1d);
             Dictionary<string, object> courtCharacter =
-                CourtCharacterDecisionSnapshot(characteristics, opportunity);
+                CourtService.CourtCharacterDecisionSnapshot(characteristics, opportunity);
             double courtPropensity = ClampDouble(ReadDouble(
                 courtCharacter, "manipulationPropensity", 0d), 0d, 1d);
             double courtGain = ClampDouble(ReadDouble(
@@ -713,7 +713,7 @@ namespace ReignBetaServer
             double strategicDisposition = 0.50d * Trait01FromPercent(p, "flirtatiousness") + 0.20d * Trait01FromPercent(p, "pragmatism") + 0.15d * Trait01FromPercent(p, "tact") + 0.10d * Trait01FromPercent(p, "confidence") + 0.05d * Trait01FromPercent(p, "riskTolerance");
             double strategic = ClampDouble(100d * benefit * strategicDisposition, 0d, 100d);
             double baseStrategic = strategic;
-            Dictionary<string, object> courtCharacter = CourtCharacterDecisionSnapshot(characteristics, opportunity);
+            Dictionary<string, object> courtCharacter = CourtService.CourtCharacterDecisionSnapshot(characteristics, opportunity);
             double courtStrategicBoost = ReadDouble(courtCharacter, "strategicBoost", 0d);
             strategic = ClampDouble(strategic + courtStrategicBoost, 0d, 100d);
 
@@ -1436,7 +1436,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             {
                 StoreWorldMemoryEvent(new Dictionary<string, object> { ["campaignId"] = campaignId, ["eventId"] = "romance_exposure_" + decisionId, ["eventType"] = "romantic_attempt_witnessed", ["worldDay"] = day, ["summary"] = "Witnesses observed a potentially compromising romantic exchange.", ["participants"] = new List<string> { subjectId, targetId }, ["known_by"] = witnesses, ["visibility"] = "witnessed_private", ["importance"] = 0.65d, ["source"] = "motive_aware_conversation" }, "motive_aware_conversation");
             }
-            Dictionary<string, object> scheme = PersistCourtCharacterSchemeFromOutcome(
+            Dictionary<string, object> scheme = CourtService.PersistCourtCharacterSchemeFromOutcome(
                 campaignId, context, payload, visibleReply, decisionBrief, decisionId, actedRomantically, calculated);
             return new Dictionary<string, object> { ["romanticActionDetected"] = actedRomantically, ["calculated"] = calculated, ["cooldownRecorded"] = actedRomantically && ReadBool(initiative, "recommended", false), ["exposureRisk"] = Math.Round(exposureRisk, 3), ["exposed"] = exposed, ["informedWitnessIds"] = exposed ? witnesses : new List<string>(), ["courtCharacterScheme"] = scheme };
         }
@@ -2726,7 +2726,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             Dictionary<string, object> courtSeductionVirtues = ReadDictionary(courtSeductionTraitDocument, "courtVirtues");
             courtSeductionVirtues["honor"] = 5;
             courtSeductionVirtues["boldness"] = 95;
-            courtSeductionTraitDocument["courtCharacter"] = BuildCourtCharacterData(courtSeductionTraitDocument, unmarriedProfile);
+            courtSeductionTraitDocument["courtCharacter"] = CourtService.BuildCourtCharacterData(courtSeductionTraitDocument, unmarriedProfile);
             Dictionary<string, object> courtSeductionPosture = CalculateRomanticPosture(
                 "test", "npc", "target", unmarriedProfile, courtSeductionTraits, neutralRelation,
                 new Dictionary<string, object>(), new Dictionary<string, object> { ["relativeBenefit"] = 100d },
@@ -3779,7 +3779,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             groups["honor"] = honor;
             groups["boldness"] = boldness;
             traits["courtVirtues"] = groups;
-            traits["courtCharacter"] = BuildCourtCharacterData(
+            traits["courtCharacter"] = CourtService.BuildCourtCharacterData(
                 traits,
                 new Dictionary<string, object>
                 {

@@ -1016,7 +1016,7 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
             }
         }
 
-        private static string SemanticSha256Hex(string value)
+        internal static string SemanticSha256Hex(string value)
         {
             using (SHA256 sha = SHA256.Create())
                 return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(value ?? ""))).Replace("-", "").ToLowerInvariant();

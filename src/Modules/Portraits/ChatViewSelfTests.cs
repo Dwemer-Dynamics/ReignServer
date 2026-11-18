@@ -6,9 +6,9 @@ using AIPortraits;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
-        private static List<Dictionary<string, object>> RunChatViewContractTests()
+        internal static List<Dictionary<string, object>> RunChatViewContractTests()
         {
             var results = new List<Dictionary<string, object>>();
             void Check(string id, Action action)
@@ -28,19 +28,19 @@ namespace ReignBetaServer
             var turns = new List<Dictionary<string, object>> { Turn("p4", "player", "player", "I offer her the sealed letter."),
                 Turn("n4i", "npc", "ira", "Ira takes the letter with both hands and smiles."),
                 Turn("n4r", "npc", "rhagaea", "Rhagaea watches the exchange quietly.") };
-            var window = ChatViewCompleteExchange(turns, "player");
+            var window = Program.ChatViewCompleteExchange(turns, "player");
             Dictionary<string, object> Scene() => TestDict("selectedTurnId", "n4i", "characterIds", new[] { "player", "ira", "rhagaea" },
                 "caption", "A letter changes hands at dusk.", "description", "At dusk in camp, Ira receives the player's sealed letter with both hands while Rhagaea watches.",
                 "evidence", new[] { TestDict("turnId", "n4i", "quote", "Ira takes the letter with both hands and smiles.") });
             Check("complete_exchange_retains_every_reply", () => Require(window.Count == 3 && ReadString(window[2], "speakerId", "") == "rhagaea", "A group reply was omitted."));
-            Check("unfinished_group_rejected", () => Require(ChatViewCompleteExchange(turns.Take(2).ToList(), "player").Count == 0, "A partial group exchange was accepted."));
-            Check("opening_without_player_exchange_rejected", () => Require(ChatViewCompleteExchange(turns.Skip(1).ToList(), "player").Count == 0, "An NPC opening was counted as a player exchange."));
-            Check("missing_snapshot_rejected", () => { var copy = turns.Select(CloneDictionary).ToList(); copy[0]["frame_json"] = "{}"; Require(ChatViewCompleteExchange(copy, "player").Count == 0, "Current roster substituted for missing historical presence."); });
+            Check("unfinished_group_rejected", () => Require(Program.ChatViewCompleteExchange(turns.Take(2).ToList(), "player").Count == 0, "A partial group exchange was accepted."));
+            Check("opening_without_player_exchange_rejected", () => Require(Program.ChatViewCompleteExchange(turns.Skip(1).ToList(), "player").Count == 0, "An NPC opening was counted as a player exchange."));
+            Check("missing_snapshot_rejected", () => { var copy = turns.Select(Program.CloneDictionary).ToList(); copy[0]["frame_json"] = "{}"; Require(Program.ChatViewCompleteExchange(copy, "player").Count == 0, "Current roster substituted for missing historical presence."); });
             Check("valid_source_locked_instant", () => ValidateChatViewScene(Scene(), window));
             Check("absent_character_rejected", () => { var scene = Scene(); scene["characterIds"] = new[] { "ira", "absent" }; Require(Reject(() => ValidateChatViewScene(scene, window)), "Absent actor reached image stage."); });
             Check("duplicate_character_rejected", () => { var scene = Scene(); scene["characterIds"] = new[] { "ira", "ira" }; Require(Reject(() => ValidateChatViewScene(scene, window)), "Identity duplicated."); });
             Check("invented_quote_rejected", () => { var scene = Scene(); scene["evidence"] = new[] { TestDict("turnId", "n4i", "quote", "Ira draws a sword.") }; Require(Reject(() => ValidateChatViewScene(scene, window)), "Invented action quote accepted."); });
-            Check("other_exchange_cannot_supply_action", () => { var other = CloneDictionary(window[0]); other["turnId"] = "old"; other["exchangeId"] = "exchange_1"; var scene = Scene(); scene["evidence"] = new[] { TestDict("turnId", "old", "quote", "sealed letter") }; Require(Reject(() => ValidateChatViewScene(scene, window.Concat(new[] { other }).ToList())), "Different instants were merged."); });
+            Check("other_exchange_cannot_supply_action", () => { var other = Program.CloneDictionary(window[0]); other["turnId"] = "old"; other["exchangeId"] = "exchange_1"; var scene = Scene(); scene["evidence"] = new[] { TestDict("turnId", "old", "quote", "sealed letter") }; Require(Reject(() => ValidateChatViewScene(scene, window.Concat(new[] { other }).ToList())), "Different instants were merged."); });
             Check("selected_turn_must_be_in_window", () => { var scene = Scene(); scene["selectedTurnId"] = "outside"; Require(Reject(() => ValidateChatViewScene(scene, window)), "Outside moment accepted."); });
             Check("selected_moment_needs_direct_evidence", () => { var scene = Scene(); scene["evidence"] = new[] { TestDict("turnId", "p4", "quote", "sealed letter") }; Require(Reject(() => ValidateChatViewScene(scene, window)), "Selected instant had no direct evidence."); });
             Check("caption_and_prompt_bounds", () => { var scene = Scene(); scene["description"] = new string('x', 6001); Require(Reject(() => ValidateChatViewScene(scene, window)), "Unbounded image brief accepted."); });
@@ -85,12 +85,12 @@ namespace ReignBetaServer
             Check("transcript_guard_rejects_gray_speech_backing", () => {
                 var document = new System.Xml.XmlDocument();
                 document.LoadXml("<ListPanel><Widget Sprite='BlankWhiteSquare' Color='#171717FF'/></ListPanel>");
-                Require(!VerificationTranscriptBackingsValid(document.DocumentElement), "A speech backing escaped the transparent transcript guard.");
+                Require(!Program.VerificationTranscriptBackingsValid(document.DocumentElement), "A speech backing escaped the transparent transcript guard.");
             });
             Check("transcript_guard_rejects_unbounded_scene_owner", () => {
                 var document = new System.Xml.XmlDocument();
                 document.LoadXml("<ListPanel><Widget Id='ChatViewImageEntry' IsVisible='@IsViewLine' SuggestedWidth='1672'><Children><Widget Sprite='BlankWhiteSquare' Color='#070808FF'/></Children></Widget></ListPanel>");
-                Require(!VerificationTranscriptBackingsValid(document.DocumentElement), "A full-width backing disguised as a scene card passed.");
+                Require(!Program.VerificationTranscriptBackingsValid(document.DocumentElement), "A full-width backing disguised as a scene card passed.");
             });
             RunChatViewPersistenceTests(results);
             return results;
@@ -98,15 +98,15 @@ namespace ReignBetaServer
 
         private static void RunChatViewPersistenceTests(List<Dictionary<string, object>> results)
         {
-            if (string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)) throw new InvalidOperationException("View persistence contracts require isolated Verification Lab storage.");
+            if (string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)) throw new InvalidOperationException("View persistence contracts require isolated Verification Lab storage.");
             string campaign = "chat_view_" + Guid.NewGuid().ToString("N");
             void Check(string name, bool passed) => results.Add(TestDict("caseId", "chat_view_db_" + name, "passed", passed, "summary", name));
             try
             {
-                using var c = OpenCampaignConnection(campaign);
-                ReadMemoryPrecisionState(c);
-                EnsureChatViewSchema(c);
-                ExecuteSql(c, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json)
+                using var c = Program.OpenCampaignConnection(campaign);
+                Program.ReadMemoryPrecisionState(c);
+                Program.EnsureChatViewSchema(c);
+                Program.ExecuteSql(c, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json)
 VALUES('view_session',$campaign,'npc0','player','open',1,1,'[""player"",""npc0""]');", TestDict("campaign", campaign));
                 var ids = Enumerable.Range(0, 10).Select(i => "npc" + i).ToList();
                 var people = ids.Concat(new[] { "player" }).Select(id => TestDict("heroStringId", id, "name", id)).ToList();
@@ -115,23 +115,23 @@ VALUES('view_session',$campaign,'npc0','player','open',1,1,'[""player"",""npc0""
                 for (int exchange = 1; exchange <= 6; exchange++)
                 {
                     string e = "e" + exchange;
-                    InsertConversationTurn(c, e + "_p", "view_session", e, exchange * 20, e, "player", "player", "Player", "I offer a letter.", "party_chat", 4, 100, "camp", participants, payload);
+                    Program.InsertConversationTurn(c, e + "_p", "view_session", e, exchange * 20, e, "player", "player", "Player", "I offer a letter.", "party_chat", 4, 100, "camp", participants, payload);
                     for (int i = 0; i < (exchange == 6 ? 9 : 10); i++)
-                        InsertConversationTurn(c, e + "_n" + i, "view_session", e, exchange * 20 + i + 1, e, "npc", ids[i], ids[i], "They receive the letter and nod.", "party_chat", 4, 100, "camp", participants, payload);
+                        Program.InsertConversationTurn(c, e + "_n" + i, "view_session", e, exchange * 20 + i + 1, e, "npc", ids[i], ids[i], "They receive the letter and nod.", "party_chat", 4, 100, "camp", participants, payload);
                 }
                 var request = TestDict("campaignId", campaign, "sessionId", "view_session", "playerId", "player", "timelineId", "main", "worldDay", 5d);
-                var window = ReadChatViewWindow(c, request);
+                var window = Program.ReadChatViewWindow(c, request);
                 Check("four_complete_groups_beyond_ui_tail", window.Count == 44 && window.Select(t => ReadString(t, "exchangeId", "")).Distinct().SequenceEqual(new[] { "e2", "e3", "e4", "e5" }));
                 request["throughExchangeId"] = "e3";
-                Check("click_boundary_excludes_later_replies", ReadChatViewWindow(c, request).Count == 33);
+                Check("click_boundary_excludes_later_replies", Program.ReadChatViewWindow(c, request).Count == 33);
                 request["playerId"] = "foreign";
-                bool rejected = false; try { ReadChatViewWindow(c, request); } catch (InvalidOperationException) { rejected = true; }
+                bool rejected = false; try { Program.ReadChatViewWindow(c, request); } catch (InvalidOperationException) { rejected = true; }
                 Check("foreign_player_cannot_read_session", rejected);
                 request["playerId"] = "player"; request["timelineId"] = "foreign_branch";
-                rejected = false; try { ReadChatViewWindow(c, request); } catch (InvalidOperationException) { rejected = true; }
+                rejected = false; try { Program.ReadChatViewWindow(c, request); } catch (InvalidOperationException) { rejected = true; }
                 Check("foreign_timeline_cannot_read_scene", rejected);
                 request["timelineId"] = "main"; request["worldDay"] = 3d;
-                rejected = false; try { ReadChatViewWindow(c, request); } catch (InvalidOperationException) { rejected = true; }
+                rejected = false; try { Program.ReadChatViewWindow(c, request); } catch (InvalidOperationException) { rejected = true; }
                 Check("future_scene_hidden", rejected);
 
                 var raw = ChatViewTestPng(384, 256, 71);
@@ -143,16 +143,16 @@ VALUES('view_session',$campaign,'npc0','player','open',1,1,'[""player"",""npc0""
                 SaveChatViewJob(c, job);
                 var restored = ChatViewResponse(campaign, job, true);
                 Check("publication_recovers_without_providers", ReadString(restored, "status", "") == "ready" && ReadString(restored, "imageSha256", "") == Sha256Hex(raw));
-                ExecuteSql(c, "INSERT INTO chat_view_requests(request_id,session_id,timeline_id,player_id,job_id) VALUES($request,'view_session','main','player',$job);", TestDict("request", new string('b', 32), "job", ReadString(job, "jobId", "")));
+                Program.ExecuteSql(c, "INSERT INTO chat_view_requests(request_id,session_id,timeline_id,player_id,job_id) VALUES($request,'view_session','main','player',$job);", TestDict("request", new string('b', 32), "job", ReadString(job, "jobId", "")));
                 request["requestId"] = new string('b', 32); request["worldDay"] = 5d;
                 Check("transport_retry_uses_admitted_job", ReadString(ChatViewApi(request, "start"), "jobId", "") == ReadString(job, "jobId", ""));
-                Check("same_timeline_archive_visible", ChatViewJobVisible(c, job, request));
+                Check("same_timeline_archive_visible", Program.ChatViewJobVisible(c, job, request));
                 request["timelineId"] = "unbound_branch";
-                Check("foreign_timeline_archive_hidden", !ChatViewJobVisible(c, job, request));
+                Check("foreign_timeline_archive_hidden", !Program.ChatViewJobVisible(c, job, request));
                 request["timelineId"] = "main";
                 string pendingKey = campaign + "|pending_contract";
                 ChatViewWorkers.TryAdd(pendingKey, new System.Threading.Tasks.TaskCompletionSource<bool>().Task);
-                try { Check("save_sync_waits_for_pending_image", ReadString(SaveSyncRegisterCore(TestDict("campaignId", campaign, "savePointId", "pending")), "result", "") == "chat_view_pending"); }
+                try { Check("save_sync_waits_for_pending_image", ReadString(Program.SaveSyncRegisterCore(TestDict("campaignId", campaign, "savePointId", "pending")), "result", "") == "chat_view_pending"); }
                 finally { ChatViewWorkers.TryRemove(pendingKey, out _); }
                 job["status"] = "generating";
                 Check("interrupted_provider_not_replayed", ReadString(ChatViewResponse(campaign, job, false), "status", "") == "uncertain");
@@ -161,14 +161,14 @@ VALUES('view_session',$campaign,'npc0','player','open',1,1,'[""player"",""npc0""
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "view_before");
                 var point = TestDict("savePointId", "view_before", "timelineId", "main", "campaignTimeDays", 5d,
                     "worldHistorySequence", 1L, "worldHistoryHeadEventId", "view_head");
-                AdvanceMemoryRestoreGeneration(campaign, point);
-                using (var recovered = OpenCampaignConnection(campaign))
+                Program.AdvanceMemoryRestoreGeneration(campaign, point);
+                using (var recovered = Program.OpenCampaignConnection(campaign))
                 {
                     request["timelineId"] = "restored_view";
-                    Check("restored_archive_requires_verified_binding", !ChatViewJobVisible(recovered, job, request));
-                    BindRecoveredMemorySources(recovered, "main", "restored_view", 1, "view_head");
-                    Check("verified_restore_preserves_memory_image", ChatViewJobVisible(recovered, job, request));
-                    Check("verified_restore_preserves_complete_window", ReadChatViewWindow(recovered, request).Count == 33);
+                    Check("restored_archive_requires_verified_binding", !Program.ChatViewJobVisible(recovered, job, request));
+                    Program.BindRecoveredMemorySources(recovered, "main", "restored_view", 1, "view_head");
+                    Check("verified_restore_preserves_memory_image", Program.ChatViewJobVisible(recovered, job, request));
+                    Check("verified_restore_preserves_complete_window", Program.ReadChatViewWindow(recovered, request).Count == 33);
                 }
             }
             catch (Exception ex) { results.Add(TestDict("caseId", "chat_view_db_fixture", "passed", false, "summary", ex.ToString())); }

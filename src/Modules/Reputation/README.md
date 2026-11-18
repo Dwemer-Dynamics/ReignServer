@@ -14,6 +14,16 @@ the social-balance test harness.
 - `CourtSocialReputation.cs`, `RulerFavorContact.cs`, `WhoremongerReputation.cs`.
 - `SocialBalanceTest.cs`: the social-balance harness and its routes.
 
+## Service class
+
+Every file except `Program.ReputationRoutes.cs` holds `internal static partial class ReputationService` (not a
+`Program` partial). It calls `Program` members with an explicit `Program.` qualifier, and `Program` and the other
+modules call it as `ReputationService.X`; the members used across that boundary are `internal`.
+`Program.ReputationRoutes.cs` stays part of `Program` and registers the service handlers. Relationships, Dialogue,
+Characters, WorldSimulation and Platform call into it (social reconciliation, public standing, reputation context in
+prompts). The social outcome worker counters, the pending world-history worker set and the social catalog cache are
+static fields of `ReputationService`.
+
 ## Routes
 
 Registered in `Program.ReputationRoutes.cs`: `/rumors/submit`, `/rumors/status`, `/rumors/correct`, `/social/catalog` (GET and
@@ -45,7 +55,7 @@ Created by `EnsureSocialReputationSchema`, `EnsureRumorSchema`, `EnsureExpandedS
 
 `RunRumorSubsystemSelfTests` (CLI `--run-rumor-tests`), `RunSocialBalanceHarnessSelfTests`
 (`--run-social-balance-harness-tests`), `RunRulerFavorContactBatchSelfTests`, `RunWhoremongerSelfTests`,
-`RunWhoremongerDelayedConfirmationSelfTests`. VerificationLab suite `social_reputation`. Test files compiled into
+`RunWhoremongerDelayedConfirmationSelfTests`, all `ReputationService` members. VerificationLab suite `social_reputation`. Test files compiled into
 the server: `RulerFavorContactBatchSelfTests.cs`, `SocialBalanceTest.cs`, `WhoremongerReputationSelfTests.cs`.
 
 ## Dependencies

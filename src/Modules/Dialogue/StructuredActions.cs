@@ -7,7 +7,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static bool UsesStructuredActions(Dictionary<string, object> payload) => ReadInt(payload, "structuredActionProtocolVersion", 0) == ActionNegotiation.ProtocolVersion;
+        internal static bool UsesStructuredActions(Dictionary<string, object> payload) => ReadInt(payload, "structuredActionProtocolVersion", 0) == ActionNegotiation.ProtocolVersion;
 
         private static void AttachStructuredActionResponseContract(Dictionary<string, object> request,
             Dictionary<string, object> payload)
@@ -116,7 +116,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static string StructuredActionPrompt(Dictionary<string, object> payload)
+        internal static string StructuredActionPrompt(Dictionary<string, object> payload)
         {
             if (!UsesStructuredActions(payload)) return "";
             return StructuredActionFixedPrompt() + StructuredActionTurnPrompt(payload);
@@ -511,7 +511,7 @@ namespace ReignBetaServer
             return true;
         }
 
-        private static void CaptureStructuredActionDecision(Dictionary<string, object> payload, Dictionary<string, object> parsed)
+        internal static void CaptureStructuredActionDecision(Dictionary<string, object> payload, Dictionary<string, object> parsed)
         {
             if (!UsesStructuredActions(payload)) return;
             var context = ReadDictionary(payload, "structuredActionContext") ?? new Dictionary<string, object>();

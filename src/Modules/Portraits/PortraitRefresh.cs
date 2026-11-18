@@ -6,12 +6,12 @@ using AIPortraits;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
         private static void ReplaceRefreshedCharacterOverride(string campaign, string hero, byte[] image, Dictionary<string, object> receipt)
         {
             if (string.IsNullOrWhiteSpace(hero)) throw new InvalidDataException("A character identity is required.");
-            ReplaceRefreshedCharacterOverrideInDirectory(Path.GetDirectoryName(CharacterFile(campaign, hero, "portraits", "custom.png")),
+            ReplaceRefreshedCharacterOverrideInDirectory(Path.GetDirectoryName(Program.CharacterFile(campaign, hero, "portraits", "custom.png")),
                 image, receipt, WriteSharedPortraitAtomic);
         }
 
@@ -19,7 +19,7 @@ namespace ReignBetaServer
             Dictionary<string, object> receipt, Action<string, byte[]> write)
         {
             string custom = Path.Combine(directory, "custom.png");
-            lock (FileLock)
+            lock (Program.FileLock)
             {
                 if (!File.Exists(custom)) return;
                 CommitOutfitFiles(new Dictionary<string, byte[]> {

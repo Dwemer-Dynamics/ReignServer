@@ -124,7 +124,7 @@ AND t.status IN ('active','source_only') ORDER BY t.ts DESC,t.session_id DESC,t.
             return lines.OrderBy(line => ReadLong(line, "ts", 0)).TakeLast(limit).ToList();
         }
 
-        private static string OriginalConversationSourceIntegrity(Dictionary<string, object> source)
+        internal static string OriginalConversationSourceIntegrity(Dictionary<string, object> source)
         {
             string hash = ReadString(TryParseJsonObject(ReadString(source, "payload_json", "{}")), "exactTextHash", "");
             if (hash.Length == 0) return "original_hash_unavailable";

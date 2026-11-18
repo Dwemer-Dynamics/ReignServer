@@ -6,14 +6,14 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
-        private static readonly string[] ImageProfilePrefixes = { "portrait", "scenery", "adultPortrait", "adultScenery" };
-        private static readonly string[] NanoImageModels = { "gpt-image-1.5", "gpt-image-1", "flux-kontext", "gemini-3-pro-image-preview" };
-        private static readonly string[] AtlasImageModels = { AtlasModelWan25ImageEdit, AtlasModelSeedreamEdit, AtlasModelSeedreamV5ProEdit,
+        internal static readonly string[] ImageProfilePrefixes = { "portrait", "scenery", "adultPortrait", "adultScenery" };
+        internal static readonly string[] NanoImageModels = { "gpt-image-1.5", "gpt-image-1", "flux-kontext", "gemini-3-pro-image-preview" };
+        internal static readonly string[] AtlasImageModels = { AtlasModelWan25ImageEdit, AtlasModelSeedreamEdit, AtlasModelSeedreamV5ProEdit,
             AtlasModelFluxKontextDev, AtlasModelWan27ImageEdit, AtlasModelGrokImagineImageEdit, "xai/grok-imagine-image-quality/edit" };
 
-        private static bool UsesAdultPortraitClothingEdit(Dictionary<string, object> payload)
+        internal static bool UsesAdultPortraitClothingEdit(Dictionary<string, object> payload)
         {
             if (IsTavernHousePortrait(payload)) return true;
             return !PreserveResidentClothing(payload)
@@ -22,7 +22,7 @@ namespace ReignBetaServer
                 && ReadInt(EnsurePortraitPhysicalConfidence(payload), "score", 50) >= 61;
         }
 
-        private static string BuildAdultPortraitClothingPrompt(Dictionary<string, object> payload)
+        internal static string BuildAdultPortraitClothingPrompt(Dictionary<string, object> payload)
         {
             bool tavernHouse = IsTavernHousePortrait(payload);
             string layer = tavernHouse ? "tavern_house_portrait_clothing.txt" : SelectPortraitPhysicalConfidencePromptFile(payload);
@@ -34,7 +34,7 @@ namespace ReignBetaServer
                 + "lighting, background, camera position, full-body framing and image dimensions. "
                 + "Do not redraw, beautify, replace or reinterpret the person. Do not add text, borders or other objects. "
                 + "Clothing guidance below applies only to garments; body size is governed exclusively by the native body layer, never by revealingness.\n\n"
-                + ExpandPortraitIdentityTokens(payload, LoadPromptTemplate(layer).Trim())
+                + ExpandPortraitIdentityTokens(payload, Program.LoadPromptTemplate(layer).Trim())
                     .Replace("[TAVERN ROLE]", TavernHousePortraitRole(payload)), payload);
         }
 
@@ -104,7 +104,7 @@ namespace ReignBetaServer
             return result;
         }
 
-        private static bool IsRetiredImageProvider(string provider)
+        internal static bool IsRetiredImageProvider(string provider)
         {
             string value = (provider ?? "").Replace(" ", "").Replace("-", "").Trim();
             return new[] { "ReignImageGenerator", "ReignGenerator", "LocalReign" }.Contains(value, StringComparer.OrdinalIgnoreCase);

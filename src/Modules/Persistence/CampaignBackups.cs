@@ -1907,7 +1907,7 @@ namespace ReignBetaServer
             return rows.ToList();
         }
 
-        private static string CampaignPortraitCacheDirectory(string campaignId)
+        internal static string CampaignPortraitCacheDirectory(string campaignId)
         {
             string root = CampaignPortraitCacheRoot();
             return string.IsNullOrWhiteSpace(root) ? "" : Path.Combine(root, SafePathSegment(campaignId, "unknown"));

@@ -109,10 +109,10 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                             unit.Reply, unit.SceneMode ?? unit.EventType, unit.Parsed, connection, audience)
                         : TestDict("status", "suppressed_by_route");
                     var viewWardrobe = unit.PublishScene && !suppressReplyEffects && !unit.PrivateWhisper
-                        ? StoreChatViewWardrobeEvidence(connection, unit.Payload, unit.Parsed, sourceRows, unit.Hero)
+                        ? PortraitsService.StoreChatViewWardrobeEvidence(connection, unit.Payload, unit.Parsed, sourceRows, unit.Hero)
                         : TestDict("status", "suppressed_by_route");
                     var social = unit.PublishSocial && !suppressReplyEffects
-                        ? NormalizeAndPersistConversationSocialSignals(unit.Campaign, unit.Parsed, unit.Payload,
+                        ? ReputationService.NormalizeAndPersistConversationSocialSignals(unit.Campaign, unit.Parsed, unit.Payload,
                             unit.Hero, unit.Player, unit.PlayerText, unit.Reply, unit.ConceptionGate,
                             unit.EventId, ReadDouble(unit.Payload, "worldDay", 0d), existingConnection: connection)
                         : TestDict("status", "suppressed_by_route", "signals", new List<Dictionary<string, object>>());

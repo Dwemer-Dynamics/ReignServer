@@ -5,6 +5,8 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Web.Script.Serialization;
 
@@ -313,6 +315,31 @@ namespace ReignBetaServer
                 parameter.ParameterName = ReignPostgreSqlDialect.ParameterName(command.Connection, pair.Key);
                 parameter.Value = pair.Value ?? DBNull.Value;
                 command.Parameters.Add(parameter);
+            }
+        }
+
+        internal static int Clamp(int value, int min, int max)
+        {
+            return Math.Max(min, Math.Min(max, value));
+        }
+
+        internal static double Clamp(double min, double max, double value) => Math.Max(min, Math.Min(max, value));
+
+        internal static string Sha256Hex(string value)
+        {
+            using (SHA256 sha = SHA256.Create())
+            {
+                return string.Concat(sha.ComputeHash(Encoding.UTF8.GetBytes(value ?? "")).Select(x => x.ToString("x2", CultureInfo.InvariantCulture)));
+            }
+        }
+
+        internal static string Sha256Hex(byte[] bytes)
+        {
+            using (SHA256 sha = SHA256.Create())
+            {
+                return BitConverter.ToString(sha.ComputeHash(bytes ?? new byte[0]))
+                    .Replace("-", "")
+                    .ToLowerInvariant();
             }
         }
     }

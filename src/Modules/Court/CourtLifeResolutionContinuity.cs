@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CourtService
     {
         // Keep native execution evidence apart from LLM-authored plans and dialogue.
         // This existing timeline-scoped table participates in campaign Save Sync.
@@ -13,14 +13,14 @@ namespace ReignBetaServer
             var facts = NormalizeCourtLifeResolutionFacts(payload);
             if (facts == null) return;
             string matter = ReadString(payload, "matterId", "");
-            using (ReignDbConnection connection = OpenCampaignConnection(campaign))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
             {
                 EnsureCourtLifeSceneStore(connection);
-                foreach (string actor in ObjectsFromValue(payload.TryGetValue("witnessHeroIds", out object witnesses) ? witnesses : null)
+                foreach (string actor in Program.ObjectsFromValue(payload.TryGetValue("witnessHeroIds", out object witnesses) ? witnesses : null)
                     .OfType<string>().Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().Take(4))
                 {
                     string id = "court_resolution:" + CourtHash(timeline + "|" + matter + "|" + actor);
-                    ExecuteSql(connection, "INSERT OR IGNORE INTO court_life_turns(turn_id,timeline_id,matter_id,actor_id,phase,player_text,reply_text,created_ts) VALUES($id,$timeline,$matter,$actor,'resolution','',$facts,$ts);",
+                    Program.ExecuteSql(connection, "INSERT OR IGNORE INTO court_life_turns(turn_id,timeline_id,matter_id,actor_id,phase,player_text,reply_text,created_ts) VALUES($id,$timeline,$matter,$actor,'resolution','',$facts,$ts);",
                         new Dictionary<string, object> { ["id"] = id, ["timeline"] = timeline, ["matter"] = matter,
                             ["actor"] = actor, ["facts"] = Json.Serialize(facts), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                 }
@@ -35,9 +35,9 @@ namespace ReignBetaServer
             if (!new[] { "favor_domestic", "favor_foreign", "compensate", "compromise", "accept", "refuse" }.Contains(outcome)) return null;
             var result = new Dictionary<string, object> { ["schema"] = "reign-court-resolution-knowledge-v1",
                 ["matterId"] = ReadString(payload, "matterId", ""), ["receiptId"] = ReadString(payload, "receiptId", ""),
-                ["title"] = LimitText(ReadString(payload, "title", "Court audience"), 200),
+                ["title"] = Program.LimitText(ReadString(payload, "title", "Court audience"), 200),
                 ["outcome"] = outcome, ["completed"] = true, ["extortion"] = ReadBool(payload, "extortion", false),
-                ["summary"] = LimitText(ReadString(payload, "summary", "The court decision completed."), 700) };
+                ["summary"] = Program.LimitText(ReadString(payload, "summary", "The court decision completed."), 700) };
             var receipt = ReadDictionary(payload, "nativeReceipt");
             if (ReadString(receipt, "type", "") == "DiplomacySignTradeAgreement")
             {
@@ -67,14 +67,14 @@ namespace ReignBetaServer
             return result;
         }
 
-        private static string BuildCourtLifeResolutionContinuityPrompt(string campaign, string hero, Dictionary<string, object> payload)
+        internal static string BuildCourtLifeResolutionContinuityPrompt(string campaign, string hero, Dictionary<string, object> payload)
         {
             string timeline = ReadString(payload, "timelineId", "");
             if (string.IsNullOrWhiteSpace(timeline) || string.IsNullOrWhiteSpace(hero)) return "";
-            using (ReignDbConnection connection = OpenCampaignConnection(campaign))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
             {
                 EnsureCourtLifeSceneStore(connection);
-                var rows = QuerySql(connection, "SELECT reply_text FROM court_life_turns WHERE timeline_id=$timeline AND actor_id=$actor AND phase='resolution' ORDER BY created_ts DESC,turn_id DESC LIMIT 6;",
+                var rows = Program.QuerySql(connection, "SELECT reply_text FROM court_life_turns WHERE timeline_id=$timeline AND actor_id=$actor AND phase='resolution' ORDER BY created_ts DESC,turn_id DESC LIMIT 6;",
                     new Dictionary<string, object> { ["timeline"] = timeline, ["actor"] = hero });
                 if (rows.Count == 0) return "";
                 return "\n\nAUTHORITATIVE COMPLETED COURT MATTERS YOU WITNESSED\n"

@@ -283,7 +283,7 @@ namespace ReignBetaServer
             string mode = NormalizeLiveTestMode(ReadString(payload, "mode", "individual_chat"));
             if (!LiveTestModes.Contains(mode)) return LiveTestError("Unsupported live-test mode.");
             if (mode.Equals("social_balance", StringComparison.OrdinalIgnoreCase)
-                && !ValidateSocialBalanceLiveEnrollment(payload, campaignId, out string enrollmentError))
+                && !ReputationService.ValidateSocialBalanceLiveEnrollment(payload, campaignId, out string enrollmentError))
                 return LiveTestError(enrollmentError);
 
             lock (LiveTestLock)
@@ -705,7 +705,7 @@ namespace ReignBetaServer
                 run["updatedUtc"] = DateTimeOffset.UtcNow.ToString("o");
                 if (result && !fatalInfrastructureFailure)
                 {
-                    RecordSocialBalanceProfileResultIfApplicable(run, command);
+                    ReputationService.RecordSocialBalanceProfileResultIfApplicable(run, command);
                     CompleteLiveTestRunIfAppropriate(run, command);
                 }
                 SaveLiveTestRun(run);

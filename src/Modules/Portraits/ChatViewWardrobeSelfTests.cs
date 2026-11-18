@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
         private static void RunChatViewWardrobeChecks(Action<string, Action> check, Action<bool, string> require)
         {
@@ -14,7 +14,7 @@ namespace ReignBetaServer
                 "locationId", "camp", "sceneInterface", "party");
             Dictionary<string, object> T(string id, int order, string speaker, string text) => TestDict("turnId", id,
                 "turnOrder", order, "exchangeId", "e1", "role", speaker == "player" ? "player" : "npc",
-                "speakerId", speaker, "text", text, "sourceHash", PromptHash(text), "frame", CloneDictionary(frame));
+                "speakerId", speaker, "text", text, "sourceHash", Program.PromptHash(text), "frame", Program.CloneDictionary(frame));
             var window = new List<Dictionary<string, object>> {
                 T("z_proposal", 10, "player", "Let us change into rougher clothes to spar together."),
                 T("a_accept", 11, "ira", "Agreed, let us do that."),
@@ -63,7 +63,7 @@ namespace ReignBetaServer
                 require(Reject(() => Validate(scene)), "A present non-signing bystander inherited the other two people's change.");
             });
             check("wardrobe_one_speaker_cannot_accept_for_everyone", () => {
-                var turns = window.Select(CloneDictionary).ToList(); turns[1]["speakerId"] = "player";
+                var turns = window.Select(Program.CloneDictionary).ToList(); turns[1]["speakerId"] = "player";
                 require(Reject(() => ValidateChatViewWardrobe(Scene(), turns, new List<Dictionary<string, object>>())), "A proposer accepted on another person's behalf.");
             });
             check("wardrobe_future_within_selected_reply_rejected", () => {
@@ -103,13 +103,13 @@ namespace ReignBetaServer
                 require(Reject(() => Validate(scene)), "Invalid array elements were silently dropped.");
             });
             check("wardrobe_scene_and_actor_continuity_required", () => {
-                var turns = window.Select(CloneDictionary).ToList(); var changed = CloneDictionary(frame); changed["room"] = "another place"; turns[2]["frame"] = changed;
+                var turns = window.Select(Program.CloneDictionary).ToList(); var changed = Program.CloneDictionary(frame); changed["room"] = "another place"; turns[2]["frame"] = changed;
                 require(Reject(() => ValidateChatViewWardrobe(Scene(), turns, new List<Dictionary<string, object>>())), "Clothes crossed a scene transition.");
-                changed = CloneDictionary(frame); changed["actors"] = new[] { TestDict("id", "ira") }; turns[2]["frame"] = changed;
+                changed = Program.CloneDictionary(frame); changed["actors"] = new[] { TestDict("id", "ira") }; turns[2]["frame"] = changed;
                 require(Reject(() => ValidateChatViewWardrobe(Scene(), turns, new List<Dictionary<string, object>>())), "An actor's absence did not invalidate their earlier scene outfit.");
             });
             check("wardrobe_partial_removal_does_not_replace_whole_outfit", () => {
-                var turns = window.Select(CloneDictionary).ToList(); turns[0]["text"] = "I remove my cloak."; turns[0]["sourceHash"] = PromptHash("I remove my cloak.");
+                var turns = window.Select(Program.CloneDictionary).ToList(); turns[0]["text"] = "I remove my cloak."; turns[0]["sourceHash"] = Program.PromptHash("I remove my cloak.");
                 var scene = Scene(); scene["wardrobeOverrides"] = new[] { TestDict("characterId", "player", "changes", new[] {
                     TestDict("scope", "garment", "operation", "remove", "garmentText", "cloak", "basis", "explicit",
                         "evidence", new[] { E("z_proposal", "I remove my cloak.", "wearing") }) }) };
@@ -125,7 +125,7 @@ namespace ReignBetaServer
                 require(Reject(() => ChatViewQuoteSpan(TestDict("quote", "She parries.", "occurrence", 1, "start", 0), source, true)), "False offsets were accepted.");
             });
             check("wardrobe_partial_replacement_preserves_scope_and_unmentioned_items", () => {
-                var turns = window.Select(CloneDictionary).ToList(); turns[0]["text"] = "I put on a coarse linen shirt."; turns[0]["sourceHash"] = PromptHash(ReadString(turns[0], "text", ""));
+                var turns = window.Select(Program.CloneDictionary).ToList(); turns[0]["text"] = "I put on a coarse linen shirt."; turns[0]["sourceHash"] = Program.PromptHash(ReadString(turns[0], "text", ""));
                 var scene = Scene(); scene["wardrobeOverrides"] = new[] { TestDict("characterId", "player", "changes", new[] {
                     TestDict("scope", "garment", "operation", "replace", "garmentText", "coarse linen shirt", "basis", "explicit",
                         "evidence", new[] { E("z_proposal", "I put on a coarse linen shirt.", "wearing") }) }) };
@@ -133,7 +133,7 @@ namespace ReignBetaServer
                 require(prompt.Contains("coarse linen shirt") && prompt.Contains("\"scope\":\"garment\"") && prompt.Contains("every other compatible portrait garment/accessory stays"), "A replacement lost the other portrait garments.");
             });
             check("wardrobe_explicit_outfit_reset_does_not_layer_prior_changes", () => {
-                var turns = window.Select(CloneDictionary).ToList(); turns[0]["text"] = "I return to my original clothes."; turns[0]["sourceHash"] = PromptHash(ReadString(turns[0], "text", ""));
+                var turns = window.Select(Program.CloneDictionary).ToList(); turns[0]["text"] = "I return to my original clothes."; turns[0]["sourceHash"] = Program.PromptHash(ReadString(turns[0], "text", ""));
                 var scene = Scene(); scene["wardrobeOverrides"] = new[] { TestDict("characterId", "player", "changes", new[] {
                     TestDict("scope", "outfit", "operation", "portrait", "garmentText", "original clothes", "basis", "explicit",
                         "evidence", new[] { E("z_proposal", "I return to my original clothes.", "wearing") }) }) };
@@ -141,13 +141,13 @@ namespace ReignBetaServer
                 require(ReadString(ReadDictionaryList(result[0], "changes")[0], "operation", "") == "portrait", "A portrait reset did not clear the old outfit.");
             });
             check("wardrobe_source_digest_and_mixed_arrays_rejected", () => {
-                var turns = window.Select(CloneDictionary).ToList(); turns[0]["sourceHash"] = "wrong";
+                var turns = window.Select(Program.CloneDictionary).ToList(); turns[0]["sourceHash"] = "wrong";
                 require(Reject(() => ValidateChatViewWardrobe(Scene(), turns, new List<Dictionary<string, object>>())), "Changed source bytes were accepted.");
                 var scene = Scene(); ReadDictionaryList(scene, "wardrobeOverrides")[0]["changes"] = new object[] { Change(), "injected" };
                 require(Reject(() => Validate(scene)), "Invalid change-array elements were ignored.");
             });
             check("wardrobe_native_age_and_equipment_stay_out_of_both_inputs", () => {
-                var source = CloneDictionary(window[0]); source["wardrobeActorIds"] = new[] { "player", "ira" };
+                var source = Program.CloneDictionary(window[0]); source["wardrobeActorIds"] = new[] { "player", "ira" };
                 string input = Json.Serialize(ChatViewClothingSelectionInput(window, TestDict("sources", new[] { source }, "coverage", "retained_scene_evidence")));
                 require(!input.Contains("36.94") && !input.Contains("native red dress") && input.Contains("contextOnly"), "Native appearance metadata returned through clothing history.");
             });
@@ -168,7 +168,7 @@ namespace ReignBetaServer
                 require(schema.Schema != null && Json.Serialize(schema.Schema).Contains("viewWardrobeEvidence"), "Strict writer output dropped clothing evidence.");
             });
             check("wardrobe_garment_case_is_canonicalized_from_real_source_words", () => {
-                var turns = window.Select(CloneDictionary).ToList(); turns[0]["text"] = "Let us change into ROUGHER CLOTHES to spar together."; turns[0]["sourceHash"] = PromptHash(ReadString(turns[0], "text", ""));
+                var turns = window.Select(Program.CloneDictionary).ToList(); turns[0]["text"] = "Let us change into ROUGHER CLOTHES to spar together."; turns[0]["sourceHash"] = Program.PromptHash(ReadString(turns[0], "text", ""));
                 var scene = Scene(); foreach (var actor in ReadDictionaryList(scene, "wardrobeOverrides"))
                     ReadDictionaryList(ReadDictionaryList(actor, "changes")[0], "evidence")[0]["quote"] = ReadString(turns[0], "text", "");
                 var result = ValidateChatViewWardrobe(scene, turns, new List<Dictionary<string, object>>());
@@ -204,13 +204,13 @@ namespace ReignBetaServer
 
         private static void RunChatViewWardrobeDatabaseChecks(Action<string, Action> check, Action<bool, string> require)
         {
-            if (string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)) throw new InvalidOperationException("Clothing history tests require isolated Verification Lab storage.");
+            if (string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)) throw new InvalidOperationException("Clothing history tests require isolated Verification Lab storage.");
             string campaign = "view_wardrobe_" + Guid.NewGuid().ToString("N");
             try
             {
-                using var c = OpenCampaignConnection(campaign);
-                ReadMemoryPrecisionState(c); EnsureChatViewSchema(c);
-                ExecuteSql(c, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json)
+                using var c = Program.OpenCampaignConnection(campaign);
+                Program.ReadMemoryPrecisionState(c); Program.EnsureChatViewSchema(c);
+                Program.ExecuteSql(c, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json)
 VALUES('clothes',$campaign,'ira','player','open',1,1,'[""player"",""ira""]');", TestDict("campaign", campaign));
                 var people = new[] { TestDict("heroStringId", "player", "name", "Player"), TestDict("heroStringId", "ira", "name", "Ira") };
                 var payload = TestDict("timelineId", "main", "locationId", "camp", "sceneInterface", "party", "sceneParticipants", people, "activeHeroIds", new[] { "ira" });
@@ -218,14 +218,14 @@ VALUES('clothes',$campaign,'ira','player','open',1,1,'[""player"",""ira""]');", 
                 {
                     string p = n == 1 ? "Let us change into rougher clothes to spar together." : "We continue training.";
                     string answer = n == 1 ? "Agreed, let us do that." : "Ira lunges toward the player.";
-                    InsertConversationTurn(c, "p" + n, "clothes", "event" + n, n * 2, "e" + n, "player", "player", "Player", p, "party_chat", 4, 100, "camp", new List<string> { "player", "ira" }, payload);
-                    InsertConversationTurn(c, "n" + n, "clothes", "event" + n, n * 2 + 1, "e" + n, "npc", "ira", "Ira", answer, "party_chat", 4, 100, "camp", new List<string> { "player", "ira" }, payload);
-                    var rows = QuerySql(c, "SELECT * FROM conversation_turns WHERE session_id='clothes' AND exchange_id=$e ORDER BY turn_order;", TestDict("e", "e" + n));
+                    Program.InsertConversationTurn(c, "p" + n, "clothes", "event" + n, n * 2, "e" + n, "player", "player", "Player", p, "party_chat", 4, 100, "camp", new List<string> { "player", "ira" }, payload);
+                    Program.InsertConversationTurn(c, "n" + n, "clothes", "event" + n, n * 2 + 1, "e" + n, "npc", "ira", "Ira", answer, "party_chat", 4, 100, "camp", new List<string> { "player", "ira" }, payload);
+                    var rows = Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE session_id='clothes' AND exchange_id=$e ORDER BY turn_order;", TestDict("e", "e" + n));
                     StoreChatViewWardrobeEvidence(c, payload, TestDict("viewWardrobeEvidence", n == 1 ? new[] {
                         TestDict("source", "player", "characterIds", new[] { "player", "ira" }, "quote", p) } : new Dictionary<string, object>[0]), rows, "ira");
                 }
                 var request = TestDict("campaignId", campaign, "sessionId", "clothes", "playerId", "player", "timelineId", "main", "worldDay", 4d);
-                var window = ReadChatViewWindow(c, request);
+                var window = Program.ReadChatViewWindow(c, request);
                 var history = ReadChatViewWardrobeHistory(c, request, window);
                 var old = ReadDictionaryList(history, "sources");
                 check("coverage_database_retains_original_player_hints_and_current_window", () => {
@@ -234,11 +234,11 @@ VALUES('clothes',$campaign,'ira','player','open',1,1,'[""player"",""ira""]');", 
                         && ReadStringList(hints[0], "characterIds").Count == 2, "Older source nominations were dropped or multiplied.");
                     using (var transaction = c.BeginTransaction())
                     {
-                        var row = QuerySql(c, "SELECT payload_json FROM chat_view_wardrobe_evidence WHERE entry_id='n6';").Single();
+                        var row = Program.QuerySql(c, "SELECT payload_json FROM chat_view_wardrobe_evidence WHERE entry_id='n6';").Single();
                         var nomination = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
-                        nomination["evidence"] = new[] { TestDict("turnId", "p6", "quote", "We continue training.", "sourceHash", PromptHash("We continue training."),
+                        nomination["evidence"] = new[] { TestDict("turnId", "p6", "quote", "We continue training.", "sourceHash", Program.PromptHash("We continue training."),
                             "start", 0, "length", "We continue training.".Length, "characterIds", new[] { "player" }) };
-                        ExecuteSql(c, "UPDATE chat_view_wardrobe_evidence SET payload_json=$payload WHERE entry_id='n6';", TestDict("payload", Json.Serialize(nomination)));
+                        Program.ExecuteSql(c, "UPDATE chat_view_wardrobe_evidence SET payload_json=$payload WHERE entry_id='n6';", TestDict("payload", Json.Serialize(nomination)));
                         hints = ReadChatViewCoverageEvidence(c, "clothes", window, history);
                         require(hints.Count == 2 && hints.Any(h => ReadString(h, "turnId", "") == "p6"), "Current-window player evidence was not exposed to the selector.");
                         require(ReadChatViewCoverageEvidence(c, "other", window, history).Count == 0, "Other-session nominations leaked.");
@@ -281,14 +281,14 @@ VALUES('clothes',$campaign,'ira','player','open',1,1,'[""player"",""ira""]');", 
                     request["sessionId"] = "clothes";
                 });
                 check("wardrobe_rejected_and_invalid_nominations_do_not_change_accepted_words", () => {
-                    var rows = QuerySql(c, "SELECT * FROM conversation_turns WHERE session_id='clothes' AND exchange_id='e6' ORDER BY turn_order;");
+                    var rows = Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE session_id='clothes' AND exchange_id='e6' ORDER BY turn_order;");
                     var receipt = StoreChatViewWardrobeEvidence(c, payload, TestDict("viewWardrobeEvidence", new[] {
                         TestDict("source", "reply", "characterIds", new[] { "absent" }, "quote", "invented clothes") }), rows, "ira");
                     require(ReadStringList(receipt, "rejected").Count == 1 && ReadString(rows.Last(), "text", "") == "Ira lunges toward the player.", "Optional clothing metadata rewrote/rejected dialogue.");
                 });
-                check("wardrobe_evidence_journal_replays_idempotently", () => require(QuerySql(c, "SELECT * FROM chat_view_wardrobe_evidence WHERE session_id='clothes';").Count == 6, "An accepted response got duplicate clothing journal rows."));
+                check("wardrobe_evidence_journal_replays_idempotently", () => require(Program.QuerySql(c, "SELECT * FROM chat_view_wardrobe_evidence WHERE session_id='clothes';").Count == 6, "An accepted response got duplicate clothing journal rows."));
                 check("wardrobe_scene_transition_discards_earlier_context", () => {
-                    var modified = window.Select(CloneDictionary).ToList(); var frame = CloneDictionary(ReadDictionary(modified[0], "frame")); frame["wardrobeScene"] = "another scene"; modified[0]["frame"] = frame;
+                    var modified = window.Select(Program.CloneDictionary).ToList(); var frame = Program.CloneDictionary(ReadDictionary(modified[0], "frame")); frame["wardrobeScene"] = "another scene"; modified[0]["frame"] = frame;
                     require(ReadDictionaryList(ReadChatViewWardrobeHistory(c, request, modified), "sources").Count == 0, "Clothing context crossed a physical scene boundary.");
                 });
                 check("wardrobe_refusal_context_and_source_journal_rollback_are_atomic", () => {
@@ -298,26 +298,26 @@ VALUES('clothes',$campaign,'ira','player','open',1,1,'[""player"",""ira""]');", 
                         {
                             string text = n == 7 ? "Let us change into red suits." : "We continue training.";
                             string answer = n == 7 ? "No, I will keep my current clothes." : "Ira raises her training blade.";
-                            InsertConversationTurn(c, "p" + n, "clothes", "event" + n, n * 2, "e" + n, "player", "player", "Player", text, "party_chat", 4, 100, "camp", new List<string> { "player", "ira" }, payload);
-                            InsertConversationTurn(c, "n" + n, "clothes", "event" + n, n * 2 + 1, "e" + n, "npc", "ira", "Ira", answer, "party_chat", 4, 100, "camp", new List<string> { "player", "ira" }, payload);
-                            var rows = QuerySql(c, "SELECT * FROM conversation_turns WHERE session_id='clothes' AND exchange_id=$e ORDER BY turn_order;", TestDict("e", "e" + n));
+                            Program.InsertConversationTurn(c, "p" + n, "clothes", "event" + n, n * 2, "e" + n, "player", "player", "Player", text, "party_chat", 4, 100, "camp", new List<string> { "player", "ira" }, payload);
+                            Program.InsertConversationTurn(c, "n" + n, "clothes", "event" + n, n * 2 + 1, "e" + n, "npc", "ira", "Ira", answer, "party_chat", 4, 100, "camp", new List<string> { "player", "ira" }, payload);
+                            var rows = Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE session_id='clothes' AND exchange_id=$e ORDER BY turn_order;", TestDict("e", "e" + n));
                             StoreChatViewWardrobeEvidence(c, payload, TestDict("viewWardrobeEvidence", n == 7 ? new[] {
                                 TestDict("source", "player", "characterIds", new[] { "player", "ira" }, "quote", text) } : new Dictionary<string, object>[0]), rows, "ira");
                         }
-                        var later = ReadChatViewWindow(c, request);
+                        var later = Program.ReadChatViewWindow(c, request);
                         var context = ReadDictionaryList(ReadChatViewWardrobeHistory(c, request, later), "sources");
                         require(context.Any(t => ReadString(t, "turnId", "") == "n7" && ReadString(t, "text", "") == "No, I will keep my current clothes.")
                             && context.Any(t => ReadString(t, "turnId", "") == "p7" && ReadString(t, "text", "").Contains("red suits")), "A clothing proposal lost its actual refusal.");
                         transaction.Rollback();
                     }
-                    require(QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id='n7';").Count == 0
-                        && QuerySql(c, "SELECT * FROM chat_view_wardrobe_evidence WHERE entry_id='n7';").Count == 0, "Rollback retained clothing evidence without its accepted source.");
+                    require(Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id='n7';").Count == 0
+                        && Program.QuerySql(c, "SELECT * FROM chat_view_wardrobe_evidence WHERE entry_id='n7';").Count == 0, "Rollback retained clothing evidence without its accepted source.");
                 });
                 c.Dispose();
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "before_clothing_change");
-                using (var changed = OpenCampaignConnection(campaign)) ExecuteSql(changed, "DELETE FROM chat_view_wardrobe_evidence;");
+                using (var changed = Program.OpenCampaignConnection(campaign)) Program.ExecuteSql(changed, "DELETE FROM chat_view_wardrobe_evidence;");
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "before_clothing_change");
-                using var restored = OpenCampaignConnection(campaign);
+                using var restored = Program.OpenCampaignConnection(campaign);
                 check("wardrobe_actual_save_snapshot_restores_frozen_evidence", () => require(ReadDictionaryList(ReadChatViewWardrobeHistory(restored, request, window), "sources").Count == 2, "Save restore lost the independent clothing journal."));
             }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }

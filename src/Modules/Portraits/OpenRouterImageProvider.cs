@@ -6,12 +6,12 @@ using System.Diagnostics;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
         private const string OpenRouterImagesUrl = "https://openrouter.ai/api/v1/images";
-        private const string DefaultOpenRouterImageModel = "openai/gpt-image-1";
+        internal const string DefaultOpenRouterImageModel = "openai/gpt-image-1";
         // Exact overlapping models from GET /api/v1/images/models, verified 2026-09-09.
-        private static readonly string[] OpenRouterImageModels = { DefaultOpenRouterImageModel,
+        internal static readonly string[] OpenRouterImageModels = { DefaultOpenRouterImageModel,
             "google/gemini-3-pro-image-preview", "bytedance-seed/seedream-4.5",
             "bytedance-seed/seedream-5-0-pro", "x-ai/grok-imagine-image-quality" };
 
@@ -57,16 +57,16 @@ namespace ReignBetaServer
             ImageGenerationProfile profile, string prompt, byte[] source, string size,
             Func<string, string, string, Dictionary<string, object>, string> send = null)
         {
-            string key = ProviderSecret(settings, "openRouterApiKey", OpenRouterImagesUrl);
+            string key = Program.ProviderSecret(settings, "openRouterApiKey", OpenRouterImagesUrl);
             if (string.IsNullOrWhiteSpace(key)) return PortraitImageCallResult.Fail("OpenRouter", profile.OpenRouterModel,
-                ProviderKeyUnavailable(settings, "openRouterApiKey", key) ? GlobalKeyUnavailableError : "No OpenRouter key is saved. Add it in API Settings; chat and images share that key.");
+                Program.ProviderKeyUnavailable(settings, "openRouterApiKey", key) ? Program.GlobalKeyUnavailableError : "No OpenRouter key is saved. Add it in API Settings; chat and images share that key.");
             var timer = Stopwatch.StartNew();
             int requestChars = 0;
             try
             {
                 string json = Json.Serialize(BuildOpenRouterImagePayload(profile.OpenRouterModel, prompt, source, size, profile.ChatView));
                 requestChars = json.Length;
-                string response = (send ?? PostJsonToLlm)(OpenRouterImagesUrl, key, json, settings);
+                string response = (send ?? Program.PostJsonToLlm)(OpenRouterImagesUrl, key, json, settings);
                 var raw = Json.Deserialize<Dictionary<string, object>>(response);
                 var data = ReadDictionaryList(raw, "data");
                 byte[] bytes = data.Count == 0 ? null : DecodeImageBase64(ReadString(data[0], "b64_json", ""));

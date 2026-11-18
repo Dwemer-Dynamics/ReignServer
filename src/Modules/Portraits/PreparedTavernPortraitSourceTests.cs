@@ -9,9 +9,9 @@ using AIPortraits;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
-        private static List<Dictionary<string, object>> RunPreparedTavernPortraitSourceTests()
+        internal static List<Dictionary<string, object>> RunPreparedTavernPortraitSourceTests()
         {
             var results = new List<Dictionary<string, object>>();
             void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
@@ -21,7 +21,7 @@ namespace ReignBetaServer
                 try { test(); results.Add(new Dictionary<string, object> { ["ok"] = true, ["passed"] = true, ["caseId"] = "prepared_tavern_" + name, ["summary"] = name }); }
                 catch (Exception ex) { results.Add(new Dictionary<string, object> { ["ok"] = true, ["passed"] = false, ["caseId"] = "prepared_tavern_" + name, ["summary"] = ex.ToString() }); }
             }
-            string catalogPath = Path.Combine(FindVerificationSourceRoot(), "ReignBeta", "ModuleData", "reign_tavern_cast.json");
+            string catalogPath = Path.Combine(Program.FindVerificationSourceRoot(), "ReignBeta", "ModuleData", "reign_tavern_cast.json");
             var catalog = Json.Deserialize<TavernHouseCastCatalog>(File.ReadAllText(catalogPath));
             var town = catalog.Towns[0]; var cast = town.People[0];
             string root = Path.Combine(Path.GetTempPath(), "reign-prepared-tavern-contract-" + Guid.NewGuid().ToString("N"));

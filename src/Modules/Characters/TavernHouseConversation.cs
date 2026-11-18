@@ -13,7 +13,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static readonly ConcurrentDictionary<string, object> TavernHouseLocks = new ConcurrentDictionary<string, object>(StringComparer.Ordinal);
+        internal static readonly ConcurrentDictionary<string, object> TavernHouseLocks = new ConcurrentDictionary<string, object>(StringComparer.Ordinal);
         private static readonly string[] TavernHousePromptFileNames = {
             "tavern_house_negotiation_role.txt", "tavern_house_arrival_image.txt",
             "tavern_house_look_again_summary.txt", "tavern_house_look_again_image.txt",
@@ -33,15 +33,15 @@ namespace ReignBetaServer
             return result;
         }
 
-        private static string TavernHouseHash(string value)
+        internal static string TavernHouseHash(string value)
         {
             using (var sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(value ?? ""))).Replace("-", "").ToLowerInvariant();
         }
 
-        private static Dictionary<string, object> TavernHouseError(string error, string code = "invalid_request")
+        internal static Dictionary<string, object> TavernHouseError(string error, string code = "invalid_request")
             => new Dictionary<string, object> { ["ok"] = false, ["error"] = error, ["code"] = code };
 
-        private static string TavernHouseSessionPath(Dictionary<string, object> payload)
+        internal static string TavernHouseSessionPath(Dictionary<string, object> payload)
         {
             string campaign = ReadString(payload, "campaignId", ""), timeline = ReadString(payload, "timelineId", "");
             string session = ReadString(payload, "conversationSessionId", "");
@@ -51,13 +51,13 @@ namespace ReignBetaServer
             return Path.Combine(CampaignDirectory(campaign), "tavern_house", TavernHouseHash(timeline), TavernHouseHash(session) + ".json");
         }
 
-        private static void SaveTavernHouseSession(string path, Dictionary<string, object> state)
+        internal static void SaveTavernHouseSession(string path, Dictionary<string, object> state)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path));
-            WriteSharedPortraitAtomic(path, Encoding.UTF8.GetBytes(Json.Serialize(state)));
+            PortraitsService.WriteSharedPortraitAtomic(path, Encoding.UTF8.GetBytes(Json.Serialize(state)));
         }
 
-        private static Dictionary<string, object> ReadTavernHouseSession(string path)
+        internal static Dictionary<string, object> ReadTavernHouseSession(string path)
         {
             if (!File.Exists(path)) return null;
             // Unlike the generic best-effort JSON reader, a damaged paid-session file must fail closed.
@@ -69,12 +69,12 @@ namespace ReignBetaServer
             return state;
         }
 
-        private static bool TavernHouseAdultAvailable(Dictionary<string, object> hero)
+        internal static bool TavernHouseAdultAvailable(Dictionary<string, object> hero)
             => !string.IsNullOrWhiteSpace(CharacterIdFrom(hero)) && ReadDouble(hero, "age", 0) >= 18
                 && !ReadBool(hero, "isChild", false) && !ReadBool(hero, "isDead", false) && ReadBool(hero, "isAlive", true)
                 && !ReadBool(hero, "isPrisoner", false) && ReadBool(hero, "isAvailable", false);
 
-        private static void ValidateTavernHouseScope(Dictionary<string, object> state, Dictionary<string, object> payload)
+        internal static void ValidateTavernHouseScope(Dictionary<string, object> state, Dictionary<string, object> payload)
         {
             foreach (string key in new[] { "campaignId", "timelineId", "townId", "conversationSessionId" })
                 if (ReadString(state, key, "") != ReadString(payload, key, "")) throw new InvalidDataException("The tavern session scope changed: " + key);
@@ -458,7 +458,7 @@ WHERE session_id=$session AND exchange_id=$exchange AND speaker_id=$speaker AND 
             return result;
         }
 
-        private static Dictionary<string, object> TavernHouseStructuredCall(Dictionary<string, object> state, string kind, string system, string content)
+        internal static Dictionary<string, object> TavernHouseStructuredCall(Dictionary<string, object> state, string kind, string system, string content)
         {
             var envelope = BuildSimplePromptEnvelope(kind, "tavern_house", system, content);
             var request = new Dictionary<string, object> { ["requestType"] = kind, ["campaignId"] = ReadString(state, "campaignId", ""),
@@ -510,8 +510,8 @@ WHERE session_id=$session AND exchange_id=$exchange AND speaker_id=$speaker AND 
                     using (var connection = OpenCampaignConnection(ReadString(state, "campaignId", "")))
                     {
                         SynchronizeTavernHouseIdentities(connection, state);
-                        EnsureSocialReputationSchema(connection);
-                        var rumor = RegisterWhoremongerVisit(connection, ReadString(state, "campaignId", ""), ReadString(state, "timelineId", ""),
+                        ReputationService.EnsureSocialReputationSchema(connection);
+                        var rumor = ReputationService.RegisterWhoremongerVisit(connection, ReadString(state, "campaignId", ""), ReadString(state, "timelineId", ""),
                             ReadString(state, "playerHeroStringId", ""), visitId, ReadString(state, "townId", ""), confirmationDay);
                         if (!ReadBool(rumor, "ok", true)) return rumor;
                         receipt["whoremonger"] = rumor;

@@ -27,7 +27,7 @@ namespace ReignBetaServer
             DeferLegacyBackgroundEnrichmentQueues();
         }
 
-        private static Dictionary<string, Dictionary<string, object>> LoadCharacterProfileLibrary()
+        internal static Dictionary<string, Dictionary<string, object>> LoadCharacterProfileLibrary()
         {
             lock (CharacterProfileLibraryLock)
             {
@@ -180,7 +180,7 @@ namespace ReignBetaServer
                 ["foundationModelVersion"] = FoundationTraitModelVersion,
                 ["traitPercentageModelVersion"] = TraitPercentageModelVersion,
                 ["courtVirtueModelVersion"] = CourtVirtueModelVersion,
-                ["courtCharacterModelVersion"] = CourtCharacterModelVersion,
+                ["courtCharacterModelVersion"] = CourtService.CourtCharacterModelVersion,
                 ["profilePackVersion"] = CharacterProfilePackVersion,
                 ["campaignCount"] = campaignCount,
                 ["characterCount"] = characterCount,
@@ -726,8 +726,8 @@ namespace ReignBetaServer
                 Dictionary<string,object> courtCharacterModel=ReadDictionary(traitDocument,"courtCharacterModel")??new Dictionary<string,object>();
                 if(courtVirtues.Count!=CourtVirtueKeys.Length||CourtVirtueKeys.Any(x=>!courtVirtues.ContainsKey(x))) errors.Add(pair.Key+" does not contain all seven court virtues.");
                 if(ReadInt(courtVirtueModel,"version",0)!=CourtVirtueModelVersion) errors.Add(pair.Key+" does not use court virtue model v"+CourtVirtueModelVersion+".");
-                if(ReadInt(courtCharacterModel,"version",0)!=CourtCharacterModelVersion) errors.Add(pair.Key+" does not use Court Character model v"+CourtCharacterModelVersion+".");
-                Dictionary<string,object> expectedCourtCharacter=BuildCourtCharacterData(traitDocument,ReadDictionary(pair.Value,"sourceFacts")??pair.Value);
+                if(ReadInt(courtCharacterModel,"version",0)!=CourtService.CourtCharacterModelVersion) errors.Add(pair.Key+" does not use Court Character model v"+CourtService.CourtCharacterModelVersion+".");
+                Dictionary<string,object> expectedCourtCharacter=CourtService.BuildCourtCharacterData(traitDocument,ReadDictionary(pair.Value,"sourceFacts")??pair.Value);
                 if(!CanonicalJson(courtCharacter).Equals(CanonicalJson(expectedCourtCharacter),StringComparison.Ordinal)) errors.Add(pair.Key+" Court Character does not match its fixed Honor-Boldness cell.");
                 if(traitDocument.ContainsKey("courtVirtueRawScores")) errors.Add(pair.Key+" persists a deprecated raw court virtue score field.");
                 Dictionary<string,object> calculatedVirtues=CalculateCourtVirtues(percentages);
@@ -801,7 +801,7 @@ namespace ReignBetaServer
                 ["courtExcluded"] = !includeCourt,
                 ["traitCount"] = CoreTraitKeys.Length,
                 ["courtVirtueModelVersion"] = CourtVirtueModelVersion,
-                ["courtCharacterModelVersion"] = CourtCharacterModelVersion,
+                ["courtCharacterModelVersion"] = CourtService.CourtCharacterModelVersion,
                 ["courtVirtueDistribution"] = courtVirtueDistribution,
                 ["negativeExtremeCount"] = globalNegativeExtreme,
                 ["positiveExtremeCount"] = globalPositiveExtreme,
@@ -921,7 +921,7 @@ namespace ReignBetaServer
                     ["reignCourtCount"] = profiles.Count(x => ReadString(x, "source", "") == "reign_court"),
                     ["courtHouseholdCount"] = ReadInt(courtManifest, "household_count", 0),
                     ["traitCount"] = CoreTraitKeys.Length,
-                    ["courtCharacterModelVersion"] = CourtCharacterModelVersion,
+                    ["courtCharacterModelVersion"] = CourtService.CourtCharacterModelVersion,
                     ["sandboxSourceHash"] = HashFiles(Path.Combine(sandbox, "heroes.xml"), Path.Combine(sandbox, "lords.xml"), Path.Combine(sandbox, "sandbox_skill_sets.xml"), Path.Combine(sandbox, "spclans.xml"), coreSkillsPath, navalSkillsPath),
                     ["reignSourceHash"] = HashFiles(Path.Combine(reign, "reign_court_heroes.xml"), Path.Combine(reign, "reign_court_lords.xml"), Path.Combine(reign, "reign_court_clans.xml"), courtManifestPath)
                 },
@@ -1015,7 +1015,7 @@ namespace ReignBetaServer
             Dictionary<string, object> traits = BuildTraitDocument(facts);
             ApplyCatalogTraitEvidence(traits, facts, courtRecord);
             EnsureTraitPercentageData(traits, id);
-            EnsureCourtCharacterData(traits, facts, id);
+            CourtService.EnsureCourtCharacterData(traits, facts, id);
             Dictionary<string, object> derivedMbti = DeriveMbtiAxes(traits);
             string mbtiType = ReadString(derivedMbti, "type", "XXXX");
             if (!MbtiDefinitions.TryGetValue(mbtiType, out MbtiDefinition mbtiDefinition))

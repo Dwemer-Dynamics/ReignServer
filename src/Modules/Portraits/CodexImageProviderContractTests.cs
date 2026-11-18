@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
         private static List<Dictionary<string, object>> RunCodexImageProviderContractTests()
         {
@@ -14,7 +14,7 @@ namespace ReignBetaServer
             Func<Action, bool> rejects = action => { try { action(); return false; } catch { return true; } };
             var settings = new Dictionary<string, object> { ["portraitProvider"] = "Codex SDK", ["sceneryProvider"] = "Codex",
                 ["sceneryImageProfileInitialized"] = true, ["adultPortraitProvider"] = "AtlasCloud", ["adultSceneryProvider"] = "NanoGPT" };
-            NormalizePortraitImageSettings(settings);
+            Program.NormalizePortraitImageSettings(settings);
             var restored = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(settings));
             check("routing_roundtrip", new[] { "portrait", "scenery", "castle_scene", "memory", "social_event" }.All(purpose =>
                 IsNormalCodexImageProfile(ResolveImageGenerationProfile(restored, purpose))
@@ -118,7 +118,7 @@ namespace ReignBetaServer
         }
 
         // Explicit live-llm suite only; never called by aggregate all/quick/offline image checks.
-        private static void RunCodexImageLiveVerification(List<Dictionary<string, object>> checks, string sandbox, Dictionary<string, object> options)
+        internal static void RunCodexImageLiveVerification(List<Dictionary<string, object>> checks, string sandbox, Dictionary<string, object> options)
         {
             string output = Path.Combine(sandbox, "codex-images");
             Directory.CreateDirectory(output);
@@ -133,10 +133,10 @@ namespace ReignBetaServer
             };
             var evidence = new List<Dictionary<string, object>>();
             int cap = Math.Min(3, Math.Max(1, ReadInt(options, "liveCaseCap", 1)));
-            for (int index = 0; index < cap && !ShouldCancelVerification(); index++)
+            for (int index = 0; index < cap && !Program.ShouldCancelVerification(); index++)
             {
                 var profile = ResolveImageGenerationProfile(new Dictionary<string, object>(), purposes[index], CodexImageProvider);
-                var call = GenerateCodexImage(LoadSettings(), profile, briefs[index], reference, index == 0 ? "768x1024" : "2048x1152", ShouldCancelVerification);
+                var call = GenerateCodexImage(Program.LoadSettings(), profile, briefs[index], reference, index == 0 ? "768x1024" : "2048x1152", Program.ShouldCancelVerification);
                 string imagePath = Path.Combine(output, purposes[index] + ".png");
                 if (call.Ok) File.WriteAllBytes(imagePath, call.ImageBytes);
                 var row = new Dictionary<string, object> { ["purpose"] = purposes[index], ["profile"] = profile.Name,
@@ -145,11 +145,11 @@ namespace ReignBetaServer
                     ["imageSha256"] = call.Ok ? Sha256Hex(call.ImageBytes) : "", ["referenceSha256"] = Sha256Hex(reference),
                     ["visualAcceptance"] = "pending human review; synthetic palette reference does not prove native likeness" };
                 evidence.Add(row);
-                AddVerificationCheck(checks, "live_llm.codex_image_" + purposes[index], "portraits_images", call.Ok,
+                Program.AddVerificationCheck(checks, "live_llm.codex_image_" + purposes[index], "portraits_images", call.Ok,
                     call.Ok ? "Codex SDK returned a validated PNG; visual acceptance remains separate." : call.Error, row);
                 if (!call.Ok) break; // Do not spend more usage after a failed compatibility attempt.
             }
-            WriteJsonObject(Path.Combine(output, "report.json"), new Dictionary<string, object> { ["schema"] = "reign-codex-image-compatibility-v1",
+            Program.WriteJsonObject(Path.Combine(output, "report.json"), new Dictionary<string, object> { ["schema"] = "reign-codex-image-compatibility-v1",
                 ["providerCalls"] = evidence.Count, ["caseCap"] = cap, ["campaignMutations"] = 0, ["cases"] = evidence });
         }
     }

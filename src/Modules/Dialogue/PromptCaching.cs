@@ -461,7 +461,7 @@ namespace ReignBetaServer
             string liveState = (parallelPieces == null
                 ? BuildLiveCharacterPrompt(heroName, profile, characteristics, promptState, playerText, sceneContext)
                 : parallelPieces.LiveState) + "\n\n" + ReadString(motiveDecision, "prompt", "");
-            liveState += BuildCourtLifeResolutionContinuityPrompt(campaignId, heroId, turnPayload);
+            liveState += CourtService.BuildCourtLifeResolutionContinuityPrompt(campaignId, heroId, turnPayload);
             liveState += BuildCurrentSceneProgressPrompt(priorLines);
             string canonicalTranscript = parallelPieces == null
                 ? FormatContinuityTranscript(priorLines, FormatDialogueForPrompt)
@@ -525,7 +525,7 @@ namespace ReignBetaServer
             string npcRelationshipBlock = ReadString(npcRelationshipPrompt, "block", "");
             bool? nobleStatus = NativeNoblePromptApplicability(profile);
             string variant = nobleStatus == true ? "noble" : nobleStatus == false ? "commoner" : "unknown";
-            string ambassadorRoleBlock = BuildAmbassadorRolePrompt(campaignId, heroId, heroName, turnPayload);
+            string ambassadorRoleBlock = CourtService.BuildAmbassadorRolePrompt(campaignId, heroId, heroName, turnPayload);
             string chancellorRoleBlock = BuildChancellorRolePrompt(heroId, heroName, turnPayload);
             string specializedRoleBlock = string.Join("\n\n", new[] { ambassadorRoleBlock, chancellorRoleBlock }
                 .Where(x => !string.IsNullOrWhiteSpace(x)));
@@ -678,7 +678,7 @@ namespace ReignBetaServer
             string liveState = (parallelPieces == null
                 ? BuildLiveCharacterPrompt(heroName, profile, characteristics, promptState, playerText, sceneContext)
                 : parallelPieces.LiveState) + "\n\n" + ReadString(motiveDecision, "prompt", "");
-            liveState += BuildCourtLifeResolutionContinuityPrompt(campaignId, heroId, eventPayload);
+            liveState += CourtService.BuildCourtLifeResolutionContinuityPrompt(campaignId, heroId, eventPayload);
             liveState += BuildCurrentSceneProgressPrompt(eventLines);
             string canonicalTranscript = parallelPieces == null
                 ? FormatContinuityTranscript(eventLines, lines => FormatEventLinesForObserver(lines, eventPayload, heroId, identityView))
@@ -736,7 +736,7 @@ namespace ReignBetaServer
             string npcRelationshipBlock = ReadString(npcRelationshipPrompt, "block", "");
             bool? nobleStatus = NativeNoblePromptApplicability(profile);
             string variant = nobleStatus == true ? "noble" : nobleStatus == false ? "commoner" : "unknown";
-            string ambassadorRoleBlock = BuildAmbassadorRolePrompt(campaignId, heroId, heroName, eventPayload);
+            string ambassadorRoleBlock = CourtService.BuildAmbassadorRolePrompt(campaignId, heroId, heroName, eventPayload);
             var composition = new Dictionary<string, object>();
             string globalPrefix = BuildDialogueGlobalPrefix(true, NativeNoblePromptApplicability(profile), actionCatalog, ambassadorRoleBlock, UsesCastleRoomAttireContext(eventPayload), composition, UsesStructuredActions(eventPayload));
             CaptureRequiredPromptEvidence(eventPayload, "canonicalTranscript", canonicalTranscript);
@@ -1356,7 +1356,7 @@ namespace ReignBetaServer
             builder.Add("SCENE STATE OUTPUT", roomAttireContext
                 ? "Return sceneStateUpdates only for explicit present location changes, using supplied heroStringId, location, and locationClass. Do not emit hourly clothing overrides in this castle/keep room session. The room's cultural scene prompt and explicit transcript actions determine attire; portrait outfits, travel equipment, and general hourly outfits do not. Preserve established actions on reopening; the arriving player's attire follows their own actions. Return an empty array when nothing changes."
                 : SceneStateOutputContract);
-            builder.Add("VIEW CLOTHING EVIDENCE", ViewWardrobeEvidenceOutputContract);
+            builder.Add("VIEW CLOTHING EVIDENCE", PortraitsService.ViewWardrobeEvidenceOutputContract);
             if (!string.IsNullOrWhiteSpace(specializedRoleBlock)) builder.Add("AUTHORITATIVE OFFICE ROLE - NON-OVERRIDABLE", specializedRoleBlock);
             if (isLord == false) builder.Omit("noble_prompt", "Native profile is not a noble; its own character foundation remains included.");
             if (string.IsNullOrWhiteSpace(specializedRoleBlock)) builder.Omit("authoritative_office_role.non-overridable", "Production posting/office resolver returned no applicable office.");
@@ -1655,7 +1655,7 @@ namespace ReignBetaServer
             return string.Join("\n", lines).Trim();
         }
 
-        private static string PromptHash(string text)
+        internal static string PromptHash(string text)
         {
             byte[] bytes = Encoding.UTF8.GetBytes(NormalizePromptSegment(text));
             using (SHA256 sha = SHA256.Create())
@@ -2614,7 +2614,7 @@ namespace ReignBetaServer
             Dictionary<string, object> reasoningRoute = ConfigureReasoningRouting(reasoningSettings, new Dictionary<string, object>(), reasoningBody, "https://nano-gpt.com/api/v1/chat/completions", "zai-org/glm-5.2", "dialogue");
             Dictionary<string, object> reasoningControl = ReadDictionary(reasoningBody, "reasoning") ?? new Dictionary<string, object>();
             add("reasoning_nanogpt_controls", ReadBool(reasoningRoute, "providerControlsApplied", false) && ReadString(reasoningControl, "effort", "") == "high" && ReadBool(reasoningControl, "exclude", false), "NanoGPT receives hidden reasoning controls with reasoning output excluded.", reasoningRoute);
-            foreach (string url in new[] { NanoGptChatCompletionsUrl, "https://nano-gpt.com/api/subscription/v1/chat/completions", "https://openrouter.ai/api/v1/chat/completions" })
+            foreach (string url in new[] { PortraitsService.NanoGptChatCompletionsUrl, "https://nano-gpt.com/api/subscription/v1/chat/completions", "https://openrouter.ai/api/v1/chat/completions" })
             {
                 var disabledBody = TestDict("reasoning_effort", "high", "reasoning", TestDict("effort", "high", "exclude", false));
                 var disabledRoute = ConfigureReasoningRouting(reasoningSettings, TestDict("reasoningDisabled", true), disabledBody, url, "fixture-disabled-checker", "repair");
@@ -2628,7 +2628,7 @@ namespace ReignBetaServer
             {
                 var directBody = TestDict();
                 ConfigureReasoningRouting(TestDict("reasoningMode", mode, "reasoningEffort", "high"), TestDict(), directBody,
-                    NanoGptChatCompletionsUrl, "fixture-direct", mode == "off" ? "dialogue" : "action_router");
+                    PortraitsService.NanoGptChatCompletionsUrl, "fixture-direct", mode == "off" ? "dialogue" : "action_router");
                 add("reasoning_none_is_explicit_" + mode, ReadString(ReadDictionary(directBody, "reasoning"), "effort", "") == "none",
                     "Off mode and direct-only purposes explicitly disable the provider's default thinking.", null);
             }
@@ -2636,13 +2636,13 @@ namespace ReignBetaServer
             ConfigureReasoningRouting(reasoningSettings, TestDict("reasoningDisabled", true), unsupportedBody,
                 "https://example.invalid/v1/chat/completions", "fixture", "repair");
             add("reasoning_unrelated_provider_contract_unchanged", !unsupportedBody.ContainsKey("reasoning"), "Nano/OpenRouter controls are not added to unrelated providers.", null);
-            string disabledCooldownKey = ReasoningRouteKey(NanoGptChatCompletionsUrl, "fixture-disabled-cooldown");
+            string disabledCooldownKey = ReasoningRouteKey(PortraitsService.NanoGptChatCompletionsUrl, "fixture-disabled-cooldown");
             try
             {
                 lock (PromptCacheStateLock) ReasoningFallbackCooldowns[disabledCooldownKey] = DateTime.UtcNow.AddMinutes(1);
                 var cooldownBody = TestDict("reasoning_effort", "high", "reasoning", TestDict("effort", "high"));
                 var disabledCooldown = ConfigureReasoningRouting(reasoningSettings, TestDict("reasoningDisabled", true), cooldownBody,
-                    NanoGptChatCompletionsUrl, "fixture-disabled-cooldown", "repair");
+                    PortraitsService.NanoGptChatCompletionsUrl, "fixture-disabled-cooldown", "repair");
                 add("reasoning_disabled_cooldown_stays_explicitly_unapplied", !ReadBool(disabledCooldown, "providerControlsApplied", true)
                     && ReadBool(disabledCooldown, "cooldownActive", false) && !cooldownBody.ContainsKey("reasoning") && !cooldownBody.ContainsKey("reasoning_effort"),
                     "Unsupported-parameter cooldown remains visible and cannot retain stale enabled controls.", disabledCooldown);

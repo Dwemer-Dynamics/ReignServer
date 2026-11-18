@@ -772,7 +772,7 @@ updated_ts=$ts;",
                     }
                 }
                 if (profile.Count > 0
-                    && EnsureCourtCharacterData(
+                    && CourtService.EnsureCourtCharacterData(
                         traits, profile, targetId))
                 {
                     if (verifyIdentity)
@@ -904,7 +904,7 @@ updated_ts=$ts;",
             };
         }
 
-        private static Dictionary<string, object>
+        internal static Dictionary<string, object>
             QualificationRuntimeProfileFromTarget(
                 string targetId,
                 Dictionary<string, object> snapshot)

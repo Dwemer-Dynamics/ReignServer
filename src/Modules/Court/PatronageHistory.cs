@@ -5,24 +5,24 @@ using Reign.Core.Contracts.Court;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CourtService
     {
-        private static Dictionary<string, object> PatronagePublicHistoryApi(Dictionary<string, string> query)
+        internal static Dictionary<string, object> PatronagePublicHistoryApi(Dictionary<string, string> query)
         {
             query = query ?? new Dictionary<string, string>();
             string campaign = query.ContainsKey("campaignId") ? query["campaignId"] : "";
             string timeline = query.ContainsKey("timelineId") ? query["timelineId"] : "";
             string kingdom = query.ContainsKey("kingdomId") ? query["kingdomId"] : "";
-            double day = ParseDoubleInvariant(query.ContainsKey("worldDay") ? query["worldDay"] : "", -1);
+            double day = Program.ParseDoubleInvariant(query.ContainsKey("worldDay") ? query["worldDay"] : "", -1);
             if (string.IsNullOrWhiteSpace(campaign) || string.IsNullOrWhiteSpace(timeline) || string.IsNullOrWhiteSpace(kingdom)
                 || day < 0 || double.IsNaN(day) || double.IsInfinity(day))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "An exact campaign, timeline, kingdom and finite world day are required." };
             var subjects = new List<Dictionary<string, object>>();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaign))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
             {
-                EnsureWorldHistorySchema(connection);
+                Program.EnsureWorldHistorySchema(connection);
                 // Knowledge rules are the authority. Private participant evidence and premature realm news never qualify.
-                var rows = QuerySql(connection, @"SELECT e.event_id,e.event_type,e.summary,e.world_day FROM world_history_events e
+                var rows = Program.QuerySql(connection, @"SELECT e.event_id,e.event_type,e.summary,e.world_day FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.is_complete=1 AND e.phase='completed' AND e.source='bannerlord_native'
 AND e.world_day<=$day AND e.event_type IN ('battle_completed','hero_prisoner_released','hero_killed','settlement_owner_changed','peace_made')
 AND EXISTS(SELECT 1 FROM world_history_knowledge_rules k WHERE k.event_id=e.event_id AND k.available_day<=$day
@@ -32,12 +32,12 @@ ORDER BY e.sequence DESC LIMIT 200;", new Dictionary<string, object> { ["timelin
                 foreach (var row in rows)
                 {
                     string id = ReadString(row, "event_id", "");
-                    var own = QueryWorldHistoryEntities(connection, id).Where(x => ReadString(x, "kingdom_id", "") == kingdom).ToList();
+                    var own = Program.QueryWorldHistoryEntities(connection, id).Where(x => ReadString(x, "kingdom_id", "") == kingdom).ToList();
                     Func<string, bool> role = word => own.Any(x => ReadString(x, "role", "").IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0);
                     string context = ReignPatronageRules.PublicNativeHistoryContext(ReadString(row, "event_type", ""),
                         role("winner"), role("released_prisoner"), role("killed victim"), role("new owner"));
                     if (context.Length == 0 || subjects.Count(x => ReadString(x, "context", "") == context) >= 8) continue;
-                    string summary = LimitText(ReadString(row, "summary", ""), 900);
+                    string summary = Program.LimitText(ReadString(row, "summary", ""), 900);
                     if (context == "reconciliation") summary += " This confirms a public peace; it does not establish private friendship or forgiveness.";
                     if (context == "settlement") summary += " This confirms the named ownership transfer; do not invent its cause or an earlier conquest.";
                     subjects.Add(new Dictionary<string, object> { ["eventId"] = id, ["eventType"] = ReadString(row, "event_type", ""),

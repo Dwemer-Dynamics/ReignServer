@@ -49,21 +49,21 @@ VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','
                 var court = Payload("court_1");
                 court["actorId"] = "npc"; court["matterId"] = "matter"; court["phase"] = "conversation";
                 court["speakerName"] = "Mira";
-                var courtReply = CourtLifeRespond(court, settings, Writer);
+                var courtReply = CourtService.CourtLifeRespond(court, settings, Writer);
                 Check("court_receives_prior_answer_and_publishes_sources", ReadBool(courtReply, "ok", false) && calls == 1
                     && captured.Contains("The old mill beside the orchard is my choice.") && SourceCount("court_life") == 2);
-                CourtLifeRespond(court, settings, Writer);
+                CourtService.CourtLifeRespond(court, settings, Writer);
                 Check("court_replay_has_no_provider_or_source_duplicate", calls == 1 && SourceCount("court_life") == 2);
 
                 var petition = Payload("petition_1");
                 petition["petitionerHeroId"] = "npc"; petition["petitionerName"] = "Mira";
                 petition["petitionId"] = "mill_petition"; petition["transcriptId"] = "petition_session"; petition["phase"] = "conversation";
-                var petitionReply = RulerPetitionRespond(petition, settings, Writer);
+                var petitionReply = CourtService.RulerPetitionRespond(petition, settings, Writer);
                 Check("petition_receives_prior_answer_and_preserves_no_actions", ReadBool(petitionReply, "ok", false)
                     && captured.Contains("The old mill beside the orchard is my choice.") && SourceCount("ruler_petition") == 2
                     && ReadDictionaryList(petitionReply, "nativeActions").Count == 0);
                 int afterPetition = calls;
-                RulerPetitionRespond(petition, settings, Writer);
+                CourtService.RulerPetitionRespond(petition, settings, Writer);
                 Check("petition_replay_does_not_regenerate", calls == afterPetition && SourceCount("ruler_petition") == 2);
 
                 var council = Payload("council_1");
@@ -72,7 +72,7 @@ VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','
                 council["presentAdvisorIds"] = new[] { "npc", "listener" };
                 council["transcript"] = new[] { TestDict("role", "npc", "speaker", "Other", "speakerHeroStringId", "other",
                     "text", "*She secretly remembers PRIVATE-MARRIAGE-902.* The orchard is east.") };
-                var councilReply = RoyalCouncilRespond(council, settings, Writer);
+                var councilReply = CourtService.RoyalCouncilRespond(council, settings, Writer);
                 Check("council_uses_shared_recall_without_hidden_or_unauthorized_packet", ReadBool(councilReply, "ok", false)
                     && captured.Contains("The old mill beside the orchard is my choice.")
                     && !captured.Contains("PRIVATE-MARRIAGE-902") && !captured.Contains("UNAUTHORIZED-TREASURY-901")
@@ -81,11 +81,11 @@ VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','
                 var child = Payload("child_1");
                 child["speaker"] = TestDict("heroStringId", "child", "name", "Pip", "age", 8d);
                 child["participants"] = new[] { "child", "player" }; child["conversationSessionId"] = "family_session";
-                var childReply = FamilyChambersChildRespond(child, settings, Writer);
+                var childReply = CourtService.FamilyChambersChildRespond(child, settings, Writer);
                 Check("child_excludes_adult_lifetime_packet_and_uses_complete_sources", ReadBool(childReply, "ok", false)
                     && !captured.Contains("Which place would you choose beside the orchard?") && SourceCount("family_chambers_child") == 2);
                 int afterChild = calls;
-                var childReplay = FamilyChambersChildRespond(child, settings, Writer);
+                var childReplay = CourtService.FamilyChambersChildRespond(child, settings, Writer);
                 Check("child_replay_preserves_emotion_intent_without_provider", calls == afterChild
                     && ReadString(childReplay, "emotion", "") == "curious" && ReadString(childReplay, "intent", "") == "answer"
                     && ReadInt(childReplay, "providerCallCount", -1) == 0 && SourceCount("family_chambers_child") == 2);
@@ -97,7 +97,7 @@ VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','
                 }
                 var overlong = Payload("oversize"); overlong["petitionerHeroId"] = "npc"; overlong["petitionId"] = "oversize";
                 overlong["transcriptId"] = "oversize_session";
-                var refused = RulerPetitionRespond(overlong, settings, _ => TestDict("ok", true, "content", Json.Serialize(TestDict("reply", new string('a', 601)))));
+                var refused = CourtService.RulerPetitionRespond(overlong, settings, _ => TestDict("ok", true, "content", Json.Serialize(TestDict("reply", new string('a', 601)))));
                 Check("long_reply_is_rejected_whole_not_clipped", !ReadBool(refused, "ok", true) && SourceCount("ruler_petition") == 3);
 
                 var context = PrepareRouteConversationMemory(Payload("fault"), "npc", "route_atomic", "fault_session", "fault_turn", new[] { "npc" }, settingsOverride: settings);
@@ -139,17 +139,17 @@ VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','
                     purposes.Add(ReadString(input, "requestType", ""));
                     return TestDict("ok", true, "content", Json.Serialize(TestDict("reply", "The old mill remains your choice.")));
                 }
-                var acceptedSingle = RulerPetitionRespond(checkedPetition, enabled, SingleWriter);
+                var acceptedSingle = CourtService.RulerPetitionRespond(checkedPetition, enabled, SingleWriter);
                 Check("retired_memory_flags_cannot_add_route_calls", ReadBool(acceptedSingle, "ok", false)
                     && purposes.SequenceEqual(new[] { "ruler_petition_reaction" })
                     && ReadInt(acceptedSingle, "providerCallCount", 0) == 1 && !acceptedSingle.ContainsKey("memoryVerification"), acceptedSingle);
-                var replaySingle = RulerPetitionRespond(checkedPetition, enabled, SingleWriter);
+                var replaySingle = CourtService.RulerPetitionRespond(checkedPetition, enabled, SingleWriter);
                 Check("route_receipt_replay_adds_no_calls", purposes.Count == 1 && ReadInt(replaySingle, "providerCallCount", -1) == 0
                     && ReadString(replaySingle, "reply", "") == ReadString(acceptedSingle, "reply", ""));
                 using (var connection = OpenCampaignConnection(campaign))
                     ExecuteSql(connection, "UPDATE conversation_route_acceptance SET accepted_reply_hash='changed' WHERE accepted_reply_hash=$hash;",
                         TestDict("hash", PromptHash(ReadString(acceptedSingle, "reply", ""))));
-                var corruptReplay = RulerPetitionRespond(checkedPetition, enabled, SingleWriter);
+                var corruptReplay = CourtService.RulerPetitionRespond(checkedPetition, enabled, SingleWriter);
                 Check("mismatched_route_receipt_rejected_without_provider", !ReadBool(corruptReplay, "ok", true) && purposes.Count == 1);
                 const string safeQuestion = "I remember your choice of the old mill. Which gate should we use?";
                 var recoveryPayload = Payload("recovery_1");

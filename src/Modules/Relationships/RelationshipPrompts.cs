@@ -210,7 +210,7 @@ Do not expose a private relationship tag merely because it is supplied as behavi
                         new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
                     bool speakerIsA = chemistry != null && ReadString(chemistry, "hero_a_id", "")
                         .Equals(speakerHeroId, StringComparison.OrdinalIgnoreCase);
-                    int affinity = chemistry == null ? 0 : EffectiveDirectionalAffinity(chemistry, speakerIsA, 0);
+                    int affinity = chemistry == null ? 0 : ReputationService.EffectiveDirectionalAffinity(chemistry, speakerIsA, 0);
                     string band = RelationshipBand(Clamp(affinity, -100, 100));
                     Dictionary<string, object> lifecycle = RelationshipLifecycleView(connection, speakerHeroId, targetId);
                     List<string> tags = ReadStringList(lifecycle, "tags")
@@ -223,11 +223,11 @@ Do not expose a private relationship tag merely because it is supplied as behavi
                     builder.AppendLine(LoadPromptTemplate(RelationshipLevelPromptFile(band)).Trim());
                     foreach (string tag in tags)
                         builder.AppendLine(LoadPromptTemplate(RelationshipTagPromptFile(tag)).Trim());
-                    Dictionary<string, object> socialStanding = BuildKnownSocialStandingView(connection,
+                    Dictionary<string, object> socialStanding = ReputationService.BuildKnownSocialStandingView(connection,
                         campaignId, ReadString(eventPayload, "timelineId", "main"), speakerHeroId, targetId,
                         IdentityStateVerified(ReadAcquaintance(connection, speakerHeroId, targetId)),
                         ReadDouble(eventPayload, "worldDay", 0d));
-                    builder.AppendLine(BuildKnownSocialStandingPromptBlock(socialStanding));
+                    builder.AppendLine(ReputationService.BuildKnownSocialStandingPromptBlock(socialStanding));
                     string historyBlock = BuildSharedRelationshipHistoryPromptBlock(
                         connection, speakerHeroId, targetId, out List<string> historyIds, eventPayload, evidenceBudget);
                     if (!string.IsNullOrWhiteSpace(historyBlock))

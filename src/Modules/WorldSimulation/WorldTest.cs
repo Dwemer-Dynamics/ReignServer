@@ -67,8 +67,8 @@ updated_ts INTEGER NOT NULL,PRIMARY KEY(campaign_id,timeline_id,movement_id));")
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,movement_id TEXT NOT NULL,clan_id TEXT NOT NULL,
 side TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL DEFAULT '{}',updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,movement_id,clan_id));");
-            EnsureKingdomLeaderDiplomacySchema(connection);
-            EnsurePoliticalPressureSchema(connection);
+            DiplomacyService.EnsureKingdomLeaderDiplomacySchema(connection);
+            DiplomacyService.EnsurePoliticalPressureSchema(connection);
         }
 
         private static Dictionary<string, object> WorldTestHeartbeatApi(Dictionary<string, object> payload)
@@ -89,12 +89,12 @@ PRIMARY KEY(campaign_id,timeline_id,movement_id,clan_id));");
                 EnsureWorldTestSchema(connection);
                 EnsureMbtiRelationshipSchema(connection);
                 EnsureRelationshipDirectorSchema(connection);
-                EnsureRumorSchema(connection);
+                ReputationService.EnsureRumorSchema(connection);
                 EnsureClanConflictSchema(connection);
                 EnsureWorldTestTelemetrySchema(connection);
                 ReconcileHeartbeatPoliticalRoster(connection, campaignId, timelineId,
                     worldDay, payload);
-                ProcessDailyRulerRelationships(connection, campaignId, timelineId,
+                DiplomacyService.ProcessDailyRulerRelationships(connection, campaignId, timelineId,
                     worldDay, payload);
                 ExecuteSql(connection, "BEGIN IMMEDIATE;");
                 try
@@ -245,7 +245,7 @@ OR world_test_rebellion_memberships.payload_json<>$payload;",
                 manifest["serverAssemblyVersion"] =
                     typeof(Program).Assembly.GetName().Version?.ToString() ?? string.Empty;
                 manifest["rumorCatalogRevision"] =
-                    ReadInt(ReadActiveSocialCatalog(connection), "revision", 0);
+                    ReadInt(ReputationService.ReadActiveSocialCatalog(connection), "revision", 0);
                 ExecuteSql(connection, @"INSERT INTO world_test_manifests(
 campaign_id,timeline_id,manifest_json,first_observed_day,latest_observed_day,created_ts,updated_ts)
 VALUES($campaign,$timeline,$manifest,$day,$day,$ts,$ts)
@@ -380,7 +380,7 @@ is_ruler=0,is_clan_leader=0
                     // A leadership change does not change rumor, reputation, or
                     // Charm inputs. Ensure rows for newly observed leaders without
                     // recalculating every already-current Public Standing record.
-                    EnsurePublicStandingForRoster(connection, campaignId,
+                    ReputationService.EnsurePublicStandingForRoster(connection, campaignId,
                         timelineId, worldDay, false);
                     standingTimer.Stop();
                     Stopwatch networkTimer = Stopwatch.StartNew();
@@ -549,7 +549,7 @@ FROM world_test_native_heartbeats GROUP BY timeline_id ORDER BY latest_day DESC;
                 EnsureWorldTestSchema(connection);
                 EnsureMbtiRelationshipSchema(connection);
                 EnsureRelationshipDirectorSchema(connection);
-                EnsureRumorSchema(connection);
+                ReputationService.EnsureRumorSchema(connection);
                 if (subsystem == "relationships")
                     rows = QuerySql(connection, @"SELECT p.*,
 COALESCE(sa.standing_value,0) AS public_standing_a,
@@ -607,10 +607,10 @@ ORDER BY day_key DESC,updated_ts DESC LIMIT 1000;",
                 else if (subsystem == "diplomacy")
                     rows = ReadWorldTestDiplomacyEvents(campaignId).OrderByDescending(x => ReadDouble(x, "worldDay", 0d)).ToList();
                 else if (subsystem == "kingdom leaders")
-                    rows = QueryKingdomLeaderActivity(connection, campaignId,
+                    rows = DiplomacyService.QueryKingdomLeaderActivity(connection, campaignId,
                         timelineId, query, 1000);
                 else if (subsystem == "political pressures")
-                    rows = QueryPoliticalPressureActivity(connection, campaignId,
+                    rows = DiplomacyService.QueryPoliticalPressureActivity(connection, campaignId,
                         timelineId, query, 1000);
                 else if (subsystem == "clan conflicts")
                 {
@@ -718,7 +718,7 @@ AND subject_id IN ($a,$b) AND (tag_id='ruler_favoring' OR tag_id LIKE 'ruler_fav
             return result;
         }
 
-        private static void InvalidateWorldTestOverviewCache(string campaignId,
+        internal static void InvalidateWorldTestOverviewCache(string campaignId,
             string timelineId)
         {
             string prefix = (campaignId ?? "") + "|"
@@ -768,7 +768,7 @@ AND subject_id IN ($a,$b) AND (tag_id='ruler_favoring' OR tag_id LIKE 'ruler_fav
                 EnsureWorldTestSchema(connection);
                 EnsureMbtiRelationshipSchema(connection);
                 EnsureRelationshipDirectorSchema(connection);
-                EnsureRumorSchema(connection);
+                ReputationService.EnsureRumorSchema(connection);
                 // Remain safe when reading an old Save Sync snapshot whose
                 // campaign schema predates eager rebellion initialization.
                 RebellionService.EnsureRebellionSchema(connection);
@@ -799,10 +799,10 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
                 Dictionary<string, object> relationships = BuildWorldTestRelationships(
                     connection, campaignId, timelineId, latestDay, mainHeroId);
                 Dictionary<string, object> kingdomLeaders =
-                    BuildWorldTestKingdomLeaders(connection, campaignId,
+                    DiplomacyService.BuildWorldTestKingdomLeaders(connection, campaignId,
                         timelineId, latestDay, nativePayload);
                 Dictionary<string, object> politicalPressures =
-                    BuildWorldTestPoliticalPressures(connection, campaignId,
+                    DiplomacyService.BuildWorldTestPoliticalPressures(connection, campaignId,
                         timelineId, latestDay);
                 Dictionary<string, object> clanConflicts =
                     BuildWorldTestClanConflicts(connection, campaignId,
@@ -861,7 +861,7 @@ WHERE last_native_sync_day>=0;").FirstOrDefault(), "day", -1d);
                     ["checkpoints"] = BuildWorldTestCheckpoints(elapsedObservedDays),
                     ["relationships"] = relationships, ["kingdomLeaders"] = kingdomLeaders,
                     ["politicalPressures"] = politicalPressures,
-                    ["clanAccords"] = ClanAccordsSnapshot(campaignId, timelineId),
+                    ["clanAccords"] = DiplomacyService.ClanAccordsSnapshot(campaignId, timelineId),
                     ["clanConflicts"] = clanConflicts,
                     ["diplomacy"] = diplomacy, ["rumors"] = rumors,
                     ["rebellions"] = rebellions, ["warEconomy"] = warEconomy,
@@ -1611,7 +1611,7 @@ ORDER BY seed_version DESC LIMIT 1;", pairParameters).FirstOrDefault()
             Dictionary<string, object> nativePayload)
         {
             List<Dictionary<string, object>> events = ReadWorldTestDiplomacyEvents(campaignId);
-            Dictionary<string, object> state = ReadDirectorState(campaignId);
+            Dictionary<string, object> state = DiplomacyService.ReadDirectorState(campaignId);
             List<Dictionary<string, object>> actions = ReadWorldTestActions(campaignId);
             List<Dictionary<string, object>> diplomaticActions = actions.Where(x =>
             {
@@ -1792,13 +1792,13 @@ WHERE e.timeline_id=$timeline AND e.event_type='social_outcome';",
                 WorldTestCounterTotals(connection, campaignId, timelineId, "rumors");
             bool enabled = LatestFeatureFlag(connection, "rumorsEnabled", true);
             string status = !enabled ? "disabled" : failedSourceOutcomes > 0 ? "error"
-                : pendingSourceOutcomeCount > SocialWorldHistoryBatchSize * 2 ? "warning"
+                : pendingSourceOutcomeCount > ReputationService.SocialWorldHistoryBatchSize * 2 ? "warning"
                 : sourceOutcomeCount > 0 && processedSourceOutcomes > 0 ? "healthy"
                 : rumorCount == 0 ? "insufficient_data"
                 : expiredActive > 0 ? "warning" : "healthy";
             List<string> anomalies = new List<string>();
             if (expiredActive > 0) anomalies.Add(expiredActive + " expired rumor occurrences are still marked active.");
-            if (pendingSourceOutcomeCount > SocialWorldHistoryBatchSize * 2)
+            if (pendingSourceOutcomeCount > ReputationService.SocialWorldHistoryBatchSize * 2)
                 anomalies.Add(pendingSourceOutcomeCount + " social outcomes are waiting for rumor/reputation processing.");
             if (failedSourceOutcomes > 0)
                 anomalies.Add(failedSourceOutcomes + " social outcomes exhausted their processing retries.");
@@ -2398,7 +2398,7 @@ WHERE e.timeline_id=$timeline AND e.event_type='social_outcome' AND r.completed=
                 string id = ReadString(row, "eventId", "");
                 if (!string.IsNullOrWhiteSpace(id)) byId[id] = row;
             }
-            foreach (Dictionary<string, object> row in ReadDiplomaticEventQueue(campaignId))
+            foreach (Dictionary<string, object> row in DiplomacyService.ReadDiplomaticEventQueue(campaignId))
             {
                 string id = ReadString(row, "eventId", "");
                 if (string.IsNullOrWhiteSpace(id)) continue;
@@ -2514,7 +2514,7 @@ WHERE e.timeline_id=$timeline AND e.event_type='social_outcome' AND r.completed=
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId)) return LatestFeatureFlag(connection, key, fallback);
         }
 
-        private static double LatestKnownWorldDay(ReignDbConnection connection,
+        internal static double LatestKnownWorldDay(ReignDbConnection connection,
             string campaignId)
         {
             double relationship = ReadDouble(QuerySql(connection,
@@ -2523,12 +2523,12 @@ WHERE e.timeline_id=$timeline AND e.event_type='social_outcome' AND r.completed=
             double rumor = ReadDouble(QuerySql(connection,
                 "SELECT MAX(world_day) AS day FROM rumor_occurrences;")
                 .FirstOrDefault(), "day", 0d);
-            Dictionary<string, object> state = ReadDirectorState(campaignId);
+            Dictionary<string, object> state = DiplomacyService.ReadDirectorState(campaignId);
             return Math.Max(relationship, Math.Max(rumor,
                 ReadDouble(state, "lastEvaluatedDay", 0d)));
         }
 
-        private static double LatestKnownWorldDay(ReignDbConnection connection,
+        internal static double LatestKnownWorldDay(ReignDbConnection connection,
             string campaignId, string timelineId)
         {
             string relationshipKey = "mbti_relationship_last_processed_day:"
@@ -2711,18 +2711,18 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
                 new Dictionary<string, object> { ["clanId"] = "unknown", ["kingdomId"] = "realm", ["leaderName"] = "Unknown", ["fiefCount"] = 1000 },
                 new Dictionary<string, object> { ["clanId"] = "foreign", ["kingdomId"] = "other", ["leaderHeroId"] = "foreign_lord", ["fiefCount"] = 1000 }
             };
-            var petitioners = SelectPoliticalPressureClans(campaign, "petitioners", 12, petitionerClans, "realm", "ruler", 4, "origin");
+            var petitioners = DiplomacyService.SelectPoliticalPressureClans(campaign, "petitioners", 12, petitionerClans, "realm", "ruler", 4, "origin");
             add("political_pressure_petitioners_exclude_sovereign",
-                petitioners.Count == 2 && PoliticalPressureLeadLords(petitioners).OrderBy(x => x).SequenceEqual(new[] { "Second Vassal", "The Vassal" }),
+                petitioners.Count == 2 && DiplomacyService.PoliticalPressureLeadLords(petitioners).OrderBy(x => x).SequenceEqual(new[] { "Second Vassal", "The Vassal" }),
                 "A dominant ruling clan, unknown leader and foreign clan cannot become petitioners; named vassals and legacy leader IDs remain eligible.");
             add("political_pressure_petitioner_severity_limit",
-                SelectPoliticalPressureClans(campaign, "petitioners", 12, petitionerClans, "realm", "ruler", 1, "target").Count == 1,
+                DiplomacyService.SelectPoliticalPressureClans(campaign, "petitioners", 12, petitionerClans, "realm", "ruler", 1, "target").Count == 1,
                 "Minor incidents retain the one-clan limit after filtering on either side.");
             add("political_pressure_no_self_petition_fallback",
-                SelectPoliticalPressureClans(campaign, "petitioners", 12, petitionerClans.Take(1).ToList(), "realm", "ruler", 4, "origin").Count == 0
-                && SelectPoliticalPressureClans(campaign, "petitioners", 12, petitionerClans, "realm", "", 4, "origin").Count == 0,
+                DiplomacyService.SelectPoliticalPressureClans(campaign, "petitioners", 12, petitionerClans.Take(1).ToList(), "realm", "ruler", 4, "origin").Count == 0
+                && DiplomacyService.SelectPoliticalPressureClans(campaign, "petitioners", 12, petitionerClans, "realm", "", 4, "origin").Count == 0,
                 "A realm without a vassal or a known sovereign yields no petitioners rather than substituting the ruler.");
-            EnsurePoliticalPressureSchema(connection);
+            DiplomacyService.EnsurePoliticalPressureSchema(connection);
             ExecuteSql(connection, "SAVEPOINT pressure_observation_contract;");
             try
             {
@@ -2758,7 +2758,7 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
                 });
                 string before = snapshot();
                 var filter = new Dictionary<string, string> { ["pair"] = "player|foreign" };
-                var observed = QueryPoliticalPressureActivity(connection, campaign, "pressure_main", filter, 10).Single();
+                var observed = DiplomacyService.QueryPoliticalPressureActivity(connection, campaign, "pressure_main", filter, 10).Single();
                 var incident = ReadDictionary(observed, "incident");
                 add("political_pressure_incident_sides_observed",
                     ReadInt(observed, "before_value", -1) == 0 && ReadInt(observed, "after_value", -1) == 0
@@ -2767,12 +2767,12 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
                     && ReadString(incident, "origin_stance", "") == "awaiting_player"
                     && ReadString(incident, "target_stance", "") == "preserve_relations",
                     "Activity retains its origin values while incident detail exposes the foreign target's actual before/after pressure and both sovereign choices.");
-                var otherTimeline = QueryPoliticalPressureActivity(connection, campaign, "pressure_other", filter, 10).Single();
-                var missingIncident = QueryPoliticalPressureActivity(connection, campaign, "pressure_main", null, 10)
+                var otherTimeline = DiplomacyService.QueryPoliticalPressureActivity(connection, campaign, "pressure_other", filter, 10).Single();
+                var missingIncident = DiplomacyService.QueryPoliticalPressureActivity(connection, campaign, "pressure_main", null, 10)
                     .Single(row => ReadString(row, "incident_id", "") == "missing_incident");
                 add("political_pressure_observation_scope_and_missing_incident",
                     ReadDictionary(otherTimeline, "incident") == null && ReadDictionary(missingIncident, "incident") == null
-                    && QueryPoliticalPressureActivity(connection, campaign, "pressure_main",
+                    && DiplomacyService.QueryPoliticalPressureActivity(connection, campaign, "pressure_main",
                         new Dictionary<string, string> { ["pair"] = "foreign|player" }, 10).Count == 0,
                     "Incident joins respect timeline ownership; missing records remain observable with null details and activity orientation is not reversed.");
                 add("political_pressure_observation_is_non_mutating", before == snapshot(),
@@ -2840,13 +2840,13 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
                     "trade_agreement", "empire", "aserai"),
                 "Completed treaty validation accepts the native pair in either direction but still requires the exact agreement kind.");
             add("ruler_bonus_polarity_lock",
-                ClassifyRulerDiplomacyPolarity(new Dictionary<string, object>
+                DiplomacyService.ClassifyRulerDiplomacyPolarity(new Dictionary<string, object>
                     { ["command"] = "sign_alliance" }) == "positive"
-                && ClassifyRulerDiplomacyPolarity(new Dictionary<string, object>
+                && DiplomacyService.ClassifyRulerDiplomacyPolarity(new Dictionary<string, object>
                     { ["command"] = "declare_war" }) == "negative",
                 "Relationship bonus opportunities classify cooperative and hostile commands with opposite locked polarities.");
             add("ruler_mixed_package_is_ambiguous",
-                ClassifyRulerDiplomacyPolarity(new Dictionary<string, object>
+                DiplomacyService.ClassifyRulerDiplomacyPolarity(new Dictionary<string, object>
                 {
                     ["command"] = "diplomatic_package",
                     ["terms"] = new Dictionary<string, object>
@@ -2857,20 +2857,20 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
                 }) == "ambiguous",
                 "A mixed positive and punitive package cannot satisfy a relationship bonus opportunity.");
             add("ruler_roll_is_directionally_stable",
-                StableRulerD100("campaign", "main", 8, "a|b")
-                    == StableRulerD100("campaign", "main", 8, "a|b")
-                && StableRulerD100("campaign", "main", 8, "a|b") >= 1
-                && StableRulerD100("campaign", "main", 8, "a|b") <= 100,
+                DiplomacyService.StableRulerD100("campaign", "main", 8, "a|b")
+                    == DiplomacyService.StableRulerD100("campaign", "main", 8, "a|b")
+                && DiplomacyService.StableRulerD100("campaign", "main", 8, "a|b") >= 1
+                && DiplomacyService.StableRulerD100("campaign", "main", 8, "a|b") <= 100,
                 "Ruler compatibility and bonus dice are stable d100 values keyed to timeline, day, and direction.");
             add("daily_ruler_relationship_rolls_disabled",
-                !DailyRulerRelationshipRollsEnabled,
+                !DiplomacyService.DailyRulerRelationshipRollsEnabled,
                 "Ruler relationships change through recorded political and diplomatic incidents without an independent daily dice pass.");
             add("kingdom_leaders_control_center_script_contract",
                 ControlCenterHtml().Contains("cell.contextLabel||''"),
                 "The rendered Kingdom Leaders matrix uses a valid JavaScript empty-string fallback so Control Center initialization can parse and run.");
             results.AddRange(RunWorldTestTelemetrySelfTests());
             results.AddRange(RunWorldTestRollupSelfTests());
-            results.AddRange(RunPoliticalPressureSelfTests());
+            results.AddRange(DiplomacyService.RunPoliticalPressureSelfTests());
             results.AddRange(RunClanConflictSelfTests());
             string previousCampaignsRoot = CampaignsRootOverride.Value;
             string isolatedCampaignsRoot = Path.Combine(
@@ -2922,13 +2922,13 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
                         new Dictionary<string, object> { ["eventId"] = "already_acknowledged", ["announcementReady"] = true, ["acknowledged"] = true },
                         new Dictionary<string, object> { ["eventId"] = "readiness_absent" }
                     };
-                    List<Dictionary<string, object>> previousAnnouncements = ReadDiplomaticEventQueue(campaign);
+                    List<Dictionary<string, object>> previousAnnouncements = DiplomacyService.ReadDiplomaticEventQueue(campaign);
                     try
                     {
-                        WriteDiplomaticEventQueue(campaign, announcementFixture);
+                        DiplomacyService.WriteDiplomaticEventQueue(campaign, announcementFixture);
                         Dictionary<string, object> announcementOverview = BuildWorldTestDiplomacy(
                             connection, campaign, "main", 7.25d, 1d, new Dictionary<string, object>());
-                        Dictionary<string, object> nextAnnouncements = NextDiplomaticEvents(
+                        Dictionary<string, object> nextAnnouncements = DiplomacyService.NextDiplomaticEvents(
                             new Dictionary<string, object> { ["campaignId"] = campaign },
                             new Dictionary<string, string>());
                         add("announcement_quiescence_matches_native_delivery",
@@ -2940,10 +2940,10 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
                             "Save quiescence counts only announcements the native delivery API can display; pending government decisions and absent readiness do not block a paused checkpoint.");
                         announcementFixture[0]["announcementReady"] = true;
                         announcementFixture[0]["executionStatus"] = "completed";
-                        WriteDiplomaticEventQueue(campaign, announcementFixture);
+                        DiplomacyService.WriteDiplomaticEventQueue(campaign, announcementFixture);
                         announcementOverview = BuildWorldTestDiplomacy(
                             connection, campaign, "main", 7.25d, 1d, new Dictionary<string, object>());
-                        nextAnnouncements = NextDiplomaticEvents(
+                        nextAnnouncements = DiplomacyService.NextDiplomaticEvents(
                             new Dictionary<string, object> { ["campaignId"] = campaign },
                             new Dictionary<string, string>());
                         add("completed_government_announcement_blocks_until_acknowledged",
@@ -2956,10 +2956,10 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
                             "privateDecisionFactors", "PRIVATE_DECISION_SENTINEL", "initiativeDiagnostics", "PRIVATE_INITIATIVE_SENTINEL")).ToList();
                         publicFixture.Add(TestDict("eventId", "pending_private_proposal", "announcementReady", false));
                         publicFixture.Add(TestDict("eventId", "private_ready", "announcementReady", true, "visibility", "private"));
-                        WriteDiplomaticEventQueue(campaign, publicFixture);
+                        DiplomacyService.WriteDiplomaticEventQueue(campaign, publicFixture);
                         string publicationQueuePath = CampaignFile(campaign, "diplomacy", "event-queue.json");
                         string beforeRead = File.ReadAllText(publicationQueuePath);
-                        var publicAnnouncements = NextDiplomaticEvents(TestDict("campaignId", campaign),
+                        var publicAnnouncements = DiplomacyService.NextDiplomaticEvents(TestDict("campaignId", campaign),
                             new Dictionary<string, string> { ["publicHistory"] = "true", ["limit"] = "500" });
                         var publicRows = ReadDictionaryList(publicAnnouncements, "events");
                         add("public_diplomacy_ignores_popup_and_ack_limits", ReadInt(publicAnnouncements, "count", 0) == 35
@@ -2972,7 +2972,7 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
                     }
                     finally
                     {
-                        WriteDiplomaticEventQueue(campaign, previousAnnouncements);
+                        DiplomacyService.WriteDiplomaticEventQueue(campaign, previousAnnouncements);
                     }
                     int count = ReadInt(QuerySql(connection, "SELECT COUNT(*) AS count FROM world_test_native_heartbeats;").FirstOrDefault(), "count", 0);
                     int rollups = ReadInt(QuerySql(connection, "SELECT COUNT(*) AS count FROM world_test_daily_rollups;").FirstOrDefault(), "count", 0);
@@ -3147,8 +3147,8 @@ VALUES
                         && !ReadBool(ReadDictionary(missingPair, "firstToSecond"), "hasPair", true)
                         && rejected,
                         "Missing pair observation creates no relationship; malformed self-pairs fail before access.");
-                    EnsureRulerFavorContactSchema(connection);
-                    EnsureSocialReputationSchema(connection);
+                    ReputationService.EnsureRulerFavorContactSchema(connection);
+                    ReputationService.EnsureSocialReputationSchema(connection);
                     ExecuteSql(connection, "SAVEPOINT pair_observation_contract;");
                     try
                     {
@@ -3307,7 +3307,7 @@ VALUES($key,$day) ON CONFLICT(key) DO UPDATE SET value=$day;",
                     "A native World Test heartbeat makes a fresh campaign selectable before its first Save Sync registration.");
                 using (ReignDbConnection observedConnection = OpenCampaignConnection(observedCampaign))
                 {
-                    EnsureRumorSchema(observedConnection);
+                    ReputationService.EnsureRumorSchema(observedConnection);
                     ExecuteSql(observedConnection, @"INSERT OR REPLACE INTO rumor_occurrences(
 occurrence_id,campaign_id,timeline_id,archetype_id,thread_key,world_day,expires_day,status,
 catalog_revision,participants_json,created_ts,updated_ts)

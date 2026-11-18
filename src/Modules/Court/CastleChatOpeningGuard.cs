@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CourtService
     {
         internal static bool CastleOpeningReplyImpliesPlayerSpeech(string reply)
         {
