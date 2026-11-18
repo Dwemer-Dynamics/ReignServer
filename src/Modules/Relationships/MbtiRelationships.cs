@@ -3931,43 +3931,6 @@ OR relationship_pair_provenance.details_json<>excluded.details_json;",
             rows.Clear();
         }
 
-        private static void ExecutePostgreSqlPreparedRelationshipBatch(
-            ReignDbConnection connection,
-            ReignDbCommand template,
-            List<Dictionary<string, object>> rows)
-        {
-            if (rows == null || rows.Count == 0)
-                return;
-            NpgsqlConnection postgreSql = connection as NpgsqlConnection;
-            if (postgreSql == null)
-                throw new InvalidOperationException(
-                    "A PostgreSQL relationship batch requires Npgsql.");
-            using (NpgsqlBatch batch = new NpgsqlBatch(postgreSql))
-            {
-                batch.Timeout = 60;
-                foreach (Dictionary<string, object> values in rows)
-                {
-                    NpgsqlBatchCommand command =
-                        new NpgsqlBatchCommand(template.CommandText);
-                    for (int index = 0;
-                        index < template.Parameters.Count; index++)
-                    {
-                        System.Data.Common.DbParameter source =
-                            template.Parameters[index];
-                        string key = source.ParameterName.StartsWith(
-                            "$", StringComparison.Ordinal)
-                                ? source.ParameterName.Substring(1)
-                                : source.ParameterName;
-                        values.TryGetValue(key, out object value);
-                        command.Parameters.Add(new NpgsqlParameter(
-                            source.ParameterName, value ?? DBNull.Value));
-                    }
-                    batch.BatchCommands.Add(command);
-                }
-                batch.ExecuteNonQuery();
-            }
-        }
-
         private static ReignDbCommand CreateRelationshipPairUpsertCommand(ReignDbConnection connection)
         {
             return CreatePreparedRelationshipCommand(connection, @"INSERT INTO relationship_pair_chemistry(

@@ -214,21 +214,6 @@ namespace ReignBetaServer
             return report;
         }
 
-        internal static Dictionary<string, object> BuildCodexPerformanceCapabilityStatuses(
-            Dictionary<string, object> requested,
-            Dictionary<string, object> applied,
-            Dictionary<string, object> unsupported,
-            Dictionary<string, object> unknown)
-        {
-            return new Dictionary<string, object>
-            {
-                ["requested"] = requested ?? new Dictionary<string, object>(),
-                ["applied"] = applied ?? new Dictionary<string, object>(),
-                ["unsupported"] = unsupported ?? new Dictionary<string, object>(),
-                ["unknown"] = unknown ?? new Dictionary<string, object>()
-            };
-        }
-
         // A small deterministic contract used by the offline suite. It deliberately exercises
         // a baseline/variant pair, an unknown usage receipt, and the outcome separation without
         // creating a provider transport or a campaign fixture.

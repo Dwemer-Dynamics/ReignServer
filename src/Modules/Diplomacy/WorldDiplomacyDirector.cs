@@ -2703,19 +2703,6 @@ namespace ReignBetaServer
             return new Dictionary<string, object> { ["fatigue"] = ReadDouble(record, sideIsA ? "fatigueA" : "fatigueB", 0d), ["active"] = ReadBool(record, "active", false) };
         }
 
-        private static bool HasDirectorWarBlockingAgreement(Dictionary<string, object> world, string actorId, string targetId)
-        {
-            foreach (Dictionary<string, object> agreement in ReadDictionaryList(world, "agreements"))
-            {
-                string kind = ReadString(agreement, "kind", "").ToLowerInvariant();
-                bool blocking = kind == "alliance" || kind == "defensive_pact" || kind == "non_aggression_pact" || kind == "demilitarized_border" || kind == "guarantee_independence" || kind == "trade_agreement" || kind == "recognized_independence";
-                bool pair = (string.Equals(ReadString(agreement, "actorKingdomId", ""), actorId, StringComparison.OrdinalIgnoreCase) && string.Equals(ReadString(agreement, "targetKingdomId", ""), targetId, StringComparison.OrdinalIgnoreCase))
-                    || (string.Equals(ReadString(agreement, "actorKingdomId", ""), targetId, StringComparison.OrdinalIgnoreCase) && string.Equals(ReadString(agreement, "targetKingdomId", ""), actorId, StringComparison.OrdinalIgnoreCase));
-                if (blocking && pair) return true;
-            }
-            return false;
-        }
-
         private static bool IsDirectorPeaceCommand(string command)
         {
             return command == "make_peace" || command == "offer_tribute_peace" || command == "demand_reparations_peace" || command == "demand_settlement_peace" || command == "demand_surrender_peace";

@@ -1911,6 +1911,9 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                 string liveTestClientPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignLiveTestClient.cs");
                 string liveTestClientText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
                 string liveTestClientTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(qualificationClientRoot, "ReignServerClient");
+                // The live-test heartbeat may live in its own client type; scope the stale-mode-list guard to both.
+                if (VerificationSourceLocator.SourceDeclaresType(liveTestClientText, "ReignLiveTestServerClient"))
+                    liveTestClientTextScoped += "\n" + VerificationSourceLocator.ReadClientTypeSourceText(qualificationClientRoot, "ReignLiveTestServerClient");
                 add("native_identity_authority_context_is_always_on",
                     serverClientText.Contains(
                         "BuildNativePoliticalContext(",

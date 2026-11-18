@@ -105,15 +105,6 @@ SET status='retired',last_error='Background LLM reason generation was retired; t
 WHERE status<>'retired';", new Dictionary<string, object> { ["ts"] = ts });
         }
 
-        private static void ProcessReputationReasonJob(string campaignId, string jobId)
-        {
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-            {
-                EnsureSocialReputationSchema(connection);
-                NormalizeRecordedReputationReasons(connection);
-            }
-        }
-
         // Startup-only reconciliation with no dedicated retry. Program submits it immediately after
         // the scheduler starts, ahead of every other producer and memory fan-out, but admission is
         // still not guaranteed (busy, stopping or canceled before start skips it); the result

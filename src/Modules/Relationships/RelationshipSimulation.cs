@@ -242,34 +242,6 @@ namespace ReignBetaServer
             return "";
         }
 
-        private static void CaptureRelationshipSimulationCensus(Dictionary<string, object> payload)
-        {
-            if (payload == null || ReadDictionaryList(payload, "heroes").Count == 0) return;
-            string campaignId = ReadString(payload, "campaignId", "");
-            if (string.IsNullOrWhiteSpace(campaignId)) return;
-            Dictionary<string, object> census = new Dictionary<string, object>
-            {
-                ["version"] = RelationshipSimulationCensusVersion,
-                ["campaignId"] = campaignId,
-                ["timelineId"] = ReadString(payload, "timelineId", "main"),
-                ["worldDay"] = ReadDouble(payload, "worldDay", 0d),
-                ["playerId"] = ReadString(payload, "playerId", ""),
-                ["playerClanId"] = ReadString(payload, "playerClanId", ""),
-                ["capturedUtc"] = DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture),
-                ["heroes"] = ReadDictionaryList(payload, "heroes"),
-                ["nobles"] = ReadDictionaryList(payload, "nobles"),
-                ["clans"] = ReadDictionaryList(payload, "clans"),
-                ["kingdoms"] = ReadDictionaryList(payload, "kingdoms"),
-                ["nativePresenceGroups"] = ReadDictionaryList(payload, "presenceGroups")
-            };
-            WriteJsonObject(RelationshipSimulationCensusPath(campaignId), census);
-        }
-
-        private static string RelationshipSimulationCensusPath(string campaignId)
-        {
-            return CampaignFile(campaignId, "relationship_simulation_census.json");
-        }
-
         private static string RelationshipSimulationRoot()
         {
             return Path.Combine(DataDir, "relationship_simulations");

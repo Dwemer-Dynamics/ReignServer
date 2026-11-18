@@ -504,38 +504,6 @@ FROM world_test_native_heartbeats GROUP BY timeline_id ORDER BY latest_day DESC;
             };
         }
 
-        private static bool TryPromoteObservedWorldTestCampaign(DirectoryInfo directory)
-        {
-            if (directory == null || IsInternalCampaignId(directory.Name)) return false;
-            if (!ReignPostgreSqlStorage.CampaignExists(directory.Name))
-                return false;
-            try
-            {
-                Dictionary<string, object> heartbeat;
-                using (ReignDbConnection connection =
-                    OpenCampaignConnection(directory.Name))
-                {
-                    if (!TableExists(
-                        connection, "world_test_native_heartbeats"))
-                        return false;
-                    heartbeat = QuerySql(connection,
-                        "SELECT payload_json FROM world_test_native_heartbeats ORDER BY updated_ts DESC LIMIT 1;")
-                        .FirstOrDefault();
-                }
-                Dictionary<string, object> payload = TryParseJsonObject(ReadString(heartbeat, "payload_json", "{}"))
-                    ?? new Dictionary<string, object>();
-                payload["campaignId"] = directory.Name;
-                if (string.IsNullOrWhiteSpace(ReadString(payload, "campaignLabel", "")))
-                    payload["campaignLabel"] = ReadString(payload, "mainHeroName", directory.Name);
-                WriteCampaignMetadata(directory.Name, payload);
-                return File.Exists(Path.Combine(directory.FullName, "campaign.json"));
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
         private static Dictionary<string, object> WorldTestOverviewApi(Dictionary<string, string> query)
         {
             query = query ?? new Dictionary<string, string>();
@@ -2264,7 +2232,7 @@ WHERE e.timeline_id=$timeline AND e.event_type='social_outcome' AND r.completed=
                 {
                     ["status"] = ReadString(source, "status", "insufficient_data"),
                     ["latestSuccessfulDay"] = ReadDouble(source, "latestSuccessfulDay", -1d),
-                    ["anomalyCount"] = WorldTestObjectList(source, "anomalies").Count
+                    ["anomalyCount"] = ReadObjectList(source, "anomalies").Count
                 };
                 if (key == "relationships")
                 {
@@ -2272,7 +2240,7 @@ WHERE e.timeline_id=$timeline AND e.event_type='social_outcome' AND r.completed=
                     compact["pairCount"] = ReadInt(source, "pairCount", 0);
                     compact["directionalEdgeCount"] = ReadInt(source, "directionalEdgeCount", 0);
                     compact["bands"] = ReadDictionary(source, "bands") ?? new Dictionary<string, object>();
-                    compact["tags"] = WorldTestObjectList(source, "tags");
+                    compact["tags"] = ReadObjectList(source, "tags");
                     compact["romanticMarriages"] = ReadInt(
                         ReadDictionary(source, "lifecycle") ?? new Dictionary<string, object>(),
                         "romanticMarriages", 0);
@@ -2371,11 +2339,11 @@ WHERE e.timeline_id=$timeline AND e.event_type='social_outcome' AND r.completed=
                 };
             }
 
-            Dictionary<string, Dictionary<string, object>> currentTags = WorldTestObjectList(current, "tags")
+            Dictionary<string, Dictionary<string, object>> currentTags = ReadObjectList(current, "tags")
                 .OfType<Dictionary<string, object>>()
                 .Where(x => !string.IsNullOrWhiteSpace(ReadString(x, "tag", "")))
                 .ToDictionary(x => ReadString(x, "tag", ""), x => x, StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, Dictionary<string, object>> priorTags = WorldTestObjectList(prior, "tags")
+            Dictionary<string, Dictionary<string, object>> priorTags = ReadObjectList(prior, "tags")
                 .OfType<Dictionary<string, object>>()
                 .Where(x => !string.IsNullOrWhiteSpace(ReadString(x, "tag", "")))
                 .ToDictionary(x => ReadString(x, "tag", ""), x => x, StringComparer.OrdinalIgnoreCase);
@@ -2595,55 +2563,6 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
             return Math.Max(Math.Max(relationship, ingested), Math.Max(rumor, rollup));
         }
 
-        private static void AddWorldTestBand(Dictionary<string, Dictionary<string, int>> bands, Dictionary<string, HashSet<string>> npcs,
-            Dictionary<string, HashSet<string>> pairs, string band, string npc, string pair)
-        {
-            if (!bands.ContainsKey(band)) band = "neutral";
-            bands[band]["directionalEdgeCount"]++;
-            if (!string.IsNullOrWhiteSpace(npc)) npcs[band].Add(npc);
-            if (!string.IsNullOrWhiteSpace(pair)) pairs[band].Add(pair);
-        }
-
-        private static void AddWorldTestTag(Dictionary<string, Dictionary<string, object>> tags, string tag, string npc, string pair, bool directional)
-        {
-            if (string.IsNullOrWhiteSpace(tag)) return;
-            if (!tags.TryGetValue(tag, out Dictionary<string, object> item))
-            {
-                item = new Dictionary<string, object>
-                {
-                    ["tag"] = tag, ["directionalEdgeCount"] = 0, ["uniqueNpcIds"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-                    ["pairIds"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                };
-                tags[tag] = item;
-            }
-            if (directional) item["directionalEdgeCount"] = ReadInt(item, "directionalEdgeCount", 0) + 1;
-            ((HashSet<string>)item["uniqueNpcIds"]).Add(npc);
-            ((HashSet<string>)item["pairIds"]).Add(pair);
-        }
-
-        private static void FinalizeWorldTestTags(Dictionary<string, Dictionary<string, object>> tags)
-        {
-            foreach (Dictionary<string, object> item in tags.Values)
-            {
-                item["uniqueNpcCount"] = ((HashSet<string>)item["uniqueNpcIds"]).Count;
-                item["pairCount"] = ((HashSet<string>)item["pairIds"]).Count;
-                item.Remove("uniqueNpcIds"); item.Remove("pairIds");
-            }
-        }
-
-        private static Dictionary<string, object> AffinitySummary(List<int> values)
-        {
-            if (values == null || values.Count == 0)
-                return new Dictionary<string, object> { ["minimum"] = 0, ["maximum"] = 0, ["average"] = 0d, ["median"] = 0d };
-            List<int> ordered = values.OrderBy(x => x).ToList();
-            double median = ordered.Count % 2 == 1 ? ordered[ordered.Count / 2] : (ordered[ordered.Count / 2 - 1] + ordered[ordered.Count / 2]) / 2d;
-            return new Dictionary<string, object>
-            {
-                ["minimum"] = ordered.First(), ["maximum"] = ordered.Last(),
-                ["average"] = Math.Round(ordered.Average(), 2), ["median"] = Math.Round(median, 2)
-            };
-        }
-
         private static Dictionary<string, object> AffinitySummaryFromHistogram(
             Dictionary<int, int> histogram)
         {
@@ -2779,14 +2698,6 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
         private static string UnixToIso(long unix)
         {
             return unix <= 0 ? "" : DateTimeOffset.FromUnixTimeSeconds(unix).UtcDateTime.ToString("o");
-        }
-
-        private static List<object> WorldTestObjectList(Dictionary<string, object> source, string key)
-        {
-            if (source == null || !source.TryGetValue(key, out object value) || value == null) return new List<object>();
-            if (value is ArrayList array) return array.Cast<object>().ToList();
-            if (value is IEnumerable<object> objects) return objects.ToList();
-            return new List<object>();
         }
 
         private static void AddPoliticalPressureObservationContracts(ReignDbConnection connection,
@@ -3411,7 +3322,7 @@ VALUES('rumor_inspector_fixture','npc_observer','marital_strife','spouse','Fixtu
                     ["campaignId"] = observedCampaign, ["timelineId"] = "main",
                     ["subsystem"] = "rumor subjects", ["search"] = "rumor_inspector_fixture"
                 });
-                List<object> receiptRows = WorldTestObjectList(receiptDetails, "rows");
+                List<object> receiptRows = ReadObjectList(receiptDetails, "rows");
                 add("rumor_subject_drilldown", receiptRows.Count == 1
                     && ReadString(receiptRows[0] as Dictionary<string, object>, "subject_id", "") == "npc_observer",
                     "The read-only social inspector can load character-owned subject tags for one selected occurrence.");
@@ -3424,8 +3335,8 @@ VALUES('rumor_inspector_fixture','npc_observer','marital_strife','spouse','Fixtu
                         "UPDATE world_test_native_heartbeats SET updated_ts=9999999999;");
                 Dictionary<string, object> worldTestCampaigns = WorldTestCampaignsApi(new Dictionary<string, string>());
                 Dictionary<string, object> backupCampaigns = CampaignListApi();
-                List<object> worldTestRows = WorldTestObjectList(worldTestCampaigns, "campaigns");
-                List<object> backupRows = WorldTestObjectList(backupCampaigns, "campaigns");
+                List<object> worldTestRows = ReadObjectList(worldTestCampaigns, "campaigns");
+                List<object> backupRows = ReadObjectList(backupCampaigns, "campaigns");
                 bool legacyPromoted = File.Exists(Path.Combine(CampaignDirectory(legacyObservedCampaign), "campaign.json"));
                 add("registry_campaign_without_local_metadata_is_isolated", !legacyPromoted,
                     "Campaign discovery never imports a PostgreSQL registry entry from another local Reign data root.");

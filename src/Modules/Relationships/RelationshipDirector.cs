@@ -778,146 +778,6 @@ WHERE run_id NOT IN (
             }
         }
 
-        private static string DirectorEdgeKingdomId(Dictionary<string, object> edge)
-        {
-            Dictionary<string, object> a=ReadDictionary(edge,"heroA")??new Dictionary<string, object>();
-            Dictionary<string, object> b=ReadDictionary(edge,"heroB")??new Dictionary<string, object>();
-            return FirstNonEmpty(ReadString(a,"kingdomId",""),ReadString(b,"kingdomId",""),ReadString(edge,"kingdomId",""));
-        }
-
-        private static void AddDirectorStoryEdges(ReignDbConnection connection,List<Dictionary<string,object>> edges,Dictionary<string,object> payload,double day)
-        {
-            Dictionary<string,Dictionary<string,object>> heroes=ReadDictionaryList(payload,"nobles").Concat(ReadDictionaryList(payload,"heroes"))
-                .Where(x=>!string.IsNullOrWhiteSpace(ReadFirstString(x,"heroStringId","heroId","id")))
-                .GroupBy(x=>ReadFirstString(x,"heroStringId","heroId","id"),StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(x=>x.Key,x=>x.First(),StringComparer.OrdinalIgnoreCase);
-            HashSet<string> existing=new HashSet<string>(edges.Select(x=>StoryPairKey(ReadFirstString(x,"heroAId","aId","subjectId"),ReadFirstString(x,"heroBId","bId","targetId"))),StringComparer.OrdinalIgnoreCase);
-            foreach(Dictionary<string,object> row in QuerySql(connection,"SELECT pair_key,subject_id,target_id FROM relationship_story_threads WHERE status='active' AND intensity>0 AND last_event_day >= $day GROUP BY pair_key;",
-                new Dictionary<string,object>{{"day",day-120d}}))
-            {
-                string a=ReadString(row,"subject_id",""),b=ReadString(row,"target_id","");
-                Dictionary<string,object> ha,hb;
-                string pair=StoryPairKey(a,b);
-                if(existing.Contains(pair)||!heroes.TryGetValue(a,out ha)||!heroes.TryGetValue(b,out hb))continue;
-                edges.Add(new Dictionary<string,object>{{"heroAId",a},{"heroBId",b},{"heroA",ha},{"heroB",hb},{"pairKey",pair},
-                    {"coLocated",false},{"sameClan",ReadString(ha,"clanId","")==ReadString(hb,"clanId","")},
-                    {"spouses",ReadString(ha,"spouseId","")==b||ReadString(hb,"spouseId","")==a},
-                    {"family",false},{"nativeRelation",0d},{"kingdomId",FirstNonEmpty(ReadString(ha,"kingdomId",""),ReadString(hb,"kingdomId",""))}});
-                existing.Add(pair);
-            }
-        }
-
-        private static Dictionary<string, object> SelectDirectorKingdomCandidate(List<Dictionary<string, object>> candidates,string runId,double day,string kingdomId)
-        {
-            List<Dictionary<string, object>> pool=candidates.OrderByDescending(x=>ReadDouble(x,"finalScore",ReadDouble(x,"score",0d))).Take(16).ToList();
-            double total=pool.Sum(x=>Math.Max(0.05d,ReadDouble(x,"finalScore",ReadDouble(x,"score",0d))));
-            if(pool.Count==0||total<=0d)return null;
-            double roll=StableUnit(runId+"|candidate|"+kingdomId+"|"+Math.Floor(day/DirectorRunIntervalDays))*total;
-            foreach(Dictionary<string, object> candidate in pool)
-            {
-                roll-=Math.Max(0.05d,ReadDouble(candidate,"finalScore",ReadDouble(candidate,"score",0d)));
-                if(roll<=0d)return candidate;
-            }
-            return pool[pool.Count-1];
-        }
-
-        private static Dictionary<string, object> ScoreDirectorEdge(ReignDbConnection connection, Dictionary<string, object> edge, double day)
-        {
-            string a = ReadFirstString(edge,"heroAId","aId","subjectId");
-            string b = ReadFirstString(edge,"heroBId","bId","targetId");
-            string lo = string.Compare(a,b,StringComparison.OrdinalIgnoreCase)<=0?a:b;
-            string hi = lo==a?b:a;
-            Dictionary<string, object> last = QuerySql(connection,"SELECT * FROM passive_relationship_events WHERE ((hero_a_id=$a AND hero_b_id=$b) OR (hero_a_id=$b AND hero_b_id=$a)) ORDER BY world_day DESC LIMIT 1;",new Dictionary<string, object>{{"a",a},{"b",b}}).FirstOrDefault();
-            if (last != null && day-ReadDouble(last,"world_day",0d)<DirectorPairCooldownDays) return new Dictionary<string, object>();
-            double monthStart=Math.Floor(day/31.5d)*31.5d;
-            int aCount=ReadInt(QuerySql(connection,"SELECT COUNT(*) AS count FROM passive_relationship_events WHERE world_day >= $day AND (hero_a_id=$hero OR hero_b_id=$hero);",new Dictionary<string, object>{{"day",monthStart},{"hero",a}}).FirstOrDefault(),"count",0);
-            int bCount=ReadInt(QuerySql(connection,"SELECT COUNT(*) AS count FROM passive_relationship_events WHERE world_day >= $day AND (hero_a_id=$hero OR hero_b_id=$hero);",new Dictionary<string, object>{{"day",monthStart},{"hero",b}}).FirstOrDefault(),"count",0);
-            if(aCount>=2||bCount>=2)return new Dictionary<string, object>();
-            Dictionary<string, object> exposure=QuerySql(connection,"SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",new Dictionary<string, object>{{"pair",lo+"|"+hi}}).FirstOrDefault()??new Dictionary<string, object>();
-            Dictionary<string, object> relationshipA=QuerySql(connection,"SELECT * FROM relationships WHERE subject_id=$a AND target_id=$b LIMIT 1;",new Dictionary<string, object>{{"a",a},{"b",b}}).FirstOrDefault()??new Dictionary<string, object>();
-            Dictionary<string, object> relationshipB=QuerySql(connection,"SELECT * FROM relationships WHERE subject_id=$a AND target_id=$b LIMIT 1;",new Dictionary<string, object>{{"a",b},{"b",a}}).FirstOrDefault()??new Dictionary<string, object>();
-            double directionalA=ReadDouble(exposure,"affinity_a_to_b",0d),directionalB=ReadDouble(exposure,"affinity_b_to_a",0d);
-            double affinity=(Math.Max(0d,directionalA)+Math.Max(0d,directionalB))/200d;
-            double tension=(Math.Max(0d,-directionalA)+Math.Max(0d,-directionalB))/200d;
-            double exposureScore=Math.Min(0.18d,ReadDouble(exposure,"weighted_exposure",0d)/60d);
-            double score = 0.10d + (ReadBool(edge,"coLocated",false)?0.30d:0d) + (ReadBool(edge,"sameClan",false)?0.12d:0d) + (ReadBool(edge,"spouses",false)?0.18d:0d)
-                + Math.Min(0.20d,Math.Abs(ReadDouble(edge,"nativeRelation",0d))/500d) + (ReadBool(edge,"sharedEvent",false)?0.15d:0d)
-                + exposureScore + Math.Min(0.16d,Math.Max(affinity,tension)*0.16d);
-            Dictionary<string, object> story=LoadPairStorySummary(connection,a,b,day);
-            double continuationMultiplier=ReadDouble(story,"multiplier",1d);
-            Dictionary<string, object> result = new Dictionary<string, object>(edge,StringComparer.OrdinalIgnoreCase)
-                {{"score",score},{"baseScore",score},{"finalScore",score*continuationMultiplier},{"pairKey",lo+"|"+hi},
-                 {"continuationMultiplier",continuationMultiplier},{"story",story}};
-            result["ambientExposure"]=ReadDouble(exposure,"weighted_exposure",0d);result["ambientAffinity"]=affinity;result["ambientTension"]=tension;
-            result["sharedRelationshipTag"]=ReadString(exposure,"shared_tag","");
-            result["directionalAffinityAToB"]=directionalA;result["directionalAffinityBToA"]=directionalB;
-            return result;
-        }
-
-        private static Dictionary<string, object> RerankDirectorCandidates(List<Dictionary<string, object>> candidates)
-        {
-            Dictionary<string, object> status = new Dictionary<string, object>{{"attempted",false},{"applied",false},{"method","deterministic"},{"candidateCount",candidates.Count}};
-            if (candidates.Count < 2) return status;
-            Dictionary<string, object> settings = LoadSettings();
-            if (!ReadBool(settings,"enableMinimeMemoryWorker",true) || !ReadBool(settings,"enableMinimeMemoryReranking",true)) return status;
-            try
-            {
-                List<Dictionary<string, object>> outbound = candidates.Select((c,i)=>new Dictionary<string, object>{{"id","director_"+i},{"text",DirectorCandidateText(c)}}).ToList();
-                string raw = PostJsonToUrl(ReadString(settings,"minimeRerankUrl","http://127.0.0.1:8082/rerank"),Json.Serialize(new Dictionary<string, object>{{"query","Rank plausible consequential noble relationship interactions in a living medieval political world."},{"candidates",outbound},{"top_k",outbound.Count}}),Math.Max(250,Math.Min(15000,ReadInt(settings,"minimeRerankTimeoutMs",15000))));
-                List<Dictionary<string, object>> ranked = ReadDictionaryList(TryParseJsonObject(raw),"results").Concat(ReadDictionaryList(TryParseJsonObject(raw),"ranked")).ToList();
-                foreach(Dictionary<string, object> item in ranked)
-                {
-                    string id=ReadFirstString(item,"id","candidate_id","candidateId");
-                    if(id.StartsWith("director_") && int.TryParse(id.Substring(9),out int index) && index>=0 && index<candidates.Count)
-                        candidates[index]["finalScore"]=ReadDouble(candidates[index],"score",0d)+Math.Max(0d,ReadDouble(item,"score",ReadDouble(item,"similarity",0d)))*0.35d;
-                }
-                status["attempted"]=true;status["applied"]=true;status["method"]="minime_rerank";
-            }
-            catch(Exception ex){status["attempted"]=true;status["error"]=ex.Message;}
-            return status;
-        }
-
-        private static string DirectorCandidateText(Dictionary<string, object> edge)
-        {
-            Dictionary<string, object> a=ReadDictionary(edge,"heroA")??new Dictionary<string, object>();
-            Dictionary<string, object> b=ReadDictionary(edge,"heroB")??new Dictionary<string, object>();
-            return ReadString(a,"name",ReadFirstString(edge,"heroAId","aId"))+" and "+ReadString(b,"name",ReadFirstString(edge,"heroBId","bId"))+"; reasons="+string.Join(",",ReadStringList(edge,"reasons"))+"; native relation="+ReadDouble(edge,"nativeRelation",0d).ToString("0",CultureInfo.InvariantCulture);
-        }
-
-        private static Dictionary<string, object> CreatePassiveRelationshipEvent(ReignDbConnection connection,string campaignId,string runId,double day,Dictionary<string, object> candidate)
-        {
-            string a=ReadFirstString(candidate,"heroAId","aId","subjectId"), b=ReadFirstString(candidate,"heroBId","bId","targetId");
-            if(string.IsNullOrWhiteSpace(a)||string.IsNullOrWhiteSpace(b)) return new Dictionary<string, object>();
-            Dictionary<string, object> pa=LoadDirectorHeroProfile(campaignId,a,ReadDictionary(candidate,"heroA")), pb=LoadDirectorHeroProfile(campaignId,b,ReadDictionary(candidate,"heroB"));
-            Dictionary<string, object> ra=QuerySql(connection,"SELECT * FROM relationships WHERE subject_id=$a AND target_id=$b LIMIT 1;",new Dictionary<string, object>{{"a",a},{"b",b}}).FirstOrDefault()??new Dictionary<string, object>();
-            Dictionary<string, object> rb=QuerySql(connection,"SELECT * FROM relationships WHERE subject_id=$a AND target_id=$b LIMIT 1;",new Dictionary<string, object>{{"a",b},{"b",a}}).FirstOrDefault()??new Dictionary<string, object>();
-            Dictionary<string, object> postureA=BuildDirectorRomanticDecision(campaignId,pa,pb,candidate,day);
-            Dictionary<string, object> postureB=BuildDirectorRomanticDecision(campaignId,pb,pa,candidate,day);
-            double preEventRomanceIntensity=PairStoryKindIntensity(connection,a,b,"romance",day,true);
-            string kind=ChoosePassiveEventKind(connection,campaignId,candidate,pa,pb,ra,rb,postureA,postureB,day);
-            string nameA=ReadString(pa,"name",a),nameB=ReadString(pb,"name",b);
-            string summary=PassiveEventSummary(kind,nameA,nameB);
-            string eventId="passive_rel_"+Guid.NewGuid().ToString("N");
-            string visibility=kind.Contains("public")?"public":"private";
-            Dictionary<string, object> memory=StoreWorldMemoryEvent(new Dictionary<string, object>{{"campaignId",campaignId},{"eventId",eventId},{"eventType",kind},{"worldDay",day},{"locationId",ReadString(candidate,"locationId","")},{"summary",summary},{"participants",new List<string>{a,b}},{"known_by",new List<string>{a,b}},{"visibility",visibility},{"importance",kind.Contains("affair")?0.82d:0.55d},{"source","passive_relationship_director"}},"relationship_director");
-            Dictionary<string, object> paired=EvaluatePassiveRelationshipPair(connection,campaignId,eventId,kind,a,b,pa,pb,candidate,summary,day,postureA,postureB,preEventRomanceIntensity);
-            Dictionary<string, object> eva=ReadDictionary(paired,"aToB")??new Dictionary<string, object>();
-            Dictionary<string, object> evb=ReadDictionary(paired,"bToA")??new Dictionary<string, object>();
-            int nativeDelta=(int)Math.Round(new[]{ReadInt(eva,"nativeRelationDelta",0),ReadInt(evb,"nativeRelationDelta",0)}.Average(),MidpointRounding.AwayFromZero);
-            nativeDelta=Clamp(nativeDelta,-2,2);
-            if(nativeDelta!=0) QueueDirectorAction(connection,"native_relation",day,a,b,new Dictionary<string, object>{{"delta",nativeDelta},{"eventId",eventId}});
-            bool aMarried=!string.IsNullOrWhiteSpace(ReadString(pa,"spouseId",""))&&!ReadString(pa,"spouseId","").Equals(b,StringComparison.OrdinalIgnoreCase);
-            bool bMarried=!string.IsNullOrWhiteSpace(ReadString(pb,"spouseId",""))&&!ReadString(pb,"spouseId","").Equals(a,StringComparison.OrdinalIgnoreCase);
-            ApplyStoryEventToDatabase(connection,kind,eventId,a,b,day,aMarried,bMarried,postureA,postureB);
-            if(kind=="secret_affair_intimacy") TryCreateNpcAffairConception(connection,day,eventId,pa,pb);
-            HandleDirectorLifeChange(connection,day,eventId,kind,a,b,pa,pb);
-            long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ExecuteSql(connection,@"INSERT INTO passive_relationship_events(passive_event_id,event_id,kind,hero_a_id,hero_b_id,world_day,location_id,visibility,summary,score,run_id,payload_json,created_ts)
-VALUES($id,$event,$kind,$a,$b,$day,$location,$visibility,$summary,$score,$run,$payload,$ts);",new Dictionary<string, object>{{"id","prev_"+Guid.NewGuid().ToString("N")},{"event",eventId},{"kind",kind},{"a",a},{"b",b},{"day",day},{"location",ReadString(candidate,"locationId","")},{"visibility",visibility},{"summary",summary},{"score",ReadDouble(candidate,"finalScore",0d)},{"run",runId},{"payload",Json.Serialize(candidate)},{"ts",ts}});
-            return new Dictionary<string, object>{{"eventId",eventId},{"kind",kind},{"heroAId",a},{"heroBId",b},{"summary",summary},{"nativeRelationDelta",nativeDelta},
-                {"continuationMultiplier",ReadDouble(candidate,"continuationMultiplier",1d)},{"continuedThread",ReadDouble(candidate,"continuationMultiplier",1d)>1d},{"memoryStore",memory}};
-        }
-
         private static string ChoosePassiveEventKind(ReignDbConnection connection,string campaignId,Dictionary<string, object> edge,Dictionary<string, object> a,Dictionary<string, object> b,Dictionary<string, object> ra,Dictionary<string, object> rb,double day)
         {
             return ChoosePassiveEventKind(connection,campaignId,edge,a,b,ra,rb,
@@ -1013,24 +873,6 @@ VALUES($id,$event,$kind,$a,$b,$day,$location,$visibility,$summary,$score,$run,$p
         private static string PassiveEventSummary(string kind,string a,string b)
         {
             switch(kind){case "secret_affair_intimacy":return a+" and "+b+" consummated a secret affair after knowingly accepting the personal and political risk.";case "romantic_intimacy":return a+" and "+b+" privately deepened their consensual courtship into romantic intimacy.";case "romantic_confidence":return a+" and "+b+" shared a private romantic confidence and acknowledged their growing interest.";case "mutual_romantic_flirtation":return a+" and "+b+" exchanged mutual flirtation and tested a growing attraction.";case "political_obstruction":return a+" and "+b+" deliberately obstructed one another's ambitions, escalating their political rivalry.";case "political_rivalry_argument":return a+" and "+b+" argued over status and ambition, sharpening their political rivalry.";case "marital_argument":return a+" and "+b+" suffered a serious marital argument that deepened the strain between them.";case "marital_separation":return a+" and "+b+" separated after a bitter marital conflict and sustained resentment.";case "marriage_proposal":return a+" and "+b+" made a serious mutual marriage proposal after sustained trust, affection, and attraction.";case "private_spousal_confidence":return a+" trusted "+b+" with a private confidence, strengthening affection and loyalty.";case "family_duty_cooperation":return a+" and "+b+" cooperated on a family duty and helped one another.";case "shared_confidence":return a+" trusted "+b+" with a personal confidence and received a respectful hearing.";default:return a+" performed a practical favor for "+b+", who offered sincere thanks.";}
-        }
-
-        private static void HandleDirectorLifeChange(ReignDbConnection connection,double day,string eventId,string kind,string a,string b,Dictionary<string, object> pa,Dictionary<string, object> pb)
-        {
-            string lo=string.Compare(a,b,StringComparison.OrdinalIgnoreCase)<=0?a:b,hi=lo==a?b:a;long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            if(kind=="marital_separation")
-            {
-                double conflict=Math.Max(PairStoryKindIntensity(connection,a,b,"marital_conflict",day,false),60d);
-                ExecuteSql(connection,@"INSERT INTO life_change_readiness(readiness_id,kind,hero_a_id,hero_b_id,score,status,last_event_id,world_day,payload_json,updated_ts,created_day)
-VALUES($id,'divorce',$a,$b,$score,'separated',$event,$day,$payload,$ts,$day)
-ON CONFLICT(kind,hero_a_id,hero_b_id) DO UPDATE SET score=$score,status='separated',last_event_id=$event,world_day=$day,updated_ts=$ts;",new Dictionary<string, object>{{"id","ready_"+Guid.NewGuid().ToString("N")},{"a",lo},{"b",hi},{"event",eventId},{"day",day},{"score",conflict},{"payload",Json.Serialize(new Dictionary<string, object>{{"separatedDay",day},{"threadIntensity",conflict}})},{"ts",ts}});
-                Dictionary<string, object> ready=QuerySql(connection,"SELECT * FROM life_change_readiness WHERE kind='divorce' AND hero_a_id=$a AND hero_b_id=$b LIMIT 1;",new Dictionary<string, object>{{"a",lo},{"b",hi}}).FirstOrDefault();
-                if(ready!=null&&ReadString(ready,"status","")=="separated"&&day-ReadDouble(ready,"created_day",day)>=30d&&conflict>=80d)
-                {
-                    QueueDirectorAction(connection,"divorce",day,a,b,new Dictionary<string, object>{{"eventId",eventId},{"separatedDay",ReadDouble(ready,"created_day",day)}});
-                    ExecuteSql(connection,"UPDATE life_change_readiness SET status='triggered',updated_ts=$ts WHERE readiness_id=$id;",new Dictionary<string, object>{{"ts",ts},{"id",ReadString(ready,"readiness_id","")}});
-                }
-            }
         }
 
         private static Dictionary<string, object> ProcessMarriageSystem(ReignDbConnection connection,string campaignId,Dictionary<string, object> payload,double day,bool force)
@@ -1160,23 +1002,6 @@ VALUES($id,$route,$status,$a,$b,$ca,$cb,$la,$lb,$day,$score,$aa,$ba,$ra,$rb,$pay
             result["traits"] = traits;
             result["heroStringId"] = heroId;
             return result;
-        }
-
-        private static void TryCreateNpcAffairConception(ReignDbConnection connection,double day,string eventId,Dictionary<string, object> a,Dictionary<string, object> b)
-        {
-            Dictionary<string, object> mother=ReadBool(a,"isFemale",false)&&!ReadBool(b,"isFemale",false)?a:ReadBool(b,"isFemale",false)&&!ReadBool(a,"isFemale",false)?b:null;
-            Dictionary<string, object> father=mother==a?b:mother==b?a:null;
-            if(mother==null||father==null||ReadBool(mother,"isPregnant",false))return;
-            double age=ReadDouble(mother,"age",0d);if(age<18d||age>45d)return;
-            double chance=NpcConceptionChance(age,ReadInt(mother,"childrenCount",0));
-            string attemptId="npc_affair_"+eventId;double roll=StableUnit(attemptId);
-            ExecuteSql(connection,@"INSERT OR IGNORE INTO conception_attempts(attempt_id,source,event_id,mother_id,father_id,mother_age,chance,roll,success,world_day,payload_json,created_ts)
-VALUES($id,'npc_affair',$event,$mother,$father,$age,$chance,$roll,$success,$day,'{}',$ts);",new Dictionary<string, object>{{"id",attemptId},{"event",eventId},{"mother",ReadString(mother,"heroStringId","")},{"father",ReadString(father,"heroStringId","")},{"age",age},{"chance",chance},{"roll",roll},{"success",roll<chance?1:0},{"day",day},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});
-            if(roll>=chance)return;
-            string motherId=ReadString(mother,"heroStringId",""),fatherId=ReadString(father,"heroStringId",""),legal=FirstNonEmpty(ReadString(mother,"spouseId",""),fatherId),conception="conception_"+Guid.NewGuid().ToString("N");long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ExecuteSql(connection,@"INSERT INTO conceptions(conception_id,attempt_id,mother_id,biological_father_id,legal_father_id,conception_day,due_day,status,secrecy,payload_json,created_ts,updated_ts)
-VALUES($id,$attempt,$mother,$bio,$legal,$day,$due,'pending_game',$secrecy,'{}',$ts,$ts);",new Dictionary<string, object>{{"id",conception},{"attempt",attemptId},{"mother",motherId},{"bio",fatherId},{"legal",legal},{"day",day},{"due",day+36d},{"secrecy",legal==fatherId?0d:0.75d},{"ts",ts}});
-            QueueDirectorAction(connection,"start_conception",day,motherId,fatherId,new Dictionary<string, object>{{"conceptionId",conception},{"motherId",motherId},{"biologicalFatherId",fatherId},{"legalFatherId",legal},{"conceptionDay",day},{"dueDay",day+36d},{"secrecy",legal==fatherId?0d:0.75d}});
         }
 
         private static string QueueDirectorAction(ReignDbConnection connection,string type,double day,string actor,string target,Dictionary<string, object> payload)

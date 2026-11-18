@@ -2011,17 +2011,6 @@ namespace ReignBetaServer
             QueueCodexThreadCleanup(cleanupId, LoadSettings(), ref fallback);
         }
 
-        private static void ConfirmCodexThreadTurn(CodexRuntimeRequestContext context, bool accepted, bool substantiveChanged, long inputTokens)
-        {
-            if (context == null) return;
-            FinalizeCodexThreadRequest(new Dictionary<string, object>
-            {
-                ["accepted"] = accepted,
-                ["substantiveChanged"] = substantiveChanged,
-                ["usage"] = new Dictionary<string, object> { ["input_tokens"] = inputTokens }
-            }, context.ToDictionary());
-        }
-
         private static void InvalidateCodexThreads(string reason)
         {
             List<string> threadIds = CodexRuntimeThreads.InvalidateAll();
@@ -2265,13 +2254,6 @@ namespace ReignBetaServer
             if (requestedIndex < 0) return LowestCodexReasoningEffort(supported);
             string lower = order.Take(requestedIndex + 1).Reverse().FirstOrDefault(value => supported.Contains(value, StringComparer.OrdinalIgnoreCase));
             return string.IsNullOrWhiteSpace(lower) ? LowestCodexReasoningEffort(supported) : lower;
-        }
-
-        private static string ResolveDisabledReasoningEffort(string model, string requested)
-        {
-            bool known;
-            string reason;
-            return ResolveRequestedReasoningEffort(model, requested, true, out known, out reason);
         }
 
         private static CodexRuntimeRequestContext BuildCodexRuntimeSelfTestContext(string sessionId, string historySignature, string currentTurn)

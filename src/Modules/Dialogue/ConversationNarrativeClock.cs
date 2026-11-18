@@ -11,7 +11,6 @@ namespace ReignBetaServer
         // Retained historical clock fields never grant elapsed time. Campaign
         // snapshots include fractional days; ordinary native progression remains.
         private static Dictionary<string, object> CurrentNarrativeClock(Dictionary<string, object> payload) => TestDict();
-        private static double NarrativeEffectiveHour(Dictionary<string, object> payload, double nativeHour) => nativeHour;
         private static (double Hours, string Label) NarratedTimeAdvance(Dictionary<string, object> payload, double previousHour) => (0d, "");
         private static void PrepareNarrativeClock(ReignDbConnection connection, Dictionary<string, object> payload, string speaker)
         {

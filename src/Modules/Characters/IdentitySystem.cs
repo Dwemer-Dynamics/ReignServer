@@ -2913,14 +2913,6 @@ WHERE observer_id=$observer AND subject_id=$subject AND identity_state<>'verifie
             return true;
         }
 
-        private static string UpsertIdentityStateRank(string state)
-        {
-            if (string.Equals(state, "verified", StringComparison.OrdinalIgnoreCase)) return "3";
-            if (string.Equals(state, "disputed", StringComparison.OrdinalIgnoreCase)) return "2";
-            if (string.Equals(state, "claimed", StringComparison.OrdinalIgnoreCase)) return "1";
-            return "0";
-        }
-
         private static bool IdentityStateVerified(Dictionary<string, object> row)
         {
             return row != null && string.Equals(ReadString(row, "identity_state", ""), "verified", StringComparison.OrdinalIgnoreCase);

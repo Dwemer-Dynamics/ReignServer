@@ -217,7 +217,7 @@ the release lock. Downloading public files is a separate preparation step;
 the benchmark has no downloader, credentials or inference endpoint. For example:
 
 ```powershell
-$modelRoot = 'D:/Projects/Reign/.codex-build/my-memory-comparison/models'
+$modelRoot = Join-Path $PWD 'Reign/.codex-build/my-memory-comparison/models'
 $modelLock = Get-Content ReignServer/scripts/npc_memory_benchmark/models.json -Raw | ConvertFrom-Json
 foreach ($candidate in $modelLock.models) {
     $target = Join-Path $modelRoot $candidate.name

@@ -48,23 +48,26 @@ The default local server address during development is:
 http://127.0.0.1:5101
 ```
 
-Run deterministic verification without starting the web server:
+The server and `ReignVerification` are Linux (`linux-x64`) artifacts; there is
+no Windows server or `ReignVerification.exe` build. Run deterministic
+verification without starting the web server through the Reign MCP
+`reign_run_offline_verification` tool with a successful Release
+`validationRunId` (for example `tier=offline`).
+
+Drive a loaded campaign without MCM or screen automation with the Windows
+`ReignLiveTest.exe` controller from the same successful validation run (or the
+guarded MCP campaign-test tools). The retired `ReignBeta\server\app` path is
+not used:
 
 ```powershell
-..\ReignBeta\server\app\ReignVerification.exe --tier offline --json
-```
-
-Drive a loaded campaign without MCM or screen automation:
-
-```powershell
-..\ReignBeta\server\app\ReignLiveTest.exe arm --minutes 30
-..\ReignBeta\server\app\ReignLiveTest.exe status --json
+ReignLiveTest.exe arm --minutes 30
+ReignLiveTest.exe status --json
 ```
 
 Run a reusable versioned scenario (the installed controller defaults to headless presentation and guarded world effects):
 
 ```powershell
-..\ReignBeta\server\app\ReignLiveTest.exe run .\ReignLiveTest\scenarios\memory-cross-mode.json --timeout 1800
+ReignLiveTest.exe run .\ReignLiveTest\scenarios\memory-cross-mode.json --timeout 1800
 ```
 
 A `checkpoint` step pauses before the next command. After saving or reloading the same campaign, use `ReignLiveTest.exe resume --run <runId>`; the fresh game instance is adopted without replaying completed turns.

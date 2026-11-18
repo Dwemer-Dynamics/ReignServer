@@ -200,8 +200,8 @@ namespace ReignBetaServer
                     result[pair.Key] = pair.Value;
             }
             result["schema"] = OptionsSchema;
-            foreach (string key in OptionKeys) result[key] = ToBool(result, key, false);
-            result["fastMode"] = ToBool(result, "fastMode", false);
+            foreach (string key in OptionKeys) result[key] = ReadBool(result, key, false);
+            result["fastMode"] = ReadBool(result, "fastMode", false);
             result["reasoningMode"] = FirstNonEmpty(ToString(result, "reasoningMode"), "selective");
             result["reasoningEffort"] = ToString(result, "reasoningEffort");
             result["lookupMode"] = ToString(result, "lookupMode").Equals("direct", StringComparison.OrdinalIgnoreCase) ? "direct" : "auto";
@@ -444,7 +444,7 @@ namespace ReignBetaServer
                 Requested = requested,
                 Diagnostics = BuildParallelPreparationPlan(requested, consistentSnapshot, characterInitialized, requiredStateUpdatesComplete, ordered.Select(x => x.Id))
             };
-            bool allowed = ToBool(result.Diagnostics, "allowed", false);
+            bool allowed = ReadBool(result.Diagnostics, "allowed", false);
             if (!allowed)
             {
                 result.FellBackToSequential = true;
@@ -677,24 +677,9 @@ namespace ReignBetaServer
             return value as string ?? Convert.ToString(value) ?? "";
         }
 
-        private static bool ToBool(Dictionary<string, object> source, string key, bool fallback)
-        {
-            if (source == null || !source.TryGetValue(key, out object value) || value == null) return fallback;
-            if (value is bool boolean) return boolean;
-            return bool.TryParse(Convert.ToString(value), out bool parsed) ? parsed : fallback;
-        }
-
         private static string ToString(Dictionary<string, object> source, string key)
         {
             return ReadString(source, key);
-        }
-
-        private static IEnumerable<Dictionary<string, object>> AsDictionaryList(object raw)
-        {
-            if (raw is IEnumerable<Dictionary<string, object>> typed) return typed;
-            if (raw is IEnumerable enumerable)
-                return enumerable.OfType<Dictionary<string, object>>();
-            return Enumerable.Empty<Dictionary<string, object>>();
         }
     }
 

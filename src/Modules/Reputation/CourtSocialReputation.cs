@@ -275,12 +275,6 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;");
                 string.Equals(ReadString(x, "id", ""), id, StringComparison.OrdinalIgnoreCase));
         }
 
-        private static void SetCourtCounterparts(List<object> tags, string id, params string[] counterparts)
-        {
-            Dictionary<string, object> item = CourtCatalogTag(tags, id);
-            if (item != null) item["counterpartTagIds"] = counterparts.Cast<object>().ToList();
-        }
-
         private static void AddCourtArchetype(
             List<object> archetypes,
             Action<string, string, string, double, string, string, string, bool> addArchetype,

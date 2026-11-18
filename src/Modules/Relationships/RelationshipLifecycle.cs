@@ -8,7 +8,6 @@ namespace ReignBetaServer
     internal static partial class Program
     {
         private const int RelationshipLifecycleVersion = 6;
-        private const int MbtiNativeRelationSyncTolerance = 5;
         private const int PostgreSqlRelationshipLifecycleSchemaRevision = 8;
         private const string PostgreSqlRelationshipLifecycleShapeMarker =
             "postgresql_relationship_lifecycle_schema_shape";
@@ -1291,112 +1290,6 @@ organic_marriage_colocated_days=$marriageColocatedDays,last_processed_day=$day,v
                 ["sharedTag"] = divorced ? "divorced" : marriedToEachOther ? "married"
                     : affair ? "lovers_affair" : lovers ? "lovers"
                     : SharedRelationshipTag(campaignId, pair.PairKey, affinityAB, affinityBA, heroA, heroB)
-            };
-        }
-
-        private static Dictionary<string, object> ApplyFiveDayRelationshipDecay(ReignDbConnection connection,
-            string campaignId, string timelineId, int day)
-        {
-            if (ReignPostgreSqlDialect.IsPostgreSql(connection))
-                return ApplyPostgreSqlFiveDayRelationshipDecay(connection,
-                    campaignId, timelineId, day);
-
-            int period = Math.Max(0, day / 5);
-            int pairsDecayed = 0, directionsDecayed = 0, nativeQueued = 0, loversEnded = 0;
-            HashSet<string> courtPopularitySubjects = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            // Opening-seed rows from older builds did not carry a decay
-            // checkpoint. Establish the current checkpoint in one set-based
-            // update. The former per-row loop generated more than ten thousand
-            // PostgreSQL commands on the first campaign day.
-            int missingDecayCheckpoints = ReadInt(QuerySql(connection, @"
-SELECT COUNT(*) AS count FROM relationship_pair_chemistry
-WHERE last_decay_period<0
-AND (affinity_a_to_b<>0 OR affinity_b_to_a<>0);")
-                .FirstOrDefault(), "count", 0);
-            if (missingDecayCheckpoints > 0)
-                ExecuteSql(connection, @"
-UPDATE relationship_pair_chemistry
-SET last_decay_period=$period,updated_ts=$ts
-WHERE last_decay_period<0
-AND (affinity_a_to_b<>0 OR affinity_b_to_a<>0);",
-                    new Dictionary<string, object>
-                    {
-                        ["period"] = period, ["ts"] = ts
-                    });
-            List<Dictionary<string, object>> rows = QuerySql(connection, @"
-SELECT * FROM relationship_pair_chemistry
-WHERE last_decay_period>=0 AND last_decay_period<$period
-AND (affinity_a_to_b<>0 OR affinity_b_to_a<>0);",
-                new Dictionary<string, object> { ["period"] = period });
-            foreach (Dictionary<string, object> row in rows)
-            {
-                int previousPeriod = ReadInt(row, "last_decay_period", -1);
-                int steps = Math.Max(0, period - previousPeriod);
-                if (steps == 0) continue;
-                int oldAB = ReadInt(row, "affinity_a_to_b", 0);
-                int oldBA = ReadInt(row, "affinity_b_to_a", 0);
-                int affinityAB = MoveTowardZero(oldAB, steps);
-                int affinityBA = MoveTowardZero(oldBA, steps);
-                string heroA = ReadString(row, "hero_a_id", "");
-                string heroB = ReadString(row, "hero_b_id", "");
-                int effectiveAB = Clamp(affinityAB + ReadInt(ResolveObserverPublicStanding(connection,
-                    campaignId, timelineId, heroA, heroB), "value", 0), -100, 100);
-                int effectiveBA = Clamp(affinityBA + ReadInt(ResolveObserverPublicStanding(connection,
-                    campaignId, timelineId, heroB, heroA), "value", 0), -100, 100);
-                directionsDecayed += (oldAB == affinityAB ? 0 : 1) + (oldBA == affinityBA ? 0 : 1);
-                string pairKey = ReadString(row, "pair_key", "");
-                if (CourtPopularityQualification(oldAB) != CourtPopularityQualification(affinityAB))
-                    courtPopularitySubjects.Add(heroB);
-                if (CourtPopularityQualification(oldBA) != CourtPopularityQualification(affinityBA))
-                    courtPopularitySubjects.Add(heroA);
-                string tagAB = DirectionalRelationshipTag(campaignId, pairKey, "a_to_b", affinityAB, affinityBA);
-                string tagBA = DirectionalRelationshipTag(campaignId, pairKey, "b_to_a", affinityBA, affinityAB);
-                Dictionary<string, object> lifecycle = QuerySql(connection,
-                    "SELECT * FROM relationship_pair_lifecycle WHERE pair_key=$pair LIMIT 1;",
-                    new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
-                string sharedTag = ReadString(row, "shared_tag", "");
-                if (lifecycle != null && ReadInt(lifecycle, "lover_active", 0) == 1
-                    && (affinityAB < 30 || affinityBA < 30))
-                {
-                    ExecuteSql(connection, @"UPDATE relationship_pair_lifecycle SET
-lover_active=0,affair_active=0,updated_ts=$ts WHERE pair_key=$pair;",
-                        new Dictionary<string, object> { ["ts"] = ts, ["pair"] = pairKey });
-                    AmbientPairContext pair = new AmbientPairContext
-                    {
-                        PairKey = pairKey, HeroAId = heroA, HeroBId = heroB
-                    };
-                    RecordRelationshipIncident(connection, pair, "lovers_ended", day,
-                        "Five-day relationship decay lowered at least one lover below thirty.",
-                        new Dictionary<string, object> { ["affinityAToB"] = affinityAB, ["affinityBToA"] = affinityBA });
-                    loversEnded++;
-                    sharedTag = SharedRelationshipTag(campaignId, pairKey, affinityAB, affinityBA,
-                        new Dictionary<string, object>(), new Dictionary<string, object>());
-                }
-                ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
-affinity_a_to_b=$ab,affinity_b_to_a=$ba,effective_affinity_a_to_b=$ab,effective_affinity_b_to_a=$ba,
-tag_a_to_b=$tagAB,tag_b_to_a=$tagBA,shared_tag=$shared,
-native_incident_offset=0,last_decay_period=$period,
-state_revision=state_revision+1,updated_ts=$ts WHERE pair_key=$pair;",
-                    new Dictionary<string, object>
-                    {
-                        ["ab"] = affinityAB, ["ba"] = affinityBA, ["tagAB"] = tagAB, ["tagBA"] = tagBA,
-                        ["shared"] = sharedTag, ["period"] = period,
-                        ["ts"] = ts, ["pair"] = pairKey
-                    });
-                row["affinity_a_to_b"] = affinityAB;
-                row["affinity_b_to_a"] = affinityBA;
-                if (RefreshEffectivePairProjection(connection, campaignId, timelineId,
-                    row, day, "five_day_decay_toward_zero"))
-                    nativeQueued++;
-                pairsDecayed++;
-            }
-            return new Dictionary<string, object>
-            {
-                ["period"] = period, ["pairsDecayed"] = pairsDecayed,
-                ["directionsDecayed"] = directionsDecayed, ["nativeChangesQueued"] = nativeQueued,
-                ["loversEnded"] = loversEnded,
-                ["courtPopularitySubjectIds"] = courtPopularitySubjects.OrderBy(x => x).Cast<object>().ToList()
             };
         }
 

@@ -113,11 +113,5 @@ FROM political_pressure_activity WHERE campaign_id=$campaign AND timeline_id=$ti
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId });
             }
         }
-
-        private static string RoyalCouncilStableToken(string value)
-        {
-            string token = new string((value ?? string.Empty).Where(char.IsLetterOrDigit).Take(64).ToArray());
-            return string.IsNullOrWhiteSpace(token) ? "advisor" : token;
-        }
     }
 }

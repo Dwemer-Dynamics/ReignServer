@@ -95,22 +95,6 @@ pair_key TEXT PRIMARY KEY,seeded_day REAL NOT NULL DEFAULT 0,created_ts INTEGER 
             return genuine >= strategic + 15d ? "sincere" : strategic >= genuine + 15d ? "calculated" : "mixed";
         }
 
-        private static Dictionary<string, object> CompactStoryThread(Dictionary<string, object> thread)
-        {
-            if (thread == null || thread.Count == 0 || ReadString(thread, "status", "") != "active"
-                || ReadDouble(thread, "effectiveIntensity", 0d) <= 0d) return new Dictionary<string, object>();
-            return new Dictionary<string, object>
-            {
-                ["kind"] = ReadString(thread, "kind", ""),
-                ["route"] = ReadString(thread, "route", ""),
-                ["motiveChannel"] = ReadString(thread, "motiveChannel", ""),
-                ["status"] = "active",
-                ["intensity"] = Math.Round(ReadDouble(thread, "effectiveIntensity", 0d), 2),
-                ["stage"] = ReadString(thread, "stage", ""),
-                ["lastEventDay"] = ReadDouble(thread, "last_event_day", 0d)
-            };
-        }
-
         private static Dictionary<string, object> LoadPairStorySummary(ReignDbConnection connection, string a, string b, double day)
         {
             EnsureDirectorPairThreadsSeeded(connection, a, b, day);
@@ -301,19 +285,6 @@ VALUES($id,$subject,$target,'feud','active',75,80,'Repeated political conflict e
         {
             Dictionary<string,object> ab=LoadStoryThread(connection,a,b,kind,day),ba=LoadStoryThread(connection,b,a,kind,day);
             return Math.Max(ReadDouble(ab,"continuationMultiplier",1d),ReadDouble(ba,"continuationMultiplier",1d));
-        }
-
-        private static double ThirdPartyCourtshipArrangementMultiplier(ReignDbConnection connection,string heroId,string proposedSpouseId,double day)
-        {
-            double strongest=0d;
-            foreach(Dictionary<string,object> row in QuerySql(connection,
-                "SELECT target_id FROM relationship_story_threads WHERE subject_id=$subject AND kind='romance' AND route='courtship' AND status='active' AND target_id<>$proposed;",
-                new Dictionary<string,object>{{"subject",heroId},{"proposed",proposedSpouseId??""}}))
-            {
-                string partner=ReadString(row,"target_id","");
-                strongest=Math.Max(strongest,PairStoryKindIntensity(connection,heroId,partner,"romance",day,true));
-            }
-            return strongest>=75d?0.50d:strongest>=50d?0.75d:1d;
         }
 
         private static double ArrangedMarriageCourtshipMultiplier(ReignDbConnection connection,string a,string b,double day)

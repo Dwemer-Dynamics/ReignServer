@@ -548,23 +548,6 @@ WHERE t.session_id=$session AND m.owner_id=$npc AND m.status<>'consolidated';",
             }
         }
 
-        private static int NpcDialogueAuditMaxSceneLaneCount(string campaignId, string npcId, string playerId)
-        {
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-            {
-                return ReadInt(QuerySql(connection, @"SELECT COUNT(*) count FROM summaries WHERE owner_id=$npc AND summary_type='scene'
-AND participants_json LIKE $player GROUP BY memory_lane ORDER BY count DESC LIMIT 1;",
-                    new Dictionary<string, object> { ["npc"] = npcId, ["player"] = "%" + playerId + "%" }).FirstOrDefault(), "count", 0);
-            }
-        }
-
-        private static bool NpcDialogueAuditArcExists(string campaignId, string npcId, string playerId)
-        {
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-                return ReadInt(QuerySql(connection, "SELECT COUNT(*) count FROM summaries WHERE owner_id=$npc AND summary_type='arc' AND participants_json LIKE $player;",
-                    new Dictionary<string, object> { ["npc"] = npcId, ["player"] = "%" + playerId + "%" }).FirstOrDefault(), "count", 0) > 0;
-        }
-
         private static bool NpcDialoguePromptContainsContext(string promptJson, string contextPullId)
         {
             string prompt = promptJson ?? "";

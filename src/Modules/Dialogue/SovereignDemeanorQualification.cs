@@ -723,14 +723,5 @@ namespace ReignBetaServer
                 };
             }
         }
-
-        private static int SovereignDemeanorTargetTier(
-            string personality, int maximum)
-        {
-            int desired = personality == "cautious" ? 1
-                : personality == "bold" ? 2
-                : personality == "principled" ? 2 : 4;
-            return Math.Min(maximum, desired);
-        }
     }
 }

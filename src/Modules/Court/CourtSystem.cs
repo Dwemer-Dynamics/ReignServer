@@ -841,7 +841,7 @@ VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$
         {
             foreach(Dictionary<string,object> row in QuerySql(connection,"SELECT * FROM intelligence_operations WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='active' AND due_day<=$day;",new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"day",ctx.WorldDay}}))
             {
-                string id=ReadString(row,"operation_id","");double risk=ReadDouble(row,"risk",0d);Dictionary<string,object> operationPayload=TryParseJsonObject(ReadString(row,"payload_json","{}"))??new Dictionary<string,object>();double officerReliability=ClampDouble(ReadDouble(operationPayload,"validatedOfficerReportReliability",0.5d),0.2d,0.95d);double roll=CourtStableUnit(ctx.CampaignId+"|"+ctx.TimelineId+"|"+id+"|exposure");bool exposed=roll<risk;double confidence=ClampDouble((0.45d+(1d-risk)*0.45d)*(0.65d+officerReliability*0.35d),0.05d,0.95d);string status=exposed?"exposed":"completed";
+                string id=ReadString(row,"operation_id","");double risk=ReadDouble(row,"risk",0d);Dictionary<string,object> operationPayload=TryParseJsonObject(ReadString(row,"payload_json","{}"))??new Dictionary<string,object>();double officerReliability=ClampDouble(ReadDouble(operationPayload,"validatedOfficerReportReliability",0.5d),0.2d,0.95d);double roll=StableUnit(ctx.CampaignId+"|"+ctx.TimelineId+"|"+id+"|exposure");bool exposed=roll<risk;double confidence=ClampDouble((0.45d+(1d-risk)*0.45d)*(0.65d+officerReliability*0.35d),0.05d,0.95d);string status=exposed?"exposed":"completed";
                 Dictionary<string,object> result=new Dictionary<string,object>{{"reportType",ReadString(row,"operation_type","")},{"targetType",ReadString(row,"target_type","")},{"targetId",ReadString(row,"target_id","")},{"confidence",confidence},{"provenance","appointed_spymaster_operation"},{"note","This report is a source-limited claim, not canonical secret truth."}};
                 ExecuteSql(connection,"UPDATE intelligence_operations SET status=$status,confidence=$confidence,source_chain_json=$sources,result_json=$result,is_exposed=$exposed,revision=revision+1,updated_ts=$ts WHERE operation_id=$id;",new Dictionary<string,object>{{"status",status},{"confidence",confidence},{"sources",Json.Serialize(new ArrayList{"court_spymaster","operation:"+id})},{"result",Json.Serialize(result)},{"exposed",exposed?1:0},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id}});
             }
@@ -970,7 +970,6 @@ VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$
             using(SHA256 sha=SHA256.Create())return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(canonical??"{}"))).Replace("-","").ToLowerInvariant();
         }
         private static bool SameCourtText(string a,string b){return string.Equals(a??"",b??"",StringComparison.OrdinalIgnoreCase);}
-        private static double CourtStableUnit(string seed){using(SHA256 sha=SHA256.Create()){byte[] hash=sha.ComputeHash(Encoding.UTF8.GetBytes(seed??""));ulong value=BitConverter.ToUInt64(hash,0);return value/(double)ulong.MaxValue;}}
 
 #if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunCourtSelfTests()
