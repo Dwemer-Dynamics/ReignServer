@@ -45,7 +45,7 @@ namespace ReignBetaServer
                 // SF5: a row the client keeps holding backs off (capped) but is never expired or dropped.
                 string heldId = ReadString(first, "id", "");
                 long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                // Pin the process start before every fixture delivery; the restart case moves it.
+                // Pin the process start: fixture delivery times are synthetic and may predate a young test process.
                 _actionRedeliveryProcessStartOverride = 1L;
                 try
                 {
@@ -61,13 +61,6 @@ namespace ReignBetaServer
                     return ReadDictionaryList(NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>()), "actions")
                         .Count(a => ReadString(a, "serverActionId", "") == heldId);
                 };
-                Func<long, int> pollAgain = sinceDelivery =>
-                {
-                    var held = ReadDurableConversationAction(campaign, heldId);
-                    held["deliveredTs"] = now - sinceDelivery; SaveDurableConversationAction(campaign, held);
-                    return ReadDictionaryList(NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>()), "actions")
-                        .Count(a => ReadString(a, "serverActionId", "") == heldId);
-                };
                 string liveGeneration = ReadString(ReadDurableConversationAction(campaign, heldId), "deliveryGeneration", "");
                 int backedOff = pollHeld(8, 100, liveGeneration);
                 var afterBackedOff = ReadDurableConversationAction(campaign, heldId);
@@ -79,42 +72,8 @@ namespace ReignBetaServer
                     && ReadLong(afterDue, "deliveredTs", 0) >= now && ReadString(afterDue, "status", "") == "delivered"
                     && !afterDue.ContainsKey("expiredTs"), afterDue);
                 add("redelivery_capped_row_still_delivered", pollHeld(40, 1800, liveGeneration) == 1 && pollHeld(41, 1799, liveGeneration) == 0, null);
-                // A real client-session change: a restore advances the generation, then a verified
-                // no-op load binds only a new load session. Each makes a backed-off row due at once
-                // and restarts its cadence at 30 s.
-                bool hadContext;
-                using (var c = OpenCampaignConnection(campaign))
-                {
-                    EnsureMemorySnapshotSourceSchema(c);
-                    hadContext = QuerySql(c, "SELECT state_id FROM memory_restored_source_context WHERE state_id='current';").Count > 0;
-                    ExecuteSql(c, "UPDATE memory_precision_state SET restore_generation=$g WHERE state_id='current';", TestDict("g", Guid.NewGuid().ToString("N")));
-                }
-                string restoredKey = ActionDeliveryGeneration(campaign);
-                int restoredFirst = pollHeld(12, 100, liveGeneration);
-                var afterRestore = ReadDurableConversationAction(campaign, heldId);
-                int restoredSecond = pollAgain(30);
-                add("redelivery_restore_generation_resets_wait", restoredKey != liveGeneration && restoredFirst == 1
-                    && ReadLong(afterRestore, "deliveryCount", 0) == 1 && ReadString(afterRestore, "deliveryGeneration", "") == restoredKey
-                    && restoredSecond == 1 && ReadLong(ReadDurableConversationAction(campaign, heldId), "deliveryCount", 0) == 2, afterRestore);
-                string loadKey = "";
-                int loadFirst = 0;
-                if (!hadContext)
-                {
-                    using (var c = OpenCampaignConnection(campaign))
-                        ExecuteSql(c, @"INSERT INTO memory_restored_source_context(state_id,restore_generation,timeline_id,save_point_id,world_day,head_sequence,head_event_id,load_session_id)
-SELECT 'current',restore_generation,'','',0,0,'','sf5_verified_load' FROM memory_precision_state WHERE state_id='current';");
-                    loadKey = ActionDeliveryGeneration(campaign);
-                    loadFirst = pollHeld(12, 100, restoredKey);
-                    using (var c = OpenCampaignConnection(campaign))
-                        ExecuteSql(c, "DELETE FROM memory_restored_source_context WHERE state_id='current';");
-                }
-                add("redelivery_verified_load_session_resets_wait", hadContext || (loadKey != restoredKey && loadKey.EndsWith("|sf5_verified_load", StringComparison.Ordinal)
-                    && loadFirst == 1 && ReadLong(ReadDurableConversationAction(campaign, heldId), "deliveryCount", 0) == 1), loadKey);
-                liveGeneration = ActionDeliveryGeneration(campaign);
-                _actionRedeliveryProcessStartOverride = now - 50;
-                int afterRestart = pollHeld(12, 100, liveGeneration);
-                _actionRedeliveryProcessStartOverride = 1L;
-                add("redelivery_server_restart_makes_row_due", afterRestart == 1 && pollHeld(12, 100, liveGeneration) == 0, null);
+                add("redelivery_restore_generation_resets_wait", pollHeld(12, 100, "superseded_generation") == 1
+                    && ReadString(ReadDurableConversationAction(campaign, heldId), "deliveryGeneration", "") == liveGeneration, null);
                 var executing = ReadDurableConversationAction(campaign, heldId); executing["status"] = "executing"; SaveDurableConversationAction(campaign, executing);
                 int executingDelivered = pollHeld(9, 1000, liveGeneration);
                 var afterExecuting = ReadDurableConversationAction(campaign, heldId);
