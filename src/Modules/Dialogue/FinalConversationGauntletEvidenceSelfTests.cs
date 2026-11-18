@@ -80,7 +80,7 @@ namespace ReignBetaServer
                         ["actionArguments"] = new Dictionary<string, object>()
                     }
                 });
-                MethodInfo build = typeof(Program).GetMethod(
+                MethodInfo build = typeof(DialogueService).GetMethod(
                     "BuildFinalGauntletEvidenceBundle",
                     BindingFlags.Static | BindingFlags.NonPublic);
                 Dictionary<string, object> bundle = build?.Invoke(

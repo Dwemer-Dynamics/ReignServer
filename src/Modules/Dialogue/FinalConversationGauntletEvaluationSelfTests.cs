@@ -17,7 +17,7 @@ namespace ReignBetaServer
                 {
                     ["id"] = id, ["passed"] = passed, ["message"] = message
                 });
-            Type program = typeof(Program);
+            Type program = typeof(DialogueService);
             BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic;
             MethodInfo evaluate = program.GetMethod(
                 "EvaluateFinalGauntletCase", flags);
