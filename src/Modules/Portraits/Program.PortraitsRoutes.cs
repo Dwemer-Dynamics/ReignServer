@@ -8,7 +8,6 @@ namespace ReignBetaServer
     internal static partial class Program
     {
         // HTTP routes owned by the Portraits module, in their former router order (see RouteTable.cs).
-        // Legacy(...) routes are still served by the if/else chain in HandleClient.
         private static void RegisterPortraitsRoutes(ReignRouteTable routes)
         {
             routes.PostPrefix("/chat-view/", StringComparison.Ordinal, request => ChatViewApi(request.JsonBody, request.Path.Substring("/chat-view/".Length)));

@@ -89,10 +89,10 @@ The accept loop hands each connection to `Task.Run(() => HandleClient(client))`,
 
 `HandleClient` (`Platform/Program.cs`) dispatches through the route table in `Platform/RouteTable.cs`. Each module
 registers its routes in `src/Modules/<Module>/Program.<Module>Routes.cs`, giving the method, the exact path or prefix
-(with its comparison), the handler and the campaign-gate policy, and the first match in registration order wins. Routes
-registered as `Legacy(...)` (the `/tests/*` and `/verification/*` routes, the module routers below, and routes whose
-router text is pinned by source contracts) are still served by the remaining `if / else if` chain in `HandleClient`,
-which ends in the 404 response. `RouteTableContractSelfTests.cs` (interaction architecture suite) checks the table
+(with its comparison), the handler and the campaign-gate policy, and the first match in registration order wins. Only
+`GET /rebellions/query` and the Spymaster router (`TryHandleSpymasterRoute`) are still registered as `Legacy(...)` and
+served by the short remaining `if / else if` chain in `HandleClient`, which ends in the 404 response; they move when
+those modules are converted. `RouteTableContractSelfTests.cs` (interaction architecture suite) checks the table
 against the pre-table route inventory, gate decisions and precedence, and checks that every `Legacy` route still has its
 chain branch. Per request `HandleClient`:
 
@@ -100,9 +100,7 @@ chain branch. Per request `HandleClient`:
    buffered, any campaign lock is taken or any route runs.
 2. Refuses a client whose `X-Reign-Protocol` header names a different protocol than
    `ReignInstallation.SupportedProtocol`.
-3. Calls `EnterCampaignRequestAccess(path)`, then dispatches. A few module routers are called from the legacy chain:
-   `TryHandleSpymasterRoute` (Spymaster), `TryHandleArrestRoute` (WorldSimulation), `TryHandleReputationRoute`
-   (Reputation). Prefix routes forward to module dispatchers such as `ChatViewApi`, `NpcLivesApi`,
+3. Calls `EnterCampaignRequestAccess(path)`, then dispatches. Prefix routes forward to module dispatchers such as `ChatViewApi`, `NpcLivesApi`,
    `CommunicationApi`, `PartyBanterApi`, `OutfitChangeApi` and `RulerRelationsApi`.
 4. Writes the JSON response, logs it, releases the campaign access, deletes any unconsumed upload and returns the
    ingress reservations in `finally`.
@@ -208,8 +206,8 @@ The default build is unchanged and still ships everything above. Building with
   `Dialogue/PersonalGossipCompositionProbe.cs`.
 - `#if !REIGN_EXCLUDE_VERIFICATION` guards the product call sites that reach them: the `Run*SelfTests` aggregators
   inside product files, the `--run-*` / `--cancel-verification` dispatch in `RunServer` (the flavour refuses those
-  flags with exit code 1 instead of starting the server), the `/tests/*` and `/verification/*` `Legacy(...)`
-  registrations together with their `HandleClient` branches, and the module self-test routes (`/court/tests`,
+  flags with exit code 1 instead of starting the server), the `/tests/*` and `/verification/*` route
+  registrations, and the module self-test routes (`/court/tests`,
   `/court/foreign-ambassadors/test`, `/rebellions/tests`, `/world-history/tests`, `/world-test/tests`,
   `/arrests/test/contracts`, `/gossip/test`). Those routes take the normal "Unknown route." 404 path.
 - The live-test bridge (`WorldSimulation/LiveInteractionTest.cs`), the final conversation gauntlet store and provider
@@ -285,8 +283,8 @@ document in the same PR as any step that lands.
    Landed as an opt-in: `ReignExcludeVerification=true` builds the test-free flavour (see
    [Test-free build flavour](#test-free-build-flavour-opt-in)); the default build keeps everything.
 2. A route table: per-module route registrations (method, path, handler, gate policy) replace the `HandleClient`
-   chain, and gate exemptions are declared on the routes instead of in a separate list. Partly landed: the table and
-   gate declarations exist and serve most routes; the `Legacy(...)` routes still use the chain.
+   chain, and gate exemptions are declared on the routes instead of in a separate list. Landed except the
+   `Legacy(...)` Rebellion query route and Spymaster router, which still use the short chain.
 3. Shared helpers (`ReadString`, `TestDict`, `QuerySql`, `ExecuteSql` and similar) move to a static `ServerCore`.
 4. The `partial class Program` is split per module into `<Module>Service` and `<Module>Store` classes, leaf modules
    first.

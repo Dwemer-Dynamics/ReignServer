@@ -8,7 +8,6 @@ namespace ReignBetaServer
     internal static partial class Program
     {
         // HTTP routes owned by the Relationships module, in their former router order (see RouteTable.cs).
-        // Legacy(...) routes are still served by the if/else chain in HandleClient.
         private static void RegisterRelationshipsRoutes(ReignRouteTable routes)
         {
             routes.Post("/political-pressure/evaluate", request => EvaluatePoliticalIncidentsCombined(request.JsonBody));
@@ -44,8 +43,11 @@ namespace ReignBetaServer
             routes.Post("/relationships/ambient/native_sync/report", request => RelationshipNativeSyncReportApi(request.JsonBody));
             routes.Post("/relationships/ambient/native_sync/pull", request => RelationshipNativeTargetPullApi(request.JsonBody));
             routes.Post("/relationships/ambient/native_sync/receipts", request => RelationshipNativeTargetReceiptsApi(request.JsonBody));
-            routes.Legacy("GET", "/relationships/ambient/status");
-            routes.Legacy("POST", "/relationships/ambient/status");
+            {
+                Func<HttpRequest, object> handler = request => MbtiRelationshipStatusApi(RelationshipStatusPayload(request));
+                routes.Get("/relationships/ambient/status", handler);
+                routes.Post("/relationships/ambient/status", handler);
+            }
             routes.Post("/relationships/simulation/census/status", request => RetiredRelationshipMechanicResult("legacy_relationship_simulation"));
             routes.Post("/relationships/simulation/start", request => RetiredRelationshipMechanicResult("legacy_relationship_simulation"));
             routes.Post("/relationships/simulation/stop", request => RetiredRelationshipMechanicResult("legacy_relationship_simulation"));

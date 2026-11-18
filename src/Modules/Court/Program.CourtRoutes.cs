@@ -8,7 +8,6 @@ namespace ReignBetaServer
     internal static partial class Program
     {
         // HTTP routes owned by the Court module, in their former router order (see RouteTable.cs).
-        // Legacy(...) routes are still served by the if/else chain in HandleClient.
         private static void RegisterCourtRoutes(ReignRouteTable routes)
         {
             routes.Post("/court/session/open", request => CourtSessionOpenApi(request.JsonBody));
@@ -23,7 +22,7 @@ namespace ReignBetaServer
             routes.Post("/court/offices/assign", request => CapitalCourtApi(request.JsonBody, CourtOfficeAssignApi));
             routes.Post("/court/offices/dismiss", request => CapitalCourtApi(request.JsonBody, CourtOfficeDismissApi));
             routes.Post("/court/royal-council/respond", request => CapitalCourtApi(request.JsonBody, body => RunInteractiveRequest(() => RoyalCouncilRespond(body))));
-            routes.Legacy("POST", "/court/ruler-petition/respond");
+            routes.Post("/court/ruler-petition/respond", request => CapitalCourtApi(request.JsonBody, body => RunInteractiveRequest(() => RulerPetitionRespond(body))));
             routes.Post("/court/life/scene", request => CapitalCourtApi(request.JsonBody, body => RunInteractiveRequest(() => CourtLifeScene(body))));
             routes.Post("/court/life/respond", request => CapitalCourtApi(request.JsonBody, body => RunInteractiveRequest(() => CourtLifeRespond(body))));
             routes.Get("/court/patronage/public-history", request => PatronagePublicHistoryApi(request.Query));
@@ -45,7 +44,7 @@ namespace ReignBetaServer
             routes.Post("/court/foreign-ambassadors/tick", request => ForeignAmbassadorTickApi(request.JsonBody));
             routes.Post("/court/foreign-ambassadors/referrals/respond", request => CapitalCourtApi(request.JsonBody, ForeignAmbassadorReferralRespondApi));
 #if !REIGN_EXCLUDE_VERIFICATION
-            routes.Legacy("POST", "/court/foreign-ambassadors/test");
+            routes.Post("/court/foreign-ambassadors/test", request => CapitalAmbassadorTestApi(request.JsonBody));
 #endif
             routes.Post("/court/intelligence/start", request => CapitalCourtApi(request.JsonBody, CourtIntelligenceStartApi));
             routes.Post("/court/intelligence/cancel", request => CapitalCourtApi(request.JsonBody, CourtIntelligenceCancelApi));

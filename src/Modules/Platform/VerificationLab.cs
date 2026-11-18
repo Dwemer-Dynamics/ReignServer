@@ -1736,7 +1736,7 @@ namespace ReignBetaServer
             AddVerificationCheck(checks, "contracts.social_event_persistent_group", "conversation_modes", persistentGroupValid,
                 persistentGroupValid ? "Five-person conversations persist across phases, track ignored participants, and advance after seven completed exchanges." : "Persistent social-event group contract is incomplete.", null);
 
-            bool groupTurnServerValid = socialEventServerText.Contains("/events/social/turn")
+            bool groupTurnServerValid = ServerRoutes.Value.Resolve("POST", "/events/social/turn")?.Handler != null
                 && socialEventTurnServerText.Contains("ResolveSocialEventAddressedHeroes")
                 && socialEventTurnServerText.Contains("EnsureSocialTurnPlayerTranscript")
                 && socialEventTurnServerText.Contains("EvaluateSocialEventJoin")
@@ -1770,7 +1770,7 @@ namespace ReignBetaServer
             string diplomacyClientText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             string worldTestClientText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             string settingsText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
-            bool randomDiplomacyDebugValid = socialEventServerText.Contains("/diplomacy/debug/random-event")
+            bool randomDiplomacyDebugValid = ServerRoutes.Value.Resolve("POST", "/diplomacy/debug/random-event")?.Handler != null
                 && diplomacyDebugServerText.Contains("payload[\"debugInitiativeTest\"] = true")
                 && diplomacyDebugServerText.Contains("EvaluateWorldDiplomacy(payload)")
                 && diplomacyDirectorText.Contains("DirectorInitiativeAttempt")
@@ -2843,10 +2843,13 @@ namespace ReignBetaServer
 
 			string serverProgramPath = VerificationSourceLocator.ResolveUnique(serverRoot, "Program.cs", "src");
 			string serverProgramText = File.Exists(serverProgramPath) ? File.ReadAllText(serverProgramPath) : "";
+			// The /identity/synchronize registration lives in the Platform route file (RouteTable.cs).
+			string platformRoutesPath = VerificationSourceLocator.ResolveUnique(serverRoot, "Program.PlatformRoutes.cs", "src");
+			string platformRoutesText = File.Exists(platformRoutesPath) ? File.ReadAllText(platformRoutesPath) : "";
 			bool portraitRosterEquipmentPersistenceValid = serverProgramText.Contains("[\"civilianEquipment\"] = CompactPortraitEquipment(character)", StringComparison.Ordinal)
 				&& serverProgramText.Contains("ReadInt(existing, \"version\", 0) >= 3", StringComparison.Ordinal)
 				&& serverProgramText.Contains("[\"version\"] = 3", StringComparison.Ordinal)
-				&& serverProgramText.Contains("IdentitySynchronizeWithPortraitRosterUpgradeApi(request.JsonBody)", StringComparison.Ordinal)
+				&& platformRoutesText.Contains("IdentitySynchronizeWithPortraitRosterUpgradeApi(request.JsonBody)", StringComparison.Ordinal)
 				&& serverProgramText.Contains("ReadInt(savedRoster, \"version\", 0) < 3", StringComparison.Ordinal);
 			AddVerificationCheck(checks, "contracts.native_portrait_roster_equipment_persistence", "portraits_images", portraitRosterEquipmentPersistenceValid,
 				portraitRosterEquipmentPersistenceValid

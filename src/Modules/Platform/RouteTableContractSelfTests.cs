@@ -605,9 +605,7 @@ namespace ReignBetaServer
                 conditions.Add(match.Groups["condition"].Value);
             Dictionary<string, string> routers = new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                ["TryHandleSpymasterRoute"] = "Program.SpymasterRoutes.cs",
-                ["TryHandleArrestRoute"] = "ArrestSystem.cs",
-                ["TryHandleReputationRoute"] = "Program.ReputationRoutes.cs"
+                ["TryHandleSpymasterRoute"] = "Program.SpymasterRoutes.cs"
             };
             List<string> routerSources = new List<string>();
             foreach (KeyValuePair<string, string> router in routers)

@@ -9,15 +9,15 @@ the social-balance test harness.
 
 ## Main files
 
-- `Program.ReputationRoutes.cs`: `TryHandleReputationRoute`, called from the `HandleClient` chain.
+- `Program.ReputationRoutes.cs`: this module's route registrations (see `Platform/RouteTable.cs`).
 - `SocialReputation.cs`, `ExpandedSocialReputation.cs`, `CharacterSocialProfile.cs`, `PublicStanding.cs`.
 - `CourtSocialReputation.cs`, `RulerFavorContact.cs`, `WhoremongerReputation.cs`.
 - `SocialBalanceTest.cs`: the social-balance harness and its routes.
 
 ## Routes
 
-Through `TryHandleReputationRoute`: `/rumors/submit`, `/rumors/status`, `/rumors/correct`, `/social/catalog` (GET and
-POST). In the main chain: `/character-editor/social/rumor/add`, `/character-editor/social/reputation/add`,
+Registered in `Program.ReputationRoutes.cs`: `/rumors/submit`, `/rumors/status`, `/rumors/correct`, `/social/catalog` (GET and
+POST), `/character-editor/social/rumor/add`, `/character-editor/social/reputation/add`,
 `/character-editor/social/reputation/retry-reason`, and the harness routes `/tests/social-balance/*` (manifest,
 prepare, case result, snapshot, affinity set, affair candidates, status, export). Reputation reason jobs resume at
 startup (`ResumePendingReputationReasonJobs`).
