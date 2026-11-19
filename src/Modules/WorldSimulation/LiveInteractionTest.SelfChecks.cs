@@ -1370,7 +1370,7 @@ namespace ReignBetaServer
             string notablePopupSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
             string notableMbtiSource = File.Exists(notableMbtiPath) ? File.ReadAllText(notableMbtiPath) : "";
             string serverProgramSource = string.IsNullOrWhiteSpace(sourceRoot)
-                ? "" : VerificationSourceLocator.ReadServerTypeSourceText(Path.Combine(sourceRoot, "ReignServer"), "Program");
+                ? "" : VerificationSourceLocator.ReadServerProgramAreaSourceText(Path.Combine(sourceRoot, "ReignServer"));
             string qualificationRunnerSource = File.Exists(qualificationRunnerPath)
                 ? VerificationSourceLocator.ReadServerSplitSourceText(Path.Combine(sourceRoot, "ReignServer"), "QualificationRunner.cs", "ReignLiveTest/Features/Dialogue")
                 : "";

@@ -811,7 +811,7 @@ namespace ReignBetaServer
             string workerSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "ContinuousRelationshipWorker.cs", "src"));
             string promptSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "RelationshipPrompts.cs", "src"));
             string promptCachingSource = VerificationSourceLocator.ReadServerSplitSourceText(serverRoot, "PromptCaching.cs", "src");
-            string programSource = VerificationSourceLocator.ReadServerTypeSourceText(serverRoot, "Program");
+            string programSource = VerificationSourceLocator.ReadServerProgramAreaSourceText(serverRoot);
             add("history_generation_is_dialogue_lazy_not_daily",
                 !string.IsNullOrWhiteSpace(workerSource)
                 && !workerSource.Contains("EnsureSharedRelationshipHistoriesForConversation", StringComparison.Ordinal)
