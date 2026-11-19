@@ -79,7 +79,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> ProjectConversationTurnForRecall(Dictionary<string, object> turn)
         {
-            var copy = VerificationService.CloneDictionary(turn);
+            var copy = CloneDictionary(turn);
             string original = ReadString(turn, "text", ""), spoken = ConversationTurnTextForRecall(turn);
             copy["text"] = spoken;
             if (original != spoken)
@@ -111,7 +111,7 @@ namespace ReignBetaServer
         {
             if (!ReadBool(result, "ok", false))
             {
-                var unavailable = VerificationService.CloneDictionary(result);
+                var unavailable = CloneDictionary(result);
                 if (ReadDictionary(unavailable, "conversationRecovery") == null)
                     unavailable["conversationRecovery"] = TestDict("status", "generation_unavailable",
                         "generationSucceeded", false, "canContinue", true, "canRetry", true,
@@ -124,7 +124,7 @@ namespace ReignBetaServer
             string sanitized = ConversationResponseService.SanitizeVisibleReply(reply);
             bool hidden = sanitized.StartsWith("[Bannerlord Reign:", StringComparison.Ordinal);
             if (HasRecallableConversationSpeech(reply) && !hidden && !string.IsNullOrWhiteSpace(sanitized)) return result;
-            var recovered = VerificationService.CloneDictionary(result);
+            var recovered = CloneDictionary(result);
             recovered["ok"] = false;
             recovered["content"] = "";
             recovered["error"] = "The character's response could not be completed. You can continue the conversation or try again.";
@@ -183,7 +183,7 @@ namespace ReignBetaServer
             var parsed = ReadBool(result, "ok", false) ? TryParseJsonObject(ReadString(result, "content", "")) : null;
             if (parsed == null) return TestDict("shouldReply", false, "body", "", "error",
                 FirstNonEmpty(ReadString(result, "error", ""), "No valid letter draft was returned."));
-            parsed = VerificationService.CloneDictionary(parsed);
+            parsed = CloneDictionary(parsed);
             string body = ReadFirstString(parsed, "body", "response", "letter");
             if (!ReadBool(parsed, "shouldReply", true) && string.IsNullOrWhiteSpace(body)) return parsed;
             string speech = ConversationSpeechForRecall(body);
@@ -193,7 +193,7 @@ namespace ReignBetaServer
                     "conversationRecovery", TestDict("status", "letter_not_generated", "canContinue", true));
             if (body != speech || ReadBool(result, "visibleRepairFailure", false))
             {
-                var status = VerificationService.CloneDictionary(ReadDictionary(parsed, "repairStatus") ?? TestDict());
+                var status = CloneDictionary(ReadDictionary(parsed, "repairStatus") ?? TestDict());
                 status["allChecksCleared"] = false;
                 status["stageCount"] = Math.Max(1, ReadInt(status, "stageCount", 0));
                 parsed["repairStatus"] = status;

@@ -48,7 +48,7 @@ namespace ReignBetaServer
                 && CanonicalJson(wireSettings) == settingsHash && CanonicalJson(wireRequest) == requestHash);
             Check("writer_wire_reports_actual_final_preflight", ReadString(wire, "status", "") == "captured"
                 && ReadBool(ReadDictionary(wire, "providerPreflight"), "fits", false));
-            var oversizedWireRequest = VerificationService.CloneDictionary(wireRequest);
+            var oversizedWireRequest = CloneDictionary(wireRequest);
             oversizedWireRequest["messages"] = new[] { TestDict("role", "user", "content", new string('x', 250000)) };
             var oversizedWire = ReadDictionary(CaptureMemoryReplayProviderRequest(oversizedWireRequest, wireSettings), "providerWireCapture");
             Check("writer_wire_estimate_advisory_without_truncation", ReadString(oversizedWire, "status", "") == "captured"
@@ -60,17 +60,17 @@ namespace ReignBetaServer
                 "worldDay", 3d, "asOfSequence", 2L, "sources", new[] { TestDict("sourceId", "original", "speakerId", "npc",
                     "role", "npc", "text", "Which place would you choose?", "audience", new[] { "npc", "player" }, "worldDay", 2d, "sequence", 1L) });
             Check("replay_accepts_bounded_originals", MemoryEvidenceReplayInputError(replayCase) == "");
-            var wholeBank = VerificationService.CloneDictionary(replayCase);
+            var wholeBank = CloneDictionary(replayCase);
             var sourceTemplate = ReadDictionaryList(replayCase, "sources").Single();
             var fullSources = Enumerable.Range(0, 2048).Select(i =>
             {
-                var source = VerificationService.CloneDictionary(sourceTemplate); source["sourceId"] = "archive_" + i;
+                var source = CloneDictionary(sourceTemplate); source["sourceId"] = "archive_" + i;
                 return source;
             }).ToList();
             wholeBank["sources"] = fullSources;
             Check("whole_bank_2048_originals_fit", MemoryEvidenceReplayInputError(wholeBank) == ""
                 && ReadInt(MemoryEvidenceReplayInputBounds(wholeBank), "sourceCount", 0) == 2048);
-            var excessSource = VerificationService.CloneDictionary(sourceTemplate); excessSource["sourceId"] = "archive_excess";
+            var excessSource = CloneDictionary(sourceTemplate); excessSource["sourceId"] = "archive_excess";
             fullSources.Add(excessSource);
             Check("whole_bank_2049_originals_reject", MemoryEvidenceReplayInputError(wholeBank) == "missing_or_unbounded_case");
             fullSources.RemoveAt(fullSources.Count - 1);
@@ -84,7 +84,7 @@ namespace ReignBetaServer
             fullSources[^1]["sequence"] = 1L;
             fullSources[^1]["sourceId"] = "archive_0";
             Check("whole_bank_duplicate_source_still_rejects", MemoryEvidenceReplayInputError(wholeBank) == "duplicate_source");
-            var sizeBoundary = VerificationService.CloneDictionary(replayCase);
+            var sizeBoundary = CloneDictionary(replayCase);
             sizeBoundary["query"] = "Escaped source \u2014 \u2018orchard\u2019 <gate> & water?";
             int boundaryPadding = 4 * 1024 * 1024 - MemoryEvidenceReplayCaseCharacters(sizeBoundary);
             sizeBoundary["query"] = ReadString(sizeBoundary, "query", "") + new string('x', boundaryPadding);
@@ -92,7 +92,7 @@ namespace ReignBetaServer
                 && MemoryEvidenceReplayInputError(sizeBoundary) == "");
             sizeBoundary["query"] = ReadString(sizeBoundary, "query", "") + "x";
             Check("whole_bank_character_boundary_plus_one_rejects", MemoryEvidenceReplayInputError(sizeBoundary) == "missing_or_unbounded_case");
-            var separatelyBoundedExtractions = VerificationService.CloneDictionary(replayCase);
+            var separatelyBoundedExtractions = CloneDictionary(replayCase);
             separatelyBoundedExtractions["capturedMemoryExtractions"] = new[] { TestDict("sourceId", "original", "capture", "bounded elsewhere") };
             Check("whole_bank_size_excludes_separately_validated_extractions", MemoryEvidenceReplayCaseCharacters(separatelyBoundedExtractions)
                 == MemoryEvidenceReplayCaseCharacters(replayCase));
@@ -114,7 +114,7 @@ namespace ReignBetaServer
                 catch (InvalidOperationException) { invalidBudgetRejected = true; }
                 Check("replay_ordinary_budget_rejects_invalid_" + invalidBudgetIndex++, invalidBudgetRejected);
             }
-            var newConversation = VerificationService.CloneDictionary(replayCase); newConversation["recentSourceIds"] = Array.Empty<object>();
+            var newConversation = CloneDictionary(replayCase); newConversation["recentSourceIds"] = Array.Empty<object>();
             Check("new_conversation_does_not_supply_archived_sources_as_recent", MemoryEvidenceReplayInputError(newConversation) == ""
                 && EvidenceReplayRecentSources(newConversation, ReadDictionaryList(newConversation, "sources")).Count == 0
                 && ReadDictionaryList(newConversation, "sources").Count == 1);
@@ -123,27 +123,27 @@ namespace ReignBetaServer
             foreach (var invalidRecent in new object[] { "original", new object[] { 1 }, new[] { "unknown" },
                 new[] { "original", "original" }, Enumerable.Range(0, 31).Select(i => "source" + i).ToArray() })
             {
-                var invalid = VerificationService.CloneDictionary(replayCase); invalid["recentSourceIds"] = invalidRecent;
+                var invalid = CloneDictionary(replayCase); invalid["recentSourceIds"] = invalidRecent;
                 Check("recent_scope_rejects_invalid_" + PromptHash(Json.Serialize(invalidRecent)).Substring(0, 8),
                     MemoryEvidenceReplayInputError(invalid) == "invalid_recent_source_ids");
             }
-            var hiddenRecent = VerificationService.CloneDictionary(replayCase); hiddenRecent["recentSourceIds"] = new[] { "original" };
+            var hiddenRecent = CloneDictionary(replayCase); hiddenRecent["recentSourceIds"] = new[] { "original" };
             ReadDictionaryList(hiddenRecent, "sources").Single()["audience"] = new[] { "player", "other" };
             Check("recent_scope_cannot_publish_unheard_source", MemoryEvidenceReplayInputError(hiddenRecent) == "invalid_recent_source_ids");
-            var reversedRecent = VerificationService.CloneDictionary(replayCase);
-            var first = VerificationService.CloneDictionary(ReadDictionaryList(reversedRecent, "sources").Single());
-            var second = VerificationService.CloneDictionary(first); second["sourceId"] = "second"; second["sequence"] = 2L;
+            var reversedRecent = CloneDictionary(replayCase);
+            var first = CloneDictionary(ReadDictionaryList(reversedRecent, "sources").Single());
+            var second = CloneDictionary(first); second["sourceId"] = "second"; second["sequence"] = 2L;
             reversedRecent["sources"] = new[] { second, first }; reversedRecent["recentSourceIds"] = new[] { "second", "original" };
             Check("recent_scope_cannot_reverse_chronology", MemoryEvidenceReplayInputError(reversedRecent) == ""
                 && EvidenceReplayRecentSources(reversedRecent, ReadDictionaryList(reversedRecent, "sources"))
                     .Select(s => ReadString(s, "sourceId", "")).SequenceEqual(new[] { "original", "second" }));
-            var labeled = VerificationService.CloneDictionary(replayCase); labeled["semanticExpectation"] = "secret test label";
+            var labeled = CloneDictionary(replayCase); labeled["semanticExpectation"] = "secret test label";
             Check("replay_labels_cannot_enter_candidate", MemoryEvidenceReplayInputError(labeled) == "labels_must_not_enter_candidate");
-            var writerCase = VerificationService.CloneDictionary(replayCase);
+            var writerCase = CloneDictionary(replayCase);
             writerCase["writerReplay"] = TestDict("model", "captured-writer", "snapshotAsOfSequence", 2L,
                 "nextContribution", "Which place did I choose?");
             Check("writer_replay_accepts_bounded_capture_contract", MemoryEvidenceReplayInputError(writerCase) == "");
-            var repairCase = VerificationService.CloneDictionary(writerCase);
+            var repairCase = CloneDictionary(writerCase);
             ReadDictionary(repairCase, "writerReplay")["repairResponses"] = Array.Empty<object>();
             Check("repair_capture_empty_array_requests_production_repairs", MemoryEvidenceReplayInputError(repairCase) == "");
             foreach (object invalid in new object[] { null, "repair", new object[] { 1 },
@@ -184,7 +184,7 @@ namespace ReignBetaServer
                 new Dictionary<string, object>(namedSource) { ["speakerName"] = "Unheard name", ["sequence"] = 2L, ["audience"] = new[] { "other", "player" } } };
             Check("fresh_writer_keeps_eligible_peer_name", EvidenceReplayPlayerName(namedCase, new(), "0:player") == "Mira"
                 && EvidenceReplayPlayerName(namedCase, new() { TestDict("speakerId", "0:player", "speaker", "Current name") }, "0:player") == "Current name");
-            var declaredPeer = VerificationService.CloneDictionary(writerCase);
+            var declaredPeer = CloneDictionary(writerCase);
             var declaredWriter = ReadDictionary(declaredPeer, "writerReplay");
             ReadDictionaryList(declaredPeer, "sources").Single()["speakerName"] = "";
             declaredWriter["peerDisplayName"] = "the Innkeeper";
@@ -201,7 +201,7 @@ namespace ReignBetaServer
                 Check("writer_peer_display_name_rejects_invalid_" + results.Count,
                     MemoryEvidenceReplayInputError(declaredPeer) == "invalid_writer_peer_display_name");
             }
-            var chainedCase = VerificationService.CloneDictionary(writerCase);
+            var chainedCase = CloneDictionary(writerCase);
             var chainedCursor = ReadDictionary(chainedCase, "writerReplay");
             for (int depth = 0; depth < EvidenceWriterReplayMaxContinuations; depth++)
             {
@@ -213,15 +213,15 @@ namespace ReignBetaServer
             Check("writer_continuation_rejects_unbounded_depth", MemoryEvidenceReplayInputError(chainedCase) == "invalid_writer_continuation");
             foreach (string forbidden in new[] { "campaignId", "model", "generationSettings", "profile", "peerDisplayName", "sources", "worldDay", "requiredEvidence" })
             {
-                var injectedContinuation = VerificationService.CloneDictionary(writerCase);
+                var injectedContinuation = CloneDictionary(writerCase);
                 ReadDictionary(injectedContinuation, "writerReplay")["continuation"] = TestDict("nextContribution", "Still undecided?", forbidden, "forbidden");
                 Check("writer_continuation_rejects_authority_or_labels_" + forbidden,
                     MemoryEvidenceReplayInputError(injectedContinuation) == "invalid_writer_continuation");
             }
-            var missingContinuationInput = VerificationService.CloneDictionary(writerCase);
+            var missingContinuationInput = CloneDictionary(writerCase);
             ReadDictionary(missingContinuationInput, "writerReplay")["continuation"] = TestDict("response", TestDict("ok", true, "content", "{}"));
             Check("writer_continuation_requires_own_next_contribution", MemoryEvidenceReplayInputError(missingContinuationInput) == "invalid_writer_replay");
-            var responseHashCase = VerificationService.CloneDictionary(writerCase);
+            var responseHashCase = CloneDictionary(writerCase);
             var responseHashFixture = ReadDictionary(responseHashCase, "writerReplay");
             responseHashFixture["response"] = TestDict("ok", true, "content", "{}", "requestSha256", new string('a', 64));
             Check("writer_replay_accepts_bounded_response_request_hash", MemoryEvidenceReplayInputError(responseHashCase) == "");
@@ -231,12 +231,12 @@ namespace ReignBetaServer
                 Check("writer_replay_rejects_malformed_response_request_hash_" + results.Count,
                     MemoryEvidenceReplayInputError(responseHashCase) == "invalid_writer_response_request_sha256");
             }
-            var configuredWriter = VerificationService.CloneDictionary(writerCase);
+            var configuredWriter = CloneDictionary(writerCase);
             ReadDictionary(configuredWriter, "writerReplay")["generationSettings"] = TestDict("reasoningMode", "selective", "reasoningEffort", "medium", "temperature", .4d);
             Check("wire_generation_settings_accept_explicit_fixture_values", MemoryEvidenceReplayInputError(configuredWriter) == "");
             foreach (string referenceMode in new[] { "off", "capture", "enabled" })
             {
-                var graphCase = VerificationService.CloneDictionary(writerCase);
+                var graphCase = CloneDictionary(writerCase);
                 ReadDictionary(graphCase, "writerReplay")["referenceGraphMode"] = referenceMode;
                 Check("reference_mode_accepts_" + referenceMode, MemoryEvidenceReplayInputError(graphCase) == "");
                 Check("reference_mode_continuation_preserves_" + referenceMode,
@@ -245,7 +245,7 @@ namespace ReignBetaServer
             }
             foreach (object invalidMode in new object[] { null, true, 1, "", "ENABLED", "on", TestDict("mode", "enabled") })
             {
-                var graphCase = VerificationService.CloneDictionary(writerCase);
+                var graphCase = CloneDictionary(writerCase);
                 ReadDictionary(graphCase, "writerReplay")["referenceGraphMode"] = invalidMode;
                 Check("reference_mode_rejects_invalid_" + results.Count,
                     MemoryEvidenceReplayInputError(graphCase) == "invalid_replay_reference_graph_mode");
@@ -256,31 +256,31 @@ namespace ReignBetaServer
                 TestDict("temperature", "0.7"), TestDict("temperature", true), TestDict("temperature", -1),
                 TestDict("temperature", 3), TestDict("temperature", (object)null) })
             {
-                var invalidWriter = VerificationService.CloneDictionary(writerCase);
+                var invalidWriter = CloneDictionary(writerCase);
                 ReadDictionary(invalidWriter, "writerReplay")["generationSettings"] = invalidGeneration;
                 Check("wire_generation_settings_reject_unbounded_or_authority_" + results.Count,
                     MemoryEvidenceReplayInputError(invalidWriter) == "invalid_replay_generation_settings");
             }
-            var futureWriter = VerificationService.CloneDictionary(writerCase);
+            var futureWriter = CloneDictionary(writerCase);
             ReadDictionary(futureWriter, "writerReplay")["snapshotAsOfSequence"] = 3L;
             Check("writer_replay_future_snapshot_rejected", MemoryEvidenceReplayInputError(futureWriter) == "invalid_writer_replay");
-            var injectedWriter = VerificationService.CloneDictionary(writerCase);
+            var injectedWriter = CloneDictionary(writerCase);
             ReadDictionary(injectedWriter, "writerReplay")["campaignId"] = "live_campaign";
             Check("writer_replay_cannot_select_campaign_or_settings", MemoryEvidenceReplayInputError(injectedWriter) == "unknown_writer_replay_field");
-            var retiredChecker = VerificationService.CloneDictionary(writerCase);
+            var retiredChecker = CloneDictionary(writerCase);
             ReadDictionary(retiredChecker, "writerReplay")["finalCheck"] = TestDict("enabled", true, "model", "obsolete-checker");
             Check("enabled_legacy_checker_replay_rejected", MemoryEvidenceReplayInputError(retiredChecker) == "memory_llm_stage_retired");
             ReadDictionary(retiredChecker, "writerReplay")["finalCheck"] = TestDict("enabled", false);
             Check("disabled_legacy_checker_fixture_readable", MemoryEvidenceReplayInputError(retiredChecker) == "");
-            var letterWriter = VerificationService.CloneDictionary(writerCase); letterWriter["route"] = "correspondence";
+            var letterWriter = CloneDictionary(writerCase); letterWriter["route"] = "correspondence";
             Check("writer_replay_does_not_claim_letter_delivery", MemoryEvidenceReplayInputError(letterWriter) == "invalid_writer_replay");
-            var capacityWriter = VerificationService.CloneDictionary(writerCase);
+            var capacityWriter = CloneDictionary(writerCase);
             var capacityCapture = TestDict("model", "captured-writer", "contextTokens", 1048576, "maxOutputTokens", 131072,
                 "source", NanoConversationModelsUrl, "sourceHash", new string('a', 64),
                 "checkedAtUtc", DateTimeOffset.UtcNow.ToString("o"), "validUntilUtc", DateTimeOffset.UtcNow.AddHours(1).ToString("o"));
             ReadDictionary(capacityWriter, "writerReplay")["contextCapacity"] = capacityCapture;
             Check("writer_replay_capacity_metadata_is_bounded", MemoryEvidenceReplayInputError(capacityWriter) == "");
-            var nativeWriterCase = VerificationService.CloneDictionary(capacityWriter);
+            var nativeWriterCase = CloneDictionary(capacityWriter);
             var nativeFixture = ReadDictionary(nativeWriterCase, "writerReplay");
             var nativeContext = TestDict("identityView", TestDict("identityState", "verified", "canonicalNameAllowed", true,
                     "knowsIdentity", true, "usableName", "Ewan", "subjectSexKnown", true, "subjectSex", "male",
@@ -289,7 +289,7 @@ namespace ReignBetaServer
                     "inertData", TestDict("campaignId", "not_a_live_campaign", "model", "not_a_model", "guardedPromptOverride", true)));
             nativeFixture["initialNativeContext"] = nativeContext;
             Check("initial_native_context_accepts_only_bounded_capture", MemoryEvidenceReplayInputError(nativeWriterCase) == "");
-            var inspectionCase = VerificationService.CloneDictionary(nativeWriterCase);
+            var inspectionCase = CloneDictionary(nativeWriterCase);
             ReadDictionary(inspectionCase, "writerReplay")["questionLinkInspection"] = TestDict("reply", "A current reply.", "writes", Array.Empty<object>());
             Check("question_inspection_accepts_bounded_capture", MemoryEvidenceReplayInputError(inspectionCase) == "");
             foreach (object invalid in new object[] { null, "reply", TestDict(), TestDict("reply", "", "writes", Array.Empty<object>()),
@@ -299,36 +299,36 @@ namespace ReignBetaServer
                 TestDict("reply", "Reply.", "writes", new[] { TestDict("kind", "agenda") }),
                 TestDict("reply", "Reply.", "writes", Array.Empty<object>(), "publish", true) })
             {
-                var bad = VerificationService.CloneDictionary(inspectionCase); ReadDictionary(bad, "writerReplay")["questionLinkInspection"] = invalid;
+                var bad = CloneDictionary(inspectionCase); ReadDictionary(bad, "writerReplay")["questionLinkInspection"] = invalid;
                 Check("question_inspection_rejects_unbounded_or_authority_" + results.Count,
                     MemoryEvidenceReplayInputError(bad) == "invalid_question_link_inspection");
             }
-            var inspectionWithoutNative = VerificationService.CloneDictionary(inspectionCase);
+            var inspectionWithoutNative = CloneDictionary(inspectionCase);
             ReadDictionary(inspectionWithoutNative, "writerReplay").Remove("initialNativeContext");
             Check("question_inspection_requires_capture_context", MemoryEvidenceReplayInputError(inspectionWithoutNative) == "question_link_inspection_capture_only");
             foreach (object invalid in new object[] { null, "native", TestDict(), TestDict("campaignId", "live"),
                 TestDict("identityView", "not an object"), TestDict("identityView", TestDict("text", new string('x', 24001))),
                 TestDict("identityView", TestDict("many", Enumerable.Repeat<object>(true, 10001).ToArray())) })
             {
-                var bad = VerificationService.CloneDictionary(nativeWriterCase); ReadDictionary(bad, "writerReplay")["initialNativeContext"] = invalid;
+                var bad = CloneDictionary(nativeWriterCase); ReadDictionary(bad, "writerReplay")["initialNativeContext"] = invalid;
                 Check("initial_native_context_rejects_invalid_tree_" + results.Count, MemoryEvidenceReplayInputError(bad) == "invalid_initial_native_context");
             }
             object deepNative = TestDict();
             for (int depth = 0; depth < 18; depth++) deepNative = TestDict("child", deepNative);
-            var deepCase = VerificationService.CloneDictionary(nativeWriterCase);
+            var deepCase = CloneDictionary(nativeWriterCase);
             ReadDictionary(deepCase, "writerReplay")["initialNativeContext"] = TestDict("identityView", deepNative);
             Check("initial_native_context_rejects_deep_tree", MemoryEvidenceReplayInputError(deepCase) == "invalid_initial_native_context");
             foreach (string forbidden in new[] { "response", "repairResponses", "continuation", "nextPlanResponse", "nextAssemblyResponse", "nextReviewResponse" })
             {
-                var bad = VerificationService.CloneDictionary(nativeWriterCase); ReadDictionary(bad, "writerReplay")[forbidden] = TestDict();
+                var bad = CloneDictionary(nativeWriterCase); ReadDictionary(bad, "writerReplay")[forbidden] = TestDict();
                 Check("initial_native_context_is_capture_only_" + forbidden, MemoryEvidenceReplayInputError(bad) == "initial_native_context_capture_only");
             }
             foreach (string forbidden in new[] { "publishedPartyViewSha256", "durableReadReplay", "reviewedFactReplay", "reviewedRecoveryReplay" })
             {
-                var bad = VerificationService.CloneDictionary(nativeWriterCase); bad[forbidden] = TestDict();
+                var bad = CloneDictionary(nativeWriterCase); bad[forbidden] = TestDict();
                 Check("initial_native_context_cannot_mix_" + forbidden, MemoryEvidenceReplayInputError(bad) == "initial_native_context_capture_only");
             }
-            var eventNative = VerificationService.CloneDictionary(nativeWriterCase); eventNative["route"] = "event";
+            var eventNative = CloneDictionary(nativeWriterCase); eventNative["route"] = "event";
             Check("initial_native_context_is_dialogue_only", MemoryEvidenceReplayInputError(eventNative) == "initial_native_context_capture_only");
             string nativeInputBefore = CanonicalJson(nativeContext);
             var mappedNative = MapReplayInitialNativeContext(nativeFixture, "npc", "player", "0:npc", "0:player");
@@ -337,24 +337,24 @@ namespace ReignBetaServer
                 && ReadString(ReadDictionaryList(ReadDictionary(mappedNative, "actionResolutionIndex"), "heroes").Single(), "heroId", "") == "0:npc"
                 && ReadString(ReadDictionary(ReadDictionary(mappedNative, "actionResolutionIndex"), "inertData"), "campaignId", "") == "not_a_live_campaign");
             Check("initial_native_context_absent_preserves_existing_path", MapReplayInitialNativeContext(ReadDictionary(capacityWriter, "writerReplay"), "npc", "player", "0:npc", "0:player") == null);
-            var politicalNativeCase = VerificationService.CloneDictionary(nativeWriterCase);
+            var politicalNativeCase = CloneDictionary(nativeWriterCase);
             var politicalNativeFixture = ReadDictionary(politicalNativeCase, "writerReplay");
             var capturedPolitics = TryParseJsonObject(System.Text.Json.JsonSerializer.Serialize(GovernmentPoliticalBeliefs.Seed(
                 "native_politics_source", "npc", "native_politics_timeline", CharactersService.CoreTraitKeys.ToDictionary(k => k, _ => 50),
                 new Dictionary<ReignGovernmentPlank, double>(), false)));
             politicalNativeFixture["profile"] = TestDict("name", "Mira", "campaignId", "native_politics_source", "heroStringId", "npc",
-                "politicalTimelineId", "native_politics_timeline", "appliedPoliticalProfile", VerificationService.CloneDictionary(capturedPolitics));
-            politicalNativeFixture["characteristics"] = TestDict("politicalProfile", VerificationService.CloneDictionary(capturedPolitics));
+                "politicalTimelineId", "native_politics_timeline", "appliedPoliticalProfile", CloneDictionary(capturedPolitics));
+            politicalNativeFixture["characteristics"] = TestDict("politicalProfile", CloneDictionary(capturedPolitics));
             Check("initial_native_politics_accepts_complete_genesis_snapshot", MemoryEvidenceReplayInputError(politicalNativeCase) == "");
             foreach (var mutation in new[] { (Key: "CampaignId", Value: (object)"different_source"), (Key: "HeroId", Value: (object)"other"),
                 (Key: "ModelVersion", Value: (object)999), (Key: "Revision", Value: (object)2L), (Key: "unexpected", Value: (object)true),
                 (Key: "SeenEvidence", Value: (object)new[] { "future_native_evidence" }), (Key: "TimelineId", Value: (object)null) })
             {
-                var bad = VerificationService.CloneDictionary(politicalNativeCase);
+                var bad = CloneDictionary(politicalNativeCase);
                 ReadDictionary(ReadDictionary(ReadDictionary(bad, "writerReplay"), "profile"), "appliedPoliticalProfile")[mutation.Key] = mutation.Value;
                 Check("initial_native_politics_rejects_" + mutation.Key, MemoryEvidenceReplayInputError(bad) == "invalid_initial_native_political_profile");
             }
-            var mismatchPolitics = VerificationService.CloneDictionary(politicalNativeCase);
+            var mismatchPolitics = CloneDictionary(politicalNativeCase);
             ReadDictionary(ReadDictionary(ReadDictionary(mismatchPolitics, "writerReplay"), "characteristics"), "politicalProfile")["Formative"] = true;
             Check("initial_native_political_snapshots_must_agree", MemoryEvidenceReplayInputError(mismatchPolitics) == "initial_native_political_snapshots_disagree");
             // Scope only contract fixtures to this invocation. Real replay input
@@ -362,14 +362,14 @@ namespace ReignBetaServer
             // Never reclaim an earlier interrupted invocation's unowned world.
             string contractNamespace = Guid.NewGuid().ToString("N");
             capacityWriter["caseId"] = ReadString(capacityWriter, "caseId", "writer") + "_" + contractNamespace;
-            var secondCase = VerificationService.CloneDictionary(capacityWriter); secondCase["caseId"] = "bounded_second_" + contractNamespace;
-            var stableInput = TestDict("schema", "reign-memory-evidence-replay-input-v1", "cases", new[] { VerificationService.CloneDictionary(capacityWriter), secondCase });
-            var withResponses = VerificationService.CloneDictionary(stableInput);
+            var secondCase = CloneDictionary(capacityWriter); secondCase["caseId"] = "bounded_second_" + contractNamespace;
+            var stableInput = TestDict("schema", "reign-memory-evidence-replay-input-v1", "cases", new[] { CloneDictionary(capacityWriter), secondCase });
+            var withResponses = CloneDictionary(stableInput);
             ReadDictionary(ReadDictionaryList(withResponses, "cases").First(), "writerReplay")["response"] = TestDict("ok", true, "finishReason", "stop",
                 "content", Json.Serialize(TestDict("reply", "We spoke about choosing a place beside the orchard.")));
             ReadDictionary(ReadDictionaryList(withResponses, "cases").First(), "writerReplay")["nextContribution"] = "A different follow-up. " + new string('n', 3000);
             Check("world_seed_ignores_responses_and_future_turns", EvidenceReplayCampaignIdentity(stableInput) == EvidenceReplayCampaignIdentity(withResponses));
-            var differentSource = VerificationService.CloneDictionary(stableInput);
+            var differentSource = CloneDictionary(stableInput);
             ReadDictionaryList(ReadDictionaryList(differentSource, "cases").First(), "sources").Single()["text"] = "A different original.";
             Check("world_seed_changes_with_originals", EvidenceReplayCampaignIdentity(stableInput) != EvidenceReplayCampaignIdentity(differentSource));
             string stableCampaign = EvidenceReplayCampaignIdentity(stableInput);
@@ -447,8 +447,8 @@ namespace ReignBetaServer
                         TestDict("blocked", registryBlocked, "beforeCount", registryBefore.Count, "afterCount", registryAfter.Count));
                 }
                 finally { ReignPostgreSqlStorage.DropCampaign(stableCampaign); }
-                var firstWorld = ReplayMemoryEvidenceFixture(VerificationService.CloneDictionary(stableInput), "first-capture");
-                var secondWorld = ReplayMemoryEvidenceFixture(VerificationService.CloneDictionary(stableInput), "second-capture");
+                var firstWorld = ReplayMemoryEvidenceFixture(CloneDictionary(stableInput), "first-capture");
+                var secondWorld = ReplayMemoryEvidenceFixture(CloneDictionary(stableInput), "second-capture");
                 Dictionary<string, object> FirstWriter(Dictionary<string, object> report) => ReadDictionary(ReadDictionaryList(report, "cases").First(), "writerReplay");
                 string Wire(Dictionary<string, object> report, int index, string field = "providerWireCapture") =>
                     ReadString(ReadDictionary(ReadDictionary(ReadDictionaryList(report, "cases")[index], "writerReplay"), field), "requestJson", "");
@@ -459,7 +459,7 @@ namespace ReignBetaServer
                     using var baselineMode = new EvidenceReplayReferenceModeScope(TestDict("referenceGraphMode", "off"));
                     Dictionary<string, object> GraphInput(string graphMode)
                     {
-                        var graphInput = VerificationService.CloneDictionary(stableInput);
+                        var graphInput = CloneDictionary(stableInput);
                         // One unchanged case isolates prompt mode rather than namespace.
                         graphInput["cases"] = new[] { ReadDictionaryList(graphInput, "cases").First() };
                         var graphWriter = ReadDictionary(ReadDictionaryList(graphInput, "cases").First(), "writerReplay");
@@ -484,7 +484,7 @@ namespace ReignBetaServer
                     Check("reference_mode_preserves_authored_window", AuthoredWindow(offWire) == AuthoredWindow(enabledWire)
                         && AuthoredWindow(offWire) == AuthoredWindow(Wire(captureGraph, 0)));
                     var graphAudit = ReadDictionary(FirstWriter(enabledGraph), "referenceGraphAudit");
-                    var withoutAuditHash = VerificationService.CloneDictionary(graphAudit); withoutAuditHash.Remove("auditSha256");
+                    var withoutAuditHash = CloneDictionary(graphAudit); withoutAuditHash.Remove("auditSha256");
                     Check("reference_mode_audit_binds_mode_without_backfill_claim", ReadString(graphAudit, "mode", "") == "enabled"
                         && ReadString(graphAudit, "source", "") == "fixture" && !ReadBool(graphAudit, "historyBackfilled", true)
                         && ReadString(graphAudit, "auditSha256", "") == PromptHash(CanonicalJson(withoutAuditHash)));
@@ -496,7 +496,7 @@ namespace ReignBetaServer
                         .All(pair => ReadString(ReadDictionary(FirstWriter(pair.Item1), "referenceGraphAudit"), "mode", "") == pair.Item2));
                     Check("reference_mode_does_not_change_settings", CanonicalJson(SettingsService.LoadSettings()) == settingsBeforeReference);
                     var invalidBatch = GraphInput("off");
-                    var invalidLaterCase = VerificationService.CloneDictionary(ReadDictionaryList(invalidBatch, "cases").First());
+                    var invalidLaterCase = CloneDictionary(ReadDictionaryList(invalidBatch, "cases").First());
                     invalidLaterCase["caseId"] = "invalid_reference_mode_later_" + contractNamespace;
                     ReadDictionary(invalidLaterCase, "writerReplay")["referenceGraphMode"] = "ENABLED";
                     invalidBatch["cases"] = new[] { ReadDictionaryList(invalidBatch, "cases").First(), invalidLaterCase };
@@ -537,7 +537,7 @@ namespace ReignBetaServer
                 var nativeInput = TestDict("schema", "reign-memory-evidence-replay-input-v1", "cases", new[] { nativeWriterCase });
                 string nativeFixtureBefore = CanonicalJson(nativeInput);
                 var nativeReport = ReplayMemoryEvidenceFixture(nativeInput, "initial-native-context-contract");
-                var nativeReportAgain = ReplayMemoryEvidenceFixture(VerificationService.CloneDictionary(nativeInput), "initial-native-context-repeat");
+                var nativeReportAgain = ReplayMemoryEvidenceFixture(CloneDictionary(nativeInput), "initial-native-context-repeat");
                 var nativeResult = FirstWriter(nativeReport);
                 var nativeWire = ReadDictionary(nativeResult, "providerWireCapture");
                 Check("initial_native_identity_reaches_actual_wire_without_effects", ReadString(nativeResult, "status", "") == "writer_pending"
@@ -548,7 +548,7 @@ namespace ReignBetaServer
                     && ReadBool(ReadDictionary(nativeResult, "initialNativeContextAudit"), "actionIndexRetainedUnchanged", false), nativeResult);
                 Check("initial_native_capture_is_repeatable_and_input_unchanged", Wire(nativeReport, 0) == Wire(nativeReportAgain, 0)
                     && CanonicalJson(nativeInput) == nativeFixtureBefore);
-                var inspectedCase = VerificationService.CloneDictionary(nativeWriterCase);
+                var inspectedCase = CloneDictionary(nativeWriterCase);
                 inspectedCase["caseId"] = "native_question_inspection_" + contractNamespace;
                 const string inspectionQuestion = "What did I propose, and what did you say?";
                 const string inspectionReply = "You proposed separate baths. You clarified the arrangement. I acknowledged my mistake. More than one bath\u2014within talking distance.";
@@ -587,7 +587,7 @@ namespace ReignBetaServer
                     && !ReadBool(inspectionAudit, "publicationAllowed", true) && !ReadBool(inspectionAudit, "certificateEligible", true)
                     && ReadInt(inspectionAudit, "providerCalls", -1) == 0 && !inspectedWriter.ContainsKey("publication")
                     && !inspectedWriter.ContainsKey("stored") && CanonicalJson(inspectionInput) == inspectionBefore);
-                var withoutInspection = VerificationService.CloneDictionary(inspectionInput);
+                var withoutInspection = CloneDictionary(inspectionInput);
                 ReadDictionary(ReadDictionaryList(withoutInspection, "cases")[0], "writerReplay").Remove("questionLinkInspection");
                 var withoutInspectionReport = ReplayMemoryEvidenceFixture(withoutInspection, "question-link-inspection-wire-control");
                 Check("question_inspection_cannot_change_provider_wire", Wire(inspectedReport, 0) == Wire(withoutInspectionReport, 0));
@@ -618,11 +618,11 @@ namespace ReignBetaServer
                 var politicalInput = TestDict("schema", "reign-memory-evidence-replay-input-v1", "cases", new[] { politicalNativeCase });
                 string politicalBefore = CanonicalJson(politicalInput);
                 var politicalReport = ReplayMemoryEvidenceFixture(politicalInput, "initial-native-political-contract");
-                var politicalRepeat = ReplayMemoryEvidenceFixture(VerificationService.CloneDictionary(politicalInput), "initial-native-political-repeat");
+                var politicalRepeat = ReplayMemoryEvidenceFixture(CloneDictionary(politicalInput), "initial-native-political-repeat");
                 var politicalResult = FirstWriter(politicalReport);
                 var boundProfile = ReadDictionary(ReadDictionary(politicalResult, "request"), "hero");
                 var boundPolitics = ReadDictionary(boundProfile, "appliedPoliticalProfile");
-                var sourceContent = VerificationService.CloneDictionary(capturedPolitics); var boundContent = VerificationService.CloneDictionary(boundPolitics);
+                var sourceContent = CloneDictionary(capturedPolitics); var boundContent = CloneDictionary(boundPolitics);
                 foreach (string key in new[] { "CampaignId", "HeroId", "TimelineId" }) { sourceContent.Remove(key); boundContent.Remove(key); }
                 var politicsAudit = ReadDictionary(ReadDictionary(politicalResult, "initialNativeContextAudit"), "politicalBinding");
                 Check("initial_native_politics_preserves_values_and_normal_issued_gate", ReadString(politicalResult, "status", "") == "writer_pending"
@@ -644,14 +644,14 @@ namespace ReignBetaServer
                 Check("initial_native_politics_is_repeatable_without_input_mutation", Wire(politicalReport, 0) == Wire(politicalRepeat, 0)
                     && CanonicalJson(politicalInput) == politicalBefore);
                 Check("initial_native_political_serialization_is_culture_invariant", invariantPoliticalJson == otherCulturePoliticalJson);
-                var collisionCase = VerificationService.CloneDictionary(politicalNativeCase); collisionCase["caseId"] = "native_political_collision_" + contractNamespace;
+                var collisionCase = CloneDictionary(politicalNativeCase); collisionCase["caseId"] = "native_political_collision_" + contractNamespace;
                 var collisionInput = TestDict("schema", "reign-memory-evidence-replay-input-v1", "cases", new[] { collisionCase });
                 using (var collisionLease = new EvidenceReplayCampaignLease(collisionInput))
                 {
                     using (var c = ReignDatabase.OpenCampaignConnection(collisionLease.Campaign)) ReadMemoryPrecisionState(c);
                     var collisionFixture = ReadDictionary(collisionCase, "writerReplay");
-                    var collisionProfile = VerificationService.CloneDictionary(ReadDictionary(collisionFixture, "profile"));
-                    var collisionCharacteristics = VerificationService.CloneDictionary(ReadDictionary(collisionFixture, "characteristics"));
+                    var collisionProfile = CloneDictionary(ReadDictionary(collisionFixture, "profile"));
+                    var collisionCharacteristics = CloneDictionary(ReadDictionary(collisionFixture, "characteristics"));
                     BindInitialReplayPoliticalProfile(collisionCase, collisionFixture, collisionProfile, collisionCharacteristics,
                         collisionLease.Campaign, "0:npc", "replay_0");
                     string politicalPath = CampaignFileService.CharacterFile(collisionLease.Campaign, "0:npc", "politics", "revision-1-" + SafeMemoryKey("replay_0") + ".json");
@@ -659,7 +659,7 @@ namespace ReignBetaServer
                     var altered = ReadDictionary(ReadDictionary(collisionFixture, "profile"), "appliedPoliticalProfile");
                     var firstValue = ReadDictionaryList(altered, "Values").First();
                     firstValue["Stance"] = ReadInt(firstValue, "Stance", 0) == 100 ? 99 : ReadInt(firstValue, "Stance", 0) + 1;
-                    ReadDictionary(collisionFixture, "characteristics")["politicalProfile"] = VerificationService.CloneDictionary(altered);
+                    ReadDictionary(collisionFixture, "characteristics")["politicalProfile"] = CloneDictionary(altered);
                     bool collisionRejected = false;
                     try { BindInitialReplayPoliticalProfile(collisionCase, collisionFixture, collisionProfile, collisionCharacteristics,
                         collisionLease.Campaign, "0:npc", "replay_0"); }
@@ -690,8 +690,8 @@ namespace ReignBetaServer
                     && ReadString(ReadDictionary(firstWorldWriter, "providerWireCapture"), "requestJson", "")
                         == ReadString(ReadDictionary(secondWorldWriter, "providerWireCapture"), "requestJson", "different")
                     && !ReignPostgreSqlStorage.CampaignExists(stableCampaign));
-                var capturedWorld = ReplayMemoryEvidenceFixture(VerificationService.CloneDictionary(withResponses), "first-response-capture");
-                var repeatedCapturedWorld = ReplayMemoryEvidenceFixture(VerificationService.CloneDictionary(withResponses), "repeat-response-capture");
+                var capturedWorld = ReplayMemoryEvidenceFixture(CloneDictionary(withResponses), "first-response-capture");
+                var repeatedCapturedWorld = ReplayMemoryEvidenceFixture(CloneDictionary(withResponses), "repeat-response-capture");
                 Check("captured_response_does_not_change_initial_or_other_case_wire",
                     ReadString(FirstWriter(capturedWorld), "status", "") == "captured_writer_stored_next_read_prepared"
                     && Wire(firstWorld, 0) == Wire(capturedWorld, 0) && Wire(firstWorld, 1) == Wire(capturedWorld, 1));
@@ -712,7 +712,7 @@ namespace ReignBetaServer
                 witness["audience"] = new[] { "player", "npc", "witness" };
                 var oldPlayer = Authored("older_player", 1, true, "I brought the amber contract to the north gate for our witnesses.", "older", "agreement");
                 var oldNpc = Authored("older_npc", 2, false, olderAnswer, "older", "agreement");
-                var wideCase = VerificationService.CloneDictionary(capacityWriter);
+                var wideCase = CloneDictionary(capacityWriter);
                 wideCase["caseId"] = "reviewed_fact_" + contractNamespace;
                 wideCase["route"] = "event";
                 wideCase["query"] = "When did the amber contract for the north gate expire?";
@@ -720,7 +720,7 @@ namespace ReignBetaServer
                 wideCase["recentSourceIds"] = exactWindow.Select(s => ReadString(s, "sourceId", "")).ToArray();
                 wideCase["sources"] = new[] { oldPlayer, oldNpc }.Concat(exactWindow).ToList();
                 ReadDictionary(wideCase, "writerReplay")["snapshotAsOfSequence"] = 31L;
-                var compactCase = VerificationService.CloneDictionary(wideCase);
+                var compactCase = CloneDictionary(wideCase);
                 compactCase["reviewedFactReplay"] = TestDict("reviewReceiptSha256", new string('c', 64),
                     "facts", new[] { TestDict("id", "fact:amber_timing", "sourceId", "older_npc", "sourceSequence", 2L,
                         "sourceTextSha256", ConversationExactTextHash(olderAnswer), "speakerId", "npc", "quote", olderAnswer, "text", reviewedFact) });
@@ -746,13 +746,13 @@ namespace ReignBetaServer
                 Check("reviewed_fact_projection_keeps_the_other_npc_in_attributed_user_context", wireMessages.Any(message =>
                     ReadString(message, "role", "") == "user" && ReadString(message, "content", "").StartsWith("HISTORICAL OTHER CHARACTER / NARRATOR ")
                     && ReadString(message, "content", "").Contains(ReadString(witness, "text", ""))));
-                var rejectedFact = VerificationService.CloneDictionary(compactCase);
+                var rejectedFact = CloneDictionary(compactCase);
                 ReadDictionaryList(ReadDictionary(rejectedFact, "reviewedFactReplay"), "facts").Single()["speakerId"] = "player";
                 bool wrongSpeakerBlocked = false;
                 try { ReplayCase(rejectedFact); }
                 catch (InvalidOperationException ex) { wrongSpeakerBlocked = ex.Message.Contains("exact projected text check"); }
                 Check("reviewed_fact_projection_rejects_wrong_speaker", wrongSpeakerBlocked);
-                var staleFact = VerificationService.CloneDictionary(compactCase);
+                var staleFact = CloneDictionary(compactCase);
                 ReadDictionaryList(ReadDictionary(staleFact, "reviewedFactReplay"), "facts").Single()["sourceTextSha256"] = new string('d', 64);
                 bool staleSourceBlocked = false;
                 try { ReplayCase(staleFact); }
@@ -761,7 +761,7 @@ namespace ReignBetaServer
                 Check("reviewed_fact_final_wire_detects_residual_original",
                     ReplayReviewedFactWireError(wideFactWire, compactCase, exactWindow, "npc", id => "0:" + id) == "older_original_reached_initial_wire");
 
-                var collisionWindow = exactWindow.Select(VerificationService.CloneDictionary).ToList();
+                var collisionWindow = exactWindow.Select(CloneDictionary).ToList();
                 collisionWindow[0]["text"] = "Nay,";
                 collisionWindow[2]["text"] = "No, Ewan, that basket is promised.";
                 var shortOriginals = new[] { Authored("old_nay", 1, true, "Nay,", "older", "agreement"),
@@ -785,7 +785,7 @@ namespace ReignBetaServer
                         RenderContinuityRecord("0:old_no", "reported_exchange", "npc", "older", 2d, 65, true, "An attributed quotation.") }
                     .All(leak => ReplayReviewedOlderOriginalDelivered(collisionResidual.Append(leak).ToList(), shortOriginals, id => "0:" + id)));
 
-                var localRepairCase = VerificationService.CloneDictionary(compactCase);
+                var localRepairCase = CloneDictionary(compactCase);
                 var localRepairWriter = ReadDictionary(localRepairCase, "writerReplay");
                 const string localRepairReply = "The third bell was the deadline.";
                 localRepairWriter["repairResponses"] = Array.Empty<object>();
@@ -819,7 +819,7 @@ namespace ReignBetaServer
                 Check("reviewed_fact_replay_refuses_generic_provider_repair_responses",
                     ReplayReviewedFactInputError(localRepairCase, ReadDictionaryList(localRepairCase, "sources")) == "invalid_reviewed_fact_replay");
 
-                var followUpCase = VerificationService.CloneDictionary(compactCase);
+                var followUpCase = CloneDictionary(compactCase);
                 var followUpFixture = ReadDictionary(followUpCase, "writerReplay");
                 const long importedOffset = 10_000L;
                 const long importedCutoff = importedOffset + 31L;
@@ -861,7 +861,7 @@ namespace ReignBetaServer
                     TestDict("stockStatus", ReadString(stockFollowUp, "status", ""), "compactStatus", ReadString(followUp, "status", ""),
                         "reason", ReadString(followUp, "reason", ""), "error", ReadString(followUp, "error", "")));
 
-                var planCase = VerificationService.CloneDictionary(compactCase);
+                var planCase = CloneDictionary(compactCase);
                 var planReview = ReadDictionary(planCase, "reviewedFactReplay");
                 planReview["writerPlan"] = true;
                 Check("reviewed_plan_rejects_an_unknown_treatment", ReplayReviewedFactInputError(planCase,
@@ -900,7 +900,7 @@ namespace ReignBetaServer
                         TestDict("status", ReadString(boundPlan, "status", ""), "groundingAccepted", ReadBool(boundPlan, "groundingAccepted", false)));
                 }
 
-                var deliveryCase = VerificationService.CloneDictionary(compactCase);
+                var deliveryCase = CloneDictionary(compactCase);
                 var deliveryReview = ReadDictionary(deliveryCase, "reviewedFactReplay");
                 deliveryReview["writerPlan"] = "reviewed_bound_delivery";
                 Check("reviewed_delivery_requires_both_checked_lines", ReplayReviewedFactInputError(deliveryCase,
@@ -926,7 +926,7 @@ namespace ReignBetaServer
                     var deliveredResponse = TestDict("ok", true, "finishReason", "stop", "requestSha256", deliveryRequest,
                         "reviewedDeliverySha256", deliveryHash, "content", Json.Serialize(TestDict("delivery", "direct", "participation", "speak")));
                     deliveryFixture["response"] = deliveredResponse;
-                    var changedSpeech = VerificationService.CloneDictionary(deliveryCase);
+                    var changedSpeech = CloneDictionary(deliveryCase);
                     ReadDictionary(ReadDictionary(changedSpeech, "reviewedFactReplay"), "deliveryChoices")["direct"] = conversationalFactReply;
                     var wrongReceipt = FirstWriter(ReplayCase(changedSpeech));
                     Check("reviewed_delivery_rejects_changed_lines_under_same_request_hash",
@@ -950,7 +950,7 @@ namespace ReignBetaServer
 
                 const string sourceOnlyCondition = "Only a keeper carrying the bronze lantern may enter.";
                 const string suppliedDraft = "I have no memory of the amber contract. Trust the invented silver lantern account.";
-                var recoveryCase = VerificationService.CloneDictionary(compactCase);
+                var recoveryCase = CloneDictionary(compactCase);
                 recoveryCase["caseId"] = "reviewed_recovery_" + contractNamespace;
                 // This chain exercises a genuinely new record as well as historical repair.
                 // The current report and reaffirmation make this a mixed turn.
@@ -971,7 +971,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> RecoveryArm(Dictionary<string, object> baseline, string mode, string prose, string finish = "stop")
                 {
                     var first = FirstWriter(ReplayCase(baseline));
-                    var arm = VerificationService.CloneDictionary(baseline);
+                    var arm = CloneDictionary(baseline);
                     arm["reviewedRecoveryReplay"] = TestDict("mode", mode, "trialId", "11111111111141118111111111111111");
                     var writer = ReadDictionary(arm, "writerReplay");
                     writer["response"] = TestDict("ok", true, "finishReason", finish, "content", prose,
@@ -985,7 +985,7 @@ namespace ReignBetaServer
                     ReadDictionaryList(writer, "repairRequests").SingleOrDefault(), "providerWireCapture"), "requestJson", "");
                 string draftJson = Json.Serialize(TestDict("reply", suppliedDraft));
                 var lookupArm = RecoveryArm(recoveryCase, "eligible_repair", draftJson);
-                var retryArm = VerificationService.CloneDictionary(lookupArm);
+                var retryArm = CloneDictionary(lookupArm);
                 ReadDictionary(retryArm, "reviewedRecoveryReplay")["mode"] = "derived_retry";
                 var lookedUp = RunRecovery(lookupArm);
                 var retried = RunRecovery(retryArm);
@@ -1000,12 +1000,12 @@ namespace ReignBetaServer
                     TestDict("lookupStatus", ReadString(lookedUp, "status", ""), "retryStatus", ReadString(retried, "status", ""),
                         "audit", lookupAudit, "preflight", ReadString(ReadDictionary(ReadDictionaryList(lookedUp, "repairRequests").SingleOrDefault(), "providerWireCapture"), "errorCode", "")));
 
-                var privateRecovery = VerificationService.CloneDictionary(recoveryCase);
+                var privateRecovery = CloneDictionary(recoveryCase);
                 privateRecovery["caseId"] = "reviewed_recovery_private_" + contractNamespace;
                 ReadDictionaryList(privateRecovery, "sources").Single(source => ReadString(source, "sourceId", "") == "older_witness")["audience"]
                     = new[] { "npc", "witness" };
                 var privateArm = RecoveryArm(privateRecovery, "eligible_repair", draftJson);
-                var privateDerived = VerificationService.CloneDictionary(privateArm);
+                var privateDerived = CloneDictionary(privateArm);
                 ReadDictionary(privateDerived, "reviewedRecoveryReplay")["mode"] = "derived_retry";
                 var denied = RunRecovery(privateArm);
                 var deniedControl = RunRecovery(privateDerived);
@@ -1029,7 +1029,7 @@ namespace ReignBetaServer
                     && !IsReviewedRecoveryCorrection("She said: \"I already told you about our earlier conversation.\"")
                     && !IsReviewedRecoveryCorrection("*I already told you about our earlier conversation.* Let us eat."));
 
-                var formatCase = VerificationService.CloneDictionary(recoveryCase);
+                var formatCase = CloneDictionary(recoveryCase);
                 formatCase["caseId"] = "reviewed_recovery_format_" + contractNamespace;
                 formatCase["query"] = "What did we agree about the amber contract at the north gate?";
                 var formatWriter = RunRecovery(RecoveryArm(formatCase, "eligible_repair", "{", "length"));
@@ -1064,7 +1064,7 @@ namespace ReignBetaServer
                     var later = ReadDictionary(acceptedRecovery, "durableRead");
                     var laterSource = ReadDictionary(later, "source");
                     string laterText = DurableWireText(ReadDictionary(later, "compactWire"));
-                    var noWrite = VerificationService.CloneDictionary(lookupArm);
+                    var noWrite = CloneDictionary(lookupArm);
                     var responseWithoutWrite = ReadDictionary(ReadDictionaryList(ReadDictionary(noWrite, "writerReplay"), "repairResponses").Single(), "response");
                     var responseContent = TryParseJsonObject(ReadString(responseWithoutWrite, "content", ""));
                     responseContent.Remove("memoryWrites");
@@ -1114,7 +1114,7 @@ namespace ReignBetaServer
                 }
 
                 const string publishedAside = "*The lanterns cast long shadows across the lane.*";
-                var partyCase = VerificationService.CloneDictionary(compactCase);
+                var partyCase = CloneDictionary(compactCase);
                 partyCase["caseId"] = "published_party_" + contractNamespace;
                 partyCase["route"] = "party_chat";
                 partyCase["asOfUtcSeconds"] = 1100L;
@@ -1148,7 +1148,7 @@ namespace ReignBetaServer
                 string detachedText = Json.Serialize(detached);
                 var detachedBytes = System.Text.Encoding.UTF8.GetBytes(detachedText);
                 partyCase["publishedPartyViewSha256"] = ConversationExactTextHash(detachedText);
-                var partyWide = VerificationService.CloneDictionary(partyCase); partyWide.Remove("reviewedFactReplay");
+                var partyWide = CloneDictionary(partyCase); partyWide.Remove("reviewedFactReplay");
                 Dictionary<string, object> PartyCase(Dictionary<string, object> item) => FirstWriter(ReplayMemoryEvidenceFixture(
                     TestDict("schema", "reign-memory-evidence-replay-input-v1", "precisionMode", "precision", "cases", new[] { item }), "published-party-contract", detachedBytes));
                 var partyWideWriter = PartyCase(partyWide);
@@ -1170,14 +1170,14 @@ namespace ReignBetaServer
                 bool PartyHistoryMatches(List<Dictionary<string, object>> messages) => mappedPartyView.WirePreservesHistory(
                     TestDict("requestJson", Json.Serialize(TestDict("messages", messages))));
                 Check("published_party_retains_last_authored_turn_when_provider_appends_authority", PartyHistoryMatches(wireWithAuthority));
-                var mutatedWireHistory = wireWithAuthority.Select(VerificationService.CloneDictionary).ToList();
+                var mutatedWireHistory = wireWithAuthority.Select(CloneDictionary).ToList();
                 var mutatedMessage = mutatedWireHistory.First(m => ReadString(m, "content", "").StartsWith("HISTORICAL ", StringComparison.Ordinal));
                 mutatedMessage["content"] = ReadString(mutatedMessage, "content", "") + "\nUnexpected additional speech.";
                 Check("published_party_wire_rejects_extra_text_after_exact_body", !PartyHistoryMatches(mutatedWireHistory));
 
                 foreach (string mutation in new[] { "body", "speaker", "role", "audience", "cutoff", "recent_order", "receipt_bytes" })
                 {
-                    var changed = VerificationService.CloneDictionary(partyCase);
+                    var changed = CloneDictionary(partyCase);
                     var changedSource = ReadDictionaryList(changed, "sources")[3];
                     if (mutation == "body") changedSource["text"] = ReadString(changedSource, "text", "") + " ";
                     if (mutation == "speaker") changedSource["speakerId"] = "npc";
@@ -1211,7 +1211,7 @@ namespace ReignBetaServer
                     TestDict("initialNeed", initialNeed, "nextNeed", nextNeed));
                 if (nextNeed > initialNeed)
                 {
-                    var boundaryInput = VerificationService.CloneDictionary(withResponses);
+                    var boundaryInput = CloneDictionary(withResponses);
                     var boundaryCapacity = ReadDictionary(ReadDictionary(ReadDictionaryList(boundaryInput, "cases").First(), "writerReplay"), "contextCapacity");
                     boundaryCapacity["contextTokens"] = nextNeed - 1;
                     boundaryCapacity["maxOutputTokens"] = new[] { "providerWireCapture", "nextWriterWireCapture" }.Max(field =>
@@ -1225,7 +1225,7 @@ namespace ReignBetaServer
                         && ReadBool(nextAdvisory, "dispatchAllowed", false) && !ReadBool(nextAdvisory, "fits", true)
                         && ReadInt(boundaryWriter, "providerCalls", -1) == 0, boundaryWriter);
                 }
-                var chronologicalCase = VerificationService.CloneDictionary(capacityWriter);
+                var chronologicalCase = CloneDictionary(capacityWriter);
                 chronologicalCase["caseId"] = "archived_session_chronology_" + contractNamespace;
                 chronologicalCase["query"] = "What did we discuss earlier?";
                 chronologicalCase["asOfSequence"] = 4L; chronologicalCase["worldDay"] = 4d;
@@ -1245,7 +1245,7 @@ namespace ReignBetaServer
                     TestDict("selectedSession", ReadString(chronologicalPacket, "exactHistorySessionId", "")));
                 const string recentRecallFact = "Brindle is my mule. A crab pinched his nose beside the watermill.";
                 const string recentRecallFailure = "I have no memory of Brindle.";
-                var recentRecallCase = VerificationService.CloneDictionary(capacityWriter);
+                var recentRecallCase = CloneDictionary(capacityWriter);
                 recentRecallCase["caseId"] = "recent_only_continuation_guard_" + contractNamespace;
                 recentRecallCase["query"] = "Let us rest beside the mill.";
                 recentRecallCase["sources"] = new[] {
@@ -1263,7 +1263,7 @@ namespace ReignBetaServer
                     "response", TestDict("ok", true, "finishReason", "stop", "content", Json.Serialize(TestDict("reply", recentRecallFailure))));
                 foreach (string callback in new[] { "named", "pronoun" })
                 {
-                    var callbackCase = VerificationService.CloneDictionary(recentRecallCase);
+                    var callbackCase = CloneDictionary(recentRecallCase);
                     callbackCase["caseId"] = "recent_only_continuation_guard_" + callback + "_" + contractNamespace;
                     ReadDictionary(callbackCase, "writerReplay")["nextContribution"] = callback == "named"
                         ? "Do you remember Brindle and the crab?" : "Do you remember him?";
@@ -1312,14 +1312,14 @@ namespace ReignBetaServer
             else
             {
                 bool liveReplayBlocked = false;
-                try { ReplayMemoryEvidenceFixture(VerificationService.CloneDictionary(stableInput), "live-refusal"); }
+                try { ReplayMemoryEvidenceFixture(CloneDictionary(stableInput), "live-refusal"); }
                 catch (InvalidOperationException) { liveReplayBlocked = true; }
                 Check("repeatable_replay_refuses_live_runtime", liveReplayBlocked);
             }
             foreach (var mutation in new[] { TestDict("model", "other-model"), TestDict("contextTokens", 0),
                 TestDict("maxOutputTokens", 2097152), TestDict("source", "file:///private-settings"), TestDict("apiKey", "forbidden") })
             {
-                var invalidCapacity = VerificationService.CloneDictionary(capacityWriter);
+                var invalidCapacity = CloneDictionary(capacityWriter);
                 foreach (var value in mutation) ReadDictionary(ReadDictionary(invalidCapacity, "writerReplay"), "contextCapacity")[value.Key] = value.Value;
                 Check("writer_replay_capacity_rejects_" + mutation.Keys.Single(), MemoryEvidenceReplayInputError(invalidCapacity) == "invalid_writer_capacity_capture");
             }
@@ -1388,7 +1388,7 @@ namespace ReignBetaServer
                 int sourcesBeforeWriter = SourceCount();
                 var writerConfiguration = ReadDictionary(writerFixture, "writerReplay");
                 var savedSettingsScope = LlmProviderService.CodexPerformanceSettings.Value;
-                writerConfiguration["contextCapacity"] = VerificationService.CloneDictionary(capacityCapture);
+                writerConfiguration["contextCapacity"] = CloneDictionary(capacityCapture);
                 var verifiedWriter = ReplayEvidenceWriter(campaign, "npc", "player", writerFixture, writerContext, settings, packet, writerTranscript);
                 var verifiedPreflight = ReadDictionary(ReadDictionary(ReadDictionary(verifiedWriter, "request"), "promptEnvelope"), "continuityPreflight");
                 Check("writer_replay_capacity_binds_actual_model_and_restores_settings",
@@ -1401,8 +1401,8 @@ namespace ReignBetaServer
                 Check("writer_replay_expired_capacity_cannot_expand_allowance",
                     !ReadBool(ReadDictionary(ReadDictionary(ReadDictionary(expiredWriter, "request"), "promptEnvelope"), "continuityPreflight"), "capacityVerified", true));
                 writerConfiguration.Remove("contextCapacity");
-                var oversizedWriter = VerificationService.CloneDictionary(writerFixture); oversizedWriter["query"] = new string('x', 210000);
-                var capacityFailure = ReplayEvidenceWriter(campaign, "npc", "player", oversizedWriter, VerificationService.CloneDictionary(writerContext), settings, packet, writerTranscript);
+                var oversizedWriter = CloneDictionary(writerFixture); oversizedWriter["query"] = new string('x', 210000);
+                var capacityFailure = ReplayEvidenceWriter(campaign, "npc", "player", oversizedWriter, CloneDictionary(writerContext), settings, packet, writerTranscript);
                 var oversizedPreflight = ReadDictionary(ReadDictionary(capacityFailure, "providerWireCapture"), "providerPreflight");
                 Check("writer_replay_oversized_preparation_is_advisory_without_publication",
                     ReadString(capacityFailure, "status", "") == "writer_pending"
@@ -1416,7 +1416,7 @@ namespace ReignBetaServer
                     && SourceCount() == sourcesBeforeWriter);
                 foreach (string groupMode in new[] { "party_chat", "event" })
                 {
-                    var groupFixture = VerificationService.CloneDictionary(writerFixture); groupFixture["route"] = groupMode;
+                    var groupFixture = CloneDictionary(writerFixture); groupFixture["route"] = groupMode;
                     var groupConfiguration = ReadDictionary(groupFixture, "writerReplay"); groupConfiguration.Remove("response");
                     var groupPending = ReplayEvidenceWriter(campaign, "npc", "player", groupFixture, writerContext, settings, packet, writerTranscript);
                     var groupRequest = ReadDictionary(groupPending, "request");
@@ -1446,7 +1446,7 @@ namespace ReignBetaServer
                     "suggestedActions", new[] { TestDict("command", "give_gold", "amount", 999999) })));
                 writerConfiguration["nextPlanResponse"] = TestDict("ok", true, "content", "{\"needs\":[],\"queries\":[]}");
                 writerConfiguration["nextAssemblyResponse"] = TestDict("ok", true, "content", "{\"selectedAliases\":[],\"findings\":[],\"unresolvedNeeds\":[]}");
-                var boundFixture = VerificationService.CloneDictionary(writerFixture);
+                var boundFixture = CloneDictionary(writerFixture);
                 var boundResponse = ReadDictionary(ReadDictionary(boundFixture, "writerReplay"), "response");
                 string writerWireHash = ReadString(pendingWire, "requestSha256", "");
                 int MemoryCount()
@@ -1462,7 +1462,7 @@ namespace ReignBetaServer
                     && !wrongWriter.ContainsKey("publication") && !wrongWriter.ContainsKey("nextWriterWireCapture")
                     && SourceCount() == sourcesBeforeWriter && MemoryCount() == memoryBeforeBinding);
                 boundResponse["requestSha256"] = writerWireHash.ToLowerInvariant();
-                var reservedFixture = VerificationService.CloneDictionary(boundFixture);
+                var reservedFixture = CloneDictionary(boundFixture);
                 var reservedResponse = ReadDictionary(ReadDictionary(reservedFixture, "writerReplay"), "response");
                 var reservedFields = TryParseJsonObject(ReadString(reservedResponse, "content", ""));
                 reservedFields["reply"] = storedReply + "\n{\"decisionBrief\":{\"decision\":\"Internal rationale.\"}}";
@@ -1504,14 +1504,14 @@ namespace ReignBetaServer
                 Check("writer_replay_publication_retry_deduplicates", SourceCount() == sourcesBeforeWriter + 2
                     && ReadBool(ReadDictionary(ReadDictionary(replayedWriter, "publication"), "acceptedUnit"), "idempotentReplay", false));
 
-                var repairFixture = VerificationService.CloneDictionary(writerFixture); repairFixture["caseId"] = "bounded_repair_capture";
+                var repairFixture = CloneDictionary(writerFixture); repairFixture["caseId"] = "bounded_repair_capture";
                 var repairConfig = ReadDictionary(repairFixture, "writerReplay");
                 var emptyResponse = TestDict("ok", true, "finishReason", "length", "content", "{}");
                 repairConfig["response"] = emptyResponse;
                 repairConfig["repairResponses"] = Array.Empty<object>();
                 int beforeRepair = SourceCount();
                 Dictionary<string, object> ReplayRepair() => ReplayEvidenceWriter(campaign, "npc", "player", repairFixture,
-                    VerificationService.CloneDictionary(writerContext), settings, packet, writerTranscript);
+                    CloneDictionary(writerContext), settings, packet, writerTranscript);
                 var repairPending = ReplayRepair();
                 var repairWire = ReadDictionary(ReadDictionaryList(repairPending, "repairRequests").Single(), "providerWireCapture");
                 Check("repair_capture_pending_exports_exact_wire_without_publication", ReadString(repairPending, "status", "") == "writer_repair_pending"
@@ -1540,7 +1540,7 @@ namespace ReignBetaServer
                     && ReadString(repairedWriter, "acceptedProse", "").Contains(storedReply)
                     && !ReadBool(repairedWriter, "certificateEligible", true), ReadString(repairedWriter, "status", ""));
 
-                var invalidMetadataFixture = VerificationService.CloneDictionary(writerFixture);
+                var invalidMetadataFixture = CloneDictionary(writerFixture);
                 invalidMetadataFixture["caseId"] = "unsupported_continuity_evidence";
                 var invalidMetadataResponse = TryParseJsonObject(ReadString(ReadDictionary(writerConfiguration, "response"), "content", ""));
                 invalidMetadataResponse["continuityWrites"] = new[] { TestDict("kind", "question", "status", "active",
@@ -1548,7 +1548,7 @@ namespace ReignBetaServer
                 ReadDictionary(invalidMetadataFixture, "writerReplay")["response"] = TestDict("ok", true, "finishReason", "stop",
                     "content", Json.Serialize(invalidMetadataResponse));
                 var invalidMetadataWriter = ReplayEvidenceWriter(campaign, "npc", "player", invalidMetadataFixture,
-                    VerificationService.CloneDictionary(writerContext), settings, packet, writerTranscript);
+                    CloneDictionary(writerContext), settings, packet, writerTranscript);
                 var invalidMetadataStored = ReadDictionary(invalidMetadataWriter, "stored");
                 Check("writer_replay_unresolved_grounding_retains_prose_and_suppresses_memory",
                     !ReadBool(invalidMetadataWriter, "groundingAccepted", true)
@@ -1628,7 +1628,7 @@ namespace ReignBetaServer
                     string recallCampaign = "evidence_recall_gate_" + Guid.NewGuid().ToString("N");
                     try
                     {
-                        var replay = VerificationService.CloneDictionary(writerFixture);
+                        var replay = CloneDictionary(writerFixture);
                         replay["caseId"] = row.Id;
                         replay["query"] = row.Query;
                         replay["route"] = row.Route;
@@ -1637,7 +1637,7 @@ namespace ReignBetaServer
                                 TestDict("kind", "agenda", "status", "active", "subject", "Check the south gate",
                                     "meaning", proposedReply, "evidenceQuote", proposedReply, "expectedRevision", 0),
                             })));
-                        var replyReplay = ReplayEvidenceWriter(recallCampaign, "npc", "player", replay, VerificationService.CloneDictionary(writerContext),
+                        var replyReplay = ReplayEvidenceWriter(recallCampaign, "npc", "player", replay, CloneDictionary(writerContext),
                             settings, TestDict("memoryPacket", ""), new());
                         var replayStored = ReadDictionary(replyReplay, "stored");
                         var authored = ReadDictionaryList(replayStored, "conversation_turns").OrderBy(r => ReadLong(r, "accepted_sequence", 0)).ToList();
@@ -1677,7 +1677,7 @@ namespace ReignBetaServer
                             "nextPlanResponse", TestDict("ok", true, "content", "{\"needs\":[],\"queries\":[]}"),
                             "nextAssemblyResponse", TestDict("ok", true, "content", "{\"selectedAliases\":[],\"findings\":[],\"unresolvedNeeds\":[]}")));
                     var firstIdentity = ReplayEvidenceWriter(identityFirst, "npc", "player", identityFixture,
-                        VerificationService.CloneDictionary(writerContext), settings, TestDict("memoryPacket", ""), new());
+                        CloneDictionary(writerContext), settings, TestDict("memoryPacket", ""), new());
                     var firstIdentityRows = ReadDictionary(firstIdentity, "stored");
                     string firstQuestionTurn = ReadString(ReadDictionaryList(firstIdentityRows, "conversation_turns")
                         .Single(r => ReadString(r, "role", "") == "npc"), "turn_id", "");
@@ -1695,7 +1695,7 @@ namespace ReignBetaServer
                         "nextAssemblyResponse", TestDict("ok", true, "content", "{\"selectedAliases\":[],\"findings\":[],\"unresolvedNeeds\":[]}"));
                     string identityInputBefore = CanonicalJson(identityFixture);
                     var secondIdentity = ReplayEvidenceWriter(identitySecond, "npc", "player", identityFixture,
-                        VerificationService.CloneDictionary(writerContext), settings, TestDict("memoryPacket", ""), new());
+                        CloneDictionary(writerContext), settings, TestDict("memoryPacket", ""), new());
                     var secondContinuation = ReadDictionary(secondIdentity, "continuation");
                     var secondIdentityRows = ReadDictionary(secondContinuation, "stored");
                     var resolvedQuestion = ReadDictionaryList(secondIdentityRows, "continuity")
@@ -1712,10 +1712,10 @@ namespace ReignBetaServer
                         && identityFirst != identitySecond);
                     var identityPayload = TestDict("timelineId", "branch_a", "conversationSessionId", "session", "sceneTurnId", "turn", "playerText", identityAnswer);
                     string fixedId = EvidenceReplayEventId(identityFixture, "npc", identityPayload, identityReply);
-                    var changedIdentity = VerificationService.CloneDictionary(identityFixture); changedIdentity["sources"] = new[] { TestDict("text", "A different original.") };
+                    var changedIdentity = CloneDictionary(identityFixture); changedIdentity["sources"] = new[] { TestDict("text", "A different original.") };
                     Check("writer_replay_identity_binds_original_history_and_reply", fixedId != EvidenceReplayEventId(changedIdentity, "npc", identityPayload, identityReply)
                         && fixedId != EvidenceReplayEventId(identityFixture, "npc", identityPayload, "A different reply."));
-                    var changedTurn = VerificationService.CloneDictionary(identityPayload); changedTurn["playerText"] = "The orchard.";
+                    var changedTurn = CloneDictionary(identityPayload); changedTurn["playerText"] = "The orchard.";
                     Check("writer_replay_identity_binds_contribution_and_observer", fixedId != EvidenceReplayEventId(identityFixture, "npc", changedTurn, identityReply)
                         && fixedId != EvidenceReplayEventId(identityFixture, "other", identityPayload, identityReply));
                 }
@@ -1725,7 +1725,7 @@ namespace ReignBetaServer
                     ReignPostgreSqlStorage.DropCampaign(identitySecond);
                 }
 
-                var chainFixture = VerificationService.CloneDictionary(writerFixture);
+                var chainFixture = CloneDictionary(writerFixture);
                 chainFixture["caseId"] = "conditional_continuation";
                 var chainConfiguration = ReadDictionary(chainFixture, "writerReplay");
                 chainConfiguration["nextContribution"] = "If we visit the mill, who will inspect its roof?";
@@ -1737,7 +1737,7 @@ namespace ReignBetaServer
                     "nextPlanResponse", TestDict("ok", true, "content", "{\"needs\":[],\"queries\":[]}"),
                     "nextAssemblyResponse", TestDict("ok", true, "content", "{\"selectedAliases\":[],\"findings\":[],\"unresolvedNeeds\":[]}"));
                 int beforeChain = SourceCount();
-                var pendingChainFixture = VerificationService.CloneDictionary(chainFixture);
+                var pendingChainFixture = CloneDictionary(chainFixture);
                 ReadDictionary(ReadDictionary(pendingChainFixture, "writerReplay"), "continuation").Remove("response");
                 var pendingChain = ReplayEvidenceWriter(campaign, "npc", "player", pendingChainFixture, writerContext, settings, packet, writerTranscript);
                 Check("writer_continuation_missing_capture_preserves_only_prior_accepted_turn",

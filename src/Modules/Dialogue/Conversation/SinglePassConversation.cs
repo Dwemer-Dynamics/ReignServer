@@ -30,7 +30,7 @@ namespace ReignBetaServer
             string mode, bool allowQuiet = false)
         {
             if (!ReadBool(result, "ok", false)) return EnsureConversationDelivery(result, allowQuiet);
-            var response = VerificationService.CloneDictionary(result);
+            var response = CloneDictionary(result);
             string content = ReadString(response, "content", "");
             var parsed = TryParseStrictJsonObject(content);
             bool speechOnly = false;
@@ -61,7 +61,7 @@ namespace ReignBetaServer
             }
             parsed[letter ? "body" : "reply"] = visible;
             var speechView = parsed;
-            if (letter) { speechView = VerificationService.CloneDictionary(parsed); speechView["reply"] = visible; }
+            if (letter) { speechView = CloneDictionary(parsed); speechView["reply"] = visible; }
             response = ConversationResponseService.RejectProviderReservedSpeech(response, speechView);
             if (!ReadBool(response, "ok", false)) return EnsureConversationDelivery(response, allowQuiet);
             parsed = ConversationResponseService.CompleteConversationStructuredResponse(parsed, ActionPipelineService.NormalizeLookup(mode).Replace(' ', '_'), out var fields);

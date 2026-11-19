@@ -135,7 +135,7 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> RunConversationContinuityRepairCli(string[] args)
         {
-            string path = Path.GetFullPath(VerificationService.ArgValue(args, "--manifest", ""));
+            string path = Path.GetFullPath(ArgValue(args, "--manifest", ""));
             var manifest = CampaignFileService.ReadJsonObject(path);
             bool apply = Program.HasArg(args, "--apply");
             string campaign = ReadString(manifest, "campaignId", ""), timeline = ReadString(manifest, "timelineId", "");
@@ -143,10 +143,10 @@ namespace ReignBetaServer
             if (apply)
             {
                 if (Environment.GetEnvironmentVariable("REIGN_CONTINUITY_MAINTENANCE") != "1"
-                    || !hash.Equals(VerificationService.ArgValue(args, "--confirmed-manifest-sha256", ""), StringComparison.OrdinalIgnoreCase))
+                    || !hash.Equals(ArgValue(args, "--confirmed-manifest-sha256", ""), StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException("Application requires maintenance mode and the explicitly reviewed manifest hash.");
-                string backup = VerificationService.ArgValue(args, "--backup", "");
-                if (!File.Exists(backup) || !ContinuityFileHash(backup).Equals(VerificationService.ArgValue(args, "--backup-sha256", ""), StringComparison.OrdinalIgnoreCase))
+                string backup = ArgValue(args, "--backup", "");
+                if (!File.Exists(backup) || !ContinuityFileHash(backup).Equals(ArgValue(args, "--backup-sha256", ""), StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException("A verified campaign backup is required before repair.");
             }
             // Open an existing registered schema directly. Do not run server startup,
@@ -169,7 +169,7 @@ namespace ReignBetaServer
                     var result = stage ? originalsAudit ? BuildConversationOriginalAudit(connection, manifest) : BuildMemoryStagingManifest(connection, manifest) : RepairConversationContinuity(connection, manifest);
                     result["mode"] = stage ? "staged_read_only" : apply ? "applied" : "preview_rolled_back";
                     result["manifestFileSha256"] = hash;
-                    string output = Path.GetFullPath(VerificationService.ArgValue(args, "--report", path + ".receipt.json"));
+                    string output = Path.GetFullPath(ArgValue(args, "--report", path + ".receipt.json"));
                     if (apply) transaction.Commit(); else transaction.Rollback();
                     File.WriteAllText(output, Json.Serialize(result));
                     return TestDict("ok", true, "mode", result["mode"], "report", output, "manifestFileSha256", hash);

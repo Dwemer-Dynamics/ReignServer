@@ -293,7 +293,7 @@ namespace ReignBetaServer
         {
             PreparePersonalGossipReply(c, campaign, row, context);
             string owner = ReadString(context, "speakerId", ""), peer = ReadString(row, "speaker_id", "");
-            var scope = VerificationService.CloneDictionary(context); scope["worldDay"] = ReadDouble(context, "currentDay", 0);
+            var scope = CloneDictionary(context); scope["worldDay"] = ReadDouble(context, "currentDay", 0);
             var access = DialogueService.BuildKnowledgeAccessContext(owner, ReadString(context, "playerId", ""), "", scope);
             // Only correspondence already exchanged with this addressee belongs
             // in this reply. Another NPC's private letters grant no disclosure.

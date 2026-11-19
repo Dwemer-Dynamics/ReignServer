@@ -116,16 +116,16 @@ namespace ReignBetaServer
             string heroName,
             Dictionary<string, object> promptState)
         {
-            profile = VerificationService.CloneDictionary(profile);
-            characteristics = VerificationService.CloneDictionary(characteristics);
-            relationships = VerificationService.CloneDictionary(relationships);
-            summary = VerificationService.CloneDictionary(summary);
-            promptState = VerificationService.CloneDictionary(promptState);
-            interactionContext = VerificationService.CloneDictionary(interactionContext);
+            profile = CloneDictionary(profile);
+            characteristics = CloneDictionary(characteristics);
+            relationships = CloneDictionary(relationships);
+            summary = CloneDictionary(summary);
+            promptState = CloneDictionary(promptState);
+            interactionContext = CloneDictionary(interactionContext);
             List<Dictionary<string, object>> prior = CloneCodexRows(priorLines);
             List<Dictionary<string, object>> pulls = CloneCodexRows(selectedContextPulls);
             List<Dictionary<string, object>> bundles = CloneCodexRows(contextBundles);
-            Dictionary<string, object> identity = VerificationService.CloneDictionary(ReadDictionary(interactionContext, "identityView"));
+            Dictionary<string, object> identity = CloneDictionary(ReadDictionary(interactionContext, "identityView"));
             var tasks = new List<CodexContextPreparationTask>
             {
                 new CodexContextPreparationTask
@@ -178,13 +178,13 @@ namespace ReignBetaServer
             Dictionary<string, object> promptState,
             Dictionary<string, object> identityView)
         {
-            eventPayload = VerificationService.CloneDictionary(eventPayload);
-            profile = VerificationService.CloneDictionary(profile);
-            characteristics = VerificationService.CloneDictionary(characteristics);
-            relationships = VerificationService.CloneDictionary(relationships);
-            summary = VerificationService.CloneDictionary(summary);
-            promptState = VerificationService.CloneDictionary(promptState);
-            Dictionary<string, object> identity = VerificationService.CloneDictionary(identityView);
+            eventPayload = CloneDictionary(eventPayload);
+            profile = CloneDictionary(profile);
+            characteristics = CloneDictionary(characteristics);
+            relationships = CloneDictionary(relationships);
+            summary = CloneDictionary(summary);
+            promptState = CloneDictionary(promptState);
+            Dictionary<string, object> identity = CloneDictionary(identityView);
             List<Dictionary<string, object>> lines = CloneCodexRows(eventLines);
             List<Dictionary<string, object>> pulls = CloneCodexRows(selectedContextPulls);
             List<Dictionary<string, object>> bundles = CloneCodexRows(contextBundles);
@@ -235,7 +235,7 @@ namespace ReignBetaServer
         {
             return (rows ?? Enumerable.Empty<Dictionary<string, object>>())
                 .Where(row => row != null)
-                .Select(VerificationService.CloneDictionary)
+                .Select(CloneDictionary)
                 .ToList();
         }
 

@@ -31,7 +31,7 @@ namespace ReignBetaServer
             var season = new Dictionary<string, object>();
             add("reign_season", TryCompleteAcceptedGuestSchedule(season, payload, "Join my party for the season")
                 && ReadDouble(season, "durationDays", 0) == 31.5 && ReadBool(season, "startNow", false), season);
-            var customCalendar = VerificationService.CloneDictionary(payload);
+            var customCalendar = CloneDictionary(payload);
             customCalendar["campaignCalendar"] = TestDict("daysPerSeason", 28, "daysPerWeek", 7, "daysPerYear", 112);
             var custom = new Dictionary<string, object>();
             add("modded_native_season", TryCompleteAcceptedGuestSchedule(custom, customCalendar, "Join my party for one season")
@@ -60,7 +60,7 @@ namespace ReignBetaServer
             var together = accepted("travel_to_tournament: We will take a detour together if the others agree.");
             const string shared = "We could all go to Chaikand together if Temur agrees to one more day.";
             add("captured_shared_detour", IsSharedTravelOnly(together, shared), null);
-            var mainPartyHero = VerificationService.CloneDictionary(hero);
+            var mainPartyHero = CloneDictionary(hero);
             mainPartyHero["currentPartyId"] = "player_party";
             foreach (string command in SeparatePartyCommands)
                 add("main_party_excluded_" + command, !DialoguePlannerCandidateEligible(command, payload, mainPartyHero, together, shared), null);
@@ -339,7 +339,7 @@ namespace ReignBetaServer
                         rejectedPromotion.Player, rejectedPromotion.Reply)
                     && !ActionPipelineService.ActionGateShouldPlan(rejectedGate), rejectedGate);
             }
-            var intoxicatedPayload = VerificationService.CloneDictionary(payload);
+            var intoxicatedPayload = CloneDictionary(payload);
             intoxicatedPayload["intoxicationReceipt"] = TestDict("suppressedCommitments", true);
             var intoxicatedClanGate = TestDict("needed", false, "commitment", "roleplay_only", "intent", "Talk only.");
             add("intoxication_blocks_clan_gate_promotion",
@@ -534,7 +534,7 @@ namespace ReignBetaServer
                         clanGate, payload, hero, "Join my clan.", clanAllowed) == null, null);
             }
 
-            var compactLivePayload = VerificationService.CloneDictionary(payload);
+            var compactLivePayload = CloneDictionary(payload);
             compactLivePayload["actionResolutionIndex"] = TestDict("version", "2", "heroesCount", 4275);
             var compactLiveHero = ReadDictionary(compactLivePayload, "hero");
             compactLiveHero["spouseName"] = "Derthert";
@@ -585,7 +585,7 @@ namespace ReignBetaServer
             add("empty_candidate_errors_survive", ClassifyDialogueQueueOutcome(0, 0, true, new List<string> { "A required item is missing" }) == "missing_required_field", null);
 
             var incomplete = TestDict("command", "transfer_gold", "FromHero", "player", "ToHero", "rhagaea");
-            var resolved = VerificationService.CloneDictionary(incomplete);
+            var resolved = CloneDictionary(incomplete);
             resolved["terms"] = TestDict("gold", 437);
             add("incomplete_guess_needs_planner", ExecutableRouterCandidates(
                 new List<Dictionary<string, object>> { incomplete }, "test_campaign", payload, "Give her some gold.").Count == 0, null);
@@ -608,8 +608,8 @@ namespace ReignBetaServer
             ActionPipelineService.ResolveItemReference(itemIndex, TestDict("Item", "Pernach"), itemTerms, new List<Dictionary<string, object>>());
             add("gift_below_inventory_display_cutoff", ReadString(itemTerms, "itemId", "") == "pernach"
                 && ReadString(itemTerms, "itemModifierId", "") == "fine", itemTerms);
-            var giftPayload = VerificationService.CloneDictionary(payload);
-            giftPayload["actionResolutionIndex"] = VerificationService.CloneDictionary(ReadDictionary(payload, "actionResolutionIndex"));
+            var giftPayload = CloneDictionary(payload);
+            giftPayload["actionResolutionIndex"] = CloneDictionary(ReadDictionary(payload, "actionResolutionIndex"));
             ReadDictionary(giftPayload, "actionResolutionIndex")["assets"] = ReadDictionary(itemIndex, "assets");
             const string capturedGift = "Here is the pernach I won, would you like it?";
             var giftGate = accepted("The speaker accepts the pernach as a gift.");

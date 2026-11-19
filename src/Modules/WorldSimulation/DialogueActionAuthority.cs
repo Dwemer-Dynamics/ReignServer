@@ -171,7 +171,7 @@ namespace ReignBetaServer
                 "I will confirm receipt of the troops when they arrive.", "I cannot confirm receipt of the prisoner yet.",
                 "I acknowledge receipt of your letter about the prisoner.", "If I confirm receipt of the prisoner, notify the guards." })
                 Check("pending_receipt_safe_" + rows.Count, !DialogueService.StructuredActionReceiptContradictions(safe, payload).Any());
-            var delivered = VerificationService.CloneDictionary(payload);
+            var delivered = CloneDictionary(payload);
             ReadDictionary(delivered, "structuredActionContext")["nativeReceipt"] = TestDict("State", "Completed",
                 "OperationId", agreement.Id, "TermsHash", agreement.TermsHash());
             Check("matching_completed_receipt_allowed", !DialogueService.StructuredActionReceiptContradictions(premature, delivered).Any());
@@ -233,7 +233,7 @@ namespace ReignBetaServer
                         return TestDict("ok", true, "content", Json.Serialize(candidate));
                     });
                 var final = TryParseJsonObject(ReadString(repaired, "content", ""));
-                var captured = VerificationService.CloneDictionary(payload);
+                var captured = CloneDictionary(payload);
                 DialogueService.CaptureStructuredActionDecision(captured, final);
                 var decision = ReadDictionary(captured, "validatedStructuredActionDecision");
                 bool success = variant == "accept" || variant == "reject" || variant == "premature_receipt";

@@ -26,7 +26,7 @@ namespace ReignBetaServer
             }
             // Submitted player speech survives even if everybody listens. No NPC
             // line, summary, relationship score or provider request is invented.
-            var source = VerificationService.CloneDictionary(payload);
+            var source = CloneDictionary(payload);
             CopyPlayerInputSource(payload, source);
             ApplyPlayerInputAudienceToPayload(source, "", allowInterpretation: false);
             string publicText = ReadString(source, "publicPlayerText", ReadString(source, "playerText", ""));
@@ -85,7 +85,7 @@ namespace ReignBetaServer
                 if (ReadString(existing, "inputHash", "") != signature)
                     return TestDict("ok", false, "error", "This group turn already has a different speaking plan input.");
                 transaction.Commit();
-                var replay = VerificationService.CloneDictionary(existing); replay["replayed"] = true;
+                var replay = CloneDictionary(existing); replay["replayed"] = true;
                 return replay;
             }
             // Never reroll an old delivered turn after its small plan cache expires.
@@ -106,7 +106,7 @@ namespace ReignBetaServer
             foreach (string id in active)
             {
                 ProjectPlayerInputForAudience(text, id, profiles, out _, out bool privatelyAddressed, privateFocusId: privateFocus);
-                var actionInput = VerificationService.CloneDictionary(payload);
+                var actionInput = CloneDictionary(payload);
                 actionInput["hero"] = profiles.First(p => CampaignFileService.CharacterIdFrom(p).Equals(id, StringComparison.OrdinalIgnoreCase));
                 // The existing exact current handover parser identifies an action
                 // recipient. It is a local read; selection executes no transfer.

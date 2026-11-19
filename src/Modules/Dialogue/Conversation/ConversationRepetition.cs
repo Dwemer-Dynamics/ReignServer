@@ -318,7 +318,7 @@ namespace ReignBetaServer
             }
             var delta = TryParseJsonObject(ReadString(repaired, "content", ""));
             string reply = ReadString(delta, "reply", "");
-            var candidate = VerificationService.CloneDictionary(original);
+            var candidate = CloneDictionary(original);
             foreach (string key in new[] { "reply", "body", "response", "text", "content" })
                 if (key == "reply" || (candidate.TryGetValue(key, out object old) && old is string s && s == oldReply)) candidate[key] = reply;
             bool preserved = delta != null && delta.Count == 1 && ReadBool(repaired, "ok", false)

@@ -33,7 +33,7 @@ namespace ReignBetaServer
             bool singleAttempt = ReadBool(payload, "singleProviderAttempt", false);
             if (singleAttempt)
             {
-                settings = VerificationService.CloneDictionary(settings);
+                settings = CloneDictionary(settings);
                 settings["llmTransientMaxAttempts"] = 1;
             }
             bool codexSubscription = UsesCodexSubscription(settings);

@@ -767,7 +767,7 @@ namespace ReignBetaServer
             {
                 Dictionary<string, object> compact = CodexConversationContracts.CompactMetadataPolicy(requestType);
                 context["compactMetadata"] = compact;
-                List<Dictionary<string, object>> requestMessages = messages.Select(VerificationService.CloneDictionary).ToList();
+                List<Dictionary<string, object>> requestMessages = messages.Select(CloneDictionary).ToList();
                 if (requestMessages.Count > 0)
                 {
                     int last = requestMessages.Count - 1;
@@ -796,7 +796,7 @@ namespace ReignBetaServer
 
             string authorityHash = CodexConversationContracts.AuthorityHash(payload, authoritativeMetadata, context);
             context["authorityHash"] = authorityHash;
-            Dictionary<string, object> schemaPayload = VerificationService.CloneDictionary(payload);
+            Dictionary<string, object> schemaPayload = CloneDictionary(payload);
             foreach (KeyValuePair<string, object> pair in authoritativeMetadata)
                 if (!schemaPayload.ContainsKey(pair.Key)) schemaPayload[pair.Key] = pair.Value;
             // This private marker is created only from the active server-owned

@@ -303,7 +303,7 @@ namespace ReignBetaServer
             Dictionary<string, object> lifecycle = RelationshipLifecycleView(connection, heroAId, heroBId);
             Dictionary<string, object> latestIncident = RelationshipsStore.SelectRelationshipIncidents2(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault()
                 ?? new Dictionary<string, object>();
-            var evidenceContext = VerificationService.CloneDictionary(context);
+            var evidenceContext = CloneDictionary(context);
             evidenceContext["worldDay"] = ReadDouble(context, "worldDay", ReadDouble(chemistry, "last_day", 0d));
             evidenceContext["timelineId"] = DialogueService.ContinuityTimeline(context);
             evidenceContext["memoryAsOfAcceptedSequence"] = DialogueService.ReadAcceptedMemorySourceWatermark(connection);
@@ -825,10 +825,10 @@ namespace ReignBetaServer
             string campaignId = "_shared_relationship_history_test_" + Guid.NewGuid().ToString("N");
             try
             {
-                var politicalBatchBasis = VerificationService.CloneDictionary(mixed);
+                var politicalBatchBasis = CloneDictionary(mixed);
                 politicalBatchBasis["campaignId"] = campaignId;
                 politicalBatchBasis["timelineId"] = "saved_branch";
-                var politicalPlayerPair = VerificationService.CloneDictionary(politicalBatchBasis);
+                var politicalPlayerPair = CloneDictionary(politicalBatchBasis);
                 politicalPlayerPair["pairKey"] = "a|player";
                 politicalPlayerPair["heroBId"] = "player";
                 politicalPlayerPair["heroB"] = TestDict("name", "Player");
@@ -865,7 +865,7 @@ namespace ReignBetaServer
                 add("private_batch_authors_do_not_mutate_shared_history_basis", CanonicalJson(politicalBatchBasis) == politicalBasisBefore
                     && !politicalBatchBasis.ContainsKey("politicalAuthors"),
                     "Private political author context is transient request metadata; it is not added to the persisted objective history basis.");
-                var missingPoliticalBasis = VerificationService.CloneDictionary(politicalBatchBasis);
+                var missingPoliticalBasis = CloneDictionary(politicalBatchBasis);
                 missingPoliticalBasis["heroBId"] = "missing_named_character";
                 bool missingPoliticalProfileRefused = false;
                 try { BuildSharedRelationshipHistoryBatchRequest(new List<Dictionary<string, object>> { missingPoliticalBasis }, politicalProfiles, TestDict()); }

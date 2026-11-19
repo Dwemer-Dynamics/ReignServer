@@ -106,7 +106,7 @@ namespace ReignBetaServer
             foreach (string key in new[] { "reply", "body" })
                 if (patch.ContainsKey(key) && ReadString(patch, key, "") != ReadFirstString(original, key, "reply", "body"))
                     return null;
-            var merged = VerificationService.CloneDictionary(original);
+            var merged = CloneDictionary(original);
             var before = ReadDictionaryList(original, "proposalDecisions");
             var after = ReadDictionaryList(patch, "proposalDecisions");
             if (original.ContainsKey("proposalDecisions"))
@@ -117,7 +117,7 @@ namespace ReignBetaServer
                 {
                     if (ReadString(before[i], "topic", "") != ReadString(after[i], "topic", "")
                         || ReadString(before[i], "objectId", "") != ReadString(after[i], "objectId", "")) return null;
-                    var entry = VerificationService.CloneDictionary(before[i]);
+                    var entry = CloneDictionary(before[i]);
                     foreach (string key in new[] { "playerQuote", "replyQuote", "evidenceKeys" })
                         if (after[i].ContainsKey(key)) entry[key] = after[i][key];
                     corrected.Add(entry);
@@ -142,7 +142,7 @@ namespace ReignBetaServer
             if (original == null || candidate == null) return;
             candidate.Remove("repairStatus");
             var status = ReadDictionary(original, "repairStatus");
-            if (status != null) candidate["repairStatus"] = VerificationService.CloneDictionary(status);
+            if (status != null) candidate["repairStatus"] = CloneDictionary(status);
             else if (ReadFirstString(original, "reply", "body").TrimEnd().EndsWith(".,", StringComparison.Ordinal))
                 candidate["repairStatus"] = new Dictionary<string, object>
                 { ["allChecksCleared"] = false, ["stageCount"] = 1 };

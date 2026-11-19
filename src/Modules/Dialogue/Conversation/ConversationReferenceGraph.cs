@@ -566,7 +566,7 @@ namespace ReignBetaServer
                     || !Member(from) || !Member(to) || from.Hash != ReadString(edge, "from_hash", "") || to.Hash != ReadString(edge, "to_hash", "")
                     || !from.View.Contains(ReadString(metadata, "originQuote", ""), StringComparison.Ordinal)
                     || !to.View.Contains(ReadString(metadata, "targetQuote", ""), StringComparison.Ordinal)) continue;
-                metadata = VerificationService.CloneDictionary(metadata);
+                metadata = CloneDictionary(metadata);
                 metadata["reboundFromEdge"] = ReadString(edge, "edge_id", "");
                 metadata["restoredSavePointId"] = ReadString(point, "savePointId", "");
                 string id = ConversationReferenceEdgeId(owner, timeline, generation, from.Type, from.Id, from.Hash,

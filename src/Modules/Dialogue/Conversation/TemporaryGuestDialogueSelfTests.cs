@@ -87,7 +87,7 @@ namespace ReignBetaServer
             foreach (string utterance in new[] { capturedRenewal, "Stay another 20 days as my traveling companion.",
                 "Extend our scout arrangement by 20 more days.", "Renew our arrangement for 20 additional days." })
             {
-                var gate = VerificationService.CloneDictionary(renewalGate);
+                var gate = CloneDictionary(renewalGate);
                 check("renewal_survives_continuity_" + results.Count,
                     !NormalizeAlreadySatisfiedContinuityGate(gate, routingPayload, routingHero), gate);
                 var choices = ActionPipelineService.BuildAllowedActionPlannerChoices(settings, routingPayload, routingHero, gate,
@@ -118,7 +118,7 @@ namespace ReignBetaServer
             }
             foreach (string commitment in new[] { "refused", "conditional", "considering", "roleplay_only" })
             {
-                var gate = VerificationService.CloneDictionary(renewalGate);
+                var gate = CloneDictionary(renewalGate);
                 gate["commitment"] = commitment;
                 check("renewal_does_not_invent_consent_" + commitment,
                     ActionPipelineService.TemporaryPartyGuestCandidateToPreserve(gate, capturedRenewal, routingPayload, routingHero) == ""
@@ -148,7 +148,7 @@ namespace ReignBetaServer
             var transportPayload = ReadDictionary(VerificationService.DefaultActionTestSnapshot(), "payload");
             var transportHero = ReadDictionary(transportPayload, "hero");
             string transportHeroId = ReadString(transportHero, "heroStringId", "");
-            var transportNative = VerificationService.CloneDictionary(native);
+            var transportNative = CloneDictionary(native);
             transportNative["heroId"] = transportHeroId;
             transportPayload["speakerHeroStringId"] = transportHeroId;
             transportPayload["temporaryPartyGuest"] = transportNative;

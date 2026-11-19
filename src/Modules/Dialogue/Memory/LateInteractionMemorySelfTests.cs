@@ -27,7 +27,7 @@ namespace ReignBetaServer
                     "criticalErrors", 1, "requiredEvidenceCoverage", .97, "answerCoverage", .97, "quality", .80,
                     "modelHash", new string('b',64), "indexSchema", "old", "retrievalP95Ms", 2001d))
                 {
-                    var invalid = VerificationService.CloneDictionary(certificate); invalid[change.Key] = change.Value;
+                    var invalid = CloneDictionary(certificate); invalid[change.Key] = change.Value;
                     Check("qualification_rejects_" + change.Key, !LateInteractionQualified(TestDict("memoryLateInteractionQualification", invalid)));
                 }
                 certificate["answerCoverage"] = double.PositiveInfinity;
@@ -87,7 +87,7 @@ namespace ReignBetaServer
                     var allowed = ReadDictionaryList(request,"eligible");
                     var picked = allowed.FirstOrDefault(r=>ReadString(r,"sourceId","")==id);
                     var hits = new List<Dictionary<string,object>>();
-                    if(picked!=null) { var hit=VerificationService.CloneDictionary(picked); hit["score"]=18d; hits.Add(hit); }
+                    if(picked!=null) { var hit=CloneDictionary(picked); hit["score"]=18d; hits.Add(hit); }
                     return TestDict("ok",true,"status","ready","schema",LateInteractionSchema,"modelHash",LateInteractionModelHash,
                         "indexedCount",allowed.Count,"results",hits);
                 }
@@ -223,7 +223,7 @@ namespace ReignBetaServer
                     if (ReadString(request, "operation", "") == "/memory/late/status")
                         return TestDict("modelInstalled", true, "schema", LateInteractionSchema, "modelHash", LateInteractionModelHash, "indexGeneration", "epoch");
                     indexCalls++;
-                    var views = ReadDictionaryList(request, "sources").Select(VerificationService.CloneDictionary).ToList();
+                    var views = ReadDictionaryList(request, "sources").Select(CloneDictionary).ToList();
                     if (!complete) views.RemoveAt(views.Count - 1);
                     return TestDict("ok", true, "schema", LateInteractionSchema, "modelHash", LateInteractionModelHash, "sources", views, "indexGeneration", "epoch");
                 };

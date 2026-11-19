@@ -14,13 +14,13 @@ namespace ReignBetaServer
             string campaign = "player_actions_test_" + Guid.NewGuid().ToString("N");
             Dictionary<string, object> NewContribution(Dictionary<string, object> prior, string id)
             {
-                var next = VerificationService.CloneDictionary(prior);
+                var next = CloneDictionary(prior);
                 PlayerInputSources.Remove(next); // A new authored contribution is not an observer clone of the prior one.
                 next["sceneTurnId"] = id; next["contributionId"] = id; next["correlationId"] = id;
                 next.Remove("inputReceipt"); next.Remove("inputSourceId");
                 return next;
             }
-            var payload = VerificationService.CloneDictionary(ReadDictionary(VerificationService.DefaultActionTestSnapshot(), "payload"));
+            var payload = CloneDictionary(ReadDictionary(VerificationService.DefaultActionTestSnapshot(), "payload"));
             payload["campaignId"] = campaign; payload["timelineId"] = "player_actions_timeline";
             payload["sceneTurnId"] = "captured"; payload["correlationId"] = "captured";
             payload["playerText"] = "*I give her the 2000 denars to join as a companion* You can leave tomorrow.";
@@ -94,12 +94,12 @@ namespace ReignBetaServer
                 var resolvedSummary = UnresolvedActionDeliverySummary(campaign);
                 add("redelivery_backed_off_row_accepts_terminal_report", ReadString(ReadDurableConversationAction(campaign, heldId), "status", "") == "completed"
                     && ReadBool(resolvedSummary, "ok", false) && ReadInt(resolvedSummary, "unresolvedCount", -1) == 0, resolvedSummary);
-                var stale = VerificationService.CloneDictionary(first); stale["status"] = "rejected";
+                var stale = CloneDictionary(first); stale["status"] = "rejected";
                 SaveDurableConversationAction(campaign, stale);
                 add("late_reply_cannot_overwrite_applied_receipt", ReadString(stale, "status", "") == "completed"
                     && ReadString(ReadDurableConversationAction(campaign, ReadString(first, "id", "")), "status", "") == "completed", stale);
             }
-            var alteredRetry = VerificationService.CloneDictionary(payload); alteredRetry["playerText"] = "I give you 2500 gold to join as a companion.";
+            var alteredRetry = CloneDictionary(payload); alteredRetry["playerText"] = "I give you 2500 gold to join as a companion.";
             PlayerInputSources.Remove(alteredRetry);
             bool changedInputRejected = false, changedInputGenerated = false;
             try { RunPlayerActionTurn(alteredRetry, () => { changedInputGenerated = true; return TestDict("ok", true, "reply", "I will consider joining."); }); }
@@ -538,11 +538,11 @@ namespace ReignBetaServer
             payload["channel"] = "in_person"; payload["guardedPromptOverride"] = true;
             add("test_directive_keeps_existing_gate", CurrentPlayerTransfers(payload).Count == 0, null);
             payload.Remove("guardedPromptOverride");
-            var group = VerificationService.CloneDictionary(payload);
+            var group = CloneDictionary(payload);
             group["attendees"] = new List<Dictionary<string, object>> { TestDict("heroStringId", "npc_a"), TestDict("heroStringId", "npc_b") };
             add("two_npc_attendees_make_you_ambiguous", !SinglePlayerTransferRecipient(group)
                 && CurrentPlayerTransfers(group).All(i => i.Error.Length > 0), null);
-            var hypothetical = VerificationService.CloneDictionary(payload);
+            var hypothetical = CloneDictionary(payload);
             hypothetical["playerText"] = "For example:\nI give you 2000 gold.";
             var hypotheticalRecord = TestDict("source", "dialogue_auto_commit", "actorHeroStringId", ReadString(payload, "playerHeroStringId", ""));
             var hypotheticalErrors = new List<string>();
@@ -668,7 +668,7 @@ namespace ReignBetaServer
                 Func<string, Dictionary<string, object>> markerOf = id => ReadDictionary(ReadDurableConversationAction(campaign, id), "terminalReport");
                 Func<Dictionary<string, object>, string, string, string, Dictionary<string, object>> recover = (envelope, live, session, point) =>
                 {
-                    var e = VerificationService.CloneDictionary(envelope); e["schema"] = P;
+                    var e = CloneDictionary(envelope); e["schema"] = P;
                     e["recovery"] = TestDict("liveGeneration", live, "savePointId", point, "loadSessionId", session);
                     e["loadProof"] = TestDict("loadSessionId", session, "savePointId", point, "restoreGeneration", live);
                     return e;

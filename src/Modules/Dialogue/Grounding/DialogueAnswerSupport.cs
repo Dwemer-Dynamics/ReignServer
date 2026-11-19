@@ -44,7 +44,7 @@ namespace ReignBetaServer
             var checkedResult = ApplyAnswerSupportGuard(result, request, payload, prior, speaker, responder);
             if (!ReadBool(checkedResult, "ok", false))
             {
-                var failure = VerificationService.CloneDictionary(result);
+                var failure = CloneDictionary(result);
                 foreach (var pair in checkedResult) failure[pair.Key] = pair.Value;
                 return failure;
             }
@@ -52,7 +52,7 @@ namespace ReignBetaServer
             string after = ReadFirstString(parsed, AnswerSupportReplyFields);
             if (before != after && validateChangedReply != null)
             {
-                var view = VerificationService.CloneDictionary(parsed);
+                var view = CloneDictionary(parsed);
                 view["reply"] = after;
                 if (!validateChangedReply(view))
                 {
@@ -305,7 +305,7 @@ namespace ReignBetaServer
                     || Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") == "1")) answer = TestDict("ok", false, "errorCode", "answer_support_capture_missing");
                 else
                 {
-                    try { answer = (responder ?? LlmProviderService.ChatWithLlm)(SealAnswerSupportAudit(VerificationService.CloneDictionary(check))); }
+                    try { answer = (responder ?? LlmProviderService.ChatWithLlm)(SealAnswerSupportAudit(CloneDictionary(check))); }
                     catch (Exception) { answer = TestDict("ok", false, "errorCode", "answer_support_unavailable"); }
                 }
                 string verdict = AnswerSupportVerdict(answer, sources, claim, payload, speaker, parsed);
@@ -338,7 +338,7 @@ namespace ReignBetaServer
                 // historical assertion or changes any surviving source quote.
                 if (!originalQuiet && string.IsNullOrWhiteSpace(DialogueClaimSpeech(visible)))
                     return TestDict("ok", false, "content", "", "errorCode", "dialogue_answer_support_no_visible_reply", "dialogueAnswerSupport", support);
-                var changed = VerificationService.CloneDictionary(parsed);
+                var changed = CloneDictionary(parsed);
                 string replyField = AnswerSupportReplyFields.FirstOrDefault(key => ReadString(parsed, key, "").Length > 0) ?? "reply";
                 changed[replyField] = visible;
                 var invalidated = new List<Dictionary<string, object>>();

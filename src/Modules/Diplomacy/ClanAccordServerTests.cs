@@ -109,7 +109,7 @@ namespace ReignBetaServer
                 };
                 var evt = new Dictionary<string, object> {
                     ["eventId"] = "formed:test", ["kind"] = "formed", ["worldDay"] = 1d,
-                    ["playerHeroId"] = "player", ["record"] = VerificationService.CloneDictionary(record),
+                    ["playerHeroId"] = "player", ["record"] = CloneDictionary(record),
                     ["knownHeroIds"] = new[] { "player", "npc", "clan_leader" }, ["partnerMemberIds"] = new[] { "npc" }
                 };
                 var payload = new Dictionary<string, object> {
@@ -169,7 +169,7 @@ namespace ReignBetaServer
                 record["EndActionId"] = "cancel:test"; record["EndActorId"] = "player"; record["EndActorName"] = "Player";
                 evt = new Dictionary<string, object> {
                     ["eventId"] = "cancel:test", ["kind"] = "ended", ["worldDay"] = 22d, ["playerHeroId"] = "player",
-                    ["record"] = VerificationService.CloneDictionary(record), ["endReason"] = "Cancelled", ["partnerMemberIds"] = new[] { "npc" },
+                    ["record"] = CloneDictionary(record), ["endReason"] = "Cancelled", ["partnerMemberIds"] = new[] { "npc" },
                     ["knownHeroIds"] = new[] { "player", "npc", "clan_leader" }
                 };
                 payload["events"] = new[] { evt };
@@ -184,10 +184,10 @@ namespace ReignBetaServer
                     "A fresh database connection reloads the persisted ledger.");
                 add("timeline_isolation", !ReadBool(ClanAccordsSnapshot(campaign, "other"), "available", true), "A different timeline cannot read this snapshot.");
                 var history = Enumerable.Range(0, 105).Select(i => {
-                    var ended = VerificationService.CloneDictionary(record); ended["Id"] = "history:" + i; ended["ActionId"] = "history-action:" + i;
+                    var ended = CloneDictionary(record); ended["Id"] = "history:" + i; ended["ActionId"] = "history-action:" + i;
                     ended["StartDay"] = 30d + i; ended["EndDay"] = 31d + i; return ended;
                 }).ToList();
-                var oldActive = VerificationService.CloneDictionary(record);
+                var oldActive = CloneDictionary(record);
                 oldActive["Id"] = "accord:old-active"; oldActive["ActionId"] = "old-active-action";
                 oldActive["IsActive"] = true; oldActive["EndReason"] = 0; oldActive["EndDay"] = null;
                 oldActive["EndActionId"] = ""; oldActive["EndActorId"] = ""; oldActive["EndActorName"] = "";

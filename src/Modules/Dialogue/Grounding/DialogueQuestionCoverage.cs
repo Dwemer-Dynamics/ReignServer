@@ -151,7 +151,7 @@ namespace ReignBetaServer
                     else
                     {
                         calls++;
-                        try { response = (responder ?? LlmProviderService.ChatWithLlm)(SealAnswerSupportAudit(VerificationService.CloneDictionary(check))); }
+                        try { response = (responder ?? LlmProviderService.ChatWithLlm)(SealAnswerSupportAudit(CloneDictionary(check))); }
                         catch (Exception) { response = TestDict("ok", false, "errorCode", "question_coverage_unavailable"); }
                     }
                     verdict = QuestionCoverageVerdict(response, questionText, offeredAnswers.Select(a => ReadString(a, "answerId", "")).ToHashSet());

@@ -203,7 +203,7 @@ namespace ReignBetaServer
         {
             if (enrollment == null || ReadString(enrollment, "source", "") != "reign_mcp_npc_lives"
                 || !ReadBool(enrollment, "recoveryCheckpointVerified", false)) return false;
-            var contract = VerificationService.CloneDictionary(enrollment); contract["source"] = "reign_mcp_structured_actions";
+            var contract = CloneDictionary(enrollment); contract["source"] = "reign_mcp_structured_actions";
             return StructuredActionEnrollmentValid(contract, campaignId);
         }
 
@@ -211,7 +211,7 @@ namespace ReignBetaServer
         {
             if (enrollment == null || ReadString(enrollment, "source", "") != "reign_mcp_personal_gossip"
                 || !ReadBool(enrollment, "recoveryCheckpointVerified", false)) return false;
-            var contract = VerificationService.CloneDictionary(enrollment); contract["source"] = "reign_mcp_structured_actions";
+            var contract = CloneDictionary(enrollment); contract["source"] = "reign_mcp_structured_actions";
             return StructuredActionEnrollmentValid(contract, campaignId);
         }
 
@@ -234,7 +234,7 @@ namespace ReignBetaServer
                     || string.IsNullOrWhiteSpace(ReadString(input, "probeId", ""))
                     || ReadString(input, "probeId", "").Length > 128
                     || ReadString(input, "expectedSaveName", "") != ReadString(enrollment, "disposableSaveName", "")) return null;
-                var scope = VerificationService.CloneDictionary(enrollment); scope["source"] = "reign_mcp_structured_actions";
+                var scope = CloneDictionary(enrollment); scope["source"] = "reign_mcp_structured_actions";
                 if (!StructuredActionEnrollmentValid(scope, ReadString(run, "campaignId", ""))) return null;
                 // No caller-selected duration, raw clock value or action is admitted.
                 if (input.ContainsKey("minutes") || input.ContainsKey("days") || input.ContainsKey("ticks")) return null;

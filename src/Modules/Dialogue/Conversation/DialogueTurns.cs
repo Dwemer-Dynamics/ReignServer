@@ -556,7 +556,7 @@ namespace ReignBetaServer
             if (pendingAddressConvention != null
                 && pendingAddressConvention.Count > 0)
                 stateUpdates["politicalAddressConvention"] =
-                    VerificationService.CloneDictionary(pendingAddressConvention);
+                    CloneDictionary(pendingAddressConvention);
             Dictionary<string, object> politicalConduct =
                 ReadDictionary(parsed, "politicalConduct")
                 ?? new Dictionary<string, object>();
@@ -937,7 +937,7 @@ namespace ReignBetaServer
             };
             if (privateGovernmentChannel && ReadBool(ReadDictionary(payload, "governmentPrivateContext"), "enabled", false)
                 && ReadDictionary(parsed, "governmentCommitment") != null)
-                response["governmentCommitment"] = VerificationService.CloneDictionary(ReadDictionary(parsed, "governmentCommitment"));
+                response["governmentCommitment"] = CloneDictionary(ReadDictionary(parsed, "governmentCommitment"));
             OperationsService.LogOperational("dialogue.respond", new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,

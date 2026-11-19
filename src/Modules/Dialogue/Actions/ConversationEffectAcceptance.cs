@@ -38,7 +38,7 @@ namespace ReignBetaServer
                 payload["conversationEffectAcceptance"] = silent;
                 return silent;
             }
-            var candidate = VerificationService.CloneDictionary(parsed);
+            var candidate = CloneDictionary(parsed);
             candidate["reply"] = reply;
             if (candidate.ContainsKey("body")) candidate["body"] = reply;
             var drink = ReadDictionary(payload, "intoxicationReceipt");
@@ -157,7 +157,7 @@ namespace ReignBetaServer
                             string currentState = PromptHash(CanonicalJson(TryParseJsonObject(ReadString(stateRow, "state_json", "{}"))));
                             if (ReadString(drink, "baseStateHash", "") != currentState)
                                 throw new InvalidOperationException("The drink state changed while the response was being prepared.");
-                            acceptedDrink = VerificationService.CloneDictionary(drink);
+                            acceptedDrink = CloneDictionary(drink);
                             acceptedDrink["commitState"] = "committed";
                             acceptedDrink["acceptedReplyHash"] = acceptedHash;
                             acceptedDrink["reply"] = reply;

@@ -115,9 +115,9 @@ namespace ReignBetaServer
             diagnostics["maximumAttempts"] = maximumAttempts;
             for (int attempt = 1; attempt <= maximumAttempts; attempt++)
             {
-                Dictionary<string, object> retryRequest = VerificationService.CloneDictionary(request ?? new Dictionary<string, object>());
+                Dictionary<string, object> retryRequest = CloneDictionary(request ?? new Dictionary<string, object>());
                 List<Dictionary<string, object>> retryMessages = ReadDictionaryList(request, "messages")
-                    .Select(VerificationService.CloneDictionary)
+                    .Select(CloneDictionary)
                     .ToList();
                 if (retryMessages.Count == 0)
                 {
@@ -232,7 +232,7 @@ namespace ReignBetaServer
                 {
                     if (regenerateEnvelope)
                     {
-                        var recoveredEvidence = VerificationService.CloneDictionary(ReadDictionary(llm, "responseRecovery"));
+                        var recoveredEvidence = CloneDictionary(ReadDictionary(llm, "responseRecovery"));
                         recoveredEvidence["regenerated"] = true;
                         recoveredEvidence["additionalProviderCalls"] = 1
                             + ReadInt(ReadDictionary(retry, "structuredActionMetadataRepair"), "providerCalls", 0);

@@ -150,7 +150,7 @@ namespace ReignBetaServer
             var recent = ReadStringList(item, "recentSourceIds").ToHashSet(StringComparer.Ordinal);
             var older = ReadDictionaryList(item, "sources").Select(s => ReadString(s, "sourceId", ""))
                 .Where(id => !recent.Contains(id)).Select(mapSourceId).ToHashSet(StringComparer.Ordinal);
-            var precision = VerificationService.CloneDictionary(ReadDictionary(stockPacket, "precisionEvidence"));
+            var precision = CloneDictionary(ReadDictionary(stockPacket, "precisionEvidence"));
             if (ReadString(precision, "mode", "") != "precision")
                 throw new InvalidOperationException("Reviewed fact replay requires the stock precision packet.");
             string text = ReadString(stockPacket, "memoryPacket", "");
@@ -181,7 +181,7 @@ namespace ReignBetaServer
             }
             precision["records"] = kept;
             precision["dynamicMemoryTokenEstimate"] = EstimateContinuityTokens(text);
-            var projectedPacket = VerificationService.CloneDictionary(stockPacket);
+            var projectedPacket = CloneDictionary(stockPacket);
             projectedPacket["memoryPacket"] = text;
             projectedPacket["precisionEvidence"] = precision;
             projectedPacket["reviewedFactProjection"] = TestDict("reviewReceiptSha256", ReadString(review, "reviewReceiptSha256", ""),
@@ -198,7 +198,7 @@ namespace ReignBetaServer
             var review = ReadDictionary(item, "reviewedFactReplay");
             string mode = ReadString(review, "writerPlan", "");
             if (mode.Length == 0) return null;
-            var deliveryChoices = IsReviewedDelivery(mode) ? VerificationService.CloneDictionary(ReadDictionary(review, "deliveryChoices")) : null;
+            var deliveryChoices = IsReviewedDelivery(mode) ? CloneDictionary(ReadDictionary(review, "deliveryChoices")) : null;
             var envelope = ReadDictionary(request, "promptEnvelope");
             var messages = ReadDictionaryList(request, "messages");
             if (envelope == null || !ConversationStructureReceipts.TryGetValue(envelope, out var receipt)
@@ -271,7 +271,7 @@ namespace ReignBetaServer
             }
 
             int index = messages.IndexOf(reference);
-            var moved = messages.Select(VerificationService.CloneDictionary).ToList();
+            var moved = messages.Select(CloneDictionary).ToList();
             moved[index]["content"] = context.Remove(start, record.Text.Length);
             moved.InsertRange(moved.Count - 1, new[] { TestDict("role", "user", "content", record.Text),
                 TestDict("role", "user", "content", rules) });
@@ -281,7 +281,7 @@ namespace ReignBetaServer
                 "strict", true, "schema", ObjectSchema(properties)));
             ConversationStructureReceipts.Remove(envelope);
             ConversationStructureReceipts.Add(envelope, new ConversationStructureReceipt {
-                Messages = moved.Select(VerificationService.CloneDictionary).ToList(), CanonicalTranscript = receipt.CanonicalTranscript });
+                Messages = moved.Select(CloneDictionary).ToList(), CanonicalTranscript = receipt.CanonicalTranscript });
             envelope["messageCount"] = moved.Count;
             ReadDictionary(envelope, "conversationMessageStructure")["serializedMessagesHash"] = PromptHash(Json.Serialize(moved));
             string choicesHash = deliveryChoices == null ? "" : PromptHash(CanonicalJson(TestDict(

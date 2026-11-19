@@ -144,7 +144,7 @@ AND COALESCE({PromptObligationPayloadSql}->'sourceEvidence'->>'evidenceType','')
                         items.Remove(item);
                         foreach (string promise in distinctPromises)
                         {
-                            var separate = VerificationService.CloneDictionary(item);
+                            var separate = CloneDictionary(item);
                             separate["description"] = promise;
                             separate["sourceEvidence"] = new Dictionary<string, object>(cited) { ["quote"] = promise, ["evidenceType"] = "future_intention" };
                             items.Add(separate);
@@ -312,7 +312,7 @@ AND COALESCE({PromptObligationPayloadSql}->'sourceEvidence'->>'evidenceType','')
             if (original.Count == 0 && sameScope && ReadString(old, "sourceValidation", "") == "supported_span")
                 original = ReadDictionary(old, "sourceEvidence") ?? TestDict();
             if (original.Count == 0) original = current;
-            item["commitmentOriginalSource"] = VerificationService.CloneDictionary(original);
+            item["commitmentOriginalSource"] = CloneDictionary(original);
         }
 
         private static bool CommitmentSourceTurnVisible(ReignDbConnection connection, Dictionary<string, object> turn,
@@ -388,7 +388,7 @@ AND COALESCE({PromptObligationPayloadSql}->'sourceEvidence'->>'evidenceType','')
                     // Joint prompts project every contribution to the common visible
                     // spans, including a speaking NPC's own private narration.
                     if (audience.Count > 1) rows = rows.Select(row => {
-                        var copy = VerificationService.CloneDictionary(row);
+                        var copy = CloneDictionary(row);
                         string common = ConversationTurnTextForRecall(row);
                         if (ReadString(row, "role", "") == "player")
                             foreach (var a in audience) common = ProjectCurrentPlayerPromptText(common, a.NpcId, TryParseJsonObject(ReadString(row, "payload_json", "{}")));

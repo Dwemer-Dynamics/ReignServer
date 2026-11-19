@@ -23,7 +23,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> SocialEventTurnPlanApi(Dictionary<string, object> payload)
         {
             PrepareSocialConversationInput(payload);
-            var floorPayload = VerificationService.CloneDictionary(payload);
+            var floorPayload = CloneDictionary(payload);
             DialogueService.CopyPlayerInputSource(payload, floorPayload);
             string eventId = ReadFirstString(payload, "eventId", "socialEventId");
             floorPayload["campaignId"] = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());

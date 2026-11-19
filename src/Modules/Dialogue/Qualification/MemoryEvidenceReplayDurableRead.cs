@@ -53,7 +53,7 @@ namespace ReignBetaServer
 
         private static string DurableProjectionHash(Dictionary<string, object> projection)
         {
-            var binding = VerificationService.CloneDictionary(projection);
+            var binding = CloneDictionary(projection);
             binding.Remove("projectionSha256");
             return ConversationExactTextHash(CanonicalJson(binding));
         }
@@ -194,12 +194,12 @@ namespace ReignBetaServer
                 var projection = ReadDictionary(payload, ReviewedDurableProjectionKey);
                 var access = DialogueService.BuildKnowledgeAccessContext(observer, peer, "", context);
                 bool accepted = CheckBinding(connection, row, payload, projection, access).Count == 0;
-                var changed = VerificationService.CloneDictionary(payload);
+                var changed = CloneDictionary(payload);
                 var sourceEvidence = ReadDictionary(changed, "sourceEvidence");
                 string hash = ReadString(sourceEvidence, "sourceHash", "");
                 sourceEvidence["sourceHash"] = (hash[0] == '0' ? "1" : "0") + hash.Substring(1);
                 bool tamperBlocked = CheckBinding(connection, row, changed, projection, access).SequenceEqual(new[] { "memory_binding" });
-                var alteredProjection = VerificationService.CloneDictionary(projection);
+                var alteredProjection = CloneDictionary(projection);
                 alteredProjection["text"] = "Altered: " + ReadString(projection, "text", "");
                 bool alteredProjectionBlocked = CheckBinding(connection, row, payload, alteredProjection, access).SequenceEqual(new[] { "projection_integrity" });
                 var foreign = DialogueService.BuildKnowledgeAccessContext(observer + ":foreign", peer, "", context);
@@ -325,8 +325,8 @@ namespace ReignBetaServer
                 "speaker", ReadString(row, "speaker_name", ""), "role", ReadString(row, "role", ""), "text", ReadString(row, "text", ""),
                 "sessionId", session, "exchangeId", ReadString(row, "exchange_id", ""))).ToList();
             SetMemoryTranscriptContext(context, transcript);
-            var wideContext = VerificationService.CloneDictionary(context);
-            var controlContext = VerificationService.CloneDictionary(context);
+            var wideContext = CloneDictionary(context);
+            var controlContext = CloneDictionary(context);
             var wide = BuildPrecisionMemoryPacket(campaign, observer, peer, "", query, wideContext, settings, false);
             var compact = BuildPrecisionMemoryPacket(campaign, observer, peer, "", query, context, settings, false, durableRead: view);
             var controls = view.CheckControls(campaign, context);
@@ -338,7 +338,7 @@ namespace ReignBetaServer
             string original = ReadString(npc, "text", ""), derived = ReadString(review, "text", ""), sourceId = ReadString(npc, "turn_id", "");
             Dictionary<string, object> CaptureRevocation(ReviewedDurableReplayRead reader)
             {
-                var revocationContext = VerificationService.CloneDictionary(controlContext);
+                var revocationContext = CloneDictionary(controlContext);
                 var packet = BuildPrecisionMemoryPacket(campaign, observer, peer, "", query, revocationContext, settings, false, durableRead: reader);
                 return ReadDictionary(CaptureMemoryReplayProviderRequest(prepare(revocationContext, transcript, packet), settings), "providerWireCapture");
             }

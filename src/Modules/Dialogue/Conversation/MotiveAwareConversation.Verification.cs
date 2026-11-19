@@ -183,7 +183,7 @@ namespace ReignBetaServer
                 &&Math.Abs(tierSixAxes["power"]-66d)<.001d&&Math.Abs(tierSixAxes["dynasty"]-60d)<.001d,
                 "Known identity exposes the exact native clan-tier ladder to relative power, prestige, protection, and dynasty evaluation.");
             Dictionary<string, object> peerOpportunity =
-                VerificationService.CloneDictionary(recognized);
+                CloneDictionary(recognized);
             peerOpportunity["observerClanTier"] = 5;
             peerOpportunity["targetClanTier"] = 5;
             peerOpportunity["clanTierDelta"] = 0;
@@ -548,7 +548,7 @@ namespace ReignBetaServer
                     "memoryWrites").Count == 0,
                 "A repeated provider contradiction produces a concise, conversational sovereign- and settlement-aware fallback and suppresses contaminated writes.");
             Dictionary<string, object> groupedFallbackContext =
-                VerificationService.CloneDictionary(sovereignContext);
+                CloneDictionary(sovereignContext);
             groupedFallbackContext["subjectId"] =
                 "reign_court_town_A6_child_1";
             groupedFallbackContext["mustAccountForPriorSpeaker"] =
@@ -1069,7 +1069,7 @@ namespace ReignBetaServer
                 }).ToList()
             };
             Dictionary<string, object> pathologicalCourtCharacter =
-                VerificationService.CloneDictionary(
+                CloneDictionary(
                     ReadDictionary(capContext, "courtCharacter")
                     ?? new Dictionary<string, object>());
             pathologicalCourtCharacter["activeScheme"] =

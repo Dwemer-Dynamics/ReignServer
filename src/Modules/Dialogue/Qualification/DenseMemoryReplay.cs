@@ -50,18 +50,18 @@ namespace ReignBetaServer
             Check("bounded_local_worker_is_valid", DenseReplayConfigError(TestDict("denseWorkerReplay", valid)) == "");
             var history = TestDict("observerId", "npc", "peerId", "player", "worldDay", 3d, "asOfSequence", 2L,
                 "sources", new[] { TestDict("sourceId", "source", "speakerId", "player", "text", "The price is700.") });
-            var nextQuestion = VerificationService.CloneDictionary(history); nextQuestion["query"] = "What price?";
+            var nextQuestion = CloneDictionary(history); nextQuestion["query"] = "What price?";
             Check("questions_share_unchanged_history", DenseReplayScopeKey(history) == DenseReplayScopeKey(nextQuestion));
             nextQuestion["observerId"] = "other";
             Check("different_observers_do_not_share_history", DenseReplayScopeKey(history) != DenseReplayScopeKey(nextQuestion));
-            nextQuestion = VerificationService.CloneDictionary(history); nextQuestion["asOfSequence"] = 1L;
+            nextQuestion = CloneDictionary(history); nextQuestion["asOfSequence"] = 1L;
             Check("different_cutoffs_do_not_share_history", DenseReplayScopeKey(history) != DenseReplayScopeKey(nextQuestion));
             foreach (var mutation in new[] { TestDict("port", 5102), TestDict("port", true), TestDict("port", 65001),
                 TestDict("token", "../settings"), TestDict("model", "remote"), TestDict("modelTreeSha256", ""),
                 TestDict("rounds", 4), TestDict("rounds", true), TestDict("modelWindowTokens", 512),
                 TestDict("modelWindowTokens", true), TestDict("apiKey", "forbidden") })
             {
-                var changed = VerificationService.CloneDictionary(valid);
+                var changed = CloneDictionary(valid);
                 foreach (var pair in mutation) changed[pair.Key] = pair.Value;
                 Check("reject_" + mutation.Keys.Single() + "_" + checks.Count,
                     DenseReplayConfigError(TestDict("denseWorkerReplay", changed)) != "");
@@ -112,7 +112,7 @@ namespace ReignBetaServer
                 string scope = campaign + "|" + observer + "|" + ReadString(context, "timelineId", "");
                 if (indexedScopes.TryGetValue(scope, out var prior))
                 {
-                    var reused = VerificationService.CloneDictionary(prior); reused["durationMs"] = 0L; reused["reusedHistory"] = true;
+                    var reused = CloneDictionary(prior); reused["durationMs"] = 0L; reused["reusedHistory"] = true;
                     return reused;
                 }
                 var documents = new List<Dictionary<string, object>>();

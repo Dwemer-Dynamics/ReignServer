@@ -180,11 +180,11 @@ namespace ReignBetaServer
                 if (profile.Count == 0) throw new InvalidOperationException("Political context is awaiting the named character's native profile: " + single);
                 authors.Add(profile);
             }
-            var messages = source.Select(VerificationService.CloneDictionary).ToList();
+            var messages = source.Select(CloneDictionary).ToList();
             foreach (var author in authors.GroupBy(CampaignFileService.CharacterIdFrom).Select(x => x.First()))
             {
                 string id = CampaignFileService.CharacterIdFrom(author); if (id.Length == 0 || ReadBool(author, "isPlayer", false)) continue;
-                var profile = VerificationService.CloneDictionary(author); profile["campaignId"] = campaign;
+                var profile = CloneDictionary(author); profile["campaignId"] = campaign;
                 var traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, id, "traits.json"));
                 var beliefs = EnsurePoliticalProfile(campaign, id, profile, traits);
                 string block = RequiredPoliticalPrompt(id, profile, TestDict("politicalProfile", TryParseJsonObject(JsonSerializer.Serialize(beliefs))));

@@ -232,7 +232,7 @@ namespace ReignBetaServer
                             var prior = observations.SingleOrDefault(r => ReadString(r, "receiptId", "") == receiptId);
                             if (prior != null && new[] { "priorNativeRelation", "nativeRelation", "requestedDelta" }.Any(key => ReadInt(prior, key, 0) != ReadInt(observation, key, 0)))
                                 return FinishApproachEvaluation(c, TestDict("ok", false, "error", "An acknowledged native observation cannot change."));
-                            if (prior == null) observations.Add(VerificationService.CloneDictionary(observation));
+                            if (prior == null) observations.Add(CloneDictionary(observation));
                         }
                         request["nativeObservations"] = observations;
                         PutApproachState(c, timeline, "request:" + id, request);
@@ -328,7 +328,7 @@ namespace ReignBetaServer
                 if (brief == null || ReadString(request, "status", "") != "accepted" || ReadString(request, "playerId", "") != player)
                     throw new InvalidOperationException("This accepted approach does not authorize the current speaker.");
                 bool opening = ReadBool(payload, "approachOpening", false) && !ReadStringList(request, "heard").Contains(hero);
-                payload["authoritativeApproachBrief"] = VerificationService.CloneDictionary(brief);
+                payload["authoritativeApproachBrief"] = CloneDictionary(brief);
                 payload["authoritativeApproachOpening"] = opening;
                 string kind = ReadString(request, "kind", "");
                 payload["authoritativeApproachKind"] = kind;
@@ -418,8 +418,8 @@ namespace ReignBetaServer
             var errors = ApproachOpeningViolations(parsed, payload);
             ConversationResponseService.DiagnosticValidation("Check approach opening", errors.Count == 0, errors, parsed);
             if (errors.Count == 0) return llm;
-            var repair = VerificationService.CloneDictionary(request);
-            var messages = ReadDictionaryList(request, "messages").Select(VerificationService.CloneDictionary).ToList();
+            var repair = CloneDictionary(request);
+            var messages = ReadDictionaryList(request, "messages").Select(CloneDictionary).ToList();
             messages.Add(TestDict("role", "user", "content", "Repair this opening using the authoritative approach brief. Preserve the complete output schema. "
                 + Json.Serialize(errors) + "\nBRIEF: " + Json.Serialize(ReadDictionary(payload, "authoritativeApproachBrief"))
                 + (ReadBool(payload, "authoritativeApproachOpening", false) && ReadString(payload, "authoritativeApproachKind", "shared") == "shared"

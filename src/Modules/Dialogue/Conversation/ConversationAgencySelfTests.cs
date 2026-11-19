@@ -90,7 +90,7 @@ namespace ReignBetaServer
                 && ReadString(ReadDictionary(soldierUpdate, "terms"), "conditions", "") == ""
                 && ReadString(soldierUpdate, "reconsideration", "").Contains("transparency")
                 && ReadDictionaryList(soldierReply, "continuityWrites").Count == 1, soldierEvaluation);
-            var ambiguousSoldier = VerificationService.CloneDictionary(soldierReply);
+            var ambiguousSoldier = CloneDictionary(soldierReply);
             soldierContext["playerText"] = "I agree.";
             add("ambiguous_agreement_does_not_clear_soldier_condition",
                 !TryResolveSoldierNoticeCondition(ambiguousSoldier, soldierContext), null);
@@ -223,7 +223,7 @@ namespace ReignBetaServer
             add("condition_does_not_execute_immediately", !ReadBool(EvaluateConversationAgency(AgencyTestReply(condition), context), "ok", true), null);
             condition["disposition"] = "conditional";
             add("conditional_agreement_can_be_recorded", ReadBool(EvaluateConversationAgency(AgencyTestReply(condition), context), "ok", false), null);
-            var conditionalContext = VerificationService.CloneDictionary(context);
+            var conditionalContext = CloneDictionary(context);
             condition["objections"] = new[] { "duty" };
             conditionalContext["records"] = ReadDictionaryList(EvaluateConversationAgency(AgencyTestReply(condition), conditionalContext), "updates");
             var unfulfilled = AgencyTestProposal(conditionalContext, "accepted", "");

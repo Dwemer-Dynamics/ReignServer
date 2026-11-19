@@ -141,7 +141,7 @@ namespace ReignBetaServer
             var result = new List<Dictionary<string, object>>();
             foreach (var original in ReadDictionaryList(handoff, "acceptedExchanges").TakeLast(2))
             {
-                var exchange = VerificationService.CloneDictionary(original);
+                var exchange = CloneDictionary(original);
                 string speaker = ReadString(exchange, "speakerId", "");
                 if (ReadString(exchange, "observerId", "") != observer && speaker != observer)
                 {

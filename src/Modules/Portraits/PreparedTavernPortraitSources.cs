@@ -32,8 +32,8 @@ namespace ReignBetaServer
             if (!Program.HasArg(args, "--import-tavern-native-sources")) return false;
             try
             {
-                string manifest = VerificationService.ArgValue(args, "--import-tavern-native-sources", "");
-                string campaign = VerificationService.ArgValue(args, "--pack-campaign", "");
+                string manifest = ArgValue(args, "--import-tavern-native-sources", "");
+                string campaign = ArgValue(args, "--pack-campaign", "");
                 if (manifest == "help" || manifest == "--help")
                 {
                     Console.WriteLine("--import-tavern-native-sources <absolute native-source-manifest.json> --pack-campaign tavern_pack_<task-id>");

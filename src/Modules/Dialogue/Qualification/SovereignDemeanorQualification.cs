@@ -11,8 +11,8 @@ namespace ReignBetaServer
         internal static Dictionary<string, object>
             RunSovereignDemeanorProviderQualification(string[] args)
         {
-            string selectedCase = VerificationService.ArgValue(args, "--case", "").Trim();
-            int extraSeed = int.TryParse(VerificationService.ArgValue(args, "--seed", "271828"),
+            string selectedCase = ArgValue(args, "--case", "").Trim();
+            int extraSeed = int.TryParse(ArgValue(args, "--seed", "271828"),
                 NumberStyles.Integer, CultureInfo.InvariantCulture,
                 out int parsedSeed) ? parsedSeed : 271828;
             List<Dictionary<string, object>> cases =
@@ -203,7 +203,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object>
             ReclassifySovereignDemeanorProviderReport(string[] args)
         {
-            string sourcePath = VerificationService.ArgValue(args,
+            string sourcePath = ArgValue(args,
                 "--reclassify-sovereign-demeanor-report", "").Trim();
             if (string.IsNullOrWhiteSpace(sourcePath)
                 || !File.Exists(sourcePath))

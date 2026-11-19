@@ -14,7 +14,7 @@ namespace ReignBetaServer
                 "locationId", "camp", "sceneInterface", "party");
             Dictionary<string, object> T(string id, int order, string speaker, string text) => TestDict("turnId", id,
                 "turnOrder", order, "exchangeId", "e1", "role", speaker == "player" ? "player" : "npc",
-                "speakerId", speaker, "text", text, "sourceHash", DialogueService.PromptHash(text), "frame", VerificationService.CloneDictionary(frame));
+                "speakerId", speaker, "text", text, "sourceHash", DialogueService.PromptHash(text), "frame", CloneDictionary(frame));
             var window = new List<Dictionary<string, object>> {
                 T("z_proposal", 10, "player", "Let us change into rougher clothes to spar together."),
                 T("a_accept", 11, "ira", "Agreed, let us do that."),
@@ -63,7 +63,7 @@ namespace ReignBetaServer
                 require(Reject(() => Validate(scene)), "A present non-signing bystander inherited the other two people's change.");
             });
             check("wardrobe_one_speaker_cannot_accept_for_everyone", () => {
-                var turns = window.Select(VerificationService.CloneDictionary).ToList(); turns[1]["speakerId"] = "player";
+                var turns = window.Select(CloneDictionary).ToList(); turns[1]["speakerId"] = "player";
                 require(Reject(() => ValidateChatViewWardrobe(Scene(), turns, new List<Dictionary<string, object>>())), "A proposer accepted on another person's behalf.");
             });
             check("wardrobe_future_within_selected_reply_rejected", () => {
@@ -103,13 +103,13 @@ namespace ReignBetaServer
                 require(Reject(() => Validate(scene)), "Invalid array elements were silently dropped.");
             });
             check("wardrobe_scene_and_actor_continuity_required", () => {
-                var turns = window.Select(VerificationService.CloneDictionary).ToList(); var changed = VerificationService.CloneDictionary(frame); changed["room"] = "another place"; turns[2]["frame"] = changed;
+                var turns = window.Select(CloneDictionary).ToList(); var changed = CloneDictionary(frame); changed["room"] = "another place"; turns[2]["frame"] = changed;
                 require(Reject(() => ValidateChatViewWardrobe(Scene(), turns, new List<Dictionary<string, object>>())), "Clothes crossed a scene transition.");
-                changed = VerificationService.CloneDictionary(frame); changed["actors"] = new[] { TestDict("id", "ira") }; turns[2]["frame"] = changed;
+                changed = CloneDictionary(frame); changed["actors"] = new[] { TestDict("id", "ira") }; turns[2]["frame"] = changed;
                 require(Reject(() => ValidateChatViewWardrobe(Scene(), turns, new List<Dictionary<string, object>>())), "An actor's absence did not invalidate their earlier scene outfit.");
             });
             check("wardrobe_partial_removal_does_not_replace_whole_outfit", () => {
-                var turns = window.Select(VerificationService.CloneDictionary).ToList(); turns[0]["text"] = "I remove my cloak."; turns[0]["sourceHash"] = DialogueService.PromptHash("I remove my cloak.");
+                var turns = window.Select(CloneDictionary).ToList(); turns[0]["text"] = "I remove my cloak."; turns[0]["sourceHash"] = DialogueService.PromptHash("I remove my cloak.");
                 var scene = Scene(); scene["wardrobeOverrides"] = new[] { TestDict("characterId", "player", "changes", new[] {
                     TestDict("scope", "garment", "operation", "remove", "garmentText", "cloak", "basis", "explicit",
                         "evidence", new[] { E("z_proposal", "I remove my cloak.", "wearing") }) }) };
@@ -125,7 +125,7 @@ namespace ReignBetaServer
                 require(Reject(() => ChatViewQuoteSpan(TestDict("quote", "She parries.", "occurrence", 1, "start", 0), source, true)), "False offsets were accepted.");
             });
             check("wardrobe_partial_replacement_preserves_scope_and_unmentioned_items", () => {
-                var turns = window.Select(VerificationService.CloneDictionary).ToList(); turns[0]["text"] = "I put on a coarse linen shirt."; turns[0]["sourceHash"] = DialogueService.PromptHash(ReadString(turns[0], "text", ""));
+                var turns = window.Select(CloneDictionary).ToList(); turns[0]["text"] = "I put on a coarse linen shirt."; turns[0]["sourceHash"] = DialogueService.PromptHash(ReadString(turns[0], "text", ""));
                 var scene = Scene(); scene["wardrobeOverrides"] = new[] { TestDict("characterId", "player", "changes", new[] {
                     TestDict("scope", "garment", "operation", "replace", "garmentText", "coarse linen shirt", "basis", "explicit",
                         "evidence", new[] { E("z_proposal", "I put on a coarse linen shirt.", "wearing") }) }) };
@@ -133,7 +133,7 @@ namespace ReignBetaServer
                 require(prompt.Contains("coarse linen shirt") && prompt.Contains("\"scope\":\"garment\"") && prompt.Contains("every other compatible portrait garment/accessory stays"), "A replacement lost the other portrait garments.");
             });
             check("wardrobe_explicit_outfit_reset_does_not_layer_prior_changes", () => {
-                var turns = window.Select(VerificationService.CloneDictionary).ToList(); turns[0]["text"] = "I return to my original clothes."; turns[0]["sourceHash"] = DialogueService.PromptHash(ReadString(turns[0], "text", ""));
+                var turns = window.Select(CloneDictionary).ToList(); turns[0]["text"] = "I return to my original clothes."; turns[0]["sourceHash"] = DialogueService.PromptHash(ReadString(turns[0], "text", ""));
                 var scene = Scene(); scene["wardrobeOverrides"] = new[] { TestDict("characterId", "player", "changes", new[] {
                     TestDict("scope", "outfit", "operation", "portrait", "garmentText", "original clothes", "basis", "explicit",
                         "evidence", new[] { E("z_proposal", "I return to my original clothes.", "wearing") }) }) };
@@ -141,13 +141,13 @@ namespace ReignBetaServer
                 require(ReadString(ReadDictionaryList(result[0], "changes")[0], "operation", "") == "portrait", "A portrait reset did not clear the old outfit.");
             });
             check("wardrobe_source_digest_and_mixed_arrays_rejected", () => {
-                var turns = window.Select(VerificationService.CloneDictionary).ToList(); turns[0]["sourceHash"] = "wrong";
+                var turns = window.Select(CloneDictionary).ToList(); turns[0]["sourceHash"] = "wrong";
                 require(Reject(() => ValidateChatViewWardrobe(Scene(), turns, new List<Dictionary<string, object>>())), "Changed source bytes were accepted.");
                 var scene = Scene(); ReadDictionaryList(scene, "wardrobeOverrides")[0]["changes"] = new object[] { Change(), "injected" };
                 require(Reject(() => Validate(scene)), "Invalid change-array elements were ignored.");
             });
             check("wardrobe_native_age_and_equipment_stay_out_of_both_inputs", () => {
-                var source = VerificationService.CloneDictionary(window[0]); source["wardrobeActorIds"] = new[] { "player", "ira" };
+                var source = CloneDictionary(window[0]); source["wardrobeActorIds"] = new[] { "player", "ira" };
                 string input = Json.Serialize(ChatViewClothingSelectionInput(window, TestDict("sources", new[] { source }, "coverage", "retained_scene_evidence")));
                 require(!input.Contains("36.94") && !input.Contains("native red dress") && input.Contains("contextOnly"), "Native appearance metadata returned through clothing history.");
             });
@@ -168,7 +168,7 @@ namespace ReignBetaServer
                 require(schema.Schema != null && Json.Serialize(schema.Schema).Contains("viewWardrobeEvidence"), "Strict writer output dropped clothing evidence.");
             });
             check("wardrobe_garment_case_is_canonicalized_from_real_source_words", () => {
-                var turns = window.Select(VerificationService.CloneDictionary).ToList(); turns[0]["text"] = "Let us change into ROUGHER CLOTHES to spar together."; turns[0]["sourceHash"] = DialogueService.PromptHash(ReadString(turns[0], "text", ""));
+                var turns = window.Select(CloneDictionary).ToList(); turns[0]["text"] = "Let us change into ROUGHER CLOTHES to spar together."; turns[0]["sourceHash"] = DialogueService.PromptHash(ReadString(turns[0], "text", ""));
                 var scene = Scene(); foreach (var actor in ReadDictionaryList(scene, "wardrobeOverrides"))
                     ReadDictionaryList(ReadDictionaryList(actor, "changes")[0], "evidence")[0]["quote"] = ReadString(turns[0], "text", "");
                 var result = ValidateChatViewWardrobe(scene, turns, new List<Dictionary<string, object>>());
@@ -287,7 +287,7 @@ namespace ReignBetaServer
                 });
                 check("wardrobe_evidence_journal_replays_idempotently", () => require(PortraitsSelfTestStore.SelectChatViewWardrobeEvidence2(c).Count == 6, "An accepted response got duplicate clothing journal rows."));
                 check("wardrobe_scene_transition_discards_earlier_context", () => {
-                    var modified = window.Select(VerificationService.CloneDictionary).ToList(); var frame = VerificationService.CloneDictionary(ReadDictionary(modified[0], "frame")); frame["wardrobeScene"] = "another scene"; modified[0]["frame"] = frame;
+                    var modified = window.Select(CloneDictionary).ToList(); var frame = CloneDictionary(ReadDictionary(modified[0], "frame")); frame["wardrobeScene"] = "another scene"; modified[0]["frame"] = frame;
                     require(ReadDictionaryList(ReadChatViewWardrobeHistory(c, request, modified), "sources").Count == 0, "Clothing context crossed a physical scene boundary.");
                 });
                 check("wardrobe_refusal_context_and_source_journal_rollback_are_atomic", () => {

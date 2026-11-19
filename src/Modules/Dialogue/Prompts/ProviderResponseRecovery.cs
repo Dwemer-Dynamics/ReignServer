@@ -40,7 +40,7 @@ namespace ReignBetaServer
             {
                 var body = TestDict("reasoning_effort", "none", "reasoning", TestDict("enabled", false),
                     "thinking", TestDict("type", "disabled"), "enable_thinking", false, "thinking_budget", 0, "max_tokens", 2200);
-                var routing = ConfigureReasoningRouting(VerificationService.CloneDictionary(settings), TestDict("reasoningDisabled", true),
+                var routing = ConfigureReasoningRouting(CloneDictionary(settings), TestDict("reasoningDisabled", true),
                     body, url, model, "dialogue_continuity_repair");
                 Check("mandatory_low_" + PromptHash(url + model).Substring(0, 8),
                     ReadString(ReadDictionary(body, "reasoning"), "effort", "") == "low"
@@ -55,7 +55,7 @@ namespace ReignBetaServer
             foreach (string model in new[] { "z-ai/glm-5.2", "z-ai/glm-5.30", "custom/glm-5.3", "fixture-disabled-checker" })
             {
                 var body = TestDict();
-                ConfigureReasoningRouting(VerificationService.CloneDictionary(settings), TestDict("reasoningDisabled", true), body,
+                ConfigureReasoningRouting(CloneDictionary(settings), TestDict("reasoningDisabled", true), body,
                     PortraitsService.NanoGptChatCompletionsUrl, model, "repair");
                 Check("unrelated_disabled_" + PromptHash(model).Substring(0, 8),
                     ReadString(ReadDictionary(body, "reasoning"), "effort", "") == "none");
@@ -66,7 +66,7 @@ namespace ReignBetaServer
             {
                 lock (PromptCacheStateLock) ReasoningFallbackCooldowns[cooldownKey] = DateTime.UtcNow.AddMinutes(1);
                 var body = TestDict("reasoning_effort", "none");
-                ConfigureReasoningRouting(VerificationService.CloneDictionary(settings), TestDict("reasoningDisabled", true), body,
+                ConfigureReasoningRouting(CloneDictionary(settings), TestDict("reasoningDisabled", true), body,
                     PortraitsService.NanoGptChatCompletionsUrl, "z-ai/glm-5.3-flash", "repair");
                 Check("mandatory_model_cooldown_never_defaults_to_max", !body.ContainsKey("reasoning_effort")
                     && ReadString(ReadDictionary(body, "reasoning"), "effort", "") == "low");
@@ -92,20 +92,20 @@ namespace ReignBetaServer
                 && StructuredActionResponseHasDecision(ReadString(recovered, "content", ""), request));
             Check("single_empty_key_preserves_metadata", Json.Serialize(ReadDictionary(parsed, "structuredActionDecision"))
                 == Json.Serialize(ReadDictionary(shifted, "structuredActionDecision")));
-            var malformed = VerificationService.CloneDictionary(shifted); malformed["structuredActionDecision"] = TestDict("kind", "accept");
+            var malformed = CloneDictionary(shifted); malformed["structuredActionDecision"] = TestDict("kind", "accept");
             var malformedResult = ConversationResponseService.RetryMalformedStructuredResponse(TestDict("ok", true, "content", Json.Serialize(malformed)), request,
                 "", "malformed-consent-regression", "dialogue", "npc", "", _ => { calls++; throw new InvalidOperationException("Malformed consent must not be repaired."); });
             Check("empty_key_cannot_repair_malformed_consent", calls == 0 && !ReadBool(malformedResult, "ok", true));
-            var ambiguous = VerificationService.CloneDictionary(shifted); ambiguous[" "] = "Another possible answer.";
+            var ambiguous = CloneDictionary(shifted); ambiguous[" "] = "Another possible answer.";
             Check("ambiguous_empty_keys_rejected", !ConversationResponseService.TryRepairShiftedConversationReplyKeys(ambiguous, out _));
-            var explicitReply = VerificationService.CloneDictionary(shifted); explicitReply["reply"] = "";
+            var explicitReply = CloneDictionary(shifted); explicitReply["reply"] = "";
             Check("explicit_empty_reply_not_overwritten", !ConversationResponseService.TryRepairShiftedConversationReplyKeys(explicitReply, out _));
             Check("untyped_empty_key_not_promoted", !ConversationResponseService.TryRepairShiftedConversationReplyKeys(
                 new Dictionary<string, object> { [""] = "A private memory, not known dialogue." }, out _));
 
             // A reply-only result needs both conservative schema completion and
             // a real verified action decision. Never fabricate consent locally.
-            var sparseRequest = VerificationService.CloneDictionary(request);
+            var sparseRequest = CloneDictionary(request);
             sparseRequest["structuredActionRepairContext"] = TestDict("playerId", "player", "npcId", "npc", "conversationId", "fixture", "worldDay", 1d);
             sparseRequest["playerText"] = "I enjoy listening.";
             calls = 0;

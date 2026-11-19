@@ -117,8 +117,8 @@ namespace ReignBetaServer
                         && ReadString(row, "toward", "") == "commoner" && !ReadBool(row, "nameKnown", true)));
                 var p = TestDict("campaignId", campaign, "timelineId", "test", "generation", generation, "sessionId", session,
                     "playerHeroStringId", "player", "partyId", "main_party", "worldDay", 20d, "traveling", true, "heroes", heroes);
-                var ineligible = VerificationService.CloneDictionary(heroes[1]); ineligible["isPrisoner"] = true;
-                var rp = VerificationService.CloneDictionary(p); rp["heroes"] = new[] { heroes[0], ineligible, Hero("player", false) };
+                var ineligible = CloneDictionary(heroes[1]); ineligible["isPrisoner"] = true;
+                var rp = CloneDictionary(p); rp["heroes"] = new[] { heroes[0], ineligible, Hero("player", false) };
                 Check("strict_party_roster", BanterRoster(rp).Count == 1);
                 int calls = 0; bool requestContentValid = false;
                 BanterTestProvider = (request, emit, canceled) => {
@@ -170,7 +170,7 @@ namespace ReignBetaServer
                 var shared = BanterSharedExcerpt(c, ids, p);
                 Check("shared_excerpt_excludes_foreign_future_private_and_invalidated", shared.Count == 1
                     && !ReadString(shared[0], "sourceId", "").Contains("branch") && ReadString(shared[0], "quote", "").Contains("worthless coward"));
-                var cutoff = VerificationService.CloneDictionary(p); cutoff["memoryAsOfTimestamp"] = 0L;
+                var cutoff = CloneDictionary(p); cutoff["memoryAsOfTimestamp"] = 0L;
                 Check("shared_excerpt_respects_as_of_before_limit", BanterSharedExcerpt(c, ids, cutoff).Count == 0);
                 p["expectedRevision"] = ReadInt(accepted, "revision", 0);
                 var handoff = PartyBanterApi("handoff", p);
@@ -186,7 +186,7 @@ namespace ReignBetaServer
                 Check("takeover_retry_cannot_duplicate_affinity", DialogueSelfTestStore.SelectConversationRelationshipReceipts(c, TestDict("id", session + "_relations")).Count == 1);
                 DialogueSelfTestStore.UpdateConversationSessions(c, TestDict("id", session));
                 Check("reopening_closed_takeover_is_read_only", ReadBool(PartyBanterApi("handoff", p), "readOnly", false));
-                var later = VerificationService.CloneDictionary(p); later["sessionId"] = "banter_" + Guid.NewGuid().ToString("N"); later["worldDay"] = 20 + 7d / 24;
+                var later = CloneDictionary(p); later["sessionId"] = "banter_" + Guid.NewGuid().ToString("N"); later["worldDay"] = 20 + 7d / 24;
                 Check("takeover_preserves_cooldown", !ReadBool(PartyBanterApi("start", later), "eligible", true));
                 p["generation"] = "old_generation";
                 Check("stale_callback_fence", ReadString(PartyBanterApi("accept", p), "errorCode", "") == "banter_stale_generation");
@@ -197,12 +197,12 @@ namespace ReignBetaServer
                 var context = PartyBanterApi("context", later); var restored = ReadDictionary(context, "episode");
                 Check("restore_retains_drafts_and_rebinds", ReadString(restored, "generation", "") == generation && ReadBool(restored, "generationDone", false)
                     && ReadInt(restored, "draftCount", 0) == 1);
-                var abandoned = VerificationService.CloneDictionary(saved); abandoned["sessionId"] = "empty_restored_banter"; abandoned["drafts"] = new List<Dictionary<string, object>>();
+                var abandoned = CloneDictionary(saved); abandoned["sessionId"] = "empty_restored_banter"; abandoned["drafts"] = new List<Dictionary<string, object>>();
                 abandoned["effectsFinalized"] = false; WriteBanter(c, abandoned);
                 PartyBanterApi("context", later);
                 Check("empty_restore_finalizes_without_cooldown", ReadBool(ReadBanter(c, "empty_restored_banter"), "effectsFinalized", false)
                     && ReadDouble(ReadBanter(c, "empty_restored_banter"), "endedDay", 0) == -1);
-                var stopped = ReadBanter(c, "restored_banter"); var stop = VerificationService.CloneDictionary(later);
+                var stopped = ReadBanter(c, "restored_banter"); var stop = CloneDictionary(later);
                 stop["sessionId"] = "restored_banter"; stop["expectedRevision"] = -1; stop["reason"] = "campaign_exit";
                 var exited = PartyBanterApi("finish", stop);
                 Check("exit_discards_unspoken_drafts_despite_inflight_revision", ReadBool(exited, "ok", false)
@@ -210,7 +210,7 @@ namespace ReignBetaServer
                 foreach (bool withPrefix in new[] { false, true })
                 {
                     string legacyId = "banter_" + Guid.NewGuid().ToString("N");
-                    var legacy = VerificationService.CloneDictionary(saved);
+                    var legacy = CloneDictionary(saved);
                     legacy["sessionId"] = legacyId; legacy["generation"] = generation; legacy["revision"] = 1;
                     legacy["state"] = "ready"; legacy["effectsFinalized"] = false; legacy["accepted"] = 0;
                     legacy["startedDay"] = 25d; legacy["endedDay"] = -1d;
@@ -222,7 +222,7 @@ namespace ReignBetaServer
                         "npcId", "noble", "playerId", "player", "channel", "party_chat", "worldDay", 25d,
                         "participants", ids.Concat(new[] { "player" }).ToList()));
                     WriteBanter(c, legacy); // Simulate persisted output from the old installed prompt.
-                    var legacyRequest = VerificationService.CloneDictionary(later);
+                    var legacyRequest = CloneDictionary(later);
                     legacyRequest["sessionId"] = legacyId; legacyRequest["worldDay"] = 25d;
                     legacyRequest["expectedRevision"] = 1; legacyRequest["sequence"] = 1;
                     if (withPrefix)

@@ -83,7 +83,7 @@ namespace ReignBetaServer
             if (patch == null) return null;
             string visible = ReadFirstString(patch, "reply", "body", "response", "text");
             if (visible.Length == 0) return null;
-            var merged = VerificationService.CloneDictionary(original);
+            var merged = CloneDictionary(original);
             string prior = ReadFirstString(original, "reply", "body", "response", "text");
             string field = new[] { "reply", "body", "response", "text" }.FirstOrDefault(original.ContainsKey) ?? "reply";
             merged[field] = visible;

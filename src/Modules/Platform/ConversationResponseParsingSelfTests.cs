@@ -211,7 +211,7 @@ namespace ReignBetaServer
                 var payload = TestDict("campaignId", campaign, "timelineId", "fixture", "turnId", "same-turn",
                     "sceneTurnId", "same-turn", "worldDay", 10d, "playerHeroStringId", "player", "conversationSessionId", "fixture");
                 DialogueService.ApplyConversationDrinking(campaign, "npc", payload, profile, null, accepted, ReadString(accepted, "reply", ""));
-                var retryPayload = VerificationService.CloneDictionary(payload);
+                var retryPayload = CloneDictionary(payload);
                 DialogueService.ApplyConversationDrinking(campaign, "npc", retryPayload, profile, null, accepted, ReadString(accepted, "reply", ""));
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {

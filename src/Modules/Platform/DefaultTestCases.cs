@@ -21,43 +21,6 @@ namespace ReignBetaServer
 {
     internal static partial class VerificationService
     {
-        internal static string ArgValue(string[] args, string key, string fallback)
-        {
-            if (args == null)
-            {
-                return fallback;
-            }
-
-            for (int i = 0; i < args.Length - 1; i++)
-            {
-                if (args[i].Equals(key, StringComparison.OrdinalIgnoreCase))
-                {
-                    return args[i + 1];
-                }
-            }
-
-            return fallback;
-        }
-
-        internal static Dictionary<string, object> CloneDictionary(Dictionary<string, object> source)
-        {
-            if (source == null)
-            {
-                return new Dictionary<string, object>();
-            }
-
-            Dictionary<string, object> clone;
-            try
-            {
-                clone = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(source)) ?? new Dictionary<string, object>();
-            }
-            catch
-            {
-                clone = new Dictionary<string, object>(source);
-            }
-            DialogueService.CopyConversationStructureReceipts(source, clone);
-            return clone;
-        }
 
         private static void CopyTestIfMissing(Dictionary<string, object> target, string key, object value)
         {

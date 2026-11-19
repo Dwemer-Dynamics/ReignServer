@@ -185,9 +185,9 @@ namespace ReignBetaServer
             var snapshot = VerificationService.DefaultActionTestSnapshot();
             var payload = ReadDictionary(snapshot, "payload");
             var hero = ReadDictionary(payload, "hero");
-            var sceneFollowPayload = VerificationService.CloneDictionary(payload);
+            var sceneFollowPayload = CloneDictionary(payload);
             sceneFollowPayload["nativeSceneMovement"] = TestDict("available", true);
-            var sceneFollowHero = VerificationService.CloneDictionary(hero);
+            var sceneFollowHero = CloneDictionary(hero);
             sceneFollowHero["currentPartyId"] = "player_party";
             add("follow_is_available_for_present_scene_actor_without_separate_party",
                 DialoguePlannerCandidateEligible("follow", sceneFollowPayload,

@@ -212,7 +212,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> StructuredActionPromptContext(Dictionary<string, object> payload)
         {
-            var context = VerificationService.CloneDictionary(ReadDictionary(payload, "structuredActionContext") ?? TestDict());
+            var context = CloneDictionary(ReadDictionary(payload, "structuredActionContext") ?? TestDict());
             context.Remove("tavernHouse");
             var scopedProposal = ReadDictionary(context, "proposal");
             if (!CharactersService.TavernActionScopeEnabled && scopedProposal != null
@@ -308,7 +308,7 @@ namespace ReignBetaServer
         // decision validation continue to use the original typed proposal.
         private static Dictionary<string, object> StructuredActionModelFacts(Dictionary<string, object> context)
         {
-            var view = VerificationService.CloneDictionary(context);
+            var view = CloneDictionary(context);
             void Pairs(Dictionary<string, object> row, string key)
             {
                 var arguments = ReadDictionary(row, key);

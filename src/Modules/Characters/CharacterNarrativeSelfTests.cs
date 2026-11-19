@@ -393,7 +393,7 @@ namespace ReignBetaServer
             string legacyCharacter = DialogueService.BuildStableCharacterPrompt("legacy", "Legacy", hero, legacyFoundation);
             check("legacy_wound_and_reputation_preserved_without_alias_duplicate", legacyCharacter.Contains("LEGACY_WOUND")
                 && legacyCharacter.Split("LEGACY_REPUTATION").Length == 2, "Legacy foundation fields remain always available, with exact reputation aliases deduplicated.");
-            var staleFoundation = VerificationService.CloneDictionary(stack); staleFoundation["background"] = ReadDictionary(legacyFoundation, "background");
+            var staleFoundation = CloneDictionary(stack); staleFoundation["background"] = ReadDictionary(legacyFoundation, "background");
             string currentCharacter = DialogueService.BuildStableCharacterPrompt("current", "Current", hero, staleFoundation);
             check("current_narrative_overrides_legacy_wound_alias", !currentCharacter.Contains("LEGACY_WOUND") && !currentCharacter.Contains("LEGACY_REPUTATION"),
                 "A current narrative does not resurrect obsolete legacy wounds or reputation.");

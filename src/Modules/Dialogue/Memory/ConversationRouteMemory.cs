@@ -25,7 +25,7 @@ namespace ReignBetaServer
             string observer, string channel, string nativeSession, string nativeTurn, IEnumerable<string> audience,
             bool childhoodOnly = false, Dictionary<string, object> settingsOverride = null)
         {
-            var payload = VerificationService.CloneDictionary(source ?? TestDict());
+            var payload = CloneDictionary(source ?? TestDict());
             CopyPlayerInputSource(source, payload);
             string campaign = ReadString(payload, "campaignId", "");
             string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");

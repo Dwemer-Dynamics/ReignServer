@@ -24,7 +24,7 @@ namespace ReignBetaServer
                 var meta = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
                 var sessionMeta = TryParseJsonObject(ReadString(row, "session_payload", "{}"));
                 string rowTimeline = FirstNonEmpty(ReadString(meta, "timelineId", ""), ReadString(sessionMeta, "timelineId", ""));
-                var scoped = VerificationService.CloneDictionary(row); scoped["timeline_id"] = rowTimeline;
+                var scoped = CloneDictionary(row); scoped["timeline_id"] = rowTimeline;
                 return MemoryTimeVisible(scoped, historyAccess, connection) && (!official || ReadString(row, "channel", "") == "ambassador_official"
                     || ReadString(sessionMeta, "channel", "") == "ambassador_official")
                     && (!official || posting.Length == 0 || FirstNonEmpty(ReadString(meta, "postingId", ""), ReadString(sessionMeta, "postingId", "")) == posting);
@@ -111,7 +111,7 @@ namespace ReignBetaServer
                     (exchange.Length > 0 && ReadString(line, "exchangeId", "") == exchange
                     || ReadString(line, "text", "") == ReadString(old, "text", "")))) continue;
                 if (ReadDouble(old, "worldDay", 0d) > historyAccess.WorldDay) continue;
-                var retained = VerificationService.CloneDictionary(old); retained["sourceIntegrity"] = "legacy_original_unverified"; lines.Add(retained);
+                var retained = CloneDictionary(old); retained["sourceIntegrity"] = "legacy_original_unverified"; lines.Add(retained);
             }
             return lines.OrderBy(line => ReadLong(line, "ts", 0)).TakeLast(limit).ToList();
         }

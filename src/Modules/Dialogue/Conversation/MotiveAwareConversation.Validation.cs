@@ -801,7 +801,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> context)
         {
             Dictionary<string, object> safe =
-                VerificationService.CloneDictionary(parsed ?? new Dictionary<string, object>());
+                CloneDictionary(parsed ?? new Dictionary<string, object>());
             Dictionary<string, object> opportunity =
                 ReadDictionary(context, "opportunity")
                 ?? new Dictionary<string, object>();
@@ -1012,7 +1012,7 @@ namespace ReignBetaServer
                 .Concat(ReadDictionaryList(
                     parsed, "relationship_assessments"))
                 .Take(8)
-                .Select(VerificationService.CloneDictionary)
+                .Select(CloneDictionary)
                 .ToList();
             foreach (Dictionary<string, object> assessment in assessments)
             {
@@ -1051,7 +1051,7 @@ namespace ReignBetaServer
             safe["stateUpdates"] = new Dictionary<string, object>();
 
             Dictionary<string, object> result =
-                VerificationService.CloneDictionary(llm ?? new Dictionary<string, object>());
+                CloneDictionary(llm ?? new Dictionary<string, object>());
             result["ok"] = true;
             result["content"] = Json.Serialize(safe);
             result["deterministicIdentityFallback"] = true;

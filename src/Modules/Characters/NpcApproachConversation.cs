@@ -63,7 +63,7 @@ namespace ReignBetaServer
             var p = DeepCloneProfileDictionary(source);
             p["campaignId"] = state.CampaignId; p["timelineId"] = state.TimelineId;
             p["heroStringId"] = hero; p["playerHeroStringId"] = player; p["playerId"] = player;
-            p["hero"] = VerificationService.CloneDictionary(ReadDictionary(source, "hero") ?? ReadDictionary(source, "profile") ?? TestDict());
+            p["hero"] = CloneDictionary(ReadDictionary(source, "hero") ?? ReadDictionary(source, "profile") ?? TestDict());
             p["correlationId"] = operation; p["sceneTurnId"] = operation;
             p["conversationSessionId"] = encounter.SessionId; p["worldDay"] = day;
             p["playerText"] = ""; p.Remove("text"); p.Remove("message");
@@ -117,7 +117,7 @@ namespace ReignBetaServer
             var nativeSpeaker = ReadDictionary(payload, "hero");
             if (nativeSpeaker != null && CampaignFileService.CharacterIdFrom(nativeSpeaker) == ReadString(request, "heroStringId", ""))
             {
-                var author = VerificationService.CloneDictionary(nativeSpeaker);
+                var author = CloneDictionary(nativeSpeaker);
                 author["politicalTimelineId"] = DialogueService.ContinuityTimeline(payload);
                 request["politicalAuthors"] = new[] { author };
             }
@@ -130,7 +130,7 @@ namespace ReignBetaServer
             Dictionary<string, object> motive, Dictionary<string, object> identity,
             List<Dictionary<string, object>> prior, string hero, string heroName, string playerName)
         {
-            var view = VerificationService.CloneDictionary(parsed ?? TestDict()); view["reply"] = reply;
+            var view = CloneDictionary(parsed ?? TestDict()); view["reply"] = reply;
             if (parsed == null || !ReadBool(llm, "ok", false) || ReadBool(llm, "visibleRepairFailure", false)
                 || ReadBool(ReadDictionary(llm, "conversationAgency"), "visibleFailure", false)
                 || !NpcApproachReplyShape(view)

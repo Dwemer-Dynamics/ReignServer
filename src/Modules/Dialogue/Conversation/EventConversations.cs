@@ -517,7 +517,7 @@ namespace ReignBetaServer
             if (pendingAddressConvention != null
                 && pendingAddressConvention.Count > 0)
                 stateUpdates["politicalAddressConvention"] =
-                    VerificationService.CloneDictionary(pendingAddressConvention);
+                    CloneDictionary(pendingAddressConvention);
             Dictionary<string, object> politicalConduct =
                 ReadDictionary(parsed, "politicalConduct")
                 ?? new Dictionary<string, object>();

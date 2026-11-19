@@ -272,7 +272,7 @@ events|something amusing about the supplied shared encounter";
                 b.AppendLine("Voice: " + DialogueService.LimitText(ReadString(voice, "speechStyle", ""), 140));
                 var persistentSources = new List<string>();
                 var otherObservers = heroes.Where(other => other != h).Select(CampaignFileService.CharacterIdFrom).ToList();
-                var persistentPayload = VerificationService.CloneDictionary(p);
+                var persistentPayload = CloneDictionary(p);
                 persistentPayload["memoryActiveTopic"] = topic;
                 b.AppendLine(BuildCharacterCommitmentPrompt(c, id, ReadString(p, "playerHeroStringId", ""), persistentPayload, persistentSources, otherObservers));
                 b.AppendLine(BuildPlayerPerformancePrompt(c, id, persistentPayload, persistentSources, otherObservers));

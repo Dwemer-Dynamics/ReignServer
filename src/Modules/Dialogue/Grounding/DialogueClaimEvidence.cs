@@ -198,7 +198,7 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> sources)
         {
             if (claim.Write == null) return new();
-            var pins = ReadDictionaryList(claim.Write, "sourceEvidenceSpans").Select(VerificationService.CloneDictionary).ToList();
+            var pins = ReadDictionaryList(claim.Write, "sourceEvidenceSpans").Select(CloneDictionary).ToList();
             var primary = ReadDictionary(claim.Write, "sourceEvidence");
             if (primary != null) pins.Insert(0, primary);
             var spans = new List<Dictionary<string, object>>();

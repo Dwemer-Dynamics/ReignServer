@@ -572,11 +572,11 @@ namespace ReignBetaServer
                 && !legacy.Contains(derived) && !legacy.Contains("ESTABLISHED IMPORTANT EPISODES"), null);
 
             var source = DialogueSelfTestStore.SelectConversationTurns11(connection).Single();
-            var recent = VerificationService.CloneDictionary(context);
+            var recent = CloneDictionary(context);
             SetMemoryTranscriptContext(recent, new() { source });
             add("episode_excerpt_deduplicates_only_identical_protected_turn",
                 Precision(recent).Count == 2 && Precision(recent).All(item => item.SourceId != "episode_report"), null);
-            var changed = VerificationService.CloneDictionary(source);
+            var changed = CloneDictionary(source);
             changed["speaker_id"] = "someone_else";
             SetMemoryTranscriptContext(recent, new() { changed });
             add("episode_excerpt_survives_wrong_speaker_in_supplied_window",
@@ -584,7 +584,7 @@ namespace ReignBetaServer
 
             var row = DialogueSelfTestStore.SelectConversationContinuity6(connection).Single();
             var episode = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
-            var altered = VerificationService.CloneDictionary(episode);
+            var altered = CloneDictionary(episode);
             ReadDictionary(altered, "sourceEvidence")["sourceHash"] = "changed";
             var foreign = DialogueService.BuildKnowledgeAccessContext("someone_else", peer, "", context);
             var earlier = DialogueService.BuildKnowledgeAccessContext(owner, peer, "", TestDict("timelineId", "episode_timeline", "worldDay", 19d));
@@ -799,7 +799,7 @@ namespace ReignBetaServer
             const string latest = "Good morning. How are you?";
             foreach (string mode in new[] { "in_person", "party_chat" })
             {
-                var turn = VerificationService.CloneDictionary(payload); turn["mode"] = mode;
+                var turn = CloneDictionary(payload); turn["mode"] = mode;
                 PromptEnvelope envelope = mode == "in_person"
                     ? BuildDialoguePromptEnvelope(campaign, "npc_a", "Speaker", "Traveler", "Traveler", latest,
                         "A quiet market street.", profile, PromptParityCharacteristics(), empty, empty, empty,
@@ -833,7 +833,7 @@ namespace ReignBetaServer
             }
             foreach (string exclusion in new[] { "hash", "span", "inactive", "branch", "observer", "future" })
             {
-                var current = VerificationService.CloneDictionary(payload);
+                var current = CloneDictionary(payload);
                 try
                 {
                     if (exclusion == "hash") DialogueSelfTestStore.UpdateConversationContinuityPending2(connection, TestDict("id", pendingId));

@@ -70,7 +70,7 @@ namespace ReignBetaServer
             var prior = ReadDictionaryList(item, "sources").Select(s => TestDict("id", s["sourceId"], "turnId", s["sourceId"],
                 "speakerId", s["speakerId"], "role", s["role"], "text", s["text"], "worldDay", s["worldDay"],
                 "acceptedSequence", s["sequence"], "audienceIds", s["audience"], "sessionId", ReadString(s, "sessionId", ""))).ToList();
-            var parsed = VerificationService.CloneDictionary(ReadDictionary(item, "draft"));
+            var parsed = CloneDictionary(ReadDictionary(item, "draft"));
             var plan = BuildDialogueClaimPlan(parsed, payload, prior, observer);
             var issues = FindDialogueIntegrityViolations(parsed, payload, prior, observer);
             int repairs = 0;
@@ -92,7 +92,7 @@ namespace ReignBetaServer
                             "nativeReferenceSealed", IsSealedAnswerSupportAudit(check), "routeAdapterPreservedRequest", beforeAdapter == hash,
                             "wireTemplateScope", "isolated_NanoGPT_HIGH_template_model_is_bound_by_subscription_dispatcher"));
                         var match = captures.Where(c => ReadString(c, "requestHash", "") == hash).ToList();
-                        return match.Count == 1 ? VerificationService.CloneDictionary(ReadDictionary(match[0], "response"))
+                        return match.Count == 1 ? CloneDictionary(ReadDictionary(match[0], "response"))
                             : TestDict("ok", false, "errorCode", "answer_support_capture_missing");
                     }
                     repairs++; return TestDict("ok", false, "error", "offline_repair_capture_missing");
@@ -105,7 +105,7 @@ namespace ReignBetaServer
                 earlyAudits = supportRequests.Count;
                 if (!ReadBool(initial, "ok", false) || !item.ContainsKey("lateRepairDraft")) return initial;
                 lateApplied = true;
-                return TestDict("ok", true, "content", Json.Serialize(VerificationService.CloneDictionary(ReadDictionary(item, "lateRepairDraft"))));
+                return TestDict("ok", true, "content", Json.Serialize(CloneDictionary(ReadDictionary(item, "lateRepairDraft"))));
             }, replayRequest, payload, prior, observer, Respond);
             return TestDict("caseId", item["caseId"], "inputDraftHash", MemorySelectionTextHash(Json.Serialize(parsed)),
                 "claimPlan", plan, "integrityViolations", issues, "repairRequests", repairs, "answerSupportRequests", supportRequests, "result", result,

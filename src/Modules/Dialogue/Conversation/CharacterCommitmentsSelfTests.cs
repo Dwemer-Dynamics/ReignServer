@@ -47,13 +47,13 @@ namespace ReignBetaServer
             NormalizeDialogueCommitment(forged, "npc");
             Check("binder_removes_forged_support_and_unknown_kind_is_not_promise", ReadString(forged, "bindingStatus", "") == "unbound"
                 && ReadString(forged, "acceptanceStatus", "") == "unknown" && ReadString(forged, "recordKind", "") == "unclassified");
-            var firstObserver = VerificationService.CloneDictionary(reportedOffer); var secondObserver = VerificationService.CloneDictionary(reportedOffer);
+            var firstObserver = CloneDictionary(reportedOffer); var secondObserver = CloneDictionary(reportedOffer);
             NormalizeDialogueCommitment(firstObserver, "ira"); NormalizeDialogueCommitment(secondObserver, "rhagaea");
             Check("observers_get_distinct_interpretation_ids", StableCommitmentId(firstObserver) != StableCommitmentId(secondObserver));
             ReadDictionary(firstObserver, "sourceEvidence")["timestamp"] = 10L;
             var previousInterpretation = TestDict("timeline_id", ContinuityTimeline(firstObserver), "owed_by", "ira", "owed_to", "player",
                 "status", "unresolved", "known_by_json", Json.Serialize(new[] { "ira" }), "payload_json", Json.Serialize(firstObserver));
-            var newer = VerificationService.CloneDictionary(firstObserver); ReadDictionary(newer, "sourceEvidence")["timestamp"] = 20L;
+            var newer = CloneDictionary(firstObserver); ReadDictionary(newer, "sourceEvidence")["timestamp"] = 20L;
             Check("newer_same_scope_bound_interpretation_can_be_revised", DialogueCommitmentRevisionAllowed(previousInterpretation, newer));
             newer["bindingStatus"] = "unbound";
             Check("unbound_revision_cannot_overwrite_bound_interpretation", !DialogueCommitmentRevisionAllowed(previousInterpretation, newer));
@@ -145,7 +145,7 @@ namespace ReignBetaServer
                 Check("legacy_supported_default_timeline_repaired_once", DialogueSelfTestStore.SelectObligations(connection).All(row => ReadString(row, "timeline_id", "") == "promise_branch"));
                 foreach (string guard in new[] { "unsupported", "edited", "foreign", "missing" })
                 {
-                    var guarded = VerificationService.CloneDictionary(fallback[0]);
+                    var guarded = CloneDictionary(fallback[0]);
                     guarded["obligation_id"] = "migration_" + guard; guarded["status"] = "fulfilled"; guarded["timelineId"] = "promise_branch";
                     if (guard == "unsupported") guarded["sourceValidation"] = "incomplete";
                     if (guard == "missing") guarded.Remove("timelineId");
@@ -255,8 +255,8 @@ namespace ReignBetaServer
                         "playerHeroStringId", "player", "actorHeroStringId", "npc", "targetHeroStringId", "player",
                         "result", TestDict("success", true, "completed", true, "resultCode", "practice_duel_completed", "message", summary));
                     ActionPipelineService.WriteActionQueueUnlocked(campaign, new List<Dictionary<string, object>> {
-                        TestDict("id", action, "status", "delivered", "record", VerificationService.CloneDictionary(practice)) });
-                    var pending = VerificationService.CloneDictionary(practice); pending["status"] = "executing";
+                        TestDict("id", action, "status", "delivered", "record", CloneDictionary(practice)) });
+                    var pending = CloneDictionary(practice); pending["status"] = "executing";
                     pending["message"] = "Practice duel is in progress."; pending["result"] = TestDict("resultCode", "conversation_duel_armed");
                     DialogueService.StoreActionResultMemory(pending, "fixture");
                     var report = ActionPipelineService.ReportAction(practice);
@@ -285,7 +285,7 @@ namespace ReignBetaServer
                     Check("practice_creates_no_public_or_social_history_" + playerWon,
                         DialogueSelfTestStore.SelectWorldHistoryEvents(connection, TestDict("action", action)).Count == 0
                         && DialogueSelfTestStore.SelectCharacterPerformanceEvents(connection, TestDict("event", "action_" + action)).Count == 0);
-                    var malformed = VerificationService.CloneDictionary(practice); malformed["actionId"] = action + "_missing"; malformed.Remove("actorHeroStringId");
+                    var malformed = CloneDictionary(practice); malformed["actionId"] = action + "_missing"; malformed.Remove("actorHeroStringId");
                     Check("practice_missing_identity_never_becomes_public_" + playerWon,
                         !ReadBool(DialogueService.StoreActionResultMemory(malformed, "fixture"), "ok", true)
                         && DialogueSelfTestStore.SelectEvents(connection, TestDict("event", "action_" + action + "_missing")).Count == 0);
@@ -319,26 +319,26 @@ namespace ReignBetaServer
                     "owed_by", "ira", "owed_to", "player", "known_by", new[] { "ira" }, "timelineId", "revision_fixture"), 100, "native");
                 foreach (string observer in new[] { "ira", "rhagaea" })
                 {
-                    var proposal = VerificationService.CloneDictionary(reportedOffer);
+                    var proposal = CloneDictionary(reportedOffer);
                     proposal["obligation_id"] = "native_protected"; proposal["timelineId"] = "revision_fixture";
                     proposal["description"] = "An inferred report about the terms.";
                     NormalizeDialogueCommitment(proposal, observer);
-                    DialogueService.InsertObligation(connection, "proposal_event", VerificationService.CloneDictionary(proposal), 200, "dialogue");
-                    DialogueService.InsertObligation(connection, "proposal_event", VerificationService.CloneDictionary(proposal), 200, "dialogue");
+                    DialogueService.InsertObligation(connection, "proposal_event", CloneDictionary(proposal), 200, "dialogue");
+                    DialogueService.InsertObligation(connection, "proposal_event", CloneDictionary(proposal), 200, "dialogue");
                 }
                 var proposals = DialogueSelfTestStore.SelectObligations5(connection);
                 Check("incompatible_proposal_replay_is_idempotent_and_observer_scoped", proposals.Count == 2
                     && proposals.Select(row => ReadString(row, "known_by_json", "")).Distinct().Count() == 2
                     && ReadString(DialogueSelfTestStore.SelectObligations6(connection).Single(), "description", "") == "Native confirmed terms.");
-                var revision = VerificationService.CloneDictionary(reportedOffer); revision["timelineId"] = "revision_fixture";
+                var revision = CloneDictionary(reportedOffer); revision["timelineId"] = "revision_fixture";
                 revision["description"] = "An unresolved interpreted request.";
                 ReadDictionary(revision, "sourceEvidence")["timestamp"] = 200L;
                 NormalizeDialogueCommitment(revision, "ira");
                 string revisionId = StableCommitmentId(revision);
-                DialogueService.InsertObligation(connection, "revision_event", VerificationService.CloneDictionary(revision), 200, "dialogue");
+                DialogueService.InsertObligation(connection, "revision_event", CloneDictionary(revision), 200, "dialogue");
                 revision["obligation_id"] = revisionId; revision["description"] = "The model interprets the newer statement as fulfillment.";
                 revision["status"] = "fulfilled"; ReadDictionary(revision, "sourceEvidence")["timestamp"] = 300L;
-                DialogueService.InsertObligation(connection, "revision_event_later", VerificationService.CloneDictionary(revision), 300, "dialogue");
+                DialogueService.InsertObligation(connection, "revision_event_later", CloneDictionary(revision), 300, "dialogue");
                 var revised = DialogueSelfTestStore.SelectObligations7(connection, TestDict("id", revisionId)).Single();
                 Check("newer_bound_revision_persists_source_and_history", ReadString(revised, "status", "") == "fulfilled"
                     && ReadDictionaryList(TryParseJsonObject(ReadString(revised, "payload_json", "{}")), "interpretationHistory").Count == 1);
@@ -364,7 +364,7 @@ namespace ReignBetaServer
                 const string promise = "I promise to speak to my father. But only after you have explained the proposal.";
                 Dictionary<string, object> Save(string id, string question, string reply, double day = 20d, string obligation = "", object participants = null, string timeline = "source_branch")
                 {
-                    var p = VerificationService.CloneDictionary(context); p["worldDay"] = day;
+                    var p = CloneDictionary(context); p["worldDay"] = day;
                     p["timelineId"] = timeline;
                     if (participants != null) p["participants"] = participants;
                     StoreConversationExchange(campaign, p, "npc", "player", "Michael", "Corein", question, reply, id, (long)(day * 10));
@@ -389,7 +389,7 @@ namespace ReignBetaServer
                 var storedPayload = TryParseJsonObject(ReadString(first, "payload_json", "{}"));
                 foreach (string legacyShape in new[] { "missing", "null", "non_dictionary" })
                 {
-                    var legacyPayload = VerificationService.CloneDictionary(storedPayload);
+                    var legacyPayload = CloneDictionary(storedPayload);
                     if (legacyShape == "missing") legacyPayload.Remove("commitmentOriginalSource");
                     else legacyPayload["commitmentOriginalSource"] = legacyShape == "null" ? null : "legacy value";
                     DialogueSelfTestStore.UpdateObligations5(c, TestDict("payload", Json.Serialize(legacyPayload), "id", obligationId));
@@ -398,7 +398,7 @@ namespace ReignBetaServer
                         legacyPrompt.Contains(originalQuestion) && legacyPrompt.Contains(promise)
                         && Regex.Matches(legacyPrompt, "kind=commitment_source_context ").Count == 1);
                 }
-                var legacyUpdate = VerificationService.CloneDictionary(storedPayload);
+                var legacyUpdate = CloneDictionary(storedPayload);
                 legacyUpdate["timelineId"] = "source_branch"; legacyUpdate["owed_by"] = "npc"; legacyUpdate["owed_to"] = "player";
                 PreserveCommitmentOriginalSource(c, obligationId, "legacy_update", legacyUpdate);
                 Check("legacy_update_preserves_verified_original_source", Json.Serialize(ReadDictionary(legacyUpdate, "commitmentOriginalSource"))

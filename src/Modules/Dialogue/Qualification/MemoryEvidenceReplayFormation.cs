@@ -49,7 +49,7 @@ namespace ReignBetaServer
             // The common seeder expects a query field. This marker never reaches
             // retrieval or formation, and the external manifest admits no query.
             return TestDict("schema", "reign-memory-evidence-replay-input-v1", "cases", cases.Select(item => {
-                var seed = VerificationService.CloneDictionary(item);
+                var seed = CloneDictionary(item);
                 seed["query"] = "scene_formation_seed_only";
                 return seed;
             }).ToList());

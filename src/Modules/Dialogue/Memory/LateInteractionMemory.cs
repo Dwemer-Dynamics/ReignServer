@@ -108,7 +108,7 @@ namespace ReignBetaServer
             if (!string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value))
             {
                 if (LateInteractionReplay.Value == null) throw new InvalidOperationException("An isolated index requires a replay adapter.");
-                var replayRequest = VerificationService.CloneDictionary(request); replayRequest["operation"] = path;
+                var replayRequest = CloneDictionary(request); replayRequest["operation"] = path;
                 return LateInteractionReplay.Value(replayRequest);
             }
             return TryParseJsonObject(DialogueService.PostJsonToUrl(endpoint + path, Json.Serialize(request), timeout));
@@ -223,7 +223,7 @@ namespace ReignBetaServer
             var eligible = ReadDictionaryList(request,"eligible");
             var exported = views.Where(v=>eligible.Any(e=>new[]{"sourceId","sourceHash","textHash","view"}
                 .All(k=>ReadString(v,k,"")==ReadString(e,k,"")))).ToList();
-            var receipt = TestDict("request",VerificationService.CloneDictionary(request),"requestHash",PromptHash(CanonicalJson(request)),
+            var receipt = TestDict("request",CloneDictionary(request),"requestHash",PromptHash(CanonicalJson(request)),
                 "documents",exported,"status","capture_pending");
             captures.Add(receipt);
             var capture = ReadDictionaryList(item,"capturedLateInteractionSearches")
@@ -239,7 +239,7 @@ namespace ReignBetaServer
                 var source = eligible.FirstOrDefault(e=>ReadString(e,"sourceId","")==map(ReadString(hit,"sourceId",""))
                     && ReadString(e,"view","")==ReadString(hit,"view","") && ReadString(e,"textHash","")==ReadString(hit,"textHash",""));
                 if(source==null) { receipt["status"]="source_or_projection_mismatch"; pending.Add("colbert_source_mismatch"); return TestDict("ok",false,"status","source_or_projection_mismatch"); }
-                var bound=VerificationService.CloneDictionary(source); bound["score"]=ReadDouble(hit,"score",0); result.Add(bound);
+                var bound=CloneDictionary(source); bound["score"]=ReadDouble(hit,"score",0); result.Add(bound);
             }
             receipt["status"]="captured_local_ranks"; receipt["captureHash"]=PromptHash(CanonicalJson(capture));
             receipt["results"]=result;

@@ -389,7 +389,7 @@ namespace ReignBetaServer
                     .Select(pair => TestDict("sourceId", pair["sourceId"], "sourceHash", pair["sourceHash"],
                         "claimHash", pair["claimHash"], "field", pair["field"], "premise", pair["premise"], "hypothesis", pair["hypothesis"],
                         "premiseHash", pair["premiseHash"], "hypothesisHash", pair["hypothesisHash"],
-                        "comparison", VerificationService.CloneDictionary(rows.Single(row => ReadString(row, "id", "") == ReadString(pair, "id", ""))),
+                        "comparison", CloneDictionary(rows.Single(row => ReadString(row, "id", "") == ReadString(pair, "id", ""))),
                         "identityAliases", plan["identityAliases"])).ToList()
                     : new List<Dictionary<string, object>>();
                 receipt["modelHash"] = valid ? ReadString(response, "modelHash", "") : "";

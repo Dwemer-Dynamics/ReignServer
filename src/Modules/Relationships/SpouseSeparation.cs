@@ -120,7 +120,7 @@ namespace ReignBetaServer
                 }
                 Check("transaction_rollback_keeps_letter_and_affinities_together", CorrectRelations()
                     && RelationshipsStore.SelectLetters15(connection).Count == 1);
-                var invalid = VerificationService.CloneDictionary(evt);
+                var invalid = CloneDictionary(evt);
                 invalid["phase"] = "proposed";
                 ProjectSpouseSeparation(connection, campaign, "alternate", invalid);
                 Check("proposal_is_not_native_fulfillment", CorrectRelations()

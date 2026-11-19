@@ -96,7 +96,7 @@ The pending commitments below are your own private dispatch ledger. Mention a pa
                 && ReadString(b, "operation", "send") == ReadString(p, "operation", "send") && ReadString(b, "kind", "inform") == ReadString(p, "kind", "inform")
                 && ReadString(b, "destinationId", "") == ReadString(p, "destinationId", "") && ReadDouble(b, "stayDays", 0) == ReadDouble(p, "stayDays", 0)
                 && ReadDouble(b, "delayDays", 0) == ReadDouble(p, "delayDays", 0))))) return null;
-            var merged = VerificationService.CloneDictionary(original);
+            var merged = CloneDictionary(original);
             merged["communicationPlans"] = plans;
             return merged;
         }
@@ -178,7 +178,7 @@ The pending commitments below are your own private dispatch ledger. Mention a pa
                         semanticPlans++;
                     }
             }
-            var result = VerificationService.CloneDictionary(llm);
+            var result = CloneDictionary(llm);
             var evidence = TestDict("attempted", true, "providerCalls", providerCalls, "completed", repaired != null, "replyUnchanged", true,
                 "draftRevision", drafts.Count > 0, "semanticPlans", semanticPlans);
             result["communicationMetadataRepair"] = evidence;

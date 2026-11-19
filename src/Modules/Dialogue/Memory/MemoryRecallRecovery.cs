@@ -176,7 +176,7 @@ namespace ReignBetaServer
                 || ReadFirstString(source, "playerText", "text", "message") != ReadFirstString(target, "playerText", "text", "message")) return;
             var to = DeliveredMemoryRecall.GetOrCreateValue(target);
             lock (to) to[observer] = new DeliveredMemoryRecallEvidence { Signature = MemoryRecallTurnSignature(target, observer),
-                ObserverName = evidence.ObserverName, Originals = evidence.Originals.Select(VerificationService.CloneDictionary).ToList() };
+                ObserverName = evidence.ObserverName, Originals = evidence.Originals.Select(CloneDictionary).ToList() };
         }
 
         private static string BindDeliveredRecallRepairEvidence(Dictionary<string, object> repairRequest,

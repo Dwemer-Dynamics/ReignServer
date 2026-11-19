@@ -45,7 +45,7 @@ namespace ReignBetaServer
                 return envelope;
             }
             string Content(PromptEnvelope envelope) => string.Join("\n", envelope.Messages.Select(m => ReadString(m, "content", "")));
-            List<Dictionary<string, object>> CloneMessages(PromptEnvelope envelope) => envelope.Messages.Select(VerificationService.CloneDictionary).ToList();
+            List<Dictionary<string, object>> CloneMessages(PromptEnvelope envelope) => envelope.Messages.Select(CloneDictionary).ToList();
             foreach (bool eventMode in new[] { false, true })
             {
                 string route = eventMode ? "event" : "dialogue";
@@ -82,7 +82,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> Preflight(List<Dictionary<string, object>> messages) => BuildContinuityProviderPreflight(new(), request,
                     TestDict("messages", messages), "", "fixture");
                 Check("whole_evidence_survives_role_boundaries_" + route, ReadBool(Preflight(CloneMessages(envelope)), "requiredSourceCoverageComplete", false));
-                var clonedRequest = VerificationService.CloneDictionary(TestDict("promptEnvelope", envelope.Diagnostics, "messages", envelope.Messages));
+                var clonedRequest = CloneDictionary(TestDict("promptEnvelope", envelope.Diagnostics, "messages", envelope.Messages));
                 var clonedBody = LlmProviderService.BuildChatRequestBody(new(), clonedRequest, ReadDictionaryList(clonedRequest, "messages"), "fixture-model");
                 Check("trusted_request_clone_preserves_delivery_" + route, ReadBool(BuildContinuityProviderPreflight(new(), clonedRequest, clonedBody, "", "fixture"), "requiredSourceCoverageComplete", false));
                 var clonedMessages = ReadDictionaryList(clonedBody, "messages");
@@ -90,7 +90,7 @@ namespace ReignBetaServer
                 Check("trusted_clone_does_not_bless_altered_role_" + route, !ReadBool(BuildContinuityProviderPreflight(new(), clonedRequest, clonedBody, "", "fixture"), "requiredSourceCoverageComplete", true));
                 var untrustedDiagnostics = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(envelope.Diagnostics));
                 Check("serialized_diagnostics_cannot_create_trust_" + route, !ConversationStructureMatches(untrustedDiagnostics, CloneMessages(envelope))
-                    && !ConversationStructureMatches(VerificationService.CloneDictionary(untrustedDiagnostics), CloneMessages(envelope)));
+                    && !ConversationStructureMatches(CloneDictionary(untrustedDiagnostics), CloneMessages(envelope)));
                 Check("original_survives_clone_mutation_" + route, ConversationStructureMatches(envelope.Diagnostics, envelope.Messages));
                 var recall = BindDeliveredMemoryRecallEvidence(payload, "npc", envelope.Messages, "Ingeiyna", lines, null, envelope.Diagnostics);
                 Check("recent_recall_receipt_survives_" + route, ReadInt(recall, "sourceCount", 0) == GroupContinuityTranscriptLines(lines).Count);
@@ -102,14 +102,14 @@ namespace ReignBetaServer
                 var repairDiagnostics = ReadDictionary(repair, "promptEnvelope");
                 var repairMessages = ReadDictionaryList(repair, "messages");
                 ConversationStructureReceipts.Add(repairDiagnostics, new ConversationStructureReceipt {
-                    Messages = repairMessages.Select(VerificationService.CloneDictionary).ToList(), CanonicalTranscript = carried
+                    Messages = repairMessages.Select(CloneDictionary).ToList(), CanonicalTranscript = carried
                 });
                 bool RepairEvidenceComplete(List<Dictionary<string, object>> messages) => ReadBool(BuildContinuityProviderPreflight(
                     new(), repair, TestDict("messages", messages), "", "fixture"), "requiredSourceCoverageComplete", false);
                 Check("repair_complete_recent_exchanges_do_not_repeat_" + route, completeExchanges.Count == 3
                     && ContinuityPromptRecords(carried, false).Count == 3 && repairMessages.Count == repairWindow.Count + 1
                     && RepairEvidenceComplete(repairMessages));
-                var alteredRepair = repairMessages.Select(VerificationService.CloneDictionary).ToList();
+                var alteredRepair = repairMessages.Select(CloneDictionary).ToList();
                 (alteredRepair[1], alteredRepair[2]) = (alteredRepair[2], alteredRepair[1]);
                 Check("repair_reconstructed_exchange_rejects_changed_order_" + route, !RepairEvidenceComplete(alteredRepair));
                 foreach (string mutation in new[] { "drop", "role", "body", "order", "latest", "context" })

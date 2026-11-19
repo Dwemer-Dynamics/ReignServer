@@ -117,7 +117,7 @@ namespace ReignBetaServer
             var responses = TryParseJsonObject(ReadString(row, "response_json", "{}"));
             var response = ReadDictionary(responses, observer);
             if (response == null || !ReadBool(response, "ok", false)) return null;
-            response = VerificationService.CloneDictionary(response);
+            response = CloneDictionary(response);
             response["idempotentReplay"] = true;
             response["inputReceipt"] = source.Receipt;
             if (payload.TryGetValue("conversationGrounding", out var grounding)) response["conversationGrounding"] = grounding;
@@ -141,7 +141,7 @@ namespace ReignBetaServer
             var responses = TryParseJsonObject(ReadString(row, "response_json", "{}"));
             if (ReadBool(response, "ok", false) && observer.Length > 0)
             {
-                var replay = VerificationService.CloneDictionary(response);
+                var replay = CloneDictionary(response);
                 // Full provider drafts/prompts have their own private diagnostics store.
                 foreach (string key in new[] { "llm", "prompt", "messages", "promptEnvelope" }) replay.Remove(key);
                 responses[observer] = replay;

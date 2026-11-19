@@ -57,7 +57,7 @@ namespace ReignBetaServer
                 foreach (string conflict in new[] { "text", "speaker", "audience", "timeline" })
                 {
                     bool rejected = false;
-                    var changed = VerificationService.CloneDictionary(payload);
+                    var changed = CloneDictionary(payload);
                     if (conflict == "audience") changed["participants"] = new[] { "npc", "player", "unheard" };
                     if (conflict == "timeline") changed["timelineId"] = "wrong_branch";
                     try
@@ -88,7 +88,7 @@ namespace ReignBetaServer
                             && ReadInt(group.Last(), "turn_order", -1) == ReadInt(group.First(), "turn_order", -1) + 1));
                 }
 
-                var groupPayload = VerificationService.CloneDictionary(payload);
+                var groupPayload = CloneDictionary(payload);
                 groupPayload["participants"] = new[] { "player", "npc", "visitor" };
                 groupPayload["sceneTurnId"] = "group_with_visitor";
                 StoreGroupedConversationExchange(campaign, groupPayload, "npc", "player", "Player", "Mira", "A public question.",
@@ -101,7 +101,7 @@ namespace ReignBetaServer
                     !DialogueService.TextListFromJson(Stored("conversation_turns", "group_after_departure_npc_npc", "participants_json")).Contains("visitor")
                     && !DialogueService.TextListFromJson(Stored("conversation_turns", "group_after_departure_player", "participants_json")).Contains("visitor")
                     && DialogueService.TextListFromJson(Stored("conversation_turns", "group_with_visitor_player", "participants_json")).Contains("visitor"));
-                var secondSpeaker = VerificationService.CloneDictionary(groupPayload);
+                var secondSpeaker = CloneDictionary(groupPayload);
                 secondSpeaker["sceneTurnId"] = "group_with_visitor";
                 secondSpeaker["participants"] = new[] { "player", "npc", "visitor" };
                 bool changedPlayerRejected = false;
@@ -128,7 +128,7 @@ namespace ReignBetaServer
                 Check("group_pair_and_index_roll_back_together", groupFailed && Count("conversation_turns") == beforeGroupFault
                     && Count("conversation_turn_fts") == beforeGroupFault);
 
-                var oversized = VerificationService.CloneDictionary(payload);
+                var oversized = CloneDictionary(payload);
                 foreach (string key in new[] { "attendees", "socialSignals" })
                     oversized[key] = Enumerable.Range(0, 16).Select(i => TestDict("heroStringId", new string('h', 160) + i,
                         "name", new string('n', 160), "supportingQuote", new string('q', 512), "signalId", new string('s', 512),

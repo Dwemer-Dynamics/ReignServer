@@ -33,7 +33,7 @@ namespace ReignBetaServer
             bool outcomeNotice = ContainsProviderDialogueOutcomeNotice(reply);
             if (!outcomeNotice && !EmbeddedProviderDialogueMetadata.IsMatch(reply))
                 return response;
-            var rejected = VerificationService.CloneDictionary(response);
+            var rejected = CloneDictionary(response);
             rejected["ok"] = false;
             rejected["content"] = "";
             rejected["errorCode"] = outcomeNotice ? "provider_dialogue_outcome_notice" : "provider_dialogue_embedded_metadata";

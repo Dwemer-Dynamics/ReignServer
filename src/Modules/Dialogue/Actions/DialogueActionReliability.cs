@@ -123,7 +123,7 @@ namespace ReignBetaServer
         {
             return candidates.Where(candidate =>
             {
-                var normalized = ActionPipelineService.NormalizeActionCommand(VerificationService.CloneDictionary(candidate), campaignId,
+                var normalized = ActionPipelineService.NormalizeActionCommand(CloneDictionary(candidate), campaignId,
                     out List<string> errors, payload, resolutionText);
                 return normalized != null && errors.Count == 0;
             }).ToList();
@@ -239,7 +239,7 @@ namespace ReignBetaServer
                     string id = ActionPipelineService.NormalizeLookup(ReadString(row, "itemId", ""));
                     if ((name.Length < 3 || !ActionPipelineService.NormalizedTextContainsPhrase(normalized, name))
                         && (id.Length < 3 || !ActionPipelineService.NormalizedTextContainsPhrase(normalized, id))) continue;
-                    var copy = VerificationService.CloneDictionary(row);
+                    var copy = CloneDictionary(row);
                     copy["holder"] = side;
                     rows.Add(copy);
                 }

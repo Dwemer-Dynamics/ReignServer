@@ -44,7 +44,7 @@ namespace ReignBetaServer
             string resolutionText = BuildRouterResolutionText(playerText, npcReply);
             foreach (Dictionary<string, object> candidate in candidates)
             {
-                Dictionary<string, object> record = NormalizeActionCommand(VerificationService.CloneDictionary(candidate), campaignId, out List<string> actionErrors, payload, resolutionText);
+                Dictionary<string, object> record = NormalizeActionCommand(CloneDictionary(candidate), campaignId, out List<string> actionErrors, payload, resolutionText);
                 if (record != null && actionErrors.Count == 0)
                 {
                     normalized.Add(record);
@@ -108,7 +108,7 @@ namespace ReignBetaServer
             string resolutionText = BuildRouterResolutionText(playerText + "\n" + ReadString(actionGate, "intent", ""), npcReply);
             foreach (Dictionary<string, object> candidate in ReadDictionaryList(planner, "candidates"))
             {
-                Dictionary<string, object> record = NormalizeActionCommand(VerificationService.CloneDictionary(candidate), campaignId, out List<string> actionErrors, payload, resolutionText);
+                Dictionary<string, object> record = NormalizeActionCommand(CloneDictionary(candidate), campaignId, out List<string> actionErrors, payload, resolutionText);
                 if (record != null && actionErrors.Count == 0)
                 {
                     normalized.Add(record);

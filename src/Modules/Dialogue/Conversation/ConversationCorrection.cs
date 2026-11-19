@@ -71,7 +71,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> ReconcileConversationPlanForPrompt(Dictionary<string, object> state,
             string playerText, Dictionary<string, object> payload)
         {
-            var result = VerificationService.CloneDictionary(state ?? TestDict());
+            var result = CloneDictionary(state ?? TestDict());
             string correction = FirstNonEmpty(ReadString(payload, "currentConversationCorrection", ""), IsConversationCorrection(playerText) ? playerText : "");
             string plan = ReadString(result, "currentPlan", "");
             if (correction.Length > 0 && plan.Length > 0

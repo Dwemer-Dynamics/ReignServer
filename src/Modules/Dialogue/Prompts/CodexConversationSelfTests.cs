@@ -504,7 +504,7 @@ namespace ReignBetaServer
                 new Dictionary<string, object> { ["role"] = "user", ["content"] = "CHARACTER" },
                 new Dictionary<string, object> { ["role"] = "user", ["content"] = "TURN ONE" }
             };
-            List<Dictionary<string, object>> second = first.Select(VerificationService.CloneDictionary).ToList();
+            List<Dictionary<string, object>> second = first.Select(CloneDictionary).ToList();
             second[2]["content"] = "TURN TWO";
             List<CodexPromptSegment> a = CodexConversationContracts.BuildPromptSegments(first);
             List<CodexPromptSegment> b = CodexConversationContracts.BuildPromptSegments(second);

@@ -169,7 +169,7 @@ namespace ReignBetaServer
                     && GovernmentPoliticalBeliefs.WorldEventChanges(evidence, "distant_stranger").Count == 0
                     && CharactersService.EnsurePoliticalProfile(campaign, "local_notable", native, traits).Revision == first.Revision,
                     "I reload an older applied snapshot. Future effects and another person's experience do not leak into my current beliefs.", null);
-                var forged = VerificationService.CloneDictionary(native);
+                var forged = CloneDictionary(native);
                 var forgedProfile = JsonSerializer.Deserialize<GovernmentPoliticalProfile>(JsonSerializer.Serialize(first));
                 forgedProfile.Values[0].Stance = forgedProfile.Values[0].Stance == 100 ? 99 : 100;
                 forged["appliedPoliticalProfile"] = TryParseJsonObject(JsonSerializer.Serialize(forgedProfile));
@@ -177,7 +177,7 @@ namespace ReignBetaServer
                 try { CharactersService.EnsurePoliticalProfile(campaign, "local_notable", forged, traits); } catch (InvalidOperationException) { refused = true; }
                 add("government.participation_unissued_profile_refused", refused,
                     "An invented private profile cannot replace the character's issued political record.", null);
-                var fork = VerificationService.CloneDictionary(native); fork["politicalTimelineId"] = "restored_branch";
+                var fork = CloneDictionary(native); fork["politicalTimelineId"] = "restored_branch";
                 var forked = CharactersService.EnsurePoliticalProfile(campaign, "local_notable", fork, traits);
                 add("government.participation_branch_keeps_applied_history", forked.TimelineId == "restored_branch"
                     && forked.Values.Zip(first.Values, (a, b) => a.Stance == b.Stance && a.Importance == b.Importance).All(x => x)

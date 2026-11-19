@@ -46,7 +46,7 @@ namespace ReignBetaServer
             foreach (var exchange in receipt.Exchanges ?? new())
                 if (Enumerable.Range(exchange.FirstMessageIndex, exchange.MessageCount).All(historicalIndices.Contains))
                     completeExchanges.Add((exchange.SourceId, exchange.Text));
-            return window.Select(entry => VerificationService.CloneDictionary(entry.Message)).ToList();
+            return window.Select(entry => CloneDictionary(entry.Message)).ToList();
         }
 
         internal static Dictionary<string, object> RetryRoleplayContinuityViolation(
@@ -248,7 +248,7 @@ namespace ReignBetaServer
             {
                 var repairEnvelope = ReadDictionary(repairRequest, "promptEnvelope") ?? TestDict();
                 ConversationStructureReceipts.Add(repairEnvelope, new ConversationStructureReceipt {
-                    Messages = ReadDictionaryList(repairRequest, "messages").Select(VerificationService.CloneDictionary).ToList(),
+                    Messages = ReadDictionaryList(repairRequest, "messages").Select(CloneDictionary).ToList(),
                     CanonicalTranscript = carriedExchanges
                 });
                 repairRequest["promptEnvelope"] = repairEnvelope;
@@ -260,7 +260,7 @@ namespace ReignBetaServer
             if (repairedParsed != null)
             {
                 if (!repairedParsed.ContainsKey("actionGate") && parsed.ContainsKey("actionGate"))
-                    repairedParsed["actionGate"] = VerificationService.CloneDictionary(ReadDictionary(parsed, "actionGate"));
+                    repairedParsed["actionGate"] = CloneDictionary(ReadDictionary(parsed, "actionGate"));
                 repairedParsed = RemoveUnsupportedContinuityWrites(repairedParsed);
                 repaired["content"] = Json.Serialize(repairedParsed);
                 if (recallContextReview && ReadBool(repaired, "ok", false)

@@ -104,7 +104,7 @@ namespace ReignBetaServer
             if (turn.Length == 0 || spans.Count == 0) return TestDict("status", "source_unavailable", "recoverable", false);
             string timeline = ContinuityTimeline(payload);
             string pendingId = "continuity_pending_" + PromptHash(timeline + "|" + owner + "|" + eventId + "|" + recordId).Substring(0, 32);
-            var value = TestDict("proposal", VerificationService.CloneDictionary(write), "sourceEvidence", source,
+            var value = TestDict("proposal", CloneDictionary(write), "sourceEvidence", source,
                 "expectedRevision", expected, "observedRevision", current,
                 "reason", "concurrent_revision_changed", "meaning", "Unapplied proposal, not established memory.");
             DialogueStore.InsertOrIgnoreConversationContinuityPending(connection, TestDict("id", pendingId, "record", recordId, "timeline", timeline,

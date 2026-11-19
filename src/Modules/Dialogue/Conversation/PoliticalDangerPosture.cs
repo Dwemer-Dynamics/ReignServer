@@ -391,7 +391,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> identityView,
                 Dictionary<string, object> payload)
         {
-            Dictionary<string, object> stored = VerificationService.CloneDictionary(
+            Dictionary<string, object> stored = CloneDictionary(
                 ReadDictionary(state, "politicalAddressConvention")
                 ?? new Dictionary<string, object>());
             if (stored.Count == 0)
@@ -425,8 +425,8 @@ namespace ReignBetaServer
                     ? "explicit_player_revocation"
                     : "explicit_player_permission"
             };
-            stored = VerificationService.CloneDictionary(update);
-            stored["pendingUpdate"] = VerificationService.CloneDictionary(update);
+            stored = CloneDictionary(update);
+            stored["pendingUpdate"] = CloneDictionary(update);
             return stored;
         }
 
@@ -1172,7 +1172,7 @@ namespace ReignBetaServer
                 new Dictionary<string, object>
                 {
                     ["politicalAddressConvention"] =
-                        VerificationService.CloneDictionary(ReadDictionary(grant,
+                        CloneDictionary(ReadDictionary(grant,
                             "pendingAddressConvention"))
                 };
             Dictionary<string, object> revoke = BuildPoliticalRiskPosture(

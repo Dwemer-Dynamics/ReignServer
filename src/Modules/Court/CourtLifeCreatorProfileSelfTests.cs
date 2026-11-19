@@ -28,7 +28,7 @@ namespace ReignBetaServer
                 TestDict("capitalSettlementStringId", "other_capital"), TestDict("hostSettlementStringId", "other_host"),
                 TestDict("playerIsKingdomRuler", false), TestDict("matterId", "international_other") })
             {
-                var changed = VerificationService.CloneDictionary(payload);
+                var changed = CloneDictionary(payload);
                 foreach (var entry in variant) changed[entry.Key] = entry.Value;
                 Check("rejects_" + variant.Keys.Single(), CourtLifeCreatorProfile(changed, actor) == null);
             }
@@ -43,7 +43,7 @@ namespace ReignBetaServer
                 var continuity = ReadDictionary(ReadDictionary(diagnostics, "continuityPreflight"), "continuityEvidence");
                 var messages = ReadDictionaryList(request, "messages");
                 requiredEvidence = DialogueService.MissingContinuityContent(DialogueService.ConversationEvidenceText(diagnostics, messages), continuity).Count == 0;
-                var altered = messages.Select(VerificationService.CloneDictionary).ToList();
+                var altered = messages.Select(CloneDictionary).ToList();
                 foreach (var message in altered) message["content"] = ReadString(message, "content", "")
                     .Replace("Explain the smaller commission.", "Explain a different commission.", StringComparison.Ordinal);
                 alteredEvidenceRejected = DialogueService.MissingContinuityContent(DialogueService.ConversationEvidenceText(diagnostics, altered), continuity).Count > 0;
@@ -66,7 +66,7 @@ namespace ReignBetaServer
                 Check("original_player_whitespace_is_stored_without_editing", ReadString(CourtSelfTestStore.SelectCourtLifeTurns(connection, TestDict("id", actor)).Single(), "player_text", "")
                     == ReadString(payload, "playerText", ""));
             }
-            var forged = VerificationService.CloneDictionary(payload); forged["actorId"] = "missing_native_court_lord";
+            var forged = CloneDictionary(payload); forged["actorId"] = "missing_native_court_lord";
             forged["turnId"] = "forged_creator";
             Check("native_identity_cannot_use_creator_profile", !ReadBool(CourtLifeRespond(forged, settings, Writer), "ok", true) && calls == 1);
             forged["source"] = "International";

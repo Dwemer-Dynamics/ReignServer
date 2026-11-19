@@ -74,7 +74,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> CodexFailureStatus()
         {
             lock (CodexFailureStateLock)
-                return TestDict("lastGenerationFailure", VerificationService.CloneDictionary(CodexLastGenerationFailure),
+                return TestDict("lastGenerationFailure", CloneDictionary(CodexLastGenerationFailure),
                     "rateLimits", CharactersService.DeepCloneProfileDictionary(CodexLastRateLimits));
         }
 
@@ -152,7 +152,7 @@ namespace ReignBetaServer
             {
                 string json = ExecuteCodexTerminalRetry(() =>
                 {
-                    var bounded = VerificationService.CloneDictionary(settings);
+                    var bounded = CloneDictionary(settings);
                     bounded["providerRequestTimeoutMs"] = Math.Max(1, timeout - (int)timer.ElapsedMilliseconds);
                     return CodexChatCompletionJson(requestBody, bounded, model, context, contentDelta, canceled);
                 }, Limits, delay =>

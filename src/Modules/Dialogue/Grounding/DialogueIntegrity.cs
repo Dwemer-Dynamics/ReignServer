@@ -218,7 +218,7 @@ namespace ReignBetaServer
         {
             string hash = MemorySelectionTextHash(ReadFirstString(corrected, "reply", "body", "response", "text")).ToLowerInvariant();
             bool unchanged = ReadString(original, "draftReplyHash", "") == hash;
-            var receipt = unchanged ? VerificationService.CloneDictionary(original) : CompareDialogueRecallClaims(corrected, payload, prior, speaker);
+            var receipt = unchanged ? CloneDictionary(original) : CompareDialogueRecallClaims(corrected, payload, prior, speaker);
             receipt["proposedDraftReplyHash"] = ReadString(original, "draftReplyHash", "");
             receipt["coverageStage"] = "accepted_response_after_prose_correction";
             receipt["acceptedSemanticCoverage"] = unchanged ? "unchanged_reply_comparison_reused" : "rechecked_comparison_hints_only";

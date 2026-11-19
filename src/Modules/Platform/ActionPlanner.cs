@@ -1406,7 +1406,7 @@ namespace ReignBetaServer
             foreach (Dictionary<string, object> candidate in candidates ?? new List<Dictionary<string, object>>())
             {
                 if (DialogueService.IsCurrentPlayerTransferAlternative(candidate, payload)) continue;
-                Dictionary<string, object> candidateCopy = VerificationService.CloneDictionary(candidate);
+                Dictionary<string, object> candidateCopy = CloneDictionary(candidate);
                 Dictionary<string, object> normalized = NormalizeActionCommand(candidateCopy, campaignId, out List<string> actionErrors, payload, resolutionText);
                 if (normalized != null && actionErrors.Count == 0)
                 {

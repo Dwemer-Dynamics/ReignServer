@@ -51,7 +51,7 @@ namespace ReignBetaServer
             Dictionary<string, object> Input(string text, string turn) {
                 var p = TestDict("campaignId", campaign, "timelineId", "clock_branch", "conversationSessionId", "clock_session",
                     "worldDay", 20d, "locationId", "town", "playerHeroStringId", "player", "heroStringId", "npc", "playerText", text,
-                    "sceneTurnId", turn, "contributionId", turn, "sceneParticipants", people.Select(VerificationService.CloneDictionary).ToList());
+                    "sceneTurnId", turn, "contributionId", turn, "sceneParticipants", people.Select(CloneDictionary).ToList());
                 var candidate = TestDict("narration", InputNarrationBlocks(text).Select(b => TestDict("index", ReadInt(b, "index", 0),
                     "spans", new[] { TestDict("quote", ReadString(b, "text", ""), "kind", "observable", "actorId", "player") })).ToList());
                 CapturePlayerInput(p).Interpretation = ValidateNarrationInterpretation(text, candidate, p);
@@ -67,7 +67,7 @@ namespace ReignBetaServer
             var resumed = PrepareConversationSceneState(campaign, reopened, "npc", "Good morning.", new(), "party_chat");
             check("same_anchor_scene_and_privacy_survive_session_reopen", ReadString(resumed, "conversationVenue", "") == "study"
                 && ReadBool(ConversationSceneSnapshot("party_chat", reopened), "private", false), resumed);
-            var exposed = VerificationService.CloneDictionary(reopened); exposed["witnessHeroIds"] = new[] { "outsider" };
+            var exposed = CloneDictionary(reopened); exposed["witnessHeroIds"] = new[] { "outsider" };
             check("narrative_privacy_never_erases_native_outside_witness", !ReadBool(ConversationSceneSnapshot("party_chat", exposed), "private", true), null);
             var advance = Input("*Eight hours later, we meet again.*", "eight_hours");
             var advanced = PrepareConversationSceneState(campaign, advance, "npc", ReadString(advance, "playerText", ""), new(), "party_chat");
@@ -83,7 +83,7 @@ namespace ReignBetaServer
             check("accepted_time_advance_is_zero", IntoxicationWorldHour(retry) == 480d && !ReadBool(CurrentNarrativeClock(retry), "advanced", false), null);
             check("narrated_time_creates_no_scene_epoch", ReadString(ReadDictionary(retry, "conversationSceneState"), "conversationVenue", "") == "study"
                 && ReadBool(ConversationSceneSnapshot("party_chat", retry), "private", false), ReadDictionary(retry, "conversationSceneState"));
-            var cloned = VerificationService.CloneDictionary(retry);
+            var cloned = CloneDictionary(retry);
             check("internal_payload_clone_retains_clock_receipt", IntoxicationWorldHour(cloned) == 480d, null);
             var native = Input("Hello.", "native_catchup"); native["worldDay"] = 20.5d;
             PrepareConversationSceneState(campaign, native, "npc", "Hello.", new(), "party_chat");

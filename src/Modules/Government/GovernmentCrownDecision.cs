@@ -31,7 +31,7 @@ namespace ReignBetaServer
                 + ReadString(payload, "summary", "") + " The ruler's stated recommendation: "
                 + ReadString(payload, "rulerRecommendation", "")
                 + ". Recall political conversations, instructions, promises, disagreements and commitments about this matter with the ruler.";
-            var context = VerificationService.CloneDictionary(payload);
+            var context = CloneDictionary(payload);
             context["playerId"] = ruler; context["heroId"] = hero;
             context["mode"] = "government_crown_decision";
             context["playerText"] = query;

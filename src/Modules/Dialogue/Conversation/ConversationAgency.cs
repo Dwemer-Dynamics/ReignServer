@@ -511,7 +511,7 @@ namespace ReignBetaServer
                 evaluation["commitState"] = "committed";
                 evaluation["acceptedReplyHash"] = PromptHash(ReadFirstString(parsed, "reply", "body"));
                 evaluation["reply"] = ReadFirstString(parsed, "reply", "body");
-                var acceptedResponse = VerificationService.CloneDictionary(parsed);
+                var acceptedResponse = CloneDictionary(parsed);
                 RemovePrivateReasoningFields(acceptedResponse);
                 acceptedResponse.Remove("conversationAgencyReceipt");
                 acceptedResponse.Remove("motiveDecision");
@@ -598,7 +598,7 @@ namespace ReignBetaServer
             var supported = ReadStringList(decision, "evidenceKeys").Select(k => AgencyEvidenceKey(k, facts))
                 .Where(facts.ContainsKey).Distinct(StringComparer.Ordinal).ToList();
             if (supported.Count == 0) return false;
-            var terms = VerificationService.CloneDictionary(ReadDictionary(previous, "terms"));
+            var terms = CloneDictionary(ReadDictionary(previous, "terms"));
             terms["conditions"] = "";
             decision["disposition"] = "undecided";
             decision["subject"] = "Workshop partnership terms";
@@ -640,11 +640,11 @@ namespace ReignBetaServer
             var supported = ReadStringList(proposal, "evidenceKeys").Select(k => AgencyEvidenceKey(k, facts))
                 .Where(facts.ContainsKey).Distinct(StringComparer.Ordinal).ToList();
             if (supported.Count == 0) return false;
-            var pending = VerificationService.CloneDictionary(proposal);
+            var pending = CloneDictionary(proposal);
             pending["disposition"] = "conditional";
             pending["engagement"] = "clarify";
             pending["subject"] = ReadString(previous, "subject", "");
-            pending["terms"] = VerificationService.CloneDictionary(ReadDictionary(previous, "terms"));
+            pending["terms"] = CloneDictionary(ReadDictionary(previous, "terms"));
             pending["objections"] = ReadStringList(previous, "objections");
             pending["reason"] = DialogueService.LimitText(ReadString(previous, "reason", "")
                 + " The latest statement was acknowledged; the other recorded conditions remain pending.", 500);
@@ -657,7 +657,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> VisibleFailedRepairWithoutEffects(Dictionary<string, object> parsed,
             string failureClass = "action_verification")
         {
-            var visible = VerificationService.CloneDictionary(parsed);
+            var visible = CloneDictionary(parsed);
             string notice = failureClass switch
             {
                 "continuity_evidence" => "[Dialogue continuity evidence could not be verified. No new memory or world change is confirmed.]",
@@ -741,7 +741,7 @@ namespace ReignBetaServer
             foreach (var source in new[] { repair, original })
             {
                 if (source == null || !ConversationResponseService.ConversationStructuredObjectHasUsableVisibleReply(source)) continue;
-                var safeSource = VerificationService.CloneDictionary(source);
+                var safeSource = CloneDictionary(source);
                 if (unsafeVisibleClaims != null && unsafeVisibleClaims.Count > 0)
                 {
                     string reply = ReadFirstString(safeSource, "reply", "body", "response");
@@ -886,7 +886,7 @@ namespace ReignBetaServer
                     return llm;
                 }
             }
-            if (ReadBool(evaluation, "replayed", false)) parsed = VerificationService.CloneDictionary(ReadDictionary(evaluation, "response"));
+            if (ReadBool(evaluation, "replayed", false)) parsed = CloneDictionary(ReadDictionary(evaluation, "response"));
             parsed["conversationAgencyReceipt"] = evaluation;
             payload["conversationAgencyReceipt"] = evaluation;
             llm["conversationAgency"] = new Dictionary<string, object>

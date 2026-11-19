@@ -504,7 +504,7 @@ namespace ReignBetaServer
             {
                 row[key] = ReadDictionaryList(row, key).ToDictionary(p => ReadString(p, "key", ""), p => p["value"], StringComparer.Ordinal);
             }
-            var restoredView = VerificationService.CloneDictionary(modelView);
+            var restoredView = CloneDictionary(modelView);
             foreach (var clause in ReadDictionaryList(ReadDictionary(restoredView, "proposal"), "Clauses")) RestoreArguments(clause, "Arguments");
             foreach (var row in ReadDictionaryList(ReadDictionary(restoredView, "appraisals"), "assets")) RestoreArguments(row, "arguments");
             Check("model_argument_projection_lossless_for_identity_wording_schedules_and_facts",
@@ -546,7 +546,7 @@ namespace ReignBetaServer
             Check("counter_projection_grants_no_signature_or_execution", newVotes != null && !newVotes.HasRequiredConsents
                 && newVotes.PlayerAcceptedHash == "" && newVotes.NpcAcceptedHash == ""
                 && Json.Serialize(ReadDictionary(votesWire, "structuredActionContext")) == beforeVotes);
-            var unchangedCounter = VerificationService.CloneDictionary(counterAnswer);
+            var unchangedCounter = CloneDictionary(counterAnswer);
             ReadDictionary(unchangedCounter, "structuredActionDecision")["clauses"] =
                 ReadDictionaryList(ReadDictionary(votesView, "proposal"), "Clauses")
                     .Select(c => TestDict("actionId", c["ActionId"], "actorId", c["ActorId"], "recipientId", c["RecipientId"],
@@ -559,7 +559,7 @@ namespace ReignBetaServer
             Check("spoken_fee_cannot_make_unchanged_counter_binding", !ReadBool(unchangedEnvelope, "valid", true)
                 && !unchangedEnvelope.ContainsKey("proposal")
                 && Json.Serialize(ReadDictionary(votesWire, "structuredActionContext")) == beforeVotes);
-            var badShape = VerificationService.CloneDictionary(counterAnswer);
+            var badShape = CloneDictionary(counterAnswer);
             ReadDictionaryList(ReadDictionary(badShape, "structuredActionDecision"), "clauses")[0]["arguments"]
                 = TestDict("businessId", "business_0", "optionId", "accept");
             CaptureStructuredActionDecision(votesWire, badShape);
@@ -567,7 +567,7 @@ namespace ReignBetaServer
                 !ReadBool(ReadDictionary(votesWire, "validatedStructuredActionDecision"), "valid", true));
             foreach (string invalidKey in new[] { "businessId", "script" })
             {
-                var invalidCounter = VerificationService.CloneDictionary(counterAnswer);
+                var invalidCounter = CloneDictionary(counterAnswer);
                 var term = ReadDictionaryList(ReadDictionary(invalidCounter, "structuredActionDecision"), "clauses")[0];
                 var pairs = ReadDictionaryList(term, "arguments"); pairs.Add(TestDict("key", invalidKey, "value", "unauthorized"));
                 term["arguments"] = pairs;
@@ -625,7 +625,7 @@ namespace ReignBetaServer
             context.Remove("proposal"); context.Remove("termsHash");
             ReadDictionary(context, "appraisals").Remove("scope");
             // Assign explicitly because readers may project JSON-backed dictionaries.
-            var legacyAppraisals = VerificationService.CloneDictionary(ReadDictionary(context, "appraisals")); legacyAppraisals.Remove("scope");
+            var legacyAppraisals = CloneDictionary(ReadDictionary(context, "appraisals")); legacyAppraisals.Remove("scope");
             context["appraisals"] = legacyAppraisals;
             scoped = StructuredActionPromptContext(payload);
             Check("old_world_map_rows_never_imply_ownership", ReadDictionaryList(ReadDictionary(scoped, "appraisals"), "assets")
@@ -704,7 +704,7 @@ namespace ReignBetaServer
                 && VerifiedAgreementPaymentHistory(paymentPayload, "npc", "other").Count == 0);
             foreach (string fault in new[] { "foreign", "pending", "amount", "fulfilled", "hash", "duplicate", "missing_actor" })
             {
-                var bad = VerificationService.CloneDictionary(paymentPayload);
+                var bad = CloneDictionary(paymentPayload);
                 var badContext = ReadDictionary(bad, "structuredActionContext");
                 var badHistory = ReadDictionary(badContext, "fulfilledPaymentHistory");
                 var badRow = ReadDictionaryList(badHistory, "rows")[0];
@@ -715,7 +715,7 @@ namespace ReignBetaServer
                     case "amount": badRow["amount"] = 501; break;
                     case "fulfilled": badRow["fulfilledInstallments"] = 2; break;
                     case "hash": badRow["termsHash"] = new string('z', 64); break;
-                    case "duplicate": badHistory["rows"] = new[] { badRow, VerificationService.CloneDictionary(badRow) }; break;
+                    case "duplicate": badHistory["rows"] = new[] { badRow, CloneDictionary(badRow) }; break;
                     case "missing_actor": badContext.Remove("npcId"); break;
                 }
                 // Replace the row explicitly: dictionary-list readers may return converted views.
@@ -724,9 +724,9 @@ namespace ReignBetaServer
                 Check("invalid_payment_" + fault + "_withheld", ReadDictionaryList(VerifiedAgreementPaymentHistory(bad), "rows").Count == 0);
             }
             var manyPayments = Enumerable.Range(0, 13).Select(i => {
-                var row = VerificationService.CloneDictionary(paidRow); row["agreementId"] = "paid-" + i; return row;
+                var row = CloneDictionary(paidRow); row["agreementId"] = "paid-" + i; return row;
             }).ToList();
-            var boundedPayload = VerificationService.CloneDictionary(paymentPayload);
+            var boundedPayload = CloneDictionary(paymentPayload);
             var boundedContext = ReadDictionary(boundedPayload, "structuredActionContext");
             var boundedHistory = ReadDictionary(boundedContext, "fulfilledPaymentHistory");
             boundedHistory["rows"] = manyPayments; boundedHistory["total"] = 13;
@@ -779,14 +779,14 @@ namespace ReignBetaServer
             var request = TestDict("structuredActionProtocolVersion", 1, "requestType", "dialogue", "messages",
                 new List<Dictionary<string, object>> { TestDict("role", "user", "content", scene) });
             request["structuredActionRepairContext"] = TestDict("playerId", "player", "npcId", "npc", "conversationId", "conversation");
-            var failure = ConversationResponseService.RetryMalformedStructuredResponse(VerificationService.CloneDictionary(empty), request, "structured_action_scope_tests", "empty-failure", "dialogue", "npc", "",
-                retry => { calls++; return VerificationService.CloneDictionary(empty); });
+            var failure = ConversationResponseService.RetryMalformedStructuredResponse(CloneDictionary(empty), request, "structured_action_scope_tests", "empty-failure", "dialogue", "npc", "",
+                retry => { calls++; return CloneDictionary(empty); });
             var attempts = ReadDictionaryList(ReadDictionary(failure, "formatRetry"), "attempts");
             Check("repeated_empty_object_has_one_regeneration_no_effects", calls == 1 && !ReadBool(failure, "ok", true)
                 && attempts.Count == 1 && ReadString(attempts[0], "callKind", "") == "full_regeneration"
                 && ReadInt(attempts[0], "requestCharacters", 0) > scene.Length);
             calls = 0;
-            var recovered = ConversationResponseService.RetryMalformedStructuredResponse(VerificationService.CloneDictionary(empty), request, "structured_action_scope_tests", "empty-success", "dialogue", "npc", "",
+            var recovered = ConversationResponseService.RetryMalformedStructuredResponse(CloneDictionary(empty), request, "structured_action_scope_tests", "empty-success", "dialogue", "npc", "",
                 retry => { calls++; return TestDict("ok", true, "content", Json.Serialize(TestDict("reply", "I remember what you told me of her husband.",
                     "structuredActionDecision", TestDict("kind", "none", "proposalId", "", "revision", 0, "termsHash", "", "reason", "No new action is offered.", "clauses", new List<Dictionary<string, object>>())))); });
             Check("empty_object_can_recover_with_preserved_context", calls == 1 && ReadBool(recovered, "ok", false)
@@ -830,7 +830,7 @@ namespace ReignBetaServer
             }
             var repairReceiptContext = TestDict("playerId", "player", "npcId", "npc", "conversationId", "conversation",
                 "nativeReceipt", TestDict("OperationId", "already-completed", "State", 7, "TermsHash", "native-exact"));
-            var receiptRequest = VerificationService.CloneDictionary(metadataRequest); receiptRequest["structuredActionRepairContext"] = repairReceiptContext;
+            var receiptRequest = CloneDictionary(metadataRequest); receiptRequest["structuredActionRepairContext"] = repairReceiptContext;
             calls = 0;
             var receiptFixed = ConversationResponseService.RetryMalformedStructuredResponse(TestDict("ok", true, "content", Json.Serialize(Answer("The original sale is already complete."))),
                 receiptRequest, "structured_action_scope_tests", "metadata-receipt", "dialogue", "npc", "",
@@ -847,8 +847,8 @@ namespace ReignBetaServer
             calls = 0;
             var unsignedPending = Json.Deserialize<ActionAgreement>(Json.Serialize(pending));
             unsignedPending.PlayerAcceptedHash = "";
-            var unsignedRequest = VerificationService.CloneDictionary(metadataRequest);
-            var unsignedContext = VerificationService.CloneDictionary(repairContext);
+            var unsignedRequest = CloneDictionary(metadataRequest);
+            var unsignedContext = CloneDictionary(repairContext);
             unsignedContext["proposal"] = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(unsignedPending));
             unsignedRequest["structuredActionRepairContext"] = unsignedContext;
             var unsignedRepair = ConversationResponseService.RetryMalformedStructuredResponse(TestDict("ok", true, "content", Json.Serialize(Answer("I accept the gift."))),
@@ -860,19 +860,19 @@ namespace ReignBetaServer
             var malformedChoice = Answer("I accept the gift."); malformedChoice["structuredActionDecision"] = TestDict("kind", "accept");
             var malformedChoiceResult = ConversationResponseService.RetryMalformedStructuredResponse(TestDict("ok", true, "content", Json.Serialize(malformedChoice)),
                 metadataRequest, "structured_action_scope_tests", "metadata-malformed-choice", "dialogue", "npc", "",
-                retry => { calls++; return VerificationService.CloneDictionary(empty); });
+                retry => { calls++; return CloneDictionary(empty); });
             Check("supplied_malformed_consent_is_not_rewritten", calls == 0 && !ReadBool(malformedChoiceResult, "ok", true));
             calls = 0;
             var missingAgain = ConversationResponseService.RetryMalformedStructuredResponse(TestDict("ok", true, "content", Json.Serialize(Answer("I accept the gift."))),
                 metadataRequest, "structured_action_scope_tests", "metadata-still-missing", "dialogue", "npc", "",
-                retry => { calls++; return VerificationService.CloneDictionary(empty); });
+                retry => { calls++; return CloneDictionary(empty); });
             Check("failed_metadata_repair_is_bounded_and_never_defaults_to_accept_or_none", calls == 1 && !ReadBool(missingAgain, "ok", true)
                 && ReadDictionary(TryParseJsonObject(ReadString(missingAgain, "content", "")), "structuredActionDecision") == null);
             calls = 0;
             var existingChoice = Answer("I accept these exact terms."); existingChoice["structuredActionDecision"] = Decision("accept");
             string existingJson = Json.Serialize(existingChoice);
             var existingResult = ConversationResponseService.RetryMalformedStructuredResponse(TestDict("ok", true, "content", existingJson), metadataRequest,
-                "structured_action_scope_tests", "metadata-existing", "dialogue", "npc", "", retry => { calls++; return VerificationService.CloneDictionary(empty); });
+                "structured_action_scope_tests", "metadata-existing", "dialogue", "npc", "", retry => { calls++; return CloneDictionary(empty); });
             Check("complete_existing_consent_is_byte_preserved_without_provider_call", calls == 0 && ReadBool(existingResult, "ok", false)
                 && ReadString(existingResult, "content", "") == existingJson);
             Check("diagnostics_reject_generic_complete_reply_with_missing_hidden_decision",
@@ -892,7 +892,7 @@ namespace ReignBetaServer
                     && ReadString(TryParseJsonObject(ReadString(recoveredShape, "content", "")), "reply", "") == "I accept these exact terms.");
             }
             calls = 0;
-            var regeneratedMissingDecision = ConversationResponseService.RetryMalformedStructuredResponse(VerificationService.CloneDictionary(empty), metadataRequest,
+            var regeneratedMissingDecision = ConversationResponseService.RetryMalformedStructuredResponse(CloneDictionary(empty), metadataRequest,
                 "structured_action_scope_tests", "metadata-after-empty-regeneration", "dialogue", "npc", "",
                 retry => { calls++; return TestDict("ok", true, "content", calls == 1
                     ? Json.Serialize(Answer("I accept these exact terms."))

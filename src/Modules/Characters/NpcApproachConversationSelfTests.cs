@@ -179,7 +179,7 @@ namespace ReignBetaServer
             var motive = TestDict();
             var accepted = BuildNpcApproachDraft(p, TestDict("ok", true), parsed, ReadString(parsed, "reply", ""), motive, identity, prior, encounter.HeroId, "Ingunde", "Michael");
             Check("grounded_draft_passes_shared_validation", ReadBool(accepted, "ok", false));
-            var attemptedAction = VerificationService.CloneDictionary(parsed);
+            var attemptedAction = CloneDictionary(parsed);
             attemptedAction["structuredActionDecision"] = TestDict("kind", "accept", "proposalId", "unreviewed_offer",
                 "revision", 1, "termsHash", new string('a', 64), "reason", "unsupported", "clauses", new object[0]);
             string stateBeforeAttemptedAction = Json.Serialize(state);

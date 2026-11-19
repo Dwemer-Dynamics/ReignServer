@@ -173,7 +173,7 @@ namespace ReignBetaServer
         {
             string before = Json.Serialize(settings);
             // Snapshot before any plaintext compatibility copy can change source/target precedence.
-            var beforeNormalization = VerificationService.CloneDictionary(settings);
+            var beforeNormalization = CloneDictionary(settings);
             SettingsService.MigrateLegacyOllamaGlobalBinding(settings);
             bool legacyBound = SettingsService.HasGlobalKeyBindingEntry(beforeNormalization, "apiKey");
             string provider = NormalizeLlmProvider(ReadString(settings, "llmProvider", ""));

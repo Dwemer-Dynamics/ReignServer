@@ -42,7 +42,7 @@ namespace ReignBetaServer
             {
                 var meta = TryParseJsonObject(ReadString(turn, "payload_json", "{}"));
                 string rowTimeline = FirstNonEmpty(ReadString(meta, "timelineId", ""), ReadString(TryParseJsonObject(ReadString(turn, "session_payload", "{}")), "timelineId", ""));
-                var scoped = VerificationService.CloneDictionary(turn); scoped["timeline_id"] = rowTimeline;
+                var scoped = CloneDictionary(turn); scoped["timeline_id"] = rowTimeline;
                 if (rowTimeline.Length > 0 && !MemoryTimeVisible(scoped, access, connection)) continue;
                 string id = ReadString(turn, "turn_id", ""), sourceId = ReadString(meta, "inputSourceId", "");
                 Dictionary<string, object> original = null;

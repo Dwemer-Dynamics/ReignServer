@@ -134,7 +134,7 @@ namespace ReignBetaServer
                     foreach (string referenceMode in new[] { "off", "enabled" })
                     {
                         ConversationReferenceValidationMode.Value = referenceMode;
-                        var modePayload = VerificationService.CloneDictionary(precisionPayload);
+                        var modePayload = CloneDictionary(precisionPayload);
                         var modePacket = DialogueService.BuildNpcMemoryPacket(campaign, "npc", "player", "", ReadString(modePayload, "playerText", ""), 4000,
                             modePayload, TestDict("memoryPrecisionMode", "precision", "enableSemanticMemory", false));
                         modePayload["memoryPrecisionEvidence"] = ReadDictionary(modePacket, "precisionEvidence");

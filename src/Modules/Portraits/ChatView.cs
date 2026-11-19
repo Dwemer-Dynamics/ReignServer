@@ -64,7 +64,7 @@ namespace ReignBetaServer
                 var clothingEvidence = ReadChatViewCoverageEvidence(connection, session, window, wardrobeHistory);
                 if (Json.Serialize(ChatViewClothingSelectionInput(window, wardrobeHistory, clothingEvidence)).Length > 180000)
                     throw new InvalidOperationException("The scene and retained clothing evidence exceed the View input limit; no source was truncated.");
-                var settings = VerificationService.CloneDictionary(SettingsService.LoadSettings());
+                var settings = CloneDictionary(SettingsService.LoadSettings());
                 var profile = ResolveImageGenerationProfile(settings, "scenery");
                 var capability = ChatViewImageCapability(profile);
                 MigrateChatViewPromptDefaults();

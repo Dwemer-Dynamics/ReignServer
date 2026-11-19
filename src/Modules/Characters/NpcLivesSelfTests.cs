@@ -421,9 +421,9 @@ namespace ReignBetaServer
                 bool allRejected = true;
                 foreach (var change in new[] { TestDict("leaseId", "forged"), TestDict("activeSaveName", "Baseline"), TestDict("timelineId", "foreign"),
                     TestDict("gameInstanceId", "old"), TestDict("nativeSaveInProgress", true), TestDict("timeMode", "FastForward") })
-                { var invalidFixture = VerificationService.CloneDictionary(fixtureRequest); foreach (var field in change) invalidFixture[field.Key] = field.Value;
+                { var invalidFixture = CloneDictionary(fixtureRequest); foreach (var field in change) invalidFixture[field.Key] = field.Value;
                     allRejected &= !NpcLivesFixtureAuthorized(invalidFixture, fixtureRun, fixtureRuntime, fixtureArm); }
-                var altered = VerificationService.CloneDictionary(fixtureRequest); var alteredCase = VerificationService.CloneDictionary(caseFields); alteredCase["chapterId"] = "forged"; altered["testCase"] = alteredCase;
+                var altered = CloneDictionary(fixtureRequest); var alteredCase = CloneDictionary(caseFields); alteredCase["chapterId"] = "forged"; altered["testCase"] = alteredCase;
                 Check("operator_setup_rejects_forged_authority_changed_chapter_and_stale_runtime", allRejected
                     && !NpcLivesFixtureAuthorized(altered, fixtureRun, fixtureRuntime, fixtureArm)
                     && !NpcLivesFixtureAuthorized(fixtureRequest, fixtureRun, TestDict(), fixtureArm)

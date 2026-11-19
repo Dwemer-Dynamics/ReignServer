@@ -23,10 +23,10 @@ namespace ReignBetaServer
                 "text", "If you put me down, I will announce my defeat.");
             var eventLine = TestDict("id", "event_file_row", "turnId", "wager", "role", "npc", "speakerHeroStringId", "ira", "text", ReadString(durable, "text", ""));
             add("event_adapter_binds_full_source_without_guessing_suffix", MatchPromptSource(eventLine, new[] { durable }) == durable, null);
-            var clipped = VerificationService.CloneDictionary(eventLine); clipped["text"] = "If you put me down";
-            var wrongSpeaker = VerificationService.CloneDictionary(eventLine); wrongSpeaker["speakerHeroStringId"] = "player";
-            var duplicateSource = VerificationService.CloneDictionary(durable); duplicateSource["turn_id"] = "another_turn";
-            var staleSource = VerificationService.CloneDictionary(eventLine); staleSource["sourceTurnId"] = "stale_durable_id";
+            var clipped = CloneDictionary(eventLine); clipped["text"] = "If you put me down";
+            var wrongSpeaker = CloneDictionary(eventLine); wrongSpeaker["speakerHeroStringId"] = "player";
+            var duplicateSource = CloneDictionary(durable); duplicateSource["turn_id"] = "another_turn";
+            var staleSource = CloneDictionary(eventLine); staleSource["sourceTurnId"] = "stale_durable_id";
             add("ambiguous_clipped_or_wrong_author_never_suppresses_source", MatchPromptSource(clipped, new[] { durable }) == null
                 && MatchPromptSource(wrongSpeaker, new[] { durable }) == null
                 && MatchPromptSource(eventLine, new[] { durable, duplicateSource }) == null
@@ -929,7 +929,7 @@ namespace ReignBetaServer
                             ["mainHeroStringId"] = "player", ["mainHeroName"] = "Michael", ["heroStringId"] = "observer" };
                         // Exercise the actual adapter shapes: event JSONL id is not
                         // the durable turn key, and turnId is the shared exchange.
-                        var routedLines = priorLines.Select(VerificationService.CloneDictionary).ToList();
+                        var routedLines = priorLines.Select(CloneDictionary).ToList();
                         if (route != "dialogue")
                         {
                             foreach (var line in routedLines)
@@ -974,7 +974,7 @@ namespace ReignBetaServer
                     DialogueSelfTestStore.InsertConversationSessions19(connection, TestDict("campaign", campaign));
                     // Bind through a second connection only after publishing the fixture.
                     bindingFixture.Commit();
-                    var bindingContext = VerificationService.CloneDictionary(context);
+                    var bindingContext = CloneDictionary(context);
                     bindingContext["playerHeroStringId"] = "player";
                     bindingContext["sceneTurnId"] = "binding_exchange";
                     bindingContext["identityView"] = TestDict("knowsIdentity", true);
@@ -995,7 +995,7 @@ namespace ReignBetaServer
                         .All(line => PlannedPromptSources(bindingContext).ContainsKey(ReadString(line, "sourceTurnId", ""))));
                     Check("storage_ids_survive_binding_and_unbound_collision_is_not_removed", ReadString(repeatedReplies[0], "id", "") == "jsonl_489"
                         && repeatedReplies.Any(line => ReadString(line, "id", "") == "binding_520"));
-                    var unknownBinding = VerificationService.CloneDictionary(bindingContext); unknownBinding["identityView"] = TestDict("knowsIdentity", false);
+                    var unknownBinding = CloneDictionary(bindingContext); unknownBinding["identityView"] = TestDict("knowsIdentity", false);
                     BindPromptTranscriptSources(campaign, "observer", unknownBinding, repeatedReplies);
                     Check("unknown_identity_does_not_export_raw_statement_ids", PlannedPromptSources(unknownBinding).Count == 0
                         && PromptStatementSources.TryGetValue(unknownBinding, out var unknownStatements) && unknownStatements.Count == 0);
