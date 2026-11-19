@@ -189,7 +189,7 @@ namespace ReignBetaServer
                 && !items.Any(x => requestText.Contains(ReadString(x, "id", ""))) && ReadInt(firstRequest, "maxTokens", 0) == 50000
                 && !firstRequest.ContainsKey("minTokens") && !firstRequest.ContainsKey("min_tokens"),
                 "The 50,000-token ceiling permits one complete compact response without a minimum token target; local IDs, identity, ratings and trio remain authoritative.");
-            var transportBody = Program.BuildChatRequestBody(Program.DefaultSettings(), firstRequest,
+            var transportBody = LlmProviderService.BuildChatRequestBody(SettingsService.DefaultSettings(), firstRequest,
                 ReadDictionaryList(firstRequest, "messages"), "deepseek/deepseek-v4.1-flash");
             check("construction_transport_budget", ReadInt(transportBody, "max_tokens", 0) == 50000
                 && ReadString(ReadDictionary(transportBody, "response_format"), "type", "") == "json_object"
@@ -269,8 +269,8 @@ namespace ReignBetaServer
                     && Json.Serialize(ReadDictionary(malformedCheckpoint, "life")) == Json.Serialize(fixtureLife),
                     "Malformed items fail completeness checks and retain valid sections for a bounded repair instead of crashing or publishing a partial profile.");
             }
-            check("prior_parse_failure_retries_after_engine_fix", Program.ShouldRetryFailedConstruction(TestDict("status", "failed",
-                "failureKind", "parse", "constructionEngineVersion", 4), Program.DefaultSettings()),
+            check("prior_parse_failure_retries_after_engine_fix", CharactersService.ShouldRetryFailedConstruction(TestDict("status", "failed",
+                "failureKind", "parse", "constructionEngineVersion", 4), SettingsService.DefaultSettings()),
                 "Profiles blocked by the earlier parser can resume after the engine fix without editing campaign data or settings.");
             var interrupted = DeepCloneProfileDictionary(written); interrupted["status"] = "blueprint";
             ReadDictionaryList(interrupted, "items")[0]["description"] = "";
@@ -393,7 +393,7 @@ namespace ReignBetaServer
             string legacyCharacter = DialogueService.BuildStableCharacterPrompt("legacy", "Legacy", hero, legacyFoundation);
             check("legacy_wound_and_reputation_preserved_without_alias_duplicate", legacyCharacter.Contains("LEGACY_WOUND")
                 && legacyCharacter.Split("LEGACY_REPUTATION").Length == 2, "Legacy foundation fields remain always available, with exact reputation aliases deduplicated.");
-            var staleFoundation = Program.CloneDictionary(stack); staleFoundation["background"] = ReadDictionary(legacyFoundation, "background");
+            var staleFoundation = CloneDictionary(stack); staleFoundation["background"] = ReadDictionary(legacyFoundation, "background");
             string currentCharacter = DialogueService.BuildStableCharacterPrompt("current", "Current", hero, staleFoundation);
             check("current_narrative_overrides_legacy_wound_alias", !currentCharacter.Contains("LEGACY_WOUND") && !currentCharacter.Contains("LEGACY_REPUTATION"),
                 "A current narrative does not resurrect obsolete legacy wounds or reputation.");
@@ -458,10 +458,10 @@ namespace ReignBetaServer
                 "Young children draw from authored play, simple wants, attachment and learning concepts, never adult careers or political ambitions.");
             check("moral_range", library.Count(x => ReadString(x, "family", "").EndsWith("/hard_edges") || ReadString(x, "family", "").EndsWith("/status")) >= 150,
                 "The library also supplies selfish, status-seeking, traditional and hard-edged motives; character interpretation preserves the native personality.");
-            string previewRoot = System.IO.Path.Combine(Program.VerificationDir, "character-narrative");
+            string previewRoot = System.IO.Path.Combine(VerificationService.VerificationDir, "character-narrative");
             System.IO.Directory.CreateDirectory(previewRoot);
             System.IO.File.WriteAllText(System.IO.Path.Combine(previewRoot, "control-center.html"), Program.ControlCenterHtml());
-            Program.WriteJsonObject(System.IO.Path.Combine(previewRoot, "fixture.json"), written);
+            CampaignFileService.WriteJsonObject(System.IO.Path.Combine(previewRoot, "fixture.json"), written);
             check("editor_preview_fixture", true, "Provider-free Control Center HTML and narrative fixture: " + previewRoot);
             var familyConcern = new Dictionary<string, object> { ["title"] = "outliving close family", ["description"] = "Fears losing a loved parent." };
             var death = new Dictionary<string, object> { ["source"] = "native", ["is_complete"] = 1, ["phase"] = "completed", ["event_type"] = "hero_death", ["summary"] = "The parent died." };
@@ -506,7 +506,7 @@ namespace ReignBetaServer
                     "The complete shipped roster's dreams, desires and values respect its unchanged personality documents.");
                 check("shipped_narrative_fact_compatibility", ReadInt(audit, "incompatibleFactCount", -1) == 0,
                     "The complete shipped roster does not invent required siblings, living parents or implausible adolescent mentoring histories.");
-                var preservedProfiles = ReadDictionaryList(Program.ReadJsonObject(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                var preservedProfiles = ReadDictionaryList(CampaignFileService.ReadJsonObject(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
                     "profiles", "profile_catalog_v4.json")), "profiles");
                 var preservedById = preservedProfiles.ToDictionary(x => ReadString(x, "heroStringId", ""), StringComparer.Ordinal);
                 bool identitiesPreserved = preservedProfiles.Count > 0 && catalogProfiles.Count == preservedProfiles.Count
@@ -519,7 +519,7 @@ namespace ReignBetaServer
                     });
                 check("native_identity_and_personality_preserved", identitiesPreserved,
                     "The complete expanded roster retains every original identity, native biography, family, age, native skill, trait and MBTI document exactly.");
-                Program.WriteJsonObject(System.IO.Path.Combine(previewRoot, "roster-audit.json"), audit);
+                CampaignFileService.WriteJsonObject(System.IO.Path.Combine(previewRoot, "roster-audit.json"), audit);
             }
             return tests;
         }

@@ -52,8 +52,8 @@ namespace ReignBetaServer
             Dictionary<string, object> payload, Dictionary<string, object> parsed, string speaker)
         {
             string player = FirstNonEmpty(ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"), "current_player");
-            var names = MergedInteractionParticipantProfiles(payload).Where(p => Program.CharacterIdFrom(p).Length > 0)
-                .Select(p => (Name: ReadString(p, "name", ""), Id: Program.CharacterIdFrom(p))).Where(p => p.Name.Length > 0).ToList();
+            var names = MergedInteractionParticipantProfiles(payload).Where(p => CampaignFileService.CharacterIdFrom(p).Length > 0)
+                .Select(p => (Name: ReadString(p, "name", ""), Id: CampaignFileService.CharacterIdFrom(p))).Where(p => p.Name.Length > 0).ToList();
             var participants = GroupConversationParticipantIds(payload).Concat(names.Select(n => n.Id)).Append(player).Append(speaker).Distinct().ToList();
             var targets = ReadStringList(parsed, "addressedHeroStringIds").Distinct().ToList();
             bool validTarget = targets.Count == 1 && participants.Contains(targets[0]) && targets[0] != speaker;
@@ -308,7 +308,7 @@ namespace ReignBetaServer
             var plan = BuildDialogueClaimPlan(parsed, payload, prior, speaker);
             var pairs = ReadDictionaryList(plan, "pairs");
             var claims = ReadDictionaryList(plan, "claims");
-            settings ??= Program.LoadSettings();
+            settings ??= SettingsService.LoadSettings();
             int defaultBudget = Math.Clamp(1500 + pairs.Sum(p => ReadString(p, "premise", "").Length + ReadString(p, "hypothesis", "").Length) * 2, 8000, 15000);
             int workBudget = Math.Clamp(ReadInt(settings, "dialogueClaimWorkBudgetMs", defaultBudget), 500, 15000);
             int callerBudget = workBudget + 2000;
@@ -332,9 +332,9 @@ namespace ReignBetaServer
             { receipt["status"] = "unavailable_backoff"; return receipt; }
             try
             {
-                settings ??= Program.LoadSettings();
+                settings ??= SettingsService.LoadSettings();
                 var request = TestDict("schema", DialogueClaimSchema, "pairs", pairs, "workBudgetMs", workBudget);
-                var response = DialogueClaimHelperReplay.Value?.Invoke(request) ?? TryParseJsonObject(Program.PostJsonToUrl(
+                var response = DialogueClaimHelperReplay.Value?.Invoke(request) ?? TryParseJsonObject(DialogueService.PostJsonToUrl(
                     SemanticWorkerUrl(settings, "/dialogue/claims/compare"), Json.Serialize(request), callerBudget));
                 var rows = ReadDictionaryList(response, "rows");
                 bool grounding = ReadString(response, "modelHash", "") == DialogueGroundingHash;
@@ -389,7 +389,7 @@ namespace ReignBetaServer
                     .Select(pair => TestDict("sourceId", pair["sourceId"], "sourceHash", pair["sourceHash"],
                         "claimHash", pair["claimHash"], "field", pair["field"], "premise", pair["premise"], "hypothesis", pair["hypothesis"],
                         "premiseHash", pair["premiseHash"], "hypothesisHash", pair["hypothesisHash"],
-                        "comparison", Program.CloneDictionary(rows.Single(row => ReadString(row, "id", "") == ReadString(pair, "id", ""))),
+                        "comparison", CloneDictionary(rows.Single(row => ReadString(row, "id", "") == ReadString(pair, "id", ""))),
                         "identityAliases", plan["identityAliases"])).ToList()
                     : new List<Dictionary<string, object>>();
                 receipt["modelHash"] = valid ? ReadString(response, "modelHash", "") : "";
@@ -433,7 +433,7 @@ namespace ReignBetaServer
             var receipt = TestDict("status", "not_configured", "authority", "claim_candidates_only", "remoteCalls", 0,
                 "coverage", "none", "candidateCount", 0);
             string qualified;
-            try { settings ??= Program.LoadSettings(); qualified = QualifiedMemoryExtractorHash(settings); }
+            try { settings ??= SettingsService.LoadSettings(); qualified = QualifiedMemoryExtractorHash(settings); }
             catch (Exception ex) when (!(ex is OperationCanceledException) && !(ex is PersistenceService.CampaignRequestReplacedException))
             { receipt["status"] = "configuration_unavailable"; receipt["errorType"] = ex.GetType().Name; return receipt; }
             if (qualified.Length == 0 && DialogueClaimExtractorReplay.Value == null) return receipt;
@@ -447,7 +447,7 @@ namespace ReignBetaServer
             {
                 string hash = MemorySelectionTextHash(text).ToLowerInvariant();
                 var request = TestDict("sourceId", "draft_" + hash, "text", text, "textHash", hash);
-                var result = DialogueClaimExtractorReplay.Value?.Invoke(request) ?? TryParseJsonObject(Program.PostJsonToUrl(
+                var result = DialogueClaimExtractorReplay.Value?.Invoke(request) ?? TryParseJsonObject(DialogueService.PostJsonToUrl(
                     SemanticWorkerUrl(settings, "/dialogue/claims/extract"), Json.Serialize(request), 2000));
                 var claims = ReadDictionaryList(result, "claims");
                 bool valid = ReadBool(result, "ok", false) && ReadString(result, "schema", "") == "reign-dialogue-claim-extraction-v1"

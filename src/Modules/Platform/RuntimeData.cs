@@ -5,11 +5,11 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class SettingsService
     {
         private const string RuntimeMigrationMarkerName = ".runtime-root-v1";
 
-        private static void MigrateLegacyRuntimeDataIfNeeded()
+        internal static void MigrateLegacyRuntimeDataIfNeeded()
         {
             string configuredRoot = Environment.GetEnvironmentVariable(
                 "REIGN_DATA_ROOT");
@@ -19,7 +19,7 @@ namespace ReignBetaServer
             string legacyRoot = Path.GetFullPath(Path.Combine(
                 AppDomain.CurrentDomain.BaseDirectory,
                 "data"));
-            string targetRoot = Path.GetFullPath(DataDir);
+            string targetRoot = Path.GetFullPath(Program.DataDir);
             if (legacyRoot.Equals(
                     targetRoot,
                     StringComparison.OrdinalIgnoreCase)

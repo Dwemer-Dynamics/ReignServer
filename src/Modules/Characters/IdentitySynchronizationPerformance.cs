@@ -38,7 +38,7 @@ namespace ReignBetaServer
         {
             var next = nextHeroes.ToDictionary(IdentityHeroId, x => x, StringComparer.OrdinalIgnoreCase);
             var families = previous.ToDictionary(x => ReadString(x, "hero_id", ""),
-                x => new HashSet<string>(Program.TextListFromJson(ReadString(x, "family_ids_json", "[]")),
+                x => new HashSet<string>(DialogueService.TextListFromJson(ReadString(x, "family_ids_json", "[]")),
                     StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
             var rows = new List<Dictionary<string, object>>();
             var seen = new HashSet<string>(StringComparer.Ordinal);

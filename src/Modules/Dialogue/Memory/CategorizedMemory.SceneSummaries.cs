@@ -43,7 +43,7 @@ namespace ReignBetaServer
                         identitySource["mainHeroStringId"] = ReadString(turn, "speaker_id", playerId);
                 }
             }
-            Program.KnowledgeAccessContext identityKnowledge = Program.BuildKnowledgeAccessContext(
+            DialogueService.KnowledgeAccessContext identityKnowledge = DialogueService.BuildKnowledgeAccessContext(
                 npcId, playerId, ReadString(session, "location_id", ""), identitySource);
             List<Dictionary<string, object>> pseudoRows = turns.Select(turn =>
             {
@@ -68,20 +68,20 @@ namespace ReignBetaServer
             pseudoRows.AddRange(verifiedLieEvidence.Select(item => new Dictionary<string, object>
             {
                 ["summary"] = "INDEPENDENT SYSTEM EVIDENCE (authoritative for the adjudicated component) — "
-                    + Program.SanitizeUnknownIdentityEvidenceText(
+                    + DialogueService.SanitizeUnknownIdentityEvidenceText(
                         ReadString(item, "evidenceSummary", "A conversation claim was independently adjudicated."),
                         identityKnowledge),
                 ["memory_type"] = "verified_system_evidence",
                 ["importance"] = 1d,
                 ["ts"] = ReadLong(item, "created_ts", now)
             }));
-            Dictionary<string, object> summarySettings = settingsOverride ?? Program.LoadSettings();
+            Dictionary<string, object> summarySettings = settingsOverride ?? SettingsService.LoadSettings();
             string summaryCorrelationId = ReadFirstString(
                 identitySource,
                 "correlationId",
                 "correlation_id",
                 "liveTestCorrelationId");
-            Dictionary<string, object> compact = Program.BuildMiddleTermSummary(summarySettings, npcId, "scene:" + sessionId, pseudoRows,
+            Dictionary<string, object> compact = DialogueService.BuildMiddleTermSummary(summarySettings, npcId, "scene:" + sessionId, pseudoRows,
                 120000,
                 "This is the canonical transcript of one closed conversation session. Consider all turns through the final listed turn. "
                 + "Never claim a participant had not answered when a later listed turn contains that participant's response. "
@@ -99,9 +99,9 @@ namespace ReignBetaServer
             string summaryText = ReadString(compact, "summary", "");
             if (string.IsNullOrWhiteSpace(summaryText))
                 summaryText = string.Join("\n---\n", pseudoRows.Select(row => ReadString(row, "summary", "")));
-            summaryText = Program.EnsureConversationSummaryProvenance(summaryText,
+            summaryText = DialogueService.EnsureConversationSummaryProvenance(summaryText,
                 Math.Max(500, Math.Min(5000, ReadInt(summarySettings, "memoryConsolidationMaxSummaryChars", 1800))));
-            summaryText = Program.SanitizeUnknownIdentityEvidenceText(summaryText, identityKnowledge);
+            summaryText = DialogueService.SanitizeUnknownIdentityEvidenceText(summaryText, identityKnowledge);
             string originalSummaryText = summaryText;
             summaryText = NormalizeHistoricalRoleplayContinuityText(summaryText,
                 Math.Max(summaryText.Length + 4096, 5000),
@@ -113,25 +113,25 @@ namespace ReignBetaServer
                 new Dictionary<string, object> { ["worldDay"] = ReadDouble(session, "end_world_day", ReadDouble(session, "start_world_day", 0d)) });
             string memoryLane = SelectConversationSceneMemoryLane(sceneRoute);
             string summaryId = "scene_" + PromptHash(sessionId + "|" + MemorySourceHash(turns) + "|" + MemoryPrecisionVersion).Substring(0, 32);
-            List<string> participants = Program.TextListFromJson(ReadString(session, "participants_json", "[]"));
+            List<string> participants = DialogueService.TextListFromJson(ReadString(session, "participants_json", "[]"));
             List<string> sourceEventIds = turns
                 .Select(turn => ReadString(turn, "event_id", ""))
                 .Where(id => !string.IsNullOrWhiteSpace(id))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
             List<string> knownBy = participants.Where(id => turns.All(turn => ReadString(turn,"speaker_id","") == id
-                || Program.TextListFromJson(ReadString(turn,"participants_json","[]")).Contains(id,StringComparer.OrdinalIgnoreCase))).ToList();
+                || DialogueService.TextListFromJson(ReadString(turn,"participants_json","[]")).Contains(id,StringComparer.OrdinalIgnoreCase))).ToList();
             participants = knownBy.ToList();
             string summaryOwner = knownBy.Contains(npcId,StringComparer.OrdinalIgnoreCase) ? npcId : "";
-            List<string> tags = Program.MergeStringLists(ReadStringList(compact, "tags"),
+            List<string> tags = DialogueService.MergeStringLists(ReadStringList(compact, "tags"),
                 new[] { "scene", "conversation", "reported_speech", "claim_attribution", memoryLane });
             if (verifiedLieEvidence.Count > 0)
             {
-                tags = Program.MergeStringLists(tags, new[] { "verified_lie", "independent_evidence" });
+                tags = DialogueService.MergeStringLists(tags, new[] { "verified_lie", "independent_evidence" });
             }
             if (!retrievalEligible)
             {
-                tags = Program.MergeStringLists(tags, new[] { "recall_reconstruction", "audit_only", "non_source" });
+                tags = DialogueService.MergeStringLists(tags, new[] { "recall_reconstruction", "audit_only", "non_source" });
             }
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             using (var publication = connection.BeginTransaction())
@@ -184,7 +184,7 @@ namespace ReignBetaServer
                     });
                 if (retrievalEligible)
                 {
-                    Program.InsertSummaryFts(connection, summaryId, summaryText, tags, participants);
+                    DialogueService.InsertSummaryFts(connection, summaryId, summaryText, tags, participants);
                 }
                 int ordinal = 0;
                 foreach (Dictionary<string, object> turn in turns)
@@ -250,7 +250,7 @@ namespace ReignBetaServer
                         string explanation = ReadString(packet, "factualExplanation", "");
                         row["evidenceSummary"] = "Lie check " + ReadString(row, "lie_check_id", "")
                             + " found the claim by " + ReadString(row, "target_id", "the claimant")
-                            + " — “" + Program.LimitText(ReadString(row, "raw_claim", ""), 500) + "” — "
+                            + " — “" + DialogueService.LimitText(ReadString(row, "raw_claim", ""), 500) + "” — "
                             + ReadString(row, "objective_verdict", "contradicted") + " and "
                             + ReadString(row, "outcome", "detected") + " for observer " + ReadString(row, "observer_id", "")
                             + (string.IsNullOrWhiteSpace(explanation) ? "." : ". " + explanation)
@@ -310,7 +310,7 @@ namespace ReignBetaServer
             }
             bool identityUnknown = knowledgeBoundary != null
                 && !ReadBool(knowledgeBoundary, "playerIdentityKnown", true);
-            Program.KnowledgeAccessContext identityKnowledge = null;
+            DialogueService.KnowledgeAccessContext identityKnowledge = null;
             int withheldScenes = 0;
             if (identityUnknown)
             {
@@ -322,12 +322,12 @@ namespace ReignBetaServer
                         ["mainHeroName"] = ReadString(knowledgeBoundary, "playerName", ""),
                         ["identityView"] = new Dictionary<string, object> { ["knowsIdentity"] = false }
                     };
-                identityKnowledge = Program.BuildKnowledgeAccessContext(npcId, playerId, "", source);
+                identityKnowledge = DialogueService.BuildKnowledgeAccessContext(npcId, playerId, "", source);
                 int before = scenes.Count;
                 scenes = scenes
-                    .Where(row => Program.UnknownIdentityMemoryEvidenceAllowed(row, identityKnowledge,
+                    .Where(row => DialogueService.UnknownIdentityMemoryEvidenceAllowed(row, identityKnowledge,
                         ReadString(row, "summary", "")))
-                    .Select(row => Program.SanitizeUnknownIdentityMemoryRow(row, identityKnowledge))
+                    .Select(row => DialogueService.SanitizeUnknownIdentityMemoryRow(row, identityKnowledge))
                     .ToList();
                 withheldScenes = before - scenes.Count;
             }
@@ -342,19 +342,19 @@ namespace ReignBetaServer
                 };
             }
             scenes = scenes.Take(8).OrderBy(row => ReadLong(row, "updated_ts", 0)).ToList();
-            Dictionary<string, object> arcSettings = Program.LoadSettings();
+            Dictionary<string, object> arcSettings = SettingsService.LoadSettings();
             string arcCorrelationId = scenes
-                .Select(Program.StoredConversationArtifactCorrelationId)
+                .Select(DialogueService.StoredConversationArtifactCorrelationId)
                 .LastOrDefault(value =>
                     !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
-            Dictionary<string, object> compact = Program.BuildMiddleTermSummary(arcSettings, npcId,
+            Dictionary<string, object> compact = DialogueService.BuildMiddleTermSummary(arcSettings, npcId,
                 "arc:" + npcId + ":" + playerId + ":" + memoryLane, scenes, 60000,
                 "These records are chronological closed conversation scenes. A departure, silence, refusal, or closure in an older scene applies only to that scene. If a later scene exists, it proves the participants subsequently re-engaged; never preserve an older scene ending as current physical absence or permanent non-engagement.",
                 arcCorrelationId, campaignId: campaignId);
             string text = ReadString(compact, "summary", "");
             if (identityUnknown)
             {
-                text = Program.SanitizeUnknownIdentityEvidenceText(text, identityKnowledge);
+                text = DialogueService.SanitizeUnknownIdentityEvidenceText(text, identityKnowledge);
             }
             string originalArcText = text;
             text = NormalizeHistoricalRoleplayContinuityText(text,
@@ -367,8 +367,8 @@ namespace ReignBetaServer
                 return new Dictionary<string, object> { ["ok"] = true, ["updated"] = false, ["reason"] = "empty_summary" };
             }
             string arcId = "arc_" + SafeMemoryKey(npcId) + "_" + SafeMemoryKey(playerId) + "_" + SafeMemoryKey(memoryLane);
-            List<string> tags = Program.MergeStringLists(ReadStringList(compact, "tags"), new[] { "rolling_arc", memoryLane });
-            List<string> participants = Program.MergeStringLists(new[] { npcId, playerId }, new List<string>());
+            List<string> tags = DialogueService.MergeStringLists(ReadStringList(compact, "tags"), new[] { "rolling_arc", memoryLane });
+            List<string> participants = DialogueService.MergeStringLists(new[] { npcId, playerId }, new List<string>());
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             using (var publication = connection.BeginTransaction())
             {
@@ -398,7 +398,7 @@ namespace ReignBetaServer
                             ["latestSceneProvesReengagement"] = true
                         })
                     });
-                Program.InsertSummaryFts(connection, arcId, text, tags, participants);
+                DialogueService.InsertSummaryFts(connection, arcId, text, tags, participants);
                 DialogueStore.UpdateSummaries(connection, new Dictionary<string, object> { ["lane"] = memoryLane, ["id"] = arcId });
                 DialogueStore.DeleteMemorySources(connection, new Dictionary<string, object> { ["id"] = arcId });
                 int ordinal = 0;
@@ -434,7 +434,7 @@ namespace ReignBetaServer
                 };
             }
             int maxChars = Math.Max(500, Math.Min(5000,
-                ReadInt(Program.LoadSettings(), "memoryConsolidationMaxSummaryChars", 1800)));
+                ReadInt(SettingsService.LoadSettings(), "memoryConsolidationMaxSummaryChars", 1800)));
             List<string> repairedIds = new List<string>();
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
@@ -465,9 +465,9 @@ namespace ReignBetaServer
                         ["updated"] = now,
                         ["id"] = summaryId
                     });
-                    Program.InsertSummaryFts(connection, summaryId, normalized,
-                        Program.TextListFromJson(ReadString(row, "tags_json", "[]")),
-                        Program.TextListFromJson(ReadString(row, "participants_json", "[]")));
+                    DialogueService.InsertSummaryFts(connection, summaryId, normalized,
+                        DialogueService.TextListFromJson(ReadString(row, "tags_json", "[]")),
+                        DialogueService.TextListFromJson(ReadString(row, "participants_json", "[]")));
                     repairedIds.Add(summaryId);
                 }
             }
@@ -503,7 +503,7 @@ namespace ReignBetaServer
             DialogueStore.InsertOrIgnoreKnowledgeReceipts(connection, new Dictionary<string, object>
             {
                 ["id"] = receiptId, ["event"] = eventId, ["npc"] = npcId, ["type"] = acquisitionType ?? "known",
-                ["confidence"] = Program.ClampDouble(confidence, 0d, 1d), ["reliability"] = Program.ClampDouble(reliability, 0d, 1d),
+                ["confidence"] = DialogueService.ClampDouble(confidence, 0d, 1d), ["reliability"] = DialogueService.ClampDouble(reliability, 0d, 1d),
                 ["day"] = worldDay, ["source"] = sourceId ?? "", ["ts"] = ts
             });
         }
@@ -511,23 +511,23 @@ namespace ReignBetaServer
         internal static string ClassifyEventCategory(string eventType, Dictionary<string, object> payload, string summary)
         {
             string value = NormalizeMemoryCategory(eventType + " " + summary);
-            if (Program.ContainsAny(value, "conversation", "dialogue_turn", "private_conversation", "party_chat")) return "conversation";
-            if (Program.ContainsAny(value, "letter", "mail", "correspondence")) return "correspondence";
-            if (Program.ContainsAny(value, "action_result", "action_completed", "action_failed")) return "action_result";
-            if (Program.ContainsAny(value, "nearby", "visible_army", "scout", "local_observation")) return "local_observation";
-            if (Program.ContainsAny(value, "social_event", "tournament", "feast", "celebration", "court_event")) return "social_event";
+            if (DialogueService.ContainsAny(value, "conversation", "dialogue_turn", "private_conversation", "party_chat")) return "conversation";
+            if (DialogueService.ContainsAny(value, "letter", "mail", "correspondence")) return "correspondence";
+            if (DialogueService.ContainsAny(value, "action_result", "action_completed", "action_failed")) return "action_result";
+            if (DialogueService.ContainsAny(value, "nearby", "visible_army", "scout", "local_observation")) return "local_observation";
+            if (DialogueService.ContainsAny(value, "social_event", "tournament", "feast", "celebration", "court_event")) return "social_event";
             return "world_event";
         }
 
         internal static string ClassifyEventSubtype(string eventType, string summary)
         {
             string value = NormalizeMemoryCategory(eventType + " " + summary);
-            if (value.Contains("tournament") && Program.ContainsAny(value, "winner", "won", "result", "victory")) return "tournament_result";
+            if (value.Contains("tournament") && DialogueService.ContainsAny(value, "winner", "won", "result", "victory")) return "tournament_result";
             if (value.Contains("tournament")) return "tournament_announcement";
-            if (Program.ContainsAny(value, "war_declared", "declared_war", "war declaration")) return "war_declared";
-            if (Program.ContainsAny(value, "siege_result", "siege ended", "siege won")) return "siege_result";
+            if (DialogueService.ContainsAny(value, "war_declared", "declared_war", "war declaration")) return "war_declared";
+            if (DialogueService.ContainsAny(value, "siege_result", "siege ended", "siege won")) return "siege_result";
             if (value.Contains("marriage")) return "marriage";
-            if (Program.ContainsAny(value, "nearby_army", "army nearby", "enemy army")) return "nearby_army";
+            if (DialogueService.ContainsAny(value, "nearby_army", "army nearby", "enemy army")) return "nearby_army";
             return NormalizeMemoryCategory(eventType);
         }
 
@@ -537,12 +537,12 @@ namespace ReignBetaServer
             if (!string.IsNullOrWhiteSpace(explicitDomain)) return NormalizeMemoryCategory(explicitDomain);
             string type = NormalizeMemoryCategory(ReadFirstString(row, "memory_type", "memoryType", "type"));
             string blob = NormalizeMemoryCategory(type + " " + ReadString(row, "source", "") + " " + ReadString(row, "tags_json", "") + " " + ReadString(row, "summary", ""));
-            if (Program.ContainsAny(blob, "world_knowledge", "war", "tournament", "siege", "alliance", "marriage", "kingdom")) return "world_affairs";
-            if (Program.ContainsAny(blob, "local_observation", "nearby", "scout", "visible_army")) return "local_awareness";
-            if (Program.ContainsAny(blob, "private_reflection", "comprehension", "feeling", "mood", "fear", "dream", "desire")) return "personal_state";
-            if (Program.ContainsAny(blob, "interpersonal", "conversation", "dialogue", "letter", "correspondence")) return "interpersonal_history";
-            if (Program.ContainsAny(blob, "obligation", "promise", "debt", "oath", "threat", "blackmail", "spymaster", "intelligence_mission", "covert_operation")) return "commitments_and_plots";
-            if (Program.ContainsAny(blob, "belief", "rumor", "gossip")) return "beliefs_and_rumors";
+            if (DialogueService.ContainsAny(blob, "world_knowledge", "war", "tournament", "siege", "alliance", "marriage", "kingdom")) return "world_affairs";
+            if (DialogueService.ContainsAny(blob, "local_observation", "nearby", "scout", "visible_army")) return "local_awareness";
+            if (DialogueService.ContainsAny(blob, "private_reflection", "comprehension", "feeling", "mood", "fear", "dream", "desire")) return "personal_state";
+            if (DialogueService.ContainsAny(blob, "interpersonal", "conversation", "dialogue", "letter", "correspondence")) return "interpersonal_history";
+            if (DialogueService.ContainsAny(blob, "obligation", "promise", "debt", "oath", "threat", "blackmail", "spymaster", "intelligence_mission", "covert_operation")) return "commitments_and_plots";
+            if (DialogueService.ContainsAny(blob, "belief", "rumor", "gossip")) return "beliefs_and_rumors";
             return "personal_state";
         }
 

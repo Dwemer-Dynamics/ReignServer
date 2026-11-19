@@ -253,7 +253,7 @@ namespace ReignBetaServer
             string kingdomName = FirstNonEmpty(ReadString(row, "origin_kingdom_name", ""), ReadString(context, "representedKingdomName", ""), ReadString(context, "representedKingdomId", "unknown kingdom"));
             string capitalName = FirstNonEmpty(ReadString(context, "capitalSettlementName", ""), ReadString(row, "capital_settlement_id", ""), "the host capital");
             StringBuilder builder = new StringBuilder();
-            builder.AppendLine(Program.LoadPromptTemplate("ambassador_role.txt").Trim());
+            builder.AppendLine(PromptService.LoadPromptTemplate("ambassador_role.txt").Trim());
             builder.AppendLine();
             builder.AppendLine("CURRENT OFFICIAL POSTING AND IDENTITY");
             builder.AppendLine("- Envoy: " + FirstNonEmpty(heroName, heroId, "unknown envoy") + " (" + heroId + ")");
@@ -461,7 +461,7 @@ namespace ReignBetaServer
         {
             return AmbassadorReferralOnlyActions.Contains(actionId ?? string.Empty, StringComparer.OrdinalIgnoreCase)
                 || string.Equals(actionId, "diplomatic_package", StringComparison.OrdinalIgnoreCase)
-                || Program.ContainsAny(command ?? string.Empty, "declare_war", "make_peace", "alliance", "pact", "settlement", "marriage", "vassal", "terminate");
+                || DialogueService.ContainsAny(command ?? string.Empty, "declare_war", "make_peace", "alliance", "pact", "settlement", "marriage", "vassal", "terminate");
         }
 
         internal static List<Dictionary<string, object>> ReadOfficialAmbassadorArchiveLines(string campaignId, Dictionary<string, object> payload, int limit)
@@ -519,7 +519,7 @@ namespace ReignBetaServer
                     ["relayedByEnvoyId"] = envoyId,
                     ["officialRelay"] = true
                 };
-                Program.AppendJsonLineToPath(Program.CharacterFile(campaignId, rulerId, "history", "dialogue.jsonl"), rulerLine);
+                CampaignFileService.AppendJsonLineToPath(CampaignFileService.CharacterFile(campaignId, rulerId, "history", "dialogue.jsonl"), rulerLine);
             }
         }
 
@@ -614,7 +614,7 @@ namespace ReignBetaServer
             {
                 {"processed",true},{"classification",label},{"evidenceTurnIds",evidenceTurnIds},{"requestedPressureDelta",requestedDelta},
                 {"appliedPressureDelta",appliedDelta},{"dailyBefore",priorDaily},{"dailyAfter",afterDaily},{"pressureBefore",pressureBefore},{"pressureAfter",pressureAfter},
-                {"pressureChannel",requestedDelta>0?"treaty_strain":"trade"},{"sceneSummary",Program.LimitText(ReadFirstString(scene,"summary","text","memory"),800)}
+                {"pressureChannel",requestedDelta>0?"treaty_strain":"trade"},{"sceneSummary",DialogueService.LimitText(ReadFirstString(scene,"summary","text","memory"),800)}
             };
         }
 
@@ -622,7 +622,7 @@ namespace ReignBetaServer
         {
             List<Dictionary<string, object>> transcript = (turns ?? new List<Dictionary<string, object>>()).Select(x => new Dictionary<string, object>
             {
-                {"turnId",ReadString(x,"turn_id","")},{"role",ReadString(x,"role","")},{"text",Program.LimitText(ReadString(x,"text",""),1200)}
+                {"turnId",ReadString(x,"turn_id","")},{"role",ReadString(x,"role","")},{"text",DialogueService.LimitText(ReadString(x,"text",""),1200)}
             }).ToList();
             Dictionary<string, object> request = new Dictionary<string, object>
             {
@@ -631,7 +631,7 @@ namespace ReignBetaServer
                 {"system","Classify only the overall official diplomatic tone toward the player's kingdom as exactly one of: strongly conciliatory, conciliatory, neutral, hostile, strongly hostile. Judge threats, contempt, provocation, reassurance, compromise, respect, and de-escalation. Return JSON {classification,evidenceTurnIds}. Evidence IDs must come from the supplied transcript. Do not return reasoning."},
                 {"prompt",Json.Serialize(transcript)}
             };
-            Dictionary<string, object> llm = Program.ChatWithLlm(request);
+            Dictionary<string, object> llm = LlmProviderService.ChatWithLlm(request);
             Dictionary<string, object> parsed = ReadBool(llm, "ok", false) ? TryParseJsonObject(ReadString(llm, "content", "")) : null;
             string label = NormalizeAmbassadorPressureClassification(ReadString(parsed, "classification", ""));
             if (string.IsNullOrWhiteSpace(label)) label = DeterministicAmbassadorToneFallback(transcript);
@@ -750,7 +750,7 @@ namespace ReignBetaServer
                 return UpdateAmbassadorReferralState(campaignId, referralId, "refused", "refuse", worldDay, new Dictionary<string, object>(), new Dictionary<string, object>());
 
             Dictionary<string, object> normalizationPayload = DiplomacyService.BuildDirectorNormalizationPayload(evaluationPayload, responder);
-            Dictionary<string, object> normalized = Program.NormalizeActionCommand(candidate, campaignId, out List<string> errors, normalizationPayload,
+            Dictionary<string, object> normalized = ActionPipelineService.NormalizeActionCommand(candidate, campaignId, out List<string> errors, normalizationPayload,
                 ReadString(answer, "acceptReason", "The represented ruler accepted the referred terms."));
             if (normalized == null || errors.Count > 0)
                 return UpdateAmbassadorReferralState(campaignId, referralId, "refused", "validation_failed", worldDay, new Dictionary<string, object>(),
@@ -762,7 +762,7 @@ namespace ReignBetaServer
             normalized["source"] = "resident_ambassador_referral";
             normalized["ambassadorReferralId"] = referralId;
             normalized["requiresAcceptance"] = false;
-            Dictionary<string, object> queued = Program.QueueAction(campaignId, normalized);
+            Dictionary<string, object> queued = ActionPipelineService.QueueAction(campaignId, normalized);
             Dictionary<string, object> receipt = new Dictionary<string, object>{{"state","queued_for_authoritative_execution"},{"actionId",ReadFirstString(queued,"id","actionId")}};
             return UpdateAmbassadorReferralState(campaignId, referralId, "accepted_pending_execution", "accept", worldDay, new Dictionary<string, object>(), receipt);
         }
@@ -797,7 +797,7 @@ namespace ReignBetaServer
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 posting = CourtStore.SelectForeignAmbassadorPostings9(connection, new Dictionary<string, object>{{"posting",ReadString(referral,"posting_id","")}}).FirstOrDefault();
             Dictionary<string, object> actor = DiplomacyService.FindDirectorKingdom(evaluationPayload, ReadString(posting, "origin_kingdom_id", ""));
-            Dictionary<string, object> normalized = Program.NormalizeActionCommand(counter, campaignId, out List<string> errors,
+            Dictionary<string, object> normalized = ActionPipelineService.NormalizeActionCommand(counter, campaignId, out List<string> errors,
                 DiplomacyService.BuildDirectorNormalizationPayload(evaluationPayload, actor ?? new Dictionary<string, object>()), "The player accepted the ruler's exact counteroffer.");
             if (normalized == null || errors.Count > 0) return CourtError("The counteroffer no longer validates: " + string.Join("; ", errors));
             if (IsInternationalCourtReferral(campaignId, timelineId, referralId))
@@ -807,7 +807,7 @@ namespace ReignBetaServer
             normalized["source"] = "resident_ambassador_counteroffer";
             normalized["ambassadorReferralId"] = referralId;
             normalized["requiresAcceptance"] = false;
-            Dictionary<string, object> queued = Program.QueueAction(campaignId, normalized);
+            Dictionary<string, object> queued = ActionPipelineService.QueueAction(campaignId, normalized);
             Dictionary<string, object> receipt = new Dictionary<string, object>{{"state","queued_for_authoritative_execution"},{"actionId",ReadFirstString(queued,"id","actionId")}};
             Dictionary<string, object> result = UpdateAmbassadorReferralState(campaignId, referralId, "accepted_pending_execution", "counter_accept", worldDay, new Dictionary<string, object>(), receipt);
             result["ok"] = true;
@@ -910,9 +910,9 @@ namespace ReignBetaServer
             add("ambassador_pressure_daily_net_cap",pressureCap,
                 "Daily pressure remains within +/-6 while later conversations can offset an earlier result.",new Dictionary<string,object>());
 
-            string rolePrompt = Program.LoadPromptTemplate("ambassador_role.txt");
-            bool roleContract = Program.ContainsAny(rolePrompt,"no off-the-record option") && Program.ContainsAny(rolePrompt,"official diplomatic record")
-                && Program.ContainsAny(rolePrompt,"authoritative successful action receipt") && Program.ContainsAny(rolePrompt,"Private Keep conversations");
+            string rolePrompt = PromptService.LoadPromptTemplate("ambassador_role.txt");
+            bool roleContract = DialogueService.ContainsAny(rolePrompt,"no off-the-record option") && DialogueService.ContainsAny(rolePrompt,"official diplomatic record")
+                && DialogueService.ContainsAny(rolePrompt,"authoritative successful action receipt") && DialogueService.ContainsAny(rolePrompt,"Private Keep conversations");
             add("ambassador_non_overridable_role_contract",roleContract,
                 "The dedicated role prompt mandates total relay, exact authority, receipt gating, and the private Keep firewall.",new Dictionary<string,object>{{"promptHash",CourtHash(rolePrompt)}});
 
@@ -938,7 +938,7 @@ namespace ReignBetaServer
         private static void RelayOfficialArchiveToSuccessor(string campaignId, string timelineId, string postingId, string rulerId)
         {
             if (string.IsNullOrWhiteSpace(rulerId)) return;
-            HashSet<string> existing = new HashSet<string>(Program.ReadJsonLinesFromPath(Program.CharacterFile(campaignId, rulerId, "history", "dialogue.jsonl"))
+            HashSet<string> existing = new HashSet<string>(Program.ReadJsonLinesFromPath(CampaignFileService.CharacterFile(campaignId, rulerId, "history", "dialogue.jsonl"))
                 .Select(x => ReadFirstString(x, "turnId", "id")).Where(x => !string.IsNullOrWhiteSpace(x)), StringComparer.OrdinalIgnoreCase);
             List<Dictionary<string, object>> rows;
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
@@ -949,7 +949,7 @@ namespace ReignBetaServer
             {
                 string turnId = ReadString(row, "turn_id", "");
                 if (string.IsNullOrWhiteSpace(turnId) || existing.Contains(turnId)) continue;
-                Program.AppendJsonLineToPath(Program.CharacterFile(campaignId, rulerId, "history", "dialogue.jsonl"), new Dictionary<string, object>
+                CampaignFileService.AppendJsonLineToPath(CampaignFileService.CharacterFile(campaignId, rulerId, "history", "dialogue.jsonl"), new Dictionary<string, object>
                 {
                     {"id",turnId},{"turnId",turnId},{"ts",ReadLong(row,"created_ts",0)},{"role",ReadString(row,"speaker_role","")},
                     {"speaker",ReadString(row,"speaker_id","")},{"text",ReadString(row,"text","")},{"channel","ambassador_official"},

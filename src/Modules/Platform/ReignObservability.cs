@@ -9,7 +9,7 @@ using OpenTelemetry.Trace;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class OperationsService
     {
         private const string ReignTelemetrySourceName = "Bannerlord.Reign";
         private static readonly ActivitySource ReignActivitySource = new ActivitySource(ReignTelemetrySourceName, "1.0.0");
@@ -17,7 +17,7 @@ namespace ReignBetaServer
         private static TracerProvider ReignTracerProvider;
         private static bool ReignTelemetryInitialized;
 
-        private sealed class ReignTraceScope : IDisposable
+        internal sealed class ReignTraceScope : IDisposable
         {
             private readonly Activity _activity;
             private readonly Stopwatch _timer;
@@ -47,10 +47,10 @@ namespace ReignBetaServer
             public void Fail(Exception exception)
             {
                 if (exception == null) return;
-                _fields["error"] = LimitText(exception.Message, 1000);
+                _fields["error"] = DialogueService.LimitText(exception.Message, 1000);
                 _activity?.SetStatus(ActivityStatusCode.Error, exception.Message);
                 _activity?.SetTag("error.type", exception.GetType().FullName);
-                _activity?.SetTag("error.message", LimitText(exception.Message, 1000));
+                _activity?.SetTag("error.message", DialogueService.LimitText(exception.Message, 1000));
             }
 
             public void Dispose()
@@ -67,7 +67,7 @@ namespace ReignBetaServer
                 _activity?.Dispose();
                 try
                 {
-                    AppendJsonLineToPath(Path.Combine(LogsDir, "otel-traces.ndjson"), _fields);
+                    CampaignFileService.AppendJsonLineToPath(Path.Combine(Program.LogsDir, "otel-traces.ndjson"), _fields);
                 }
                 catch
                 {
@@ -75,7 +75,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static void InitializeReignTelemetry(Dictionary<string, object> settings)
+        internal static void InitializeReignTelemetry(Dictionary<string, object> settings)
         {
             lock (ReignTelemetryLock)
             {
@@ -91,16 +91,16 @@ namespace ReignBetaServer
             }
         }
 
-        private static ReignTraceScope BeginReignSpan(string name, Dictionary<string, object> fields = null)
+        internal static ReignTraceScope BeginReignSpan(string name, Dictionary<string, object> fields = null)
         {
-            if (!ReignTelemetryInitialized) InitializeReignTelemetry(LoadSettings());
+            if (!ReignTelemetryInitialized) InitializeReignTelemetry(SettingsService.LoadSettings());
             return new ReignTraceScope(name, fields);
         }
 
-        private static Dictionary<string, object> ReignTelemetryStatus()
+        internal static Dictionary<string, object> ReignTelemetryStatus()
         {
-            Dictionary<string, object> settings = LoadSettings();
-            string path = Path.Combine(LogsDir, "otel-traces.ndjson");
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
+            string path = Path.Combine(Program.LogsDir, "otel-traces.ndjson");
             return new Dictionary<string, object>
             {
                 ["ok"] = true,

@@ -55,8 +55,8 @@ namespace ReignBetaServer
                 && ReadString(outage, "error", "") == "provider timeout"
                 && ReadInt(ReadDictionary(outage, "conversationRecovery"), "additionalProviderCalls", -1) == 0);
             var limited = TestDict("codexFailure", TestDict("httpStatusCode", 429));
-            Check("codex_rate_limit_is_explained_to_player", Program.LlmFailureForDisplay(limited).Contains("429")
-                && Program.LlmFailureForDisplay(limited).Contains("Retry"));
+            Check("codex_rate_limit_is_explained_to_player", DialogueService.LlmFailureForDisplay(limited).Contains("429")
+                && DialogueService.LlmFailureForDisplay(limited).Contains("Retry"));
             var quiet = TestDict("ok", true, "content", Json.Serialize(TestDict("participation", "quiet", "reply", "")));
             Check("intentional_group_silence_remains_valid", ReadBool(EnsureConversationDelivery(quiet, true), "ok", false)
                 && !ReadBool(EnsureConversationDelivery(quiet), "ok", true));
@@ -69,7 +69,7 @@ namespace ReignBetaServer
             foreach (string mode in new[] { "party_chat", "castle_chat", "social_event" })
             {
                 string bytes = Json.Serialize(quietAnswer);
-                var structured = Program.RetryMalformedStructuredResponse(TestDict("ok", true, "content", bytes), TestDict(),
+                var structured = ConversationResponseService.RetryMalformedStructuredResponse(TestDict("ok", true, "content", bytes), TestDict(),
                     "", "quiet-contract", mode, "npc", "", _ => { formatRepairCalls++; throw new InvalidOperationException("Silence needs no provider repair."); });
                 var validated = ValidateSpokenEventResponse(structured, candidate => { spokenValidationCalls++; return candidate; });
                 Check(mode + "_silence_skips_format_and_spoken_repairs", formatRepairCalls == 0 && spokenValidationCalls == 0
@@ -145,7 +145,7 @@ namespace ReignBetaServer
                     }
                     if (route == "individual")
                     {
-                        input["retryOfCorrelationId"] = Program.EnsureCorrelationId(input);
+                        input["retryOfCorrelationId"] = OperationsService.EnsureCorrelationId(input);
                         int generated = 0;
                         input["playerText"] = "Changed words cannot replace an original.";
                         var changed = RunDialogueWithRetryGate(input, () => { generated++; return TestDict("ok", true); });

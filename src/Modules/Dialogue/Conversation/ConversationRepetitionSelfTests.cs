@@ -60,20 +60,20 @@ namespace ReignBetaServer
                 Check("functional_repeat_" + results.Count, Find(functional, source: new List<Dictionary<string, object>> {
                     Line("fact1", functional), Line("fact2", functional) }).Count == 0, functional);
 
-            var duplicated = new List<Dictionary<string, object>> { history[0], Program.CloneDictionary(history[0]) };
+            var duplicated = new List<Dictionary<string, object>> { history[0], CloneDictionary(history[0]) };
             Check("sql_route_duplicate_cannot_supply_two_votes", Find(repeated, source: duplicated).Count == 0
                 && ConversationExpressionHistory(duplicated, "npc", "Mira").Count == 1);
-            var foreign = history.Select(Program.CloneDictionary).ToList();
+            var foreign = history.Select(CloneDictionary).ToList();
             foreign.ForEach(row => row["speaker_id"] = "other");
             Check("other_speaker_excluded", Find(repeated, source: foreign).Count == 0);
             var payload = TestDict("timelineId", "current", "conversationId", "current-session");
-            var scoped = history.Select(Program.CloneDictionary).ToList();
+            var scoped = history.Select(CloneDictionary).ToList();
             scoped[0]["timelineId"] = "abandoned"; scoped[1]["session_id"] = "old-session";
             Check("branch_and_scene_excluded", ConversationExpressionHistory(scoped, "npc", "Mira", payload).Count == 0);
-            var sessionRow = Program.CloneDictionary(history[0]); sessionRow["sessionId"] = "canonical-session";
+            var sessionRow = CloneDictionary(history[0]); sessionRow["sessionId"] = "canonical-session";
             Check("canonical_session_field_priority", ConversationExpressionHistory(new List<Dictionary<string, object>> { sessionRow }, "npc", "Mira",
                 TestDict("conversationId", "native-conversation", "conversationSessionId", "canonical-session")).Count == 1);
-            scoped = history.Select(Program.CloneDictionary).ToList();
+            scoped = history.Select(CloneDictionary).ToList();
             scoped[0]["status"] = "rejected";
             scoped[1]["repairStatus"] = TestDict("allChecksCleared", false);
             Check("rejected_or_marked_drafts_excluded", ConversationExpressionHistory(scoped, "npc", "Mira", payload).Count == 0);
@@ -91,7 +91,7 @@ namespace ReignBetaServer
             Check("group_ledger_uses_only_current_speaker", !ReadString(BuildConversationNaturalnessContext("Hello.", true, foreign, "npc", "Mira"), "prompt", "")
                 .Contains("RECENT EXPRESSION EVIDENCE"));
             Check("correction_guidance_changes_framing", ReadString(BuildConversationNaturalnessContext("You keep repeating the same thing.", false), "prompt", "").Contains("not rationalize"));
-            var privateNameHistory = history.Select(Program.CloneDictionary).ToList();
+            var privateNameHistory = history.Select(CloneDictionary).ToList();
             privateNameHistory.ForEach(row => row["text"] = "TrueName. " + ReadString(row, "text", ""));
             var unknownIdentity = TestDict("knowsIdentity", false, "canonicalNameAllowed", false,
                 "usableName", "the traveler", "safeLabel", "the traveler");
@@ -107,7 +107,7 @@ namespace ReignBetaServer
                 {
                     var value = AgencyTestReply(null); value["reply"] = reply; value["body"] = reply;
                     value["actionGate"] = TestDict("needed", false, "commitment", "roleplay_only", "intent", "", "confidence", 1d);
-                    return Program.CompleteConversationStructuredResponse(value, "dialogue", out _);
+                    return ConversationResponseService.CompleteConversationStructuredResponse(value, "dialogue", out _);
                 }
                 var original = Original(repeated);
                 original["emotion"] = "warm";
@@ -158,7 +158,7 @@ namespace ReignBetaServer
                 var oversize = Original(repeated + new string(' ', 21000));
                 var overResult = Run(oversize, req => { calls++; throw new InvalidOperationException("Oversize must not dispatch."); });
                 Check("oversized_style_request_makes_zero_calls", calls == 0 && ReadBool(ReadDictionary(overResult, "roleplayContinuityRepair"), "budgetExceeded", false));
-                var mixed = Program.CloneDictionary(original); mixed["reply"] = "*A pause - taken and held, the way she takes possession of silence.* " + repeated;
+                var mixed = CloneDictionary(original); mixed["reply"] = "*A pause - taken and held, the way she takes possession of silence.* " + repeated;
                 Check("gesture_cleanup_cannot_hide_spoken_loop", !TryRemoveRepeatedStageDirectionsOnly(mixed,
                     themes.Concat(new[] { TestDict("type", "repeated_distinctive_phrase", "match", "A pause - taken and held, the way she takes possession of silence.") }).ToList(),
                     TestDict(), history, "Mira", "Player", out _, out _, out _));

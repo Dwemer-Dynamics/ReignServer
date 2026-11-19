@@ -20,7 +20,7 @@ namespace ReignBetaServer
             int fetches = 0;
             bool outage = false;
             var catalog = new ConversationCapacityCatalog(() => { fetches++; if (outage) throw new System.Net.Http.HttpRequestException("fixture outage"); return metadata; }, () => clock);
-            var settings = TestDict("llmProvider", Program.NanoGptProvider, "dialogueModel", model, "eventsModel", model);
+            var settings = TestDict("llmProvider", LlmProviderService.NanoGptProvider, "dialogueModel", model, "eventsModel", model);
             var messages = new List<Dictionary<string, object>> { TestDict("role", "user", "content", "required_latest") };
             var body = TestDict("model", model, "messages", messages, "max_tokens", 8000, "response_format", TestDict("type", "json_object"));
             var payload = TestDict("promptEnvelope", TestDict("continuityPreflight", TestDict("requiredSourceIds", new[] { "required_latest" })));
@@ -204,7 +204,7 @@ namespace ReignBetaServer
             clock = clock.AddSeconds(31);
             outage = false;
             add("capacity_recovers_after_metadata_outage", catalog.Read(model) != null && fetches == 3, fetches);
-            var explicitSettings = TestDict("llmProvider", Program.NanoGptProvider, "verifiedConversationContextWindows",
+            var explicitSettings = TestDict("llmProvider", LlmProviderService.NanoGptProvider, "verifiedConversationContextWindows",
                 TestDict(ReadString(discovered, "routeKey", ""), TestDict("endpoint", PortraitsService.NanoGptChatCompletionsUrl, "model", model,
                 "contextTokens", 1048576, "source", "fixture", "validUntilUtc", DateTimeOffset.UtcNow.AddMinutes(-1).ToString("o"))));
             add("capacity_expired_explicit_certificate_not_overridden", !ReadBool(BuildContinuityProviderPreflight(explicitSettings, payload,
@@ -217,7 +217,7 @@ namespace ReignBetaServer
             string Catalog(int context, int percent = 95) => Json.Serialize(TestDict("fetched_at", DateTimeOffset.UtcNow.ToString("o"),
                 "client_version", "0.162.0", "models", new[] { TestDict("slug", "gpt-capacity-fixture", "context_window", context,
                     "effective_context_window_percent", percent) }));
-            var settings = TestDict("llmProvider", Program.CodexSubscriptionProvider, "dialogueModel", "gpt-capacity-fixture", "eventsModel", "gpt-capacity-fixture");
+            var settings = TestDict("llmProvider", LlmProviderService.CodexSubscriptionProvider, "dialogueModel", "gpt-capacity-fixture", "eventsModel", "gpt-capacity-fixture");
             const string endpoint = "codex-app-server://local";
             try
             {
@@ -243,7 +243,7 @@ namespace ReignBetaServer
                         endpoint, "gpt-capacity-fixture"), "fits", true), null);
                     add("codex_capacity_assembly_matches_provider_" + context,
                         CanonicalJson(ResolveConversationPromptCapacity(TestDict(), "dialogue", settings)) ==
-                        CanonicalJson(ResolveConversationCapacity(settings, TestDict("max_tokens", Program.StructuredDialogueResponseMaxTokens(settings)), endpoint, "gpt-capacity-fixture")), null);
+                        CanonicalJson(ResolveConversationCapacity(settings, TestDict("max_tokens", DialogueService.StructuredDialogueResponseMaxTokens(settings)), endpoint, "gpt-capacity-fixture")), null);
                 }
                 var smallBody = TestDict("messages", new[] { TestDict("role", "user", "content", new string('x', 300000)) }, "max_tokens", 8000);
                 foreach (string metadata in new[] { "{", "null", Catalog(0), Catalog(500000, 101), Catalog(500000, 0),
@@ -275,19 +275,19 @@ namespace ReignBetaServer
             results.AddRange(RunPromptEvidenceAllocationAssertions());
             Action<string, bool, object> add = (id, pass, data) => results.Add(TestDict(
                 "caseId", "continuity_" + id, "passed", pass, "summary", id, "data", data));
-            var observer = new Program.KnowledgeAccessContext { NpcId = "npc_b" };
+            var observer = new DialogueService.KnowledgeAccessContext { NpcId = "npc_b" };
             var legacyBelief = TestDict("believer_id", "npc_a", "known_by_json", "[\"npc_a\",\"npc_b\"]", "visibility", "public");
-            add("foreign_private_belief_stays_private", !Program.KnowledgeRowVisibleToNpc("beliefs", legacyBelief, observer), null);
+            add("foreign_private_belief_stays_private", !DialogueService.KnowledgeRowVisibleToNpc("beliefs", legacyBelief, observer), null);
             var legacyThought = TestDict("owner_id", "npc_a", "known_by_json", "[\"npc_a\",\"npc_b\"]");
-            add("foreign_comprehension_stays_private", !Program.KnowledgeRowVisibleToNpc("comprehension", legacyThought, observer), null);
+            add("foreign_comprehension_stays_private", !DialogueService.KnowledgeRowVisibleToNpc("comprehension", legacyThought, observer), null);
             legacyThought["owner_id"] = "npc_b";
-            add("own_comprehension_retained", Program.KnowledgeRowVisibleToNpc("comprehension", legacyThought, observer), null);
+            add("own_comprehension_retained", DialogueService.KnowledgeRowVisibleToNpc("comprehension", legacyThought, observer), null);
             add("legacy_interpretation_is_private_mental_state", IsPrivateMentalLayer("interpretation"), null);
             var naturalIdentity = TestDict("canonicalNameAllowed", true, "authorityView", TestDict("currentSettlementName", "Akkalat"));
             var meaningfulState = TestDict("currentCrisis", "A father's silence — acknowledged aloud but not resolved");
             var preservedState = SanitizeConversationStateForVerifiedIdentity(meaningfulState, naturalIdentity, TestDict());
             add("crisis_dash_is_not_a_scene_heading", ReadString(preservedState, "currentCrisis", "") == ReadString(meaningfulState, "currentCrisis", ""), preservedState);
-            var authored = Program.PrepareStructuredWrites(new List<Dictionary<string, object>> { TestDict("claim", "I am worried.",
+            var authored = DialogueService.PrepareStructuredWrites(new List<Dictionary<string, object>> { TestDict("claim", "I am worried.",
                 "believer", "npc_b", "known_by", new[] { "npc_b", "player" }, "visibility", "public") },
                 "npc_a", "player", "town", "dialogue", "belief", new List<string> { "npc_b" }).Single();
             add("speaker_owns_hidden_metadata", ReadString(authored, "believer", "") == "npc_a"
@@ -459,15 +459,15 @@ namespace ReignBetaServer
                     "I defeated the Khan in the last tournament and shared drinks with him afterward.", "in_person", 19d, 1, "town_a", new List<string> { "npc_a", "player" }, TestDict());
                 InsertConversationTurn(connection, "victory_answer", "old_tournament", "victory_event", 1, "victory_exchange", "npc", "npc_a", "Speaker",
                     "You already told me that you won. I heard the story; I was not there.", "in_person", 19d, 2, "town_a", new List<string> { "npc_a", "player" }, TestDict());
-                var retrieved = SearchExactConversationHistory(connection, "npc_a", "I fought a Khan.", TestDict(), 24000, null, "current_session", 30, new Program.KnowledgeAccessContext { NpcId = "npc_a" });
+                var retrieved = SearchExactConversationHistory(connection, "npc_a", "I fought a Khan.", TestDict(), 24000, null, "current_session", 30, new DialogueService.KnowledgeAccessContext { NpcId = "npc_a" });
                 add("ordinary_khan_reference_retrieves_full_outcome_and_reply", ReadString(retrieved, "text", "").Contains("shared drinks with him afterward")
                     && ReadString(retrieved, "text", "").Contains("I was not there") && ReadStringList(retrieved, "expandedTurnIds").Count == 2, retrieved);
                 var longWords=Enumerable.Range(0,90).Select(i=>"roadword"+i).ToList();
                 foreach(int position in new[] {0,45,90}) {
                     var words=new List<string>(longWords); words.Insert(position,"khan");
                     string longInput=string.Join(" ",words);
-                    var longRecall=SearchExactConversationHistory(connection,"npc_a",longInput,TestDict(),24000,null,"current_session",30,new Program.KnowledgeAccessContext {NpcId="npc_a"});
-                    add("lowercase_title_survives_long_input_position_"+position,Program.MemoryQueryTerms(longInput).Contains("khan")
+                    var longRecall=SearchExactConversationHistory(connection,"npc_a",longInput,TestDict(),24000,null,"current_session",30,new DialogueService.KnowledgeAccessContext {NpcId="npc_a"});
+                    add("lowercase_title_survives_long_input_position_"+position,DialogueService.MemoryQueryTerms(longInput).Contains("khan")
                         && ReadString(longRecall,"text","").Contains("shared drinks with him afterward") && ReadString(longRecall,"text","").Contains("I was not there"),null);
                 }
                 InsertConversationTurn(connection, "father_source", "old_tournament", "father_event", 2, "father_exchange", "npc", "npc_a", "Speaker", quote,
@@ -556,7 +556,7 @@ namespace ReignBetaServer
             Save("episode_narrated", narrated);
             Save("episode_settled", settled);
             context.Remove("conversationSessionId");
-            var access = Program.BuildKnowledgeAccessContext(owner, peer, "", context);
+            var access = DialogueService.BuildKnowledgeAccessContext(owner, peer, "", context);
             List<MemoryEvidence> Precision(Dictionary<string, object> request) =>
                 LoadPrecisionFoundation(connection, campaign, PlanMemoryQuery(owner, peer, "Earlier preparations", request),
                     request, access).Where(item => item.Kind == "episode").ToList();
@@ -572,11 +572,11 @@ namespace ReignBetaServer
                 && !legacy.Contains(derived) && !legacy.Contains("ESTABLISHED IMPORTANT EPISODES"), null);
 
             var source = DialogueSelfTestStore.SelectConversationTurns11(connection).Single();
-            var recent = Program.CloneDictionary(context);
+            var recent = CloneDictionary(context);
             SetMemoryTranscriptContext(recent, new() { source });
             add("episode_excerpt_deduplicates_only_identical_protected_turn",
                 Precision(recent).Count == 2 && Precision(recent).All(item => item.SourceId != "episode_report"), null);
-            var changed = Program.CloneDictionary(source);
+            var changed = CloneDictionary(source);
             changed["speaker_id"] = "someone_else";
             SetMemoryTranscriptContext(recent, new() { changed });
             add("episode_excerpt_survives_wrong_speaker_in_supplied_window",
@@ -584,10 +584,10 @@ namespace ReignBetaServer
 
             var row = DialogueSelfTestStore.SelectConversationContinuity6(connection).Single();
             var episode = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
-            var altered = Program.CloneDictionary(episode);
+            var altered = CloneDictionary(episode);
             ReadDictionary(altered, "sourceEvidence")["sourceHash"] = "changed";
-            var foreign = Program.BuildKnowledgeAccessContext("someone_else", peer, "", context);
-            var earlier = Program.BuildKnowledgeAccessContext(owner, peer, "", TestDict("timelineId", "episode_timeline", "worldDay", 19d));
+            var foreign = DialogueService.BuildKnowledgeAccessContext("someone_else", peer, "", context);
+            var earlier = DialogueService.BuildKnowledgeAccessContext(owner, peer, "", TestDict("timelineId", "episode_timeline", "worldDay", 19d));
             add("episode_excerpt_rejects_stale_foreign_and_future_source",
                 RenderContinuityEpisodeEvidence(connection, row, altered, source, access).Length == 0
                 && RenderContinuityEpisodeEvidence(connection, row, episode, source, foreign).Length == 0
@@ -723,7 +723,7 @@ namespace ReignBetaServer
             AddMemory("pair_memory_private_lineage", "scope_current", timeline, 8);
             DialogueSelfTestStore.InsertMemorySources(connection);
 
-            var access = new Program.KnowledgeAccessContext { NpcId = observer, TimelineId = timeline, WorldDay = 20d,
+            var access = new DialogueService.KnowledgeAccessContext { NpcId = observer, TimelineId = timeline, WorldDay = 20d,
                 AsOfAcceptedSequence = 200, AsOfTimestamp = 10 };
             (string Text, List<string> Ids) Build()
             {
@@ -799,7 +799,7 @@ namespace ReignBetaServer
             const string latest = "Good morning. How are you?";
             foreach (string mode in new[] { "in_person", "party_chat" })
             {
-                var turn = Program.CloneDictionary(payload); turn["mode"] = mode;
+                var turn = CloneDictionary(payload); turn["mode"] = mode;
                 PromptEnvelope envelope = mode == "in_person"
                     ? BuildDialoguePromptEnvelope(campaign, "npc_a", "Speaker", "Traveler", "Traveler", latest,
                         "A quiet market street.", profile, PromptParityCharacteristics(), empty, empty, empty,
@@ -833,7 +833,7 @@ namespace ReignBetaServer
             }
             foreach (string exclusion in new[] { "hash", "span", "inactive", "branch", "observer", "future" })
             {
-                var current = Program.CloneDictionary(payload);
+                var current = CloneDictionary(payload);
                 try
                 {
                     if (exclusion == "hash") DialogueSelfTestStore.UpdateConversationContinuityPending2(connection, TestDict("id", pendingId));
@@ -923,7 +923,7 @@ namespace ReignBetaServer
             add("opening_historical_tent_sentence_preserved",!flagged("I remember the tent by the road.\n\nWe can talk about it here."),null);
             var gate = TestDict("needed",true,"commitment","accepted","intent","accept_temporary_party_guest");
             var membership = TestDict("playerClanId","own_clan","speakerClanId","own_clan");
-            add("already_member_gate_is_not_failure",NormalizeAlreadySatisfiedContinuityGate(gate,membership,TestDict("clanId","own_clan")) && !Program.ActionGateShouldPlan(gate),gate);
+            add("already_member_gate_is_not_failure",NormalizeAlreadySatisfiedContinuityGate(gate,membership,TestDict("clanId","own_clan")) && !ActionPipelineService.ActionGateShouldPlan(gate),gate);
             foreach(string intent in new[] { "She renews her traveling companion commitment for 20 more days", "extend_temporary_party_guest", "end_temporary_party_guest" })
                 add("real_guest_action_survives_"+intent,!NormalizeAlreadySatisfiedContinuityGate(TestDict("intent",intent),membership,TestDict("clanId","own_clan")),null);
 
@@ -932,13 +932,13 @@ namespace ReignBetaServer
                 var lines = new List<Dictionary<string,object>>();
                 for(int i=0;i<count;i++) { lines.Add(TestDict("id","p"+i,"exchangeId","e"+i,"role","player","speaker","Traveler","text","Question "+i));
                     lines.Add(TestDict("id","n"+i,"exchangeId","e"+i,"role","npc","speaker","Speaker","text","Answer "+i+"\n\nComplete second paragraph.")); }
-                string transcript=FormatContinuityTranscript(lines,Program.FormatDialogueForPrompt);
+                string transcript=FormatContinuityTranscript(lines,DialogueService.FormatDialogueForPrompt);
                 var decisions=new List<object>();
                 string selected=SelectWholeContinuityRecords(transcript,1200,true,decisions,"test_transcript");
                 add("whole_recent_exchange_survives_"+count,selected.Contains("Question "+(count-1)) && selected.Contains("Answer "+(count-1))
                     && selected.Contains("Complete second paragraph.") && decisions.OfType<Dictionary<string,object>>().Any(d=>ReadBool(d,"required",false)&&ReadBool(d,"retained",false)),decisions);
                 add("latest_thirty_messages_survive_compaction_"+count, lines.TakeLast(30).All(line =>
-                    selected.Contains(Program.FormatDialogueForPrompt(new List<Dictionary<string, object>> { line })))
+                    selected.Contains(DialogueService.FormatDialogueForPrompt(new List<Dictionary<string, object>> { line })))
                     && ContinuityPromptRecords(transcript, true).Count(record => record.Required) == Math.Min(count, 15), decisions);
                 var transcriptContext = TestDict();
                 SetMemoryTranscriptContext(transcriptContext, lines);
@@ -951,7 +951,7 @@ namespace ReignBetaServer
             var boundaryLines = Enumerable.Range(0, 35).Select(i => TestDict("id", "boundary_"+i,
                 "exchangeId", "boundary_exchange_"+(i/2), "role", i%2==0 ? "player" : "npc",
                 "speaker", i%2==0 ? "Traveler" : "Speaker", "text", "Complete boundary message " + i + ".")).ToList();
-            string boundaryTranscript = FormatContinuityTranscript(boundaryLines, Program.FormatDialogueForPrompt);
+            string boundaryTranscript = FormatContinuityTranscript(boundaryLines, DialogueService.FormatDialogueForPrompt);
             var boundaryRecords = ContinuityPromptRecords(boundaryTranscript, true).Where(record => record.Required).ToList();
             add("recent_window_keeps_whole_exchange_at_thirtieth_message", boundaryRecords.Count == 16
                 && boundaryRecords.First().SourceId == "boundary_4,boundary_5"
@@ -1013,9 +1013,9 @@ namespace ReignBetaServer
             add("production_repair_marks_unresolved_presence_without_effects",ReadBool(unresolved,"ok",false)
                 && ReadBool(unresolved,"visibleRepairFailure",false)
                 && ReadString(unresolvedVisible,"reply","").EndsWith(".,",StringComparison.Ordinal)
-                && Program.SanitizeVisibleReply(ReadString(unresolvedVisible,"reply","")).EndsWith(".,",StringComparison.Ordinal)
+                && ConversationResponseService.SanitizeVisibleReply(ReadString(unresolvedVisible,"reply","")).EndsWith(".,",StringComparison.Ordinal)
                 && ReadDictionaryList(unresolvedVisible,"continuityWrites").Count==0
-                && !Program.ActionGateShouldPlan(ReadDictionary(unresolvedVisible,"actionGate")),unresolved);
+                && !ActionPipelineService.ActionGateShouldPlan(ReadDictionary(unresolvedVisible,"actionGate")),unresolved);
             var repaired=RetryRoleplayContinuityViolation(TestDict("ok",true,"content",Json.Serialize(response("My father is here."))),TestDict("requestType","dialogue","maxTokens",3000),payload,
                 PromptParityIdentity(),noLines,campaign,"continuity-corrected","dialogue","npc_a","Speaker","Traveler","",request=>TestDict("ok",true,"content",Json.Serialize(response("I need reliable news before deciding where to ride."))));
             add("production_repair_accepts_grounded_correction",ReadBool(repaired,"ok",false),repaired);
@@ -1028,7 +1028,7 @@ namespace ReignBetaServer
             var restoredGateObject = TryParseJsonObject(ReadString(restoredGate,"content",""));
             add("prose_repair_preserves_required_action_gate",ReadBool(restoredGate,"ok",false)
                 && ReadDictionary(restoredGateObject,"actionGate") != null
-                && Program.StructuredResponseIsComplete(ReadString(restoredGate,"content",""),"dialogue")
+                && ConversationResponseService.StructuredResponseIsComplete(ReadString(restoredGate,"content",""),"dialogue")
                 && ReadBool(ReadDictionary(restoredGate,"roleplayContinuityRepair"),"revalidationCleared",false),restoredGate);
             var unsupportedWrite = response("We found him. The tournament is behind us, and the road is ours again.");
             unsupportedWrite["continuityWrites"] = new List<Dictionary<string,object>> {

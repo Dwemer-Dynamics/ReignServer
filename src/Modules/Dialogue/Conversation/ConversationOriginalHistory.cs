@@ -18,13 +18,13 @@ namespace ReignBetaServer
             var rows = DialogueStore.SelectConversationTurns26(connection, TestDict("player", player, "session", session, "npc", npc, "limit", Math.Max(1000, Math.Min(10000, limit * 8))));
             bool official = ReadString(payload, "conversationMode", "") == "ambassador_official";
             string posting = ReadString(payload, "postingId", "");
-            var historyAccess = new Program.KnowledgeAccessContext { NpcId = player, TimelineId = timeline,
+            var historyAccess = new DialogueService.KnowledgeAccessContext { NpcId = player, TimelineId = timeline,
                 WorldDay = ReadDouble(payload, "worldDay", double.MaxValue), AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue };
             rows = rows.Where(row => {
                 var meta = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
                 var sessionMeta = TryParseJsonObject(ReadString(row, "session_payload", "{}"));
                 string rowTimeline = FirstNonEmpty(ReadString(meta, "timelineId", ""), ReadString(sessionMeta, "timelineId", ""));
-                var scoped = Program.CloneDictionary(row); scoped["timeline_id"] = rowTimeline;
+                var scoped = CloneDictionary(row); scoped["timeline_id"] = rowTimeline;
                 return MemoryTimeVisible(scoped, historyAccess, connection) && (!official || ReadString(row, "channel", "") == "ambassador_official"
                     || ReadString(sessionMeta, "channel", "") == "ambassador_official")
                     && (!official || posting.Length == 0 || FirstNonEmpty(ReadString(meta, "postingId", ""), ReadString(sessionMeta, "postingId", "")) == posting);
@@ -111,7 +111,7 @@ namespace ReignBetaServer
                     (exchange.Length > 0 && ReadString(line, "exchangeId", "") == exchange
                     || ReadString(line, "text", "") == ReadString(old, "text", "")))) continue;
                 if (ReadDouble(old, "worldDay", 0d) > historyAccess.WorldDay) continue;
-                var retained = Program.CloneDictionary(old); retained["sourceIntegrity"] = "legacy_original_unverified"; lines.Add(retained);
+                var retained = CloneDictionary(old); retained["sourceIntegrity"] = "legacy_original_unverified"; lines.Add(retained);
             }
             return lines.OrderBy(line => ReadLong(line, "ts", 0)).TakeLast(limit).ToList();
         }

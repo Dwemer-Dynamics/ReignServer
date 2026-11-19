@@ -312,7 +312,7 @@ namespace ReignBetaServer
                 add("dialogue_memory_cannot_verify_transformative_gift",
                     ReadString(ReadDictionaryList(dialogueClaimGift, "receipts").FirstOrDefault(), "severityTier", "") == "meaningful",
                     "An LLM memory of a player asserting an ordinary gift cannot verify transfer or life-changing value for a high-tier award.", dialogueClaimGift);
-                Program.WriteJsonObject(Program.CharacterFile(campaign, "npc_j", "traits.json"), new Dictionary<string, object>
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "npc_j", "traits.json"), new Dictionary<string, object>
                 {
                     ["jealousy"] = 95, ["envy"] = 90, ["empathy"] = 10, ["generosity"] = 10
                 });
@@ -332,7 +332,7 @@ namespace ReignBetaServer
                     && jealousDelta < 0 && Math.Abs(jealousDelta) < Math.Abs(recipientGiftDelta)
                     && string.IsNullOrWhiteSpace(ReadString(jealousReceipt, "benefitEventId", "")),
                     "A highly jealous witness may reasonably resent the player, but never inherits or mirrors the recipient's transformative gift value or benefit ledger.", jealousWitness);
-                Program.WriteJsonObject(Program.CharacterFile(campaign, "npc_k", "traits.json"), new Dictionary<string, object>
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "npc_k", "traits.json"), new Dictionary<string, object>
                 {
                     ["jealousy"] = 5, ["envy"] = 5, ["empathy"] = 90, ["generosity"] = 90
                 });

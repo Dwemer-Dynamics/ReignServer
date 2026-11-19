@@ -22,7 +22,7 @@ namespace ReignBetaServer
         {
             string id = ReadFirstString(payload, "directorActionId", "director_action_id");
             string pairKey = id.Substring("native_target:".Length);
-            string status = Program.NormalizeLookup(ReadString(payload, "status", "completed"));
+            string status = ActionPipelineService.NormalizeLookup(ReadString(payload, "status", "completed"));
             string error = ReadString(payload, "error", "");
             double day = ReadDouble(payload, "worldDay", 0d);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -535,7 +535,7 @@ namespace ReignBetaServer
                                     ?"The pair married after jointly accepting responsibility for a conception."
                                     :"The pair married after both directional affinities reached seventy or above.",
                                 new Dictionary<string, object>{{"directorActionId",id},{"route",lifecycleMarriageRoute}});
-                            Program.StoreWorldMemoryEvent(new Dictionary<string, object>{{"campaignId",campaignId},
+                            DialogueService.StoreWorldMemoryEvent(new Dictionary<string, object>{{"campaignId",campaignId},
                                 {"eventId","marriage_"+id},{"eventType","world_event"},{"eventSubtype",pregnancyCommitmentRoute?"pregnancy_commitment_marriage":"mutual_affinity_marriage"},
                                 {"worldDay",ReadDouble(payload,"worldDay",ReadDouble(action,"world_day",0d))},
                                 {"summary",a+" and "+b+" married."},{"participants",new[]{a,b}},
@@ -544,7 +544,7 @@ namespace ReignBetaServer
                         else if(status=="invalid")
                             RelationshipsStore.UpdateRelationshipPairLifecycle6(connection, new Dictionary<string, object>
                             {
-                                {"reason",Program.LimitText(FirstNonEmpty(ReadString(payload,"error",""),
+                                {"reason",DialogueService.LimitText(FirstNonEmpty(ReadString(payload,"error",""),
                                     "Native marriage eligibility rejected this couple."),500)},
                                 {"ts",ts},{"pair",pairKey}
                             });
@@ -632,7 +632,7 @@ namespace ReignBetaServer
 			RelationshipsStore.UpdateRumorOccurrences(connection, args);
 			ReputationService.ReconcileSocialRelationshipsForSubjects(connection, campaignId,
 				timelineId, new[] { heroA, heroB }, worldDay);
-			Program.StoreWorldMemoryEvent(new Dictionary<string, object>
+			DialogueService.StoreWorldMemoryEvent(new Dictionary<string, object>
 			{
 				["campaignId"] = campaignId,
 				["timelineId"] = timelineId,
@@ -734,7 +734,7 @@ namespace ReignBetaServer
             var row=RelationshipsStore.SelectMarriageEvaluations9(connection, new Dictionary<string,object>{{"id",evaluationId}}).FirstOrDefault();
             if(row==null)return;
             string a=ReadString(row,"hero_a_id",""),b=ReadString(row,"hero_b_id",""),route=ReadString(row,"route",""),eventId="marriage_"+evaluationId;
-            Program.StoreWorldMemoryEvent(new Dictionary<string, object>{{"campaignId",campaignId},{"eventId",eventId},{"eventType","world_event"},{"eventSubtype",route=="arranged"?"arranged_marriage":"romantic_marriage"},{"worldDay",day},{"summary",a+" and "+b+" married"+(route=="arranged"?" by agreement of their clan leaders.":" after developing mutual trust, affection, and attraction.")},{"participants",new[]{a,b,ReadString(row,"leader_a_id",""),ReadString(row,"leader_b_id","")}},{"visibility","public"},{"importance",0.9d}},"relationship_director_marriage");
+            DialogueService.StoreWorldMemoryEvent(new Dictionary<string, object>{{"campaignId",campaignId},{"eventId",eventId},{"eventType","world_event"},{"eventSubtype",route=="arranged"?"arranged_marriage":"romantic_marriage"},{"worldDay",day},{"summary",a+" and "+b+" married"+(route=="arranged"?" by agreement of their clan leaders.":" after developing mutual trust, affection, and attraction.")},{"participants",new[]{a,b,ReadString(row,"leader_a_id",""),ReadString(row,"leader_b_id","")}},{"visibility","public"},{"importance",0.9d}},"relationship_director_marriage");
         }
 
         private static void ApplyCompelledMarriageConsequence(ReignDbConnection connection,string campaignId,string timelineId,string eventId,string spouse,string match,string leader,double resentment,double day)
@@ -767,15 +767,15 @@ namespace ReignBetaServer
         internal static bool IsExplicitConceptionCapablePlayerText(string text)
         {
             string value=(text??"").ToLowerInvariant();
-            bool completed=Program.ContainsAny(value,"we made love","i made love","slept together","lay together","finished inside","came inside","inseminat");
-            bool conceive=Program.ContainsAny(value,"try for a child","tried for a child","attempted to have a child","make a child","conceive","get you pregnant","become pregnant");
-            return (completed&&conceive)||Program.ContainsAny(value,"finished inside","came inside","inseminat");
+            bool completed=DialogueService.ContainsAny(value,"we made love","i made love","slept together","lay together","finished inside","came inside","inseminat");
+            bool conceive=DialogueService.ContainsAny(value,"try for a child","tried for a child","attempted to have a child","make a child","conceive","get you pregnant","become pregnant");
+            return (completed&&conceive)||DialogueService.ContainsAny(value,"finished inside","came inside","inseminat");
         }
 
         private static double PlayerConceptionChance(double age){if(age<18d||age>45d)return 0d;return (15d-(age-18d)*(12d/27d))/100d;}
         internal static string NormalizePregnancyChoiceToken(string value){return (value??"").Trim().ToLowerInvariant().Replace("-","_").Replace(" ","_");}
         internal static double StableUnit(string seed){using(SHA256 sha=SHA256.Create()){byte[] hash=sha.ComputeHash(Encoding.UTF8.GetBytes(seed??""));ulong value=BitConverter.ToUInt64(hash,0);return value/(double)ulong.MaxValue;}}
         private static double TraitFromProfile(Dictionary<string, object> profile,string key){Dictionary<string, object> direct=ReadDictionary(profile,"foundationTraits")??ReadDictionary(ReadDictionary(profile,"traits"),"foundationTraits")??ReadDictionary(profile,"traits")??new Dictionary<string, object>();return ReadDouble(direct,key,0d);}
-        private static double Trait01(Dictionary<string, object> profile,string key){return Program.ClampDouble((TraitFromProfile(profile,key)+2d)/4d,0d,1d);}
+        private static double Trait01(Dictionary<string, object> profile,string key){return DialogueService.ClampDouble((TraitFromProfile(profile,key)+2d)/4d,0d,1d);}
     }
 }

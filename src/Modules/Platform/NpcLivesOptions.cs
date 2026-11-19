@@ -8,7 +8,7 @@ using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class SettingsService
     {
         internal static NpcLivesOptions ReadNpcLivesOptions(Dictionary<string, object> settings = null)
         {
@@ -41,7 +41,7 @@ namespace ReignBetaServer
                 if (incoming.TryGetValue(key, out var value) && (!(value is string text) || text.Length > 200))
                     return "Approach provider and model must be text of at most 200 characters.";
             if (incoming.ContainsKey("npcLivesApproachProvider") && ReadString(incoming, "npcLivesApproachProvider", "").Length > 0
-                && !ChatProviders.Contains(ReadString(incoming, "npcLivesApproachProvider", ""))) return "Select a supported Approach provider.";
+                && !LlmProviderService.ChatProviders.Contains(ReadString(incoming, "npcLivesApproachProvider", ""))) return "Select a supported Approach provider.";
             return "";
         }
         internal static Dictionary<string, object> NpcLivesOptionsForClient(Dictionary<string, object> settings)

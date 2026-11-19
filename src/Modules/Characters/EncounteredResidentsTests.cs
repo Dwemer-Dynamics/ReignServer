@@ -153,15 +153,15 @@ namespace ReignBetaServer
                 var traits = new Dictionary<string, object> { ["basePersonalitySummary"] = "Patient with children, fiercely proud of her work, wary of promises." };
                 var characteristics = new Dictionary<string, object> { ["traits"] = traits,
                     ["voice"] = new Dictionary<string, object> { ["speechStyle"] = "Dry wit and short, precise answers." } };
-                string template = DialogueService.NormalizePromptSegment(Program.LoadPromptTemplate("commoner_prompt.txt"));
-                Require(Program.PromptFileNames.Contains("commoner_prompt.txt") && Program.PromptMetadataByName().ContainsKey("commoner_prompt.txt")
-                    && Program.DefaultPromptTemplates()["commoner_prompt.txt"].Length > 1000, "Commoner prompt is missing from editable inventory or embedded defaults.");
+                string template = DialogueService.NormalizePromptSegment(PromptService.LoadPromptTemplate("commoner_prompt.txt"));
+                Require(Program.PromptFileNames.Contains("commoner_prompt.txt") && PromptService.PromptMetadataByName().ContainsKey("commoner_prompt.txt")
+                    && PromptService.DefaultPromptTemplates()["commoner_prompt.txt"].Length > 1000, "Commoner prompt is missing from editable inventory or embedded defaults.");
                 string first = DialogueService.BuildStableCharacterPrompt("commoner-fixture", "Sabina Doria", profile, characteristics);
                 Require(first.Contains(template) && first.Contains("Tavern work") && first.Contains("Patient with children")
                     && first.Contains("Dry wit"), "Role prompting replaced personality or missed native tavern occupation.");
-                string legacy = Program.BuildCharacterFoundationText("verify_commoner", "commoner-fixture", "Sabina Doria", profile, characteristics, new Dictionary<string, object>());
-                string construction = Program.BuildCharacterConstructionPrompt("verify_commoner", "commoner-fixture", profile, traits);
-                Require(legacy.Contains(template) && construction.Contains(template) && DialogueService.NormalizePromptSegment(construction).Contains(DialogueService.NormalizePromptSegment(Program.LoadPromptTemplate("world_tone.txt"))), "Legacy or first-contact construction omitted commoner/world layers.");
+                string legacy = DialogueService.BuildCharacterFoundationText("verify_commoner", "commoner-fixture", "Sabina Doria", profile, characteristics, new Dictionary<string, object>());
+                string construction = CharactersService.BuildCharacterConstructionPrompt("verify_commoner", "commoner-fixture", profile, traits);
+                Require(legacy.Contains(template) && construction.Contains(template) && DialogueService.NormalizePromptSegment(construction).Contains(DialogueService.NormalizePromptSegment(PromptService.LoadPromptTemplate("world_tone.txt"))), "Legacy or first-contact construction omitted commoner/world layers.");
                 resident["recruited"] = true;
                 string recruited = DialogueService.BuildStableCharacterPrompt("commoner-fixture", "Sabina Doria", profile, characteristics);
                 Require(recruited.Contains("not a current shift") && recruited.Contains("Patient with children")
@@ -281,7 +281,7 @@ namespace ReignBetaServer
                 var characteristics = new Dictionary<string, object> { ["traits"] = new Dictionary<string, object> {
                     ["basePersonalitySummary"] = "Distinctive practical outlook and dry humor." } };
                 var empty = new Dictionary<string, object>(); var rows = new List<Dictionary<string, object>>();
-                string template = DialogueService.NormalizePromptSegment(Program.LoadPromptTemplate("commoner_prompt.txt"));
+                string template = DialogueService.NormalizePromptSegment(PromptService.LoadPromptTemplate("commoner_prompt.txt"));
                 var envelopes = new List<DialogueService.PromptEnvelope>();
                 envelopes.Add(DialogueService.BuildDialoguePromptEnvelope("verify_commoner", "commoner-fixture", "Sabina Doria", "Visitor", "Visitor",
                     "How is your work?", "An ordinary conversation.", profile, characteristics, empty, empty, empty, rows, rows, rows, rows, empty, empty));

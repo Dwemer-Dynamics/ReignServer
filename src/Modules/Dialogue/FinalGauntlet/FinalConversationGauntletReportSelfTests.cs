@@ -120,7 +120,7 @@ namespace ReignBetaServer
                             root, "review-answer-key.private.json")),
                     "Repeated exports retain stable blinded IDs and keep the answer key separate.");
                 Dictionary<string, object> reviewPack =
-                    Program.ReadJsonObject(Path.Combine(root, "review-pack.json"));
+                    CampaignFileService.ReadJsonObject(Path.Combine(root, "review-pack.json"));
                 List<Dictionary<string, object>> reviewItems =
                     ReadDictionaryList(reviewPack, "items");
                 add(
@@ -130,7 +130,7 @@ namespace ReignBetaServer
                             reviewItems[0], "transcript").Count == 2,
                     "Review selections contain actual dialogue and never empty placeholder transcripts.");
                 Dictionary<string, object> exported =
-                    Program.ReadJsonObject(Path.Combine(root, "report.json"));
+                    CampaignFileService.ReadJsonObject(Path.Combine(root, "report.json"));
                 Dictionary<string, object> budget =
                     ReadDictionary(exported, "providerBudget");
                 add(

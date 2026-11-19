@@ -135,13 +135,13 @@ namespace ReignBetaServer
             result.Add(new Dictionary<string, object>
             {
                 ["type"] = echoes.Count > 0 ? "group_conversation_accounting_echo" : "repeated_conversation_accounting",
-                ["match"] = Program.LimitText(ConversationSpeech(reply).Trim(), 700),
+                ["match"] = DialogueService.LimitText(ConversationSpeech(reply).Trim(), 700),
                 ["detail"] = "The reply repeats a recent conversational tally or debt/payment metaphor. Answer the current message plainly in this character's voice, respecting received answers, corrections and any separate unresolved request. Preserve legitimate refusal and actual financial facts; remove the repeated framing rather than merely changing its words.",
                 ["priorEvidence"] = repeated.Concat(echoes).Take(3).Select(row => new Dictionary<string, object>
                 {
                     ["speaker"] = ReadFirstString(row, "speaker", "speaker_name"),
                     ["turnId"] = ReadFirstString(row, "turn_id", "turnId", "id"),
-                    ["text"] = Program.LimitText(ConversationSpeech(ReadString(row, "text", "")).Trim(), 1100)
+                    ["text"] = DialogueService.LimitText(ConversationSpeech(ReadString(row, "text", "")).Trim(), 1100)
                 }).ToList()
             });
             return result;
@@ -150,7 +150,7 @@ namespace ReignBetaServer
         private static bool IsGeneratedConversationRhetoric(Dictionary<string, object> row)
         {
             // Authored foundations and unfamiliar provenance are never silently reclassified.
-            string provenance = Program.NormalizeLookup(ReadFirstString(row, "provenance", "sourceBasis")).Replace(' ', '_');
+            string provenance = ActionPipelineService.NormalizeLookup(ReadFirstString(row, "provenance", "sourceBasis")).Replace(' ', '_');
             return provenance == "npc_generated_personal_history" && IsConversationCharacteristicRhetoric(ReadString(row, "text", ""));
         }
 
@@ -164,10 +164,10 @@ namespace ReignBetaServer
 
         internal static bool DynamicCharacteristicsEquivalent(string left, string right)
         {
-            if (Program.NormalizeLookup(left) == Program.NormalizeLookup(right)) return true;
+            if (ActionPipelineService.NormalizeLookup(left) == ActionPipelineService.NormalizeLookup(right)) return true;
             // Keep polarity, quantities and changed particulars: lexical similarity alone
             // must not merge contradictions or different memories on the same topic.
-            Func<string, string> qualifiers = text => string.Join("|", Regex.Matches(Program.NormalizeLookup(text),
+            Func<string, string> qualifiers = text => string.Join("|", Regex.Matches(ActionPipelineService.NormalizeLookup(text),
                 @"\b(?:not|never|no|without|dislike\w*|hate\w*|fear\w*|avoid\w*|\d+)\b").Cast<Match>().Select(m => m.Value).Distinct().OrderBy(x => x));
             if (qualifiers(left) != qualifiers(right)) return false;
             HashSet<string> a = CharactersService.DynamicEvidenceTerms(left), b = CharactersService.DynamicEvidenceTerms(right);
@@ -183,7 +183,7 @@ namespace ReignBetaServer
                     && ReadString(row, "category", "") != "narrative_development"
                     && ReadString(row, "category", "") != "life_transition"
                     && !IsGeneratedConversationRhetoric(row)).ToList();
-            string query = Program.NormalizeLookup(ConversationSpeech(relevanceQuery));
+            string query = ActionPipelineService.NormalizeLookup(ConversationSpeech(relevanceQuery));
             bool first = Regex.IsMatch(query, @"\b(first|earliest|oldest|initial)\b");
             bool habit = Regex.IsMatch(query, @"\b(habit|habits|routine|ritual)\b");
             bool interests = Regex.IsMatch(query, @"\b(hobbies|hobby|enjoy|enjoys|interests|yourself|free time|like to do|want for yourself)\b");

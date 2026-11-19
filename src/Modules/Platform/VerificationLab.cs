@@ -13,17 +13,17 @@ using System.Xml;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class VerificationService
     {
         private static readonly object VerificationLock = new object();
-        internal static readonly string VerificationDir = Path.Combine(TestsDir, "verification");
+        internal static readonly string VerificationDir = Path.Combine(Program.TestsDir, "verification");
         private static readonly string VerificationRunsDir = Path.Combine(VerificationDir, "runs");
         private static readonly string VerificationFailuresDir = Path.Combine(VerificationDir, "failures");
         // Keep mutable sandboxes beneath the packaged test-data tree, but make the
         // path deliberately short.  The installed Bannerlord module already has a
         // long base path, and fixture campaign/hero IDs can otherwise cross the
         // legacy Win32 MAX_PATH boundary before SQLite creates its database.
-        private static readonly string VerificationSandboxesDir = Path.Combine(TestsDir, "v");
+        private static readonly string VerificationSandboxesDir = Path.Combine(Program.TestsDir, "v");
         private static readonly string VerificationCancelPath = Path.Combine(VerificationDir, "cancel.request");
         private static readonly string VerificationGameCommandPath = Path.Combine(VerificationDir, "game-command.json");
         private static readonly string VerificationGameStatusPath = Path.Combine(VerificationDir, "game-status.json");
@@ -31,10 +31,10 @@ namespace ReignBetaServer
         private static volatile bool VerificationCancelRequested;
         internal static Task VerificationTask;
 
-        private static Dictionary<string, object> RunVerificationCli(string[] args)
+        internal static Dictionary<string, object> RunVerificationCli(string[] args)
         {
             EnsureVerificationDirectories();
-            if (HasArg(args, "--cancel"))
+            if (Program.HasArg(args, "--cancel"))
             {
                 VerificationCancelRequested = true;
                 File.WriteAllText(VerificationCancelPath, DateTime.UtcNow.ToString("o"));
@@ -53,17 +53,17 @@ namespace ReignBetaServer
                 ["suite"] = ArgValue(args, "--suite", ""),
                 ["seed"] = ParseInt(ArgValue(args, "--seed", "1337"), 1337),
                 ["repeat"] = Math.Max(1, ParseInt(ArgValue(args, "--repeat", "1"), 1)),
-                ["failFast"] = HasArg(args, "--fail-fast"),
-                ["json"] = HasArg(args, "--json"),
+                ["failFast"] = Program.HasArg(args, "--fail-fast"),
+                ["json"] = Program.HasArg(args, "--json"),
                 ["liveCaseCap"] = Math.Max(1, ParseInt(ArgValue(args, "--live-case-cap", "20"), 20)),
                 ["gameTimeoutSeconds"] = Math.Max(30, ParseInt(ArgValue(args, "--game-timeout-seconds", "900"), 900))
             };
             string codexPlanPath = ArgValue(args, "--codex-performance-plan", "");
-            if (!string.IsNullOrWhiteSpace(codexPlanPath)) options["codexPerformance"] = ReadJsonObject(codexPlanPath);
+            if (!string.IsNullOrWhiteSpace(codexPlanPath)) options["codexPerformance"] = CampaignFileService.ReadJsonObject(codexPlanPath);
             return RunVerification(options);
         }
 
-        private static Dictionary<string, object> StartVerificationApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> StartVerificationApi(Dictionary<string, object> payload)
         {
             EnsureVerificationDirectories();
             lock (VerificationLock)
@@ -80,12 +80,12 @@ namespace ReignBetaServer
 
                 Dictionary<string, object> options = NormalizeVerificationOptions(payload);
                 if (ReadString(options, "suite", "") == "codex_performance" && ReadString(options, "tier", "") != "quick" && ReadString(options, "tier", "") != "offline")
-                    ValidateCodexPerformanceRun(options);
+                    LlmProviderService.ValidateCodexPerformanceRun(options);
                 // Admission precedes any status change, so a refusal leaves the previous status.
                 // Lock order is VerificationLock -> scheduler gate only: the scheduler never calls
                 // out under its gate, and the outcome continuation below takes VerificationLock on
                 // a pool thread, so it cannot observe this run before it is published here.
-                PriorityWorkAdmission admission = TryEnqueuePriorityBackgroundWork("verification.run", "normal",
+                PriorityWorkAdmission admission = OperationsService.TryEnqueuePriorityBackgroundWork("verification.run", "normal",
                     () => RunVerification(options), null, out Task scheduled);
                 if (admission != PriorityWorkAdmission.Accepted)
                 {
@@ -94,7 +94,7 @@ namespace ReignBetaServer
                     {
                         ["ok"] = false,
                         ["accepted"] = false,
-                        ["reason"] = busy ? PriorityWorkNotStartedBusy : PriorityWorkNotStartedStopping,
+                        ["reason"] = busy ? OperationsService.PriorityWorkNotStartedBusy : OperationsService.PriorityWorkNotStartedStopping,
                         ["error"] = busy
                             ? "The background scheduler is at capacity; verification was not queued."
                             : "The server is stopping; verification was not queued.",
@@ -138,7 +138,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> VerificationStatusApi()
+        internal static Dictionary<string, object> VerificationStatusApi()
         {
             lock (VerificationLock)
             {
@@ -154,7 +154,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> CancelVerificationApi()
+        internal static Dictionary<string, object> CancelVerificationApi()
         {
             EnsureVerificationDirectories();
             VerificationCancelRequested = true;
@@ -168,7 +168,7 @@ namespace ReignBetaServer
             return new Dictionary<string, object> { ["ok"] = true, ["cancelRequested"] = true };
         }
 
-        private static Dictionary<string, object> VerificationResultsApi(Dictionary<string, string> query)
+        internal static Dictionary<string, object> VerificationResultsApi(Dictionary<string, string> query)
         {
             EnsureVerificationDirectories();
             int limit = 20;
@@ -181,7 +181,7 @@ namespace ReignBetaServer
             if (!string.IsNullOrWhiteSpace(runId))
             {
                 string path = FindVerificationRunPath(runId);
-                Dictionary<string, object> run = string.IsNullOrWhiteSpace(path) ? new Dictionary<string, object>() : ReadJsonObject(path);
+                Dictionary<string, object> run = string.IsNullOrWhiteSpace(path) ? new Dictionary<string, object>() : CampaignFileService.ReadJsonObject(path);
                 return run.Count == 0
                     ? new Dictionary<string, object> { ["ok"] = false, ["error"] = "Verification run was not found." }
                     : new Dictionary<string, object> { ["ok"] = true, ["run"] = run, ["path"] = path };
@@ -193,7 +193,7 @@ namespace ReignBetaServer
                 .Take(limit)
                 .Select(path =>
                 {
-                    Dictionary<string, object> row = ReadJsonObject(path);
+                    Dictionary<string, object> row = CampaignFileService.ReadJsonObject(path);
                     return new Dictionary<string, object>
                     {
                         ["runId"] = ReadString(row, "runId", Path.GetFileNameWithoutExtension(path)),
@@ -213,12 +213,12 @@ namespace ReignBetaServer
             return new Dictionary<string, object> { ["ok"] = true, ["runs"] = rows, ["count"] = rows.Count };
         }
 
-        private static Dictionary<string, object> ReplayVerificationApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> ReplayVerificationApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string runId = ReadString(payload, "runId", "");
             string path = FindVerificationRunPath(runId);
-            Dictionary<string, object> prior = string.IsNullOrWhiteSpace(path) ? new Dictionary<string, object>() : ReadJsonObject(path);
+            Dictionary<string, object> prior = string.IsNullOrWhiteSpace(path) ? new Dictionary<string, object>() : CampaignFileService.ReadJsonObject(path);
             if (prior.Count == 0)
             {
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Verification run was not found." };
@@ -244,7 +244,7 @@ namespace ReignBetaServer
         {
             HashSet<string> owned = new HashSet<string>(
                 scope.CreatedCampaignIds.Concat(
-                    scope.UnattributedCampaignIds.Where(IsInternalCampaignId))
+                    scope.UnattributedCampaignIds.Where(CampaignFileService.IsInternalCampaignId))
                     .Where(id => !string.IsNullOrWhiteSpace(id)
                         && !preexistingCampaigns.Contains(id)),
                 StringComparer.OrdinalIgnoreCase);
@@ -274,20 +274,20 @@ namespace ReignBetaServer
             Dictionary<string, object> options = NormalizeVerificationOptions(rawOptions);
             string tier = ReadString(options, "tier", "offline").ToLowerInvariant();
             string suite = ReadString(options, "suite", "");
-            CodexPerformanceBudget previousCodexBudget = ActiveCodexPerformanceBudget.Value;
+            LlmProviderService.CodexPerformanceBudget previousCodexBudget = LlmProviderService.ActiveCodexPerformanceBudget.Value;
             if (suite == "codex_performance" && tier != "quick" && tier != "offline")
             {
-                var codexPlan = ValidateCodexPerformanceRun(options);
-                ActiveCodexPerformanceBudget.Value = new CodexPerformanceBudget { Maximum = ReadInt(codexPlan, "totalProviderCallCap", 0) };
+                var codexPlan = LlmProviderService.ValidateCodexPerformanceRun(options);
+                LlmProviderService.ActiveCodexPerformanceBudget.Value = new LlmProviderService.CodexPerformanceBudget { Maximum = ReadInt(codexPlan, "totalProviderCallCap", 0) };
             }
             int seed = ReadInt(options, "seed", 1337);
             int repeat = Math.Max(1, ReadInt(options, "repeat", 1));
             bool failFast = ReadBool(options, "failFast", false);
             string runId = "verify-" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N").Substring(0, 8);
             string sandboxToken = runId.Length > 8 ? runId.Substring(runId.Length - 8) : runId;
-            string sandbox = Path.Combine(VerificationSandboxesDir, "r-" + SafePathSegment(sandboxToken, "run"));
+            string sandbox = Path.Combine(VerificationSandboxesDir, "r-" + CampaignFileService.SafePathSegment(sandboxToken, "run"));
             string verificationCampaignsRoot = Path.Combine(sandbox, "c");
-            string previousCampaignsRoot = CampaignsRootOverride.Value;
+            string previousCampaignsRoot = Program.CampaignsRootOverride.Value;
             Directory.CreateDirectory(sandbox);
             TryDelete(VerificationCancelPath);
             VerificationCancelRequested = false;
@@ -317,7 +317,7 @@ namespace ReignBetaServer
             };
 
             SetVerificationStatus(runId, "running", "Discovering coverage and running deterministic checks.", 0, 0, 0);
-            CampaignsRootOverride.Value = verificationCampaignsRoot;
+            Program.CampaignsRootOverride.Value = verificationCampaignsRoot;
             CampaignCreationScope campaignScope =
                 ReignPostgreSqlStorage.BeginCampaignCreationScope();
             try
@@ -372,10 +372,10 @@ namespace ReignBetaServer
             }
             finally
             {
-                if (ActiveCodexPerformanceBudget.Value != previousCodexBudget)
+                if (LlmProviderService.ActiveCodexPerformanceBudget.Value != previousCodexBudget)
                 {
-                    if (ActiveCodexPerformanceBudget.Value != null) ActiveCodexPerformanceBudget.Value.Closed = true;
-                    ActiveCodexPerformanceBudget.Value = previousCodexBudget;
+                    if (LlmProviderService.ActiveCodexPerformanceBudget.Value != null) LlmProviderService.ActiveCodexPerformanceBudget.Value.Closed = true;
+                    LlmProviderService.ActiveCodexPerformanceBudget.Value = previousCodexBudget;
                 }
                 ReignPostgreSqlStorage.EndCampaignCreationScope(campaignScope);
                 ReignPostgreSqlStorage.ClearAllPools();
@@ -392,7 +392,7 @@ namespace ReignBetaServer
                 }
                 catch { }
                 ReignPostgreSqlStorage.ClearAllPools();
-                CampaignsRootOverride.Value = previousCampaignsRoot;
+                Program.CampaignsRootOverride.Value = previousCampaignsRoot;
                 PersistenceService.TryDeleteDirectory(verificationCampaignsRoot);
             }
 
@@ -434,7 +434,7 @@ namespace ReignBetaServer
                 return;
             }
             if (explicitSuite && ShouldRunVerificationSuite(requestedSuite, "war_economy_options"))
-                AddSubsystemListSummary(checks, "contracts.war_economy_options", "war_economy_options", RunWarEconomyOptionsSelfTests());
+                AddSubsystemListSummary(checks, "contracts.war_economy_options", "war_economy_options", SettingsService.RunWarEconomyOptionsSelfTests());
             if (string.Equals(requestedSuite, "memory_evidence_replay", StringComparison.OrdinalIgnoreCase))
             {
                 var replay = DialogueService.RunMemoryEvidenceReplay();
@@ -462,7 +462,7 @@ namespace ReignBetaServer
             if (requestedSuite == "relationship_throughput_contracts" || requestedSuite == "relationship_throughput_smoke"
                 || requestedSuite == "relationship_throughput")
             {
-                if (!HasArg(Environment.GetCommandLineArgs(), "--run-verification"))
+                if (!Program.HasArg(Environment.GetCommandLineArgs(), "--run-verification"))
                     throw new InvalidOperationException("Relationship throughput contracts require the isolated Verification Lab CLI.");
                 AddSubsystemListSummary(checks, "contracts.relationship_throughput", "relationship_throughput", RelationshipsService.RunRelationshipThroughputSelfTests());
                 if (requestedSuite != "relationship_throughput_contracts")
@@ -475,13 +475,13 @@ namespace ReignBetaServer
             }
             if (string.Equals(requestedSuite, "codex_performance", StringComparison.OrdinalIgnoreCase))
             {
-                if (!HasArg(Environment.GetCommandLineArgs(), "--run-verification"))
+                if (!Program.HasArg(Environment.GetCommandLineArgs(), "--run-verification"))
                     throw new InvalidOperationException("Injected Codex contracts require the isolated non-listening Verification Lab CLI through reign_run_offline_verification.");
-                AddSubsystemListSummary(checks, "contracts.codex_runtime", "codex_performance", RunCodexRuntimeSelfTests());
+                AddSubsystemListSummary(checks, "contracts.codex_runtime", "codex_performance", LlmProviderService.RunCodexRuntimeSelfTests());
                 AddSubsystemListSummary(checks, "contracts.codex_conversation", "codex_performance", DialogueService.RunCodexConversationSelfTests());
-                var integration = RunCodexPerformanceIntegrationSelfTests();
+                var integration = LlmProviderService.RunCodexPerformanceIntegrationSelfTests();
                 AddVerificationCheck(checks, "contracts.codex_integration", "codex_performance", ReadBool(integration, "ok", false), "Codex settings and physical provider-call cap contracts.", integration);
-                var reports = RunCodexPerformanceReportSelfTests();
+                var reports = LlmProviderService.RunCodexPerformanceReportSelfTests();
                 AddVerificationCheck(checks, "contracts.codex_performance_reports", "codex_performance", ReadBool(reports, "ok", false), "Codex comparison report contracts.", reports);
                 return;
             }
@@ -556,7 +556,7 @@ namespace ReignBetaServer
             {
                 AddSelfTestSummary(checks, "baseline.diplomacy", "world_diplomacy", DiplomacyService.RunWorldDiplomacySelfTests());
                 AddSelfTestSummary(checks, "baseline.world_history", "world_history", WorldSimulationService.RunWorldHistorySelfTests());
-                AddSelfTestSummary(checks, "baseline.initialization_readiness", "save_load", RunInitializationReadinessSelfTests());
+                AddSelfTestSummary(checks, "baseline.initialization_readiness", "save_load", Program.RunInitializationReadinessSelfTests());
                 AddSelfTestSummary(checks, "baseline.rebellion", "rebellion", RebellionService.RunRebellionSelfTests());
                 AddSubsystemListSummary(checks, "baseline.world_test", "world_test", WorldSimulationService.RunWorldTestSelfTests());
             }

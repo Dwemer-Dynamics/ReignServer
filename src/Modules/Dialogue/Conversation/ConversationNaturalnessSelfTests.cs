@@ -120,16 +120,16 @@ namespace ReignBetaServer
             var firstWrite = normalize(hobbyA, "wooden_horses");
             var secondWrite = normalize(hobbyB, "evening_carving");
             string campaign = "naturalness_test_" + Guid.NewGuid().ToString("N");
-            Program.UpsertCharacterProfile(campaign, profile);
+            CharactersService.UpsertCharacterProfile(campaign, profile);
             CharactersService.StoreDynamicCharacteristicWrites(campaign, "fixture_gavene", firstWrite, payload, TestDict("exchangeId", "original"), "event_original", "dialogue", "", 1, new[] { "fixture_gavene" });
             var duplicateStore = CharactersService.StoreDynamicCharacteristicWrites(campaign, "fixture_gavene", secondWrite, payload, TestDict("exchangeId", "paraphrase"), "event_paraphrase", "dialogue", "", 2, new[] { "fixture_gavene" });
-            var persisted = Program.ReadJsonObject(Program.CharacterFile(campaign, "fixture_gavene", "dynamic_characteristics.json"));
+            var persisted = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, "fixture_gavene", "dynamic_characteristics.json"));
             add("paraphrase_write_retains_original_and_rejection_evidence", ReadInt(duplicateStore, "rejectedCount", 0) == 1
                 && ReadDictionaryList(persisted, "active").Count == 1 && ReadDictionaryList(persisted, "rejected").Count == 1
                 && ReadString(ReadDictionaryList(persisted, "active")[0], "source_exchange_id", "") == "original", duplicateStore);
             foreach (string name in new[] { "world_tone.txt", "noble_prompt.txt" })
             {
-                string template = Program.LoadPromptTemplate(name), scoped = ScopeConversationTone(template);
+                string template = PromptService.LoadPromptTemplate(name), scoped = ScopeConversationTone(template);
                 add("scoped_tone_idempotent_" + name, ScopeConversationTone(scoped) == scoped, null);
             }
             string custom = "CUSTOM VOICE: proud, terse, fond of chess. " + ConversationToneReplacements[0, 0] + " CUSTOM END.";
@@ -154,27 +154,27 @@ namespace ReignBetaServer
             var results = new List<Dictionary<string, object>>();
             Action<string, bool, object> add = (id, pass, data) => results.Add(TestDict(
                 "caseId", "action_availability_" + id, "passed", pass, "summary", id, "data", data));
-            var catalog = ReadDictionaryList(Program.ActionCatalog(), "commands");
+            var catalog = ReadDictionaryList(ActionPipelineService.ActionCatalog(), "commands");
             var unavailableCurrent = catalog
-                .Where(row => !Program.ActionCapabilityForCommand(ReadString(row, "command", "")).Equals("unsupported", StringComparison.OrdinalIgnoreCase))
-                .Where(row => !Program.PlannerCanExposeAction(ReadString(row, "command", ""), false))
+                .Where(row => !ActionPipelineService.ActionCapabilityForCommand(ReadString(row, "command", "")).Equals("unsupported", StringComparison.OrdinalIgnoreCase))
+                .Where(row => !ActionPipelineService.PlannerCanExposeAction(ReadString(row, "command", ""), false))
                 .Select(row => ReadString(row, "command", ""))
                 .ToList();
             add("every_registered_non_retired_action_reaches_production_planner",
                 unavailableCurrent.Count == 0, unavailableCurrent);
             var retired = new[] { "temporary_truce", "sign_temporary_truce", "trade_embargo" };
             add("retired_actions_remain_hidden",
-                retired.All(command => !Program.PlannerCanExposeAction(command, false)), retired);
+                retired.All(command => !ActionPipelineService.PlannerCanExposeAction(command, false)), retired);
             add("native_actions_report_mechanical_capability",
                 new[] { "transfer_workshop", "join_clan", "leave_clan" }
-                    .All(command => Program.ActionCapabilityForCommand(command) == "mechanical"), null);
+                    .All(command => ActionPipelineService.ActionCapabilityForCommand(command) == "mechanical"), null);
             add("registered_scene_hooks_are_available",
                 new[] { "follow", "show_the_way" }
-                    .All(command => Program.ActionCapabilityForCommand(command) == "mechanical"
-                        && Program.PlannerCanExposeAction(command, false)), null);
+                    .All(command => ActionPipelineService.ActionCapabilityForCommand(command) == "mechanical"
+                        && ActionPipelineService.PlannerCanExposeAction(command, false)), null);
             add("legacy_follow_commands_canonicalize_to_one_public_action",
-                Program.CanonicalCommand("follow_on_map") == "follow"
-                && Program.CanonicalCommand("follow_in_scene") == "follow"
+                ActionPipelineService.CanonicalCommand("follow_on_map") == "follow"
+                && ActionPipelineService.CanonicalCommand("follow_in_scene") == "follow"
                 && !catalog.Any(row => new[] { "follow_on_map", "follow_in_scene" }
                     .Contains(ReadString(row, "command", ""))), null);
 
@@ -182,21 +182,21 @@ namespace ReignBetaServer
             const string reply = "All right. I'm in. Clan Howarton. Your banner, my caravan, my route, my margins, your cut when the books come back. Let's go look at my caravan.";
             var gate = TestDict("needed", true, "commitment", "accepted", "intent",
                 "Chagun accepts clan membership in clan Howarton, receiving a financed caravan, armed men under Howarton banner, and full trade authority, with her profit-share number to be determined after inspecting the caravan and stock.");
-            var snapshot = Program.DefaultActionTestSnapshot();
+            var snapshot = VerificationService.DefaultActionTestSnapshot();
             var payload = ReadDictionary(snapshot, "payload");
             var hero = ReadDictionary(payload, "hero");
-            var sceneFollowPayload = Program.CloneDictionary(payload);
+            var sceneFollowPayload = CloneDictionary(payload);
             sceneFollowPayload["nativeSceneMovement"] = TestDict("available", true);
-            var sceneFollowHero = Program.CloneDictionary(hero);
+            var sceneFollowHero = CloneDictionary(hero);
             sceneFollowHero["currentPartyId"] = "player_party";
             add("follow_is_available_for_present_scene_actor_without_separate_party",
                 DialoguePlannerCandidateEligible("follow", sceneFollowPayload,
                     sceneFollowHero, TestDict("commitment", "accepted"),
                     "Please follow me while we are here."), null);
-            var settings = new Dictionary<string, object>(Program.LoadSettings()) { ["enableMinimeMemoryWorker"] = false };
+            var settings = new Dictionary<string, object>(SettingsService.LoadSettings()) { ["enableMinimeMemoryWorker"] = false };
             foreach (int cap in new[] { 3, 10 })
             {
-                var choices = Program.BuildAllowedActionPlannerChoices(settings, payload, hero, gate,
+                var choices = ActionPipelineService.BuildAllowedActionPlannerChoices(settings, payload, hero, gate,
                     playerText, reply, cap);
                 add("captured_chagun_join_clan_survives_top_" + cap,
                     choices.Count <= cap
@@ -207,13 +207,13 @@ namespace ReignBetaServer
             foreach (string commitment in new[] { "conditional", "refused", "roleplay_only" })
             {
                 add("clan_membership_requires_accepted_" + commitment,
-                    Program.AcceptedClanMembershipCandidateToPreserve(new Dictionary<string, object>(gate)
+                    ActionPipelineService.AcceptedClanMembershipCandidateToPreserve(new Dictionary<string, object>(gate)
                     {
                         ["commitment"] = commitment
                     }, playerText) == "", null);
             }
             add("clan_membership_requires_actionable_gate",
-                Program.AcceptedClanMembershipCandidateToPreserve(new Dictionary<string, object>(gate)
+                ActionPipelineService.AcceptedClanMembershipCandidateToPreserve(new Dictionary<string, object>(gate)
                 {
                     ["needed"] = false
                 }, playerText) == "", null);
@@ -226,13 +226,13 @@ namespace ReignBetaServer
             Action<string, bool, object> add = (id, pass, data) => results.Add(TestDict("caseId", "item_gift_" + id, "passed", pass, "summary", id, "data", data));
             const string playerText = "Hadax is the one I defeated to win the final bout, here is the pernach i won, would you like it? Gavene?";
             var gate = TestDict("needed", true, "commitment", "accepted", "intent", "Gavene accepts the tournament-won pernach from the armed stranger as a kept token rather than payment, and opens House Cassianentis's door to him at Phycaon.");
-            var snapshot = Program.DefaultActionTestSnapshot();
+            var snapshot = VerificationService.DefaultActionTestSnapshot();
             var payload = ReadDictionary(snapshot, "payload");
             var hero = ReadDictionary(payload, "hero");
-            var settings = new Dictionary<string, object>(Program.LoadSettings()) { ["enableMinimeMemoryWorker"] = false };
+            var settings = new Dictionary<string, object>(SettingsService.LoadSettings()) { ["enableMinimeMemoryWorker"] = false };
             foreach (int cap in new[] { 3, 10 })
             {
-                var choices = Program.BuildAllowedActionPlannerChoices(settings, payload, hero, gate, playerText,
+                var choices = ActionPipelineService.BuildAllowedActionPlannerChoices(settings, payload, hero, gate, playerText,
                     "So put it here as the first thing of yours this house holds — proof of a name, not the name itself.", cap);
                 add("captured_pernach_survives_top_" + cap, choices.Count <= cap && choices.Any(row => ReadString(row, "command", "") == "transfer_item"), choices.Select(row => ReadString(row, "command", "")).ToList());
             }
@@ -250,10 +250,10 @@ namespace ReignBetaServer
             owner["inventory"] = TestDict("topItems", new List<Dictionary<string, object>> { TestDict("itemId", "fixture_pernach", "name", "Pernach", "count", 1) });
             var terms = new Dictionary<string, object>();
             var trace = new List<Dictionary<string, object>>();
-            Program.ResolveItemReference(index, TestDict("Item", "Pernach"), terms, trace);
+            ActionPipelineService.ResolveItemReference(index, TestDict("Item", "Pernach"), terms, trace);
             add("pernach_resolves_from_native_inventory_evidence", ReadString(terms, "itemId", "") == "fixture_pernach", trace);
             var unknownTerms = new Dictionary<string, object>();
-            Program.ResolveItemReference(index, TestDict("Item", "Imaginary Prize"), unknownTerms, new List<Dictionary<string, object>>());
+            ActionPipelineService.ResolveItemReference(index, TestDict("Item", "Imaginary Prize"), unknownTerms, new List<Dictionary<string, object>>());
             add("routing_does_not_invent_missing_item", !unknownTerms.ContainsKey("itemId"), unknownTerms);
             return results;
         }

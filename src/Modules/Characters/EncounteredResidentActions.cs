@@ -21,7 +21,7 @@ namespace ReignBetaServer
             bool accepted = false;
             foreach (string clause in clauses)
             {
-                bool decision = Program.ContainsAnyPhrase(clause, Program.DialogueActionAcceptancePhrases())
+                bool decision = ActionPipelineService.ContainsAnyPhrase(clause, ActionPipelineService.DialogueActionAcceptancePhrases())
                     || Regex.IsMatch(clause, @"\bi(?: (?:will|shall|agree to)|'ll)? (?:join|travel|ride|serve|come|accompany|become)\b")
                     || clause.Contains("i'm joining you") || clause.Contains("i am joining you");
                 bool blocked = Regex.IsMatch(clause, @"\b(if|unless|perhaps|maybe|might|would|could|hypothetically|provided|assuming|tomorrow|later|after|once|first)\b");
@@ -73,26 +73,26 @@ namespace ReignBetaServer
             if (release)
             {
                 if (resident) { raw["targetHeroStringId"] = speaker; raw["TargetHero"] = speaker; }
-                string player = Program.LatestPlayerDirectiveOrText(resolution.Substring(0, Math.Max(0, resolution.LastIndexOf("npc:", StringComparison.OrdinalIgnoreCase))));
+                string player = ActionPipelineService.LatestPlayerDirectiveOrText(resolution.Substring(0, Math.Max(0, resolution.LastIndexOf("npc:", StringComparison.OrdinalIgnoreCase))));
                 string grant = resident ? player : reply;
                 if (!Regex.IsMatch(grant ?? "", @"(?i)\b(release|discharge|relieve)\b.*\b(duty|service|duties)\b")
                     || Regex.IsMatch(grant ?? "", @"(?i)\b(if|unless|might|would|could|not|won't|cannot)\b"))
                     errors.Add("Duty release requires an explicit present release by the authorized commander.");
                 terms["releaseConfirmed"] = errors.Count == 0;
-                terms["verifiedConsentQuote"] = Program.LimitText(grant, 1200);
+                terms["verifiedConsentQuote"] = DialogueService.LimitText(grant, 1200);
                 return;
             }
             if (recruit && !resident) errors.Add("Permanent resident recruitment requires encountered-resident metadata.");
             if (recruit)
             {
-                string turn = FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), Program.EnsureCorrelationId(payload));
+                string turn = FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), OperationsService.EnsureCorrelationId(payload));
                 terms["paymentDependencies"] = DialogueService.CurrentPlayerTransfers(payload).Select((i, slot) => new { i, slot })
                     .Where(x => x.i.Error.Length == 0 && x.i.Command == "transfer_gold" && x.i.Purpose == "recruitment_advance")
                     .Select(x => ReignBeta.Shared.Dialogue.PlayerActionRules.ActionId(ReadString(payload, "campaignId", "default"), DialogueService.ContinuityTimeline(payload), turn, x.slot)).ToList();
             }
             if (!ResidentHasUnconditionalConsent(reply)) errors.Add("The current visible reply does not unconditionally agree to join.");
             terms["consentConfirmed"] = errors.Count == 0;
-            terms["verifiedConsentQuote"] = Program.LimitText(reply, 1200);
+            terms["verifiedConsentQuote"] = DialogueService.LimitText(reply, 1200);
             if (recruit && ReadString(terms, "agreementKind", "") != "permanent")
                 errors.Add("Permanent companion recruitment must explicitly identify agreementKind=permanent.");
             if (recruit || terms.ContainsKey("agreedGold"))
@@ -103,7 +103,7 @@ namespace ReignBetaServer
                 {
                     terms["agreedGold"] = gold;
                     // Price must be present in the accepted exchange, never invented by the planner.
-                    string accepted = (Program.LatestPlayerDirectiveOrText(resolution.Substring(0,
+                    string accepted = (ActionPipelineService.LatestPlayerDirectiveOrText(resolution.Substring(0,
                         Math.Max(0, resolution.LastIndexOf("npc:", StringComparison.OrdinalIgnoreCase)))) + "\n" + reply).Replace(",", "");
                     var prices = Regex.Matches(accepted, @"(?i)\b(\d+)\s*(?:denars?|gold|coins?)\b")
                         .Cast<Match>().Select(m => int.TryParse(m.Groups[1].Value, out int n) ? n : -1).ToList();
@@ -132,18 +132,18 @@ namespace ReignBetaServer
             if (double.IsNaN(total) || double.IsInfinity(total) || total < 0 || total > int.MaxValue || total != Math.Truncate(total)) return null;
             string campaign = ReadString(payload, "campaignId", "default");
             var candidate = TestDict("command", "recruit_encountered_resident", "source", "dialogue_resident_companion",
-                "FromHero", FirstNonEmpty(ReadFirstString(payload, "speakerHeroStringId", "heroStringId", "heroId"), Program.CharacterIdFrom(hero)),
+                "FromHero", FirstNonEmpty(ReadFirstString(payload, "speakerHeroStringId", "heroStringId", "heroId"), CampaignFileService.CharacterIdFrom(hero)),
                 "requiresAcceptance", false, "reason", "The resident explicitly accepted permanent companionship under the verified agreement.",
                 "terms", TestDict("agreementKind", "permanent", "agreedGold", (int)total));
             var bound = BindResidentActionProfile(payload, hero);
-            var normalized = Program.NormalizeActionCommand(candidate, campaign, out var errors, bound,
-                Program.BuildRouterResolutionText(ReadFirstString(payload, "playerText", "text", "message"), reply));
+            var normalized = ActionPipelineService.NormalizeActionCommand(candidate, campaign, out var errors, bound,
+                ActionPipelineService.BuildRouterResolutionText(ReadFirstString(payload, "playerText", "text", "message"), reply));
             if (normalized == null || errors.Count > 0)
             {
                 response["reply"] = reply + "\n\n[Recruitment not queued: " + string.Join(" ", errors) + "]";
                 return null;
             }
-            return Program.QueueAction(campaign, normalized);
+            return ActionPipelineService.QueueAction(campaign, normalized);
         }
 
         internal static string ResidentRecruitmentCandidate(Dictionary<string, object> hero, string text)

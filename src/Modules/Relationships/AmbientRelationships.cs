@@ -27,7 +27,7 @@ namespace ReignBetaServer
             payload = payload ?? new Dictionary<string, object>();
             Stopwatch timer = Stopwatch.StartNew();
             string campaignId = ReadString(payload, "campaignId", "default");
-            string correlationId = Program.EnsureCorrelationId(payload);
+            string correlationId = OperationsService.EnsureCorrelationId(payload);
             int day = (int)Math.Floor(ReadDouble(payload, "worldDay", 0d) + 0.000001d);
             List<Dictionary<string, object>> groups = ReadDictionaryList(payload, "presenceGroups");
             List<Dictionary<string, object>> heroRows = ReadDictionaryList(payload, "heroes");
@@ -155,7 +155,7 @@ namespace ReignBetaServer
                             ["duration"] = timer.ElapsedMilliseconds, ["summary"] = Json.Serialize(summary), ["ts"] = ts
                         });
                     RelationshipsStore.Commit(connection);
-                    Program.WriteAudit(campaignId, correlationId, "server", "relationships", "relationships.ambient_daily", "", "", "", "completed",
+                    OperationsService.WriteAudit(campaignId, correlationId, "server", "relationships", "relationships.ambient_daily", "", "", "", "completed",
                         timer.ElapsedMilliseconds, "Deterministic ambient NPC relationship chemistry processed without an LLM call.", summary);
                     return summary;
                 }
@@ -460,9 +460,9 @@ namespace ReignBetaServer
         {
             string heroId = ReadFirstString(snapshot, "heroStringId", "heroId", "id");
             Dictionary<string, object> profile = new Dictionary<string, object>(snapshot ?? new Dictionary<string, object>(), StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, object> storedProfile = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json"));
+            Dictionary<string, object> storedProfile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "profile.json"));
             foreach (KeyValuePair<string, object> item in storedProfile) profile[item.Key] = item.Value;
-            Dictionary<string, object> traitDocument = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"));
+            Dictionary<string, object> traitDocument = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"));
             Dictionary<string, object> storedTraits = ReadDictionary(traitDocument, "foundationTraits")
                 ?? ReadDictionary(snapshot,"foundationTraits");
             if (storedTraits == null || storedTraits.Count == 0)
@@ -498,23 +498,23 @@ namespace ReignBetaServer
             double targetMerit = AmbientAverage01(target, "courage", "discipline", "confidence", "dutyMotivation");
             double observerRespect = AmbientAverage01(observer, "authorityRespect", "dutyMotivation", "ambition");
             double admiration = Map01ToSigned(0.70d * targetMerit + 0.30d * observerRespect);
-            double statusFriction = Program.ClampDouble((AmbientTo01(AmbientTrait(observer, "pride")) + AmbientTo01(AmbientTrait(observer, "envy"))
+            double statusFriction = DialogueService.ClampDouble((AmbientTo01(AmbientTrait(observer, "pride")) + AmbientTo01(AmbientTrait(observer, "envy"))
                 + AmbientTo01(AmbientTrait(observer, "irritability")) + AmbientTo01(AmbientTrait(target, "ambition"))
                 + AmbientTo01(AmbientTrait(target, "assertiveness")) + AmbientTo01(AmbientTrait(target, "powerMotivation"))
                 + AmbientTo01(AmbientTrait(target, "aggression"))) / 7d, 0d, 1d);
             double goalOverlap = new[] { "ambition", "powerMotivation", "fameMotivation", "wealthMotivation", "legacyMotivation" }
                 .Select(x => Math.Min(AmbientTo01(AmbientTrait(observer, x)), AmbientTo01(AmbientTrait(target, x)))).Average();
-            double rivalryPotential = Program.ClampDouble(0.55d * goalOverlap + 0.25d * statusFriction
+            double rivalryPotential = DialogueService.ClampDouble(0.55d * goalOverlap + 0.25d * statusFriction
                 + 0.20d * Math.Min(AmbientTo01(AmbientTrait(observer, "pride")), AmbientTo01(AmbientTrait(target, "pride"))), 0d, 1d);
             double affiliation = pair == null ? 0d : pair.SameClan ? 1d : pair.SameKingdom ? 0.5d : 0d;
             Dictionary<string, object> equilibrium = new Dictionary<string, object>
             {
-                ["trust"] = Math.Round(Program.ClampDouble(12d * trustPerception + 8d * valueAlignment + 5d * socialEase, -25d, 25d), 3),
-                ["respect"] = Math.Round(Program.ClampDouble(15d * admiration + 8d * valueAlignment - 8d * statusFriction, -25d, 25d), 3),
-                ["affection"] = Math.Round(Program.ClampDouble(12d * socialEase + 10d * valueAlignment + 3d * trustPerception - 6d * statusFriction, -25d, 25d), 3),
-                ["interest_alignment"] = Math.Round(Program.ClampDouble(24d * valueAlignment + 6d * affiliation, -30d, 30d), 3),
-                ["resentment"] = Math.Round(Program.ClampDouble(14d * statusFriction - 4d * socialEase - 4d * valueAlignment, 0d, 20d), 3),
-                ["rivalry"] = Math.Round(Program.ClampDouble(14d * rivalryPotential + 6d * statusFriction, 0d, 20d), 3)
+                ["trust"] = Math.Round(DialogueService.ClampDouble(12d * trustPerception + 8d * valueAlignment + 5d * socialEase, -25d, 25d), 3),
+                ["respect"] = Math.Round(DialogueService.ClampDouble(15d * admiration + 8d * valueAlignment - 8d * statusFriction, -25d, 25d), 3),
+                ["affection"] = Math.Round(DialogueService.ClampDouble(12d * socialEase + 10d * valueAlignment + 3d * trustPerception - 6d * statusFriction, -25d, 25d), 3),
+                ["interest_alignment"] = Math.Round(DialogueService.ClampDouble(24d * valueAlignment + 6d * affiliation, -30d, 30d), 3),
+                ["resentment"] = Math.Round(DialogueService.ClampDouble(14d * statusFriction - 4d * socialEase - 4d * valueAlignment, 0d, 20d), 3),
+                ["rivalry"] = Math.Round(DialogueService.ClampDouble(14d * rivalryPotential + 6d * statusFriction, 0d, 20d), 3)
             };
             return new Dictionary<string, object>
             {
@@ -545,7 +545,7 @@ namespace ReignBetaServer
                 }
                 double gap = desired - current;
                 if (Math.Abs(gap) < 0.5d) continue;
-                double delta = Program.ClampDouble(gap * 0.02d * exposureWeight, -0.50d, 0.50d);
+                double delta = DialogueService.ClampDouble(gap * 0.02d * exposureWeight, -0.50d, 0.50d);
                 if (Math.Abs(delta) < 0.00001d) continue;
                 double next = ClampRelationship(current + delta);
                 changes[facet] = delta;
@@ -598,10 +598,10 @@ namespace ReignBetaServer
             return string.Compare(a, b, StringComparison.OrdinalIgnoreCase) <= 0 ? a + "|" + b : b + "|" + a;
         }
 
-        private static double AmbientTrait(Dictionary<string, object> profile, string key) => Program.ClampDouble(TraitFromProfile(profile, key) / 2d, -1d, 1d);
-        private static double AmbientTo01(double signed) => Program.ClampDouble((signed + 1d) / 2d, 0d, 1d);
-        private static double Map01ToSigned(double value) => Program.ClampDouble(value * 2d - 1d, -1d, 1d);
-        private static double AmbientSimilarity(double a, double b) => Program.ClampDouble(1d - Math.Abs(a - b) / 2d, 0d, 1d);
+        private static double AmbientTrait(Dictionary<string, object> profile, string key) => DialogueService.ClampDouble(TraitFromProfile(profile, key) / 2d, -1d, 1d);
+        private static double AmbientTo01(double signed) => DialogueService.ClampDouble((signed + 1d) / 2d, 0d, 1d);
+        private static double Map01ToSigned(double value) => DialogueService.ClampDouble(value * 2d - 1d, -1d, 1d);
+        private static double AmbientSimilarity(double a, double b) => DialogueService.ClampDouble(1d - Math.Abs(a - b) / 2d, 0d, 1d);
         private static double AmbientAverage01(Dictionary<string, object> profile, params string[] keys) => keys.Select(x => AmbientTo01(AmbientTrait(profile, x))).Average();
 
         private static List<Dictionary<string, object>> RunAmbientRelationshipSelfTests()
@@ -620,8 +620,8 @@ namespace ReignBetaServer
             add("rival_equilibrium_friction", ReadDouble(friction, "rivalry", 0d) > 5d || ReadDouble(friction, "resentment", 0d) > 5d, "Proud aggressive peers produce rivalry or resentment pressure.");
             Dictionary<string, object> directionalA = CalculateAmbientCompatibility(warm, rivalA, pair), directionalB = CalculateAmbientCompatibility(rivalA, warm, pair);
             add("directional_chemistry", Math.Abs(ReadDouble(ReadDictionary(directionalA, "equilibrium"), "trust", 0d) - ReadDouble(ReadDictionary(directionalB, "equilibrium"), "trust", 0d)) > 0.1d, "Compatibility is evaluated independently in each direction.");
-            double partyDelta = Program.ClampDouble((20d - 0d) * 0.02d * AmbientPartyExposure, -0.50d, 0.50d);
-            double settlementDelta = Program.ClampDouble((20d - 0d) * 0.02d * AmbientSettlementExposure, -0.50d, 0.50d);
+            double partyDelta = DialogueService.ClampDouble((20d - 0d) * 0.02d * AmbientPartyExposure, -0.50d, 0.50d);
+            double settlementDelta = DialogueService.ClampDouble((20d - 0d) * 0.02d * AmbientSettlementExposure, -0.50d, 0.50d);
             add("party_stronger_than_settlement", partyDelta > settlementDelta && Math.Abs(settlementDelta - 0.14d) < 0.0001d, "Party exposure is stronger and settlement drift uses the doubled convergence rate.");
             add("seven_day_settlement_drift", Math.Abs(settlementDelta * 7d - 0.98d) < 0.0001d, "A twenty-point settlement gap moves approximately one point over a seven-day stay.");
             add("ambient_facet_allowlist", AmbientFacetKeys.All(x => new[] { "trust", "respect", "affection", "interest_alignment", "resentment", "rivalry" }.Contains(x)) && !AmbientFacetKeys.Contains("attraction") && !AmbientFacetKeys.Contains("loyalty"), "Ambient drift cannot directly alter romance, loyalty, fear, debt, or other gated facets.");
@@ -730,7 +730,7 @@ namespace ReignBetaServer
                     trustAfterBlock = ReadDouble(RelationshipsStore.SelectRelationships2(connection, new Dictionary<string, object> { ["a"] = heroA, ["b"] = heroB }).FirstOrDefault(), "trust", 0d);
                 add("persistence_major_history_blocks_healing", Math.Abs(trustAfterBlock - trustBeforeBlock) < 0.000001d,
                     "Active betrayal evidence prevents ordinary proximity from increasing trust.");
-                add("persistence_unconstructed_heroes_stay_transient", !Directory.Exists(Program.CharacterDirectory(campaignId, heroA)) && !Directory.Exists(Program.CharacterDirectory(campaignId, heroB)),
+                add("persistence_unconstructed_heroes_stay_transient", !Directory.Exists(CampaignFileService.CharacterDirectory(campaignId, heroA)) && !Directory.Exists(CampaignFileService.CharacterDirectory(campaignId, heroB)),
                     "Ambient processing used transient deterministic traits without constructing profiles or backstories.");
             }
             catch (Exception ex)
@@ -739,7 +739,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaignId));
             }
             return results;
         }

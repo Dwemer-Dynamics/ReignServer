@@ -40,7 +40,7 @@ namespace ReignBetaServer
                 return TestDict("status", "no_player_contribution", "persisted", false);
             string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
             if (player.Length == 0) throw new InvalidOperationException("The original message requires a player identity before generation.");
-            string contribution = FirstNonEmpty(ReadFirstString(payload, "contributionId", "sceneTurnId", "turnId", "requestId"), Program.EnsureCorrelationId(payload));
+            string contribution = FirstNonEmpty(ReadFirstString(payload, "contributionId", "sceneTurnId", "turnId", "requestId"), OperationsService.EnsureCorrelationId(payload));
             string session = ReadFirstString(payload, "conversationSessionId", "sessionId", "conversationId");
             if (session.Length == 0)
             {
@@ -64,7 +64,7 @@ namespace ReignBetaServer
             DialogueStore.InsertOrIgnoreConversationSessions4(connection, TestDict("session", session, "campaign", campaign, "npc", observer, "player", player,
                     "channel", ReadString(payload, "channel", "in_person"), "now", now, "day", ReadDouble(payload, "worldDay", 0d),
                     "location", ReadFirstString(payload, "locationId", "currentSettlementId"),
-                    "audience", Json.Serialize(Program.MergeStringLists(ReadStringList(payload, "participants"), new[] { player, observer })),
+                    "audience", Json.Serialize(DialogueService.MergeStringLists(ReadStringList(payload, "participants"), new[] { player, observer })),
                     "payload", SerializeConversationTurnStoragePayload(payload)));
             var sessionRow = DialogueStore.SelectConversationSessions7(connection, TestDict("session", session)).Single();
             string sessionTimeline = ReadString(TryParseJsonObject(ReadString(sessionRow, "payload_json", "{}")), "timelineId", "");
@@ -117,7 +117,7 @@ namespace ReignBetaServer
             var responses = TryParseJsonObject(ReadString(row, "response_json", "{}"));
             var response = ReadDictionary(responses, observer);
             if (response == null || !ReadBool(response, "ok", false)) return null;
-            response = Program.CloneDictionary(response);
+            response = CloneDictionary(response);
             response["idempotentReplay"] = true;
             response["inputReceipt"] = source.Receipt;
             if (payload.TryGetValue("conversationGrounding", out var grounding)) response["conversationGrounding"] = grounding;
@@ -141,7 +141,7 @@ namespace ReignBetaServer
             var responses = TryParseJsonObject(ReadString(row, "response_json", "{}"));
             if (ReadBool(response, "ok", false) && observer.Length > 0)
             {
-                var replay = Program.CloneDictionary(response);
+                var replay = CloneDictionary(response);
                 // Full provider drafts/prompts have their own private diagnostics store.
                 foreach (string key in new[] { "llm", "prompt", "messages", "promptEnvelope" }) replay.Remove(key);
                 responses[observer] = replay;

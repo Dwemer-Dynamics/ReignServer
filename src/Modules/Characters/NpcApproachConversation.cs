@@ -46,13 +46,13 @@ namespace ReignBetaServer
                 {
                     var current = ReadNpcLives(c, scope.Campaign, scope.Timeline);
                     if (NpcLivesGeneration(c) != scope.Generation
-                        || scope.Invitation != null && ResolveNpcLifeInvitationOpening(current, payload, scope.Hero, Program.ReadNpcLivesOptions())?.ReceiptKey != scope.Invitation.ReceiptKey
+                        || scope.Invitation != null && ResolveNpcLifeInvitationOpening(current, payload, scope.Hero, SettingsService.ReadNpcLivesOptions())?.ReceiptKey != scope.Invitation.ReceiptKey
                         || !current.Encounters.Any(e => e.OpeningPending
                             && e.HeroId == scope.Hero && e.OpeningOperationId == scope.Operation
                             && e.OpeningGeneration == scope.Generation && e.SessionId == scope.Session && e.OpeningDay == scope.Day))
                         return TestDict("ok", false, "status", "superseded");
                 }
-                return Program.RunInteractiveRequest(() => prepare == null ? Program.DialogueRespondCore(payload) : prepare(payload));
+                return Program.RunInteractiveRequest(() => prepare == null ? DialogueService.DialogueRespondCore(payload) : prepare(payload));
             }
             finally { Program.ExitCampaignRequestAccess(access); }
         }
@@ -63,7 +63,7 @@ namespace ReignBetaServer
             var p = DeepCloneProfileDictionary(source);
             p["campaignId"] = state.CampaignId; p["timelineId"] = state.TimelineId;
             p["heroStringId"] = hero; p["playerHeroStringId"] = player; p["playerId"] = player;
-            p["hero"] = Program.CloneDictionary(ReadDictionary(source, "hero") ?? ReadDictionary(source, "profile") ?? TestDict());
+            p["hero"] = CloneDictionary(ReadDictionary(source, "hero") ?? ReadDictionary(source, "profile") ?? TestDict());
             p["correlationId"] = operation; p["sceneTurnId"] = operation;
             p["conversationSessionId"] = encounter.SessionId; p["worldDay"] = day;
             p["playerText"] = ""; p.Remove("text"); p.Remove("message");
@@ -115,9 +115,9 @@ namespace ReignBetaServer
             request["eventId"] = ReadString(payload, "correlationId", "");
             request["heroName"] = ReadString(ReadDictionary(payload, "hero"), "name", "");
             var nativeSpeaker = ReadDictionary(payload, "hero");
-            if (nativeSpeaker != null && Program.CharacterIdFrom(nativeSpeaker) == ReadString(request, "heroStringId", ""))
+            if (nativeSpeaker != null && CampaignFileService.CharacterIdFrom(nativeSpeaker) == ReadString(request, "heroStringId", ""))
             {
-                var author = Program.CloneDictionary(nativeSpeaker);
+                var author = CloneDictionary(nativeSpeaker);
                 author["politicalTimelineId"] = DialogueService.ContinuityTimeline(payload);
                 request["politicalAuthors"] = new[] { author };
             }
@@ -130,7 +130,7 @@ namespace ReignBetaServer
             Dictionary<string, object> motive, Dictionary<string, object> identity,
             List<Dictionary<string, object>> prior, string hero, string heroName, string playerName)
         {
-            var view = Program.CloneDictionary(parsed ?? TestDict()); view["reply"] = reply;
+            var view = CloneDictionary(parsed ?? TestDict()); view["reply"] = reply;
             if (parsed == null || !ReadBool(llm, "ok", false) || ReadBool(llm, "visibleRepairFailure", false)
                 || ReadBool(ReadDictionary(llm, "conversationAgency"), "visibleFailure", false)
                 || !NpcApproachReplyShape(view)
@@ -181,7 +181,7 @@ namespace ReignBetaServer
                 || captured.Session != encounter.SessionId || captured.Day != encounter.OpeningDay
                 || captured.ReplyHash != DialogueService.PromptHash(ReadString(draft, "reply", ""))
                 || captured.ActivityHash != DialogueService.PromptHash(ReadString(draft, "activity", ""))
-                || captured.Invitation != null && ResolveNpcLifeInvitationOpening(state, saved, encounter.HeroId, Program.ReadNpcLivesOptions())?.ReceiptKey != captured.Invitation.ReceiptKey) return false;
+                || captured.Invitation != null && ResolveNpcLifeInvitationOpening(state, saved, encounter.HeroId, SettingsService.ReadNpcLivesOptions())?.ReceiptKey != captured.Invitation.ReceiptKey) return false;
             receipt = captured; return true;
         }
 

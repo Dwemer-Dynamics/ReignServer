@@ -77,7 +77,7 @@ namespace ReignBetaServer
                 ["expiresUtc"] = expires.ToString("o"),
                 ["requestedBy"] = ReadString(payload, "requestedBy", "ReignLiveTest")
             };
-            lock (LiveTestLock) Program.WriteJsonObject(LiveTestArmPath(), arm);
+            lock (LiveTestLock) CampaignFileService.WriteJsonObject(LiveTestArmPath(), arm);
             return new Dictionary<string, object>
             {
                 ["ok"] = true, ["armed"] = true, ["armId"] = arm["armId"], ["expiresUtc"] = arm["expiresUtc"]
@@ -89,7 +89,7 @@ namespace ReignBetaServer
             query = query ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             string campaignId = query.TryGetValue("campaignId", out string requested) ? requested : "";
             Dictionary<string, object> runtime = LoadLiveTestRuntime(campaignId);
-            Dictionary<string, object> arm = Program.ReadJsonObject(LiveTestArmPath());
+            Dictionary<string, object> arm = CampaignFileService.ReadJsonObject(LiveTestArmPath());
             bool armed = IsLiveTestArmed(arm);
             string runtimeCampaign = ReadString(runtime, "campaignId", campaignId);
             Dictionary<string, object> run = string.IsNullOrWhiteSpace(runtimeCampaign) ? null : FindActiveLiveTestRun(runtimeCampaign);
@@ -125,7 +125,7 @@ namespace ReignBetaServer
                     && !string.Equals(currentInstance, gameInstanceId, StringComparison.OrdinalIgnoreCase)
                     && CompareLiveTestGameInstanceOrder(gameInstanceId, currentInstance) < 0)
                 {
-                    Dictionary<string, object> currentArm = Program.ReadJsonObject(LiveTestArmPath());
+                    Dictionary<string, object> currentArm = CampaignFileService.ReadJsonObject(LiveTestArmPath());
                     return new Dictionary<string, object>
                     {
                         ["ok"] = false,
@@ -149,9 +149,9 @@ namespace ReignBetaServer
 
                 payload["schemaVersion"] = LiveTestSchemaVersion;
                 payload["receivedUtc"] = DateTimeOffset.UtcNow.ToString("o");
-                Program.WriteJsonObject(LiveTestRuntimePath(campaignId), payload);
-                Program.WriteJsonObject(LiveTestLatestRuntimePath(), payload);
-                Dictionary<string, object> arm = Program.ReadJsonObject(LiveTestArmPath());
+                CampaignFileService.WriteJsonObject(LiveTestRuntimePath(campaignId), payload);
+                CampaignFileService.WriteJsonObject(LiveTestLatestRuntimePath(), payload);
+                Dictionary<string, object> arm = CampaignFileService.ReadJsonObject(LiveTestArmPath());
                 if (DialogueService.TryRenewPersonalGossipConversationLease(active, payload, DateTimeOffset.UtcNow, IsLiveTestArmed(arm)))
                     SaveLiveTestRun(active);
                 return new Dictionary<string, object>
@@ -263,7 +263,7 @@ namespace ReignBetaServer
                 return LiveTestError("Unsupported live-test schemaVersion. Expected 1 or " + LiveTestSchemaVersion.ToString(CultureInfo.InvariantCulture) + ".");
             string campaignId = ReadString(payload, "campaignId", "");
             if (string.IsNullOrWhiteSpace(campaignId)) return LiveTestError("campaignId is required.");
-            if (!IsLiveTestArmed(Program.ReadJsonObject(LiveTestArmPath()))) return LiveTestError("The live-test bridge is not armed or its arm window expired.");
+            if (!IsLiveTestArmed(CampaignFileService.ReadJsonObject(LiveTestArmPath()))) return LiveTestError("The live-test bridge is not armed or its arm window expired.");
             Dictionary<string, object> runtime = LoadLiveTestRuntime(campaignId);
             if (!IsFreshLiveTestRuntime(runtime)) return LiveTestError("No fresh loaded-game heartbeat exists for this campaign.");
             if (ReadBool(ReadDictionary(runtime, "saveSync"), "alignmentPending", false)) return LiveTestError("Save Sync alignment is still pending.");
@@ -506,7 +506,7 @@ namespace ReignBetaServer
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "");
             string instanceId = ReadString(payload, "gameInstanceId", "");
-            if (!IsLiveTestArmed(Program.ReadJsonObject(LiveTestArmPath()))) return new Dictionary<string, object> { ["ok"] = true, ["found"] = false, ["armed"] = false };
+            if (!IsLiveTestArmed(CampaignFileService.ReadJsonObject(LiveTestArmPath()))) return new Dictionary<string, object> { ["ok"] = true, ["found"] = false, ["armed"] = false };
             lock (LiveTestLock)
             {
                 Dictionary<string, object> run = FindActiveLiveTestRun(campaignId);
@@ -666,9 +666,9 @@ namespace ReignBetaServer
                 if (result)
                 {
                     command["result"] = fatalInfrastructureFailure
-                        ? new Dictionary<string, object> { ["fatalInfrastructureFailure"] = true, ["error"] = Program.LimitText(reportedError, 2000) }
+                        ? new Dictionary<string, object> { ["fatalInfrastructureFailure"] = true, ["error"] = DialogueService.LimitText(reportedError, 2000) }
                         : ReadDictionary(payload, "result") ?? new Dictionary<string, object>();
-                    command["error"] = fatalInfrastructureFailure ? Program.LimitText(reportedError, 2000) : ReadString(payload, "error", "");
+                    command["error"] = fatalInfrastructureFailure ? DialogueService.LimitText(reportedError, 2000) : ReadString(payload, "error", "");
                     command["correlationIds"] = ReadStringList(payload, "correlationIds");
                     if (fatalInfrastructureFailure)
                     {
@@ -677,7 +677,7 @@ namespace ReignBetaServer
                         List<Dictionary<string, object>> infrastructureFailures = ReadDictionaryList(run, "infrastructureFailures");
                         infrastructureFailures.Add(new Dictionary<string, object>
                         {
-                            ["commandId"] = commandId, ["error"] = Program.LimitText(reportedError, 2000),
+                            ["commandId"] = commandId, ["error"] = DialogueService.LimitText(reportedError, 2000),
                             ["utc"] = DateTimeOffset.UtcNow.ToString("o")
                         });
                         run["infrastructureFailures"] = infrastructureFailures;

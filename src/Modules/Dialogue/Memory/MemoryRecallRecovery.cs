@@ -176,7 +176,7 @@ namespace ReignBetaServer
                 || ReadFirstString(source, "playerText", "text", "message") != ReadFirstString(target, "playerText", "text", "message")) return;
             var to = DeliveredMemoryRecall.GetOrCreateValue(target);
             lock (to) to[observer] = new DeliveredMemoryRecallEvidence { Signature = MemoryRecallTurnSignature(target, observer),
-                ObserverName = evidence.ObserverName, Originals = evidence.Originals.Select(Program.CloneDictionary).ToList() };
+                ObserverName = evidence.ObserverName, Originals = evidence.Originals.Select(CloneDictionary).ToList() };
         }
 
         private static string BindDeliveredRecallRepairEvidence(Dictionary<string, object> repairRequest,
@@ -411,7 +411,7 @@ namespace ReignBetaServer
             // the very evidence the correction must preserve.
             var sources = originalEvents.Select(source => TestDict("sourceId", source["id"],
                 "original", ReadString(source, "text", ""))).ToList();
-            found.Add(TestDict("type", contextReview ? "critical_continuity_recall_context" : "critical_continuity_recall_loss", "match", Program.LimitText(match ?? "", 220),
+            found.Add(TestDict("type", contextReview ? "critical_continuity_recall_context" : "critical_continuity_recall_loss", "match", DialogueService.LimitText(match ?? "", 220),
                 "detail", "Original exchanges below were actually delivered to this observer. "
                     + (contextReview ? "The supplied context also contains earlier unreliable recall: reassess the entire answer and all proposed writes from original events. " : "The draft conflicts with that evidence. ")
                     + "Do not deny remembering their supported topics or ask for the supplied story again. Earlier failed recall, its metaphors and subsequent retellings are not independent evidence of amnesia. Answer from these originals as ordinary memory. Remove every lost/kept/recovered-page contrast and dependent mental, memory, mood, plan or continuity write. Acknowledge a prior mistaken answer briefly only if needed. Recalling an existing event does not create a new event; omit redundant writes whose only purpose is to announce recall or reconstruction. Keep unsupported details narrowly uncertain. An invitation, promise or plan never proves its later fulfillment; describe what was actually said and do not invent arrival, completion, witnesses, dates or a new cause. Any retained source quote must be one exact contiguous span of the corrected visible reply or supplied original, with the correct speaker.",
@@ -447,7 +447,7 @@ namespace ReignBetaServer
         }
 
         private static List<Dictionary<string, object>> ExpandMemoryRecallPrecedingTurn(ReignDbConnection connection,
-            List<Dictionary<string, object>> exchange, Program.KnowledgeAccessContext knowledge)
+            List<Dictionary<string, object>> exchange, DialogueService.KnowledgeAccessContext knowledge)
         {
             if (knowledge == null || exchange.Count == 0) return exchange;
             var first = exchange.OrderBy(row => ReadLong(row, "turn_order", 0)).First();
@@ -465,7 +465,7 @@ namespace ReignBetaServer
 
         private static List<string> MemoryRecallTerms(string text)
         {
-            var terms = Program.MemoryQueryTerms(text).Where(t => !ExactRecallStopWords.Contains(t, StringComparer.OrdinalIgnoreCase)
+            var terms = DialogueService.MemoryQueryTerms(text).Where(t => !ExactRecallStopWords.Contains(t, StringComparer.OrdinalIgnoreCase)
                 && !new[] { "can", "did", "does", "still", "please" }.Contains(t, StringComparer.OrdinalIgnoreCase)).ToList();
             // The game and ordinary dialogue use both names for the same event.
             // Expansion affects discovery only, never source text or truth.
@@ -477,13 +477,13 @@ namespace ReignBetaServer
         private static List<string> MemoryRecallQueryGroups(string query)
         {
             string spoken = Regex.Replace(query ?? "", @"\*[^*]*\*", " ");
-            string primary = Program.MemoryQueryTerms(spoken).Count >= 3 ? spoken : query ?? "";
-            var groups = new List<string> { Program.BuildFtsQuery(MemoryRecallTerms(primary)) };
+            string primary = DialogueService.MemoryQueryTerms(spoken).Count >= 3 ? spoken : query ?? "";
+            var groups = new List<string> { DialogueService.BuildFtsQuery(MemoryRecallTerms(primary)) };
             // A long reminder can ask about several episodes. Search each
             // substantive sentence as well as the whole contribution, so a long
             // preamble cannot crowd its final question out of the candidate set.
             groups.AddRange(Regex.Split(primary, @"(?<=[.!?;])\s+").Select(MemoryRecallTerms)
-                .Where(terms => terms.Count >= 2).Select(Program.BuildFtsQuery).TakeLast(5));
+                .Where(terms => terms.Count >= 2).Select(DialogueService.BuildFtsQuery).TakeLast(5));
             return groups.Where(g => g.Length > 0).Distinct(StringComparer.Ordinal).ToList();
         }
 
@@ -530,13 +530,13 @@ namespace ReignBetaServer
         // Action/topic terms remain fallback candidates, and action-only input
         // uses its complete contribution.
         private static List<Dictionary<string, object>> FindLexicalMemoryRecallTurns(ReignDbConnection connection,
-            MemoryQueryPlan plan, Program.KnowledgeAccessContext knowledge, int limit,
+            MemoryQueryPlan plan, DialogueService.KnowledgeAccessContext knowledge, int limit,
             int maximumCandidatePages = int.MaxValue, bool requirePlayerSource = true, bool excludeCurrentSession = false)
         {
             if (plan.Terms.Count == 0) return new();
             var groups = MemoryRecallQueryGroups(plan.Query);
-            if (groups.Count == 0) groups.Add(Program.BuildFtsQuery(plan.Terms));
-            var parameters = TestDict("query", Program.BuildFtsQuery(plan.Terms.Concat(MemoryRecallTerms(plan.Query)).Distinct().ToList()), "npc", plan.Observer,
+            if (groups.Count == 0) groups.Add(DialogueService.BuildFtsQuery(plan.Terms));
+            var parameters = TestDict("query", DialogueService.BuildFtsQuery(plan.Terms.Concat(MemoryRecallTerms(plan.Query)).Distinct().ToList()), "npc", plan.Observer,
                 "queryGroups", Json.Serialize(groups),
                 "session", plan.Session, "day", plan.WorldDay, "timeline", plan.Timeline,
                 "asOfSequence", knowledge.AsOfAcceptedSequence, "asOfTimestamp", knowledge.AsOfTimestamp);

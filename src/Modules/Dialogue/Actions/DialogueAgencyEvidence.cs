@@ -51,7 +51,7 @@ namespace ReignBetaServer
                     + @"(?<place>[\p{L}][\p{L}\s'-]{2,80})[.!?""”]*\s*$", options);
                 if (!request.Success) continue;
                 if (!IsAssertedDialogueRequest(sentence.Value, request.Index)) continue;
-                string topic = Program.NormalizeLookup(request.Groups["place"].Value);
+                string topic = ActionPipelineService.NormalizeLookup(request.Groups["place"].Value);
                 // Do not turn abstract needs into an invitation ownership alarm.
                 if (Regex.IsMatch(topic, @"\b(?:answer|respect|truth|love|trust|fear|plan|help|understanding|attention|permission|chance|reason)\b", options)) continue;
                 result.Add(new DialogueRequestEvidence { Quote = sentence.Value.Trim(), Start = sentence.Index + sentence.Value.IndexOf(sentence.Value.Trim(), StringComparison.Ordinal),
@@ -83,7 +83,7 @@ namespace ReignBetaServer
             if (patch == null) return null;
             string visible = ReadFirstString(patch, "reply", "body", "response", "text");
             if (visible.Length == 0) return null;
-            var merged = Program.CloneDictionary(original);
+            var merged = CloneDictionary(original);
             string prior = ReadFirstString(original, "reply", "body", "response", "text");
             string field = new[] { "reply", "body", "response", "text" }.FirstOrDefault(original.ContainsKey) ?? "reply";
             merged[field] = visible;
@@ -188,7 +188,7 @@ namespace ReignBetaServer
             var group = TestDict("playerHeroStringId", "player", "activeHeroIds", new[] { "npc", "other", "player" });
             Check("group_you_needs_known_addressee", FindAttributedRequestInversions(bad, group, history, "npc").Count == 0);
 
-            var complete = Program.CompleteConversationStructuredResponse(TestDict("reply", bad,
+            var complete = ConversationResponseService.CompleteConversationStructuredResponse(TestDict("reply", bad,
                 "relationshipAssessments", new List<Dictionary<string, object>> { TestDict("targetHeroStringId", "player", "valence", "positive",
                     "severityTier", "meaningful", "currentConductQuote", "I stayed away because I cared about your happiness.") },
                 "memoryWrites", new List<Dictionary<string, object>> { TestDict("text", "The player said he cared.", "evidenceQuote", "I stayed away because I cared about your happiness.") }), "dialogue", out _);

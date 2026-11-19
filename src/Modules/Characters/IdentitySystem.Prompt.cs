@@ -59,7 +59,7 @@ namespace ReignBetaServer
             Dictionary<string, object> encounter = new Dictionary<string, object>
             {
                 ["campaignId"] = ReadString(payload, "campaignId", "default"),
-                ["correlationId"] = Program.EnsureCorrelationId(payload),
+                ["correlationId"] = OperationsService.EnsureCorrelationId(payload),
                 ["observerHeroStringId"] = observerId,
                 ["subjectHeroStringId"] = subjectId,
                 ["encounterId"] = encounterId,
@@ -132,7 +132,7 @@ namespace ReignBetaServer
                 "playerId");
             Dictionary<string, object> observer =
                 profiles.FirstOrDefault(profile =>
-                    Program.CharacterIdFrom(profile).Equals(
+                    CampaignFileService.CharacterIdFrom(profile).Equals(
                         observerId ?? "",
                         StringComparison.OrdinalIgnoreCase))
                 ?? ReadDictionary(payload, "speaker")
@@ -149,7 +149,7 @@ namespace ReignBetaServer
                     "sessionId",
                     "eventId"),
                 "group_identity_"
-                    + Program.EnsureCorrelationId(payload));
+                    + OperationsService.EnsureCorrelationId(payload));
             Dictionary<string, object> nativeBase =
                 ReadDictionary(
                     payload,
@@ -159,7 +159,7 @@ namespace ReignBetaServer
                 new List<Dictionary<string, object>>();
             foreach (Dictionary<string, object> subject in profiles)
             {
-                string subjectId = Program.CharacterIdFrom(subject);
+                string subjectId = CampaignFileService.CharacterIdFrom(subject);
                 if (string.IsNullOrWhiteSpace(subjectId)
                     || subjectId.Equals(
                         observerId ?? "",
@@ -187,7 +187,7 @@ namespace ReignBetaServer
                             ["campaignId"] =
                                 campaignId ?? "default",
                             ["correlationId"] =
-                                Program.EnsureCorrelationId(payload),
+                                OperationsService.EnsureCorrelationId(payload),
                             ["observerHeroStringId"] =
                                 observerId ?? "",
                             ["subjectHeroStringId"] =
@@ -397,7 +397,7 @@ namespace ReignBetaServer
                 "mainHeroStringId",
                 "playerId");
             List<string> observers = profiles
-                .Select(Program.CharacterIdFrom)
+                .Select(CampaignFileService.CharacterIdFrom)
                 .Concat(new[] { playerId })
                 .Where(id => !string.IsNullOrWhiteSpace(id)
                     && !id.Equals(
@@ -407,7 +407,7 @@ namespace ReignBetaServer
                 .ToList();
             Dictionary<string, object> subject =
                 profiles.FirstOrDefault(profile =>
-                    Program.CharacterIdFrom(profile).Equals(
+                    CampaignFileService.CharacterIdFrom(profile).Equals(
                         speakerId ?? "",
                         StringComparison.OrdinalIgnoreCase))
                 ?? new Dictionary<string, object>
@@ -422,13 +422,13 @@ namespace ReignBetaServer
                     {
                         ["campaignId"] = campaignId ?? "default",
                         ["correlationId"] =
-                            Program.EnsureCorrelationId(payload),
+                            OperationsService.EnsureCorrelationId(payload),
                         ["observerHeroStringId"] = observerId,
                         ["subjectHeroStringId"] =
                             speakerId ?? "",
                         ["observer"] =
                             profiles.FirstOrDefault(profile =>
-                                Program.CharacterIdFrom(profile).Equals(
+                                CampaignFileService.CharacterIdFrom(profile).Equals(
                                     observerId,
                                     StringComparison.OrdinalIgnoreCase))
                             ?? new Dictionary<string, object>

@@ -3,7 +3,7 @@ using ReignBeta.Shared;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class SettingsService
     {
         internal static PlayerApproachOptions ReadPlayerApproachOptions(Dictionary<string, object> settings = null)
         {

@@ -206,10 +206,10 @@ namespace ReignBetaServer
             {
                 string campaignId =
                     ReadString(campaign, "campaignId", "");
-                if (Program.IsInternalCampaignId(campaignId)) continue;
-                string campaignDirectory = Program.CampaignDirectory(campaignId);
+                if (CampaignFileService.IsInternalCampaignId(campaignId)) continue;
+                string campaignDirectory = CampaignFileService.CampaignDirectory(campaignId);
                 if (!Directory.Exists(campaignDirectory)
-                    || !Program.IsRealCampaignDirectory(
+                    || !CampaignFileService.IsRealCampaignDirectory(
                         new DirectoryInfo(campaignDirectory))) continue;
                 try
                 {
@@ -247,10 +247,10 @@ namespace ReignBetaServer
             {
                 string campaignId =
                     ReadString(campaign, "campaignId", "");
-                if (Program.IsInternalCampaignId(campaignId)) continue;
-                string campaignDirectory = Program.CampaignDirectory(campaignId);
+                if (CampaignFileService.IsInternalCampaignId(campaignId)) continue;
+                string campaignDirectory = CampaignFileService.CampaignDirectory(campaignId);
                 if (!Directory.Exists(campaignDirectory)
-                    || !Program.IsRealCampaignDirectory(
+                    || !CampaignFileService.IsRealCampaignDirectory(
                         new DirectoryInfo(campaignDirectory))) continue;
                 try
                 {

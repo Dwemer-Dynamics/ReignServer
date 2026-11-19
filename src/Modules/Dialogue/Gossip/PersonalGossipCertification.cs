@@ -60,7 +60,7 @@ namespace ReignBetaServer
             var command = ReadDictionaryList(run, "commands").SingleOrDefault(x => ReadString(x, "commandId", "") == ReadString(p, "commandId", ""));
             var sync = ReadDictionary(runtime, "saveSync");
             return campaign.Length > 0 && instance.Length > 0 && command != null
-                && WorldSimulationService.IsLiveTestArmed(Program.ReadJsonObject(WorldSimulationService.LiveTestArmPath())) && WorldSimulationService.IsFreshLiveTestRuntime(runtime)
+                && WorldSimulationService.IsLiveTestArmed(CampaignFileService.ReadJsonObject(WorldSimulationService.LiveTestArmPath())) && WorldSimulationService.IsFreshLiveTestRuntime(runtime)
                 && WorldSimulationService.PersonalGossipEnrollmentValid(enrollment, campaign) && ReadString(run, "mode", "") == "personal_gossip"
                 && new[] { "queued", "running" }.Contains(ReadString(run, "status", ""))
                 && ReadString(run, "campaignId", "") == campaign && ReadString(runtime, "campaignId", "") == campaign
@@ -139,7 +139,7 @@ namespace ReignBetaServer
                         "signal", GossipFields("targets", ReadDictionaryList(test, "targets")));
                     string type = ReadString(test, "topicType", "positive");
                     var audit = BuildPersonalGossipCandidates(c, topic, people, type);
-                    var candidates = GossipRecipients(audit, type, GossipTrait(Program.ReadJsonObject(Program.CharacterFile(campaign, actor, "traits.json")), "familyMotivation"), PersonalGossipSettings());
+                    var candidates = GossipRecipients(audit, type, GossipTrait(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, actor, "traits.json")), "familyMotivation"), PersonalGossipSettings());
                     double total = candidates.Sum(x => x.Weight);
                     result["candidates"] = candidates.Select(x => { var item = x.Audit(); item["probability"] = x.Weight / total;
                         item["delayDays"] = GossipTransitDays(self, x.Person, PersonalGossipSettings(), x.Local); return item; }).ToList();
@@ -335,8 +335,8 @@ namespace ReignBetaServer
                 "memoryRestoreGeneration", ReadString(ReadMemoryPrecisionState(c), "restore_generation", ""),
                 "beforePresence", people.Where(x => ids.Contains(GossipHeroId(x))).ToList(),
                 "beforeNativeActivationStates", activationStates,
-                "beforeTraits", profiles.ToDictionary(x => ReadString(x, "heroId", ""), x => (object)Program.ReadJsonObject(Program.CharacterFile(campaign, ReadString(x, "heroId", ""), "traits.json"))),
-                "beforeEditorAuthority", profiles.ToDictionary(x => ReadString(x, "heroId", ""), x => (object)Program.ReadJsonObject(Program.CharacterFile(campaign, ReadString(x, "heroId", ""), "editor_authority.json"))),
+                "beforeTraits", profiles.ToDictionary(x => ReadString(x, "heroId", ""), x => (object)CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, ReadString(x, "heroId", ""), "traits.json"))),
+                "beforeEditorAuthority", profiles.ToDictionary(x => ReadString(x, "heroId", ""), x => (object)CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, ReadString(x, "heroId", ""), "editor_authority.json"))),
                 "beforeRelationships", ReadDictionaryList(test, "relationships").SelectMany(x => DialogueStore.SelectRelationshipPairChemistry(c, GossipFields("pair", RelationshipsService.AmbientPairKey(ReadString(x, "observerId", ""), ReadString(x, "subjectId", ""))))).ToList());
             // Persist recovery evidence BEFORE any fixture mutation. Current's retained save restores both stores.
             DialogueStore.InsertPersonalGossipTestFixtures(c, GossipFields("id", fixture, "timeline", ReadString(p, "timelineId", ""), "actor", actor, "marker", marker,
@@ -353,7 +353,7 @@ namespace ReignBetaServer
             foreach (var item in profiles)
             {
                 string hero = ReadString(item, "heroId", ""), profile = ReadString(item, "profile", "");
-                var traits = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "traits.json"));
+                var traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "traits.json"));
                 ApplyPersonalGossipTraitProfile(traits, profile);
                 // Use the normal editor reconciliation, including derived personality and cache invalidation.
                 SavePersonalGossipTraitProfile(c, campaign, hero, traits);

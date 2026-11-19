@@ -26,8 +26,8 @@ retirement, and the validation archive.
 
 The module's `Program` partials are now `internal static partial class PersistenceService` in their existing files. It
 calls `Program` members with an explicit `Program.` qualifier, and `Program` and the other modules call it as
-`PersistenceService.X`; the members used across that boundary are `internal`. `Program.PersistenceRoutes.cs` stays
-part of `Program` and registers the service handlers. The PostgreSQL helper types listed above
+`PersistenceService.X`; the members used across that boundary are `internal`. `PersistenceRoutes.cs` (an `internal static` route class called
+from `Platform/RouteTable.cs`) registers the service handlers. The PostgreSQL helper types listed above
 (`ReignPostgreSqlStorage`, `ReignPostgreSqlDialect` and the others in `PostgreSqlStorage.cs`, `PostgreSqlDialect.cs`,
 `DatabaseParameterExtensions.cs`, `DatabaseAvailability.cs`, `GlobalDatabaseAliases.cs`,
 `PostgreSqlCampaignOwnership.cs`, `PostgreSqlValidationArchive.cs`) were already their own types.

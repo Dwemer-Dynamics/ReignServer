@@ -83,7 +83,7 @@ namespace ReignBetaServer
             }
 
             Dictionary<string, object> manifest =
-                Program.ReadJsonObject(Path.Combine(pointRoot, "manifest.json"));
+                CampaignFileService.ReadJsonObject(Path.Combine(pointRoot, "manifest.json"));
             if (!ReadString(manifest, "campaignId", "")
                     .Equals(campaignId, StringComparison.OrdinalIgnoreCase)
                 || !ReadString(manifest, "fingerprint", "")
@@ -182,7 +182,7 @@ namespace ReignBetaServer
                     }
                     catch (Exception ex) when (!(ex is CampaignRequestReplacedException) && !(ex is OperationCanceledException))
                     {
-                        Program.LogOperational("save_sync.load_proof_bind_failed", TestDict("campaignId", campaignId,
+                        OperationsService.LogOperational("save_sync.load_proof_bind_failed", TestDict("campaignId", campaignId,
                             "savePointId", savePointId, "error", ex.GetType().Name));
                     }
                 }

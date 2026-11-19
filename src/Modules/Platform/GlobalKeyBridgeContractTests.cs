@@ -7,14 +7,14 @@ using System.Runtime.InteropServices;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class SettingsService
     {
         [DllImport("libc", EntryPoint = "geteuid")]
         private static extern uint NativeGeteuid();
 
         // Fake-transport contract for global key references. No real socket, store or provider traffic; vault and stat
         // checks use disposable temp files only.
-        private static List<Dictionary<string, object>> RunGlobalKeyBridgeContractTests()
+        internal static List<Dictionary<string, object>> RunGlobalKeyBridgeContractTests()
         {
             var rows = new List<Dictionary<string, object>>();
             Action<string, bool> check = (id, passed) => rows.Add(new Dictionary<string, object> {
@@ -51,40 +51,40 @@ namespace ReignBetaServer
             {
                 // Named Ollama migration carries an opaque reference once, without
                 // depending on the store being available or resolving a secret.
-                string ollamaOrigin = NormalizedOrigin(OllamaCloudChatUrl);
+                string ollamaOrigin = NormalizedOrigin(LlmProviderService.OllamaCloudChatUrl);
                 Func<Dictionary<string, object>> legacyOllama = () => TestDict("llmProvider", "openai_compatible",
-                    "apiUrl", OllamaCloudChatUrl, "apiKey", "shadow-local",
+                    "apiUrl", LlmProviderService.OllamaCloudChatUrl, "apiKey", "shadow-local",
                     "globalKeyBindings", TestDict("apiKey", TestDict("keyId", keyId, "provider", "custom_openai", "origin", ollamaOrigin)));
                 var migration = legacyOllama();
-                NormalizeChatProviderProfiles(migration);
+                LlmProviderService.NormalizeChatProviderProfiles(migration);
                 check("ollama_migration_reference_only_offline", BoundKeyId(migration, "ollamaCloudApiKey") == keyId
                     && BoundKeyId(migration, "apiKey") == keyId && ReadString(migration, "ollamaCloudApiKey", "missing") == ""
                     && calls.Count == 0);
                 var migrationBindings = ReadDictionary(migration, "globalKeyBindings");
                 migrationBindings.Remove("ollamaCloudApiKey");
-                NormalizeChatProviderProfiles(migration);
+                LlmProviderService.NormalizeChatProviderProfiles(migration);
                 check("ollama_migration_not_replayed_after_unbind", !HasGlobalKeyBindingEntry(migration, "ollamaCloudApiKey") && calls.Count == 0);
                 foreach (string defect in new[] { "origin", "provider", "keyId" })
                 {
                     var bad = legacyOllama();
                     ReadDictionary(ReadDictionary(bad, "globalKeyBindings"), "apiKey")[defect] = "invalid";
-                    NormalizeChatProviderProfiles(bad);
+                    LlmProviderService.NormalizeChatProviderProfiles(bad);
                     check("ollama_invalid_legacy_" + defect + "_no_plaintext_copy", !HasGlobalKeyBindingEntry(bad, "ollamaCloudApiKey")
                         && ReadString(bad, "ollamaCloudApiKey", "missing") == "" && calls.Count == 0);
                 }
                 var dedicated = legacyOllama();
                 dedicated["ollamaCloudApiKey"] = "existing-dedicated";
-                NormalizeChatProviderProfiles(dedicated);
+                LlmProviderService.NormalizeChatProviderProfiles(dedicated);
                 check("ollama_migration_preserves_dedicated_value", ReadString(dedicated, "ollamaCloudApiKey", "") == "existing-dedicated"
                     && !HasGlobalKeyBindingEntry(dedicated, "ollamaCloudApiKey"));
                 var malformed = legacyOllama();
                 ReadDictionary(malformed, "globalKeyBindings")["ollamaCloudApiKey"] = TestDict("keyId", "bad", "provider", "custom_openai", "origin", ollamaOrigin);
                 malformed["ollamaCloudApiKey"] = "shadow-local";
-                NormalizeChatProviderProfiles(malformed);
+                LlmProviderService.NormalizeChatProviderProfiles(malformed);
                 // A pre-upgrade shadow beside a binding is cleared once on load; later Reign-only keys are kept.
                 SanitizeBoundKeySlots(malformed);
                 check("ollama_malformed_binding_blocks_fallback", ReadString(malformed, "ollamaCloudApiKey", "x") == ""
-                    && ProviderSecret(malformed, "ollamaCloudApiKey", OllamaCloudChatUrl) == ""
+                    && ProviderSecret(malformed, "ollamaCloudApiKey", LlmProviderService.OllamaCloudChatUrl) == ""
                     && ProviderKeyUnavailable(malformed, "ollamaCloudApiKey", "") && calls.Count == 0);
                 malformed["ollamaCloudApiKey"] = "fixture-reign-only";
                 SanitizeBoundKeySlots(malformed);
@@ -94,54 +94,54 @@ namespace ReignBetaServer
                 var filteredPatch = WithoutGlobalKeyMigrationPatch(markerPatch);
                 check("migration_marker_server_owned_patch_clone", !filteredPatch.ContainsKey("globalKeyMigrations")
                     && markerPatch.ContainsKey("globalKeyMigrations") && ReadBool(filteredPatch, "legacyMemoryMode", false));
-                var boundOllama = legacyOllama(); NormalizeChatProviderProfiles(boundOllama);
+                var boundOllama = legacyOllama(); LlmProviderService.NormalizeChatProviderProfiles(boundOllama);
                 bool namedBinding;
-                string namedKey = ResolveLlmRequestApiKey(boundOllama, TestDict("apiUrl", "https://attacker.invalid/", "apiKey", "payload-secret"), out namedBinding);
+                string namedKey = LlmProviderService.ResolveLlmRequestApiKey(boundOllama, TestDict("apiUrl", "https://attacker.invalid/", "apiKey", "payload-secret"), out namedBinding);
                 check("ollama_named_request_resolves_once_canonical", namedKey == secret && namedBinding && calls.Count == 1
                     && ReadString(ReadDictionary(calls[0], "body"), "origin", "") == ollamaOrigin);
                 calls.Clear();
-                boundOllama["llmProvider"] = CodexSubscriptionProvider;
-                check("subscription_never_resolves_global_key", ResolveLlmRequestApiKey(boundOllama, null, out namedBinding) == "" && !namedBinding && calls.Count == 0);
+                boundOllama["llmProvider"] = LlmProviderService.CodexSubscriptionProvider;
+                check("subscription_never_resolves_global_key", LlmProviderService.ResolveLlmRequestApiKey(boundOllama, null, out namedBinding) == "" && !namedBinding && calls.Count == 0);
                 var customOverride = legacyOllama();
-                check("custom_explicit_key_does_not_resolve_stored_binding", ResolveLlmRequestApiKey(customOverride,
+                check("custom_explicit_key_does_not_resolve_stored_binding", LlmProviderService.ResolveLlmRequestApiKey(customOverride,
                     TestDict("apiKey", "explicit-fixture", "apiUrl", "https://fixture.invalid/"), out namedBinding) == "explicit-fixture"
                     && !namedBinding && calls.Count == 0);
-                boundOllama["llmProvider"] = OllamaCloudProvider;
+                boundOllama["llmProvider"] = LlmProviderService.OllamaCloudProvider;
                 ReadDictionary(ReadDictionary(boundOllama, "globalKeyBindings"), "ollamaCloudApiKey")["provider"] = "openrouter";
-                check("named_slot_wrong_provider_refused_locally", ResolveLlmRequestApiKey(boundOllama, null, out namedBinding) == "" && namedBinding && calls.Count == 0);
+                check("named_slot_wrong_provider_refused_locally", LlmProviderService.ResolveLlmRequestApiKey(boundOllama, null, out namedBinding) == "" && namedBinding && calls.Count == 0);
 
                 var binding = new Dictionary<string, object> { ["keyId"] = keyId, ["provider"] = "openrouter", ["origin"] = OpenRouterOrigin };
                 var settings = new Dictionary<string, object> { ["llmProvider"] = "openrouter", ["openRouterApiKey"] = "",
                     ["nanoGptApiKey"] = "fixture-local", ["globalKeyBindings"] = new Dictionary<string, object> { ["openRouterApiKey"] = binding } };
 
                 check("unbound_slot_keeps_local_value", ProviderSecret(settings, "nanoGptApiKey", PortraitsService.NanoGptChatCompletionsUrl) == "fixture-local" && calls.Count == 0);
-                bool read = LlmApiKey(settings) == secret && ProviderSecret(settings, "openRouterApiKey", "https://openrouter.ai/api/v1/images") == secret;
+                bool read = LlmProviderService.LlmApiKey(settings) == secret && ProviderSecret(settings, "openRouterApiKey", "https://openrouter.ai/api/v1/images") == secret;
                 var resolves = calls.Where(c => ReadString(c, "op", "") == "resolve").ToList();
                 check("bound_slot_reads_current_value_every_use", read && resolves.Count == 2
                     && resolves.All(c => ReadString(ReadDictionary(c, "body"), "key_id", "") == keyId && ReadString(ReadDictionary(c, "body"), "origin", "") == OpenRouterOrigin));
                 calls.Clear();
                 check("origin_mismatch_fails_closed", ProviderSecret(settings, "openRouterApiKey", "https://openrouter.ai.attacker.invalid/v1") == ""
-                    && ProviderSecret(settings, "openRouterApiKey", OpenRouterChatUrl, "https://other.invalid/") == "" && calls.Count == 0
+                    && ProviderSecret(settings, "openRouterApiKey", LlmProviderService.OpenRouterChatUrl, "https://other.invalid/") == "" && calls.Count == 0
                     && ProviderKeyUnavailable(settings, "openRouterApiKey", "") && !ProviderKeyUnavailable(settings, "nanoGptApiKey", ""));
                 foreach (string outcome in new[] { "changed", "missing", "wrong_provider", "unavailable", "not_enrolled" })
                 {
                     resolveOutcome = outcome;
-                    check("resolve_" + outcome + "_has_no_fallback", ProviderSecret(settings, "openRouterApiKey", OpenRouterChatUrl) == "");
+                    check("resolve_" + outcome + "_has_no_fallback", ProviderSecret(settings, "openRouterApiKey", LlmProviderService.OpenRouterChatUrl) == "");
                 }
 
                 // A bound key that cannot be resolved stops the LLM request before any provider dispatch.
                 resolveOutcome = "unavailable";
                 var customBound = new Dictionary<string, object> { ["llmProvider"] = "openai_compatible", ["apiUrl"] = "https://custom.invalid/v1/chat/completions",
                     ["globalKeyBindings"] = new Dictionary<string, object> { ["apiKey"] = new Dictionary<string, object> { ["keyId"] = keyId, ["provider"] = "custom_openai", ["origin"] = "https://custom.invalid:443" } } };
-                var refused = ChatWithLlm(new Dictionary<string, object> { ["requestType"] = "dialogue", ["singleProviderAttempt"] = true }, null, null, customBound);
-                var redirected = ChatWithLlm(new Dictionary<string, object> { ["apiUrl"] = "https://elsewhere.invalid/v1/chat/completions", ["singleProviderAttempt"] = true }, null, null, customBound);
+                var refused = LlmProviderService.ChatWithLlm(new Dictionary<string, object> { ["requestType"] = "dialogue", ["singleProviderAttempt"] = true }, null, null, customBound);
+                var redirected = LlmProviderService.ChatWithLlm(new Dictionary<string, object> { ["apiUrl"] = "https://elsewhere.invalid/v1/chat/completions", ["singleProviderAttempt"] = true }, null, null, customBound);
                 check("bound_key_unavailable_fails_closed_before_dispatch", ReadString(refused, "errorCode", "") == "global_key_unavailable"
                     && ReadInt(refused, "providerCallCount", -1) == 0 && ReadString(redirected, "errorCode", "") == "global_key_unavailable");
                 resolveOutcome = "resolved";
                 calls.Clear();
                 InvalidateGlobalKeyStatusCache();
                 calls.Clear();
-                SettingsFingerprint(TestDict("llmProvider", NanoGptProvider, "nanoGptApiKey", ""));
+                SettingsFingerprint(TestDict("llmProvider", LlmProviderService.NanoGptProvider, "nanoGptApiKey", ""));
                 SettingsFingerprint(settings);
                 SettingsForUi(settings);
                 check("diagnostics_never_resolve", calls.Count == 0);
@@ -151,12 +151,12 @@ namespace ReignBetaServer
                 var layered = TestDict("llmProvider", "openrouter", "openRouterApiKey", "fixture-reign-only",
                     "globalKeyBindings", TestDict("openRouterApiKey", binding));
                 calls.Clear();
-                check("reign_only_key_overrides_binding", ProviderSecret(layered, "openRouterApiKey", OpenRouterChatUrl) == "fixture-reign-only"
+                check("reign_only_key_overrides_binding", ProviderSecret(layered, "openRouterApiKey", LlmProviderService.OpenRouterChatUrl) == "fixture-reign-only"
                     && !ProviderKeyUnavailable(layered, "openRouterApiKey", "fixture-reign-only") && calls.Count == 0);
                 layered["openRouterApiKey"] = "";
-                check("cleared_reign_only_key_falls_back_to_binding", ProviderSecret(layered, "openRouterApiKey", OpenRouterChatUrl) == secret
+                check("cleared_reign_only_key_falls_back_to_binding", ProviderSecret(layered, "openRouterApiKey", LlmProviderService.OpenRouterChatUrl) == secret
                     && resolvesOf(keyId) == 1);
-                var auto = TestDict("llmProvider", NanoGptProvider, "nanoGptApiKey", "fixture-reign-only-nano");
+                var auto = TestDict("llmProvider", LlmProviderService.NanoGptProvider, "nanoGptApiKey", "fixture-reign-only-nano");
                 calls.Clear();
                 bool localFirst = ProviderSecret(auto, "nanoGptApiKey", PortraitsService.NanoGptChatCompletionsUrl) == "fixture-reign-only-nano" && calls.Count == 0;
                 auto["nanoGptApiKey"] = "";
@@ -181,10 +181,10 @@ namespace ReignBetaServer
                 InvalidateGlobalKeyStatusCache();
                 resolveOutcome = "unavailable";
                 bool autoBinding;
-                string autoKey = ResolveLlmRequestApiKey(auto, null, out autoBinding);
+                string autoKey = LlmProviderService.ResolveLlmRequestApiKey(auto, null, out autoBinding);
                 bool autoUnavailable = ProviderSecret(auto, "nanoGptApiKey", PortraitsService.NanoGptChatCompletionsUrl) == ""
                     && ProviderKeyUnavailable(auto, "nanoGptApiKey", "");
-                var autoRefused = ChatWithLlm(new Dictionary<string, object> { ["requestType"] = "dialogue", ["singleProviderAttempt"] = true }, null, null, auto);
+                var autoRefused = LlmProviderService.ChatWithLlm(new Dictionary<string, object> { ["requestType"] = "dialogue", ["singleProviderAttempt"] = true }, null, null, auto);
                 check("auto_failed_resolve_is_unavailable", autoKey == "" && autoBinding && autoUnavailable
                     && ReadString(autoRefused, "errorCode", "") == "global_key_unavailable" && ReadInt(autoRefused, "providerCallCount", -1) == 0);
                 resolveOutcome = "resolved";
@@ -226,7 +226,7 @@ namespace ReignBetaServer
                     && new[] { "http://[::1", "http://[fe80::1%25eth0]:1234", "ftp://[::1]:1", "http://u@[::1]:1", "http://::1:1234" }.All(bad => NormalizedOrigin(bad) == null));
 
                 var merged = new Dictionary<string, object>(settings);
-                MergeProviderSettings(merged, new Dictionary<string, object> { ["globalKeyBindings"] = new Dictionary<string, object> {
+                LlmProviderService.MergeProviderSettings(merged, new Dictionary<string, object> { ["globalKeyBindings"] = new Dictionary<string, object> {
                     ["nanoGptApiKey"] = new Dictionary<string, object> { ["keyId"] = other, ["provider"] = "nano_gpt", ["origin"] = NanoGptOrigin } } });
                 check("generic_settings_cannot_bind", GlobalKeyBinding(merged, "nanoGptApiKey") == null && GlobalKeyBinding(merged, "openRouterApiKey") != null);
 
@@ -375,20 +375,20 @@ namespace ReignBetaServer
                 string settingsFile = Path.Combine(root, "settings.json");
                 Func<Dictionary<string, object>> readFile = () => Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(settingsFile));
                 var routerBinding = TestDict("openRouterApiKey", binding);
-                WriteJsonObject(settingsFile, TestDict("openRouterApiKey", "stale-shadow", "globalKeyBindings", routerBinding));
+                CampaignFileService.WriteJsonObject(settingsFile, TestDict("openRouterApiKey", "stale-shadow", "globalKeyBindings", routerBinding));
                 var unrelatedSave = SaveSettingsCore(TestDict("siteUrl", "https://fixture.invalid/"), out _, out _, settingsFile);
                 var afterUnrelated = readFile();
                 check("save_clears_preupgrade_shadow_once", ReadBool(unrelatedSave, "ok", false) && ReadString(afterUnrelated, "openRouterApiKey", "x") == ""
                     && ReadBool(ReadDictionary(afterUnrelated, "globalKeyMigrations"), BoundShadowCleanupMarker, false)
                     && BoundKeyId(afterUnrelated, "openRouterApiKey") == keyId);
-                WriteJsonObject(settingsFile, TestDict("openRouterApiKey", "stale-shadow", "globalKeyBindings", routerBinding));
+                CampaignFileService.WriteJsonObject(settingsFile, TestDict("openRouterApiKey", "stale-shadow", "globalKeyBindings", routerBinding));
                 var reignOnlySave = SaveSettingsCore(TestDict("openRouterApiKey", "fixture-file-reign-only"), out _, out _, settingsFile);
                 var reloadedFile = readFile();
                 SanitizeBoundKeySlots(reloadedFile);
                 calls.Clear();
                 check("reign_only_key_saved_on_bound_slot_survives_reload", ReadBool(reignOnlySave, "ok", false)
                     && ReadString(reloadedFile, "openRouterApiKey", "") == "fixture-file-reign-only" && BoundKeyId(reloadedFile, "openRouterApiKey") == keyId
-                    && ProviderSecret(reloadedFile, "openRouterApiKey", OpenRouterChatUrl) == "fixture-file-reign-only" && calls.Count == 0
+                    && ProviderSecret(reloadedFile, "openRouterApiKey", LlmProviderService.OpenRouterChatUrl) == "fixture-file-reign-only" && calls.Count == 0
                     && !Json.Serialize(reignOnlySave).Contains("fixture-file-reign-only"));
                 var localClear = ClearSettingsKey(TestDict("key", "openRouterApiKey"), null, settingsFile);
                 var afterClear = readFile();
@@ -399,7 +399,7 @@ namespace ReignBetaServer
                     && ReadString(guardedUnbind, "outcome", "") == "forbidden" && BoundKeyId(readFile(), "openRouterApiKey") == keyId
                     && ReadBool(nothingToClear, "ok", false) && ReadString(nothingToClear, "outcome", "") == "unchanged");
                 // The custom endpoint's Reign-only key is refused unless the URL the caller saw is the endpoint left in place.
-                WriteJsonObject(settingsFile, TestDict("llmProvider", "openai_compatible", "apiUrl", "https://old.invalid/v1/chat/completions"));
+                CampaignFileService.WriteJsonObject(settingsFile, TestDict("llmProvider", "openai_compatible", "apiUrl", "https://old.invalid/v1/chat/completions"));
                 var staleEndpoint = SaveSettingsCore(TestDict("apiKey", "fixture-endpoint-key", "expectedApiUrl", "https://new.invalid/v1"), out _, out _, settingsFile);
                 bool staleStoredNothing = ReadString(readFile(), "apiKey", "") == "";
                 var sameEndpoint = SaveSettingsCore(TestDict("apiKey", "fixture-endpoint-key", "expectedApiUrl", "https://OLD.invalid/other"), out _, out _, settingsFile);
@@ -414,7 +414,7 @@ namespace ReignBetaServer
                 var legacy = new Dictionary<string, object> { ["llmProvider"] = "openai_compatible", ["apiUrl"] = oldUrl, ["apiKey"] = "old-secret",
                     ["nanoGptApiKey"] = "fixture-local", ["openRouterApiKey"] = "router-local", ["chatProviderProfilesInitialized"] = true };
                 Func<Dictionary<string, object>, Dictionary<string, object>, (Dictionary<string, object> S, List<string> Clears)> mergeInto = (start, incoming) =>
-                { var s = new Dictionary<string, object>(start); return (s, MergeProviderSettings(s, incoming)); };
+                { var s = new Dictionary<string, object>(start); return (s, LlmProviderService.MergeProviderSettings(s, incoming)); };
                 var same = mergeInto(legacy, new Dictionary<string, object> { ["apiUrl"] = "https://OLD.invalid/v2", ["apiKey"] = "" });
                 var moved = mergeInto(legacy, new Dictionary<string, object> { ["apiUrl"] = newUrl, ["apiKey"] = "" });
                 var maskedMove = mergeInto(legacy, new Dictionary<string, object> { ["apiUrl"] = newUrl, ["apiKey"] = "************" });
@@ -427,7 +427,7 @@ namespace ReignBetaServer
                 var afterMove = new Dictionary<string, object> { ["apiUrl"] = newUrl, ["apiKey"] = "", ["nanoGptApiKey"] = "", ["openRouterApiKey"] = "" };
                 RecoverSettingsSecretsFromVault(vault, afterMove, false, out _);
                 check("legacy_custom_key_cleared_on_origin_change", moved.Clears.SequenceEqual(new[] { "apiKey" }) && ReadString(moved.S, "apiKey", "x") == ""
-                    && ProviderSecret(moved.S, "apiKey", LlmApiUrl(moved.S)) == "" && ReadString(maskedMove.S, "apiKey", "x") == ""
+                    && ProviderSecret(moved.S, "apiKey", LlmProviderService.LlmApiUrl(moved.S)) == "" && ReadString(maskedMove.S, "apiKey", "x") == ""
                     && ReadString(moved.S, "nanoGptApiKey", "") == "fixture-local" && ReadString(moved.S, "openRouterApiKey", "") == "router-local");
                 check("legacy_custom_key_kept_for_same_origin_or_explicit_key", same.Clears.Count == 0 && ReadString(same.S, "apiKey", "") == "old-secret"
                     && explicitKey.Clears.Count == 0 && ReadString(explicitKey.S, "apiKey", "") == "fixture-explicit"
@@ -437,11 +437,11 @@ namespace ReignBetaServer
 
                 // Mutation guard: custom header, exact same-origin, loopback direct peer, Apache-overwritten peer/host only.
                 Func<string, bool> peers = address => address == "127.0.0.1" || address == "172.20.0.1";
-                Func<HttpRequest, bool> allowed = r => GlobalKeyRequestAllowed(r, peers);
-                var direct = new HttpRequest { KeysHeader = "1", RemoteAddress = "127.0.0.1", Host = "127.0.0.1:5101", Origin = "http://127.0.0.1:5101" };
-                var apache = new HttpRequest { KeysHeader = "1", RemoteAddress = "127.0.0.1", Host = "127.0.0.1:5101", ProxyPeer = "172.20.0.1",
+                Func<Program.HttpRequest, bool> allowed = r => GlobalKeyRequestAllowed(r, peers);
+                var direct = new Program.HttpRequest { KeysHeader = "1", RemoteAddress = "127.0.0.1", Host = "127.0.0.1:5101", Origin = "http://127.0.0.1:5101" };
+                var apache = new Program.HttpRequest { KeysHeader = "1", RemoteAddress = "127.0.0.1", Host = "127.0.0.1:5101", ProxyPeer = "172.20.0.1",
                     ProxyHost = "127.0.0.1:8089", Origin = "http://127.0.0.1:8089" };
-                Func<HttpRequest, Action<HttpRequest>, HttpRequest> with = (r, change) => { var copy = (HttpRequest)r.GetType().GetMethod("MemberwiseClone",
+                Func<Program.HttpRequest, Action<Program.HttpRequest>, Program.HttpRequest> with = (r, change) => { var copy = (Program.HttpRequest)r.GetType().GetMethod("MemberwiseClone",
                     System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(r, null); change(copy); return copy; };
                 check("mutation_guard", allowed(direct) && allowed(apache)
                     && !allowed(with(direct, r => r.KeysHeader = ""))
@@ -455,8 +455,8 @@ namespace ReignBetaServer
 
                 // Central ingress policy: real loopback socket, Apache claims only together and canonical, exact local
                 // authority; Origin/Sec-Fetch-Site only ever refuse. No protocol header or Origin absence grants access.
-                Func<HttpRequest, string> refusal = r => IngressAccessRefusal(r, peers, 5101);
-                var native = new HttpRequest { Method = "POST", Path = "/llm/chat", RemoteAddress = "127.0.0.1", Host = "127.0.0.1:5101" };
+                Func<Program.HttpRequest, string> refusal = r => Program.IngressAccessRefusal(r, peers, 5101);
+                var native = new Program.HttpRequest { Method = "POST", Path = "/llm/chat", RemoteAddress = "127.0.0.1", Host = "127.0.0.1:5101" };
                 var nativeApache = with(native, r => { r.ProxyPeer = "172.20.0.1"; r.ProxyHost = "127.0.0.1:8089"; });
                 var panel = with(nativeApache, r => r.Origin = "http://127.0.0.1:8089");
                 var panelGet = with(nativeApache, r => { r.Method = "GET"; r.Path = "/api/settings"; r.FetchSite = "same-origin"; });
@@ -500,8 +500,8 @@ namespace ReignBetaServer
                 // Framing and limits are decided from the headers alone: a 403/413 below arrives with no body sent at all.
                 Func<string, string, object> ingressFrom = (remote, raw) =>
                 {
-                    try { return ReadRequest(new MemoryStream(System.Text.Encoding.Latin1.GetBytes(raw)), remote, peers, 5101); }
-                    catch (HttpIngressException ex) { return ex.Status + ":" + ex.Reason; }
+                    try { return Program.ReadRequest(new MemoryStream(System.Text.Encoding.Latin1.GetBytes(raw)), remote, peers, 5101); }
+                    catch (Program.HttpIngressException ex) { return ex.Status + ":" + ex.Reason; }
                 };
                 Func<string, object> ingress = raw =>
                 {
@@ -509,12 +509,12 @@ namespace ReignBetaServer
                     return result is string failure ? int.Parse(failure.Substring(0, failure.IndexOf(':')), System.Globalization.CultureInfo.InvariantCulture) : result;
                 };
                 const string line = "POST /api/settings HTTP/1.1\r\nHost: 127.0.0.1:5101\r\n";
-                var parsed = ingress(line + "Content-Length: 7\r\n\r\n{\"a\":1}") as HttpRequest;
+                var parsed = ingress(line + "Content-Length: 7\r\n\r\n{\"a\":1}") as Program.HttpRequest;
                 bool parsedHeldBudget = parsed != null && parsed.ReservedJsonBytes == 7;
-                ReleaseIngressReservations(parsed);
+                Program.ReleaseIngressReservations(parsed);
                 check("ingress_parses_bounded_json", parsed != null && ReadInt(parsed.JsonBody, "a", 0) == 1 && parsed.Origin == null
                     && parsedHeldBudget && parsed.ReservedJsonBytes == 0
-                    && ingress("") == null && ingress(line + "\r\n") is HttpRequest);
+                    && ingress("") == null && ingress(line + "\r\n") is Program.HttpRequest);
                 check("ingress_rejects_malformed_framing", object.Equals(ingress(line + "Content-Length: 1\r\nContent-Length: 1\r\n\r\n{"), 400)
                     && object.Equals(ingress(line + "Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n"), 411)
                     && object.Equals(ingress(line + "Transfer-Encoding: chunked\r\nContent-Length: 2\r\n\r\n{}"), 400)
@@ -535,21 +535,21 @@ namespace ReignBetaServer
                     && object.Equals(ingress(line + "Content-Length: " + (64L * 1024 * 1024 + 1) + "\r\n\r\n"), 413)
                     && object.Equals(ingress("POST /api/support-bundle HTTP/1.1\r\nHost: 127.0.0.1:5101\r\nContent-Length: " + (8L * 1024 * 1024 + 1) + "\r\n\r\n"), 413)
                     && object.Equals(ingress("POST /api/campaigns/import HTTP/1.1\r\nHost: 127.0.0.1:5101\r\nContent-Type: application/zip\r\nContent-Length: "
-                        + (IngressMaxCampaignUploadBytes + 1) + "\r\n\r\n"), 413)
+                        + (Program.IngressMaxCampaignUploadBytes + 1) + "\r\n\r\n"), 413)
                     && object.Equals(ingress("GET /api/settings HTTP/1.1\r\nHost: 127.0.0.1:5101\r\nX-Reign-Peer: 192.168.1.5\r\nX-Reign-Host: 127.0.0.1:8089\r\n\r\n"), 403)
-                    && ingress("GET /health HTTP/1.1\r\n\r\n") is HttpRequest);
+                    && ingress("GET /health HTTP/1.1\r\n\r\n") is Program.HttpRequest);
 
                 // Post-Apache wire shapes: loopback socket, rewritten loopback Host, X-Forwarded-For appended by mod_proxy.
                 const string proxied = "GET /api/settings HTTP/1.1\r\nHost: 127.0.0.1:5101\r\n";
                 var proxiedPair = ingressFrom("127.0.0.1", proxied + "X-Reign-Peer: 172.20.0.1\r\nX-Reign-Host: 127.0.0.1:8089\r\n"
-                    + "X-Forwarded-For: 192.168.1.5\r\nSec-Fetch-Site: same-origin\r\n\r\n") as HttpRequest;
+                    + "X-Forwarded-For: 192.168.1.5\r\nSec-Fetch-Site: same-origin\r\n\r\n") as Program.HttpRequest;
                 check("ingress_proxy_marker_wire_shapes", (ingressFrom("127.0.0.1", proxied + "X-Forwarded-For: 192.168.1.5\r\n\r\n") as string) == "403:proxy_incomplete"
                     && (ingressFrom("127.0.0.1", proxied + "X-Forwarded-For: 127.0.0.1\r\n\r\n") as string) == "403:proxy_incomplete"
                     && (ingressFrom("127.0.0.1", proxied + "X-Reign-Host: 127.0.0.1:8089\r\nX-Forwarded-For: 192.168.1.5\r\n\r\n") as string) == "403:proxy_incomplete"
                     && (ingressFrom("127.0.0.1", proxied + "X-Reign-Peer: 192.168.1.5\r\nX-Reign-Host: 127.0.0.1:8089\r\nX-Forwarded-For: 172.20.0.1\r\n\r\n") as string) == "403:proxy_peer"
                     && proxiedPair != null && proxiedPair.ProxyForwarded
-                    && ingressFrom("127.0.0.1", proxied + "\r\n") is HttpRequest
-                    && ingressFrom("192.0.2.7", "GET /health HTTP/1.1\r\nX-Forwarded-For: 192.0.2.7\r\n\r\n") is HttpRequest);
+                    && ingressFrom("127.0.0.1", proxied + "\r\n") is Program.HttpRequest
+                    && ingressFrom("192.0.2.7", "GET /health HTTP/1.1\r\nX-Forwarded-For: 192.0.2.7\r\n\r\n") is Program.HttpRequest);
 
                 // Public routes: exact raw "GET" plus exact raw path, from any transport, with no body. A declared body is
                 // refused from the headers ("public_body", never body_eof: no body bytes are sent here); every alias, case
@@ -569,16 +569,16 @@ namespace ReignBetaServer
                 long localActive = 0; int granted = 0;
                 System.Threading.Tasks.Parallel.For(0, 1000, _ =>
                 {
-                    if (TryReserveIngressBytes(ref localActive, 3, 300)) System.Threading.Interlocked.Increment(ref granted);
+                    if (Program.TryReserveIngressBytes(ref localActive, 3, 300)) System.Threading.Interlocked.Increment(ref granted);
                 });
                 check("ingress_json_budget_exact_under_concurrency", granted == 100 && System.Threading.Interlocked.Read(ref localActive) == 300
-                    && !TryReserveIngressBytes(ref localActive, 1, 300) && TryReserveIngressBytes(ref localActive, 0, 300));
+                    && !Program.TryReserveIngressBytes(ref localActive, 1, 300) && Program.TryReserveIngressBytes(ref localActive, 0, 300));
                 // The synthetic process-wide reservation and exclusive upload slot below would refuse real traffic, so they run
                 // only in non-listening verification (RunTestSuiteApi can reach this suite while the server is listening).
-                if (ActiveServerPort <= 0)
+                if (Program.ActiveServerPort <= 0)
                 {
-                    long synthetic = IngressMaxActiveJsonBytes - 10;
-                    bool syntheticHeld = TryReserveIngressBytes(ref ActiveIngressJsonBytes, synthetic, IngressMaxActiveJsonBytes);
+                    long synthetic = Program.IngressMaxActiveJsonBytes - 10;
+                    bool syntheticHeld = Program.TryReserveIngressBytes(ref Program.ActiveIngressJsonBytes, synthetic, Program.IngressMaxActiveJsonBytes);
                     bool budgetHonoured = false;
                     try
                     {
@@ -586,41 +586,41 @@ namespace ReignBetaServer
                         bool exhaustedBeforeRead = (ingressFrom("127.0.0.1", line + "Content-Length: 11\r\n\r\n") as string) == "429:json_budget";
                         bool parseErrorReleased = (json("{bad json}") as string) == "400:json";
                         bool disconnectReleased = (ingressFrom("127.0.0.1", line + "Content-Length: 10\r\n\r\n{\"a") as string) == "400:body_eof";
-                        var held = json("{\"a\":1234}") as HttpRequest;
+                        var held = json("{\"a\":1234}") as Program.HttpRequest;
                         bool heldBlocksOthers = held != null && held.ReservedJsonBytes == 10 && (json(" ") as string) == "429:json_budget";
-                        ReleaseIngressReservations(held);
-                        ReleaseIngressReservations(held);
-                        var afterRelease = json(" ") as HttpRequest;
+                        Program.ReleaseIngressReservations(held);
+                        Program.ReleaseIngressReservations(held);
+                        var afterRelease = json(" ") as Program.HttpRequest;
                         bool releasedOnce = afterRelease != null && afterRelease.ReservedJsonBytes == 1
                             && (json("{\"a\":1234}") as string) == "429:json_budget";
-                        ReleaseIngressReservations(afterRelease);
+                        Program.ReleaseIngressReservations(afterRelease);
                         budgetHonoured = exhaustedBeforeRead && parseErrorReleased && disconnectReleased && heldBlocksOthers && releasedOnce;
                     }
                     finally
                     {
-                        if (syntheticHeld) System.Threading.Interlocked.Add(ref ActiveIngressJsonBytes, -synthetic);
+                        if (syntheticHeld) System.Threading.Interlocked.Add(ref Program.ActiveIngressJsonBytes, -synthetic);
                     }
                     check("ingress_json_budget_shared_and_released", syntheticHeld && budgetHonoured);
 
                     // One staged campaign upload at a time: a second is refused before any staging file exists, and the slot
                     // returns with the holder's release.
-                    bool slotTaken = System.Threading.Interlocked.CompareExchange(ref ActiveCampaignUploads, 1, 0) == 0;
-                    var uploadHolder = new HttpRequest { HoldsUploadSlot = slotTaken ? 1 : 0 };
+                    bool slotTaken = System.Threading.Interlocked.CompareExchange(ref Program.ActiveCampaignUploads, 1, 0) == 0;
+                    var uploadHolder = new Program.HttpRequest { HoldsUploadSlot = slotTaken ? 1 : 0 };
                     string secondUpload;
                     try
                     {
                         secondUpload = ingressFrom("127.0.0.1", "POST /api/campaigns/import HTTP/1.1\r\nHost: 127.0.0.1:5101\r\n"
                             + "Content-Type: application/zip\r\nContent-Length: 5\r\n\r\n") as string;
                     }
-                    finally { ReleaseIngressReservations(uploadHolder); }
+                    finally { Program.ReleaseIngressReservations(uploadHolder); }
                     check("ingress_single_staged_upload", slotTaken && secondUpload == "429:upload_busy" && uploadHolder.HoldsUploadSlot == 0
-                        && System.Threading.Volatile.Read(ref ActiveCampaignUploads) == 0);
+                        && System.Threading.Volatile.Read(ref Program.ActiveCampaignUploads) == 0);
                 }
 
                 // A stored custom or named-chat key follows only its configured origin; a payload key goes where it is sent.
                 var storedCustom = TestDict("llmProvider", "openai_compatible", "apiUrl", "https://custom.invalid/v1/chat/completions",
                     "apiKey", "stored-custom", "openRouterApiKey", "stored-router");
-                Func<Dictionary<string, object>, string> customKey = payload => ResolveLlmRequestApiKey(storedCustom, payload, out _, ReadString(payload, "apiUrl", null));
+                Func<Dictionary<string, object>, string> customKey = payload => LlmProviderService.ResolveLlmRequestApiKey(storedCustom, payload, out _, ReadString(payload, "apiUrl", null));
                 calls.Clear();
                 check("stored_key_withheld_from_foreign_origin", customKey(TestDict("apiUrl", "https://attacker.invalid/v1/chat/completions")) == ""
                     && customKey(TestDict("apiUrl", "http://custom.invalid/v1/chat/completions")) == ""
@@ -630,20 +630,20 @@ namespace ReignBetaServer
                     && ProviderSecret(storedCustom, "openRouterApiKey", "https://openrouter.ai.attacker.invalid/v1") == ""
                     && ProviderSecret(storedCustom, "apiKey") == "" && calls.Count == 0);
                 check("stored_key_kept_for_same_origin_and_explicit_key", customKey(TestDict("apiUrl", "https://CUSTOM.invalid/v2/other")) == "stored-custom"
-                    && customKey(null) == "stored-custom" && LlmApiKey(storedCustom) == "stored-custom"
+                    && customKey(null) == "stored-custom" && LlmProviderService.LlmApiKey(storedCustom) == "stored-custom"
                     && customKey(TestDict("apiUrl", "https://elsewhere.invalid/v1", "apiKey", "one-off")) == "one-off"
-                    && ProviderSecret(storedCustom, "openRouterApiKey", OpenRouterChatUrl) == "stored-router" && calls.Count == 0);
-                var unsafeUrl = ChatWithLlm(TestDict("apiUrl", "file:///tmp/reign-provider", "apiKey", "one-off", "singleProviderAttempt", true), null, null, storedCustom);
+                    && ProviderSecret(storedCustom, "openRouterApiKey", LlmProviderService.OpenRouterChatUrl) == "stored-router" && calls.Count == 0);
+                var unsafeUrl = LlmProviderService.ChatWithLlm(TestDict("apiUrl", "file:///tmp/reign-provider", "apiKey", "one-off", "singleProviderAttempt", true), null, null, storedCustom);
                 check("unsafe_provider_url_refused_before_dispatch", ReadString(unsafeUrl, "errorCode", "") == "provider_url_invalid"
                     && ReadInt(unsafeUrl, "providerCallCount", -1) == 0
-                    && IsDispatchableProviderUrl("http://192.168.1.20:8000/v1/chat/completions") && IsDispatchableProviderUrl("http://localhost:11434/v1")
-                    && !new[] { "file:///etc/passwd", "ftp://host/x", "https://u:p@host/x", "/v1/chat", "" }.Any(IsDispatchableProviderUrl));
+                    && LlmProviderService.IsDispatchableProviderUrl("http://192.168.1.20:8000/v1/chat/completions") && LlmProviderService.IsDispatchableProviderUrl("http://localhost:11434/v1")
+                    && !new[] { "file:///etc/passwd", "ftp://host/x", "https://u:p@host/x", "/v1/chat", "" }.Any(LlmProviderService.IsDispatchableProviderUrl));
 
                 // An implicit saved key aimed at another origin is refused by ChatWithLlm itself (complete and streaming), never
                 // sent keyless; a bound key keeps global_key_unavailable. Neither reaches the store, a provider or the stream.
                 int streamedFragments = 0;
                 Func<Dictionary<string, object>, Action<string>, Dictionary<string, object>> chat = (settingsFixture, delta) =>
-                    ChatWithLlm(new Dictionary<string, object> { ["apiUrl"] = "https://attacker.invalid/v1/chat/completions", ["singleProviderAttempt"] = true },
+                    LlmProviderService.ChatWithLlm(new Dictionary<string, object> { ["apiUrl"] = "https://attacker.invalid/v1/chat/completions", ["singleProviderAttempt"] = true },
                         delta, delta == null ? null : (Func<bool>)(() => false), settingsFixture);
                 Action<string> countFragments = _ => streamedFragments++;
                 calls.Clear();
@@ -654,25 +654,25 @@ namespace ReignBetaServer
                     && boundForeign.All(r => ReadString(r, "errorCode", "") == "global_key_unavailable" && ReadInt(r, "providerCallCount", -1) == 0)
                     && streamedFragments == 0 && calls.Count == 0);
                 var keyless = TestDict("llmProvider", "openai_compatible", "apiUrl", "http://127.0.0.1:8000/v1/chat/completions", "apiKey", "");
-                check("stored_key_rule_scope", !StoredKeyForeignDestination(storedCustom, TestDict("apiKey", "one-off"), "https://attacker.invalid/v1")
-                    && !StoredKeyForeignDestination(storedCustom, null, "https://CUSTOM.invalid/v2/other")
-                    && !StoredKeyForeignDestination(keyless, null, "http://192.168.1.20:8000/v1/chat/completions")
-                    && !StoredKeyForeignDestination(customBound, null, "https://attacker.invalid/v1")
-                    && !StoredKeyForeignDestination(TestDict("llmProvider", OpenRouterProvider, "openRouterApiKey", "stored-router"), null, OpenRouterChatUrl)
-                    && StoredKeyForeignDestination(storedCustom, TestDict("apiUrl", "x"), "http://custom.invalid/v1/chat/completions"));
+                check("stored_key_rule_scope", !LlmProviderService.StoredKeyForeignDestination(storedCustom, TestDict("apiKey", "one-off"), "https://attacker.invalid/v1")
+                    && !LlmProviderService.StoredKeyForeignDestination(storedCustom, null, "https://CUSTOM.invalid/v2/other")
+                    && !LlmProviderService.StoredKeyForeignDestination(keyless, null, "http://192.168.1.20:8000/v1/chat/completions")
+                    && !LlmProviderService.StoredKeyForeignDestination(customBound, null, "https://attacker.invalid/v1")
+                    && !LlmProviderService.StoredKeyForeignDestination(TestDict("llmProvider", LlmProviderService.OpenRouterProvider, "openRouterApiKey", "stored-router"), null, LlmProviderService.OpenRouterChatUrl)
+                    && LlmProviderService.StoredKeyForeignDestination(storedCustom, TestDict("apiUrl", "x"), "http://custom.invalid/v1/chat/completions"));
 
                 // Process-selecting settings: HTTP saves keep the stored value or return to the official default only.
                 var operatorOwned = TestDict("codexExecutable", "/opt/codex/bin/codex", "codexHome", "/srv/codex-home", "portraitNativeSourceGeneratorPath", "");
-                check("process_settings_operator_owned", OperatorOwnedProcessSettingRefusal(operatorOwned,
+                check("process_settings_operator_owned", LlmProviderService.OperatorOwnedProcessSettingRefusal(operatorOwned,
                         TestDict("codexExecutable", " /opt/codex/bin/codex ", "codexHome", "/srv/codex-home", "portraitNativeSourceGeneratorPath", "")) == null
-                    && OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("codexExecutable", "codex", "codexHome", "")) == null
-                    && OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("codexExecutable", "")) == null
-                    && OperatorOwnedProcessSettingRefusal(TestDict(), TestDict("codexExecutable", "", "codexHome", "")) == null
-                    && OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("apiUrl", "https://x.invalid")) == null
-                    && (OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("codexExecutable", "/tmp/evil")) ?? "").Contains("codexExecutable")
-                    && (OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("codexHome", "/tmp/home")) ?? "").Contains("codexHome")
-                    && OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("portraitNativeSourceGeneratorPath", "/mnt/c/x/Generator.exe")) != null
-                    && OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("codexExecutable", TestDict("path", "/tmp/evil"))) != null);
+                    && LlmProviderService.OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("codexExecutable", "codex", "codexHome", "")) == null
+                    && LlmProviderService.OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("codexExecutable", "")) == null
+                    && LlmProviderService.OperatorOwnedProcessSettingRefusal(TestDict(), TestDict("codexExecutable", "", "codexHome", "")) == null
+                    && LlmProviderService.OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("apiUrl", "https://x.invalid")) == null
+                    && (LlmProviderService.OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("codexExecutable", "/tmp/evil")) ?? "").Contains("codexExecutable")
+                    && (LlmProviderService.OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("codexHome", "/tmp/home")) ?? "").Contains("codexHome")
+                    && LlmProviderService.OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("portraitNativeSourceGeneratorPath", "/mnt/c/x/Generator.exe")) != null
+                    && LlmProviderService.OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("codexExecutable", TestDict("path", "/tmp/evil"))) != null);
 
                 // struct stat offsets on Linux x64 against disposable paths; other platforms must report nothing.
                 if (OperatingSystem.IsLinux() && RuntimeInformation.ProcessArchitecture == Architecture.X64)

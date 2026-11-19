@@ -105,9 +105,9 @@ namespace ReignBetaServer
             });
             Check("dialogue_membership_is_private_and_receipt_bound", () => {
                 var state = new Dictionary<string, object> { ["status"] = "negotiating", ["madamId"] = "madam", ["roster"] = roster };
-                Require(TavernHousePresentProfiles(state).Select(Program.CharacterIdFrom).SequenceEqual(new[] { "madam" }), "Workers overheard the private negotiation.");
+                Require(TavernHousePresentProfiles(state).Select(CampaignFileService.CharacterIdFrom).SequenceEqual(new[] { "madam" }), "Workers overheard the private negotiation.");
                 state["status"] = "visiting"; state["receipt"] = new Dictionary<string, object> { ["participantHeroIds"] = new[] { "worker-b", "worker-a" } };
-                Require(TavernHousePresentProfiles(state).Select(Program.CharacterIdFrom).SequenceEqual(new[] { "worker-b", "worker-a" }), "A worker was omitted or the unselected madam was present.");
+                Require(TavernHousePresentProfiles(state).Select(CampaignFileService.CharacterIdFrom).SequenceEqual(new[] { "worker-b", "worker-a" }), "A worker was omitted or the unselected madam was present.");
                 state["status"] = "closed"; Require(Rejects(() => TavernHousePresentProfiles(state)), "A closed visit remained usable.");
             });
             Check("initial_madam_greeting_uses_server_owned_opening_and_replay", () => {
@@ -256,7 +256,7 @@ namespace ReignBetaServer
                 var state = new Dictionary<string, object> { ["player"] = Hero("player", "Player"), ["playerHeroStringId"] = "player", ["roster"] = roster,
                     ["receipt"] = new Dictionary<string, object> { ["participantHeroIds"] = new[] { "worker-b", "worker-a" } } };
                 var refs = PortraitsService.TavernHouseSceneProfiles(state);
-                Require(refs.Select(Program.CharacterIdFrom).SequenceEqual(new[] { "player", "worker-b", "worker-a" }), "Reference identities/order leaked the unselected madam or omitted the player.");
+                Require(refs.Select(CampaignFileService.CharacterIdFrom).SequenceEqual(new[] { "player", "worker-b", "worker-a" }), "Reference identities/order leaked the unselected madam or omitted the player.");
                 ReadDictionary(state, "receipt")["participantHeroIds"] = new[] { "worker-a", "missing" };
                 Require(Rejects(() => PortraitsService.TavernHouseSceneProfiles(state)), "A missing reference identity was silently omitted.");
             });
@@ -318,7 +318,7 @@ namespace ReignBetaServer
                 Require(defaults["tavern_house_look_again_summary.txt"].Contains("complete attributed conversation"), "Summary default truncates or ignores full conversation.");
                 Require(defaults["tavern_house_look_again_image.txt"].Contains("{summary}") && defaults["tavern_house_arrival_image.txt"].Contains("{participants}"), "Image prompt lost summary/identity placeholders.");
                 Require(defaults["tavern_house_portrait_clothing.txt"].Contains("[TAVERN ROLE]"), "Tavern clothing prompt lost its role token.");
-                var meta = Program.PromptMetadataByName()["tavern_house_portrait_clothing.txt"];
+                var meta = PromptService.PromptMetadataByName()["tavern_house_portrait_clothing.txt"];
                 Require(ReadBool(meta, "visible", false) && ReadString(meta, "category", "") == "image"
                     && ReadString(meta, "label", "") == "Tavern House: Portrait Clothing",
                     "Tavern clothing prompt is not visible in the WebUI image prompt library.");

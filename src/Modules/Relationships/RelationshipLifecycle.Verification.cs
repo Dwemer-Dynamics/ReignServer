@@ -95,7 +95,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(correspondenceCampaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(correspondenceCampaignId));
             }
             return results;
         }
@@ -763,7 +763,7 @@ namespace ReignBetaServer
                     RelationshipsStore.UpsertRelationshipPairLifecycle(connection, new Dictionary<string, object> { ["pair"] = repairPairKey });
                     RelationshipsStore.InsertRelationshipDirectorActions3(connection);
                     RelationshipsStore.InsertRelationshipIncidents2(connection, new Dictionary<string, object> { ["pair"] = repairPairKey });
-                    Program.StoreWorldMemoryEvent(new Dictionary<string, object>
+                    DialogueService.StoreWorldMemoryEvent(new Dictionary<string, object>
                     {
                         ["campaignId"] = campaignId,
                         ["eventId"] = "marriage_repair_action_1",
@@ -774,7 +774,7 @@ namespace ReignBetaServer
                         ["visibility"] = "public",
                         ["importance"] = 0.9d
                     }, "relationship_lifecycle_marriage");
-                    Program.StoreWorldMemoryEvent(new Dictionary<string, object>
+                    DialogueService.StoreWorldMemoryEvent(new Dictionary<string, object>
                     {
                         ["campaignId"] = campaignId,
                         ["eventId"] = "marriage_repair_action_2",
@@ -871,7 +871,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaignId));
             }
             return results;
         }

@@ -252,7 +252,7 @@ namespace ReignBetaServer
                 }
                 SchedulePersonalGossip(campaign);
             }
-            catch (Exception ex) { Program.LogOperational("gossip.accept_failed", GossipFields("campaignId", campaign, "error", Program.LimitText(ex.Message, 500))); }
+            catch (Exception ex) { OperationsService.LogOperational("gossip.accept_failed", GossipFields("campaignId", campaign, "error", DialogueService.LimitText(ex.Message, 500))); }
         }
 
         private static int PersonalGossipSourceStrength(Dictionary<string, object> topic)
@@ -343,7 +343,7 @@ namespace ReignBetaServer
                 }
                 SchedulePersonalGossip(campaign);
             }
-            catch (Exception ex) { Program.LogOperational("gossip.relationship_failed", GossipFields("campaignId", campaign, "error", Program.LimitText(ex.Message, 500))); }
+            catch (Exception ex) { OperationsService.LogOperational("gossip.relationship_failed", GossipFields("campaignId", campaign, "error", DialogueService.LimitText(ex.Message, 500))); }
         }
 
         private static List<GossipCandidate> BuildPersonalGossipCandidates(ReignDbConnection c, Dictionary<string, object> topic,
@@ -393,7 +393,7 @@ namespace ReignBetaServer
             string player = ReadString(topic, "playerId", ""), session = ReadString(topic, "sessionId", "");
             var policy = ReadDictionary(topic, "policy");
             var signal = ReadDictionary(topic, "signal");
-            var traits = Program.ReadJsonObject(Program.CharacterFile(campaign, speaker, "traits.json"));
+            var traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, speaker, "traits.json"));
             double day = ReadDouble(topic, "worldDay", 0);
             if (DialogueStore.SelectPersonalGossipMessages(c, GossipFields("id", id)).Count > 0) return;
             if (ReadInt(topic, "hop", 1) > ReadInt(policy, "maximumOutwardHops", 2)
@@ -435,8 +435,8 @@ namespace ReignBetaServer
             if (friendly.Count + negative.Count == 0) { SavePersonalGossipTopic(c, topic, ReadBool(topic, "presenceComplete", true) ? "no_audience" : "presence_incomplete"); return; }
             int share = GossipShareChance(emotion, traits);
             bool retell = ReadInt(topic, "hop", 1) > 1;
-            share = retell ? Program.GossipAdjustedChance(GossipRetellChance(share, ReadInt(topic, "credibility", 50)), "retell", policy)
-                : Program.GossipAdjustedChance(share, "share", policy);
+            share = retell ? SettingsService.GossipAdjustedChance(GossipRetellChance(share, ReadInt(topic, "credibility", 50)), "retell", policy)
+                : SettingsService.GossipAdjustedChance(share, "share", policy);
             topic["shareChance"] = share; topic["shareRoll"] = GossipDecisionRoll(topic, id, "share");
             if (GossipDecisionRoll(topic, id, "share") > share) { SavePersonalGossipTopic(c, topic, "sharing_declined"); return; }
             var selected = GossipChooseRecipient(negative, GossipDecisionDraw(topic, id, "negative_recipient"));
@@ -447,7 +447,7 @@ namespace ReignBetaServer
                 var target = ReadDictionaryList(signal, "targets").FirstOrDefault(t => GossipSameId(ReadString(t, "heroId", ""), selected.Id));
                 negativeChance = GossipNegativeChance(traits, selected.Hurt, selected.Affinity, selected.Grievance,
                     ReadBool(target, "knownJealousy", false), ReadBool(target, "knownEnvy", false));
-                negativeChance = Program.GossipAdjustedChance(negativeChance, "negative", policy);
+                negativeChance = SettingsService.GossipAdjustedChance(negativeChance, "negative", policy);
                 if (GossipDecisionRoll(topic, id, "negative") <= negativeChance) type = "negative";
             }
             if (type.Length == 0)
@@ -466,14 +466,14 @@ namespace ReignBetaServer
             if (type == "impression") privacy = GossipPrivacy(ReadString(signal, "existencePrivacy", "personal"));
             int detail = GossipDetailChance(traits, privacy, emotion, selected.Affinity, bond,
                 ReadBool(signal, "ownCompromising", false), ReadBool(signal, "promisedSecrecy", false), negativeChance);
-            detail = Program.GossipAdjustedChance(detail, "disclosure", policy);
+            detail = SettingsService.GossipAdjustedChance(detail, "disclosure", policy);
             int disclosureRoll = GossipDecisionRoll(topic, id, "disclosure");
             topic["detailChance"] = detail; topic["disclosureRoll"] = disclosureRoll;
             if (disclosureRoll > detail)
             {
                 int existence = GossipDetailChance(traits, GossipPrivacy(ReadString(signal, "existencePrivacy", privacy)), emotion,
                     selected.Affinity, bond, ReadBool(signal, "ownCompromising", false), ReadBool(signal, "promisedSecrecy", false), 0);
-                existence = Program.GossipAdjustedChance(existence, "disclosure", policy);
+                existence = SettingsService.GossipAdjustedChance(existence, "disclosure", policy);
                 if (type == "negative" || delta == 0 || disclosureRoll > existence) { SavePersonalGossipTopic(c, topic, "privacy_declined"); return; }
                 type = "impression";
             }
@@ -485,7 +485,7 @@ namespace ReignBetaServer
             { SavePersonalGossipTopic(c, topic, "witness_capacity_reached"); return; }
             string distortion = "none";
             int distortionChance = GossipTrait(traits, "honesty") >= 100 ? 0
-                : Program.GossipAdjustedChance(GossipDistortionChance(traits, selected.Hurt), "distortion", policy);
+                : SettingsService.GossipAdjustedChance(GossipDistortionChance(traits, selected.Hurt), "distortion", policy);
             topic["distortionChance"] = distortionChance;
             if (type == "negative" && GossipDecisionRoll(topic, id, "distortion") <= distortionChance)
                 distortion = GossipDistortionSeverity(GossipDistortionScore(traits, selected.Hurt), GossipDecisionRoll(topic, id, "severity"));

@@ -242,7 +242,7 @@ namespace ReignBetaServer
                     {"expectedRevision",ReadLong(resident,"revision",0)},{"postingId",postingId},{"originRulerHeroStringId","ruler_successor"},
                     {"originRulerName","Successor"},{"charm",ReadInt(established,"charm",200)},{"rulerTrust",10},{"worldDay",24d}
                 });
-                List<Dictionary<string,object>> successorHistory = Program.ReadJsonLinesFromPath(Program.CharacterFile(campaignId,"ruler_successor","history","dialogue.jsonl"));
+                List<Dictionary<string,object>> successorHistory = Program.ReadJsonLinesFromPath(CampaignFileService.CharacterFile(campaignId,"ruler_successor","history","dialogue.jsonl"));
                 AddCapitalAmbassadorTestAssertion(assertions, "server_successor_archive_and_charter_refresh",
                     ReadBool(authorityRefresh,"ok",false) && ReadLong(authorityRefresh,"authorityRevision",0)>charterRevision
                     && successorHistory.Count(x=>ReadString(x,"channel","")=="ambassador_official")>=2,
@@ -273,19 +273,19 @@ namespace ReignBetaServer
                     "Official tone applies only discrete pressure, caps net daily change at +/-6, and permits later offset without a native relation mutation.",
                     new Dictionary<string,object>{{"strongHostile",pressureOne},{"cappedHostile",pressureTwo},{"offset",pressureThree}});
 
-                Dictionary<string,object> providerTimeout = Program.ClassifySyntheticProviderFault("timeout");
+                Dictionary<string,object> providerTimeout = VerificationService.ClassifySyntheticProviderFault("timeout");
                 AddCapitalAmbassadorTestAssertion(assertions, "server_provider_failure_class_once",
                     ReadBool(providerTimeout,"retryable",false) && !ReadBool(providerTimeout,"terminal",true)
                     && ReadInt(providerTimeout,"maxAttempts",0)==2,
                     "The representative provider-timeout class is bounded and retryable without implying an ambassador decision.", providerTimeout);
 
-                Dictionary<string,object> transportWrite = Program.ClassifySyntheticProviderFault("interrupted_write");
+                Dictionary<string,object> transportWrite = VerificationService.ClassifySyntheticProviderFault("interrupted_write");
                 AddCapitalAmbassadorTestAssertion(assertions, "server_transport_failure_class_once",
                     !ReadBool(transportWrite,"retryable",true) && ReadBool(transportWrite,"terminal",false)
                     && ReadString(transportWrite,"failureKind","")=="invalid_provider_response",
                     "The representative interrupted-transport class fails closed as an invalid response.", transportWrite);
 
-                Dictionary<string,object> retryLimit = Program.ClassifySyntheticProviderFault("retry_limit");
+                Dictionary<string,object> retryLimit = VerificationService.ClassifySyntheticProviderFault("retry_limit");
                 AddCapitalAmbassadorTestAssertion(assertions, "server_retry_exhaustion_class_once",
                     !ReadBool(retryLimit,"retryable",true) && ReadBool(retryLimit,"terminal",false)
                     && ReadInt(retryLimit,"maxAttempts",0)==1,
@@ -372,9 +372,9 @@ namespace ReignBetaServer
             {
                 ReignDatabase.InvalidateCampaignSchemaCaches(campaignId);
                 ReignPostgreSqlStorage.DropCampaign(campaignId);
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaignId));
                 return !ReignPostgreSqlStorage.CampaignExists(campaignId)
-                    && !Directory.Exists(Program.CampaignDirectory(campaignId));
+                    && !Directory.Exists(CampaignFileService.CampaignDirectory(campaignId));
             }
             catch
             {

@@ -50,18 +50,18 @@ namespace ReignBetaServer
             Check("bounded_local_worker_is_valid", DenseReplayConfigError(TestDict("denseWorkerReplay", valid)) == "");
             var history = TestDict("observerId", "npc", "peerId", "player", "worldDay", 3d, "asOfSequence", 2L,
                 "sources", new[] { TestDict("sourceId", "source", "speakerId", "player", "text", "The price is700.") });
-            var nextQuestion = Program.CloneDictionary(history); nextQuestion["query"] = "What price?";
+            var nextQuestion = CloneDictionary(history); nextQuestion["query"] = "What price?";
             Check("questions_share_unchanged_history", DenseReplayScopeKey(history) == DenseReplayScopeKey(nextQuestion));
             nextQuestion["observerId"] = "other";
             Check("different_observers_do_not_share_history", DenseReplayScopeKey(history) != DenseReplayScopeKey(nextQuestion));
-            nextQuestion = Program.CloneDictionary(history); nextQuestion["asOfSequence"] = 1L;
+            nextQuestion = CloneDictionary(history); nextQuestion["asOfSequence"] = 1L;
             Check("different_cutoffs_do_not_share_history", DenseReplayScopeKey(history) != DenseReplayScopeKey(nextQuestion));
             foreach (var mutation in new[] { TestDict("port", 5102), TestDict("port", true), TestDict("port", 65001),
                 TestDict("token", "../settings"), TestDict("model", "remote"), TestDict("modelTreeSha256", ""),
                 TestDict("rounds", 4), TestDict("rounds", true), TestDict("modelWindowTokens", 512),
                 TestDict("modelWindowTokens", true), TestDict("apiKey", "forbidden") })
             {
-                var changed = Program.CloneDictionary(valid);
+                var changed = CloneDictionary(valid);
                 foreach (var pair in mutation) changed[pair.Key] = pair.Value;
                 Check("reject_" + mutation.Keys.Single() + "_" + checks.Count,
                     DenseReplayConfigError(TestDict("denseWorkerReplay", changed)) != "");
@@ -100,7 +100,7 @@ namespace ReignBetaServer
 
             internal Dictionary<string, object> Post(string path, Dictionary<string, object> body)
             {
-                var result = TryParseJsonObject(Program.PostJsonToUrl(Endpoint + path, Json.Serialize(body), 30000)) ?? TestDict();
+                var result = TryParseJsonObject(DialogueService.PostJsonToUrl(Endpoint + path, Json.Serialize(body), 30000)) ?? TestDict();
                 if (!ReadBool(result, "ok", false)) throw new InvalidOperationException("Isolated dense worker failed: " + ReadString(result, "error", "unknown"));
                 return result;
             }
@@ -112,7 +112,7 @@ namespace ReignBetaServer
                 string scope = campaign + "|" + observer + "|" + ReadString(context, "timelineId", "");
                 if (indexedScopes.TryGetValue(scope, out var prior))
                 {
-                    var reused = Program.CloneDictionary(prior); reused["durationMs"] = 0L; reused["reusedHistory"] = true;
+                    var reused = CloneDictionary(prior); reused["durationMs"] = 0L; reused["reusedHistory"] = true;
                     return reused;
                 }
                 var documents = new List<Dictionary<string, object>>();
@@ -123,7 +123,7 @@ namespace ReignBetaServer
                     generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
                     if (string.IsNullOrWhiteSpace(generation))
                         throw new InvalidOperationException("Dense replay requires an initialized source restore generation.");
-                    var access = Program.BuildKnowledgeAccessContext(observer, peer, "", context);
+                    var access = DialogueService.BuildKnowledgeAccessContext(observer, peer, "", context);
                     foreach (var source in sources)
                     {
                         string originalId = caseIndex + ":" + ReadString(source, "sourceId", "");
@@ -134,10 +134,10 @@ namespace ReignBetaServer
                             "worldDay", ReadDouble(source, "worldDay", 0), "sourceTurnIds", new[] { originalId },
                             "sourceSpeakerId", ReadString(original, "speaker_id", ""),
                             "fixtureProjection", "verbatim_original_reported_speech_v1");
-                        var audience = Program.TextListFromJson(ReadString(original, "participants_json", "[]"));
+                        var audience = DialogueService.TextListFromJson(ReadString(original, "participants_json", "[]"));
                         string summary = ReadString(source, "speakerName", "Speaker") + " (reported "
                             + ReadString(source, "role", "speech") + "): " + ReadString(original, "text", "");
-                        Program.InsertMemoryRow(connection, memoryId, originalId, observer, "episodic", ReadLong(source, "sequence", 0),
+                        DialogueService.InsertMemoryRow(connection, memoryId, originalId, observer, "episodic", ReadLong(source, "sequence", 0),
                             ReadDouble(source, "worldDay", 0), "", summary, audience, new(), "[]", audience, new(), new(),
                             "private", .5d, 0d, 1d, new(), "active", "isolated_verbatim_projection", Json.Serialize(payload), "", "not_indexed");
                         var row = LoadEmbeddingSourceRow(connection, "memory", memoryId);

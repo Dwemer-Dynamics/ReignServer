@@ -63,7 +63,7 @@ namespace ReignBetaServer
             {
                 Dictionary<string, object> traitDocument = string.IsNullOrWhiteSpace(heroId)
                     ? new Dictionary<string, object>()
-                    : Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"));
+                    : CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"));
                 if (traitDocument.Count == 0 && !string.IsNullOrWhiteSpace(heroId))
                 {
                     Dictionary<string, Dictionary<string, object>> profiles = CharactersService.LoadCharacterProfileLibrary();
@@ -93,12 +93,12 @@ namespace ReignBetaServer
                     ?? new Dictionary<string, object>();
                 if (flirtatiousness < 0 && foundation.ContainsKey("flirtatiousness"))
                 {
-                    flirtatiousness = CharactersService.StableTraitPercentage(heroId, "flirtatiousness", Program.TraitInt(foundation, "flirtatiousness"));
+                    flirtatiousness = CharactersService.StableTraitPercentage(heroId, "flirtatiousness", CharactersService.TraitInt(foundation, "flirtatiousness"));
                     source += "+stable_percentage_fallback";
                 }
                 if (confidence < 0 && foundation.ContainsKey("confidence"))
                 {
-                    confidence = CharactersService.StableTraitPercentage(heroId, "confidence", Program.TraitInt(foundation, "confidence"));
+                    confidence = CharactersService.StableTraitPercentage(heroId, "confidence", CharactersService.TraitInt(foundation, "confidence"));
                     source += "+stable_percentage_fallback";
                 }
             }
@@ -151,11 +151,11 @@ namespace ReignBetaServer
         {
             return new List<Dictionary<string, object>>
             {
-                Program.PromptMeta(PortraitPhysicalConfidencePromptFileNames[0], "Female Physical Confidence 00-20", "image", true, "Female clothing modifier for a physical_confidence score from 0 through 20."),
-                Program.PromptMeta(PortraitPhysicalConfidencePromptFileNames[1], "Female Physical Confidence 21-40", "image", true, "Female clothing modifier for a physical_confidence score from 21 through 40."),
-                Program.PromptMeta(PortraitPhysicalConfidencePromptFileNames[2], "Female Physical Confidence 41-60", "image", true, "Female clothing modifier for a physical_confidence score from 41 through 60."),
-                Program.PromptMeta(PortraitPhysicalConfidencePromptFileNames[3], "Female Physical Confidence 61-80", "image", true, "Female clothing modifier for a physical_confidence score from 61 through 80."),
-                Program.PromptMeta(PortraitPhysicalConfidencePromptFileNames[4], "Female Physical Confidence 81-100", "image", true, "Female clothing modifier for a physical_confidence score from 81 through 100.")
+                PromptService.PromptMeta(PortraitPhysicalConfidencePromptFileNames[0], "Female Physical Confidence 00-20", "image", true, "Female clothing modifier for a physical_confidence score from 0 through 20."),
+                PromptService.PromptMeta(PortraitPhysicalConfidencePromptFileNames[1], "Female Physical Confidence 21-40", "image", true, "Female clothing modifier for a physical_confidence score from 21 through 40."),
+                PromptService.PromptMeta(PortraitPhysicalConfidencePromptFileNames[2], "Female Physical Confidence 41-60", "image", true, "Female clothing modifier for a physical_confidence score from 41 through 60."),
+                PromptService.PromptMeta(PortraitPhysicalConfidencePromptFileNames[3], "Female Physical Confidence 61-80", "image", true, "Female clothing modifier for a physical_confidence score from 61 through 80."),
+                PromptService.PromptMeta(PortraitPhysicalConfidencePromptFileNames[4], "Female Physical Confidence 81-100", "image", true, "Female clothing modifier for a physical_confidence score from 81 through 100.")
             };
         }
 

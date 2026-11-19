@@ -11,8 +11,8 @@ namespace ReignBetaServer
         internal static Dictionary<string, object>
             RunSovereignDemeanorProviderQualification(string[] args)
         {
-            string selectedCase = Program.ArgValue(args, "--case", "").Trim();
-            int extraSeed = int.TryParse(Program.ArgValue(args, "--seed", "271828"),
+            string selectedCase = ArgValue(args, "--case", "").Trim();
+            int extraSeed = int.TryParse(ArgValue(args, "--seed", "271828"),
                 NumberStyles.Integer, CultureInfo.InvariantCulture,
                 out int parsedSeed) ? parsedSeed : 271828;
             List<Dictionary<string, object>> cases =
@@ -44,7 +44,7 @@ namespace ReignBetaServer
             if (Program.HasArg(args, "--resume") && File.Exists(progressPath))
             {
                 Dictionary<string, object> progress =
-                    Program.ReadJsonObject(progressPath);
+                    CampaignFileService.ReadJsonObject(progressPath);
                 if (ReadInt(progress, "seed", -1) == extraSeed
                     && ReadString(progress, "buildVersion", "")
                         == buildVersion)
@@ -74,7 +74,7 @@ namespace ReignBetaServer
                 }
                 results.Add(RunSovereignDemeanorProviderCase(testCase));
                 completedCaseIds.Add(caseId);
-                Program.WriteJsonObject(progressPath,
+                CampaignFileService.WriteJsonObject(progressPath,
                     new Dictionary<string, object>
                     {
                         ["schema"] =
@@ -180,8 +180,8 @@ namespace ReignBetaServer
                     "yyyyMMdd-HHmmss", CultureInfo.InvariantCulture)
                 + "-seed-" + extraSeed.ToString(
                     CultureInfo.InvariantCulture) + ".json");
-            Program.WriteJsonObject(reportPath, report);
-            Program.WriteJsonObject(progressPath,
+            CampaignFileService.WriteJsonObject(reportPath, report);
+            CampaignFileService.WriteJsonObject(progressPath,
                 new Dictionary<string, object>
                 {
                     ["schema"] =
@@ -203,7 +203,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object>
             ReclassifySovereignDemeanorProviderReport(string[] args)
         {
-            string sourcePath = Program.ArgValue(args,
+            string sourcePath = ArgValue(args,
                 "--reclassify-sovereign-demeanor-report", "").Trim();
             if (string.IsNullOrWhiteSpace(sourcePath)
                 || !File.Exists(sourcePath))
@@ -212,7 +212,7 @@ namespace ReignBetaServer
                     ["ok"] = false,
                     ["error"] = "The retained sovereign-demeanor provider report was not found."
                 };
-            Dictionary<string, object> source = Program.ReadJsonObject(sourcePath);
+            Dictionary<string, object> source = CampaignFileService.ReadJsonObject(sourcePath);
             int seed = ReadInt(source, "seed", 271828);
             Dictionary<string, Dictionary<string, object>> cases =
                 BuildSovereignDemeanorPairwiseCases(seed).ToDictionary(
@@ -326,7 +326,7 @@ namespace ReignBetaServer
                 + "-seed-" + seed.ToString(
                     CultureInfo.InvariantCulture) + ".json");
             report["reportPath"] = reportPath;
-            Program.WriteJsonObject(reportPath, report);
+            CampaignFileService.WriteJsonObject(reportPath, report);
             return report;
         }
 
@@ -631,7 +631,7 @@ namespace ReignBetaServer
                             }
                         }
                 };
-            Dictionary<string, object> llm = Program.ChatWithLlm(request);
+            Dictionary<string, object> llm = LlmProviderService.ChatWithLlm(request);
             string initialContent = ReadString(llm, "content", "");
             Dictionary<string, object> context =
                 new Dictionary<string, object>

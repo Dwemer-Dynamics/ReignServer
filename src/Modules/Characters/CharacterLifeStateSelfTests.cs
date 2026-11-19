@@ -21,7 +21,7 @@ namespace ReignBetaServer
                 "summary", "Selected life records retain their content and source IDs in deterministic chronological order; shared policy occurs once."));
             void Check(string id,bool passed,object data=null)=>results.Add(TestDict("caseId","character_life_"+id,"passed",passed,"summary",id,"data",data));
             string campaign="character_life_test_"+Guid.NewGuid().ToString("N");
-            var access=new Program.KnowledgeAccessContext { NpcId="npc",PlayerId="player",TimelineId="main",WorldDay=30 };
+            var access=new DialogueService.KnowledgeAccessContext { NpcId="npc",PlayerId="player",TimelineId="main",WorldDay=30 };
             var context=TestDict("campaignId",campaign,"timelineId","main","worldDay",30d,"playerHeroStringId","player","playerText","Tell me about the weather.");
             const string reply="I will follow you in building an independent nation, provided we buy land peacefully and keep the caravans neutral.";
             Dictionary<string,object> Decision(int revision,string words,string disposition="accepted")=>TestDict("id","pledge","topic","allegiance","stakes","life_changing",
@@ -52,8 +52,8 @@ namespace ReignBetaServer
                     Check("coercion_is_not_willing_loyalty",FormatCharacterLifeTransition(coerced).Contains("coerced compliance"));
                     Check("group_listener_does_not_inherit_speakers_pledge",ReadCharacterDecisionTransitions(connection,"listener",access).Count==0);
                     Check("official_firewall_holds_private_decision",!BuildCharacterLifeStatePrompt(connection,"npc","player",new(context){["officialMemoryFirewall"]=true},new()).Contains("independent nation"));
-                    Check("asof_excludes_future_acceptance",ReadCharacterDecisionTransitions(connection,"npc",new Program.KnowledgeAccessContext{NpcId="npc",TimelineId="main",WorldDay=10}).Count==0);
-                    Check("branch_does_not_inherit_unrestored_decision",ReadCharacterDecisionTransitions(connection,"npc",new Program.KnowledgeAccessContext{NpcId="npc",TimelineId="branch",WorldDay=30}).Count==0);
+                    Check("asof_excludes_future_acceptance",ReadCharacterDecisionTransitions(connection,"npc",new DialogueService.KnowledgeAccessContext{NpcId="npc",TimelineId="main",WorldDay=10}).Count==0);
+                    Check("branch_does_not_inherit_unrestored_decision",ReadCharacterDecisionTransitions(connection,"npc",new DialogueService.KnowledgeAccessContext{NpcId="npc",TimelineId="branch",WorldDay=30}).Count==0);
                     Receipt(connection,"missing",Decision(1,reply));
                     DialogueService.SpecialistFixtureTurn(connection,campaign,"uncommitted_npc","npc",reply,day:11,ts:11);
                     Receipt(connection,"uncommitted",Decision(1,reply),commit:"pending");
@@ -71,7 +71,7 @@ namespace ReignBetaServer
                     Check("withdrawal_prompt_does_not_reaffirm_old_pledge",!FormatCharacterLifeTransition(current[0]).Contains("remains part of your present commitments")
                         &&FormatCharacterLifeTransition(current[0]).Contains("supersedes the earlier acceptance"));
                     Check("earlier_asof_retains_original_commitment",ReadString(CurrentCharacterLifeState(ReadCharacterDecisionTransitions(connection,"npc",
-                        new Program.KnowledgeAccessContext{NpcId="npc",TimelineId="main",WorldDay=11,AsOfTimestamp=11})).Single(),"status","")=="active_commitment");
+                        new DialogueService.KnowledgeAccessContext{NpcId="npc",TimelineId="main",WorldDay=11,AsOfTimestamp=11})).Single(),"status","")=="active_commitment");
                     string letter=ReadString(RelationshipsService.InsertLetter(connection,"npc","Ira","player","Michael",reply,"npc_initiated","plan","","a","b",14,16,TestDict()),"letterId","");
                     var letterDecision=Decision(1,reply);letterDecision["id"]="letter_pledge";letterDecision["worldDay"]=14d;
                     Receipt(connection,letter,letterDecision);
@@ -84,7 +84,7 @@ namespace ReignBetaServer
                     Check("native_marriage_is_personal_history_without_invented_love",native.Count==1&&ReadBool(native[0],"executionConfirmed",false)
                         &&ReadString(native[0],"personalMeaning","")=="not_inferred"&&!FormatCharacterLifeTransition(native[0]).Contains("in love"));
                     Check("native_same_day_later_ingest_not_visible",ReadCharacterNativeLifeTransitions(connection,"npc",
-                        new Program.KnowledgeAccessContext{NpcId="npc",TimelineId="main",WorldDay=30,AsOfTimestamp=8}).Count==0);
+                        new DialogueService.KnowledgeAccessContext{NpcId="npc",TimelineId="main",WorldDay=30,AsOfTimestamp=8}).Count==0);
                     Check("native_event_does_not_become_listeners_life",ReadCharacterNativeLifeTransitions(connection,"listener",access).Count==0);
                     CharactersSelfTestStore.UpdateWorldHistoryEntities(connection);
                     Check("witness_is_not_a_party_to_native_life_change",ReadCharacterNativeLifeTransitions(connection,"npc",access).Count==0);
@@ -107,7 +107,7 @@ namespace ReignBetaServer
                     Check("shared_protected_context_"+mode,DialogueService.BuildProtectedConversationContinuity(campaign,"npc",payload,TestDict()).Contains("CURRENT DYNAMIC CHARACTER"));
                 }
             }
-            catch(Exception ex){results.Add(TestDict("caseId","character_life_fixture_completed","passed",false,"summary",Program.LimitText(ex.ToString(),2500)));}
+            catch(Exception ex){results.Add(TestDict("caseId","character_life_fixture_completed","passed",false,"summary",DialogueService.LimitText(ex.ToString(),2500)));}
             finally{ReignPostgreSqlStorage.DropCampaign(campaign);}
             return results;
         }

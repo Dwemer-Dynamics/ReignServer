@@ -26,7 +26,7 @@ namespace ReignBetaServer
             foreach (Dictionary<string, object> initiator in initiators)
             {
                 string id = ReadString(initiator, "heroId", "");
-                Dictionary<string, object> document = Program.ReadJsonObject(Program.CharacterFile(campaignId, id, "traits.json"));
+                Dictionary<string, object> document = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, id, "traits.json"));
                 Dictionary<string, object> virtues = ReadDictionary(document, "courtVirtues");
                 Dictionary<string, object> percentages = ReadDictionary(document, "traitPercentages");
                 if (virtues == null && percentages != null) virtues = CharactersService.CalculateCourtVirtues(percentages);
@@ -37,7 +37,7 @@ namespace ReignBetaServer
             bool privateInitiative = romantic && permittedInitiators.Count > 0;
             var prompt = new StringBuilder();
             prompt.AppendLine("CURRENT NOBLE VISIT: You are a real visiting noble, with your ordinary personality, knowledge, relationships, and agency intact.");
-            prompt.AppendLine("Visit purpose: " + Program.LimitText(ReadString(context, "purpose", ""), 600));
+            prompt.AppendLine("Visit purpose: " + DialogueService.LimitText(ReadString(context, "purpose", ""), 600));
             prompt.AppendLine("During introductions, naturally state the planned stay of " + ReadInt(context, "stayDays", 3) + " days. The stay is temporary; later conversation remains possible while you are resident.");
             prompt.AppendLine("Your household role: " + role + ". Present household: " + Json.Serialize(members));
             if (romantic && matchmaking)

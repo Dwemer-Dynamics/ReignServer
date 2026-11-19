@@ -179,7 +179,7 @@ namespace ReignBetaServer
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                     Check("batch_read_retry_preserves_original_read_day", ReadDouble(RelationshipsSelfTestStore.SelectLetters5(connection).Single(), "read_day", 0) == 7000d);
             }
-            catch (Exception ex) { Check("suite_exception", false, Program.LimitText(ex.ToString(), 2000)); }
+            catch (Exception ex) { Check("suite_exception", false, DialogueService.LimitText(ex.ToString(), 2000)); }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             return results;
         }

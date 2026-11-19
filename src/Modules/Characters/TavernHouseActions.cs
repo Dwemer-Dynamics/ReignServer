@@ -21,7 +21,7 @@ namespace ReignBetaServer
             => new TavernHouseActionContext { CampaignId = ReadString(state, "campaignId", ""), TimelineId = ReadString(state, "timelineId", ""),
                 TownId = ReadString(state, "townId", ""), SessionId = ReadString(state, "conversationSessionId", ""),
                 PlayerId = ReadString(state, "playerHeroStringId", ""), MadamId = ReadString(state, "madamId", ""),
-                Roster = ReadDictionaryList(state, "roster").Select(p => new TavernHouseActionPerson { HeroId = Program.CharacterIdFrom(p),
+                Roster = ReadDictionaryList(state, "roster").Select(p => new TavernHouseActionPerson { HeroId = CampaignFileService.CharacterIdFrom(p),
                     Name = ReadString(p, "name", ""), Adult = ReadDouble(p, "age", 0) >= 18 && !ReadBool(p, "isChild", false),
                     Available = TavernHouseAdultAvailable(p) }).ToList() };
 

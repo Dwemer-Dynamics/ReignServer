@@ -18,15 +18,15 @@ namespace ReignBetaServer
                 "speakerId", i % 3 == 0 ? "player" : "npc_" + (i % 3), "text", "The same words can recur.")).ToList();
             var collisionContext = TestDict(); SetMemoryTranscriptContext(collisionContext, collisionLines);
             add("exchange_ids_do_not_overwrite_distinct_authors_or_turns", ReadDictionary(collisionContext, "memoryPromptSourceHashes").Count == 14
-                && Program.CanonicalizePromptTranscript(collisionLines, 30).Count == 14, null);
+                && DialogueService.CanonicalizePromptTranscript(collisionLines, 30).Count == 14, null);
             var durable = TestDict("turn_id", "durable_npc_ira", "exchange_id", "wager", "session_id", "scene", "role", "npc", "speaker_id", "ira",
                 "text", "If you put me down, I will announce my defeat.");
             var eventLine = TestDict("id", "event_file_row", "turnId", "wager", "role", "npc", "speakerHeroStringId", "ira", "text", ReadString(durable, "text", ""));
             add("event_adapter_binds_full_source_without_guessing_suffix", MatchPromptSource(eventLine, new[] { durable }) == durable, null);
-            var clipped = Program.CloneDictionary(eventLine); clipped["text"] = "If you put me down";
-            var wrongSpeaker = Program.CloneDictionary(eventLine); wrongSpeaker["speakerHeroStringId"] = "player";
-            var duplicateSource = Program.CloneDictionary(durable); duplicateSource["turn_id"] = "another_turn";
-            var staleSource = Program.CloneDictionary(eventLine); staleSource["sourceTurnId"] = "stale_durable_id";
+            var clipped = CloneDictionary(eventLine); clipped["text"] = "If you put me down";
+            var wrongSpeaker = CloneDictionary(eventLine); wrongSpeaker["speakerHeroStringId"] = "player";
+            var duplicateSource = CloneDictionary(durable); duplicateSource["turn_id"] = "another_turn";
+            var staleSource = CloneDictionary(eventLine); staleSource["sourceTurnId"] = "stale_durable_id";
             add("ambiguous_clipped_or_wrong_author_never_suppresses_source", MatchPromptSource(clipped, new[] { durable }) == null
                 && MatchPromptSource(wrongSpeaker, new[] { durable }) == null
                 && MatchPromptSource(eventLine, new[] { durable, duplicateSource }) == null
@@ -39,7 +39,7 @@ namespace ReignBetaServer
             var repeatedUnbound = new List<Dictionary<string, object>> {
                 TestDict("turnId", "same_exchange", "sequence", 1, "role", "player", "text", "Yes."),
                 TestDict("turnId", "same_exchange", "sequence", 2, "role", "player", "text", "Yes.") };
-            add("unbound_exchange_id_is_not_individual_identity", Program.CanonicalizePromptTranscript(repeatedUnbound, 30).Count == 2, null);
+            add("unbound_exchange_id_is_not_individual_identity", DialogueService.CanonicalizePromptTranscript(repeatedUnbound, 30).Count == 2, null);
             var privateLines = new List<Dictionary<string, object>> { TestDict("text", "OTHER_OBSERVER_SECRET") };
             add("projection_failure_never_exposes_raw_history", !TryProjectBoundTranscript(privateLines,
                 () => throw new InvalidOperationException("injected projection failure")) && privateLines.Count == 0, null);
@@ -63,7 +63,7 @@ namespace ReignBetaServer
                 && ReadInt(ReadDictionary(incompleteDiagnostics, "reasons"), "no_record_fits_summary_budget", 0) == 1
                 && !Json.Serialize(incompleteDiagnostics).Contains("PRIVATE_SOURCE_SENTINEL"), null);
             string campaign = "memory_precision_test_" + Guid.NewGuid().ToString("N");
-            var defaultPolicy = Program.DefaultSettings();
+            var defaultPolicy = SettingsService.DefaultSettings();
             add("new_memory_is_default", !ReadBool(defaultPolicy, "legacyMemoryMode", true)
                 && !defaultPolicy.ContainsKey("memoryPrecisionMode") && !defaultPolicy.ContainsKey("memoryReferenceGraphMode")
                 && ResolveMemoryMode(defaultPolicy) == "precision" && ResolveConversationReferenceMode(defaultPolicy) == "enabled"
@@ -83,12 +83,12 @@ namespace ReignBetaServer
                     && ResolveConversationReferenceMode(migrated) == "enabled", null);
             }
             var malformedPolicy = TestDict("legacyMemoryMode", "invalid", "temperature", .7d, "dialogueModel", "fixture/model", "apiKey", "fixture-key");
-            Program.NormalizeMemorySettings(malformedPolicy);
+            SettingsService.NormalizeMemorySettings(malformedPolicy);
             add("missing_or_malformed_toggle_defaults_new_without_changing_provider", malformedPolicy["legacyMemoryMode"] is false
                 && ResolveMemoryMode(null) == "precision" && ReadDouble(malformedPolicy, "temperature", 0) == .7d
                 && ReadString(malformedPolicy, "dialogueModel", "") == "fixture/model"
                 && ReadString(malformedPolicy, "apiKey", "") == "fixture-key", null);
-            var observer = new Program.KnowledgeAccessContext { NpcId = "npc_b", PlayerId = "player", TimelineId = "timeline_a", WorldDay = 30 };
+            var observer = new DialogueService.KnowledgeAccessContext { NpcId = "npc_b", PlayerId = "player", TimelineId = "timeline_a", WorldDay = 30 };
             var settings = TestDict("useMemoryLlmForConsolidation", false, "enableSemanticMemory", false,
                 "memoryPrecisionMode", "precision", "enableSemanticMemory", false);
             var taggedSources = new List<Dictionary<string, object>> {
@@ -97,7 +97,7 @@ namespace ReignBetaServer
                 TestDict("ts", 2L, "summary", "The speaker explained her grief and trust.",
                     "tags_json", "[\"personal_disclosure\",\"grief\",\"trust\"]") };
             string taggedOriginal = CanonicalJson(taggedSources);
-            var taggedDigest = Program.BuildMiddleTermSummary(settings, "npc_b", "conversation:tag_fixture", taggedSources);
+            var taggedDigest = DialogueService.BuildMiddleTermSummary(settings, "npc_b", "conversation:tag_fixture", taggedSources);
             var digestTags = ReadStringList(taggedDigest, "tags");
             add("summary_topics_use_content_tags_not_provenance_wrapper", digestTags.Contains("grief")
                 && digestTags.Contains("arenicos") && digestTags.Contains("trust")
@@ -118,10 +118,10 @@ namespace ReignBetaServer
                 TestDict("summary", new string('x', 9000), "tags_json", "[\"dialogue\"]"),
                 TestDict("summary", "The caravan price remains conditional on arrival.", "tags_json", "[\"caravan_terms\"]") }, 1);
             add("summary_topics_include_final_record_without_extra_calls", lateTags.SequenceEqual(new[] { "caravan_terms" }), lateTags);
-            var qualified = Program.TryExtractMinimeTopics(settings, "Not intimate.", 5);
+            var qualified = DialogueService.TryExtractMinimeTopics(settings, "Not intimate.", 5);
             add("topic_hints_do_not_drop_explicit_negation", qualified.Contains("not_intimate")
                 && !qualified.Contains("intimate") && !qualified.Contains("intimacy"), qualified);
-            var lateQuestionTopics = Program.TryExtractMinimeTopics(settings,
+            var lateQuestionTopics = DialogueService.TryExtractMinimeTopics(settings,
                 string.Concat(Enumerable.Repeat("He sips slowly beside the fire. ", 150))
                     + "What does Empress Narea plan for the tournament?", 3);
             add("topic_query_retains_late_entities_and_subject_after_long_narration",
@@ -233,16 +233,16 @@ namespace ReignBetaServer
                 add("non_primary_group_participant_exact_recall", exchanges.Any(e => e.Text.Contains("300 denars") && e.Text.Contains("Nothing has been paid")), exchanges.Select(e => e.SourceId).ToList());
                 var exact = SearchExactConversationHistory(connection, "npc_b", "caravan price", TestDict(), 24000, null, "current_session", 30, observer);
                 add("legacy_exact_route_includes_secondary_participant", ReadString(exact, "text", "").Contains("300 denars"), exact);
-                var stranger = new Program.KnowledgeAccessContext { NpcId = "npc_b_child", WorldDay = 30, TimelineId = "timeline_a" };
+                var stranger = new DialogueService.KnowledgeAccessContext { NpcId = "npc_b_child", WorldDay = 30, TimelineId = "timeline_a" };
                 add("similar_identifier_is_not_participant", FindPrecisionExchanges(connection, PlanMemoryQuery("npc_b_child", "player", "caravan", context), stranger, 8).Count == 0, null);
-                var early = new Program.KnowledgeAccessContext { NpcId = "npc_b", WorldDay = 19, TimelineId = "timeline_a" };
+                var early = new DialogueService.KnowledgeAccessContext { NpcId = "npc_b", WorldDay = 19, TimelineId = "timeline_a" };
                 var earlyPlan = PlanMemoryQuery("npc_b", "player", "caravan", TestDict("worldDay", 19d, "timelineId", "timeline_a"));
                 add("future_exchange_unavailable", FindPrecisionExchanges(connection, earlyPlan, early, 8).Count == 0, null);
                 var otherTimeline = PlanMemoryQuery("npc_b", "player", "caravan", TestDict("worldDay", 30d, "timelineId", "timeline_b"));
-                add("other_timeline_unavailable", FindPrecisionExchanges(connection, otherTimeline, new Program.KnowledgeAccessContext { NpcId = "npc_b", WorldDay = 30, TimelineId = "timeline_b" }, 8).Count == 0, null);
+                add("other_timeline_unavailable", FindPrecisionExchanges(connection, otherTimeline, new DialogueService.KnowledgeAccessContext { NpcId = "npc_b", WorldDay = 30, TimelineId = "timeline_b" }, 8).Count == 0, null);
 
                 DialogueSelfTestStore.InsertMemories4(connection);
-                add("unrelated_rows_cannot_exhaust_candidate_limit", Program.QueryKnownRows(connection, "memories", observer, "status='active'", 4).Any(r => ReadString(r, "memory_id", "") == "eligible_old"), null);
+                add("unrelated_rows_cannot_exhaust_candidate_limit", DialogueService.QueryKnownRows(connection, "memories", observer, "status='active'", 4).Any(r => ReadString(r, "memory_id", "") == "eligible_old"), null);
                 using (var obligationFixture = connection.BeginTransaction())
                 {
                     void SaveObligation(string id, long timestamp, string text, string validation = "", string spanStatus = "", string evidenceType = "", bool hidden = false)
@@ -255,7 +255,7 @@ namespace ReignBetaServer
                         if (spanStatus.Length > 0) obligation["sourceEvidence"] = TestDict("status", spanStatus, "quote", text, "speakerId", "npc_b");
                         if (evidenceType.Length > 0) obligation["evidenceType"] = evidenceType;
                         if (hidden) obligation["hidden_from"] = new[] { "npc_b" };
-                        Program.InsertObligation(connection, "obligation_event_" + id, obligation, timestamp, "dialogue");
+                        DialogueService.InsertObligation(connection, "obligation_event_" + id, obligation, timestamp, "dialogue");
                     }
                     const string supported = "I promise to inspect the markerproof only if the caravan arrives.";
                     const string court = "Native ledger payment for the markerproof.";
@@ -267,10 +267,10 @@ namespace ReignBetaServer
                     SaveObligation("unverified_type_only", 34, "A supposed markerproof without evidence.", evidenceType: "unverified_summary");
                     SaveObligation("incomplete_span_only", 35, "Another markerproof missing its source.", spanStatus: "incomplete");
                     SaveObligation("hidden_obligation", 36, "Hidden markerproof obligation.", "supported_span", "supported_span", "spoken_statement", hidden: true);
-                    var promptObligations = Program.QueryKnownRows(connection, "obligations", observer, PromptActiveObligationSql, 2);
+                    var promptObligations = DialogueService.QueryKnownRows(connection, "obligations", observer, PromptActiveObligationSql, 2);
                     add("prompt_obligation_budget_excludes_incomplete_and_hypothetical_rows",
                         promptObligations.Select(r => ReadString(r, "description", "")).SequenceEqual(new[] { court, supported }), null);
-                    var editorObligations = Program.QueryKnownRows(connection, "obligations", observer, "", 20);
+                    var editorObligations = DialogueService.QueryKnownRows(connection, "obligations", observer, "", 20);
                     add("prompt_obligation_guard_preserves_stored_rows_for_review",
                         editorObligations.Count == 7 && editorObligations.Any(r => ReadString(r, "obligation_id", "") == "incomplete_obligation"), null);
                     var temporalObligations = LoadTemporalKnowledgeForPrompt(connection, campaign, observer, new() { "markerproof" }, 2);
@@ -278,17 +278,17 @@ namespace ReignBetaServer
                         temporalObligations.Select(r => ReadString(r, "claim", "")).ToHashSet().SetEquals(new[] { court, supported }), null);
                     obligationFixture.Rollback();
                 }
-                Program.InsertMemoryFts(connection, "eligible_old", "300 denars caravan caravan agreement arrival", new List<string>(), new List<string>());
-                add("eligible_ranked_lexical_source_found", Program.SearchMemoryFts(connection, new List<string> { "caravan" }, 1, observer).Contains("eligible_old"), null);
+                DialogueService.InsertMemoryFts(connection, "eligible_old", "300 denars caravan caravan agreement arrival", new List<string>(), new List<string>());
+                add("eligible_ranked_lexical_source_found", DialogueService.SearchMemoryFts(connection, new List<string> { "caravan" }, 1, observer).Contains("eligible_old"), null);
                 using(var fixture=connection.BeginTransaction())
                 {
                     DialogueSelfTestStore.InsertBeliefs(connection);
-                    add("owned_belief_relevance_precedes_candidate_limit",ReadString(Program.QueryKnownRows(connection,"beliefs",observer,"",1,new List<string>{"caravan"}).Single(),"belief_id","")=="old_relevant_belief",null);
+                    add("owned_belief_relevance_precedes_candidate_limit",ReadString(DialogueService.QueryKnownRows(connection,"beliefs",observer,"",1,new List<string>{"caravan"}).Single(),"belief_id","")=="old_relevant_belief",null);
                     fixture.Rollback();
                 }
                 DialogueSelfTestStore.UpdateMemories2(connection);
-                add("hidden_overrides_ownership", Program.QueryKnownRows(connection, "memories", observer, "status='active'", 4).Count == 0
-                    && Program.SearchMemoryFts(connection, new List<string> { "caravan" }, 1, observer).Count == 0, null);
+                add("hidden_overrides_ownership", DialogueService.QueryKnownRows(connection, "memories", observer, "status='active'", 4).Count == 0
+                    && DialogueService.SearchMemoryFts(connection, new List<string> { "caravan" }, 1, observer).Count == 0, null);
 
                 var assertion = TestDict("subjectId", "npc_b", "predicate", "price", "objectId", "900", "claim", "Caravan price is 900.",
                     "believer", "npc_b", "cardinality", "one", "agreementId", "caravan", "timelineId", "timeline_a", "worldDay", 20d,
@@ -300,9 +300,9 @@ namespace ReignBetaServer
                 using (var transaction = connection.BeginTransaction()) { second = UpsertTemporalAssertion(connection, campaign, "event_2", "belief_2", "belief", assertion, 200); transaction.Commit(); }
                 add("changed_terms_link_revision", ReadString(DialogueSelfTestStore.SelectTemporalKnowledgeAssertions2(connection, TestDict("id", second)).Single(), "supersedes_assertion_id", "") == first, null);
                 add("current_terms_select_new_version", LoadTemporalKnowledgeForPrompt(connection, campaign, observer, new List<string> { "caravan" }, 4).Single().TryGetValue("assertion_id", out var latest) && Convert.ToString(latest) == second, null);
-                var pastObserver = new Program.KnowledgeAccessContext { NpcId = "npc_b", TimelineId = "timeline_a", WorldDay = 22 };
+                var pastObserver = new DialogueService.KnowledgeAccessContext { NpcId = "npc_b", TimelineId = "timeline_a", WorldDay = 22 };
                 add("as_of_query_selects_old_terms", ReadString(LoadTemporalKnowledgeForPrompt(connection, campaign, pastObserver, new List<string> { "caravan" }, 4).Single(), "assertion_id", "") == first, null);
-                add("private_belief_never_shared_truth", LoadTemporalKnowledgeForPrompt(connection, campaign, new Program.KnowledgeAccessContext { NpcId = "npc_a", TimelineId = "timeline_a", WorldDay = 30 }, new List<string> { "caravan" }, 4).Count == 0, null);
+                add("private_belief_never_shared_truth", LoadTemporalKnowledgeForPrompt(connection, campaign, new DialogueService.KnowledgeAccessContext { NpcId = "npc_a", TimelineId = "timeline_a", WorldDay = 30 }, new List<string> { "caravan" }, 4).Count == 0, null);
                 using(var fixture=connection.BeginTransaction())
                 {
                     DialogueSelfTestStore.InsertTemporalKnowledgeAssertions2(connection, TestDict("campaign",campaign));
@@ -374,7 +374,7 @@ namespace ReignBetaServer
                     RepairConversationContinuity(connection, freshStage);
                     add("legacy_staging_repeat_preserves_ids_tags_and_originals", ReadBool(duplicate, "idempotent", false)
                         && DialogueSelfTestStore.SelectSummaries(connection).Count == 1
-                        && Program.TextListFromJson(ReadString(published, "tags_json", "[]")).Contains("denars")
+                        && DialogueService.TextListFromJson(ReadString(published, "tags_json", "[]")).Contains("denars")
                         && DialogueSelfTestStore.SelectMemorySources2(connection, TestDict("id", ReadString(published, "summary_id", ""))).Count == 3
                         && MemorySourceHash(DialogueSelfTestStore.SelectConversationTurns55(connection)) == originalTurns, null);
                     preview.Rollback();
@@ -383,7 +383,7 @@ namespace ReignBetaServer
                 using (var upgrade = connection.BeginTransaction())
                 {
                     DialogueSelfTestStore.InsertSummaries(connection);
-                    Program.InsertSummaryFts(connection, "old_staged_scene", "Earlier derived scene text.", new() { "scene" }, new() { "npc_a", "npc_b", "player" });
+                    DialogueService.InsertSummaryFts(connection, "old_staged_scene", "Earlier derived scene text.", new() { "scene" }, new() { "npc_a", "npc_b", "player" });
                     var upgradeStage = BuildMemoryStagingManifest(connection, TestDict("campaignId", campaign, "timelineId", "timeline_a"));
                     RepairConversationContinuity(connection, upgradeStage);
                     var repeatedUpgrade = RepairConversationContinuity(connection, upgradeStage);
@@ -443,8 +443,8 @@ namespace ReignBetaServer
                     var whisperedStage = BuildMemoryStagingManifest(connection, TestDict("campaignId", campaign, "timelineId", "timeline_a"));
                     RepairConversationContinuity(connection, whisperedStage);
                     var whisperedSummary = DialogueSelfTestStore.SelectSummaries2(connection).Single();
-                    add("legacy_staging_whisper_excludes_nonwitness", !Program.TextListFromJson(ReadString(whisperedSummary, "known_by_json", "[]")).Contains("npc_b")
-                        && !Program.KnowledgeRowVisibleToNpc("summaries", whisperedSummary, observer, connection), null);
+                    add("legacy_staging_whisper_excludes_nonwitness", !DialogueService.TextListFromJson(ReadString(whisperedSummary, "known_by_json", "[]")).Contains("npc_b")
+                        && !DialogueService.KnowledgeRowVisibleToNpc("summaries", whisperedSummary, observer, connection), null);
                     privateStage.Rollback();
                 }
                 var privateSafe = PrecisionExchangeEvidence(connection,DialogueSelfTestStore.SelectConversationTurns57(connection).Single(),observer,true,100);
@@ -508,7 +508,7 @@ namespace ReignBetaServer
                 add("schema_compaction_preserves_custom_instructions_" + PromptHash(custom).Substring(0, 8), CompactPrecisionSchema(custom) == custom, null);
             foreach (string name in new[] { "dialogue_output_schema.json", "event_output_schema.json" })
             {
-                var output = TryParseJsonObject(ConversationMemoryOutputSchema(Program.DefaultPromptText(name, Program.DefaultPromptTemplates())));
+                var output = TryParseJsonObject(ConversationMemoryOutputSchema(PromptService.DefaultPromptText(name, PromptService.DefaultPromptTemplates())));
                 add("ordinary_json_example_source_fields_" + name, new[] { "memoryWrites", "beliefWrites", "obligationWrites", "comprehensionWrites" }
                     .All(field => ReadDictionaryList(output, field).Count > 0 && ReadDictionaryList(output, field)
                         .All(write => ReadDictionary(write, "sourceEvidence")?.ContainsKey("quote") == true)), null);
@@ -627,8 +627,8 @@ namespace ReignBetaServer
                     "npc", "npc", "NPC", answer, "in_person", 20d, 100L,
                     "", new List<string> { "npc", "player" }, context);
                 DialogueSelfTestStore.UpdateConversationTurns47(connection);
-                Program.KnowledgeAccessContext Access(long cutoff = 11, double day = 20, long timestamp = 100, string branch = "derivative_branch", string npc = "npc") =>
-                    new Program.KnowledgeAccessContext { NpcId = npc, PlayerId = "player", TimelineId = branch, WorldDay = day,
+                DialogueService.KnowledgeAccessContext Access(long cutoff = 11, double day = 20, long timestamp = 100, string branch = "derivative_branch", string npc = "npc") =>
+                    new DialogueService.KnowledgeAccessContext { NpcId = npc, PlayerId = "player", TimelineId = branch, WorldDay = day,
                         AsOfAcceptedSequence = cutoff, AsOfTimestamp = timestamp };
                 var plan = PlanMemoryQuery("npc", "player", "mill roof", context);
                 foreach (var kind in new[] { ("memories", "memory_id"), ("summaries", "summary_id"),
@@ -638,8 +638,8 @@ namespace ReignBetaServer
                         "summary", answer, "claim", answer, "text", answer, "status", "active", "ts", 1L,
                         "payload_json", Json.Serialize(TestDict("timelineId", "derivative_branch", "worldDay", 1d)));
                     string before = CanonicalJson(row);
-                    Check(kind.Item1 + "_cannot_backdate_past_its_source", !Program.KnowledgeRowVisibleToNpc(kind.Item1, row, Access(10), connection));
-                    Check(kind.Item1 + "_available_after_source_acceptance", Program.KnowledgeRowVisibleToNpc(kind.Item1, row, Access(), connection));
+                    Check(kind.Item1 + "_cannot_backdate_past_its_source", !DialogueService.KnowledgeRowVisibleToNpc(kind.Item1, row, Access(10), connection));
+                    Check(kind.Item1 + "_available_after_source_acceptance", DialogueService.KnowledgeRowVisibleToNpc(kind.Item1, row, Access(), connection));
                     Check(kind.Item1 + "_source_day_timestamp_and_branch_control", !MemoryTimeVisible(row, Access(day: 19), connection)
                         && !MemoryTimeVisible(row, Access(timestamp: 99), connection)
                         && !MemoryTimeVisible(row, Access(branch: "another_branch"), connection));
@@ -684,7 +684,7 @@ namespace ReignBetaServer
             Dictionary<string, object> response = TestDict("ok", true, "finishReason", "length", "content", "{}", "model", "fixture",
                 "raw", TestDict("usage", TestDict("completion_tokens", 1200, "completion_tokens_details", TestDict("reasoning_tokens", 1199))));
             Dictionary<string, object> Respond(Dictionary<string, object> input) { calls++; request = input; return response; }
-            var length = Program.BuildMiddleTermSummary(settings, "npc", "conversation:compaction_fixture", rows, responder: Respond, campaignId: "isolated_compaction_campaign");
+            var length = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:compaction_fixture", rows, responder: Respond, campaignId: "isolated_compaction_campaign");
             var diagnostic = ReadDictionary(length, "compactionDiagnostic");
             Check("length_failure_is_explicit_and_not_retried", calls == 1 && !ReadBool(length, "retryable", true)
                 && ReadString(length, "compactionStatus", "") == "incomplete"
@@ -704,35 +704,35 @@ namespace ReignBetaServer
             {
                 response = TestDict("ok", true, "finishReason", "stop", "content", item.Item2,
                     "cache", TestDict("idempotencyCacheHit", true));
-                var result = Program.BuildMiddleTermSummary(settings, "npc", "conversation:compaction_fixture", rows, responder: Respond);
+                var result = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:compaction_fixture", rows, responder: Respond);
                 Check(item.Item1 + "_retains_originals_without_retry", ReadString(result, "summary", "") == retained
                     && ReadString(result, "compactionStatus", "") == "incomplete" && !ReadBool(result, "retryable", true)
                     && ReadString(ReadDictionary(result, "compactionDiagnostic"), "reason", "") == item.Item3
                     && ReadBool(ReadDictionary(result, "compactionDiagnostic"), "responseCacheHit", false));
             }
             response = TestDict("ok", true, "finishReason", "stop", "content", "{\"sourceIndices\":[1,3]}");
-            var accepted = Program.BuildMiddleTermSummary(settings, "npc", "conversation:compaction_fixture", rows, responder: Respond);
+            var accepted = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:compaction_fixture", rows, responder: Respond);
             Check("valid_partial_selection_preserves_answer_and_qualification", ReadString(accepted, "compactionStatus", "") == "complete"
                 && !ReadBool(accepted, "coverageComplete", true) && ReadString(accepted, "summary", "").Contains("may arrive tomorrow; no payment has happened.")
                 && ReadString(accepted, "summary", "").Contains("NPC asked") && ReadString(accepted, "summary", "").Length <= 1800);
             response = TestDict("ok", false, "error", "HTTP status 401 invalid API key");
-            var unauthorized = Program.BuildMiddleTermSummary(settings, "npc", "conversation:compaction_fixture", rows, responder: Respond);
+            var unauthorized = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:compaction_fixture", rows, responder: Respond);
             Check("provider_configuration_failure_is_not_blindly_retried", !ReadBool(unauthorized, "retryable", true)
                 && ReadString(ReadDictionary(unauthorized, "compactionDiagnostic"), "reason", "") == "provider_failure");
             int beforeLocal = calls;
-            var complete = Program.BuildMiddleTermSummary(settings, "npc", "conversation:short_fixture", new() { rows[0], rows[2] }, responder: Respond);
+            var complete = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:short_fixture", new() { rows[0], rows[2] }, responder: Respond);
             Check("complete_sources_fit_without_provider", calls == beforeLocal && ReadBool(complete, "coverageComplete", false)
                 && ReadString(complete, "summary", "").Contains(ReadString(rows[0], "summary", ""))
                 && ReadString(complete, "summary", "").Contains(ReadString(rows[2], "summary", ""))
                 && ReadString(ReadDictionary(complete, "compactionDiagnostic"), "reason", "") == "complete_sources_fit_locally");
             response = TestDict("ok", true, "finishReason", "stop", "content", "{\"digest\":[{\"text\":\"A source with no asserted events remains uninformative.\",\"sourceIndices\":[1]}]}");
-            var oversize = Program.BuildMiddleTermSummary(settings, "npc", "conversation:oversize_fixture", new() { rows[1] }, responder: Respond);
+            var oversize = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:oversize_fixture", new() { rows[1] }, responder: Respond);
             Check("oversized_original_can_be_compressed_in_one_call", calls == beforeLocal + 1
                 && ReadString(oversize, "compactionStatus", "") == "complete" && !ReadBool(oversize, "coverageComplete", true)
                 && ReadString(oversize, "interpretationStatus", "") == "unverified" && ReadStringList(oversize, "originalSourceRecords").Single().Contains(new string('x', 3000))
                 && ReadString(oversize, "summary", "").Length < 1800 && ReadInt(request, "maxTokens", 0) >= 4096);
             response["content"] = "{\"digest\":[{\"text\":\"Wrong reference\",\"sourceIndices\":[999]}]}";
-            var wrongReference = Program.BuildMiddleTermSummary(settings, "npc", "conversation:fixture", rows, responder: Respond);
+            var wrongReference = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:fixture", rows, responder: Respond);
             Check("digest_bad_reference_retains_originals", ReadString(wrongReference, "compactionStatus", "") == "incomplete"
                 && ReadString(ReadDictionary(wrongReference, "compactionDiagnostic"), "reason", "") == "digest_invalid_source_reference");
             var derivedRow = TestDict("summary", "DO_NOT_TREAT_THIS_DIGEST_AS_AN_ORIGINAL", "payload_json", Json.Serialize(oversize));
@@ -746,7 +746,7 @@ namespace ReignBetaServer
                     AcceptAttributedMemoryDigest(invalidDigest, rows, new() { new string('x', 3000) }, new(), 1800, out _) == null);
             var missingArchive = TestDict("summary", "Retain the available older digest.", "payload_json", Json.Serialize(TestDict("method", "model_attributed_digest")));
             int beforeMissing = calls;
-            var unavailable = Program.BuildMiddleTermSummary(settings, "npc", "conversation:fixture", new() { rows[0], missingArchive }, responder: Respond);
+            var unavailable = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:fixture", new() { rows[0], missingArchive }, responder: Respond);
             Check("missing_digest_archive_never_silently_disappears_or_completes", calls == beforeMissing
                 && ReadString(unavailable, "summary", "").Contains("Retain the available older digest.")
                 && ReadString(unavailable, "compactionStatus", "") == "incomplete");
@@ -761,17 +761,17 @@ namespace ReignBetaServer
             var results = new List<Dictionary<string, object>>();
             void Check(string name, bool passed, object data = null) => results.Add(TestDict(
                 "caseId", "memory_precision_recent_window_" + name, "passed", passed,
-                "summary", name + (!passed && data != null ? ": " + Program.LimitText(data is string error ? error : Json.Serialize(data), 2400) : ""), "data", data));
+                "summary", name + (!passed && data != null ? ": " + DialogueService.LimitText(data is string error ? error : Json.Serialize(data), 2400) : ""), "data", data));
             string campaign = "recent_memory_window_" + Guid.NewGuid().ToString("N");
             var context = TestDict("timelineId", "window_main", "worldDay", 30d, "playerHeroStringId", "player");
             var settings = TestDict("enableSemanticMemory", false, "enableMinime", false,
                 "useMemoryLlmForConsolidation", false, "memoryPrecisionMode", "precision");
-            var knowledge = Program.BuildKnowledgeAccessContext("observer", "player", "", context);
+            var knowledge = DialogueService.BuildKnowledgeAccessContext("observer", "player", "", context);
             var plan = PlanMemoryQuery("observer", "player", "Continue our conversation", context);
-            var priorSettings = Program.CodexPerformanceSettings.Value;
+            var priorSettings = LlmProviderService.CodexPerformanceSettings.Value;
             var envelopeSettings = new Dictionary<string, object>(settings)
             {
-                ["llmProvider"] = Program.NanoGptProvider, ["dialogueModel"] = "recent-window-fixture",
+                ["llmProvider"] = LlmProviderService.NanoGptProvider, ["dialogueModel"] = "recent-window-fixture",
                 ["eventsModel"] = "recent-window-fixture"
             };
             var certificates = TestDict();
@@ -784,7 +784,7 @@ namespace ReignBetaServer
                     "source", "isolated recent-window fixture", "validUntilUtc", DateTimeOffset.UtcNow.AddHours(1).ToString("o"));
             }
             envelopeSettings["verifiedConversationContextWindows"] = certificates;
-            Program.CodexPerformanceSettings.Value = envelopeSettings;
+            LlmProviderService.CodexPerformanceSettings.Value = envelopeSettings;
             try
             {
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
@@ -902,9 +902,9 @@ namespace ReignBetaServer
                     }
                     var restricted = new Dictionary<string, object>(context) { ["officialMemoryFirewall"] = true };
                     Check("official_route_firewall", LoadRecentConversationWindow(connection, plan, restricted, knowledge, settings, TestDict()).Count == 0);
-                    var unknown = Program.BuildKnowledgeAccessContext("observer", "player", "", context); unknown.PlayerIdentityUnknown = true;
+                    var unknown = DialogueService.BuildKnowledgeAccessContext("observer", "player", "", context); unknown.PlayerIdentityUnknown = true;
                     Check("unknown_identity_firewall", LoadRecentConversationWindow(connection, plan, context, unknown, settings, TestDict()).Count == 0);
-                    var early = Program.BuildKnowledgeAccessContext("observer", "player", "", context); early.AsOfTimestamp = 30;
+                    var early = DialogueService.BuildKnowledgeAccessContext("observer", "player", "", context); early.AsOfTimestamp = 30;
                     var historical = LoadRecentConversationWindow(connection, plan, context, early, settings, TestDict());
                     Check("asof_never_sees_later_sources_or_rewrites", historical.All(e => e.Kind != "recent_summary")
                         && !historical.Any(e => e.Text.Contains("no payment has occurred")));
@@ -912,7 +912,7 @@ namespace ReignBetaServer
                 foreach (string mode in new[] { "precision", "legacy" })
                 {
                     var options = new Dictionary<string, object>(settings) { ["memoryPrecisionMode"] = mode };
-                    var packet = Program.BuildNpcMemoryPacket(campaign, "observer", "player", "", "Continue our conversation", 2000, context, options);
+                    var packet = DialogueService.BuildNpcMemoryPacket(campaign, "observer", "player", "", "Continue our conversation", 2000, context, options);
                     string text = ReadString(packet, "memoryPacket", "");
                     Check("shared_packet_window_" + mode, Enumerable.Range(11, 30).All(i => text.Contains("END-SUMMARY-" + i))
                         && text.Contains("no payment has occurred"));
@@ -929,7 +929,7 @@ namespace ReignBetaServer
                             ["mainHeroStringId"] = "player", ["mainHeroName"] = "Michael", ["heroStringId"] = "observer" };
                         // Exercise the actual adapter shapes: event JSONL id is not
                         // the durable turn key, and turnId is the shared exchange.
-                        var routedLines = priorLines.Select(Program.CloneDictionary).ToList();
+                        var routedLines = priorLines.Select(CloneDictionary).ToList();
                         if (route != "dialogue")
                         {
                             foreach (var line in routedLines)
@@ -942,12 +942,12 @@ namespace ReignBetaServer
                             if (route == "party_chat")
                             {
                                 payload["groupTranscript"] = routedLines;
-                                routedLines = Program.BuildPartyChatPromptTranscript(payload, "Continue our conversation");
+                                routedLines = DialogueService.BuildPartyChatPromptTranscript(payload, "Continue our conversation");
                             }
-                            else routedLines = Program.BuildSocialEventPromptTranscript(routedLines, 30);
+                            else routedLines = DialogueService.BuildSocialEventPromptTranscript(routedLines, 30);
                         }
                         BindPromptTranscriptSources(campaign, "observer", payload, routedLines);
-                        var memory = Program.BuildNpcMemoryPacket(campaign, "observer", "player", "", "Continue our conversation", 2000, payload, settings);
+                        var memory = DialogueService.BuildNpcMemoryPacket(campaign, "observer", "player", "", "Continue our conversation", 2000, payload, settings);
                         string memoryText = ReadString(memory, "memoryPacket", "");
                         var profile = TestDict("name", "Observer", "heroStringId", "observer", "age", 30, "isNoble", true);
                         var foundation = TestDict("background", TestDict("centralWound", "PRIVATE_WOUND_FIXTURE", "publicReputation", "REPUTATION_FIXTURE"));
@@ -974,7 +974,7 @@ namespace ReignBetaServer
                     DialogueSelfTestStore.InsertConversationSessions19(connection, TestDict("campaign", campaign));
                     // Bind through a second connection only after publishing the fixture.
                     bindingFixture.Commit();
-                    var bindingContext = Program.CloneDictionary(context);
+                    var bindingContext = CloneDictionary(context);
                     bindingContext["playerHeroStringId"] = "player";
                     bindingContext["sceneTurnId"] = "binding_exchange";
                     bindingContext["identityView"] = TestDict("knowsIdentity", true);
@@ -995,14 +995,14 @@ namespace ReignBetaServer
                         .All(line => PlannedPromptSources(bindingContext).ContainsKey(ReadString(line, "sourceTurnId", ""))));
                     Check("storage_ids_survive_binding_and_unbound_collision_is_not_removed", ReadString(repeatedReplies[0], "id", "") == "jsonl_489"
                         && repeatedReplies.Any(line => ReadString(line, "id", "") == "binding_520"));
-                    var unknownBinding = Program.CloneDictionary(bindingContext); unknownBinding["identityView"] = TestDict("knowsIdentity", false);
+                    var unknownBinding = CloneDictionary(bindingContext); unknownBinding["identityView"] = TestDict("knowsIdentity", false);
                     BindPromptTranscriptSources(campaign, "observer", unknownBinding, repeatedReplies);
                     Check("unknown_identity_does_not_export_raw_statement_ids", PlannedPromptSources(unknownBinding).Count == 0
                         && PromptStatementSources.TryGetValue(unknownBinding, out var unknownStatements) && unknownStatements.Count == 0);
                 }
             }
             catch (Exception ex) { Check("fixture_completed", false, ex.ToString()); }
-            finally { Program.CodexPerformanceSettings.Value = priorSettings; ReignPostgreSqlStorage.DropCampaign(campaign); }
+            finally { LlmProviderService.CodexPerformanceSettings.Value = priorSettings; ReignPostgreSqlStorage.DropCampaign(campaign); }
             return results;
         }
 

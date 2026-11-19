@@ -51,7 +51,7 @@ namespace ReignBetaServer
                 id = EnqueueMemoryJob(connection, campaignId, "memory_consolidation", ownerId, groupKey, sessionId);
             // Rejection leaves the row pending (no claim, no attempt consumed); the 60 s
             // reconciliation timer re-admits it.
-            Program.EnqueuePriorityBackgroundWork("memory.consolidation", "maintenance", () => ProcessMemoryBackgroundJob(campaignId, id));
+            OperationsService.EnqueuePriorityBackgroundWork("memory.consolidation", "maintenance", () => ProcessMemoryBackgroundJob(campaignId, id));
             return new Dictionary<string, object> { ["ok"] = true, ["queued"] = true, ["jobId"] = id, ["ownerId"] = ownerId, ["groupKey"] = groupKey ?? "" };
         }
 
@@ -83,12 +83,12 @@ namespace ReignBetaServer
                     DialogueStore.UpdateMemoryBackgroundJobs2(connection, new Dictionary<string, object> { ["id"] = id, ["token"] = token, ["now"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                             ["until"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 120 });
             }
-            catch (Exception ex) { Program.LogOperational("memory.lease_renew_failed", new Dictionary<string, object> { ["jobId"] = id, ["error"] = Program.LimitText(ex.Message, 300) }); }
+            catch (Exception ex) { OperationsService.LogOperational("memory.lease_renew_failed", new Dictionary<string, object> { ["jobId"] = id, ["error"] = DialogueService.LimitText(ex.Message, 300) }); }
         }
 
         private static void ProcessMemoryBackgroundJob(string campaignId, string jobId)
         {
-            if (Program.PriorityBackgroundWorkShouldYield()) return;
+            if (OperationsService.PriorityBackgroundWorkShouldYield()) return;
             string token = Guid.NewGuid().ToString("N");
             Dictionary<string, object> job;
             using (var connection = ReignDatabase.OpenCampaignConnection(campaignId))
@@ -127,7 +127,7 @@ namespace ReignBetaServer
                         if (!recall && !string.IsNullOrWhiteSpace(ReadString(result,"summaryId","")))
                         {
                             using (var followupConnection = ReignDatabase.OpenCampaignConnection(campaignId))
-                                foreach (string participant in Program.TextListFromJson(ReadString(session,"participants_json","[]"))
+                                foreach (string participant in DialogueService.TextListFromJson(ReadString(session,"participants_json","[]"))
                                     .Where(p => p != ReadString(session,"player_id","")).Distinct(StringComparer.OrdinalIgnoreCase))
                                     EnqueueMemoryJob(followupConnection,campaignId,"memory_consolidation",participant,"conversation:"+sessionId,sessionId);
                             result["arc"] = UpdateRollingConversationArc(campaignId,owner,ReadString(session,"player_id",""),
@@ -136,7 +136,7 @@ namespace ReignBetaServer
                         }
                     }
                     else if (type == "memory_consolidation")
-                        result = Program.ConsolidateNpcMemory(campaignId, owner, false, ReadString(job, "group_key", ""));
+                        result = DialogueService.ConsolidateNpcMemory(campaignId, owner, false, ReadString(job, "group_key", ""));
                     else throw new InvalidOperationException("Unknown memory job type.");
                     using (var connection = ReignDatabase.OpenCampaignConnection(campaignId))
                     {
@@ -146,8 +146,8 @@ namespace ReignBetaServer
                 catch (Exception ex)
                 {
                     using (var connection = ReignDatabase.OpenCampaignConnection(campaignId))
-                        RetryMemoryJob(connection, jobId, token, ReadInt(job, "attempt_count", 1), Program.LimitText(ex.Message, 1000), new Dictionary<string, object>());
-                    Program.LogOperational("memory.job_failed", new Dictionary<string, object> { ["jobId"] = jobId, ["error"] = Program.LimitText(ex.Message, 500) });
+                        RetryMemoryJob(connection, jobId, token, ReadInt(job, "attempt_count", 1), DialogueService.LimitText(ex.Message, 1000), new Dictionary<string, object>());
+                    OperationsService.LogOperational("memory.job_failed", new Dictionary<string, object> { ["jobId"] = jobId, ["error"] = DialogueService.LimitText(ex.Message, 500) });
                 }
                 finally { CurrentMemoryJob.Value = previousFence; }
             }
@@ -189,14 +189,14 @@ namespace ReignBetaServer
             // MemoryReconcileQueued is cleared exactly once: by the callback's finally after it
             // runs, or by the not-started release when admission is refused or the queued
             // callback is canceled before start. The timer then retries on its next tick.
-            Program.TryEnqueuePriorityBackgroundWork("memory.reconcile", "maintenance", () => {
+            OperationsService.TryEnqueuePriorityBackgroundWork("memory.reconcile", "maintenance", () => {
                 try
                 {
                     foreach (var campaign in ReignPostgreSqlStorage.ListCampaignMetadata())
                     {
-                        if (Program.PriorityBackgroundWorkShouldYield()) return;
+                        if (OperationsService.PriorityBackgroundWorkShouldYield()) return;
                         string campaignId = ReadString(campaign, "campaignId", "");
-                        if (!Program.HasLocalCampaignMetadata(campaignId)) continue;
+                        if (!CampaignFileService.HasLocalCampaignMetadata(campaignId)) continue;
                         using (var connection = ReignDatabase.OpenCampaignConnection(campaignId))
                         {
                             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -210,7 +210,7 @@ namespace ReignBetaServer
                                 .Select(r => ReadString(r, "job_id", "")).ToList())
                             {
                                 // A refused resume leaves its row pending and unclaimed; the next tick retries.
-                                if (Program.TryEnqueuePriorityBackgroundWork("memory.resume", "maintenance",
+                                if (OperationsService.TryEnqueuePriorityBackgroundWork("memory.resume", "maintenance",
                                     () => ProcessMemoryBackgroundJob(campaignId, id), null, out _) != PriorityWorkAdmission.Accepted) break;
                             }
                          }
@@ -223,8 +223,8 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> MemoryBackgroundStatusApi(Dictionary<string, string> query)
         {
-            string campaign = query != null && query.TryGetValue("campaignId", out string requested) ? requested : Program.ResolveLogCampaignId("");
-            if (string.IsNullOrWhiteSpace(campaign) || !Program.HasCampaignPostgreSqlStorage(campaign)) return new Dictionary<string, object> { ["ok"] = true, ["jobs"] = new List<object>() };
+            string campaign = query != null && query.TryGetValue("campaignId", out string requested) ? requested : CampaignFileService.ResolveLogCampaignId("");
+            if (string.IsNullOrWhiteSpace(campaign) || !DialogueService.HasCampaignPostgreSqlStorage(campaign)) return new Dictionary<string, object> { ["ok"] = true, ["jobs"] = new List<object>() };
             using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 var counts = DialogueStore.SelectMemoryBackgroundJobs5(connection);
@@ -233,7 +233,7 @@ namespace ReignBetaServer
                     ["jobs"] = jobs,
                     ["counts"] = counts, ["precision"] = ReadMemoryPrecisionState(connection), ["leaseSeconds"] = 120,
                     ["heartbeatSeconds"] = 30, ["reconciliationSeconds"] = 60,
-                    ["effectiveMemoryMode"] = ResolveMemoryMode(Program.LoadSettings()),
+                    ["effectiveMemoryMode"] = ResolveMemoryMode(SettingsService.LoadSettings()),
                     ["referenceGraphMode"] = ConversationReferenceMode() };
                 foreach (string status in new[] { "pending", "running", "failed", "incomplete", "completed", "no_op" })
                     result[status] = ReadInt(counts.FirstOrDefault(r => ReadString(r, "status", "") == status), "count", 0);

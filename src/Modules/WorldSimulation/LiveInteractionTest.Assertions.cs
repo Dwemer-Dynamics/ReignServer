@@ -54,7 +54,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> row = new Dictionary<string, object>
                 {
                     ["commandId"] = commandId, ["assertion"] = name, ["expected"] = expected,
-                    ["passed"] = passed, ["evidence"] = Program.LimitText(evidence, 1200),
+                    ["passed"] = passed, ["evidence"] = DialogueService.LimitText(evidence, 1200),
                     ["utc"] = DateTimeOffset.UtcNow.ToString("o")
                 };
                 rows.Add(row);
@@ -73,7 +73,7 @@ namespace ReignBetaServer
                     {
                         ["commandId"] = commandId, ["assertion"] = name,
                         ["error"] = "Live interaction assertion failed: " + name,
-                        ["evidence"] = Program.LimitText(evidence, 1200), ["critical"] = criticalFailure,
+                        ["evidence"] = DialogueService.LimitText(evidence, 1200), ["critical"] = criticalFailure,
                         ["utc"] = DateTimeOffset.UtcNow.ToString("o")
                     });
                 }
@@ -194,7 +194,7 @@ namespace ReignBetaServer
                     if (ReadInt(store, "storedCount", 0) <= 0
                         && CharactersService.ReplyLikelyIntroducesDynamicCharacteristic(text)
                         && !reiteratesInjected)
-                        uncaptured.Add(Program.LimitText(text, 240));
+                        uncaptured.Add(DialogueService.LimitText(text, 240));
                 }
                 record("requiresDynamicCharacteristicIntegrity", true, uncaptured.Count == 0,
                     uncaptured.Count == 0
@@ -560,7 +560,7 @@ namespace ReignBetaServer
                 catch (Exception ex)
                 {
                     record("requiresDynamicCharacteristicOverflowSelection", minimumActive, false,
-                        "Could not inspect active Dynamic Characteristics: " + Program.LimitText(ex.Message, 500));
+                        "Could not inspect active Dynamic Characteristics: " + DialogueService.LimitText(ex.Message, 500));
                     activeCount = -1;
                 }
                 if (activeCount >= 0)
@@ -1141,15 +1141,15 @@ namespace ReignBetaServer
                     rollingArcSources = ReadInt(WorldSimulationStore.CountMemorySources2(connection, new Dictionary<string, object> { ["id"] = arcId }).FirstOrDefault(), "count", 0);
                 }
 
-                List<string> participants = Program.TextListFromJson(ReadString(session, "participants_json", "[]"));
+                List<string> participants = DialogueService.TextListFromJson(ReadString(session, "participants_json", "[]"));
                 string player = ReadString(session, "player_id", "");
                 List<string> nonPlayerParticipants = participants
                     .Where(id => !string.IsNullOrWhiteSpace(id)
                         && !id.Equals(player, StringComparison.OrdinalIgnoreCase))
                     .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                List<string> knownBy = Program.TextListFromJson(ReadString(summary, "known_by_json", "[]"));
+                List<string> knownBy = DialogueService.TextListFromJson(ReadString(summary, "known_by_json", "[]"));
                 string summaryId = ReadString(summary, "summary_id", "");
-                bool semanticEnabled = ReadBool(Program.LoadSettings(), "enableSemanticMemory", true);
+                bool semanticEnabled = ReadBool(SettingsService.LoadSettings(), "enableSemanticMemory", true);
                 Dictionary<string, object> memoryResult = ReadDictionary(result, "memory")
                     ?? new Dictionary<string, object>();
                 Dictionary<string, object> arcResult = ReadDictionary(memoryResult, "arc")
@@ -1217,7 +1217,7 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                evidence = "Memory artifact inspection failed: " + Program.LimitText(ex.Message, 900);
+                evidence = "Memory artifact inspection failed: " + DialogueService.LimitText(ex.Message, 900);
                 return false;
             }
         }
@@ -1269,7 +1269,7 @@ namespace ReignBetaServer
                     return false;
                 }
 
-                Dictionary<string, object> settings = Program.LoadSettings();
+                Dictionary<string, object> settings = SettingsService.LoadSettings();
                 bool semanticEnabled = ReadBool(settings, "enableSemanticMemory", true);
                 int minimumItems = Math.Max(2, Math.Min(20,
                     ReadInt(settings, "memoryConsolidationMinItems", 4)));
@@ -1306,7 +1306,7 @@ namespace ReignBetaServer
                             {
                                 errors.Add(sessionId + "/" + ownerId + ": consolidation job " + status
                                     + (string.IsNullOrWhiteSpace(ReadString(job, "last_error", ""))
-                                        ? "" : " (" + Program.LimitText(ReadString(job, "last_error", ""), 160) + ")"));
+                                        ? "" : " (" + DialogueService.LimitText(ReadString(job, "last_error", ""), 160) + ")"));
                                 continue;
                             }
 
@@ -1336,10 +1336,10 @@ namespace ReignBetaServer
                             int fts = ReadInt(WorldSimulationStore.CountSummaryFts(connection, new Dictionary<string, object> { ["id"] = middleId }).FirstOrDefault(), "count", 0);
                             int embeddingJobs = ReadInt(WorldSimulationStore.CountEmbeddingJobs2(connection, new Dictionary<string, object> { ["id"] = middleId }).FirstOrDefault(), "count", 0);
                             bool valid = ReadInt(middle, "event_count", 0) >= minimumItems
-                                && Program.TextListFromJson(ReadString(middle, "source_events_json", "[]")).Count >= minimumItems
+                                && DialogueService.TextListFromJson(ReadString(middle, "source_events_json", "[]")).Count >= minimumItems
                                 && sourceMemoryIds.Count > 0
                                 && memoryLinks == sourceMemoryIds.Count
-                                && eventLinks == Program.TextListFromJson(ReadString(middle, "source_events_json", "[]")).Count
+                                && eventLinks == DialogueService.TextListFromJson(ReadString(middle, "source_events_json", "[]")).Count
                                 && unconsolidated == 0
                                 && fts == 1
                                 && (!semanticEnabled
@@ -1406,7 +1406,7 @@ namespace ReignBetaServer
             catch (Exception ex)
             {
                 evidence = "Qualification memory completion inspection failed: "
-                    + Program.LimitText(ex.Message, 900);
+                    + DialogueService.LimitText(ex.Message, 900);
                 return false;
             }
         }

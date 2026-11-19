@@ -11,7 +11,7 @@ namespace ReignBetaServer
         private static void ReplaceRefreshedCharacterOverride(string campaign, string hero, byte[] image, Dictionary<string, object> receipt)
         {
             if (string.IsNullOrWhiteSpace(hero)) throw new InvalidDataException("A character identity is required.");
-            ReplaceRefreshedCharacterOverrideInDirectory(Path.GetDirectoryName(Program.CharacterFile(campaign, hero, "portraits", "custom.png")),
+            ReplaceRefreshedCharacterOverrideInDirectory(Path.GetDirectoryName(CampaignFileService.CharacterFile(campaign, hero, "portraits", "custom.png")),
                 image, receipt, WriteSharedPortraitAtomic);
         }
 

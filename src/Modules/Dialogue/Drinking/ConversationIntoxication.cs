@@ -256,7 +256,7 @@ Engine owns intoxication, recovery and tolerance; stateUpdates cannot change the
                     // Invalid observation metadata must not suppress independently
                     // supported legacy refills/handoffs in the same paragraph.
                     var observationCheckScene = new DrinkScene { Scope = scene.Scope, Hour = scene.Hour,
-                        Vessels = scene.Vessels.Select(Program.CloneDictionary).ToList() };
+                        Vessels = scene.Vessels.Select(CloneDictionary).ToList() };
                     sceneObservations = sceneObservations.Where(o => ApplyDrinkSceneObservation(observationCheckScene, o,
                         payload, heroId, key, new List<Dictionary<string, object>>())).ToList();
                     var coveredSceneObservations = new List<DrinkSceneObservation>();
@@ -286,7 +286,7 @@ Engine owns intoxication, recovery and tolerance; stateUpdates cannot change the
                         profile != null && profile.ContainsKey("isFemale") ? (bool?)ReadBool(profile, "isFemale", false) : null,
                         proposedVessel, offeredBeverage, offer, scene.Scope.Length == 0 ? null : advanceScene, scene.Scope.Length == 0 ? null : sceneCovered);
                     if (scene.Scope.Length > 0) advanceScene(reply.Length);
-                    var consumptionCandidate = Program.CloneDictionary(parsed);
+                    var consumptionCandidate = CloneDictionary(parsed);
                     foreach (var item in ReadDictionaryList(consumptionCandidate, "drinkConsumptions"))
                         if (scene.Aliases.TryGetValue(ReadString(item, "vesselId", ""), out string id)) item["vesselId"] = id;
                     proposed += ValidateQuietDrinkConsumption(consumptionCandidate, reply, heroId, proposedVessel, offer, evidence);
@@ -354,7 +354,7 @@ Engine owns intoxication, recovery and tolerance; stateUpdates cannot change the
                     else transaction.Rollback();
                     payload["intoxicationReceipt"] = receiptNew;
                     if (persist && evidence.Count > 0)
-                        Program.WriteAudit(campaignId, ReadString(payload, "correlationId", identity), "server",
+                        OperationsService.WriteAudit(campaignId, ReadString(payload, "correlationId", identity), "server",
                             ReadString(payload, "mode", "dialogue"), "drinking.receipt", heroId, "", "", "completed", 0,
                             "Narrated drinking adjudicated against the accepted reply.", receiptNew);
                     return reply;

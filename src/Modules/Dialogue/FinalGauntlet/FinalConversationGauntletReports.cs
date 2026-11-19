@@ -93,14 +93,14 @@ namespace ReignBetaServer
                     ["stageBPolicy"] =
                         "Every case runs once; failures are retained and execution continues."
                 };
-            Program.WriteJsonObject(Path.Combine(root, "manifest.json"), manifest);
+            CampaignFileService.WriteJsonObject(Path.Combine(root, "manifest.json"), manifest);
             WriteGauntletNdjson(
                 Path.Combine(root, "cases.ndjson"), cases);
             WriteGauntletNdjson(
                 Path.Combine(root, "assertions.ndjson"), assertions);
-            Program.WriteJsonObject(
+            CampaignFileService.WriteJsonObject(
                 Path.Combine(root, "scorecard.json"), scorecard);
-            Program.WriteJsonObject(
+            CampaignFileService.WriteJsonObject(
                 Path.Combine(root, "report.json"), report);
             foreach (Dictionary<string, object> row in evidence)
             {
@@ -120,7 +120,7 @@ namespace ReignBetaServer
                 BuildFinalGauntletReviewPack(
                     connection, campaignId, runId, cases, evidence);
             report["reviewPack"] = review;
-            Program.WriteJsonObject(
+            CampaignFileService.WriteJsonObject(
                 Path.Combine(root, "report.json"), report);
             return new Dictionary<string, object>
             {
@@ -402,7 +402,7 @@ namespace ReignBetaServer
             string campaignId,
             string runId)
         {
-            return Program.CampaignFile(
+            return CampaignFileService.CampaignFile(
                 campaignId,
                 "tests",
                 "fg",

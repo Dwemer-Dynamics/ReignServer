@@ -27,7 +27,7 @@ namespace ReignBetaServer
                     "criticalErrors", 1, "requiredEvidenceCoverage", .97, "answerCoverage", .97, "quality", .80,
                     "modelHash", new string('b',64), "indexSchema", "old", "retrievalP95Ms", 2001d))
                 {
-                    var invalid = Program.CloneDictionary(certificate); invalid[change.Key] = change.Value;
+                    var invalid = CloneDictionary(certificate); invalid[change.Key] = change.Value;
                     Check("qualification_rejects_" + change.Key, !LateInteractionQualified(TestDict("memoryLateInteractionQualification", invalid)));
                 }
                 certificate["answerCoverage"] = double.PositiveInfinity;
@@ -78,7 +78,7 @@ namespace ReignBetaServer
                 Add("other-timeline", "npc", "Another branch has a garden.", 21, timeline:"other");
                 Add("unheard", "outsider", "I saw the rare plant.", 22, audience:new[]{"outsider","player"});
                 Add("similar-id", "outsider", "The garden belongs to my friend.", 23, audience:new[]{"npc_child","player"});
-                var knowledge = new Program.KnowledgeAccessContext { NpcId="npc", PlayerId="player", TimelineId="main", WorldDay=20, AsOfTimestamp=25, AsOfAcceptedSequence=25 };
+                var knowledge = new DialogueService.KnowledgeAccessContext { NpcId="npc", PlayerId="player", TimelineId="main", WorldDay=20, AsOfTimestamp=25, AsOfAcceptedSequence=25 };
                 var plan = new MemoryQueryPlan { Observer="npc", Peer="player", Timeline="main", WorldDay=20, Query="What hobby did we share?" };
                 Dictionary<string, object> lastRequest = null;
                 Dictionary<string, object> Answer(Dictionary<string, object> request, string id)
@@ -87,7 +87,7 @@ namespace ReignBetaServer
                     var allowed = ReadDictionaryList(request,"eligible");
                     var picked = allowed.FirstOrDefault(r=>ReadString(r,"sourceId","")==id);
                     var hits = new List<Dictionary<string,object>>();
-                    if(picked!=null) { var hit=Program.CloneDictionary(picked); hit["score"]=18d; hits.Add(hit); }
+                    if(picked!=null) { var hit=CloneDictionary(picked); hit["score"]=18d; hits.Add(hit); }
                     return TestDict("ok",true,"status","ready","schema",LateInteractionSchema,"modelHash",LateInteractionModelHash,
                         "indexedCount",allowed.Count,"results",hits);
                 }
@@ -137,7 +137,7 @@ namespace ReignBetaServer
                 replayRequest["query"]="A different search.";
                 Check("replay_missing_query_stays_pending",ReadString(ReplayLateInteractionSearch(replayItem,replayRequest,id=>"mapped_"+id,new(){replayEligible},pending,captures),"status","")=="capture_pending");
 
-                var listener = new Program.KnowledgeAccessContext { NpcId="listener",PlayerId="player",TimelineId="main",WorldDay=20,AsOfTimestamp=25,AsOfAcceptedSequence=25 };
+                var listener = new DialogueService.KnowledgeAccessContext { NpcId="listener",PlayerId="player",TimelineId="main",WorldDay=20,AsOfTimestamp=25,AsOfAcceptedSequence=25 };
                 var listenerPlan = new MemoryQueryPlan { Observer="listener",Peer="player",Timeline="main",WorldDay=20,Query="the evening" };
                 LateInteractionReplay.Value = request => Answer(request,"private");
                 found = FindLateInteractionTurns(connection,listenerPlan,listener,4,requirePlayerSource:false);
@@ -184,7 +184,7 @@ namespace ReignBetaServer
                 Check("isolated_verification_never_contacts_installed_worker", FindLateInteractionTurns(connection,plan,knowledge,4,false).Count==0);
                 RunLateInteractionIndexRecoveryContracts(Check);
             }
-            catch(Exception ex) { results.Add(TestDict("caseId","late_interaction_fixture_completed","passed",false,"summary",Program.LimitText(ex.ToString(),2500))); }
+            catch(Exception ex) { results.Add(TestDict("caseId","late_interaction_fixture_completed","passed",false,"summary",DialogueService.LimitText(ex.ToString(),2500))); }
             finally { LateInteractionReplay.Value=prior; LateInteractionReplayAudit.Value=priorAudit; LateInteractionReplayRecovery.Value=priorRecovery; ReignPostgreSqlStorage.DropCampaign(campaign); }
             return results;
         }
@@ -223,7 +223,7 @@ namespace ReignBetaServer
                     if (ReadString(request, "operation", "") == "/memory/late/status")
                         return TestDict("modelInstalled", true, "schema", LateInteractionSchema, "modelHash", LateInteractionModelHash, "indexGeneration", "epoch");
                     indexCalls++;
-                    var views = ReadDictionaryList(request, "sources").Select(Program.CloneDictionary).ToList();
+                    var views = ReadDictionaryList(request, "sources").Select(CloneDictionary).ToList();
                     if (!complete) views.RemoveAt(views.Count - 1);
                     return TestDict("ok", true, "schema", LateInteractionSchema, "modelHash", LateInteractionModelHash, "sources", views, "indexGeneration", "epoch");
                 };

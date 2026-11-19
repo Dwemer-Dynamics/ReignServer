@@ -18,29 +18,29 @@ namespace ReignBetaServer
             // retain the existing scaffold/enrichment policy. Concurrent first clicks share one lock.
             lock (ResidentConstructionLocks.GetOrAdd(campaignId + "|" + heroId, _ => new object()))
             {
-                string profilePath = Program.CharacterFile(campaignId, heroId, "profile.json");
-                var savedProfile = Program.ReadJsonObject(profilePath);
+                string profilePath = CampaignFileService.CharacterFile(campaignId, heroId, "profile.json");
+                var savedProfile = CampaignFileService.ReadJsonObject(profilePath);
                 if (savedProfile.Count == 0) savedProfile = new Dictionary<string, object>(hero);
                 PreserveCommonerHousehold(hero, savedProfile);
                 if (hero.TryGetValue("commonerHousehold", out object household)) savedProfile["commonerHousehold"] = household;
                 foreach (string field in new[] { "nativeEncyclopediaText", "encyclopediaText" })
                     if (savedProfile.ContainsKey(field)) savedProfile[field] = NormalizeResidentFamilyAbsence(ReadString(savedProfile, field, ""));
-                Program.WriteJsonObject(profilePath, savedProfile);
-                string characteristicsPath = Program.CharacterFile(campaignId, heroId, "characteristics.json");
-                var characteristics = Program.ReadJsonObject(characteristicsPath);
+                CampaignFileService.WriteJsonObject(profilePath, savedProfile);
+                string characteristicsPath = CampaignFileService.CharacterFile(campaignId, heroId, "characteristics.json");
+                var characteristics = CampaignFileService.ReadJsonObject(characteristicsPath);
                 if (characteristics.TryGetValue("background", out object background))
                 {
                     object normalized = NormalizeResidentBackgroundFamilyAbsence(background);
                     if (Json.Serialize(normalized) != Json.Serialize(background))
-                    { characteristics["background"] = normalized; Program.WriteJsonObject(characteristicsPath, characteristics); }
+                    { characteristics["background"] = normalized; CampaignFileService.WriteJsonObject(characteristicsPath, characteristics); }
                 }
-                var existing = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"));
+                var existing = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "constructed.json"));
                 if (ReadBool(existing, "residentFirstContactComplete", false)
-                    && Program.IsCharacterConstructionReady(existing)
-                    && Program.TraitDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"))))
+                    && CharactersService.IsCharacterConstructionReady(existing)
+                    && CharactersService.TraitDocumentReady(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"))))
                 { existing["alreadyReady"] = true; return existing; }
-                var result = Program.ConstructCharacterFiles(campaignId, heroId, hero, true, true, source + "_encountered_resident");
-                if (!Program.IsCharacterConstructionReady(result) || !ReadBool(result, "llmUsed", false))
+                var result = CharactersService.ConstructCharacterFiles(campaignId, heroId, hero, true, true, source + "_encountered_resident");
+                if (!CharactersService.IsCharacterConstructionReady(result) || !ReadBool(result, "llmUsed", false))
                 {
                     result["ok"] = false;
                     result["residentFirstContactComplete"] = false;
@@ -48,7 +48,7 @@ namespace ReignBetaServer
                 }
                 result["residentFirstContactComplete"] = true;
                 result["backgroundEnrichmentPending"] = false;
-                Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"), result);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "constructed.json"), result);
                 MarkCharacterConstructionCompletedOnInteraction(campaignId, heroId, source);
                 return result;
             }

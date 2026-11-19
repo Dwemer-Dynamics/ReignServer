@@ -224,7 +224,7 @@ namespace ReignBetaServer
                 lock (Program.FileLock)
                     foreach (string heroId in ids)
                         snapshot.documents[heroId] = FileNames.ToDictionary(name => name,
-                            name => Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, name)), StringComparer.Ordinal);
+                            name => CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, name)), StringComparer.Ordinal);
                 return snapshot;
             }
 
@@ -370,8 +370,8 @@ namespace ReignBetaServer
             double jealousy = 50d;
             if (observer != null && ReadInt(observer, "is_player", 0) == 0)
                 jealousy = RelationshipTraitPercent(files != null ? files.Document(observerId, "traits.json")
-                    : Program.ReadJsonObject(Program.CharacterFile(campaignId, observerId, "traits.json")), "jealousy");
-            double jealousyFactor = 0.5d + Program.ClampDouble(jealousy, 0d, 100d) / 100d;
+                    : CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, observerId, "traits.json")), "jealousy");
+            double jealousyFactor = 0.5d + DialogueService.ClampDouble(jealousy, 0d, 100d) / 100d;
             double favorValue = 0d;
             string scope = "foreign";
             if (favorite)
@@ -495,7 +495,7 @@ namespace ReignBetaServer
 
         private static bool TryProcessNextPublicStandingInvalidationUnderCampaignGate()
         {
-            string root = Program.CampaignsRoot();
+            string root = CampaignFileService.CampaignsRoot();
             if (!System.IO.Directory.Exists(root)) return false;
             foreach (string directory in System.IO.Directory.GetDirectories(root))
             {
@@ -515,11 +515,11 @@ namespace ReignBetaServer
                 }
                 catch (Exception ex)
                 {
-                    Program.LogOperational("relationships.public_standing_invalidation_failed",
+                    OperationsService.LogOperational("relationships.public_standing_invalidation_failed",
                         new Dictionary<string, object>
                         {
                             ["campaignId"] = campaignId,
-                            ["error"] = Program.LimitText(ex.Message, 1000)
+                            ["error"] = DialogueService.LimitText(ex.Message, 1000)
                         });
                     if (DatabaseAvailability.Shared.BackingOff) break;
                 }

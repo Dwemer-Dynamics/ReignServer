@@ -70,7 +70,7 @@ namespace ReignBetaServer
                 var result = SaveSyncRegisterCore(payload);
                 result["gateWaitMs"] = gateWaitMs;
                 result["requestDurationMs"] = requestTimer.ElapsedMilliseconds;
-                Program.LogOperational("save_sync.register_completed", new Dictionary<string, object>
+                OperationsService.LogOperational("save_sync.register_completed", new Dictionary<string, object>
                 {
                     ["campaignId"] = ReadString(payload, "campaignId", ""),
                     ["gateWaitMs"] = gateWaitMs, ["requestDurationMs"] = requestTimer.ElapsedMilliseconds,
@@ -105,7 +105,7 @@ namespace ReignBetaServer
             string campaignMetadataPath = Path.Combine(campaignDir, "campaign.json");
             if (!File.Exists(campaignMetadataPath))
             {
-                Program.WriteJsonObject(campaignMetadataPath, new Dictionary<string, object>
+                CampaignFileService.WriteJsonObject(campaignMetadataPath, new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["campaignLabel"] = ReadString(payload, "campaignLabel", campaignId),
@@ -122,7 +122,7 @@ namespace ReignBetaServer
                 && File.Exists(Path.Combine(pointRoot, "manifest.json"))
                 && Directory.Exists(Path.Combine(pointRoot, "campaign")))
             {
-                Dictionary<string, object> existingManifest = Program.ReadJsonObject(Path.Combine(pointRoot, "manifest.json"));
+                Dictionary<string, object> existingManifest = CampaignFileService.ReadJsonObject(Path.Combine(pointRoot, "manifest.json"));
                 if (!ReadString(existingManifest, "campaignId", "").Equals(campaignId, StringComparison.OrdinalIgnoreCase)
                     || !ReadString(existingManifest, "fingerprint", "").Equals(ReadString(existing, "snapshotFingerprint", ""), StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("Save Sync storage-key collision detected; no snapshot was changed.");
@@ -271,7 +271,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> point = SaveSyncPoint(ledger, savePointId);
                 if (point == null) return SaveSyncMissingFinalizeResult(campaignId, savePointId);
                 bool successful = ReadBool(payload, "successful", false);
-                point["nativeSaveName"] = Program.LimitText(ReadString(payload, "nativeSaveName", ReadString(point, "nativeSaveName", "")), 240);
+                point["nativeSaveName"] = DialogueService.LimitText(ReadString(payload, "nativeSaveName", ReadString(point, "nativeSaveName", "")), 240);
                 point["saveFinalizedUtc"] = DateTime.UtcNow.ToString("o");
                 point["status"] = successful ? "ready" : "save_failed";
                 if (!successful)
@@ -348,7 +348,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> SaveSyncLoadCore(Dictionary<string, object> payload, bool dryRun)
         {
-            if (!dryRun) Program.InvalidateCodexConversationTimeline(ReadString(payload, "campaignId", ""));
+            if (!dryRun) LlmProviderService.InvalidateCodexConversationTimeline(ReadString(payload, "campaignId", ""));
             return SaveSyncLoadPostgreSql(payload, dryRun);
         }
 
@@ -505,7 +505,7 @@ namespace ReignBetaServer
                             }
                             else
                             {
-                                Dictionary<string, object> metadata = Program.ReadJsonObject(
+                                Dictionary<string, object> metadata = CampaignFileService.ReadJsonObject(
                                     Path.Combine(StrictCampaignDirectory(campaignId),
                                         "campaign.json"));
                                 Dictionary<string, object> deletion =
@@ -567,8 +567,8 @@ namespace ReignBetaServer
             string root = SaveSyncRoot();
             if (!Directory.Exists(root)) return new List<string>();
             return Directory.GetDirectories(root).Where(path => File.Exists(Path.Combine(path, "ledger.json")))
-                .Select(path => ReadString(Program.ReadJsonObject(Path.Combine(path, "ledger.json")), "campaignId", ""))
-                .Where(id => Program.HasLocalCampaignMetadata(id))
+                .Select(path => ReadString(CampaignFileService.ReadJsonObject(Path.Combine(path, "ledger.json")), "campaignId", ""))
+                .Where(id => CampaignFileService.HasLocalCampaignMetadata(id))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }
@@ -665,7 +665,7 @@ namespace ReignBetaServer
                         ["totalMs"] = timer.ElapsedMilliseconds
                     }
                 };
-                Program.WriteJsonObject(Path.Combine(staging, "manifest.json"), manifest);
+                CampaignFileService.WriteJsonObject(Path.Combine(staging, "manifest.json"), manifest);
                 Directory.CreateDirectory(Path.GetDirectoryName(destinationRoot));
                 MoveDirectoryWithRetries(staging, destinationRoot);
                 return manifest;
@@ -754,7 +754,7 @@ namespace ReignBetaServer
                 Stopwatch manifestTimer = Stopwatch.StartNew();
                 List<Dictionary<string, object>> files = BackupFileManifest(campaignRoot);
                 manifestTimer.Stop();
-                Dictionary<string, object> oldManifest = Program.ReadJsonObject(Path.Combine(temp, "manifest.json"));
+                Dictionary<string, object> oldManifest = CampaignFileService.ReadJsonObject(Path.Combine(temp, "manifest.json"));
                 string fingerprint = SaveSyncManifestFingerprint(files);
                 Dictionary<string, object> optimizedManifest =
                     new Dictionary<string, object>(oldManifest, StringComparer.OrdinalIgnoreCase)
@@ -775,7 +775,7 @@ namespace ReignBetaServer
                             ["fileManifestMs"] = manifestTimer.ElapsedMilliseconds
                         }
                     };
-                Program.WriteJsonObject(Path.Combine(temp, "manifest.json"), optimizedManifest);
+                CampaignFileService.WriteJsonObject(Path.Combine(temp, "manifest.json"), optimizedManifest);
                 string optimizedStorageId = SaveSyncStorageKey("content|" + fingerprint);
                 string optimizedRoot = SaveSyncContentRoot(campaignId, optimizedStorageId);
 
@@ -806,7 +806,7 @@ namespace ReignBetaServer
                         else if (Directory.Exists(optimizedRoot))
                         {
                             Dictionary<string, object> existingManifest =
-                                Program.ReadJsonObject(Path.Combine(optimizedRoot, "manifest.json"));
+                                CampaignFileService.ReadJsonObject(Path.Combine(optimizedRoot, "manifest.json"));
                             if (!ReadString(existingManifest, "fingerprint", "")
                                 .Equals(fingerprint, StringComparison.OrdinalIgnoreCase))
                                 throw new InvalidDataException("Save Sync optimized content-key collision.");
@@ -849,7 +849,7 @@ namespace ReignBetaServer
                 "manifest.json");
             if (File.Exists(manifestPath))
             {
-                Dictionary<string, object> manifest = Program.ReadJsonObject(manifestPath);
+                Dictionary<string, object> manifest = CampaignFileService.ReadJsonObject(manifestPath);
                 string campaignId = ReadString(manifest, "campaignId", "");
                 string savePointId = SaveSyncPostgreSqlSnapshotPointId(manifest);
                 if (ReadString(manifest, "databaseProvider", "")
@@ -1160,7 +1160,7 @@ namespace ReignBetaServer
         {
             Dictionary<string, Dictionary<string, object>> rows =
                 new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, object> manifest = Program.ReadJsonObject(
+            Dictionary<string, object> manifest = CampaignFileService.ReadJsonObject(
                 Path.Combine(snapshotRoot, "manifest.json"));
             string campaignId = ReadString(manifest, "campaignId", "");
             string savePointId = SaveSyncPostgreSqlSnapshotPointId(manifest);

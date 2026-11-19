@@ -27,7 +27,7 @@ namespace ReignBetaServer
 
         // Read the same original player bytes used by View, never the NPC's observer projection.
         private static string ChatViewWardrobeOriginalText(ReignDbConnection connection, Dictionary<string, object> row,
-            Program.KnowledgeAccessContext access = null)
+            DialogueService.KnowledgeAccessContext access = null)
         {
             string text = ReadString(row, "text", "");
             if (ReadString(row, "role", "") != "player") return text;
@@ -93,7 +93,7 @@ namespace ReignBetaServer
             string session = ReadString(request, "sessionId", ""), player = ReadString(request, "playerId", "");
             int first = ReadInt(window.First(), "turnOrder", 0);
             string scope = ChatViewWardrobeFrameScope(ReadDictionary(window.First(), "frame"));
-            var access = new Program.KnowledgeAccessContext { NpcId = player, TimelineId = ReadString(request, "timelineId", ""),
+            var access = new DialogueService.KnowledgeAccessContext { NpcId = player, TimelineId = ReadString(request, "timelineId", ""),
                 WorldDay = ReadDouble(request, "worldDay", double.MaxValue), AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue };
             var prior = PortraitsStore.SelectConversationTurns2(connection, TestDict("session", session, "first", first));
             var eligible = new List<Dictionary<string, object>>();
@@ -101,7 +101,7 @@ namespace ReignBetaServer
             foreach (var row in prior)
             {
                 if (!DialogueService.MemoryTimeVisible(row, access, connection)
-                    || !Program.TextListFromJson(ReadString(row, "participants_json", "[]")).Contains(player, StringComparer.OrdinalIgnoreCase)) continue;
+                    || !DialogueService.TextListFromJson(ReadString(row, "participants_json", "[]")).Contains(player, StringComparer.OrdinalIgnoreCase)) continue;
                 if (ReadString(row, "frame_json", "").Length == 0) { incompleteBoundary = true; break; }
                 if (ChatViewWardrobeFrameScope(TryParseJsonObject(ReadString(row, "frame_json", "{}"))) != scope) break;
                 eligible.Add(row);

@@ -8,7 +8,7 @@ out together with Court when `ExcludeCourt=true`.
 
 ## Main files
 
-- `Program.SpymasterRoutes.cs`: this module's route registrations (see `Platform/RouteTable.cs`). It stays part of
+- `SpymasterRoutes.cs`: this module's route registrations (see `Platform/RouteTable.cs`). It stays part of
   `Program` and calls the `SpymasterService` handlers.
 - `SpymasterSystem.cs`: the handlers and schema, in `internal static partial class SpymasterService` (not a `Program`
   partial). It calls `Program` members with an explicit `Program.` qualifier. Shared game-free rules are in

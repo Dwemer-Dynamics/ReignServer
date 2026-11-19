@@ -106,7 +106,7 @@ namespace ReignBetaServer
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             int desiredDelta = Clamp(ReadInt(payload, "relationshipDelta", 0), -100, 100);
             int reputationValue = Clamp(ReadInt(payload, "reputationValue", 0), -100, 100);
-            string description = Program.LimitText(ReadString(payload, "description", ""), 1000);
+            string description = DialogueService.LimitText(ReadString(payload, "description", ""), 1000);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
@@ -232,7 +232,7 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
             Dictionary<string, object> context = ReadDictionary(payload, "arrestContext")
                 ?? new Dictionary<string, object>();
-            string normalized = Program.NormalizeLookup(playerText);
+            string normalized = ActionPipelineService.NormalizeLookup(playerText);
             if (string.IsNullOrWhiteSpace(normalized) || ArrestTextIsNonDirective(normalized))
                 return results;
             string playerId = ReadFirstString(payload, "playerHeroStringId", "playerId");
@@ -309,7 +309,7 @@ namespace ReignBetaServer
                 ["severity"] = severity,
                 ["chargeCategory"] = category,
                 ["surrenderAccepted"] = !partyEncounter || ArrestReplyAccepts(visibleReply),
-                ["reactionSnapshot"] = Program.LimitText(visibleReply ?? string.Empty, 1000)
+                ["reactionSnapshot"] = DialogueService.LimitText(visibleReply ?? string.Empty, 1000)
             };
             results.Add(prepare);
             return results;
@@ -352,7 +352,7 @@ namespace ReignBetaServer
 
         private static bool ArrestTextIsNonDirective(string normalized)
         {
-            return Program.ContainsAnyNormalized(normalized,
+            return ActionPipelineService.ContainsAnyNormalized(normalized,
                 "do not arrest", "dont arrest", "do not take him", "do not take her",
                 "not arrest", "if i arrest", "if we arrest", "would arrest",
                 "would you arrest", "could arrest", "should i arrest", "should i put",
@@ -362,7 +362,7 @@ namespace ReignBetaServer
 
         private static bool LooksLikeArrestOrder(string normalized)
         {
-            return Program.ContainsAnyNormalized(normalized,
+            return ActionPipelineService.ContainsAnyNormalized(normalized,
                 "arrest", "guards take", "guard take", "take him to the dungeon",
                 "take her to the dungeon", "take them to the dungeon",
                 "take him away", "take her away", "take them away", "take you away",
@@ -374,8 +374,8 @@ namespace ReignBetaServer
                 "lock them up", "take you into custody", "taking you into custody", "detain him",
                 "detain her", "detain them", "placed in custody")
                 || (normalized.Contains("lock ") && normalized.Contains(" up"))
-                || (Program.ContainsAnyNormalized(normalized, "dungeon", "prison", "custody", "detained")
-                    && Program.ContainsAnyNormalized(normalized, "guards", "guard", "take", "send", "lock", "put", "place"));
+                || (ActionPipelineService.ContainsAnyNormalized(normalized, "dungeon", "prison", "custody", "detained")
+                    && ActionPipelineService.ContainsAnyNormalized(normalized, "guards", "guard", "take", "send", "lock", "put", "place"));
         }
 
         private static bool ArrestNamesAbsentThirdParty(
@@ -396,8 +396,8 @@ namespace ReignBetaServer
                     || string.Equals(id, playerId, StringComparison.OrdinalIgnoreCase)) continue;
                 foreach (string name in new[] { ReadString(hero, "name", ""), id })
                 {
-                    string candidate = Program.NormalizeLookup(name);
-                    if (candidate.Length >= 3 && Program.NormalizedTextContainsPhrase(normalizedText, candidate))
+                    string candidate = ActionPipelineService.NormalizeLookup(name);
+                    if (candidate.Length >= 3 && ActionPipelineService.NormalizedTextContainsPhrase(normalizedText, candidate))
                         return true;
                 }
             }
@@ -406,7 +406,7 @@ namespace ReignBetaServer
 
         private static bool LooksLikeArrestConfirmation(string normalized)
         {
-            return Program.ContainsAnyNormalized(normalized,
+            return ActionPipelineService.ContainsAnyNormalized(normalized,
                 "take him away", "take her away", "take them away", "take you away",
                 "guards take him", "guards take her", "guards take them", "guards take you",
                 "to the dungeon", "to prison", "do it guards", "proceed with the arrest",
@@ -415,7 +415,7 @@ namespace ReignBetaServer
 
         private static bool LooksLikeRescission(string normalized)
         {
-            return Program.ContainsAnyNormalized(normalized,
+            return ActionPipelineService.ContainsAnyNormalized(normalized,
                 "rescind the accusation", "withdraw the accusation", "clear his name",
                 "clear her name", "clear their name", "clear your name", "charges are dropped",
                 "drop the charges", "pardon and clear", "accusation was false", "exonerate");
@@ -423,7 +423,7 @@ namespace ReignBetaServer
 
         private static bool LooksLikeRelease(string normalized)
         {
-            return Program.ContainsAnyNormalized(normalized,
+            return ActionPipelineService.ContainsAnyNormalized(normalized,
                 "release him", "release her", "release them", "release you",
                 "free him", "free her", "free them", "free you", "let him out",
                 "let her out", "let them out", "leave the dungeon");
@@ -431,14 +431,14 @@ namespace ReignBetaServer
 
         private static bool LooksLikeDuel(string normalized)
         {
-            return Program.ContainsAnyNormalized(normalized,
+            return ActionPipelineService.ContainsAnyNormalized(normalized,
                 "nonlethal duel", "non lethal duel", "duel for your surrender",
                 "duel for the arrest", "fight me for your freedom", "settle this by duel");
         }
 
         private static bool LooksLikePlayerPartyAttack(string normalized)
         {
-            return Program.ContainsAnyNormalized(normalized,
+            return ActionPipelineService.ContainsAnyNormalized(normalized,
                 "order my men to attack", "order our men to attack", "my men attack",
                 "our men attack", "troops attack", "party attack", "attack their party",
                 "attack his party", "attack her party", "men seize them by force");
@@ -446,10 +446,10 @@ namespace ReignBetaServer
 
         private static bool ArrestReplyAccepts(string reply)
         {
-            string normalized = Program.NormalizeLookup(reply);
-            if (Program.ContainsAnyNormalized(normalized, "refuse", "will not", "wont", "never surrender",
+            string normalized = ActionPipelineService.NormalizeLookup(reply);
+            if (ActionPipelineService.ContainsAnyNormalized(normalized, "refuse", "will not", "wont", "never surrender",
                 "fight you", "resist", "defy", "not surrender")) return false;
-            return Program.ContainsAnyNormalized(normalized, "surrender", "submit", "yield", "i accept",
+            return ActionPipelineService.ContainsAnyNormalized(normalized, "surrender", "submit", "yield", "i accept",
                 "very well", "i will go", "take me", "i comply", "agreed", "duel", "accept your challenge");
         }
 
@@ -468,7 +468,7 @@ namespace ReignBetaServer
                 if (index >= 0)
                 {
                     string reason = text.Substring(index + marker.Length).Trim(' ', '.', ',', ';', ':', '!', '?');
-                    if (reason.Length >= 3) return Program.LimitText(reason, 500);
+                    if (reason.Length >= 3) return DialogueService.LimitText(reason, 500);
                 }
             }
             foreach (string charge in new[]
@@ -480,34 +480,34 @@ namespace ReignBetaServer
             {
                 int index = lower.IndexOf(charge, StringComparison.Ordinal);
                 if (index >= 0)
-                    return Program.LimitText(text.Substring(index).Trim(' ', '.', ',', ';', ':', '!', '?'), 500);
+                    return DialogueService.LimitText(text.Substring(index).Trim(' ', '.', ',', ';', ':', '!', '?'), 500);
             }
             return string.Empty;
         }
 
         private static string ClassifyArrestSeverity(string accusation)
         {
-            string value = Program.NormalizeLookup(accusation);
-            if (Program.ContainsAnyNormalized(value, "treason", "regicide", "betray the realm", "wartime betrayal"))
+            string value = ActionPipelineService.NormalizeLookup(accusation);
+            if (ActionPipelineService.ContainsAnyNormalized(value, "treason", "regicide", "betray the realm", "wartime betrayal"))
                 return "capital";
-            if (Program.ContainsAnyNormalized(value, "murder", "assassination", "espionage", "spying",
+            if (ActionPipelineService.ContainsAnyNormalized(value, "murder", "assassination", "espionage", "spying",
                 "foreign spy", "sabotage", "rebellion")) return "grave";
-            if (Program.ContainsAnyNormalized(value, "theft", "fraud", "corruption", "assault",
+            if (ActionPipelineService.ContainsAnyNormalized(value, "theft", "fraud", "corruption", "assault",
                 "stole", "conspiracy", "conspiring", "bribery", "kidnapping")) return "serious";
             return "minor";
         }
 
         private static string ClassifyArrestCharge(string accusation)
         {
-            string value = Program.NormalizeLookup(accusation);
-            if (Program.ContainsAnyNormalized(value, "treason", "regicide")) return "treason";
-            if (Program.ContainsAnyNormalized(value, "espionage", "spying", "foreign spy", "spy")) return "espionage";
-            if (Program.ContainsAnyNormalized(value, "murder", "assassination")) return "murder";
-            if (Program.ContainsAnyNormalized(value, "sabotage")) return "sabotage";
-            if (Program.ContainsAnyNormalized(value, "rebellion")) return "rebellion";
-            if (Program.ContainsAnyNormalized(value, "theft", "stole", "fraud", "corruption", "bribery")) return "property_corruption";
-            if (Program.ContainsAnyNormalized(value, "assault", "kidnapping")) return "violence";
-            if (Program.ContainsAnyNormalized(value, "conspiracy", "conspiring")) return "conspiracy";
+            string value = ActionPipelineService.NormalizeLookup(accusation);
+            if (ActionPipelineService.ContainsAnyNormalized(value, "treason", "regicide")) return "treason";
+            if (ActionPipelineService.ContainsAnyNormalized(value, "espionage", "spying", "foreign spy", "spy")) return "espionage";
+            if (ActionPipelineService.ContainsAnyNormalized(value, "murder", "assassination")) return "murder";
+            if (ActionPipelineService.ContainsAnyNormalized(value, "sabotage")) return "sabotage";
+            if (ActionPipelineService.ContainsAnyNormalized(value, "rebellion")) return "rebellion";
+            if (ActionPipelineService.ContainsAnyNormalized(value, "theft", "stole", "fraud", "corruption", "bribery")) return "property_corruption";
+            if (ActionPipelineService.ContainsAnyNormalized(value, "assault", "kidnapping")) return "violence";
+            if (ActionPipelineService.ContainsAnyNormalized(value, "conspiracy", "conspiring")) return "conspiracy";
             return "other";
         }
 

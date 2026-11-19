@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class VerificationService
     {
         // The route inventory of the former HandleClient if/else router (unstable e0a0ca9), in its match order:
         // "<method> <exact|prefix> <comparison> <path> <campaign gate: read|none|- for prefixes>[ court]".
@@ -463,16 +463,16 @@ namespace ReignBetaServer
 #else
             bool courtCompiled = true;
 #endif
-            ReignRouteTable table = ServerRoutes.Value;
-            List<(ReignRoute Route, string Gate)> expected = new List<(ReignRoute, string)>();
+            Program.ReignRouteTable table = Program.ServerRoutes.Value;
+            List<(Program.ReignRoute Route, string Gate)> expected = new List<(Program.ReignRoute, string)>();
             foreach (string row in PreTableRouteInventory)
             {
                 string[] parts = row.Split(' ');
                 if (parts.Length > 5 && parts[5] == "court" && !courtCompiled) continue;
-                expected.Add((new ReignRoute
+                expected.Add((new Program.ReignRoute
                 {
                     Method = parts[0],
-                    Match = parts[1] == "exact" ? RouteMatch.Exact : RouteMatch.Prefix,
+                    Match = parts[1] == "exact" ? Program.RouteMatch.Exact : Program.RouteMatch.Prefix,
                     Comparison = (StringComparison)Enum.Parse(typeof(StringComparison), parts[2]),
                     Path = parts[3]
                 }, parts[4]));
@@ -494,9 +494,9 @@ namespace ReignBetaServer
                 });
 
             List<string> gateMismatches = new List<string>();
-            foreach ((ReignRoute route, string gate) in expected)
+            foreach ((Program.ReignRoute route, string gate) in expected)
             {
-                if (route.Match != RouteMatch.Exact) continue;
+                if (route.Match != Program.RouteMatch.Exact) continue;
                 bool exempt = table.IsCampaignGateExempt(route.Path);
                 if (exempt != (gate == "none")) gateMismatches.Add(route.ContractKey + " expected " + gate);
             }
@@ -507,11 +507,11 @@ namespace ReignBetaServer
                 bool exempt = table.IsCampaignGateExempt(path);
                 if (exempt != (probe.Substring(0, split) == "none")) gateMismatches.Add("probe '" + path + "' expected " + probe.Substring(0, split));
             }
-            foreach (ReignRoute route in table.Routes)
+            foreach (Program.ReignRoute route in table.Routes)
             {
                 // A declared exemption must be the path's actual policy for every method registered on it.
-                if (route.Match == RouteMatch.Exact
-                    && (route.CampaignGate == CampaignGatePolicy.None) != table.IsCampaignGateExempt(route.Path)
+                if (route.Match == Program.RouteMatch.Exact
+                    && (route.CampaignGate == Program.CampaignGatePolicy.None) != table.IsCampaignGateExempt(route.Path)
                     && !table.ExemptAreas.Any(area => area.Contains(route.Path)))
                     gateMismatches.Add("declared " + route.ContractKey + " " + route.CampaignGate);
             }
@@ -522,15 +522,15 @@ namespace ReignBetaServer
 
             List<string> precedenceMismatches = new List<string>();
             List<(string Method, string Path)> requests = expected
-                .Select(item => (item.Route.Method, item.Route.Match == RouteMatch.Exact ? item.Route.Path : item.Route.Path + "contract-probe"))
+                .Select(item => (item.Route.Method, item.Route.Match == Program.RouteMatch.Exact ? item.Route.Path : item.Route.Path + "contract-probe"))
                 .ToList();
             requests.AddRange(new[] { ("PUT", "/health"), ("POST", "/health"), ("HEAD", "/"), ("OPTIONS", "/api/settings"),
                 ("GET", "/no-such-route"), ("GET", "/HEALTH"), ("POST", "/chat-view"), ("POST", "/Communications/x"),
                 ("GET", "/WORLD-HISTORY/EVENT/abc"), ("delete", "/api/campaigns/delete") });
             foreach ((string method, string path) in requests)
             {
-                ReignRoute first = expected.Select(item => item.Route).FirstOrDefault(route => route.Matches(method, path));
-                ReignRoute resolved = table.Resolve(method, path);
+                Program.ReignRoute first = expected.Select(item => item.Route).FirstOrDefault(route => route.Matches(method, path));
+                Program.ReignRoute resolved = table.Resolve(method, path);
                 string expectedKey = first?.ContractKey ?? "unknown";
                 string resolvedKey = resolved?.ContractKey ?? "unknown";
                 if (expectedKey != resolvedKey) precedenceMismatches.Add(method + " " + path + " expected " + expectedKey + " resolved " + resolvedKey);
@@ -544,9 +544,9 @@ namespace ReignBetaServer
             {
                 for (int j = i + 1; j < table.Routes.Count; j++)
                 {
-                    ReignRoute earlier = table.Routes[i], later = table.Routes[j];
-                    string laterProbe = later.Match == RouteMatch.Exact ? later.Path : later.Path + "contract-probe";
-                    string earlierProbe = earlier.Match == RouteMatch.Exact ? earlier.Path : earlier.Path + "contract-probe";
+                    Program.ReignRoute earlier = table.Routes[i], later = table.Routes[j];
+                    string laterProbe = later.Match == Program.RouteMatch.Exact ? later.Path : later.Path + "contract-probe";
+                    string earlierProbe = earlier.Match == Program.RouteMatch.Exact ? earlier.Path : earlier.Path + "contract-probe";
                     bool overlap = earlier.Matches(later.Method, laterProbe) || later.Matches(earlier.Method, earlierProbe);
                     if (!overlap) continue;
                     if (!formerOrder.TryGetValue(earlier.ContractKey, out int a) || !formerOrder.TryGetValue(later.ContractKey, out int b) || a > b)

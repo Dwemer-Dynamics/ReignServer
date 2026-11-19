@@ -259,11 +259,11 @@ namespace ReignBetaServer
         private static double CourtCharacterGainStrength(Dictionary<string, object> opportunity)
         {
             opportunity = opportunity ?? new Dictionary<string, object>();
-            double relative = Program.ClampDouble((ReadDouble(opportunity, "relativeBenefit", 50d) - 50d) / 50d, 0d, 1d);
-            double bestAxis = Program.ClampDouble(
+            double relative = DialogueService.ClampDouble((ReadDouble(opportunity, "relativeBenefit", 50d) - 50d) / 50d, 0d, 1d);
+            double bestAxis = DialogueService.ClampDouble(
                 ReadDouble(opportunity, "bestOpportunityGain", 0d), 0d, 1d);
             double tier = ReadBool(opportunity, "targetClanTierKnown", false)
-                ? Program.ClampDouble(Math.Max(0d, ReadInt(opportunity, "clanTierDelta", 0)) / 2d, 0d, 1d)
+                ? DialogueService.ClampDouble(Math.Max(0d, ReadInt(opportunity, "clanTierDelta", 0)) / 2d, 0d, 1d)
                 : 0d;
             return Math.Max(bestAxis, Math.Max(relative, tier));
         }

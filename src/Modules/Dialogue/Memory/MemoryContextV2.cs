@@ -112,7 +112,7 @@ namespace ReignBetaServer
         }
 
         internal static string MemoryPrecisionMode(ReignDbConnection connection, Dictionary<string, object> settings = null) =>
-            ResolveMemoryMode(settings ?? Program.LoadSettings(), IsIsolatedMemoryValidation);
+            ResolveMemoryMode(settings ?? SettingsService.LoadSettings(), IsIsolatedMemoryValidation);
 
         // Only the Save Sync rollback passes its load session; any other restore stays
         // unproven for terminal report recovery (fail closed).
@@ -309,7 +309,7 @@ namespace ReignBetaServer
                 return MemoryCompactionOutcome(retained, "provider_refused", provider);
             if (!ReadBool(provider, "ok", false))
             {
-                bool transient = Program.IsTransientLlmFailure(ReadString(provider, "error", ""));
+                bool transient = LlmProviderService.IsTransientLlmFailure(ReadString(provider, "error", ""));
                 return MemoryCompactionOutcome(retained, transient ? "provider_transient_failure" : "provider_failure", provider, transient);
             }
             var parsed = TryParseJsonObject(ReadString(provider, "content", ""));
@@ -335,7 +335,7 @@ namespace ReignBetaServer
                 var accepted = AcceptMemorySummaryCandidate(summary, rows, sources, topics);
                 if (ReadString(accepted, "compactionStatus", "") == "complete")
                 {
-                    if (dialogueDerived) accepted["summary"] = Program.EnsureConversationSummaryProvenance(ReadString(accepted, "summary", ""), maxChars);
+                    if (dialogueDerived) accepted["summary"] = DialogueService.EnsureConversationSummaryProvenance(ReadString(accepted, "summary", ""), maxChars);
                     if (ReadString(accepted, "summary", "").Length > maxChars)
                         return MemoryCompactionOutcome(retained, "summary_exceeds_budget", provider);
                     return MemoryCompactionOutcome(accepted, "source_extract_accepted", provider);
@@ -491,14 +491,14 @@ namespace ReignBetaServer
                 plan.WorldDay = Math.Min(plan.WorldDay, Math.Max(0d, ReadDouble(context, "memoryAsOfWorldDay", plan.WorldDay)));
             foreach (var profile in MergedInteractionParticipantProfiles(context ?? new Dictionary<string, object>()))
             {
-                string name = ReadString(profile, "name", ""), id = Program.CharacterIdFrom(profile);
+                string name = ReadString(profile, "name", ""), id = CampaignFileService.CharacterIdFrom(profile);
                 if (name.Length > 0 && id.Length > 0 && Regex.IsMatch(plan.Query, @"(?<![\p{L}\p{Nd}_])" + Regex.Escape(name) + @"(?![\p{L}\p{Nd}_])", RegexOptions.IgnoreCase))
                 { plan.Entities.Add(id); plan.ExplicitEntities.Add(id); }
             }
-            plan.Terms.AddRange(Program.MemoryQueryTerms(plan.Query).Where(t => !ExactRecallStopWords.Contains(t, StringComparer.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase));
+            plan.Terms.AddRange(DialogueService.MemoryQueryTerms(plan.Query).Where(t => !ExactRecallStopWords.Contains(t, StringComparer.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase));
             // The current answer may be short ("yes", "you named it"). Include
             // the recent NPC question as secondary retrieval terms, never as truth.
-            plan.Terms.AddRange(Program.MemoryQueryTerms(ReadString(context, "memoryActiveTopic", ""))
+            plan.Terms.AddRange(DialogueService.MemoryQueryTerms(ReadString(context, "memoryActiveTopic", ""))
                 .Where(t => !ExactRecallStopWords.Contains(t, StringComparer.OrdinalIgnoreCase) && !plan.Terms.Contains(t))
                 .Distinct(StringComparer.OrdinalIgnoreCase).Take(12));
             if (Regex.IsMatch(plan.Query, @"\b(agree|agreed|promise|promised|owe|owed|pay|payment|amount|terms|how much)\b", RegexOptions.IgnoreCase)) plan.Needs.Add("commitment");
@@ -553,7 +553,7 @@ namespace ReignBetaServer
             var timer = System.Diagnostics.Stopwatch.StartNew();
             context ??= new Dictionary<string, object>();
             var plan = PlanMemoryQuery(npc, peer, query, context);
-            var knowledge = Program.BuildKnowledgeAccessContext(npc, peer, location, context);
+            var knowledge = DialogueService.BuildKnowledgeAccessContext(npc, peer, location, context);
             knowledge.WorldDay = plan.WorldDay;
             publishedParty?.BindRead(campaign, knowledge, query);
             var diagnostics = new Dictionary<string, object>();
@@ -595,7 +595,7 @@ namespace ReignBetaServer
                     candidates.AddRange(ExpandPrecisionSource(connection, "memories",
                         new Dictionary<string, object> { ["memory_id"] = assertion.Id, ["event_id"] = ReadString(row, "source_event_id", "") }, plan, knowledge, 87));
                 }
-                foreach (var row in Program.QueryKnownRows(connection, "obligations", knowledge, PromptActiveObligationSql, 64))
+                foreach (var row in DialogueService.QueryKnownRows(connection, "obligations", knowledge, PromptActiveObligationSql, 64))
                 {
                     bool relevant = plan.Needs.Contains("commitment") || plan.Terms.Any(t => ReadString(row, "description", "").Contains(t, StringComparison.OrdinalIgnoreCase))
                         || ReadString(row, "owed_by", "") == npc && ReadString(row, "owed_to", "") == peer
@@ -611,11 +611,11 @@ namespace ReignBetaServer
                 {
                     string key = table == "memories" ? "memory_id" : table == "summaries" ? "summary_id" : table == "beliefs" ? "belief_id" : "comprehension_id";
                     string type = table == "memories" ? "memory" : table == "summaries" ? "summary" : table == "beliefs" ? "belief" : "comprehension";
-                    var lexical = table == "memories" ? Program.SearchMemoryFts(connection, plan.Terms, 32, knowledge)
-                        : table == "summaries" ? Program.SearchSummaryFts(connection, plan.Terms, 24, knowledge) : new HashSet<string>();
+                    var lexical = table == "memories" ? DialogueService.SearchMemoryFts(connection, plan.Terms, 32, knowledge)
+                        : table == "summaries" ? DialogueService.SearchSummaryFts(connection, plan.Terms, 24, knowledge) : new HashSet<string>();
                     var rows = table == "memories" || table == "summaries"
-                        ? Program.LoadFtsRows(connection, table, key, lexical, knowledge)
-                        : plan.Terms.Count==0 ? new List<Dictionary<string,object>>() : Program.QueryKnownRows(connection, table, knowledge, "", 32, plan.Terms);
+                        ? DialogueService.LoadFtsRows(connection, table, key, lexical, knowledge)
+                        : plan.Terms.Count==0 ? new List<Dictionary<string,object>>() : DialogueService.QueryKnownRows(connection, table, knowledge, "", 32, plan.Terms);
                     var semanticRows = LoadSemanticRows(connection, table, key, type, semantic, knowledge);
                     var lexicalOrder = lexical.ToList();
                     var vectorOrder = semanticRows.Select(r => ReadString(r, key, "")).ToList();
@@ -664,7 +664,7 @@ namespace ReignBetaServer
                 candidates.RemoveAll(e => e.Kind == "reported_exchange" || e.Kind == "recent_summary");
             candidates = candidates.Where(e => !IsUnsupportedWordingJudgment(e.Text)).ToList();
             if (knowledge.PlayerIdentityUnknown)
-                foreach (var evidence in candidates) evidence.Text = Program.SanitizeUnknownIdentityEvidenceText(evidence.Text, knowledge);
+                foreach (var evidence in candidates) evidence.Text = DialogueService.SanitizeUnknownIdentityEvidenceText(evidence.Text, knowledge);
             diagnostics["reranking"] = "local_selection_helper_after_complete_candidate_assembly";
             var unresolved = new List<string>();
             // The legacy ambiguity helper remains off. Evidence preparation has its own explicit model purpose.
@@ -736,9 +736,9 @@ namespace ReignBetaServer
                     + Json.Serialize(ConversationQuestionExample()) + ". communicationPlans is required: use [] without a communication commitment, otherwise entries like "
                     + Json.Serialize(CommunicationPlanExample()) + ". Fill exact source values; never copy example placeholders.";
             string hash = PromptHash(source);
-            var defaults = Program.DefaultPromptTemplates();
+            var defaults = PromptService.DefaultPromptTemplates();
             bool stock = new[] { "dialogue_output_schema.json", "event_output_schema.json" }.Any(name =>
-                hash == PromptHash(Program.DefaultPromptText(name, defaults)) || VersionTwoReasoningPromptHashes[name].Contains(hash));
+                hash == PromptHash(PromptService.DefaultPromptText(name, defaults)) || VersionTwoReasoningPromptHashes[name].Contains(hash));
             if (stock)
             {
                 // These stock example descriptions repeat the owning field rules.
@@ -809,12 +809,12 @@ namespace ReignBetaServer
             return ReadLong(DialogueStore.SelectConversationTurnsDynamicDynamic(connection, letterPart, communicationPart).Single(), "watermark", 0);
         }
 
-        internal static bool PrecisionTurnVisible(Dictionary<string,object> turn,string observer,Program.KnowledgeAccessContext knowledge, ReignDbConnection connection = null) =>
+        internal static bool PrecisionTurnVisible(Dictionary<string,object> turn,string observer,DialogueService.KnowledgeAccessContext knowledge, ReignDbConnection connection = null) =>
             ReadString(turn,"status","active") == "active" && !string.IsNullOrWhiteSpace(ConversationTurnTextForRecall(turn))
             && (knowledge == null || MemoryTimeVisible(turn,knowledge,connection)) && (ReadString(turn,"speaker_id","") == observer
-            || Program.TextListFromJson(ReadString(turn,"participants_json","[]")).Contains(observer,StringComparer.OrdinalIgnoreCase));
+            || DialogueService.TextListFromJson(ReadString(turn,"participants_json","[]")).Contains(observer,StringComparer.OrdinalIgnoreCase));
 
-        internal static bool MemoryTimeVisible(Dictionary<string, object> row, Program.KnowledgeAccessContext knowledge, ReignDbConnection connection = null)
+        internal static bool MemoryTimeVisible(Dictionary<string, object> row, DialogueService.KnowledgeAccessContext knowledge, ReignDbConnection connection = null)
         {
             if (IsUnsupportedRecallAbsenceDerived(row, connection, knowledge)) return false;
             if (connection != null && row.ContainsKey("record_id") && row.ContainsKey("kind")

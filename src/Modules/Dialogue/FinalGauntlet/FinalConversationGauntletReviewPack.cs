@@ -163,12 +163,12 @@ namespace ReignBetaServer
                     ["instructions"] =
                         "Score each dimension 0-4 without viewing the private answer key."
                 };
-            Program.WriteJsonObject(Path.Combine(root, "review-pack.json"), pack);
+            CampaignFileService.WriteJsonObject(Path.Combine(root, "review-pack.json"), pack);
             File.WriteAllText(
                 Path.Combine(root, "review-pack.md"),
                 RenderFinalGauntletReviewMarkdown(blinded),
                 System.Text.Encoding.UTF8);
-            Program.WriteJsonObject(
+            CampaignFileService.WriteJsonObject(
                 Path.Combine(root, "review-answer-key.private.json"),
                 new Dictionary<string, object>
                 {

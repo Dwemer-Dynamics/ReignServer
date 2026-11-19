@@ -6,11 +6,11 @@ using EconomyOptions = Reign.Core.Contracts.Economy.WarEconomyOptions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class SettingsService
     {
-        private static List<Dictionary<string, object>> RunWarEconomyOptionsSelfTests()
+        internal static List<Dictionary<string, object>> RunWarEconomyOptionsSelfTests()
         {
-            if (string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)) throw new InvalidOperationException("Economy options checks require the isolated Verification Lab.");
+            if (string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)) throw new InvalidOperationException("Economy options checks require the isolated Verification Lab.");
             var rows = new List<Dictionary<string, object>>();
             void Check(string id, bool ok) => rows.Add(TestDict("caseId", "war_economy_options." + id, "suite", "interaction_architecture", "passed", ok));
             var settings = DefaultSettings(); settings["private_fixture"] = "preserve";
@@ -21,7 +21,7 @@ namespace ReignBetaServer
             {
                 Check(pair.Key + ".strict", ValidateWarEconomyPatch(settings, TestDict(pair.Key, false)) == ""
                     && ValidateWarEconomyPatch(settings, TestDict(pair.Key, "false")).Length > 0);
-                MergeProviderSettings(settings, TestDict(pair.Key, false));
+                LlmProviderService.MergeProviderSettings(settings, TestDict(pair.Key, false));
             }
             var restored = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(settings));
             Check("partial_json_roundtrip", EconomyOptions.Switches.Keys.All(k => !ReadWarEconomyOptions(restored).Enabled(k))
@@ -51,7 +51,7 @@ namespace ReignBetaServer
                 "economyNpcTradeCashPercent", 45, "economyNpcTradeDailyChance", 6.5);
             string tradeError = ValidateWarEconomyPatch(restored, tradePatch, requireRevision: true);
             var tradeSettings = new Dictionary<string, object>(restored, StringComparer.Ordinal);
-            MergeProviderSettings(tradeSettings, tradePatch);
+            LlmProviderService.MergeProviderSettings(tradeSettings, tradePatch);
             var appliedTrade = ReadWarEconomyOptions(Json.Deserialize<Dictionary<string, object>>(Json.Serialize(tradeSettings)));
             Check("npc_trade_revision_and_roundtrip", tradeError == "" && appliedTrade.NpcTradeEnabled(true)
                 && !appliedTrade.NpcTradeEnabled(false) && appliedTrade.NpcTradePrice(true) == 35000
@@ -63,11 +63,11 @@ namespace ReignBetaServer
             Check("production_registered", ReignXpOptionsHtml().Contains("id='warEconomyOptions'")
                 && ReignXpOptionsScript().Contains("warEconomySettingsForSave")
                 && ReignXpOptionsForClient(restored).ContainsKey("warEconomy"));
-            WriteJsonObject(Path.Combine(VerificationDir, "war-economy-options-fixture.json"), TestDict(
+            CampaignFileService.WriteJsonObject(Path.Combine(VerificationService.VerificationDir, "war-economy-options-fixture.json"), TestDict(
                 "schema", "reign-war-economy-options-browser-fixture-v1", "markup", WarEconomyOptionsHtml(), "script", WarEconomyOptionsScript(),
                 "defaults", EconomyOptions.DefaultValues(), "switches", EconomyOptions.Switches.Keys.ToArray(),
                 "numbers", EconomyOptions.Numbers.Keys.ToArray(), "gameplayOptions", WarEconomyOptionsForClient(DefaultSettings())));
-            WriteJsonObject(Path.Combine(VerificationDir, "war-economy-full-options-fixture.json"), TestDict(
+            CampaignFileService.WriteJsonObject(Path.Combine(VerificationService.VerificationDir, "war-economy-full-options-fixture.json"), TestDict(
                 "markup", ReignXpOptionsHtml(), "script", ReignXpOptionsScript(),
                 "diagnosticsMarkup", NpcLivesDiagnosticsHtml(), "diagnosticsScript", CharactersService.NpcStoryEditorScript(),
                 "definitions", ReignBeta.Shared.Characters.NpcStoryCatalog.All));

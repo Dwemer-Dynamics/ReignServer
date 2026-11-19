@@ -54,20 +54,20 @@ namespace ReignBetaServer
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     DialogueSelfTestSchema.DropMemoryRestoredSources2(connection, branchSchema, branchSchema);
-                    Check("preupgrade_parent_sources_invisible", !PrecisionTurnVisible(DialogueSelfTestStore.SelectConversationTurns61(connection).Single(), "npc", Program.BuildKnowledgeAccessContext("npc", "player", "", context), connection));
+                    Check("preupgrade_parent_sources_invisible", !PrecisionTurnVisible(DialogueSelfTestStore.SelectConversationTurns61(connection).Single(), "npc", DialogueService.BuildKnowledgeAccessContext("npc", "player", "", context), connection));
                 }
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "branch");
                 AdvanceMemoryRestoreGeneration(campaign, branchPoint);
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var access = Program.BuildKnowledgeAccessContext("npc", "player", "", context);
+                    var access = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", context);
                     var original = DialogueSelfTestStore.SelectConversationTurns61(connection).Single();
                     Check("prior_failed_recall_remains_historical_speech", ReadString(DialogueSelfTestStore.SelectConversationTurns62(connection).Single(), "text", "") == "Tempest? I cannot recall him.");
                     Check("legacy_upgrade_recovers_exact_original", PrecisionTurnVisible(original, "npc", access, connection) && ReadString(original, "text", "") == story
                         && ReadString(original, "speaker_id", "") == "player");
                     foreach (string id in new[] { "sibling", "later_parent" })
                         Check("rejects_" + id, !PrecisionTurnVisible(DialogueSelfTestStore.SelectConversationTurns(connection, TestDict("id", id)).Single(), "npc", access, connection));
-                    var outsider = Program.BuildKnowledgeAccessContext("other", "player", "", context);
+                    var outsider = DialogueService.BuildKnowledgeAccessContext("other", "player", "", context);
                     Check("native_projection_recovered_from_old_schema_with_empty_checksums", ReadInt(ReadPlayerPerformanceCounts(connection, "child", "player", 21d, access), "tournamentWins", 0) == 2
                         && ReadInt(ReadPlayerPerformanceCounts(connection, "child", "player", 21d, outsider), "tournamentWins", 0) == 1);
                     Check("native_recovery_does_not_recreate_receipts_or_accept_changed_future", DialogueSelfTestStore.SelectCharacterPerformanceEvents2(connection).Count == 5
@@ -82,12 +82,12 @@ namespace ReignBetaServer
                     RecoverLegacyPerformanceSources(connection, nativeProof, generation);
                     Check("recovered_whisper_keeps_audience", !PrecisionTurnVisible(DialogueSelfTestStore.SelectConversationTurns63(connection).Single(), "other", outsider, connection));
                     var belief = DialogueSelfTestStore.SelectBeliefs(connection).Single();
-                    Check("other_memory_store_recovered_with_privacy", Program.KnowledgeRowVisibleToNpc("beliefs", belief, access, connection) && !Program.KnowledgeRowVisibleToNpc("beliefs", belief, outsider, connection));
-                    var early = Program.BuildKnowledgeAccessContext("npc", "player", "", context); early.AsOfAcceptedSequence = ReadLong(original, "accepted_sequence", 0) - 1;
+                    Check("other_memory_store_recovered_with_privacy", DialogueService.KnowledgeRowVisibleToNpc("beliefs", belief, access, connection) && !DialogueService.KnowledgeRowVisibleToNpc("beliefs", belief, outsider, connection));
+                    var early = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", context); early.AsOfAcceptedSequence = ReadLong(original, "accepted_sequence", 0) - 1;
                     Check("same_day_sequence_cutoff_survives_recovery", !PrecisionTurnVisible(original, "npc", early, connection));
                     var poisoned = TestDict("mood", "unsettled — a gap in memory where Stone is concerned", "currentPlan", "Continue training; recover the Tempest memory; keep the boundary",
                         "currentCrisis", "Protect political confidence; no memory of any Tempest conversation; preserve the boundary", "lastKnownSettlementId", "town");
-                    Program.WriteJsonObject(Program.CharacterFile(campaign, "npc", "state.json"), poisoned);
+                    CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "npc", "state.json"), poisoned);
                     var clean = WithoutRecallAbsenceState(poisoned);
                     Check("old_absence_state_quarantined_without_erasing_other_concerns", ReadString(clean, "mood", "") == "unsettled"
                         && ReadString(clean, "currentPlan", "") == "Continue training; keep the boundary"
@@ -100,7 +100,7 @@ namespace ReignBetaServer
                     Check("unrelated_negative_fact_and_memory_intention_preserved", ReadString(WithoutRecallAbsenceState(TestDict("currentCrisis", "No supplies left; protect the memory of my father")), "currentCrisis", "") == "No supplies left; protect the memory of my father");
                     var badComprehension = TestDict("comprehension_id", "gap", "owner_id", "npc", "text", "She has no memory of anything called Tempest.");
                     var badAssertion = TestDict("assertion_id", "gap", "assertion_kind", "comprehension", "claim", "She has no memory of anything called Tempest.");
-                    Check("existing_mental_absence_and_assertion_excluded", !Program.KnowledgeRowVisibleToNpc("comprehension", badComprehension, access, connection)
+                    Check("existing_mental_absence_and_assertion_excluded", !DialogueService.KnowledgeRowVisibleToNpc("comprehension", badComprehension, access, connection)
                         && !MemoryTimeVisible(badAssertion, access, connection));
                     var reportedAbsence = TestDict("memory_id", "reported", "summary", "She said she has no memory of Tempest.");
                     string reportedBefore = CanonicalJson(reportedAbsence);
@@ -116,7 +116,7 @@ namespace ReignBetaServer
                         payload["officialMemoryFirewall"] = false; payload["mode"] = route;
                         payload["playerText"] = query;
                         var settings = TestDict("enableSemanticMemory", false, "minimeEnabled", false, "memoryPrecisionMode", memoryMode, "useMemoryLlmForConsolidation", false);
-                        var packet = Program.BuildNpcMemoryPacket(campaign, "npc", "player", "", query, 8000, payload, settings);
+                        var packet = DialogueService.BuildNpcMemoryPacket(campaign, "npc", "player", "", query, 8000, payload, settings);
                         string memory = ReadString(packet, "memoryPacket", "");
                         if (packet.TryGetValue("precisionEvidence", out var precisionEvidence)) payload["memoryPrecisionEvidence"] = precisionEvidence;
                         var profile = PromptParityProfile(); profile["heroStringId"] = "npc";
@@ -158,14 +158,14 @@ namespace ReignBetaServer
                 }
                 InitializeVerifiedSnapshotMemorySources(campaign, branchPoint, "branch");
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
-                    Check("verified_noop_upgrade_also_recovers_old_sources", PrecisionTurnVisible(DialogueSelfTestStore.SelectConversationTurns61(connection).Single(), "npc", Program.BuildKnowledgeAccessContext("npc", "player", "", context), connection));
+                    Check("verified_noop_upgrade_also_recovers_old_sources", PrecisionTurnVisible(DialogueSelfTestStore.SelectConversationTurns61(connection).Single(), "npc", DialogueService.BuildKnowledgeAccessContext("npc", "player", "", context), connection));
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "second");
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "second");
                 AdvanceMemoryRestoreGeneration(campaign, new Dictionary<string, object>(branchPoint) { ["savePointId"] = "second" });
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
-                    Check("second_restore_retains_recovered_history", PrecisionTurnVisible(DialogueSelfTestStore.SelectConversationTurns61(connection).Single(), "npc", Program.BuildKnowledgeAccessContext("npc", "player", "", context), connection));
+                    Check("second_restore_retains_recovered_history", PrecisionTurnVisible(DialogueSelfTestStore.SelectConversationTurns61(connection).Single(), "npc", DialogueService.BuildKnowledgeAccessContext("npc", "player", "", context), connection));
             }
-            catch (Exception ex) { Check("suite_exception", false, ex.ToString()); results.Last()["summary"] = "Legacy memory recovery exception: " + Program.LimitText(ex.ToString(), 2200); }
+            catch (Exception ex) { Check("suite_exception", false, ex.ToString()); results.Last()["summary"] = "Legacy memory recovery exception: " + DialogueService.LimitText(ex.ToString(), 2200); }
             finally
             {
                 PersistenceService.SaveSyncDisableBackgroundOptimizationForTests = oldOptimization;

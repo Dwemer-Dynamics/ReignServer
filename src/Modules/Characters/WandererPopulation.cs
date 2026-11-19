@@ -63,13 +63,13 @@ namespace ReignBetaServer
                 bool contact = match != null;
                 if (!contact)
                 {
-                    var legacy = Program.ReadJsonLinesFromPath(Program.CharacterFile(campaign, hero, "history", "dialogue.jsonl"));
+                    var legacy = Program.ReadJsonLinesFromPath(CampaignFileService.CharacterFile(campaign, hero, "history", "dialogue.jsonl"));
                     var relevant = legacy.Where(row => string.IsNullOrEmpty(ReadString(row, "timelineId", "")) || ReadString(row, "timelineId", "") == timeline).ToArray();
                     if (relevant.Any(row => ReadString(row, "role", "") == "player" && !string.IsNullOrWhiteSpace(ReadString(row, "text", "")))
                         && relevant.Any(row => ReadString(row, "role", "") == "npc" && !string.IsNullOrWhiteSpace(ReadString(row, "text", ""))))
                     { contact = true; receipt = "legacy-dialogue:" + hero; }
                 }
-                var saved = ReadDictionary(Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "profile.json")), "wandererIdentity");
+                var saved = ReadDictionary(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "profile.json")), "wandererIdentity");
                 if (ReadBool(saved, "protected", false)) { contact = true; receipt = ReadString(saved, "contactReceipt", "saved-contact"); }
                 return new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaign, ["timelineId"] = timeline,
                     ["heroStringId"] = hero, ["hasContact"] = contact, ["receipt"] = receipt };

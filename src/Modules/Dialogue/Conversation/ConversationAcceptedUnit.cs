@@ -28,7 +28,7 @@ namespace ReignBetaServer
         internal static string AcceptedConversationEventId(string campaign, string hero, Dictionary<string, object> payload) =>
             "accepted_" + PromptHash(string.Join("|", campaign, ContinuityTimeline(payload), hero,
                 ReadFirstString(payload, "conversationSessionId", "sessionId", "conversationId"),
-                FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), Program.EnsureCorrelationId(payload)))).Substring(0, 32);
+                FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), OperationsService.EnsureCorrelationId(payload)))).Substring(0, 32);
 
         internal static void EnsureAcceptedConversationUnitSchema(ReignDbConnection connection) => DialogueSchema.CreateConversationAcceptedUnits(connection);
 
@@ -40,7 +40,7 @@ namespace ReignBetaServer
         {
             if (string.IsNullOrWhiteSpace(unit.Generation))
                 throw new InvalidOperationException("Conversation publication requires its pre-generation restore boundary.");
-            var finalOpening = Program.CloneDictionary(unit.Parsed ?? TestDict()); finalOpening["reply"] = unit.Reply;
+            var finalOpening = CloneDictionary(unit.Parsed ?? TestDict()); finalOpening["reply"] = unit.Reply;
             bool groundingFailed = ReadBool(unit.Payload, "conversationGroundingFailed", false);
             bool intentionalSilence = (unit.GroupConversation || unit.EventType == "social_event_turn")
                 && IsIntentionalConversationSilence(unit.Parsed) && string.IsNullOrWhiteSpace(unit.Reply);
@@ -78,14 +78,14 @@ namespace ReignBetaServer
                     boundary?.Invoke("after_sources");
                     // Commit methods may update their request-local receipts. Keep
                     // those changes private until the outer source transaction wins.
-                    var effectPayload = Program.CloneDictionary(unit.Payload);
+                    var effectPayload = CloneDictionary(unit.Payload);
                     if (ReadString(ReadDictionary(unit.Payload, "npcLeaveResponseGuard"), "repair", "") == "bounded_local")
                     {
                         unit.Memories = unit.Beliefs = unit.Relationships = unit.Obligations = unit.Comprehensions = unit.Continuity = new List<Dictionary<string, object>>();
                         unit.PublishScene = unit.PublishSocial = unit.PublishIntroductions = false;
                     }
                     CopyPlayerInputSource(unit.Payload, effectPayload);
-                    var effectParsed = Program.CloneDictionary(unit.Parsed);
+                    var effectParsed = CloneDictionary(unit.Parsed);
                     bool technicalNotice = IsTechnicalConversationNotice(unit.Reply) || groundingFailed;
                     bool suppressReplyEffects = technicalNotice || intentionalSilence;
                     string excludedStatus = intentionalSilence ? "intentional_silence_excluded" : "technical_notice_excluded";
@@ -97,7 +97,7 @@ namespace ReignBetaServer
                     boundary?.Invoke("after_effects");
                     string session = ReadString(source, "sessionId", "");
                     var audience = unit.PrivateWhisper ? new[] { unit.Hero, unit.Player }
-                        : Program.TextListFromJson(ReadString(sourceRows.LastOrDefault(row => ReadString(row, "speaker_id", "") == unit.Hero),
+                        : DialogueService.TextListFromJson(ReadString(sourceRows.LastOrDefault(row => ReadString(row, "speaker_id", "") == unit.Hero),
                             "participants_json", "[]")).ToArray();
                     var scene = unit.PublishScene && !suppressReplyEffects
                         ? FinalizeConversationSceneState(unit.Campaign, unit.Payload, unit.Hero, unit.PlayerText,
@@ -122,16 +122,16 @@ namespace ReignBetaServer
                     boundary?.Invoke("after_context_effects");
                     string group = unit.GroupConversation || unit.EventType == "dialogue_turn"
                         ? "conversation:" + session
-                        : Program.BuildMemoryGroupKey(unit.Payload, unit.Hero, unit.Player, unit.Location, "social_event", unit.Timestamp);
+                        : DialogueService.BuildMemoryGroupKey(unit.Payload, unit.Hero, unit.Player, unit.Location, "social_event", unit.Timestamp);
                     var personalState = CharactersService.ReadNpcLives(connection, unit.Campaign, ContinuityTimeline(unit.Payload));
                     bool personalMatter = CharactersService.NpcLivesOwnsRelationshipReward(personalState, unit.Hero, unit.Payload);
                     if (personalMatter) unit.Relationships = new List<Dictionary<string, object>>();
                     // A quiet turn preserves the player's sources and an idempotent
                     // receipt, but supplies no NPC speech or attention evidence.
                     var memory = suppressReplyEffects ? TestDict("status", excludedStatus, "continuity", TestDict("status", "complete"))
-                        : Program.StoreTurnMemoryLayers(unit.Campaign, unit.EventId, unit.EventType,
+                        : DialogueService.StoreTurnMemoryLayers(unit.Campaign, unit.EventId, unit.EventType,
                         unit.Hero, unit.Player, unit.Location, unit.PlayerText, unit.Reply,
-                        (unit.Memories ?? new List<Dictionary<string, object>>()).Select(Program.CloneDictionary).ToList(),
+                        (unit.Memories ?? new List<Dictionary<string, object>>()).Select(CloneDictionary).ToList(),
                         unit.Beliefs, unit.Relationships, unit.Obligations, unit.Comprehensions, group, unit.Timestamp,
                         unit.Participants, unit.RetrievalEligible, unit.Payload, unit.Continuity, connection);
                     boundary?.Invoke("after_memory");
@@ -177,9 +177,9 @@ namespace ReignBetaServer
                     throw new InvalidOperationException("The conversation's source publication did not accept its dependent records.");
                 var effectReceipt = ReadDictionary(accepted, "effects");
                 foreach (var item in ReadDictionary(accepted, "effectPayload") ?? TestDict())
-                    if (item.Value is Dictionary<string, object> value && value.Count > 0) unit.Payload[item.Key] = Program.CloneDictionary(value);
+                    if (item.Value is Dictionary<string, object> value && value.Count > 0) unit.Payload[item.Key] = CloneDictionary(value);
                 if (unit.Parsed != null && ReadDictionary(unit.Payload, "conversationAgencyReceipt") is { } agency && agency.Count > 0)
-                    unit.Parsed["conversationAgencyReceipt"] = Program.CloneDictionary(agency);
+                    unit.Parsed["conversationAgencyReceipt"] = CloneDictionary(agency);
                 unit.Payload["conversationEffectAcceptance"] = effectReceipt;
                 unit.Payload["conversationAcceptedUnit"] = accepted;
                 return exchange;
@@ -192,7 +192,7 @@ namespace ReignBetaServer
             string turn = ReadFirstString(unit.Payload, "sceneTurnId", "turnId", "exchangeId");
             string session = ReadString(publicSource, "sessionId", "") + "_whisper_" + SafeMemoryKey(unit.Hero) + "_" + SafeMemoryKey(turn);
             string exchange = turn + "_whisper_" + SafeMemoryKey(unit.Hero);
-            var request = Program.CloneDictionary(unit.Payload);
+            var request = CloneDictionary(unit.Payload);
             CopyPlayerInputSource(unit.Payload, request);
             var audience = new List<string> { unit.Hero, unit.Player };
             request["conversationSessionId"] = session; request["sceneTurnId"] = exchange;
@@ -240,7 +240,7 @@ namespace ReignBetaServer
                 && ReadString(row, "speaker_id", "") == unit.Hero).ToList();
             if (matches.Count != 1) return null;
             var row = matches[0];
-            var audience = Program.TextListFromJson(ReadString(row, "participants_json", "[]"));
+            var audience = DialogueService.TextListFromJson(ReadString(row, "participants_json", "[]"));
             string turn = ReadString(row, "turn_id", "");
             if (ReadString(row, "text", "") != reply || ReadString(row, "status", "") != "active"
                 || ReadString(row, "session_id", "") != session || ReadString(row, "event_id", "") != unit.EventId
@@ -308,7 +308,7 @@ namespace ReignBetaServer
                 || ReadString(receipt, "restoreGeneration", "") != ack["restoreGeneration"])
                 return Reply("conflict", "identity_mismatch");
             if (current != ack["restoreGeneration"]) return Reply("stale", "restore_generation_changed");
-            var audience = Program.TextListFromJson(ReadString(source, "participants_json", "[]"));
+            var audience = DialogueService.TextListFromJson(ReadString(source, "participants_json", "[]"));
             if (source == null || ReadString(source, "role", "") != "npc" || ReadString(source, "status", "") != "active"
                 || ReadString(source, "speaker_id", "") != ack["speakerHeroStringId"]
                 || ReadString(source, "session_id", "") != ack["sessionId"] || ReadString(source, "event_id", "") != ack["unitId"]

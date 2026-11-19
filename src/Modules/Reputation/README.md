@@ -9,7 +9,7 @@ the social-balance test harness.
 
 ## Main files
 
-- `Program.ReputationRoutes.cs`: this module's route registrations (see `Platform/RouteTable.cs`).
+- `ReputationRoutes.cs`: this module's route registrations (see `Platform/RouteTable.cs`).
 - `SocialReputation.cs`, `ExpandedSocialReputation.cs`, `CharacterSocialProfile.cs`, `PublicStanding.cs`.
 - `CourtSocialReputation.cs`, `RulerFavorContact.cs`, `WhoremongerReputation.cs`.
 - `SocialBalanceTest.cs`: the social-balance harness and its routes (with its `SocialBalanceTest.Profiles.cs` and
@@ -17,17 +17,17 @@ the social-balance test harness.
 
 ## Service class
 
-Every file except `Program.ReputationRoutes.cs` holds `internal static partial class ReputationService` (not a
+Every file except `ReputationRoutes.cs` holds `internal static partial class ReputationService` (not a
 `Program` partial). It calls `Program` members with an explicit `Program.` qualifier, and `Program` and the other
 modules call it as `ReputationService.X`; the members used across that boundary are `internal`.
-`Program.ReputationRoutes.cs` stays part of `Program` and registers the service handlers. Relationships, Dialogue,
+`ReputationRoutes.cs` (an `internal static` route class called from `Platform/RouteTable.cs`) registers the service handlers. Relationships, Dialogue,
 Characters, WorldSimulation and Platform call into it (social reconciliation, public standing, reputation context in
 prompts). The social outcome worker counters, the pending world-history worker set and the social catalog cache are
 static fields of `ReputationService`.
 
 ## Routes
 
-Registered in `Program.ReputationRoutes.cs`: `/rumors/submit`, `/rumors/status`, `/rumors/correct`, `/social/catalog` (GET and
+Registered in `ReputationRoutes.cs`: `/rumors/submit`, `/rumors/status`, `/rumors/correct`, `/social/catalog` (GET and
 POST), `/character-editor/social/rumor/add`, `/character-editor/social/reputation/add`,
 `/character-editor/social/reputation/retry-reason`, and the harness routes `/tests/social-balance/*` (manifest,
 prepare, case result, snapshot, affinity set, affair candidates, status, export). Reputation reason jobs resume at

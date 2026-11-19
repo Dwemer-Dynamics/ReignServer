@@ -50,21 +50,21 @@ namespace ReignBetaServer
                 CalculateRebellionRecognitionChance(-20, 0, 0, -2, -2) == 1
                 && CalculateRebellionRecognitionChance(5, 3, 2, 2, 4) == 30,
                 "recognition probability is always bounded to the hard 1-30 percent range");
-            add("declaration_phrase", Program.LooksLikeExplicitPlayerRebellionDeclaration("I challenge your rule and I declare a rebellion."), "explicit first-person ruler challenge maps deterministically");
-            add("declaration_not_question", !Program.LooksLikeExplicitPlayerRebellionDeclaration("Should I declare a rebellion someday?"), "questions and future hypotheticals do not declare");
-            add("recruitment_phrase", Program.LooksLikeRebellionRecruitmentRequest("Join my rebellion against the ruler."), "post-declaration recruitment request maps");
-            add("join_phrase", Program.LooksLikePlayerJoinRebellionRequest("I ask to join your rebellion."), "player request to join NPC rebellion maps");
-            add("acceptance_fail_closed", Program.IsUnambiguousActionAcceptance("I accept. My clan stands with you.")
-                && !Program.IsUnambiguousActionAcceptance("No. I will not join you."), "NPC recruitment requires unambiguous acceptance and blocks refusal");
-            add("surrender_phrases", Program.LooksLikeExplicitPlayerRebellionSurrender("I surrender this rebellion and yield the throne.")
-                && Program.LooksLikeExplicitNpcRebellionSurrender("I relinquish my claim. I surrender."), "player and NPC surrender are explicit");
-            add("action_type_mapping", Program.MapCommandToActionType("start_ruling_clan_rebellion") == "PoliticsStartRulingClanRebellion"
-                && Program.MapCommandToActionType("recruit_lord_to_rebellion") == "PoliticsRecruitLordToRebellion"
-                && Program.MapCommandToActionType("join_rebellion") == "PoliticsJoinRebellion"
-                && Program.MapCommandToActionType("surrender_rebellion") == "PoliticsSurrenderRebellion"
-                && Program.MapCommandToActionType("resolve_rebellion_pledge") == "PoliticsResolveRebellionPledge"
-                && Program.MapCommandToActionType("resolve_rebellion_summons") == "PoliticsResolveRebellionSummons"
-                && Program.MapCommandToActionType("back_rebellion") == "DiplomacyBackRebellion", "rebellion actions, including foreign backing, map to client enum names");
+            add("declaration_phrase", ActionPipelineService.LooksLikeExplicitPlayerRebellionDeclaration("I challenge your rule and I declare a rebellion."), "explicit first-person ruler challenge maps deterministically");
+            add("declaration_not_question", !ActionPipelineService.LooksLikeExplicitPlayerRebellionDeclaration("Should I declare a rebellion someday?"), "questions and future hypotheticals do not declare");
+            add("recruitment_phrase", ActionPipelineService.LooksLikeRebellionRecruitmentRequest("Join my rebellion against the ruler."), "post-declaration recruitment request maps");
+            add("join_phrase", ActionPipelineService.LooksLikePlayerJoinRebellionRequest("I ask to join your rebellion."), "player request to join NPC rebellion maps");
+            add("acceptance_fail_closed", ActionPipelineService.IsUnambiguousActionAcceptance("I accept. My clan stands with you.")
+                && !ActionPipelineService.IsUnambiguousActionAcceptance("No. I will not join you."), "NPC recruitment requires unambiguous acceptance and blocks refusal");
+            add("surrender_phrases", ActionPipelineService.LooksLikeExplicitPlayerRebellionSurrender("I surrender this rebellion and yield the throne.")
+                && ActionPipelineService.LooksLikeExplicitNpcRebellionSurrender("I relinquish my claim. I surrender."), "player and NPC surrender are explicit");
+            add("action_type_mapping", ActionPipelineService.MapCommandToActionType("start_ruling_clan_rebellion") == "PoliticsStartRulingClanRebellion"
+                && ActionPipelineService.MapCommandToActionType("recruit_lord_to_rebellion") == "PoliticsRecruitLordToRebellion"
+                && ActionPipelineService.MapCommandToActionType("join_rebellion") == "PoliticsJoinRebellion"
+                && ActionPipelineService.MapCommandToActionType("surrender_rebellion") == "PoliticsSurrenderRebellion"
+                && ActionPipelineService.MapCommandToActionType("resolve_rebellion_pledge") == "PoliticsResolveRebellionPledge"
+                && ActionPipelineService.MapCommandToActionType("resolve_rebellion_summons") == "PoliticsResolveRebellionSummons"
+                && ActionPipelineService.MapCommandToActionType("back_rebellion") == "DiplomacyBackRebellion", "rebellion actions, including foreign backing, map to client enum names");
             List<Dictionary<string, object>> backingKingdoms = new List<Dictionary<string, object>>
             {
                 new Dictionary<string, object> { ["kingdomId"] = "rebel", ["strength"] = 100d, ["enemies"] = new ArrayList { "parent", "ally" } },
@@ -134,17 +134,17 @@ namespace ReignBetaServer
             {
                 ["needed"] = true, ["commitment"] = "refused"
             };
-            List<Dictionary<string, object>> unilateral = Program.BuildRebellionDialogueCandidates(dialoguePayload, dialogueHero,
+            List<Dictionary<string, object>> unilateral = ActionPipelineService.BuildRebellionDialogueCandidates(dialoguePayload, dialogueHero,
                 "I challenge your rule and I declare a rebellion.", "No. I reject your challenge.", refusedActionGate);
             add("unilateral_dialogue_declaration", unilateral.Count == 1
                 && ReadString(unilateral[0], "command", "") == "start_ruling_clan_rebellion",
                 "ruler refusal cannot block an explicit player declaration");
-            List<Dictionary<string, object>> acceptedRecruitment = Program.BuildRebellionDialogueCandidates(dialoguePayload, dialogueHero,
+            List<Dictionary<string, object>> acceptedRecruitment = ActionPipelineService.BuildRebellionDialogueCandidates(dialoguePayload, dialogueHero,
                 "Join my rebellion against the ruler.", "I accept. My clan stands with you.", acceptedActionGate);
             add("accepted_dialogue_recruitment", acceptedRecruitment.Count == 1
                 && ReadString(acceptedRecruitment[0], "command", "") == "recruit_lord_to_rebellion",
                 "unambiguous visible acceptance queues recruitment");
-            List<Dictionary<string, object>> refusedRecruitment = Program.BuildRebellionDialogueCandidates(dialoguePayload, dialogueHero,
+            List<Dictionary<string, object>> refusedRecruitment = ActionPipelineService.BuildRebellionDialogueCandidates(dialoguePayload, dialogueHero,
                 "Join my rebellion against the ruler.", "No. I will not join.", refusedActionGate);
             add("refused_dialogue_recruitment", refusedRecruitment.Count == 0,
                 "refused recruitment fails closed");
@@ -221,7 +221,7 @@ namespace ReignBetaServer
                     && ReadInt(ReadDictionary(mergedMailProfile, "traits"), "honor", 0) == 1
                     && ReadString(rejectedMailProfile, "name", "") == "Persisted Lord",
                 "delayed correspondence overlays the exact matching dispatch-time native recipient profile while rejecting mismatched identities");
-            List<Dictionary<string, object>> conversationalPledge = Program.BuildRebellionDialogueCandidates(
+            List<Dictionary<string, object>> conversationalPledge = ActionPipelineService.BuildRebellionDialogueCandidates(
                 dialoguePayload, dialogueHero,
                 "Give me your final answer: will you pledge your clan to my rebellion against our ruler without further condition?",
                 "I'll pledge. Wyreglen rides with you.", acceptedActionGate);
@@ -230,17 +230,17 @@ namespace ReignBetaServer
                     && ReadString(conversationalPledge[0], "command", "") == "resolve_rebellion_pledge"
                     && ReadString(ReadDictionary(conversationalPledge[0], "terms"), "decision", "") == "pledge",
                 "a natural future-tense pledge routes to secret preparation rather than immediate declaration");
-            List<Dictionary<string, object>> conditionalPreparation = Program.BuildRebellionDialogueCandidates(
+            List<Dictionary<string, object>> conditionalPreparation = ActionPipelineService.BuildRebellionDialogueCandidates(
                 dialoguePayload, dialogueHero,
                 "Will you pledge your clan to my rebellion against our ruler?",
                 "Give me land and a seat, and you'll have my axe and my clan's banners. Until then I stand aside.",
                 conditionalActionGate);
-            List<Dictionary<string, object>> finalRefusal = Program.BuildRebellionDialogueCandidates(
+            List<Dictionary<string, object>> finalRefusal = ActionPipelineService.BuildRebellionDialogueCandidates(
                 dialoguePayload, dialogueHero,
                 "Give me your final answer: do you refuse to support my rebellion against our ruler?",
                 "My answer is no, and it stays no.",
                 finalRefusalActionGate);
-            List<Dictionary<string, object>> deferredRefusal = Program.BuildRebellionDialogueCandidates(
+            List<Dictionary<string, object>> deferredRefusal = ActionPipelineService.BuildRebellionDialogueCandidates(
                 dialoguePayload, dialogueHero,
                 "Will you pledge your clan to my rebellion against our ruler?",
                 "I won't pledge today, but I'll listen. Give me something real to weigh.",

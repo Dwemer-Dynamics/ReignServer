@@ -52,10 +52,10 @@ namespace ReignBetaServer
 
         internal static bool IsSharedTravelOnly(Dictionary<string, object> gate, string playerText)
         {
-            string text = Program.NormalizeLookup(playerText);
+            string text = ActionPipelineService.NormalizeLookup(playerText);
             if (HasDirectCampaignOrderRequest(playerText)
-                || !string.IsNullOrWhiteSpace(Program.TemporaryPartyGuestCandidateToPreserve(gate, playerText))) return false;
-            string intent = Program.NormalizeLookup(ReadString(gate, "intent", ""));
+                || !string.IsNullOrWhiteSpace(ActionPipelineService.TemporaryPartyGuestCandidateToPreserve(gate, playerText))) return false;
+            string intent = ActionPipelineService.NormalizeLookup(ReadString(gate, "intent", ""));
             return Regex.IsMatch(text, @"\b(?:we|our route|our trip|together|let s)\b")
                 && Regex.IsMatch(intent, @"\b(?:travel|detour|itinerary|destination|tournament|go to|ride to)\b")
                 && !Regex.IsMatch(intent, @"\b(?:transfer|gift|marriage|clan membership|arrest|declare war|peace treaty)\b");
@@ -64,7 +64,7 @@ namespace ReignBetaServer
         internal static bool DialoguePlannerCandidateEligible(string command, Dictionary<string, object> payload,
             Dictionary<string, object> hero, Dictionary<string, object> gate, string playerText)
         {
-            command = Program.CanonicalCommand(command);
+            command = ActionPipelineService.CanonicalCommand(command);
             if (command == "accept_temporary_party_guest" && TemporaryGuestAlreadySatisfied(payload, hero)) return false;
             if (command == "renew_temporary_party_guest" && !GuestCanRenew(CurrentSpeakerGuest(payload, hero))) return false;
             bool sceneFollow = command == "follow"
@@ -76,7 +76,7 @@ namespace ReignBetaServer
                 var guest = TemporaryGuestDialogueContext(payload,
                     FirstNonEmpty(ReadFirstString(payload, "speakerHeroStringId", "heroStringId"), ReadString(hero, "heroStringId", "")));
                 return guest != null && ReadBool(guest, "inMainParty", false)
-                    && Regex.IsMatch(Program.NormalizeLookup(playerText), @"\b(?:accept (?:banishment|that risk)|fight(?:ing)? (?:your|our|my|their) own (?:realm|faction|clan)|own faction combat)\b");
+                    && Regex.IsMatch(ActionPipelineService.NormalizeLookup(playerText), @"\b(?:accept (?:banishment|that risk)|fight(?:ing)? (?:your|our|my|their) own (?:realm|faction|clan)|own faction combat)\b");
             }
             return true;
         }
@@ -86,15 +86,15 @@ namespace ReignBetaServer
         {
             // The hidden planner supplies negotiated terms. Test fixture defaults
             // must never add money, durations, fiefs or an unrelated target here.
-            Program.CompleteTestDirectiveActionDefaults(action, payload, hero, text, includeTestValues: false);
-            var terms = Program.ToCaseInsensitiveDictionary(ReadDictionary(action, "terms") ?? new Dictionary<string, object>());
-            string command = Program.CanonicalCommand(ReadString(action, "command", ""));
+            ActionPipelineService.CompleteTestDirectiveActionDefaults(action, payload, hero, text, includeTestValues: false);
+            var terms = LlmProviderService.ToCaseInsensitiveDictionary(ReadDictionary(action, "terms") ?? new Dictionary<string, object>());
+            string command = ActionPipelineService.CanonicalCommand(ReadString(action, "command", ""));
             if ((command == "transfer_item" || command == "transfer_gold" || command == "give_gold_to_player")
                 && TransferDirectionNeedsResolution(action, terms))
-                Program.ApplyTransferDirectionDefaults(action, terms, payload, hero, text, command);
+                ActionPipelineService.ApplyTransferDirectionDefaults(action, terms, payload, hero, text, command);
             action["terms"] = terms;
             if (command == "transfer_item") CompleteNamedGiftTerms(action, terms, payload, text);
-            Program.CompleteFallbackDirectiveTerms(action, payload, hero, text, includeTestValues: false);
+            ActionPipelineService.CompleteFallbackDirectiveTerms(action, payload, hero, text, includeTestValues: false);
             // Fallback completion may replace the dictionary; bind the terms actually attached to the action.
             terms = ReadDictionary(action, "terms") ?? terms;
             BindTemporaryGuestActionTerms(command, terms, payload, hero);
@@ -102,7 +102,7 @@ namespace ReignBetaServer
         }
 
         internal static bool HasExplicitCurrentSettlementReference(string text)
-            => Regex.IsMatch(Program.NormalizeLookup(text), @"\b(?:this|current|our present) (?:town|village|castle|settlement)|\b(?:wait|stay|hold|patrol|defend) here\b");
+            => Regex.IsMatch(ActionPipelineService.NormalizeLookup(text), @"\b(?:this|current|our present) (?:town|village|castle|settlement)|\b(?:wait|stay|hold|patrol|defend) here\b");
 
         internal static bool TransferDirectionNeedsResolution(Dictionary<string, object> action, Dictionary<string, object> terms)
             => FirstNonEmpty(ReadFirstString(action, "FromHero", "fromHero", "actorHeroStringId", "actorHeroId"),
@@ -113,7 +113,7 @@ namespace ReignBetaServer
         internal static string ClassifyDialogueQueueOutcome(int candidateCount, int queuedCount, bool actionable, List<string> errors)
         {
             if (queuedCount > 0) return "queued_awaiting_native";
-            if (errors != null && errors.Count > 0) return Program.ClassifyActionFailure(candidateCount, errors);
+            if (errors != null && errors.Count > 0) return ActionPipelineService.ClassifyActionFailure(candidateCount, errors);
             return actionable ? "no_executable_action" : "no_action_detected";
         }
 
@@ -123,7 +123,7 @@ namespace ReignBetaServer
         {
             return candidates.Where(candidate =>
             {
-                var normalized = Program.NormalizeActionCommand(Program.CloneDictionary(candidate), campaignId,
+                var normalized = ActionPipelineService.NormalizeActionCommand(CloneDictionary(candidate), campaignId,
                     out List<string> errors, payload, resolutionText);
                 return normalized != null && errors.Count == 0;
             }).ToList();
@@ -133,19 +133,19 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> resolved, List<Dictionary<string, object>> fallback)
         {
             var result = new List<Dictionary<string, object>>();
-            foreach (var candidate in resolved.Concat(fallback)) Program.AppendUniqueActionCandidate(result, candidate);
+            foreach (var candidate in resolved.Concat(fallback)) ActionPipelineService.AppendUniqueActionCandidate(result, candidate);
             return result;
         }
 
         internal static bool TryCompleteAcceptedGuestSchedule(Dictionary<string, object> terms,
             Dictionary<string, object> payload, string exchange)
         {
-            string text = Program.NormalizeLookup(exchange);
+            string text = ActionPipelineService.NormalizeLookup(exchange);
             var calendar = ReadDictionary(payload, "campaignCalendar");
-            bool openEnded = Program.ContainsAnyNormalized(text, "open ended", "no fixed end date", "every thirty days");
-            double days = openEnded ? 0 : Program.ExtractItemAmount(text, "days?");
+            bool openEnded = ActionPipelineService.ContainsAnyNormalized(text, "open ended", "no fixed end date", "every thirty days");
+            double days = openEnded ? 0 : ActionPipelineService.ExtractItemAmount(text, "days?");
             if (!openEnded && days <= 0)
-                days = Program.ExtractItemAmount(Regex.Replace(text, @"\b(?:more|additional|extra)\s+(?=days?\b)", ""), "days?");
+                days = ActionPipelineService.ExtractItemAmount(Regex.Replace(text, @"\b(?:more|additional|extra)\s+(?=days?\b)", ""), "days?");
             bool fixedSeason = Regex.IsMatch(text, @"\bfor (?:the|a|one|1|this) season\b|\b(?:full|one) season (?:of )?(?:service|travel)\b");
             if (!openEnded && fixedSeason) days = ReadDouble(calendar, "daysPerSeason", 0);
             var explicitDays = Regex.Match(exchange ?? "", @"(?<![\w.\d])(\d+(?:\.\d+)?)\s+(?:(?:more|additional|extra)\s+)?days?\b", RegexOptions.IgnoreCase);
@@ -170,9 +170,9 @@ namespace ReignBetaServer
             var wages = Regex.Matches(exchange ?? "", @"\b(\d[\d,]*|" + numberWord + @"(?:[\s-]+" + numberWord + @")*)\s*(?:denars?|gold)?\s*(?:a|per|each)\s*(day|week|season|year)\b", RegexOptions.IgnoreCase);
             if (wages.Count > 0)
             {
-                var distinct = wages.Cast<Match>().Select(x => Program.ExtractMoneyAmount(x.Groups[1].Value + " gold", 0)
+                var distinct = wages.Cast<Match>().Select(x => ActionPipelineService.ExtractMoneyAmount(x.Groups[1].Value + " gold", 0)
                     + ":" + x.Groups[2].Value.ToLowerInvariant()).Distinct().ToList();
-                int amount = Program.ExtractMoneyAmount(wages[0].Groups[1].Value + " gold", 0);
+                int amount = ActionPipelineService.ExtractMoneyAmount(wages[0].Groups[1].Value + " gold", 0);
                 if (distinct.Count != 1 || amount <= 0) return false;
                 string unit = wages[0].Groups[2].Value.ToLowerInvariant();
                 double period = unit == "day" ? 1 : ReadDouble(calendar,
@@ -193,9 +193,9 @@ namespace ReignBetaServer
 
         internal static void BindAcceptedItemDelivery(Dictionary<string, object> action, string speaker)
         {
-            if (Program.CanonicalCommand(ReadString(action, "command", "")) != "transfer_item" || string.IsNullOrWhiteSpace(speaker)) return;
+            if (ActionPipelineService.CanonicalCommand(ReadString(action, "command", "")) != "transfer_item" || string.IsNullOrWhiteSpace(speaker)) return;
             action["acceptedByHeroStringId"] = speaker;
-            var terms = Program.ToCaseInsensitiveDictionary(ReadDictionary(action, "terms") ?? new Dictionary<string, object>());
+            var terms = LlmProviderService.ToCaseInsensitiveDictionary(ReadDictionary(action, "terms") ?? new Dictionary<string, object>());
             // Native validation compares the accepted speaker to the actual source
             // or recipient. A third party's permission cannot change protected gear.
             terms["sourceConsentConfirmed"] = true;
@@ -226,7 +226,7 @@ namespace ReignBetaServer
         internal static List<Dictionary<string, object>> MentionedActionItems(Dictionary<string, object> index, string text)
         {
             var rows = new List<Dictionary<string, object>>();
-            string normalized = Program.NormalizeLookup(text);
+            string normalized = ActionPipelineService.NormalizeLookup(text);
             var assets = ReadDictionary(index, "assets");
             foreach (string side in new[] { "player", "speaker" })
             {
@@ -235,11 +235,11 @@ namespace ReignBetaServer
                 foreach (var row in ActionInventoryItems(ReadDictionary(holder, "inventory"))
                     .Concat(ReadDictionaryList(appearance, "civilianEquipment")).Concat(ReadDictionaryList(appearance, "battleEquipment")))
                 {
-                    string name = Program.NormalizeLookup(ReadString(row, "name", ""));
-                    string id = Program.NormalizeLookup(ReadString(row, "itemId", ""));
-                    if ((name.Length < 3 || !Program.NormalizedTextContainsPhrase(normalized, name))
-                        && (id.Length < 3 || !Program.NormalizedTextContainsPhrase(normalized, id))) continue;
-                    var copy = Program.CloneDictionary(row);
+                    string name = ActionPipelineService.NormalizeLookup(ReadString(row, "name", ""));
+                    string id = ActionPipelineService.NormalizeLookup(ReadString(row, "itemId", ""));
+                    if ((name.Length < 3 || !ActionPipelineService.NormalizedTextContainsPhrase(normalized, name))
+                        && (id.Length < 3 || !ActionPipelineService.NormalizedTextContainsPhrase(normalized, id))) continue;
+                    var copy = CloneDictionary(row);
                     copy["holder"] = side;
                     rows.Add(copy);
                 }
@@ -248,7 +248,7 @@ namespace ReignBetaServer
         }
 
         internal static bool HasNativeItemGiftRequest(Dictionary<string, object> payload, string text)
-            => Regex.IsMatch(Program.NormalizeLookup(Regex.Replace(text ?? "", @"\*[^*]*\*", " ")),
+            => Regex.IsMatch(ActionPipelineService.NormalizeLookup(Regex.Replace(text ?? "", @"\*[^*]*\*", " ")),
                 @"\b(?:give|gift|hand|take|offer|donate|here is|here s)\b")
                 && MentionedActionItems(ReadDictionary(payload, "actionResolutionIndex"), text).Count > 0;
 
@@ -256,7 +256,7 @@ namespace ReignBetaServer
             Dictionary<string, object> payload, Dictionary<string, object> hero, string playerText, HashSet<string> allowed)
         {
             if (!allowed.Contains("transfer_item") || !HasNativeItemGiftRequest(payload, playerText)
-                || !ShouldPreserveAcceptedItemGift(gate, playerText, Program.CommandFromDirectiveText(playerText))) return null;
+                || !ShouldPreserveAcceptedItemGift(gate, playerText, ActionPipelineService.CommandFromDirectiveText(playerText))) return null;
             var action = TestDict("command", "transfer_item", "source", "accepted_named_gift_fallback",
                 "reason", "The speaker accepted the specifically offered native item.");
             CompleteConversationActionTerms(action, payload, hero, playerText);
@@ -282,10 +282,10 @@ namespace ReignBetaServer
             string itemId = ReadString(row, "itemId", ""), name = ReadString(row, "name", itemId);
             action["Item"] = itemId;
             terms["itemId"] = itemId;
-            if (rows.Count == 1) Program.ApplyResolvedItemTerms(terms, row);
-            int amount = Program.ExtractInventoryItemAmount(text, name);
+            if (rows.Count == 1) ActionPipelineService.ApplyResolvedItemTerms(terms, row);
+            int amount = ActionPipelineService.ExtractInventoryItemAmount(text, name);
             if (amount == 0 && Regex.IsMatch(text ?? "", @"\b(?:the|a|an|one|my|this|that)\s+" + Regex.Escape(name) + @"\b", RegexOptions.IgnoreCase)) amount = 1;
-            if (amount > 0) Program.AddIfMissing(terms, "amount", amount);
+            if (amount > 0) ActionPipelineService.AddIfMissing(terms, "amount", amount);
         }
     }
 }

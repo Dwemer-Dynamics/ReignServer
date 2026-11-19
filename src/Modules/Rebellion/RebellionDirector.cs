@@ -341,7 +341,7 @@ namespace ReignBetaServer
                     ["parentKingdomId"] = parentKingdomId, ["supportCoalition"] = ReadStringList(militaryEvidence, "supportCoalition"),
                     ["oppositionCoalition"] = ReadStringList(militaryEvidence, "oppositionCoalition")
                 };
-                Program.QueueAction(campaignId, new Dictionary<string, object>
+                ActionPipelineService.QueueAction(campaignId, new Dictionary<string, object>
                 {
                     ["serverActionId"] = actionId, ["actionId"] = actionId,
                     ["command"] = "back_rebellion", ["type"] = "DiplomacyBackRebellion", ["typeValue"] = 30,
@@ -641,7 +641,7 @@ namespace ReignBetaServer
                     ["payload"] = Json.Serialize(evidence),
                     ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                 });
-            Program.LogOperational("rebellion.recognition_attempt", row);
+            OperationsService.LogOperational("rebellion.recognition_attempt", row);
             return row;
         }
 
@@ -787,9 +787,9 @@ namespace ReignBetaServer
                 "effectiveAttitude", 0);
             double relationshipPressure = Clamp(0d, 100d, 50d - effectiveAttitude);
 
-            Dictionary<string, object> traits = ReadDictionary(Program.ReadJsonObject(Program.CharacterFile(campaignId, leaderId, "traits.json")), "foundationTraits")
+            Dictionary<string, object> traits = ReadDictionary(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, leaderId, "traits.json")), "foundationTraits")
                 ?? ReadDictionary(clan, "traits") ?? new Dictionary<string, object>();
-            Dictionary<string, object> pressureDoc = Program.ReadJsonObject(Program.CharacterFile(campaignId, leaderId, "pressure.json"));
+            Dictionary<string, object> pressureDoc = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, leaderId, "pressure.json"));
             double drive = 0.16d * Trait100(traits, "ambition") + 0.16d * Trait100(traits, "powerMotivation")
                 + 0.10d * Trait100(traits, "pride") + 0.10d * Trait100(traits, "assertiveness")
                 + 0.10d * Trait100(traits, "vengefulness") + 0.10d * Trait100(traits, "riskTolerance")
@@ -831,15 +831,15 @@ namespace ReignBetaServer
                 List<Dictionary<string, object>> facts = RebellionStore.SelectWorldHistoryEntities(connection, new Dictionary<string, object> { ["hero"] = heroId, ["clan"] = clanId, ["kingdom"] = kingdomId, ["from"] = worldDay - 126d, ["to"] = worldDay });
                 foreach (Dictionary<string, object> fact in facts)
                 {
-                    string type = Program.NormalizeLookup(ReadString(fact, "event_type", ""));
+                    string type = ActionPipelineService.NormalizeLookup(ReadString(fact, "event_type", ""));
                     double decay = Clamp(0d, 1d, 1d - (worldDay - ReadDouble(fact, "world_day", worldDay)) / 126d);
                     double modifier = 0d;
-                    if (Program.ContainsAny(type, "execution", "hero killed", "family punishment")) modifier = 18d;
-                    else if (Program.ContainsAny(type, "confisc", "settlement owner changed")) modifier = 12d;
-                    else if (Program.ContainsAny(type, "exile", "clan exiled")) modifier = 16d;
-                    else if (Program.ContainsAny(type, "support claimant")) modifier = 15d;
-                    else if (Program.ContainsAny(type, "battle completed", "siege completed", "military disaster")) modifier = 6d;
-                    else if (Program.ContainsAny(type, "reward", "fief granted", "reconciliation", "promise fulfilled")) modifier = -12d;
+                    if (DialogueService.ContainsAny(type, "execution", "hero killed", "family punishment")) modifier = 18d;
+                    else if (DialogueService.ContainsAny(type, "confisc", "settlement owner changed")) modifier = 12d;
+                    else if (DialogueService.ContainsAny(type, "exile", "clan exiled")) modifier = 16d;
+                    else if (DialogueService.ContainsAny(type, "support claimant")) modifier = 15d;
+                    else if (DialogueService.ContainsAny(type, "battle completed", "siege completed", "military disaster")) modifier = 6d;
+                    else if (DialogueService.ContainsAny(type, "reward", "fief granted", "reconciliation", "promise fulfilled")) modifier = -12d;
                     score += modifier * decay;
                 }
                 int claimantSupport = RebellionStore.CountEvents(connection, new Dictionary<string, object> { ["clan"] = "%" + clanId + "%" }).Select(x => ReadInt(x, "count", 0)).FirstOrDefault();
@@ -909,7 +909,7 @@ namespace ReignBetaServer
             string defeatedId, int defections)
         {
             if (string.IsNullOrWhiteSpace(victorId) || string.IsNullOrWhiteSpace(defeatedId) || string.Equals(victorId, defeatedId, StringComparison.OrdinalIgnoreCase)) return "pardon";
-            Dictionary<string, object> traits = ReadDictionary(Program.ReadJsonObject(Program.CharacterFile(campaignId, victorId, "traits.json")), "foundationTraits") ?? new Dictionary<string, object>();
+            Dictionary<string, object> traits = ReadDictionary(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, victorId, "traits.json")), "foundationTraits") ?? new Dictionary<string, object>();
             double alignment = RelationshipAlignment(connection, campaignId,
                 timelineId, victorId, defeatedId, 0);
             double severity = 45d + 0.15d * Trait100(traits, "vengefulness") + 0.10d * Trait100(traits, "aggression")
@@ -925,7 +925,7 @@ namespace ReignBetaServer
         private static string SelectRebellionObjective(ReignDbConnection connection, string campaignId, Dictionary<string, object> candidate, Dictionary<string, object> kingdom, Dictionary<string, object> scores)
         {
             string leaderId = ReadString(candidate, "leaderHeroId", "");
-            Dictionary<string, object> traits = ReadDictionary(Program.ReadJsonObject(Program.CharacterFile(campaignId, leaderId, "traits.json")), "foundationTraits")
+            Dictionary<string, object> traits = ReadDictionary(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, leaderId, "traits.json")), "foundationTraits")
                 ?? ReadDictionary(candidate, "traits") ?? new Dictionary<string, object>();
             double claimant = 20d * Math.Max(0, ReadInt(candidate, "tier", 0) - 3) + 0.10d * ReadDouble(candidate, "influence", 0d)
                 + 0.25d * Trait100(traits, "ambition") + 0.25d * Trait100(traits, "powerMotivation");
@@ -957,7 +957,7 @@ namespace ReignBetaServer
             Dictionary<string, object> candidate, double rebelPower, double loyalistPower)
         {
             string rulerId = ReadString(ruler, "leaderHeroId", "");
-            Dictionary<string, object> traits = ReadDictionary(Program.ReadJsonObject(Program.CharacterFile(campaignId, rulerId, "traits.json")), "foundationTraits")
+            Dictionary<string, object> traits = ReadDictionary(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, rulerId, "traits.json")), "foundationTraits")
                 ?? ReadDictionary(ruler, "traits") ?? new Dictionary<string, object>();
             double ratio = Clamp(0d, 100d, 100d * rebelPower / Math.Max(1d, rebelPower + loyalistPower));
             return Clamp(0d, 100d, 25d + 0.30d * ratio + 0.20d * Trait100(traits, "pragmatism")

@@ -41,7 +41,7 @@ namespace ReignBetaServer
             Dictionary<string, object> p, NpcLivesOptions options, double day)
         {
             if (!NpcLivesFixtureAuthorized(p, WorldSimulationService.LoadLiveTestRun(state.CampaignId, ReadString(p, "runId", "")),
-                WorldSimulationService.LoadLiveTestRuntime(state.CampaignId), Program.ReadJsonObject(WorldSimulationService.LiveTestArmPath())))
+                WorldSimulationService.LoadLiveTestRuntime(state.CampaignId), CampaignFileService.ReadJsonObject(WorldSimulationService.LiveTestArmPath())))
                 throw new InvalidOperationException("An exact armed native NPC Lives command lease and disposable Current are required for invitation setup.");
             var test = ReadDictionary(p, "testCase");
             string hero = ReadString(test, "heroId", ""), player = ReadFirstString(p, "playerId", "playerHeroStringId"), party = ReadString(p, "partyId", "");
@@ -66,7 +66,7 @@ namespace ReignBetaServer
                 ReadString(p, "locationId", ""), ReadString(test, "locationId", ""));
             if (invitationKind == "leave")
             {
-                var traits = Program.ReadJsonObject(Program.CharacterFile(state.CampaignId, hero, "traits.json"));
+                var traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(state.CampaignId, hero, "traits.json"));
                 var candidate = new NpcLifeCandidate { HeroId = hero,
                     Affinity = NpcLivesAffinity(c, hero, player, ReadInt(member, "nativeRelation", 0)),
                     Honor = NarrativePersonalityScore(traits, member, "honor"), Compassion = NarrativePersonalityScore(traits, member, "compassion"),

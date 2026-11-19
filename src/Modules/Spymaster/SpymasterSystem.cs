@@ -132,7 +132,7 @@ namespace ReignBetaServer
             string summary = phase.Equals("resolved", StringComparison.OrdinalIgnoreCase)
                 ? "Spymaster operation " + missionId + ": I was ordered to conduct " + request + " Result: " + result
                 : "Spymaster operation " + missionId + ": I personally received this order: " + request;
-            Program.StoreWorldMemoryEvent(new Dictionary<string, object>
+            DialogueService.StoreWorldMemoryEvent(new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId, ["timelineId"] = timelineId,
                 ["eventId"] = "spymaster_operation_" + missionId + "_" + phase,
@@ -148,7 +148,7 @@ namespace ReignBetaServer
             bool playerIdentified = ReadBool(mission, "PlayerIdentified", ReadBool(mission, "playerIdentified", false));
             if (phase.Equals("resolved", StringComparison.OrdinalIgnoreCase) && targetNoticed && !string.IsNullOrWhiteSpace(targetId))
             {
-                Program.StoreWorldMemoryEvent(new Dictionary<string, object>
+                DialogueService.StoreWorldMemoryEvent(new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId, ["eventId"] = "spymaster_target_discovery_" + missionId,
                     ["eventType"] = "covert_investigation_discovered", ["worldDay"] = resolvedDay,

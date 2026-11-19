@@ -10,7 +10,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class ConversationResponseService
     {
         private static string DiagnosticQuery(Dictionary<string, string> query, string key) => query != null && query.TryGetValue(key, out var value) ? value ?? "" : "";
         private static int DiagnosticBound(Dictionary<string, string> query, string key, int fallback, int max)
@@ -63,7 +63,7 @@ namespace ReignBetaServer
         private static List<Dictionary<string, object>> DiagnosticLegacyRows(string campaign)
         {
             if (string.IsNullOrWhiteSpace(campaign)) return new List<Dictionary<string, object>>();
-            var rows = DiagnosticReadRecords(CampaignFile(campaign, "audit", "audit.jsonl"), FileLock, out string warning);
+            var rows = DiagnosticReadRecords(CampaignFileService.CampaignFile(campaign, "audit", "audit.jsonl"), Program.FileLock, out string warning);
             if (warning.Length > 0) DiagnosticLastError = warning;
             return rows;
         }
@@ -107,11 +107,11 @@ namespace ReignBetaServer
                 meta["conversationKey"] = DiagnosticConversationKey(meta); return meta;
             }).ToList();
         }
-        private static Dictionary<string, object> ConversationDiagnosticsListApi(Dictionary<string, string> query)
+        internal static Dictionary<string, object> ConversationDiagnosticsListApi(Dictionary<string, string> query)
         {
             string campaign = DiagnosticQuery(query, "campaignId"), text = DiagnosticQuery(query, "search"), mode = DiagnosticQuery(query, "mode"), status = DiagnosticQuery(query, "status");
             var rows = DiagnosticManifestIndex();
-            string legacyCampaign = FirstNonEmpty(campaign, LatestCampaignId());
+            string legacyCampaign = FirstNonEmpty(campaign, SettingsService.LatestCampaignId());
             if (legacyCampaign.Length > 0)
             {
                 var known = new HashSet<string>(rows.Select(x => ReadString(x, "correlationId", "")));
@@ -132,7 +132,7 @@ namespace ReignBetaServer
                 return new Dictionary<string, object> { ["conversationKey"] = g.Key, ["campaignId"] = ReadString(last, "campaignId", ""),
                     ["title"] = FirstNonEmpty(ReadString(last, "heroName", ""), ReadString(last, "heroId", ""), "Other LLM activity"),
                     ["mode"] = ReadString(last, "mode", ""), ["lastUtc"] = ReadString(last, "startedUtc", ""), ["responseCount"] = g.Count(),
-                    ["preview"] = LimitText(FirstNonEmpty(ReadString(last, "reply", ""), ReadString(last, "playerText", "")), 160) };
+                    ["preview"] = DialogueService.LimitText(FirstNonEmpty(ReadString(last, "reply", ""), ReadString(last, "playerText", "")), 160) };
             }).OrderByDescending(x => ReadString(x, "lastUtc", ""), StringComparer.Ordinal).ToList();
             return new Dictionary<string, object> { ["ok"] = true, ["schema"] = ConversationDiagnosticSchema,
                 ["conversations"] = conversations.Skip(offset).Take(limit).ToList(), ["conversationCount"] = conversations.Count,
@@ -141,7 +141,7 @@ namespace ReignBetaServer
                 ["campaigns"] = rows.Select(x => ReadString(x, "campaignId", "")).Where(x => x.Length > 0).Distinct().OrderBy(x => x).ToList(),
                 ["modes"] = rows.Select(x => ReadString(x, "mode", "")).Distinct().OrderBy(x => x).ToList(), ["error"] = DiagnosticLastError };
         }
-        private static Dictionary<string, object> ConversationDiagnosticsTraceApi(Dictionary<string, string> query)
+        internal static Dictionary<string, object> ConversationDiagnosticsTraceApi(Dictionary<string, string> query)
         {
             string id = DiagnosticQuery(query, "traceId");
             if (id.StartsWith("legacy-", StringComparison.Ordinal))
@@ -176,7 +176,7 @@ namespace ReignBetaServer
                 ["steps"] = grouped, ["complete"] = ReadBool(manifest, "fullCapture", false) && ReadString(manifest, "captureError", "").Length == 0,
                 ["timingNote"] = "The response total is wall-clock time. Parent steps include their children; do not add nested durations." };
         }
-        private static Dictionary<string, object> ConversationDiagnosticsPayloadApi(Dictionary<string, string> query)
+        internal static Dictionary<string, object> ConversationDiagnosticsPayloadApi(Dictionary<string, string> query)
         {
             string trace = DiagnosticQuery(query, "traceId"), id = DiagnosticId(DiagnosticQuery(query, "payloadId"));
             int offset = DiagnosticBound(query, "offset", 0, int.MaxValue), length = Math.Max(2, DiagnosticBound(query, "length", 12000, 12000));
@@ -205,7 +205,7 @@ namespace ReignBetaServer
                 ["offset"] = offset, ["nextOffset"] = offset + count, ["hasMore"] = offset + count < text.Length,
                 ["content"] = text.Substring(offset, count), ["metadata"] = meta };
         }
-        private static Dictionary<string, object> ConversationDiagnosticsCaptureApi(Dictionary<string, object> changes = null)
+        internal static Dictionary<string, object> ConversationDiagnosticsCaptureApi(Dictionary<string, object> changes = null)
         {
             lock (DiagnosticSettingsLock)
             {
@@ -227,7 +227,7 @@ namespace ReignBetaServer
                     ["note"] = "Changes apply to new responses. In-flight captures finish recording. Credentials are excluded." };
             }
         }
-        private static Dictionary<string, object> ConversationDiagnosticsClearApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> ConversationDiagnosticsClearApi(Dictionary<string, object> payload)
         {
             var ids = ReadStringList(payload, "traceIds").Distinct().ToList();
             if (ReadString(payload, "confirmation", "") != "clear selected diagnostic captures" || ids.Count == 0 || ids.Count > 500) throw new ArgumentException("Select 1–500 exact completed captures and confirm their deletion.");
@@ -240,7 +240,7 @@ namespace ReignBetaServer
             }
             return new Dictionary<string, object> { ["ok"] = true, ["deletedCaptures"] = deleted, ["campaignDataChanged"] = false };
         }
-        private static void WriteConversationDiagnosticsExport(NetworkStream stream, Dictionary<string, string> query)
+        internal static void WriteConversationDiagnosticsExport(NetworkStream stream, Dictionary<string, string> query)
         {
             string key = DiagnosticQuery(query, "conversationKey"), traceId = DiagnosticQuery(query, "traceId");
             if (key.Length == 0 && traceId.Length == 0) throw new ArgumentException("Select a conversation or response to export.");
@@ -253,7 +253,7 @@ namespace ReignBetaServer
             try
             {
                 using (var output = File.Create(path)) WriteConversationDiagnosticArchive(output, selected);
-                WriteFile(stream, path, "application/zip");
+                Program.WriteFile(stream, path, "application/zip");
             }
             finally { if (File.Exists(path)) File.Delete(path); }
         }

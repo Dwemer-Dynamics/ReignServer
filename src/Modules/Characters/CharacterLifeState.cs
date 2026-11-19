@@ -47,7 +47,7 @@ namespace ReignBetaServer
         }
 
         private static List<Dictionary<string, object>> ReadCharacterDecisionTransitions(ReignDbConnection connection,
-            string owner, Program.KnowledgeAccessContext access)
+            string owner, DialogueService.KnowledgeAccessContext access)
         {
             var result = new List<Dictionary<string, object>>();
             if (!WorldSimulationService.TableExists(connection, "conversation_negotiation_turns")) return result;
@@ -89,12 +89,12 @@ namespace ReignBetaServer
         }
 
         private static List<Dictionary<string, object>> ReadCharacterNativeLifeTransitions(ReignDbConnection connection,
-            string owner, Program.KnowledgeAccessContext access, Dictionary<string, object> profile = null)
+            string owner, DialogueService.KnowledgeAccessContext access, Dictionary<string, object> profile = null)
         {
             var result = new List<Dictionary<string, object>>();
             if (!WorldSimulationService.TableExists(connection, "world_history_events") || !WorldSimulationService.TableExists(connection, "world_history_entities")
                 || !WorldSimulationService.TableExists(connection, "world_history_knowledge_rules")) return result;
-            var family = Program.CharacterIdFrom(profile) == owner ? ReadStringList(profile, "childrenIds").Concat(new[] {
+            var family = CampaignFileService.CharacterIdFrom(profile) == owner ? ReadStringList(profile, "childrenIds").Concat(new[] {
                 ReadString(profile, "fatherId", ""), ReadString(profile, "motherId", ""), ReadString(profile, "spouseId", "") })
                 .Where(id => id.Length > 0 && id != owner).Distinct().ToList() : new List<string>();
             var rows = CharactersStore.SelectWorldHistoryEvents(connection, TestDict("timeline", access.TimelineId, "day", access.WorldDay, "owner", owner, "kingdom", access.KingdomId, "family", Json.Serialize(family)));
@@ -152,14 +152,14 @@ namespace ReignBetaServer
         private static string BuildCharacterLifeStatePrompt(ReignDbConnection connection, string owner, string peer,
             Dictionary<string, object> payload, List<string> sourceIds)
         {
-            var access = Program.BuildKnowledgeAccessContext(owner, peer, "", payload);
+            var access = DialogueService.BuildKnowledgeAccessContext(owner, peer, "", payload);
             bool official = ReadBool(payload, "officialMemoryFirewall", false);
             var transitions = official ? new List<Dictionary<string, object>>() : ReadCharacterDecisionTransitions(connection, owner, access);
             transitions.AddRange(ReadCharacterNativeLifeTransitions(connection, owner, access,
                 ReadDictionary(payload, "hero") ?? ReadDictionary(payload, "profile") ?? ReadDictionary(payload, "speaker")));
             var current = CurrentCharacterLifeState(transitions);
             var query = ReadFirstString(payload, "playerText", "text", "message");
-            var terms = Program.MemoryQueryTerms(query);
+            var terms = DialogueService.MemoryQueryTerms(query);
             var selected = current.Where(t => ReadString(t, "sourceKind", "") == "accepted_decision")
                 .Concat(current.Where(t => ReadString(t, "sourceKind", "") == "native_confirmed")
                     .OrderByDescending(t => terms.Count(term => ReadString(t, "subject", "").Contains(term, StringComparison.OrdinalIgnoreCase)))
@@ -202,12 +202,12 @@ namespace ReignBetaServer
             catch (Exception ex)
             {
                 payload["characterLifeState"] = TestDict("schema", CharacterLifeStateSchema, "status", "unavailable", "remoteCalls", 0);
-                Program.LogOperational("character.life_read_unavailable", TestDict("ownerId", owner, "errorType", ex.GetType().Name));
+                OperationsService.LogOperational("character.life_read_unavailable", TestDict("ownerId", owner, "errorType", ex.GetType().Name));
                 return "";
             }
         }
 
-        internal static void RefreshCharacterLifeProjection(string campaign, string owner, Program.KnowledgeAccessContext access)
+        internal static void RefreshCharacterLifeProjection(string campaign, string owner, DialogueService.KnowledgeAccessContext access)
         {
             try
             {
@@ -225,7 +225,7 @@ namespace ReignBetaServer
                 }
                 transaction.Commit();
             }
-            catch (Exception ex) { Program.LogOperational("character.life_projection_deferred", TestDict("ownerId", owner, "errorType", ex.GetType().Name)); }
+            catch (Exception ex) { OperationsService.LogOperational("character.life_projection_deferred", TestDict("ownerId", owner, "errorType", ex.GetType().Name)); }
         }
     }
 }

@@ -37,7 +37,7 @@ namespace ReignBetaServer
             Add("short_instruction", Errors("You said kiss me again.").Count == 1, "A short instruction still preserves its originating speaker.");
             Add("both_speakers_abstain", Errors(wrong, h: new() { source, TestDict("id", "player_also", "speakerId", "player", "text", "Stop talking about the future.") }).Count == 0,
                 "Repeated wording from both speakers cannot establish exclusive ownership.");
-            var currentInput = Program.CloneDictionary(payload); currentInput["playerText"] = "Stop talking about the future.";
+            var currentInput = CloneDictionary(payload); currentInput["playerText"] = "Stop talking about the future.";
             Add("current_input_prevents_false_correction", Errors(wrong, currentInput).Count == 0,
                 "The current player contribution survives even before storage and prevents false exclusive ownership.");
             currentInput["playerText"] = "Rhea, stop talking about the future.";
@@ -82,7 +82,7 @@ namespace ReignBetaServer
                 "Literal first-person quotation preserves its actual original speaker.");
             Add("future_source_excluded", Errors(wrong, h: new() { TestDict("id", "future", "speakerId", "npc", "text", source["text"], "worldDay", 11d) }).Count == 0,
                 "Later sources cannot prove a prior claim.");
-            var asOf = Program.CloneDictionary(payload); asOf["asOfAcceptedSequence"] = 2L; asOf["asOfTimestamp"] = 50L;
+            var asOf = CloneDictionary(payload); asOf["asOfAcceptedSequence"] = 2L; asOf["asOfTimestamp"] = 50L;
             Add("sequence_source_excluded", Errors(wrong, asOf, new() { TestDict("id", "later", "speakerId", "npc", "text", source["text"], "acceptedSequence", 3L) }).Count == 0, "No later accepted sequence.");
             Add("timestamp_source_excluded", Errors(wrong, asOf, new() { TestDict("id", "later", "speakerId", "npc", "text", source["text"], "ts", 51L) }).Count == 0, "No later timestamp.");
             Add("private_other_actor_excluded", Errors("I said stop talking about the future.", h: new() {
@@ -95,19 +95,19 @@ namespace ReignBetaServer
             Add("long_original_not_prefix", Errors(wrong, h: new() {
                 TestDict("id", "long", "speakerId", "npc", "text", string.Concat(Enumerable.Repeat("Ordinary scene detail. ", 60)) + source["text"]) }).Count == 1,
                 "A decisive clause beyond 450 characters remains available.");
-            var many = Program.CloneDictionary(payload);
+            var many = CloneDictionary(payload);
             many["memoryPrecisionEvidence"] = TestDict("records", new List<Dictionary<string, object>> { TestDict("sourceTurns",
                 Enumerable.Range(0, 90).Select(i => TestDict("id", "irrelevant_" + i, "speakerId", "player", "text", "We discussed a different town.")).ToList()) });
             Add("recent_source_protected", Errors(wrong, many).Count == 1, "Large retrieval cannot evict the immediately preceding original.");
-            var group = Program.CloneDictionary(payload);
+            var group = CloneDictionary(payload);
             group["participantProfiles"] = new List<Dictionary<string, object>> { TestDict("heroStringId", "npc", "name", "Rhea"),
                 TestDict("heroStringId", "player", "name", "Michael"), TestDict("heroStringId", "other", "name", "Ira") };
             group["participantHeroIds"] = new List<string> { "npc", "player", "other" };
-            var addressedSource = Program.CloneDictionary(source); addressedSource["addressedIds"] = new List<string> { "player" };
+            var addressedSource = CloneDictionary(source); addressedSource["addressedIds"] = new List<string> { "player" };
             Add("ambiguous_group_you", Errors(wrong, group, new() { addressedSource }).Count == 0, "Group you without an explicit audience remains unresolved.");
             var explicitDraft = TestDict("reply", wrong, "addressedHeroStringIds", new List<string> { "player" });
             Add("explicit_group_you", FindRecalledSpeakerInversions(explicitDraft, group, new() { addressedSource }, "npc").Count == 1, "Pinned group audience permits ownership comparison.");
-            var currentGroup = Program.CloneDictionary(group); currentGroup["playerText"] = "Stop talking about the future.";
+            var currentGroup = CloneDictionary(group); currentGroup["playerText"] = "Stop talking about the future.";
             Add("current_group_input_prevents_false_correction", FindRecalledSpeakerInversions(explicitDraft, currentGroup, new() { addressedSource }, "npc").Count == 0,
                 "Unresolved current group audience cannot turn the player's repeated instruction into a false correction.");
             currentGroup["playerText"] = "*I whisper to Ira* Stop talking about the future.";
@@ -126,7 +126,7 @@ namespace ReignBetaServer
             var told = TestDict("reply", "You told me to stop talking about the future. The fire is warm.");
             Add("recipient_change_requires_writer", !TryCorrectExactDialogueOwnership(told, payload, history, "npc", Errors(ReadString(told, "reply", "")), out _),
                 "Told/asked me needs recipient correction as well as speaker correction; no subject-only rewrite.");
-            var secondary = Program.CloneDictionary(parsed);
+            var secondary = CloneDictionary(parsed);
             secondary["memoryWrites"] = new List<Dictionary<string, object>> { TestDict("text", "A compound description.", "sourceEvidenceSpans", new List<Dictionary<string, object>> {
                 TestDict("quote", "I am glad you stayed."), TestDict("quote", "You said stop talking about the future.") }) };
             Add("secondary_citation_invalidated", TryCorrectExactDialogueOwnership(secondary, payload, history, "npc", errors, out var secondaryCorrected)
@@ -148,7 +148,7 @@ namespace ReignBetaServer
                     calls++;
                     return TestDict("ok", true, "schema", DialogueClaimSchema, "modelHash", DialogueNliHash, "tokenizerHash", DialogueNliTokenizerHash,
                         "backend", "cpu", "remoteCalls", 0, "rows", ReadDictionaryList(request, "pairs").Select(pair => {
-                            var row = Program.CloneDictionary(pair); row["status"] = "scored"; row["label"] = "contradiction"; row["outcome"] = "contradicted";
+                            var row = CloneDictionary(pair); row["status"] = "scored"; row["label"] = "contradiction"; row["outcome"] = "contradicted";
                             row["scores"] = TestDict("contradiction", .99, "entailment", .005, "neutral", .005); row["inputTokens"] = 40;
                             row["coverage"] = "complete_pair"; row["authority"] = "comparison_hint_only"; return row;
                         }).ToList()); };
@@ -159,7 +159,7 @@ namespace ReignBetaServer
                     "schema", DialogueClaimSchema, "modelHash", DialogueGroundingHash, "tokenizerHash", DialogueGroundingTokenizerHash,
                     "weightsHash", DialogueGroundingWeightsHash, "scoringKind", "grounding_binary", "backend", "cpu", "remoteCalls", 0,
                     "rows", ReadDictionaryList(request, "pairs").Select(pair => {
-                        var row = Program.CloneDictionary(pair); row["status"] = "scored"; row["label"] = "unsupported"; row["outcome"] = "unsupported";
+                        var row = CloneDictionary(pair); row["status"] = "scored"; row["label"] = "unsupported"; row["outcome"] = "unsupported";
                         row["scores"] = TestDict("unsupported", .99, "supported", .01); row["inputTokens"] = 40;
                         row["coverage"] = "complete_pair"; row["authority"] = "comparison_hint_only"; return row;
                     }).ToList());
@@ -170,7 +170,7 @@ namespace ReignBetaServer
                 Add("grounding_guides_proven_repair", guidance.Contains("LOCAL SOURCE-BOUND COMPARISON GUIDANCE", StringComparison.Ordinal)
                     && guidance.Contains("identityAliases", StringComparison.Ordinal) && ReadInt(repairHints, "repairGuidanceCount", 0) > 0,
                     "Validated complete comparisons guide the existing writer repair with canonical identities and source pins.");
-                var foreignErrors = toldErrors.Select(Program.CloneDictionary).ToList();
+                var foreignErrors = toldErrors.Select(CloneDictionary).ToList();
                 foreignErrors.ForEach(v => v["sourceHash"] = new string('f', 64));
                 Add("grounding_guidance_foreign_source_excluded", BuildDialogueClaimRepairGuidance(repairHints, foreignErrors).Length == 0,
                     "A comparison cannot guide a repair for another source revision.");
@@ -239,12 +239,12 @@ namespace ReignBetaServer
                 var toldOriginal = AgencyTestReply(null);
                 toldOriginal["reply"] = ReadString(told, "reply", "");
                 toldOriginal.Remove("body");
-                toldOriginal = Program.CompleteConversationStructuredResponse(toldOriginal, "dialogue", out _);
+                toldOriginal = ConversationResponseService.CompleteConversationStructuredResponse(toldOriginal, "dialogue", out _);
                 var toldResult = TestDict("ok", true, "content", Json.Serialize(toldOriginal));
                 accepted = RetryDialogueIntegrityViolation(toldResult, TestDict("requestType", "dialogue"), payload, history, "fixture", "fixture", "dialogue", "npc", "",
                     _ => { recipientRepairCalls++; return TestDict("ok", true, "content", Json.Serialize(TestDict("reply", "I told you to stop talking about the future. The fire is warm."))); }, false);
                 Add("recipient_repair_revalidated", recipientRepairCalls == 1 && ReadBool(accepted, "ok", false)
-                    && Program.StructuredResponseIsComplete(ReadString(accepted, "content", ""), "dialogue")
+                    && ConversationResponseService.StructuredResponseIsComplete(ReadString(accepted, "content", ""), "dialogue")
                     && ReadString(TryParseJsonObject(ReadString(accepted, "content", "")), "reply", "").StartsWith("I told you", StringComparison.Ordinal),
                     "One targeted writer repair can correct both roles without producing a self-addressed instruction.");
                 var finalParsed = TryParseJsonObject(ReadString(accepted, "content", ""));
@@ -292,7 +292,7 @@ namespace ReignBetaServer
                 && ReadDictionaryList(write, "sourceEvidenceSpans").All(s => ReadString(s, "status", "") == "supported_span")
                 && !ReadBool(ReadDictionary(write, "claimSourceCoverage"), "claimEntailmentVerified", true),
                 "Both original quotes bind, without pretending the complete summary is semantically verified.");
-            var defaults = Program.DefaultPromptTemplates();
+            var defaults = PromptService.DefaultPromptTemplates();
             foreach (var kind in new[] { CodexConversationContractKind.Individual, CodexConversationContractKind.Group,
                 CodexConversationContractKind.Castle, CodexConversationContractKind.Social, CodexConversationContractKind.Correspondence })
             {

@@ -23,7 +23,7 @@ namespace ReignBetaServer
                 root = ReadString(row, "root_id", ""); topic = ReadString(row, "topic_id", "");
                 before = PersonalGossipProbeState(c, timeline, root, topic);
             }
-            var proposal = PersonalGossipProbeDraft(data, Program.ChatWithLlm);
+            var proposal = PersonalGossipProbeDraft(data, LlmProviderService.ChatWithLlm);
             if (!GossipTestAuthorized(request)) throw new InvalidOperationException("The exact probe lease or native scope changed.");
             using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
             using (var c = ReignDatabase.OpenCampaignConnection(campaign))

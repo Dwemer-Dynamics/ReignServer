@@ -62,8 +62,8 @@ namespace ReignBetaServer
             var place = Regex.Match(claim ?? "", @"\b(?:at|near|outside|inside)\s+(?:the\s+)?(?<place>[A-Z][\p{L}'’-]*(?:\s+[A-Z][\p{L}'’-]*){0,4})",
                 RegexOptions.CultureInvariant);
             if (!place.Success) return true;
-            string named = Program.NormalizeLookup(place.Groups["place"].Value);
-            string actual = Program.NormalizeLookup(ReadString(row, "location_name", ""));
+            string named = ActionPipelineService.NormalizeLookup(place.Groups["place"].Value);
+            string actual = ActionPipelineService.NormalizeLookup(ReadString(row, "location_name", ""));
             return actual.Length > 0 && named == actual;
         }
     }

@@ -35,7 +35,7 @@ namespace ReignBetaServer
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", Program.ResolveLogCampaignId(""));
+            string campaignId = ReadString(payload, "campaignId", CampaignFileService.ResolveLogCampaignId(""));
             string runId = ReadString(payload, "runId", "");
             Dictionary<string, object> run = WorldSimulationService.LoadLiveTestRun(campaignId, runId);
             if (run.Count == 0)
@@ -214,10 +214,10 @@ namespace ReignBetaServer
                         ["caseId"] = caseId,
                         ["playerText"] = ReadString(command, "text", ""),
                         ["reply"] = FirstNonEmpty(ReadString(reply, "text", ""), ReadString(raw, "reply", "")),
-                        ["characterCard"] = Program.LimitText(foundation, 5500),
+                        ["characterCard"] = DialogueService.LimitText(foundation, 5500),
                         ["decisionEvidence"] = ReadDictionary(raw, "decisionBrief") ?? new Dictionary<string, object>(),
                         ["selectedContextPulls"] = ReadStringList(raw, "selectedContextPulls"),
-                        ["contextBundleEvidence"] = Program.LimitText(
+                        ["contextBundleEvidence"] = DialogueService.LimitText(
                             Json.Serialize(ReadDictionaryList(raw, "contextBundles")), 5500),
                         ["identityEvidence"] = ReadDictionary(raw, "identityView") ?? new Dictionary<string, object>(),
                         ["motiveEvidence"] = ReadinessCompactMotiveEvidence(
@@ -463,13 +463,13 @@ namespace ReignBetaServer
             }
             foreach (Dictionary<string, object> row in judged)
             {
-                row["personalityConsistency"] = Program.ClampDouble(ReadDouble(row, "personalityConsistency", 0d), 0d, 1d);
-                row["factualAccuracy"] = Program.ClampDouble(ReadDouble(row, "factualAccuracy", 0d), 0d, 1d);
-                row["groupAwareness"] = Program.ClampDouble(ReadDouble(row, "groupAwareness", 0d), 0d, 1d);
-                row["relationshipHistoryQuality"] = Program.ClampDouble(
+                row["personalityConsistency"] = DialogueService.ClampDouble(ReadDouble(row, "personalityConsistency", 0d), 0d, 1d);
+                row["factualAccuracy"] = DialogueService.ClampDouble(ReadDouble(row, "factualAccuracy", 0d), 0d, 1d);
+                row["groupAwareness"] = DialogueService.ClampDouble(ReadDouble(row, "groupAwareness", 0d), 0d, 1d);
+                row["relationshipHistoryQuality"] = DialogueService.ClampDouble(
                     ReadDouble(row, "relationshipHistoryQuality", 0d), 0d, 1d);
-                row["clanTierRecognition"] = Program.ClampDouble(ReadDouble(row, "clanTierRecognition", 0d), 0d, 1d);
-                row["manipulationCapability"] = Program.ClampDouble(ReadDouble(row, "manipulationCapability", 0d), 0d, 1d);
+                row["clanTierRecognition"] = DialogueService.ClampDouble(ReadDouble(row, "clanTierRecognition", 0d), 0d, 1d);
+                row["manipulationCapability"] = DialogueService.ClampDouble(ReadDouble(row, "manipulationCapability", 0d), 0d, 1d);
             }
             Dictionary<string, Dictionary<string, object>> results =
                 new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
@@ -683,12 +683,12 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> blinded,
             string correlationId = "")
         {
-            return Program.ChatWithLlm(new Dictionary<string, object>
+            return LlmProviderService.ChatWithLlm(new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,
                 ["correlationId"] = correlationId ?? string.Empty,
                 ["requestType"] = "readiness_evaluation",
-                ["model"] = ReadString(Program.LoadSettings(), "dialogueModel", ""),
+                ["model"] = ReadString(SettingsService.LoadSettings(), "dialogueModel", ""),
                 ["temperature"] = 0d,
                 ["maxTokens"] = ConversationReadinessJudgeMaxTokens(blinded.Count),
                 ["reasoningEffort"] = "none",
@@ -754,7 +754,7 @@ namespace ReignBetaServer
                 List<string> violations,
                 string correlationId = "")
         {
-            return Program.ChatWithLlm(
+            return LlmProviderService.ChatWithLlm(
                 BuildConversationReadinessJudgeSchemaRepairRequest(
                     campaignId, blindedCase, invalidOutput, violations,
                     correlationId));
@@ -774,7 +774,7 @@ namespace ReignBetaServer
                 ["correlationId"] = correlationId ?? string.Empty,
                 ["requestType"] = "readiness_evaluation",
                 ["model"] = ReadString(
-                    Program.LoadSettings(), "dialogueModel", ""),
+                    SettingsService.LoadSettings(), "dialogueModel", ""),
                 ["temperature"] = 0d,
                 ["maxTokens"] = 3200,
                 ["reasoningEffort"] = "none",
@@ -865,7 +865,7 @@ namespace ReignBetaServer
                 List<string> borderlineRubrics,
                 string correlationId = "")
         {
-            return Program.ChatWithLlm(
+            return LlmProviderService.ChatWithLlm(
                 BuildConversationReadinessJudgeCalibrationRequest(
                     campaignId,
                     blindedCase,
@@ -888,7 +888,7 @@ namespace ReignBetaServer
                 ["correlationId"] = correlationId ?? string.Empty,
                 ["requestType"] = "readiness_evaluation",
                 ["model"] = ReadString(
-                    Program.LoadSettings(), "dialogueModel", ""),
+                    SettingsService.LoadSettings(), "dialogueModel", ""),
                 ["temperature"] = 0d,
                 ["maxTokens"] = 3200,
                 ["reasoningEffort"] = "none",
@@ -970,12 +970,12 @@ namespace ReignBetaServer
         {
             return new Dictionary<string, object>
             {
-                ["memorySummary"] = Program.LimitText(ReadString(context, "memorySummary", ""), 2200),
+                ["memorySummary"] = DialogueService.LimitText(ReadString(context, "memorySummary", ""), 2200),
                 ["memories"] = ReadDictionaryList(context, "memories").Take(6).Select(row =>
                     new Dictionary<string, object>
                     {
                         ["id"] = ReadFirstString(row, "id", "memory_id", "event_id"),
-                        ["text"] = Program.LimitText(ReadFirstString(row, "text", "summary", "content"), 650),
+                        ["text"] = DialogueService.LimitText(ReadFirstString(row, "text", "summary", "content"), 650),
                         ["source"] = ReadFirstString(row, "source", "source_event_id", "source_session_id")
                     }).ToList(),
                 ["priorLines"] = ReadDictionaryList(context, "priorLines").Take(8).Select(row =>
@@ -983,7 +983,7 @@ namespace ReignBetaServer
                     {
                         ["id"] = ReadFirstString(row, "id", "turn_id"),
                         ["speaker"] = ReadFirstString(row, "speaker", "speaker_id"),
-                        ["text"] = Program.LimitText(ReadString(row, "text", ""), 650)
+                        ["text"] = DialogueService.LimitText(ReadString(row, "text", ""), 650)
                     }).ToList(),
                 ["eventLines"] = ReadDictionaryList(context, "eventLines")
                     .Skip(Math.Max(0, ReadDictionaryList(context, "eventLines").Count - 10))
@@ -994,7 +994,7 @@ namespace ReignBetaServer
                         ["speakerId"] = ReadFirstString(row, "speakerHeroStringId", "speaker_id", "heroStringId"),
                         ["speaker"] = ReadString(row, "speaker", ""),
                         ["role"] = ReadString(row, "role", ""),
-                        ["text"] = Program.LimitText(ReadString(row, "text", ""), 800)
+                        ["text"] = DialogueService.LimitText(ReadString(row, "text", ""), 800)
                     }).ToList(),
                 ["sourceSummaryIds"] = ReadStringList(context, "sourceSummaryIds").Take(12).ToList(),
                 ["matchedTurnIds"] = ReadStringList(context, "matchedTurnIds").Take(20).ToList(),
@@ -1042,12 +1042,12 @@ namespace ReignBetaServer
                                 ["chapterOrdinal"] = ReadInt(row, "chapter_ordinal", 0),
                                 ["canonStatus"] = ReadString(row, "canon_status", ""),
                                 ["generationStatus"] = ReadString(row, "generation_status", ""),
-                                ["objectiveConduct"] = Program.LimitText(
+                                ["objectiveConduct"] = DialogueService.LimitText(
                                     ReadString(row, "objective_summary", ""), 900),
-                                ["speakerPrivateInterpretation"] = Program.LimitText(
+                                ["speakerPrivateInterpretation"] = DialogueService.LimitText(
                                     ReadString(row,
                                         speakerIsA ? "a_interpretation" : "b_interpretation", ""), 750),
-                                ["otherPrivateInterpretationForbiddenToSpeaker"] = Program.LimitText(
+                                ["otherPrivateInterpretationForbiddenToSpeaker"] = DialogueService.LimitText(
                                     ReadString(row,
                                         speakerIsA ? "b_interpretation" : "a_interpretation", ""), 750)
                             });
@@ -1060,7 +1060,7 @@ namespace ReignBetaServer
                 return new Dictionary<string, object>
                 {
                     ["available"] = false,
-                    ["error"] = Program.LimitText(ex.Message, 500),
+                    ["error"] = DialogueService.LimitText(ex.Message, 500),
                     ["chapters"] = chapters
                 };
             }
@@ -1093,7 +1093,7 @@ namespace ReignBetaServer
                     .Select(domain => new Dictionary<string, object>
                     {
                         ["id"] = ReadString(domain, "id", ""),
-                        ["instruction"] = Program.LimitText(ReadString(domain, "instruction", ""), 420)
+                        ["instruction"] = DialogueService.LimitText(ReadString(domain, "instruction", ""), 420)
                     }).ToList(),
                 ["highlightedScores"] = (ReadDictionary(motive, "highlightedScores")
                     ?? new Dictionary<string, object>()).Take(20)
@@ -1139,7 +1139,7 @@ namespace ReignBetaServer
                     {
                         ["role"] = ReadString(row, "role", ""),
                         ["speaker"] = ReadString(row, "speaker", ""),
-                        ["text"] = Program.LimitText(ReadString(row, "text", ""), 800)
+                        ["text"] = DialogueService.LimitText(ReadString(row, "text", ""), 800)
                     }).ToList()
             };
         }
@@ -1152,7 +1152,7 @@ namespace ReignBetaServer
             if (start < 0) return "";
             int end = text.IndexOf(endMarker, start + startMarker.Length, StringComparison.OrdinalIgnoreCase);
             if (end < 0) end = Math.Min(text.Length, start + maxChars);
-            return Program.LimitText(text.Substring(start, Math.Max(0, end - start)), maxChars);
+            return DialogueService.LimitText(text.Substring(start, Math.Max(0, end - start)), maxChars);
         }
 
         private static void AppendReadinessRubricAssertion(

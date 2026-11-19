@@ -94,7 +94,7 @@ namespace ReignBetaServer
             string timelineId)
         {
             string player = ReadFirstString(
-                Program.ReadJsonObject(Program.CampaignFile(campaignId, "campaign.json")),
+                CampaignFileService.ReadJsonObject(CampaignFileService.CampaignFile(campaignId, "campaign.json")),
                 "mainHeroStringId", "mainHeroId");
             Dictionary<string, object> parameters = new Dictionary<string, object>
             {
@@ -164,10 +164,10 @@ namespace ReignBetaServer
         {
             query = query ?? new Dictionary<string, string>();
             string campaignId = query.TryGetValue("campaignId", out string campaign)
-                ? campaign : Program.LatestCampaignId();
+                ? campaign : SettingsService.LatestCampaignId();
             string timelineId = query.TryGetValue("timelineId", out string timeline)
                 ? timeline : "main";
-            if (!Program.HasRealCampaignStorage(campaignId))
+            if (!CampaignFileService.HasRealCampaignStorage(campaignId))
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false, ["campaignId"] = campaignId,
@@ -217,7 +217,7 @@ namespace ReignBetaServer
             {
                 string campaignId = selection[0];
                 string timelineId = selection.Length > 1 ? selection[1] : "main";
-                if (!Program.HasRealCampaignStorage(campaignId))
+                if (!CampaignFileService.HasRealCampaignStorage(campaignId))
                     return new Dictionary<string, object>
                     {
                         ["ok"] = false, ["comparable"] = false,

@@ -65,8 +65,8 @@ namespace ReignBetaServer
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
-            List<string> heroIds = Program.MergeStringLists(
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
+            List<string> heroIds = DialogueService.MergeStringLists(
                 ReadStringList(payload, "heroIds"),
                 ReadStringList(payload, "participantHeroIds"))
                 .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -78,7 +78,7 @@ namespace ReignBetaServer
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "At least two heroIds are required." };
             Dictionary<string, Dictionary<string, object>> profiles = heroIds.ToDictionary(
                 id => id,
-                id => Program.ReadJsonObject(Program.CharacterFile(campaignId, id, "profile.json")),
+                id => CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, id, "profile.json")),
                 StringComparer.OrdinalIgnoreCase);
             List<Dictionary<string, object>> requests = SharedRelationshipHistoryPairRequests(
                 heroIds, new List<string>(), "", profiles);
@@ -92,7 +92,7 @@ namespace ReignBetaServer
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
             string heroId = ReadFirstString(payload, "heroStringId", "heroId");
             string otherId = ReadFirstString(payload, "otherHeroStringId", "otherHeroId");
             if (string.IsNullOrWhiteSpace(campaignId))
@@ -303,7 +303,7 @@ namespace ReignBetaServer
             Dictionary<string, object> lifecycle = RelationshipLifecycleView(connection, heroAId, heroBId);
             Dictionary<string, object> latestIncident = RelationshipsStore.SelectRelationshipIncidents2(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault()
                 ?? new Dictionary<string, object>();
-            var evidenceContext = Program.CloneDictionary(context);
+            var evidenceContext = CloneDictionary(context);
             evidenceContext["worldDay"] = ReadDouble(context, "worldDay", ReadDouble(chemistry, "last_day", 0d));
             evidenceContext["timelineId"] = DialogueService.ContinuityTimeline(context);
             evidenceContext["memoryAsOfAcceptedSequence"] = DialogueService.ReadAcceptedMemorySourceWatermark(connection);
@@ -350,7 +350,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> SharedRelationshipHistoryProfile(
             string campaignId, string heroId, Dictionary<string, object> supplied)
         {
-            Dictionary<string, object> stored = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json"));
+            Dictionary<string, object> stored = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "profile.json"));
             Dictionary<string, object> result = new Dictionary<string, object>(stored, StringComparer.OrdinalIgnoreCase);
             foreach (KeyValuePair<string, object> pair in supplied ?? new Dictionary<string, object>())
                 result[pair.Key] = pair.Value;
@@ -361,7 +361,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> SharedRelationshipHistoryCharacterBrief(
             string campaignId, string heroId, Dictionary<string, object> profile)
         {
-            Dictionary<string, object> traits = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"));
+            Dictionary<string, object> traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"));
             Dictionary<string, object> portrait = ReadDictionary(traits, "personalityPortrait")
                 ?? new Dictionary<string, object>();
             Dictionary<string, object> mbti = ResolveCharacterMbtiProfile(campaignId, heroId, profile, traits);
@@ -377,7 +377,7 @@ namespace ReignBetaServer
                 ["fatherId"] = ReadString(profile, "fatherId", ""),
                 ["motherId"] = ReadString(profile, "motherId", ""),
                 ["mbti"] = ReadString(mbti, "type", "XXXX"),
-                ["personality"] = Program.LimitText(FirstNonEmpty(
+                ["personality"] = DialogueService.LimitText(FirstNonEmpty(
                     ReadString(traits, "basePersonalitySummary", ""),
                     string.Join(" ", portrait.Values.Select(Convert.ToString))), 1200)
             };
@@ -406,7 +406,7 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> pending,
             Dictionary<string, Dictionary<string, object>> profiles)
         {
-            return Program.ChatWithLlm(BuildSharedRelationshipHistoryBatchRequest(pending, profiles, Program.LoadSettings()));
+            return LlmProviderService.ChatWithLlm(BuildSharedRelationshipHistoryBatchRequest(pending, profiles, SettingsService.LoadSettings()));
         }
 
         private static Dictionary<string, object> BuildSharedRelationshipHistoryBatchRequest(
@@ -485,7 +485,7 @@ namespace ReignBetaServer
                 ["requestType"] = "relationship",
                 ["campaignId"] = campaignId,
                 ["politicalAuthors"] = politicalAuthors,
-                ["model"] = Program.ModelForRequest(settings, "relationship"),
+                ["model"] = ActionPipelineService.ModelForRequest(settings, "relationship"),
                 ["correlationId"] = "relationship_history_" + Guid.NewGuid().ToString("N"),
                 ["maxTokens"] = Math.Min(5000, 900 + pending.Count * 360),
                 ["temperature"] = 0.45d,
@@ -703,9 +703,9 @@ namespace ReignBetaServer
                 ?? new Dictionary<string, object>();
             var active = new HashSet<string>(new[] { "activeHeroIds", "activeHeroStringIds", "activeParticipantIds" }
                 .SelectMany(key => ReadStringList(eventPayload, key)), StringComparer.OrdinalIgnoreCase);
-            var candidates = Program.MentionedResolverEntries(index, "heroes", "name", text, int.MaxValue)
+            var candidates = ActionPipelineService.MentionedResolverEntries(index, "heroes", "name", text, int.MaxValue)
                 .Where(row => ReadFirstString(row, "heroStringId", "heroId", "id").Length > 0)
-                .GroupBy(row => Program.NormalizeLookup(ReadString(row, "name", "")), StringComparer.OrdinalIgnoreCase);
+                .GroupBy(row => ActionPipelineService.NormalizeLookup(ReadString(row, "name", "")), StringComparer.OrdinalIgnoreCase);
             foreach (var namesakes in candidates)
             {
                 var ids = namesakes.Select(row => ReadFirstString(row, "heroStringId", "heroId", "id"))
@@ -732,7 +732,7 @@ namespace ReignBetaServer
             {
                 bool isA = ReadString(row, "hero_a_id", "").Equals(heroId, StringComparison.OrdinalIgnoreCase);
                 string otherId = ReadString(row, isA ? "hero_b_id" : "hero_a_id", "");
-                Dictionary<string, object> other = Program.ReadJsonObject(Program.CharacterFile(campaignId, otherId, "profile.json"));
+                Dictionary<string, object> other = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, otherId, "profile.json"));
                 row["otherHeroId"] = otherId;
                 row["otherHeroName"] = ReadString(other, "name", otherId);
                 row["thisCharacterInterpretation"] = ReadString(row,
@@ -805,13 +805,13 @@ namespace ReignBetaServer
                 ReadInt(result, "dailyWorkerCalls", -1) == 0
                 && ReadBool(result, "dailyWorkerUnaffected", false),
                 "Lazy relationship-history generation performs no daily-worker calls.");
-            string sourceRoot = Program.FindVerificationSourceRoot();
+            string sourceRoot = VerificationService.FindVerificationSourceRoot();
             string serverRoot = string.IsNullOrWhiteSpace(sourceRoot)
                 ? "" : Path.Combine(sourceRoot, "ReignServer");
             string workerSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "ContinuousRelationshipWorker.cs", "src"));
             string promptSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "RelationshipPrompts.cs", "src"));
             string promptCachingSource = VerificationSourceLocator.ReadServerSplitSourceText(serverRoot, "PromptCaching.cs", "src");
-            string programSource = VerificationSourceLocator.ReadServerTypeSourceText(serverRoot, "Program");
+            string programSource = VerificationSourceLocator.ReadServerProgramAreaSourceText(serverRoot);
             add("history_generation_is_dialogue_lazy_not_daily",
                 !string.IsNullOrWhiteSpace(workerSource)
                 && !workerSource.Contains("EnsureSharedRelationshipHistoriesForConversation", StringComparison.Ordinal)
@@ -825,10 +825,10 @@ namespace ReignBetaServer
             string campaignId = "_shared_relationship_history_test_" + Guid.NewGuid().ToString("N");
             try
             {
-                var politicalBatchBasis = Program.CloneDictionary(mixed);
+                var politicalBatchBasis = CloneDictionary(mixed);
                 politicalBatchBasis["campaignId"] = campaignId;
                 politicalBatchBasis["timelineId"] = "saved_branch";
-                var politicalPlayerPair = Program.CloneDictionary(politicalBatchBasis);
+                var politicalPlayerPair = CloneDictionary(politicalBatchBasis);
                 politicalPlayerPair["pairKey"] = "a|player";
                 politicalPlayerPair["heroBId"] = "player";
                 politicalPlayerPair["heroB"] = TestDict("name", "Player");
@@ -842,13 +842,13 @@ namespace ReignBetaServer
                     new List<Dictionary<string, object>> { politicalBatchBasis, politicalPlayerPair }, politicalProfiles, TestDict());
                 var politicalAuthors = ReadDictionaryList(politicalBatchRequest, "politicalAuthors");
                 add("batch_uses_actual_deduplicated_authors", politicalAuthors.Count == 3
-                    && politicalAuthors.Select(Program.CharacterIdFrom).OrderBy(x => x, StringComparer.Ordinal)
+                    && politicalAuthors.Select(CampaignFileService.CharacterIdFrom).OrderBy(x => x, StringComparer.Ordinal)
                         .SequenceEqual(new[] { "a", "b", "player" })
                     && !politicalBatchRequest.ContainsKey("heroStringId")
                     && !Json.Serialize(politicalBatchRequest).Contains("__relationship_history_batch__", StringComparison.Ordinal),
                     "A multi-pair history request names its actual participants; batch metadata is never a character.");
                 var politicalMessages = ReadDictionaryList(politicalBatchRequest, "messages");
-                var politicalOutbound = Program.BuildChatRequestBody(TestDict(), politicalBatchRequest, politicalMessages, "offline-capture");
+                var politicalOutbound = LlmProviderService.BuildChatRequestBody(TestDict(), politicalBatchRequest, politicalMessages, "offline-capture");
                 var politicalActual = ReadDictionaryList(politicalOutbound, "messages");
                 var politicalBlocks = politicalActual.Where(row => ReadString(row, "content", "")
                     .StartsWith("REQUIRED PRIVATE POLITICAL BELIEFS", StringComparison.Ordinal)).ToList();
@@ -860,12 +860,12 @@ namespace ReignBetaServer
                     && Enum.GetValues(typeof(Reign.Core.Contracts.Government.ReignGovernmentPlank))
                         .Cast<Reign.Core.Contracts.Government.ReignGovernmentPlank>()
                         .All(plank => politicalBlocks.All(row => ReadString(row, "content", "").Contains(plank + ":", StringComparison.Ordinal)))
-                    && ReadDictionaryList(Program.BuildChatRequestBody(TestDict(), politicalBatchRequest, politicalActual, "offline-capture"), "messages").Count == politicalActual.Count,
+                    && ReadDictionaryList(LlmProviderService.BuildChatRequestBody(TestDict(), politicalBatchRequest, politicalActual, "offline-capture"), "messages").Count == politicalActual.Count,
                     "The final provider envelope has one complete private foundation per actual NPC, preserves saved timelines, skips the human player and remains idempotent.");
                 add("private_batch_authors_do_not_mutate_shared_history_basis", CanonicalJson(politicalBatchBasis) == politicalBasisBefore
                     && !politicalBatchBasis.ContainsKey("politicalAuthors"),
                     "Private political author context is transient request metadata; it is not added to the persisted objective history basis.");
-                var missingPoliticalBasis = Program.CloneDictionary(politicalBatchBasis);
+                var missingPoliticalBasis = CloneDictionary(politicalBatchBasis);
                 missingPoliticalBasis["heroBId"] = "missing_named_character";
                 bool missingPoliticalProfileRefused = false;
                 try { BuildSharedRelationshipHistoryBatchRequest(new List<Dictionary<string, object>> { missingPoliticalBasis }, politicalProfiles, TestDict()); }
@@ -914,22 +914,22 @@ namespace ReignBetaServer
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaignId));
             }
             string fixtureCampaignId =
                 "_relationship_fixture_test_" + Guid.NewGuid().ToString("N");
             string armPath = WorldSimulationService.LiveTestArmPath();
             bool armExisted = File.Exists(armPath);
             Dictionary<string, object> originalArm =
-                armExisted ? Program.ReadJsonObject(armPath) : null;
+                armExisted ? CampaignFileService.ReadJsonObject(armPath) : null;
             try
             {
-                Program.WriteJsonObject(armPath, new Dictionary<string, object>
+                CampaignFileService.WriteJsonObject(armPath, new Dictionary<string, object>
                 {
                     ["expiresUtc"] = DateTimeOffset.UtcNow
                         .AddMinutes(5).ToString("o")
                 });
-                Program.WriteJsonObject(
+                CampaignFileService.WriteJsonObject(
                     DialogueService.ConversationReadinessStatePath(fixtureCampaignId),
                     new Dictionary<string, object>
                     {
@@ -993,9 +993,9 @@ namespace ReignBetaServer
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(fixtureCampaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(fixtureCampaignId));
                 if (armExisted)
-                    Program.WriteJsonObject(armPath,
+                    CampaignFileService.WriteJsonObject(armPath,
                         originalArm ?? new Dictionary<string, object>());
                 else
                     PersistenceService.TryDeleteFile(armPath);

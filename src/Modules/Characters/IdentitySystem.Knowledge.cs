@@ -23,7 +23,7 @@ namespace ReignBetaServer
             if (writes.Count == 0) return results;
             HashSet<string> present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (string id in ReadStringList(payload, "activeHeroIds")) present.Add(id);
-            foreach (Dictionary<string, object> attendee in ReadDictionaryList(payload, "attendees")) present.Add(Program.CharacterIdFrom(attendee));
+            foreach (Dictionary<string, object> attendee in ReadDictionaryList(payload, "attendees")) present.Add(CampaignFileService.CharacterIdFrom(attendee));
             present.Add(ReadFirstString(payload, "speakerHeroStringId", "heroStringId"));
             present.Add(ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId"));
             present.RemoveWhere(string.IsNullOrWhiteSpace);
@@ -61,7 +61,7 @@ namespace ReignBetaServer
                     ["kind"] = string.Equals(introducer, subject, StringComparison.OrdinalIgnoreCase) ? "self" : "third_party",
                     ["encounterId"] = encounterId,
                     ["worldDay"] = ReadDouble(payload, "worldDay", 0d),
-                    ["correlationId"] = Program.EnsureCorrelationId(payload)
+                    ["correlationId"] = OperationsService.EnsureCorrelationId(payload)
                 };
                 results.Add(IdentityIntroductionApi(request, connection));
             }
@@ -75,7 +75,7 @@ namespace ReignBetaServer
             Dictionary<string, object> existing = ReadStoredAcquaintance(connection, observerId, subjectId);
             string result = existing == null ? "created" : IdentityStateVerified(existing) ? "unchanged" : "upgraded";
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            List<string> aliases = existing == null ? new List<string>() : Program.TextListFromJson(ReadString(existing, "aliases_json", "[]"));
+            List<string> aliases = existing == null ? new List<string>() : DialogueService.TextListFromJson(ReadString(existing, "aliases_json", "[]"));
             string claimed = existing == null ? "" : ReadString(existing, "claimed_name", "");
             if (!string.IsNullOrWhiteSpace(claimed) && !aliases.Contains(claimed, StringComparer.OrdinalIgnoreCase)) aliases.Add(claimed);
             CharactersStore.UpsertAcquaintances2(connection, new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId, ["canonical"] = canonicalName, ["claimed"] = claimed, ["aliases"] = Json.Serialize(aliases), ["source"] = source ?? "", ["sourceEntity"] = sourceEntityId ?? "", ["day"] = worldDay, ["ts"] = ts });
@@ -95,7 +95,7 @@ namespace ReignBetaServer
                 }
                 return;
             }
-            List<string> aliases = existing == null ? new List<string>() : Program.TextListFromJson(ReadString(existing, "aliases_json", "[]"));
+            List<string> aliases = existing == null ? new List<string>() : DialogueService.TextListFromJson(ReadString(existing, "aliases_json", "[]"));
             string prior = existing == null ? "" : ReadString(existing, "claimed_name", "");
             if (!string.IsNullOrWhiteSpace(prior) && !aliases.Contains(prior, StringComparer.OrdinalIgnoreCase)) aliases.Add(prior);
             if (!aliases.Contains(claimedName, StringComparer.OrdinalIgnoreCase)) aliases.Add(claimedName);
@@ -331,7 +331,7 @@ namespace ReignBetaServer
                     diplomacy, "playerEnemyKingdoms");
             string subjectId = IdentityHeroId(subject);
             string observerId = IdentityHeroId(observer);
-            string encounterMode = Program.NormalizeLookup(
+            string encounterMode = ActionPipelineService.NormalizeLookup(
                 ReadString(context, "mode", ""));
             bool institutionalEncounter =
                 ReadBool(context, "officialAudience", false)
@@ -621,7 +621,7 @@ namespace ReignBetaServer
             if (ReadBool(hero, "isWanderer",
                     ReadInt(hero, "is_wanderer", 0) != 0))
                 roles.Add("wanderer");
-            string occupation = Program.NormalizeLookup(
+            string occupation = ActionPipelineService.NormalizeLookup(
                 ReadString(hero, "occupation", ""));
             if (roles.Count == 0)
             {
@@ -651,7 +651,7 @@ namespace ReignBetaServer
         private static string DeriveSceneIdentityLabel(Dictionary<string, object> context)
         {
             string supplied = ReadFirstString(context, "visibleLabel", "sceneLabel", "unknownLabel");
-            if (!string.IsNullOrWhiteSpace(supplied)) return Program.LimitText(supplied, 80);
+            if (!string.IsNullOrWhiteSpace(supplied)) return DialogueService.LimitText(supplied, 80);
             Dictionary<string, object> appearance = ReadDictionary(context, "appearance") ?? ReadDictionary(ReadDictionary(context, "subject"), "appearance") ?? new Dictionary<string, object>();
             string status = ReadString(appearance, "visibleStatusLabel", "").ToLowerInvariant();
             string mode = ReadString(context, "mode", "").ToLowerInvariant();
@@ -687,7 +687,7 @@ namespace ReignBetaServer
             }
 
             string latestNpcLine = candidateNpcLines.LastOrDefault() ?? "";
-            return Program.ContainsAny(latestNpcLine.ToLowerInvariant(),
+            return DialogueService.ContainsAny(latestNpcLine.ToLowerInvariant(),
                 "what is your name", "what's your name", "who are you", "what are you called",
                 "tell me your name", "give me your name", "state your name", "introduce yourself",
                 "not introduced yourself", "not yet introduced yourself", "not yet introduced themselves",

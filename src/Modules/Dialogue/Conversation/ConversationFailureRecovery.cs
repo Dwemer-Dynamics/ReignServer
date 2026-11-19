@@ -14,11 +14,11 @@ namespace ReignBetaServer
             Func<Dictionary<string, object>> respond)
         {
             string hero = FirstNonEmpty(ReadFirstString(payload, "heroStringId", "speakerHeroStringId", "heroId"),
-                Program.CharacterIdFrom(ReadDictionary(payload, "hero")));
+                CampaignFileService.CharacterIdFrom(ReadDictionary(payload, "hero")));
             string campaign = ReadString(payload, "campaignId", "default");
             string session = ReadFirstString(payload, "conversationSessionId", "sessionId");
             if (hero.Length == 0 || session.Length == 0) return respond();
-            string correlation = Program.EnsureCorrelationId(payload), retry = ReadString(payload, "retryOfCorrelationId", "");
+            string correlation = OperationsService.EnsureCorrelationId(payload), retry = ReadString(payload, "retryOfCorrelationId", "");
             if (retry.Length > 0 && retry != correlation)
                 return TestDict("ok", false, "errorCode", "retry_identity_mismatch", "error", "Retry must keep the original message identity.");
             string unit = AcceptedConversationEventId(campaign, hero, payload);
@@ -79,7 +79,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> ProjectConversationTurnForRecall(Dictionary<string, object> turn)
         {
-            var copy = Program.CloneDictionary(turn);
+            var copy = CloneDictionary(turn);
             string original = ReadString(turn, "text", ""), spoken = ConversationTurnTextForRecall(turn);
             copy["text"] = spoken;
             if (original != spoken)
@@ -111,7 +111,7 @@ namespace ReignBetaServer
         {
             if (!ReadBool(result, "ok", false))
             {
-                var unavailable = Program.CloneDictionary(result);
+                var unavailable = CloneDictionary(result);
                 if (ReadDictionary(unavailable, "conversationRecovery") == null)
                     unavailable["conversationRecovery"] = TestDict("status", "generation_unavailable",
                         "generationSucceeded", false, "canContinue", true, "canRetry", true,
@@ -121,10 +121,10 @@ namespace ReignBetaServer
             var parsed = TryParseJsonObject(ReadString(result, "content", ""));
             if (allowQuiet && IsIntentionalConversationSilence(parsed)) return result;
             string reply = ReadFirstString(parsed, "reply", "response", "text", "content");
-            string sanitized = Program.SanitizeVisibleReply(reply);
+            string sanitized = ConversationResponseService.SanitizeVisibleReply(reply);
             bool hidden = sanitized.StartsWith("[Bannerlord Reign:", StringComparison.Ordinal);
             if (HasRecallableConversationSpeech(reply) && !hidden && !string.IsNullOrWhiteSpace(sanitized)) return result;
-            var recovered = Program.CloneDictionary(result);
+            var recovered = CloneDictionary(result);
             recovered["ok"] = false;
             recovered["content"] = "";
             recovered["error"] = "The character's response could not be completed. You can continue the conversation or try again.";
@@ -171,8 +171,8 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                Program.LogOperational("conversation.unanswered_input_incomplete", TestDict("campaignId", campaign,
-                    "heroStringId", hero, "error", Program.LimitText(ex.Message, 500)));
+                OperationsService.LogOperational("conversation.unanswered_input_incomplete", TestDict("campaignId", campaign,
+                    "heroStringId", hero, "error", DialogueService.LimitText(ex.Message, 500)));
                 return TestDict("status", "player_input_unavailable", "coverageGap", "Player input could not be persisted.",
                     "npcResponseStored", false, "effectsConfirmed", false);
             }
@@ -183,17 +183,17 @@ namespace ReignBetaServer
             var parsed = ReadBool(result, "ok", false) ? TryParseJsonObject(ReadString(result, "content", "")) : null;
             if (parsed == null) return TestDict("shouldReply", false, "body", "", "error",
                 FirstNonEmpty(ReadString(result, "error", ""), "No valid letter draft was returned."));
-            parsed = Program.CloneDictionary(parsed);
+            parsed = CloneDictionary(parsed);
             string body = ReadFirstString(parsed, "body", "response", "letter");
             if (!ReadBool(parsed, "shouldReply", true) && string.IsNullOrWhiteSpace(body)) return parsed;
             string speech = ConversationSpeechForRecall(body);
             if (string.IsNullOrWhiteSpace(speech)
-                || Program.SanitizeVisibleReply(speech).StartsWith("[Bannerlord Reign:", StringComparison.Ordinal))
+                || ConversationResponseService.SanitizeVisibleReply(speech).StartsWith("[Bannerlord Reign:", StringComparison.Ordinal))
                 return TestDict("shouldReply", false, "body", "", "error", "No usable letter draft was returned.",
                     "conversationRecovery", TestDict("status", "letter_not_generated", "canContinue", true));
             if (body != speech || ReadBool(result, "visibleRepairFailure", false))
             {
-                var status = Program.CloneDictionary(ReadDictionary(parsed, "repairStatus") ?? TestDict());
+                var status = CloneDictionary(ReadDictionary(parsed, "repairStatus") ?? TestDict());
                 status["allChecksCleared"] = false;
                 status["stageCount"] = Math.Max(1, ReadInt(status, "stageCount", 0));
                 parsed["repairStatus"] = status;

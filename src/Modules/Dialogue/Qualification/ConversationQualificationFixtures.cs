@@ -11,7 +11,7 @@ namespace ReignBetaServer
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            if (!WorldSimulationService.IsLiveTestArmed(Program.ReadJsonObject(WorldSimulationService.LiveTestArmPath())))
+            if (!WorldSimulationService.IsLiveTestArmed(CampaignFileService.ReadJsonObject(WorldSimulationService.LiveTestArmPath())))
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false,
@@ -28,9 +28,9 @@ namespace ReignBetaServer
             }
 
             string campaignId = ReadString(
-                payload, "campaignId", Program.ResolveLogCampaignId(""));
+                payload, "campaignId", CampaignFileService.ResolveLogCampaignId(""));
             Dictionary<string, object> state =
-                Program.ReadJsonObject(ConversationReadinessStatePath(campaignId));
+                CampaignFileService.ReadJsonObject(ConversationReadinessStatePath(campaignId));
             string qualificationId = ReadString(state, "qualificationId", "");
             string requestedQualificationId =
                 ReadString(payload, "qualificationId", qualificationId);
@@ -123,7 +123,7 @@ namespace ReignBetaServer
                     state["updatedUtc"] = DateTimeOffset.UtcNow.ToString("o");
                     // Persist the recovery manifest before touching relationship
                     // state so an interrupted qualification can still restore it.
-                    Program.WriteJsonObject(
+                    CampaignFileService.WriteJsonObject(
                         ConversationReadinessStatePath(campaignId), state);
                 }
 
@@ -149,7 +149,7 @@ namespace ReignBetaServer
             }
 
             state["updatedUtc"] = DateTimeOffset.UtcNow.ToString("o");
-            Program.WriteJsonObject(ConversationReadinessStatePath(campaignId), state);
+            CampaignFileService.WriteJsonObject(ConversationReadinessStatePath(campaignId), state);
             return new Dictionary<string, object>
             {
                 ["ok"] = after != null,
@@ -182,7 +182,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            if (!WorldSimulationService.IsLiveTestArmed(Program.ReadJsonObject(WorldSimulationService.LiveTestArmPath())))
+            if (!WorldSimulationService.IsLiveTestArmed(CampaignFileService.ReadJsonObject(WorldSimulationService.LiveTestArmPath())))
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false,
@@ -198,9 +198,9 @@ namespace ReignBetaServer
                 };
 
             string campaignId = ReadString(
-                payload, "campaignId", Program.ResolveLogCampaignId(""));
+                payload, "campaignId", CampaignFileService.ResolveLogCampaignId(""));
             Dictionary<string, object> state =
-                Program.ReadJsonObject(
+                CampaignFileService.ReadJsonObject(
                     ConversationReadinessStatePath(campaignId));
             string qualificationId =
                 ReadString(state, "qualificationId", "");
@@ -253,7 +253,7 @@ namespace ReignBetaServer
                     fixtures;
                 state["updatedUtc"] =
                     DateTimeOffset.UtcNow.ToString("o");
-                Program.WriteJsonObject(
+                CampaignFileService.WriteJsonObject(
                     ConversationReadinessStatePath(campaignId), state);
                 return new Dictionary<string, object>
                 {
@@ -310,7 +310,7 @@ namespace ReignBetaServer
                 state["updatedUtc"] =
                     DateTimeOffset.UtcNow.ToString("o");
                 // Persist recovery metadata before creating the evidence row.
-                Program.WriteJsonObject(
+                CampaignFileService.WriteJsonObject(
                     ConversationReadinessStatePath(campaignId), state);
             }
 
@@ -429,13 +429,13 @@ namespace ReignBetaServer
                     }
                     catch (Exception ex)
                     {
-                        errors.Add(pairKey + ": " + Program.LimitText(ex.Message, 300));
+                        errors.Add(pairKey + ": " + DialogueService.LimitText(ex.Message, 300));
                     }
                 }
             }
             state["relationshipQualificationFixtures"] = fixtures;
             state["updatedUtc"] = DateTimeOffset.UtcNow.ToString("o");
-            Program.WriteJsonObject(ConversationReadinessStatePath(campaignId), state);
+            CampaignFileService.WriteJsonObject(ConversationReadinessStatePath(campaignId), state);
             return new Dictionary<string, object>
             {
                 ["ok"] = errors.Count == 0,
@@ -451,7 +451,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            if (!WorldSimulationService.IsLiveTestArmed(Program.ReadJsonObject(WorldSimulationService.LiveTestArmPath())))
+            if (!WorldSimulationService.IsLiveTestArmed(CampaignFileService.ReadJsonObject(WorldSimulationService.LiveTestArmPath())))
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false,
@@ -466,9 +466,9 @@ namespace ReignBetaServer
                 };
 
             string campaignId = ReadString(
-                payload, "campaignId", Program.ResolveLogCampaignId(""));
+                payload, "campaignId", CampaignFileService.ResolveLogCampaignId(""));
             Dictionary<string, object> state =
-                Program.ReadJsonObject(ConversationReadinessStatePath(campaignId));
+                CampaignFileService.ReadJsonObject(ConversationReadinessStatePath(campaignId));
             string qualificationId = ReadString(state, "qualificationId", "");
             if (state.Count == 0
                 || !qualificationId.Equals(
@@ -500,7 +500,7 @@ namespace ReignBetaServer
 
             string playerId = ReadFirstString(
                 payload, "playerHeroId", "subjectHeroId");
-            string playerName = Program.LimitText(
+            string playerName = DialogueService.LimitText(
                 ReadString(payload, "playerName", ""), 80);
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             List<string> targetIds = ReadStringList(payload, "targetHeroIds")
@@ -518,7 +518,7 @@ namespace ReignBetaServer
                         "playerHeroId, playerName, and targetHeroIds are required."
                 };
 
-            string correlationId = Program.EnsureCorrelationId(payload);
+            string correlationId = OperationsService.EnsureCorrelationId(payload);
             Dictionary<string, Dictionary<string, object>>
                 targetSnapshots =
                     ReadDictionaryList(payload, "targetSnapshots")
@@ -553,7 +553,7 @@ namespace ReignBetaServer
             if (!verifyIdentity)
             {
                 Dictionary<string, object> cached =
-                    Program.ReadJsonObject(profileCachePath);
+                    CampaignFileService.ReadJsonObject(profileCachePath);
                 List<Dictionary<string, object>> cachedTargets =
                     ReadDictionaryList(cached, "targets");
                 if (ReadString(cached, "cacheKey", "").Equals(
@@ -641,7 +641,7 @@ namespace ReignBetaServer
                         DateTimeOffset.UtcNow.ToString("o");
                     // Persist the recovery manifest before changing identity
                     // state. A profile-only scan never creates a fixture.
-                    Program.WriteJsonObject(
+                    CampaignFileService.WriteJsonObject(
                         ConversationReadinessStatePath(campaignId), state);
                     foreach (string targetId in targetIds)
                     {
@@ -665,12 +665,12 @@ namespace ReignBetaServer
             int materializedBaselineCount = 0;
             foreach (string targetId in targetIds)
             {
-                string traitsPath = Program.CharacterFile(
+                string traitsPath = CampaignFileService.CharacterFile(
                     campaignId, targetId, "traits.json");
-                Dictionary<string, object> profile = Program.ReadJsonObject(
-                    Program.CharacterFile(campaignId, targetId, "profile.json"));
+                Dictionary<string, object> profile = CampaignFileService.ReadJsonObject(
+                    CampaignFileService.CharacterFile(campaignId, targetId, "profile.json"));
                 Dictionary<string, object> traits =
-                    Program.ReadJsonObject(traitsPath);
+                    CampaignFileService.ReadJsonObject(traitsPath);
                 if ((profile.Count == 0 || traits.Count == 0)
                     && targetSnapshots.TryGetValue(
                         targetId,
@@ -689,14 +689,14 @@ namespace ReignBetaServer
                                 runtimeProfile,
                                 false,
                                 false);
-                            profile = Program.ReadJsonObject(
-                                Program.CharacterFile(
+                            profile = CampaignFileService.ReadJsonObject(
+                                CampaignFileService.CharacterFile(
                                     campaignId,
                                     targetId,
                                     "profile.json"));
                             if (profile.Count == 0)
                                 profile = runtimeProfile;
-                            traits = Program.ReadJsonObject(traitsPath);
+                            traits = CampaignFileService.ReadJsonObject(traitsPath);
                             if (traits.Count > 0)
                                 materializedBaselineCount++;
                         }
@@ -725,7 +725,7 @@ namespace ReignBetaServer
                                 profile,
                                 false,
                                 false);
-                            traits = Program.ReadJsonObject(traitsPath);
+                            traits = CampaignFileService.ReadJsonObject(traitsPath);
                         }
                         else
                         {
@@ -738,7 +738,7 @@ namespace ReignBetaServer
                         traits, profile, targetId))
                 {
                     if (verifyIdentity)
-                        Program.WriteJsonObject(traitsPath, traits);
+                        CampaignFileService.WriteJsonObject(traitsPath, traits);
                 }
                 Dictionary<string, object> percentages =
                     TraitPercentageSnapshot(traits);
@@ -821,7 +821,7 @@ namespace ReignBetaServer
                 .ToList();
             if (!verifyIdentity)
             {
-                Program.WriteJsonObject(
+                CampaignFileService.WriteJsonObject(
                     profileCachePath,
                     new Dictionary<string, object>
                     {
@@ -834,7 +834,7 @@ namespace ReignBetaServer
                         ["targets"] = rows
                     });
             }
-            Program.WriteAudit(
+            OperationsService.WriteAudit(
                 campaignId, correlationId, "server", "qualification",
                 "qualification.fixture.manipulation", playerId, "", "",
                 "completed", 0,
@@ -1007,13 +1007,13 @@ namespace ReignBetaServer
                     catch (Exception ex)
                     {
                         errors.Add(observer + "->" + subject + ": "
-                            + Program.LimitText(ex.Message, 300));
+                            + DialogueService.LimitText(ex.Message, 300));
                     }
                 }
             }
             state["manipulationIdentityFixtures"] = fixtures;
             state["updatedUtc"] = DateTimeOffset.UtcNow.ToString("o");
-            Program.WriteJsonObject(
+            CampaignFileService.WriteJsonObject(
                 ConversationReadinessStatePath(campaignId), state);
             return new Dictionary<string, object>
             {

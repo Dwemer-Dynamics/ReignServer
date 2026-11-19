@@ -40,7 +40,7 @@ namespace ReignBetaServer
                 if (new[] { "fear", "wound", "jealousy", "temptation", "secret" }.Contains(category)) changed["visibility"] = "private";
                 else if (!changed.ContainsKey("visibility")) changed["visibility"] = "personal";
                 if (original == null || ReadString(original, "title", "") != ReadString(changed, "title", ""))
-                    changed["meaningKey"] = Program.NormalizeLookup(ReadString(changed, "title", ""));
+                    changed["meaningKey"] = ActionPipelineService.NormalizeLookup(ReadString(changed, "title", ""));
                 changed["source"] = "character_editor";
                 changed.Remove("developmentId");
                 merged.Add(changed);
@@ -57,15 +57,15 @@ namespace ReignBetaServer
         {
             var incoming = ReadDictionary(documents, "narrative");
             if (incoming == null || incoming.Count == 0) return;
-            var basis = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "narrative.json"));
+            var basis = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "narrative.json"));
             var effective = ResolveEffectiveNarrative(new Dictionary<string, object> { ["narrative"] = basis,
-                ["dynamicCharacteristics"] = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "dynamic_characteristics.json")) });
+                ["dynamicCharacteristics"] = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "dynamic_characteristics.json")) });
             documents["narrative"] = MergeEditedNarrative(basis, effective, incoming);
         }
 
         private static void ReconcileEditedNarrative(string campaign, string hero)
         {
-            var basis = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "narrative.json"));
+            var basis = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "narrative.json"));
             if (!NarrativeDocumentReady(basis)) return;
             var items = ReadDictionaryList(basis, "items");
             using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
@@ -80,12 +80,12 @@ namespace ReignBetaServer
                 ProjectDynamicCharacteristicsFile(campaign, hero, connection);
             }
             var stack = new Dictionary<string, object> { ["narrative"] = basis,
-                ["dynamicCharacteristics"] = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "dynamic_characteristics.json")),
-                ["background"] = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "background.json")) };
+                ["dynamicCharacteristics"] = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "dynamic_characteristics.json")),
+                ["background"] = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "background.json")) };
             ApplyNarrativePromptProjection(stack);
             foreach (var part in new Dictionary<string, string> { ["background"] = "background", ["voice"] = "voice", ["motivations"] = "motivations",
                 ["saveQuirks"] = "save_quirks", ["hiddenHistory"] = "hidden_history", ["secrets"] = "secrets" })
-                Program.WriteJsonObject(Program.CharacterFile(campaign, hero, part.Value + ".json"), stack[part.Key]);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, hero, part.Value + ".json"), stack[part.Key]);
         }
     }
 }

@@ -693,7 +693,7 @@ FROM STDIN (FORMAT BINARY)"))
                 {
                     ["delta"] = delta, ["day"] = day,
                     ["kind"] = "consequence",
-                    ["context"] = Program.LimitText(reason ?? string.Empty, 240),
+                    ["context"] = DialogueService.LimitText(reason ?? string.Empty, 240),
                     ["ts"] = ts, ["pair"] = pairKey
                 });
             Dictionary<string, object> pair = updated.FirstOrDefault();

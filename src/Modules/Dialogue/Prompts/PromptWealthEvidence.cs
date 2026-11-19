@@ -21,7 +21,7 @@ namespace ReignBetaServer
                 facts.Remove("personalWealthTier");
                 if (facts.TryGetValue("gold", out object gold) && gold != null && ReadBool(facts, "economicCapacityKnown", true)
                     && ReadString(facts, "dataState", "") != "unknown")
-                    facts["personalWealthTier"] = Program.WealthTier(ReadInt(facts, "gold", 0));
+                    facts["personalWealthTier"] = DialogueService.WealthTier(ReadInt(facts, "gold", 0));
                 facts["partyInventoryState"] = "unknown_legacy_observation";
                 // Historical nonzero cargo remains a historical fact. An old zero
                 // cannot distinguish no party, observation failure or an empty roster.

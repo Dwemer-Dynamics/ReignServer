@@ -149,8 +149,8 @@ namespace ReignBetaServer
                 var native = TestDict("heroStringId", "local_notable", "name", "A local notable", "age", 35, "isChild", false,
                     "isAlive", true, "occupation", "Merchant", "isNotable", true, "politicalTimelineId", "original", "campaignId", campaign);
                 var traits = CharactersService.BuildTraitDocument(native); CharactersService.EnsureTraitPercentageData(traits, "local_notable");
-                Program.WriteJsonObject(Program.CharacterFile(campaign, "local_notable", "traits.json"), traits);
-                Program.WriteJsonObject(Program.CharacterFile(campaign, "local_notable", "profile.json"), native);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "local_notable", "traits.json"), traits);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "local_notable", "profile.json"), native);
                 var first = CharactersService.EnsurePoliticalProfile(campaign, "local_notable", native, traits);
                 native["appliedPoliticalProfile"] = TryParseJsonObject(JsonSerializer.Serialize(first));
                 var evidence = new GovernmentPoliticalWorldEvidence { Id = "government:actual_law", CampaignId = campaign,
@@ -169,7 +169,7 @@ namespace ReignBetaServer
                     && GovernmentPoliticalBeliefs.WorldEventChanges(evidence, "distant_stranger").Count == 0
                     && CharactersService.EnsurePoliticalProfile(campaign, "local_notable", native, traits).Revision == first.Revision,
                     "I reload an older applied snapshot. Future effects and another person's experience do not leak into my current beliefs.", null);
-                var forged = Program.CloneDictionary(native);
+                var forged = CloneDictionary(native);
                 var forgedProfile = JsonSerializer.Deserialize<GovernmentPoliticalProfile>(JsonSerializer.Serialize(first));
                 forgedProfile.Values[0].Stance = forgedProfile.Values[0].Stance == 100 ? 99 : 100;
                 forged["appliedPoliticalProfile"] = TryParseJsonObject(JsonSerializer.Serialize(forgedProfile));
@@ -177,7 +177,7 @@ namespace ReignBetaServer
                 try { CharactersService.EnsurePoliticalProfile(campaign, "local_notable", forged, traits); } catch (InvalidOperationException) { refused = true; }
                 add("government.participation_unissued_profile_refused", refused,
                     "An invented private profile cannot replace the character's issued political record.", null);
-                var fork = Program.CloneDictionary(native); fork["politicalTimelineId"] = "restored_branch";
+                var fork = CloneDictionary(native); fork["politicalTimelineId"] = "restored_branch";
                 var forked = CharactersService.EnsurePoliticalProfile(campaign, "local_notable", fork, traits);
                 add("government.participation_branch_keeps_applied_history", forked.TimelineId == "restored_branch"
                     && forked.Values.Zip(first.Values, (a, b) => a.Stance == b.Stance && a.Importance == b.Importance).All(x => x)
@@ -192,14 +192,14 @@ namespace ReignBetaServer
                 {
                     var request = TestDict("campaignId", campaign, "heroStringId", "local_notable", "hero", native, "requestType", route,
                         "politicalAuthors", new[] { native }, "messages", messages);
-                    var outbound = Program.BuildChatRequestBody(TestDict(), request, messages, "offline-capture");
+                    var outbound = LlmProviderService.BuildChatRequestBody(TestDict(), request, messages, "offline-capture");
                     var actual = ReadDictionaryList(outbound, "messages");
                     string joined = string.Join("\n", actual.Select(x => ReadString(x, "content", "")));
                     add("government.participation_final_provider_" + route, actual.Count == 3
                         && ReadString(actual[1], "content", "") == history
                         && Enum.GetValues(typeof(ReignGovernmentPlank)).Cast<ReignGovernmentPlank>().All(x => joined.Contains(x + ":"))
                         && joined.Contains("revision " + first.Revision + " — timeline original")
-                        && ReadDictionaryList(Program.BuildChatRequestBody(TestDict(), request, actual, "offline-capture"), "messages").Count == 3,
+                        && ReadDictionaryList(LlmProviderService.BuildChatRequestBody(TestDict(), request, actual, "offline-capture"), "messages").Count == 3,
                         "I use " + route + "; the outgoing provider request retains all 16 beliefs and all earlier conversation, with one private block.", null);
                 }
                 var other = TestDict("heroStringId", "companion", "campaignId", campaign, "politicalTimelineId", "original",

@@ -19,7 +19,7 @@ namespace ReignBetaServer
             string courtManifestPath = ProfileArg(args, "--court-manifest", "");
             string naval = ProfileArg(args, "--naval-data", Path.GetFullPath(Path.Combine(sandbox, "..", "..", "NavalDLC", "ModuleData")));
             string output = ProfileArg(args, "--output", CharacterProfileCatalogPath);
-            if (ReadString(Program.ReadJsonObject(output), "packVersion", "") == NarrativePack)
+            if (ReadString(CampaignFileService.ReadJsonObject(output), "packVersion", "") == NarrativePack)
                 throw new InvalidOperationException("The legacy foundation generator cannot overwrite a complete narrative catalog. Generate foundations to a separate path and use the guarded narrative authoring workflow.");
             if (!Directory.Exists(sandbox)) throw new DirectoryNotFoundException("Sandbox ModuleData was not found: " + sandbox);
             if (!Directory.Exists(reign)) throw new DirectoryNotFoundException("Reign ModuleData was not found: " + reign);
@@ -47,7 +47,7 @@ namespace ReignBetaServer
                     .Where(node => !existingClanIds.Contains((string)node.Attribute("id"))).Select(node => new XElement(node)));
             }
             XDocument courtClans = XDocument.Load(Path.Combine(reign, "reign_court_clans.xml"), LoadOptions.PreserveWhitespace);
-            Dictionary<string, object> courtManifest = Program.ReadJsonObject(courtManifestPath);
+            Dictionary<string, object> courtManifest = CampaignFileService.ReadJsonObject(courtManifestPath);
             Dictionary<string, Dictionary<string, object>> courtRecords = ReadDictionaryList(courtManifest, "records").ToDictionary(x => ReadString(x, "id", ""), x => x, StringComparer.OrdinalIgnoreCase);
             Dictionary<string, XElement> skillSets = skills.Descendants("SkillSet").Where(x => x.Attribute("id") != null).ToDictionary(x => (string)x.Attribute("id"), x => x, StringComparer.OrdinalIgnoreCase);
             string coreSkillsPath = Path.GetFullPath(Path.Combine(sandbox, "..", "..", "SandBoxCore", "ModuleData", "sandboxcore_skill_sets.xml"));
@@ -142,7 +142,7 @@ namespace ReignBetaServer
             foreach (XElement trait in npc.Descendants("Trait"))
             {
                 string key = ((string)trait.Attribute("id") ?? "").ToLowerInvariant();
-                if (nativeTraits.ContainsKey(key)) nativeTraits[key] = Program.ClampTrait(ParseInt((string)trait.Attribute("value")));
+                if (nativeTraits.ContainsKey(key)) nativeTraits[key] = CharactersService.ClampTrait(ParseInt((string)trait.Attribute("value")));
             }
             string templateId = RemoveObjectPrefix((string)npc.Attribute("skill_template"));
             Dictionary<string, object> nativeSkills = ResolveCatalogNativeSkills(npc, skillSets);
@@ -230,7 +230,7 @@ namespace ReignBetaServer
             traits.Remove("assignmentSources");
             traits.Remove("assignmentProtocol");
             Dictionary<string, object> foundation = ReadDictionary(traits, "foundationTraits") ?? new Dictionary<string, object>();
-            string culture = Program.HumanizeKey(ReadString(facts, "cultureId", "Calradian"));
+            string culture = DialogueService.HumanizeKey(ReadString(facts, "cultureId", "Calradian"));
             string role = ReadString(facts, "roleLabel", "noble");
             string home = ReadString(facts, "homeSettlementName", "their clan's holdings");
             string house = ReadString(facts, "houseName", "their clan");
@@ -248,11 +248,11 @@ namespace ReignBetaServer
             Dictionary<string, object> background = new Dictionary<string, object>
             {
                 ["version"] = 2,
-                ["summary"] = !string.IsNullOrWhiteSpace(nativeText) ? summary : Program.LimitText(summary, 1400),
+                ["summary"] = !string.IsNullOrWhiteSpace(nativeText) ? summary : DialogueService.LimitText(summary, 1400),
                 ["centralWound"] = CatalogCentralWound(facts, foundation),
                 ["publicReputation"] = CatalogPublicReputation(foundation),
                 ["canonBuiltFrom"] = CatalogEvidenceList(facts),
-                ["encyclopediaText"] = !string.IsNullOrWhiteSpace(nativeText) ? nativeText : Program.LimitText(publicText, 900),
+                ["encyclopediaText"] = !string.IsNullOrWhiteSpace(nativeText) ? nativeText : DialogueService.LimitText(publicText, 900),
                 ["nativeEncyclopediaText"] = nativeText,
                 ["nativeTextPreserved"] = !string.IsNullOrWhiteSpace(nativeText)
             };
@@ -299,8 +299,8 @@ namespace ReignBetaServer
             Action<string, int, string> adjust = (key, delta, reason) =>
             {
                 if (!foundation.ContainsKey(key) || NativeLockedCoreTraits.Contains(key)) return;
-                int before = Program.TraitInt(foundation, key);
-                int after = Program.ClampTrait(before + delta);
+                int before = CharactersService.TraitInt(foundation, key);
+                int after = CharactersService.ClampTrait(before + delta);
                 if (after == before) return;
                 foundation[key] = after;
                 evidence.Add(new Dictionary<string, object> { ["trait"] = key, ["prior"] = before, ["value"] = after, ["evidence"] = reason });
@@ -322,7 +322,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> BuildCatalogVoice(Dictionary<string, object> facts, Dictionary<string, object> traits)
         {
             string nativeVoice = ReadString(facts, "voiceId", "earnest");
-            int tact = Program.TraitInt(traits, "tact"), assertiveness = Program.TraitInt(traits, "assertiveness"), stability = Program.TraitInt(traits, "emotionalStability"), pride = Program.TraitInt(traits, "pride");
+            int tact = CharactersService.TraitInt(traits, "tact"), assertiveness = CharactersService.TraitInt(traits, "assertiveness"), stability = CharactersService.TraitInt(traits, "emotionalStability"), pride = CharactersService.TraitInt(traits, "pride");
             string speech = nativeVoice == "curt" ? "Uses clipped, economical statements" : nativeVoice == "softspoken" ? "Speaks quietly and makes listeners lean in" : nativeVoice == "ironic" ? "Uses dry implication and carefully placed irony" : "Speaks earnestly and prefers clear declarations";
             speech += tact >= 1 ? ", cushioning dangerous points with courtly phrasing." : tact <= -1 ? ", often letting blunt truth land without protection." : ", balancing directness with the needs of the room.";
             return new Dictionary<string, object>
@@ -331,13 +331,13 @@ namespace ReignBetaServer
                 ["nativeVoice"] = nativeVoice,
                 ["speechStyle"] = speech,
                 ["socialMask"] = stability >= 1 ? "Maintains a controlled public composure." : pride >= 1 ? "Projects dignity even when composure is strained." : "Adapts their public manner to the immediate balance of power.",
-                ["tells"] = new List<object> { assertiveness >= 1 ? "Takes possession of pauses before answering." : "Waits to see who will press first.", Program.TraitInt(traits, "irritability") >= 1 ? "Impatience appears in shortened replies." : "Frustration is usually kept behind small changes in posture." }
+                ["tells"] = new List<object> { assertiveness >= 1 ? "Takes possession of pauses before answering." : "Waits to see who will press first.", CharactersService.TraitInt(traits, "irritability") >= 1 ? "Impatience appears in shortened replies." : "Frustration is usually kept behind small changes in posture." }
             };
         }
 
         private static Dictionary<string, object> BuildCatalogMotivations(Dictionary<string, object> facts, Dictionary<string, object> traits)
         {
-            List<string> motives = new[] { "wealthMotivation", "powerMotivation", "familyMotivation", "fameMotivation", "knowledgeMotivation", "religionMotivation", "revengeMotivation", "dutyMotivation", "survivalMotivation", "legacyMotivation" }.OrderByDescending(x => Program.TraitInt(traits, x)).ThenBy(x => StableIndex(ReadString(facts, "heroStringId", "") + x, 1000)).Take(3).ToList();
+            List<string> motives = new[] { "wealthMotivation", "powerMotivation", "familyMotivation", "fameMotivation", "knowledgeMotivation", "religionMotivation", "revengeMotivation", "dutyMotivation", "survivalMotivation", "legacyMotivation" }.OrderByDescending(x => CharactersService.TraitInt(traits, x)).ThenBy(x => StableIndex(ReadString(facts, "heroStringId", "") + x, 1000)).Take(3).ToList();
             Dictionary<string, string> dreams = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 ["wealthMotivation"] = "Build enough wealth that neither creditors nor patrons can dictate the household's choices.", ["powerMotivation"] = "Gain durable influence over the decisions that shape their clan and realm.", ["familyMotivation"] = "Secure the safety and advancement of the people they recognize as family.", ["fameMotivation"] = "Earn a reputation that cannot be dismissed as inherited station.", ["knowledgeMotivation"] = "Understand the people, records, and systems others use as leverage.", ["religionMotivation"] = "Live in a way that gives sacred order practical force.", ["revengeMotivation"] = "Settle a grievance that still defines what justice means to them.", ["dutyMotivation"] = "Fulfill the obligations of station without becoming another noble remembered for neglect.", ["survivalMotivation"] = "Create enough security to survive the next reversal of war or politics.", ["legacyMotivation"] = "Leave heirs, works, or a reputation that outlasts immediate victories."
@@ -356,7 +356,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> BuildCatalogHookPools(Dictionary<string, object> facts, Dictionary<string, object> traits, Dictionary<string, string> names)
         {
             string role = ReadString(facts, "roleLabel", "noble"), home = ReadString(facts, "homeSettlementName", "the household's holding"), house = ReadString(facts, "houseName", "the clan"), spouse = ResolveCatalogName(names, ReadString(facts, "spouseId", ""), "their spouse"), father = ResolveCatalogName(names, ReadString(facts, "fatherId", ""), "their father"), mother = ResolveCatalogName(names, ReadString(facts, "motherId", ""), "their mother");
-            int basePressure = 20 + Math.Max(0, Program.TraitInt(traits, "ambition")) * 12 + Math.Max(0, Program.TraitInt(traits, "pride")) * 8;
+            int basePressure = 20 + Math.Max(0, CharactersService.TraitInt(traits, "ambition")) * 12 + Math.Max(0, CharactersService.TraitInt(traits, "pride")) * 8;
             return new Dictionary<string, object>
             {
                 ["secretInterests"] = new List<string> { "Private correspondence with someone outside the expected social circle.", "Collecting accounts of old disputes that powerful people would rather forget.", "Testing whether a commercial venture could create independence from clan money.", "A fascination with a rival culture's customs and political methods." },
@@ -403,8 +403,8 @@ namespace ReignBetaServer
             if (role == "child_1") return "They fear being prepared for responsibility yet still judged unworthy when succession matters.";
             if (role.StartsWith("child_", StringComparison.Ordinal)) return "They have learned that family affection and family usefulness are not always the same thing.";
             if (role == "father" || role == "mother") return "They carry the knowledge that protecting a household can require choices their children may never forgive.";
-            if (Program.TraitInt(traits, "pride") >= 1) return "Humiliation and public dismissal cut more deeply than they admit.";
-            if (Program.TraitInt(traits, "socialTrust") <= -1) return "Past disappointments taught them that dependence gives other people leverage.";
+            if (CharactersService.TraitInt(traits, "pride") >= 1) return "Humiliation and public dismissal cut more deeply than they admit.";
+            if (CharactersService.TraitInt(traits, "socialTrust") <= -1) return "Past disappointments taught them that dependence gives other people leverage.";
             return "They fear becoming useful to everyone while remaining truly known by no one.";
         }
 
@@ -426,32 +426,32 @@ namespace ReignBetaServer
                 "Their strongest choices emerge when personal attachment collides with the security of their station.",
                 "They prefer controlled bargains, but accumulated humiliation can make a dangerous risk feel necessary."
             };
-            return tensions[StableIndex(ReadString(facts, "heroStringId", "") + "|distinctive_tension|" + Program.TraitInt(traits, "pride"), tensions.Length)];
+            return tensions[StableIndex(ReadString(facts, "heroStringId", "") + "|distinctive_tension|" + CharactersService.TraitInt(traits, "pride"), tensions.Length)];
         }
 
         private static string CatalogPublicReputation(Dictionary<string, object> traits)
         {
-            if (Program.TraitInt(traits, "tact") >= 1 && Program.TraitInt(traits, "confidence") >= 1) return "Considered politically composed and difficult to corner in public.";
-            if (Program.TraitInt(traits, "aggression") >= 1) return "Known for answering resistance directly and sometimes too forcefully.";
-            if (Program.TraitInt(traits, "compassion") >= 1) return "Regarded as more attentive to dependents and casualties than many nobles.";
-            if (Program.TraitInt(traits, "socialTrust") <= -1) return "Regarded as guarded, observant, and slow to accept assurances.";
+            if (CharactersService.TraitInt(traits, "tact") >= 1 && CharactersService.TraitInt(traits, "confidence") >= 1) return "Considered politically composed and difficult to corner in public.";
+            if (CharactersService.TraitInt(traits, "aggression") >= 1) return "Known for answering resistance directly and sometimes too forcefully.";
+            if (CharactersService.TraitInt(traits, "compassion") >= 1) return "Regarded as more attentive to dependents and casualties than many nobles.";
+            if (CharactersService.TraitInt(traits, "socialTrust") <= -1) return "Regarded as guarded, observant, and slow to accept assurances.";
             return "Seen as a capable noble whose deeper priorities are not yet obvious.";
         }
 
         private static string CatalogFear(Dictionary<string, object> traits)
         {
-            if (Program.TraitInt(traits, "fearfulness") >= 1) return "A sudden reversal that leaves them exposed before preparations are complete.";
-            if (Program.TraitInt(traits, "shame") >= 1) return "Public disgrace that permanently changes how their family sees them.";
-            if (Program.TraitInt(traits, "familyMotivation") >= 1) return "Watching family loyalty fracture under pressure they failed to anticipate.";
+            if (CharactersService.TraitInt(traits, "fearfulness") >= 1) return "A sudden reversal that leaves them exposed before preparations are complete.";
+            if (CharactersService.TraitInt(traits, "shame") >= 1) return "Public disgrace that permanently changes how their family sees them.";
+            if (CharactersService.TraitInt(traits, "familyMotivation") >= 1) return "Watching family loyalty fracture under pressure they failed to anticipate.";
             return "Losing control of a consequential choice to someone who does not understand its cost.";
         }
 
         private static List<object> CatalogLimits(Dictionary<string, object> traits)
         {
             List<object> limits = new List<object>();
-            if (Program.TraitInt(traits, "honesty") >= 1) limits.Add("Will not knowingly build a lasting agreement on a direct lie.");
-            if (Program.TraitInt(traits, "compassion") >= 1 || Program.TraitInt(traits, "mercy") >= 1) limits.Add("Will not casually punish helpless people for another person's offense.");
-            if (Program.TraitInt(traits, "loyalty") >= 1) limits.Add("Will not abandon a chosen ally without warning when alternatives remain.");
+            if (CharactersService.TraitInt(traits, "honesty") >= 1) limits.Add("Will not knowingly build a lasting agreement on a direct lie.");
+            if (CharactersService.TraitInt(traits, "compassion") >= 1 || CharactersService.TraitInt(traits, "mercy") >= 1) limits.Add("Will not casually punish helpless people for another person's offense.");
+            if (CharactersService.TraitInt(traits, "loyalty") >= 1) limits.Add("Will not abandon a chosen ally without warning when alternatives remain.");
             if (limits.Count == 0) limits.Add("Will not accept a bargain that leaves them permanently powerless.");
             return limits;
         }

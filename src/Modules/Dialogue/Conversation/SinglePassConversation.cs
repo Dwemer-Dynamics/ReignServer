@@ -21,7 +21,7 @@ namespace ReignBetaServer
             Func<Dictionary<string, object>, Dictionary<string, object>> responder = null)
         {
             BeginSinglePassConversation(payload);
-            return PrepareSinglePassConversationResponse((responder ?? Program.ChatWithLlm)(request), mode, allowQuiet);
+            return PrepareSinglePassConversationResponse((responder ?? LlmProviderService.ChatWithLlm)(request), mode, allowQuiet);
         }
 
         // Decode the one authored answer. No judge, rewrite, missing-metadata
@@ -30,13 +30,13 @@ namespace ReignBetaServer
             string mode, bool allowQuiet = false)
         {
             if (!ReadBool(result, "ok", false)) return EnsureConversationDelivery(result, allowQuiet);
-            var response = Program.CloneDictionary(result);
+            var response = CloneDictionary(result);
             string content = ReadString(response, "content", "");
             var parsed = TryParseStrictJsonObject(content);
             bool speechOnly = false;
             if (parsed == null)
             {
-                var envelope = Program.ReadConversationResponseEnvelope(content);
+                var envelope = ConversationResponseService.ReadConversationResponseEnvelope(content);
                 // Only a complete outer reply string is eligible. Never search
                 // nested/private fields, broken strings or duplicate documents.
                 if (envelope.Truncated && envelope.Error.Length == 0 && envelope.ReplyStart >= 0)
@@ -61,10 +61,10 @@ namespace ReignBetaServer
             }
             parsed[letter ? "body" : "reply"] = visible;
             var speechView = parsed;
-            if (letter) { speechView = Program.CloneDictionary(parsed); speechView["reply"] = visible; }
-            response = Program.RejectProviderReservedSpeech(response, speechView);
+            if (letter) { speechView = CloneDictionary(parsed); speechView["reply"] = visible; }
+            response = ConversationResponseService.RejectProviderReservedSpeech(response, speechView);
             if (!ReadBool(response, "ok", false)) return EnsureConversationDelivery(response, allowQuiet);
-            parsed = Program.CompleteConversationStructuredResponse(parsed, Program.NormalizeLookup(mode).Replace(' ', '_'), out var fields);
+            parsed = ConversationResponseService.CompleteConversationStructuredResponse(parsed, ActionPipelineService.NormalizeLookup(mode).Replace(' ', '_'), out var fields);
             // Missing consent stays missing. The independent action protocol checks
             // participants, proposal identity, terms, resources and replay receipts.
             response["content"] = Json.Serialize(parsed);

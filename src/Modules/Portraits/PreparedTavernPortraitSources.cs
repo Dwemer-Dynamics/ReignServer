@@ -32,8 +32,8 @@ namespace ReignBetaServer
             if (!Program.HasArg(args, "--import-tavern-native-sources")) return false;
             try
             {
-                string manifest = Program.ArgValue(args, "--import-tavern-native-sources", "");
-                string campaign = Program.ArgValue(args, "--pack-campaign", "");
+                string manifest = ArgValue(args, "--import-tavern-native-sources", "");
+                string campaign = ArgValue(args, "--pack-campaign", "");
                 if (manifest == "help" || manifest == "--help")
                 {
                     Console.WriteLine("--import-tavern-native-sources <absolute native-source-manifest.json> --pack-campaign tavern_pack_<task-id>");
@@ -41,7 +41,7 @@ namespace ReignBetaServer
                     return true;
                 }
 #if !REIGN_EXCLUDE_VERIFICATION
-                string catalog = Path.Combine(Program.FindVerificationSourceRoot(), "ReignBeta", "ModuleData", "reign_tavern_cast.json");
+                string catalog = Path.Combine(VerificationService.FindVerificationSourceRoot(), "ReignBeta", "ModuleData", "reign_tavern_cast.json");
 #else
                 string catalog = null;
                 throw new InvalidOperationException("--import-tavern-native-sources needs the source checkout locator, which this build excludes.");

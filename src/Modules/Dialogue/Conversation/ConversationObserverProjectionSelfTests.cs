@@ -142,17 +142,17 @@ namespace ReignBetaServer
                         "npc", "npc_a", "Arin", reply, "party_chat", 10d, 20L, "town", participants, payload);
                 var writes = new List<Dictionary<string, object>> { TestDict("memoryId", "mixed_fixture", "text", "The public flower exchange included " + secret + ".",
                     "ownerId", "npc_b", "known_by", participants, "visibility", "public") };
-                Program.StoreTurnMemoryLayers(campaign, "observer_event", "party_chat_turn", "npc_a", "player", "town", "Here is the flower.", reply,
+                DialogueService.StoreTurnMemoryLayers(campaign, "observer_event", "party_chat_turn", "npc_a", "player", "town", "Here is the flower.", reply,
                     writes, new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
                     new List<Dictionary<string, object>>(), "conversation:observer_scene", 20L, participants, true, payload);
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var owner = Program.BuildKnowledgeAccessContext("npc_a", "player", "town", payload);
-                    var bystander = Program.BuildKnowledgeAccessContext("npc_b", "player", "town", payload);
-                    var ownerRows = Program.QueryKnownRows(connection, "memories", owner, "status='active'", 50);
-                    var publicRows = Program.QueryKnownRows(connection, "memories", bystander, "status='active'", 50);
-                    var ownerAuditRows = Program.QueryKnownRows(connection, "memories", owner, "status='audit_only'", 50);
-                    var bystanderAuditRows = Program.QueryKnownRows(connection, "memories", bystander, "status='audit_only'", 50);
+                    var owner = DialogueService.BuildKnowledgeAccessContext("npc_a", "player", "town", payload);
+                    var bystander = DialogueService.BuildKnowledgeAccessContext("npc_b", "player", "town", payload);
+                    var ownerRows = DialogueService.QueryKnownRows(connection, "memories", owner, "status='active'", 50);
+                    var publicRows = DialogueService.QueryKnownRows(connection, "memories", bystander, "status='active'", 50);
+                    var ownerAuditRows = DialogueService.QueryKnownRows(connection, "memories", owner, "status='audit_only'", 50);
+                    var bystanderAuditRows = DialogueService.QueryKnownRows(connection, "memories", bystander, "status='audit_only'", 50);
                     Check("mixed_write_owned_only_by_actual_speaker", ownerAuditRows.Any(r =>
                             ReadString(r, "memory_id", "") == "mixed_fixture" && ReadString(r, "owner_id", "") == "npc_a"
                             && ReadString(TryParseJsonObject(ReadString(r, "payload_json", "{}")), "sourceValidation", "") == "incomplete"
@@ -162,8 +162,8 @@ namespace ReignBetaServer
                         && bystanderAuditRows.All(r => ReadString(r, "memory_id", "") != "mixed_fixture"));
                     Check("public_observation_survives_as_separate_supported_record", publicRows.Any(r => ReadString(r, "summary", "").Contains("turns the stem"))
                         && publicRows.All(r => !ReadString(r, "summary", "").Contains(secret)), publicRows.Select(r => ReadString(r, "summary", "")).ToList());
-                    var earlier = Program.BuildKnowledgeAccessContext("npc_b", "player", "town", new Dictionary<string, object>(payload) { ["worldDay"] = 9d });
-                    Check("accepted_world_day_prevents_future_memory_leak", Program.QueryKnownRows(connection, "memories", earlier, "status='active'", 50).Count == 0);
+                    var earlier = DialogueService.BuildKnowledgeAccessContext("npc_b", "player", "town", new Dictionary<string, object>(payload) { ["worldDay"] = 9d });
+                    Check("accepted_world_day_prevents_future_memory_leak", DialogueService.QueryKnownRows(connection, "memories", earlier, "status='active'", 50).Count == 0);
                     var original = DialogueSelfTestStore.SelectConversationTurns13(connection).Single();
                     Check("historical_source_stays_complete_but_reader_is_scoped", ReadString(original, "text", "") == reply
                         && RenderExactHistoryTurn(original, owner).Contains(secret) && !RenderExactHistoryTurn(original, bystander).Contains(secret));
@@ -187,7 +187,7 @@ namespace ReignBetaServer
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     var source = DialogueSelfTestStore.SelectConversationTurns14(connection).Single();
-                    var knowledge = Program.BuildKnowledgeAccessContext("npc_b", "player", "town", payload);
+                    var knowledge = DialogueService.BuildKnowledgeAccessContext("npc_b", "player", "town", payload);
                     Check("accepted_private_original_is_retained_but_not_npc_evidence", ReadString(source, "text", "") == privatePlayerInput
                         && !PrecisionTurnVisible(source, "npc_b", knowledge)
                         && DialogueSelfTestStore.SelectConversationTurnFts(connection, TestDict("id", ReadString(source, "turn_id", ""))).Count == 0);
@@ -223,7 +223,7 @@ namespace ReignBetaServer
                 Check("actual_individual_provider_message_keeps_complete_player_input", Json.Serialize(directEnvelope.Messages).Contains("secret meeting")
                     && Json.Serialize(directEnvelope.Messages).Contains("Good evening."));
             }
-            catch (Exception ex) { Check("suite_exception", false, Program.LimitText(ex.ToString(), 2200)); }
+            catch (Exception ex) { Check("suite_exception", false, DialogueService.LimitText(ex.ToString(), 2200)); }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             return results;
         }

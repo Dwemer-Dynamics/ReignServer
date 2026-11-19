@@ -79,7 +79,7 @@ namespace ReignBetaServer
             bool missingTokenRejected = false;
             try { BuildPortraitPhysiqueEvidence(native(.5, .5), "No body tokens", false); } catch (InvalidDataException) { missingTokenRejected = true; }
             check("missing_template_tokens_rejected", missingTokenRejected);
-            check("catalog", Program.PromptFileNames.Contains(PortraitBodyPromptFile) && Program.DefaultPromptTemplates()[PortraitBodyPromptFile] == PortraitBodyPromptDefault);
+            check("catalog", Program.PromptFileNames.Contains(PortraitBodyPromptFile) && PromptService.DefaultPromptTemplates()[PortraitBodyPromptFile] == PortraitBodyPromptDefault);
             string fixture = Path.Combine(Path.GetTempPath(), "reign-shared-rebuild-" + Guid.NewGuid().ToString("N"));
             try {
                 Directory.CreateDirectory(fixture);

@@ -71,7 +71,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> ReconcileConversationPlanForPrompt(Dictionary<string, object> state,
             string playerText, Dictionary<string, object> payload)
         {
-            var result = Program.CloneDictionary(state ?? TestDict());
+            var result = CloneDictionary(state ?? TestDict());
             string correction = FirstNonEmpty(ReadString(payload, "currentConversationCorrection", ""), IsConversationCorrection(playerText) ? playerText : "");
             string plan = ReadString(result, "currentPlan", "");
             if (correction.Length > 0 && plan.Length > 0
@@ -130,7 +130,7 @@ namespace ReignBetaServer
             var updates = ReadDictionary(parsed, "stateUpdates");
             string plan = ReadString(updates, "currentPlan", "");
             if (contested.Length > 0 && (updates == null || !updates.ContainsKey("currentPlan")
-                || Program.NormalizeLookup(plan) == Program.NormalizeLookup(contested)))
+                || ActionPipelineService.NormalizeLookup(plan) == ActionPipelineService.NormalizeLookup(contested)))
                 Issue(contested, "unreconciled_currentPlan");
             if (DisputesConversationRelevance(correction))
             {

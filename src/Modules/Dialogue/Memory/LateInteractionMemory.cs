@@ -108,10 +108,10 @@ namespace ReignBetaServer
             if (!string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value))
             {
                 if (LateInteractionReplay.Value == null) throw new InvalidOperationException("An isolated index requires a replay adapter.");
-                var replayRequest = Program.CloneDictionary(request); replayRequest["operation"] = path;
+                var replayRequest = CloneDictionary(request); replayRequest["operation"] = path;
                 return LateInteractionReplay.Value(replayRequest);
             }
-            return TryParseJsonObject(Program.PostJsonToUrl(endpoint + path, Json.Serialize(request), timeout));
+            return TryParseJsonObject(DialogueService.PostJsonToUrl(endpoint + path, Json.Serialize(request), timeout));
         }
 
         private static void DeferLateInteractionIndex(string campaign, LateInteractionIndexRecovery recovery,
@@ -126,7 +126,7 @@ namespace ReignBetaServer
             try
             {
                 if (LateInteractionReplayAudit.Value != null) LateInteractionReplayAudit.Value.Add(audit);
-                else Program.LogOperational("memory.late_interaction_index_deferred", audit);
+                else OperationsService.LogOperational("memory.late_interaction_index_deferred", audit);
             }
             catch { }
         }
@@ -172,7 +172,7 @@ namespace ReignBetaServer
             else
             {
                 // Optional search diagnostics must never reject usable dialogue.
-                try { Program.LogOperational("memory.late_interaction_search", audit); }
+                try { OperationsService.LogOperational("memory.late_interaction_search", audit); }
                 catch { }
             }
         }
@@ -223,7 +223,7 @@ namespace ReignBetaServer
             var eligible = ReadDictionaryList(request,"eligible");
             var exported = views.Where(v=>eligible.Any(e=>new[]{"sourceId","sourceHash","textHash","view"}
                 .All(k=>ReadString(v,k,"")==ReadString(e,k,"")))).ToList();
-            var receipt = TestDict("request",Program.CloneDictionary(request),"requestHash",PromptHash(CanonicalJson(request)),
+            var receipt = TestDict("request",CloneDictionary(request),"requestHash",PromptHash(CanonicalJson(request)),
                 "documents",exported,"status","capture_pending");
             captures.Add(receipt);
             var capture = ReadDictionaryList(item,"capturedLateInteractionSearches")
@@ -239,7 +239,7 @@ namespace ReignBetaServer
                 var source = eligible.FirstOrDefault(e=>ReadString(e,"sourceId","")==map(ReadString(hit,"sourceId",""))
                     && ReadString(e,"view","")==ReadString(hit,"view","") && ReadString(e,"textHash","")==ReadString(hit,"textHash",""));
                 if(source==null) { receipt["status"]="source_or_projection_mismatch"; pending.Add("colbert_source_mismatch"); return TestDict("ok",false,"status","source_or_projection_mismatch"); }
-                var bound=Program.CloneDictionary(source); bound["score"]=ReadDouble(hit,"score",0); result.Add(bound);
+                var bound=CloneDictionary(source); bound["score"]=ReadDouble(hit,"score",0); result.Add(bound);
             }
             receipt["status"]="captured_local_ranks"; receipt["captureHash"]=PromptHash(CanonicalJson(capture));
             receipt["results"]=result;
@@ -248,7 +248,7 @@ namespace ReignBetaServer
         }
 
         private static List<Dictionary<string, object>> FindLateInteractionTurns(ReignDbConnection connection,
-            MemoryQueryPlan plan, Program.KnowledgeAccessContext knowledge, int limit, bool requirePlayerSource = true)
+            MemoryQueryPlan plan, DialogueService.KnowledgeAccessContext knowledge, int limit, bool requirePlayerSource = true)
         {
             var empty = new List<Dictionary<string, object>>();
             bool isolated = !string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value);
@@ -258,7 +258,7 @@ namespace ReignBetaServer
             var audit = TestDict("schema", LateInteractionSchema, "applied", false, "modelHash", LateInteractionModelHash);
             try
             {
-                var settings = isolated ? TestDict() : Program.LoadSettings();
+                var settings = isolated ? TestDict() : SettingsService.LoadSettings();
                 string mode = isolated ? "replay" : ReadString(settings, "memoryLateInteractionMode", "shadow");
                 audit["mode"] = mode;
                 if (!new[] { "shadow", "on", "replay" }.Contains(mode) || string.IsNullOrWhiteSpace(plan.Query)) return empty;
@@ -299,7 +299,7 @@ AND t.world_day<=$day AND t.accepted_sequence<=$asOfSequence AND t.ts<=$asOfTime
                 request["eligible"] = candidates.Select(r => TestDict("sourceId", ReadString(r, "turn_id", ""),
                     "sourceHash", ReadString(r, "source_hash", ""), "textHash", ReadString(r, "text_hash", ""), "view", ReadString(r, "view", ""))).ToList();
                 var response = isolated ? LateInteractionReplay.Value(request)
-                    : TryParseJsonObject(Program.PostJsonToUrl(SemanticWorkerUrl(settings, "/memory/late/search"), Json.Serialize(request), 4000));
+                    : TryParseJsonObject(DialogueService.PostJsonToUrl(SemanticWorkerUrl(settings, "/memory/late/search"), Json.Serialize(request), 4000));
                 audit["status"] = ReadString(response, "status", "invalid_response");
                 audit["workerTiming"] = ReadDictionary(response, "timing");
                 audit["workerIndexedOriginals"] = ReadInt(response, "indexedCount", 0);
@@ -381,7 +381,7 @@ AND t.world_day<=$day AND t.accepted_sequence<=$asOfSequence AND t.ts<=$asOfTime
                 }
                 foreach (var source in sources)
                 {
-                    if (!isolated && (Program.PriorityBackgroundWorkShouldYield() || PersistenceService.IsSaveSyncSemanticBlocked(campaign))) break;
+                    if (!isolated && (OperationsService.PriorityBackgroundWorkShouldYield() || PersistenceService.IsSaveSyncSemanticBlocked(campaign))) break;
                     phase = "source_projection";
                     var views = new[] { "self", "public" }.Select(v => LateInteractionView(source, v)).Where(v => v != null).ToList();
                     if (views.Count == 0) { RecordLateInteractionIndexFailure(campaign, source, "empty_visible_source"); continue; }
@@ -444,7 +444,7 @@ AND t.world_day<=$day AND t.accepted_sequence<=$asOfSequence AND t.ts<=$asOfTime
             try
             {
                 if (LateInteractionReplayAudit.Value != null) LateInteractionReplayAudit.Value.Add(audit);
-                else Program.LogOperational("memory.late_interaction_index_source_failed", audit);
+                else OperationsService.LogOperational("memory.late_interaction_index_source_failed", audit);
             }
             catch { }
         }

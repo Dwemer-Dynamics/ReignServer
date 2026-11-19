@@ -21,7 +21,7 @@ namespace ReignBetaServer
                     .Where(x => !string.IsNullOrWhiteSpace(x)),
                 StringComparer.OrdinalIgnoreCase);
             List<Dictionary<string, object>> entries =
-                Program.ReadJsonLinesFromPath(Program.CampaignFile(
+                Program.ReadJsonLinesFromPath(CampaignFileService.CampaignFile(
                     campaignId,
                     "audit",
                     "audit.jsonl"))
@@ -100,17 +100,17 @@ namespace ReignBetaServer
                         .ToList(),
                     ["sourceAuditEntries"] = entries
                 };
-            string directory = Program.CampaignFile(
+            string directory = CampaignFileService.CampaignFile(
                 campaignId,
                 "audit",
                 "test-data",
                 "final-gauntlet",
-                Program.SafePathSegment(runId, "run"));
+                CampaignFileService.SafePathSegment(runId, "run"));
             Directory.CreateDirectory(directory);
             string path = Path.Combine(
                 directory,
-                Program.SafePathSegment(caseInstanceId, "case") + ".evidence-v3.json");
-            Program.WriteJsonObject(path, bundle);
+                CampaignFileService.SafePathSegment(caseInstanceId, "case") + ".evidence-v3.json");
+            CampaignFileService.WriteJsonObject(path, bundle);
             bundle["artifactPath"] = path;
             return bundle;
         }

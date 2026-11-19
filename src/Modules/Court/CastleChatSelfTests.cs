@@ -74,7 +74,7 @@ namespace ReignBetaServer
                 { "castleOpening", true }, { "castleRoomName", "Training Yard" },
                 { "playerText", string.Empty }, { "sceneContext", "base" }
             };
-            bool appliedOpening = Program.ApplyCastleChatMode(openingPayload, "room prompt");
+            bool appliedOpening = DialogueService.ApplyCastleChatMode(openingPayload, "room prompt");
             add("castle_opening_uses_npc_initiative_contract",
                 appliedOpening
                 && Convert.ToBoolean(openingPayload["approachOpening"])
@@ -103,7 +103,7 @@ namespace ReignBetaServer
             {
                 { "castleOpening", false }, { "playerText", "Continue." }
             };
-            bool appliedContinued = Program.ApplyCastleChatMode(continuedPayload, "room prompt");
+            bool appliedContinued = DialogueService.ApplyCastleChatMode(continuedPayload, "room prompt");
             add("castle_continuation_preserves_player_turn_contract",
                 appliedContinued
                 && !continuedPayload.ContainsKey("approachOpening")

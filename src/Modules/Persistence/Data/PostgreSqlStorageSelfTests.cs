@@ -142,7 +142,7 @@ AND indexdef LIKE '%(payload)%';").FirstOrDefault(), "count", 0);
                     ReignPostgreSqlStorage.DropCampaign(campaignId);
                 }
                 catch { }
-                TryDeleteDirectory(Program.CampaignDirectory(campaignId));
+                TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaignId));
                 TryDeleteDirectory(SaveSyncCampaignRoot(campaignId));
             }
             RunCampaignCleanupScopeSelfTests(add);
@@ -219,7 +219,7 @@ VALUES(@campaign_id,@schema_name,now(),now());", other))
                 bool foreignUnattributed =
                     !scope.CreatedCampaignIds.Contains(foreignInternal, StringComparer.OrdinalIgnoreCase)
                     && !scope.UnattributedCampaignIds.Contains(foreignInternal, StringComparer.OrdinalIgnoreCase);
-                List<string> leaked = Program.DropVerificationRunCampaigns(scope, preexisting);
+                List<string> leaked = VerificationService.DropVerificationRunCampaigns(scope, preexisting);
                 HashSet<string> after = RegisteredCampaignIdsForSelfTest();
                 add("verification_sweep_drops_only_run_campaigns",
                     registeredDuringRun
@@ -289,7 +289,7 @@ VALUES(@campaign_id,@schema_name,now(),now());", other))
                     }
                     bool unattributed = current.UnattributedCampaignIds.Contains(
                         staleInternal, StringComparer.OrdinalIgnoreCase);
-                    List<string> leaked = Program.DropVerificationRunCampaigns(current, preexisting);
+                    List<string> leaked = VerificationService.DropVerificationRunCampaigns(current, preexisting);
                     add("verification_sweep_ignores_ended_scope_of_long_lived_worker",
                         finished
                         && workerError == null
@@ -557,7 +557,7 @@ AND table_name IN ('player_attention_events','player_approach_state');")
                     foreach (string id in new[] { campaign, concurrent })
                     {
                         try { ReignPostgreSqlStorage.DropCampaign(id); } catch { }
-                        TryDeleteDirectory(Program.CampaignDirectory(id));
+                        TryDeleteDirectory(CampaignFileService.CampaignDirectory(id));
                         TryDeleteDirectory(SaveSyncCampaignRoot(id));
                     }
                 }

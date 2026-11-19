@@ -27,7 +27,7 @@ namespace ReignBetaServer
             bool sharedReadable = !string.IsNullOrWhiteSpace(sharedRoot) && Directory.Exists(Path.Combine(sharedRoot, "_shared"));
             var sharedFolders = sharedReadable ? ChatViewHeroFolders(Path.Combine(sharedRoot, "_shared"), hero) : Array.Empty<string>();
             return SelectChatViewPortraitPath(campaignFolders, sharedFolders,
-                Program.CharacterFile(campaign, hero, "portraits"),
+                CampaignFileService.CharacterFile(campaign, hero, "portraits"),
                 hero.Equals("main_hero", StringComparison.OrdinalIgnoreCase)
                     || hero.Equals("player_hero", StringComparison.OrdinalIgnoreCase), sharedReadable);
         }
@@ -75,7 +75,7 @@ namespace ReignBetaServer
         {
             string folder = Path.GetDirectoryName(path);
             string origin = path.StartsWith(PersistenceService.CampaignPortraitCacheDirectory(campaign) + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-                ? "campaign" : folder == Program.CharacterFile(campaign, hero, "portraits") ? "character" : "shared";
+                ? "campaign" : folder == CampaignFileService.CharacterFile(campaign, hero, "portraits") ? "character" : "shared";
             return TestDict("characterId", hero, "contract", ChatViewReferenceContract, "origin", origin,
                 "folder", Path.GetFileName(folder), "fileName", Path.GetFileName(path), "sha256", Sha256Hex(bytes));
         }

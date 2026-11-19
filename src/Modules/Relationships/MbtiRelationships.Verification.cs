@@ -28,9 +28,9 @@ namespace ReignBetaServer
             var scopedStatusRequest = new Program.HttpRequest { Method = "GET",
                 Query = new Dictionary<string, string> { ["campaignId"] = "requested_campaign", ["timelineId"] = "requested_timeline" },
                 JsonBody = TestDict("campaignId", "wrong_body_campaign", "timelineId", "wrong_body_timeline") };
-            var getScope = Program.RelationshipStatusPayload(scopedStatusRequest);
+            var getScope = CampaignFileService.RelationshipStatusPayload(scopedStatusRequest);
             scopedStatusRequest.Method = "POST";
-            var postScope = Program.RelationshipStatusPayload(scopedStatusRequest);
+            var postScope = CampaignFileService.RelationshipStatusPayload(scopedStatusRequest);
             add("ambient_status_scope_follows_request_transport",
                 ReadString(getScope, "campaignId", "") == "requested_campaign"
                 && ReadString(getScope, "timelineId", "") == "requested_timeline"
@@ -337,7 +337,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(ingestCampaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(ingestCampaignId));
             }
             results.AddRange(RunCampaignOpeningRelationshipSeedSelfTests());
             results.AddRange(RunDailyRandomRelationshipMatchingSelfTests());
@@ -538,7 +538,7 @@ namespace ReignBetaServer
             finally
             {
                 ReignPostgreSqlStorage.DropCampaign(campaignId);
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaignId));
             }
             string scaleCampaignId = "opening_seed_scale_"
                 + Guid.NewGuid().ToString("N").Substring(0, 10);
@@ -617,7 +617,7 @@ namespace ReignBetaServer
             finally
             {
                 ReignPostgreSqlStorage.DropCampaign(scaleCampaignId);
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(scaleCampaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(scaleCampaignId));
             }
             return results;
         }
@@ -855,7 +855,7 @@ namespace ReignBetaServer
                     dailyPair = RelationshipsStore.SelectRelationshipPairChemistry8(dailyConnection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault()
                         ?? new Dictionary<string, object>();
                 ReignPostgreSqlStorage.DropCampaign(batchCampaign);
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(batchCampaign));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(batchCampaign));
 
                 int shard = RelationshipCadenceShard(batchCampaign, pairKey);
                 Dictionary<string, object> batchResult = MbtiRelationshipSnapshotApi(
@@ -907,7 +907,7 @@ namespace ReignBetaServer
             finally
             {
                 ReignPostgreSqlStorage.DropCampaign(batchCampaign);
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(batchCampaign));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(batchCampaign));
             }
             return results;
         }
@@ -1247,8 +1247,8 @@ namespace ReignBetaServer
                 add("continuous_native_pull_uses_backlog_batch",
                     ReadInt(emptyNativePull, "batchLimit", 0) == 1024,
                     "The continuous native projection protocol accepts 1,024-target backlog batches while retaining coalesced per-pair revisions.");
-                add("transient_profiles_do_not_construct", !Directory.Exists(Program.CharacterDirectory(campaignId, heroA))
-                    && !Directory.Exists(Program.CharacterDirectory(campaignId, heroB)),
+                add("transient_profiles_do_not_construct", !Directory.Exists(CampaignFileService.CharacterDirectory(campaignId, heroA))
+                    && !Directory.Exists(CampaignFileService.CharacterDirectory(campaignId, heroB)),
                     "Unconstructed participants use transient traits without profile or backstory generation.");
             }
             catch (Exception ex)
@@ -1258,7 +1258,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaignId));
             }
 
             string atomicCampaignId = "mr_atomic_"
@@ -1318,7 +1318,7 @@ namespace ReignBetaServer
             {
                 InvalidateRelationshipPairStateCache(atomicCampaignId);
                 ReignPostgreSqlStorage.DropCampaign(atomicCampaignId);
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(atomicCampaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(atomicCampaignId));
             }
 
             string scaleCampaignId = "mr_scale_" + Guid.NewGuid().ToString("N").Substring(0, 12);
@@ -1404,7 +1404,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(scaleCampaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(scaleCampaignId));
             }
             return results;
         }

@@ -41,9 +41,9 @@ namespace ReignBetaServer
             int nobleNotablePairs = ReadInt(pairSummary, "noble_notable_pairs", 0);
             int missingMbti = ReadInt(pairSummary, "missing_mbti", 0);
             int typeMismatches = ReadInt(WorldSimulationStore.CountRelationshipPairChemistry2(connection, pairParameters).FirstOrDefault(), "count", 0);
-            int notableSyncErrors = notableProfiles.Count(x => Program.ContainsAny(ReadString(x, "native_sync_status", ""), "failed", "contradicted"));
+            int notableSyncErrors = notableProfiles.Count(x => DialogueService.ContainsAny(ReadString(x, "native_sync_status", ""), "failed", "contradicted"));
             int notableSyncOverdue = notableProfiles.Count(x =>
-                Program.ContainsAny(ReadString(x, "native_sync_status", ""), "pending", "claimed")
+                DialogueService.ContainsAny(ReadString(x, "native_sync_status", ""), "pending", "claimed")
                 && latestDay - ReadDouble(x, "native_action_created_day", latestDay) > 1d);
             Dictionary<string, Dictionary<string, int>> bands = WorldTestRelationshipBands.ToDictionary(
                 x => x, x => new Dictionary<string, int> { ["uniqueNpcCount"] = 0, ["directionalEdgeCount"] = 0, ["pairCount"] = 0 },
@@ -594,7 +594,7 @@ namespace ReignBetaServer
         private static string ExpectedAgreementKindForDiplomacyCommand(
             string command)
         {
-            switch (Program.NormalizeLookup(command))
+            switch (ActionPipelineService.NormalizeLookup(command))
             {
                 case "sign_trade_agreement": return "trade_agreement";
                 case "sign_non_aggression_pact": return "non_aggression_pact";

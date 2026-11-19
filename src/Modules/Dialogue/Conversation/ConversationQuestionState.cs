@@ -78,11 +78,11 @@ An open ledger is a record of accepted links, not proof of silence. Later addres
                 if (row == null)
                 {
                     var candidates = DialogueStore.SelectConversationTurns30(connection, TestDict("id", id, "speaker", requestedSpeaker)).Where(candidate =>
-                            PrecisionTurnVisible(candidate, owner, Program.BuildKnowledgeAccessContext(owner, peer, "", payload), connection)
+                            PrecisionTurnVisible(candidate, owner, DialogueService.BuildKnowledgeAccessContext(owner, peer, "", payload), connection)
                             && ReadString(candidate, "text", "").Contains(quote, StringComparison.Ordinal)).Take(2).ToList();
                     if (candidates.Count == 1) row = candidates[0];
                 }
-                if (row == null || !PrecisionTurnVisible(row, owner, Program.BuildKnowledgeAccessContext(owner, peer, "", payload), connection)) return null;
+                if (row == null || !PrecisionTurnVisible(row, owner, DialogueService.BuildKnowledgeAccessContext(owner, peer, "", payload), connection)) return null;
                 text = ReadString(row, "text", ""); speaker = ReadString(row, "speaker_id", "");
                 if (!string.Equals(requestedSpeaker, speaker, StringComparison.OrdinalIgnoreCase)) return null;
             }
@@ -105,7 +105,7 @@ An open ledger is a record of accepted links, not proof of silence. Later addres
                 "beatId", row == null ? ReadFirstString(payload, "sceneTurnId", "exchangeId", "turnId")
                     : ReadFirstString(TryParseJsonObject(ReadString(row, "payload_json", "{}")), "sceneTurnId", "exchangeId", "turnId"),
                 "audienceIds", row == null ? new List<string> { owner, peer }.Where(s => s.Length > 0).Distinct().ToList()
-                    : Program.TextListFromJson(ReadString(row, "participants_json", "[]")));
+                    : DialogueService.TextListFromJson(ReadString(row, "participants_json", "[]")));
         }
 
         private static string QuestionSourceOrder(Dictionary<string, object> answer, Dictionary<string, object> question)
@@ -141,7 +141,7 @@ An open ledger is a record of accepted links, not proof of silence. Later addres
             var state = ReadDictionary(write, "questionState");
             if (state == null) return "question_state_missing";
             string id = CurrentContinuityRecordId(connection, ContinuityTimeline(payload), owner, ReadString(write, "id", ""));
-            var access = Program.BuildKnowledgeAccessContext(owner, peer, "", payload);
+            var access = DialogueService.BuildKnowledgeAccessContext(owner, peer, "", payload);
             var old = id.Length == 0 ? null : DialogueStore.SelectConversationContinuity7(connection, MemorySourceTimelineSql("conversation_continuity", access: access),                TestDict("id", id, "owner", owner, "timeline", ContinuityTimeline(payload))).FirstOrDefault();
             if (old != null && !MemoryTimeVisible(old, access, connection)) old = null;
             var requestedQuestion = ReadDictionary(state, "question");
@@ -207,7 +207,7 @@ An open ledger is a record of accepted links, not proof of silence. Later addres
                     return "answered_question_requires_explicit_reopening";
             }
             string followUp = CurrentContinuityRecordId(connection, ContinuityTimeline(payload), owner, ReadString(state, "followUpTo", ""));
-            if (followUp.Length > 0 && (followUp == id || DialogueStore.SelectConversationContinuity9(connection, MemorySourceTimelineSql("conversation_continuity", access: Program.BuildKnowledgeAccessContext(owner, peer, "", payload)),                TestDict("id", followUp, "timeline", ContinuityTimeline(payload), "owner", owner)).Count != 1)) return "question_followup_unverified";
+            if (followUp.Length > 0 && (followUp == id || DialogueStore.SelectConversationContinuity9(connection, MemorySourceTimelineSql("conversation_continuity", access: DialogueService.BuildKnowledgeAccessContext(owner, peer, "", payload)),                TestDict("id", followUp, "timeline", ContinuityTimeline(payload), "owner", owner)).Count != 1)) return "question_followup_unverified";
             write["id"] = id;
             write["status"] = answerState == "answered" || answerState == "refused" ? "resolved" : answerState == "deferred" ? "deferred" : "active";
             if (ReadString(write, "status", "") == "resolved" && ReadString(write, "transitionReason", "").Length == 0)
@@ -233,7 +233,7 @@ An open ledger is a record of accepted links, not proof of silence. Later addres
         }
 
         private static bool QuestionOriginalStillVerified(ReignDbConnection connection, Dictionary<string, object> source,
-            string observer, Program.KnowledgeAccessContext access)
+            string observer, DialogueService.KnowledgeAccessContext access)
         {
             string id = ReadString(source, "turnId", "");
             if (id.Length == 0) return false; // Keep the record recoverable, but do not certify a missing original.
@@ -257,7 +257,7 @@ An open ledger is a record of accepted links, not proof of silence. Later addres
         // not an answer. Expose bounded originals for review without interpreting
         // relevance, changing the ledger, or manufacturing consent/agreement.
         private static List<Dictionary<string, object>> QuestionUnreviewedTurns(ReignDbConnection connection,
-            Dictionary<string, object> row, Dictionary<string, object> state, string owner, Program.KnowledgeAccessContext access)
+            Dictionary<string, object> row, Dictionary<string, object> state, string owner, DialogueService.KnowledgeAccessContext access)
         {
             if (new[] { "answered", "refused" }.Contains(ReadString(state, "answerState", ""))) return new();
             var question = ReadDictionary(state, "question");
@@ -292,9 +292,9 @@ An open ledger is a record of accepted links, not proof of silence. Later addres
         private static string BuildQuestionContinuityPrompt(ReignDbConnection connection, Dictionary<string, object> payload,
             string owner, string peer, List<string> sourceIds)
         {
-            var terms = Program.MemoryQueryTerms(ReadFirstString(payload, "playerText", "text", "message") + " " + ReadString(payload, "memoryActiveTopic", ""))
+            var terms = DialogueService.MemoryQueryTerms(ReadFirstString(payload, "playerText", "text", "message") + " " + ReadString(payload, "memoryActiveTopic", ""))
                 .Where(t => !ExactRecallStopWords.Contains(t, StringComparer.OrdinalIgnoreCase)).Distinct().Take(16).ToList();
-            var access = Program.BuildKnowledgeAccessContext(owner, peer, "", payload);
+            var access = DialogueService.BuildKnowledgeAccessContext(owner, peer, "", payload);
             var parameters = TestDict("owner", owner, "peer", peer, "timeline", ContinuityTimeline(payload),
                 "day", access.WorldDay, "timestamp", access.AsOfTimestamp);
             string eligible = DialogueStore.SelectConversationContinuitySql(MemorySourceTimelineSql("conversation_continuity", access: access));

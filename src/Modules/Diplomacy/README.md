@@ -13,10 +13,10 @@ treaties, incidents, war origins), political pressure, and clan accords.
 
 ## Service class
 
-Every file except `Program.DiplomacyRoutes.cs` holds `internal static partial class DiplomacyService` (not a `Program`
+Every file except `DiplomacyRoutes.cs` holds `internal static partial class DiplomacyService` (not a `Program`
 partial). It calls `Program` members with an explicit `Program.` qualifier, and `Program` and the other modules call
-it as `DiplomacyService.X`; the members used across that boundary are `internal`. `Program.DiplomacyRoutes.cs` stays
-part of `Program` and registers the service handlers. Court, Rebellion, Spymaster, Relationships and WorldSimulation
+it as `DiplomacyService.X`; the members used across that boundary are `internal`. `DiplomacyRoutes.cs` (an `internal static` route class called
+from `Platform/RouteTable.cs`) registers the service handlers. Court, Rebellion, Spymaster, Relationships and WorldSimulation
 call into it for political pressure, the director's state and event queue, and ruler diplomacy rolls. The director's
 command tables and the political pressure catalog are static fields of `DiplomacyService`.
 

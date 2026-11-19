@@ -61,10 +61,10 @@ namespace ReignBetaServer
             return ReadDictionaryList(payload, "recentEvents").Take(WildernessRecentEventLimit)
                 .Select(row => new Dictionary<string, object>
                 {
-                    ["varietyKey"] = Program.LimitText(ReadString(row, "varietyKey", ""), 80),
-                    ["title"] = Program.LimitText(ReadString(row, "title", ""), 120),
-                    ["approachDescription"] = Program.LimitText(ReadString(row, "approachDescription", ""), WildernessRecentApproachLimit),
-                    ["openingText"] = Program.LimitText(ReadString(row, "openingText", ""), WildernessRecentOpeningLimit)
+                    ["varietyKey"] = DialogueService.LimitText(ReadString(row, "varietyKey", ""), 80),
+                    ["title"] = DialogueService.LimitText(ReadString(row, "title", ""), 120),
+                    ["approachDescription"] = DialogueService.LimitText(ReadString(row, "approachDescription", ""), WildernessRecentApproachLimit),
+                    ["openingText"] = DialogueService.LimitText(ReadString(row, "openingText", ""), WildernessRecentOpeningLimit)
                 }).ToList();
         }
 
@@ -87,12 +87,12 @@ namespace ReignBetaServer
             var background = ReadDictionary(stack, "background");
             var brief = new Dictionary<string, object>
             {
-                ["id"] = Program.LimitText(Program.CharacterIdFrom(participant), 160),
-                ["name"] = Program.LimitText(ReadString(participant, "name", ""), 120),
-                ["role"] = Program.LimitText(ReadString(participant, "generatedRole", "party_member"), 80),
-                ["culture"] = Program.LimitText(ReadFirstString(participant, "cultureName", "culture"), 120),
-                ["personality"] = Program.LimitText(ReadString(traits, "basePersonalitySummary", ""), 700),
-                ["background"] = Program.LimitText(FirstNonEmpty(ReadString(background, "summary", ""), ReadString(stack, "nativeBiography", "")), 900),
+                ["id"] = DialogueService.LimitText(CampaignFileService.CharacterIdFrom(participant), 160),
+                ["name"] = DialogueService.LimitText(ReadString(participant, "name", ""), 120),
+                ["role"] = DialogueService.LimitText(ReadString(participant, "generatedRole", "party_member"), 80),
+                ["culture"] = DialogueService.LimitText(ReadFirstString(participant, "cultureName", "culture"), 120),
+                ["personality"] = DialogueService.LimitText(ReadString(traits, "basePersonalitySummary", ""), 700),
+                ["background"] = DialogueService.LimitText(FirstNonEmpty(ReadString(background, "summary", ""), ReadString(stack, "nativeBiography", "")), 900),
                 ["scope"] = "Selected character facts for a new opening, not a transcript or a complete biography. Missing facts are unknown."
             };
             // Missing native identity is unknown, never the false/male default.
@@ -128,7 +128,7 @@ namespace ReignBetaServer
                 foreach (var pair in fields.Take(16))
                 {
                     if (budget < 100) break;
-                    string key = Program.LimitText(pair.Key, 60);
+                    string key = DialogueService.LimitText(pair.Key, 60);
                     budget -= key.Length + 8;
                     result[key] = ProjectWildernessFacts(pair.Value, ref budget, depth + 1);
                 }
@@ -144,7 +144,7 @@ namespace ReignBetaServer
                 }
                 return result;
             }
-            string text = Program.LimitText(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture), Math.Min(400, budget));
+            string text = DialogueService.LimitText(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture), Math.Min(400, budget));
             budget -= text.Length;
             return text;
         }
@@ -166,15 +166,15 @@ namespace ReignBetaServer
             string opening = ReadString(response, "openingText", "");
             if (string.IsNullOrWhiteSpace(approach) || string.IsNullOrWhiteSpace(opening)
                 || string.IsNullOrWhiteSpace(ReadString(response, "playerHook", ""))) return "incomplete_opening";
-            string[] allowedIds = participants.Select(Program.CharacterIdFrom).ToArray();
+            string[] allowedIds = participants.Select(CampaignFileService.CharacterIdFrom).ToArray();
             if (!ReadStringList(response, "participantHeroIds").Any(id => allowedIds.Contains(id, StringComparer.Ordinal))) return "no_eligible_participants";
             if (WildernessOpeningIdentityConflict(response, participants)) return "participant_gender_conflict";
             foreach (var recent in WildernessRecentEvents(payload))
             {
                 string priorApproach = ReadString(recent, "approachDescription", "");
                 string priorOpening = ReadString(recent, "openingText", "");
-                if (WildernessNormalizedText(Program.LimitText(approach, WildernessRecentApproachLimit)) == WildernessNormalizedText(priorApproach)
-                    || WildernessNormalizedText(Program.LimitText(opening, WildernessRecentOpeningLimit)) == WildernessNormalizedText(priorOpening)) return "repeated_opening";
+                if (WildernessNormalizedText(DialogueService.LimitText(approach, WildernessRecentApproachLimit)) == WildernessNormalizedText(priorApproach)
+                    || WildernessNormalizedText(DialogueService.LimitText(opening, WildernessRecentOpeningLimit)) == WildernessNormalizedText(priorOpening)) return "repeated_opening";
                 var currentWords = WildernessContentWords(approach + " " + opening, participants);
                 var priorWords = WildernessContentWords(priorApproach + " " + priorOpening, participants);
                 int shared = currentWords.Intersect(priorWords).Count();

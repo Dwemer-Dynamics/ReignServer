@@ -145,13 +145,13 @@ namespace ReignBetaServer
                 ["requiresAcceptance"] = false, ["authorizationMode"] = "negotiated", ["negotiationId"] = id, ["termsHash"] = hash,
                 ["terms"] = terms
             };
-            Dictionary<string, object> normalized = Program.NormalizeActionCommand(raw, ReadString(draft, "campaign_id", "default"), out List<string> errors, raw);
+            Dictionary<string, object> normalized = ActionPipelineService.NormalizeActionCommand(raw, ReadString(draft, "campaign_id", "default"), out List<string> errors, raw);
             if (errors.Count > 0 || normalized == null)
             {
                 RebellionStore.UpdateNegotiatedActionDrafts4(connection, new Dictionary<string, object> { ["day"] = day, ["payload"] = Json.Serialize(errors), ["id"] = id });
                 return;
             }
-            Dictionary<string, object> queued = Program.QueueAction(ReadString(draft, "campaign_id", "default"), normalized);
+            Dictionary<string, object> queued = ActionPipelineService.QueueAction(ReadString(draft, "campaign_id", "default"), normalized);
             RebellionStore.UpdateNegotiatedActionDrafts5(connection, new Dictionary<string, object> { ["action"] = ReadString(queued, "actionId", ReadString(normalized, "actionId", "")), ["day"] = day, ["id"] = id });
         }
 
@@ -174,7 +174,7 @@ namespace ReignBetaServer
         {
             Dictionary<string, object> row = RebellionStore.SelectNegotiatedActionDrafts4(connection, new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
             if (row == null) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Negotiation draft was not found." };
-            if (day > ReadDouble(row, "expires_day", double.MaxValue) && !Program.ContainsAny(Program.NormalizeLookup(ReadString(row, "status", "")), "queued", "completed", "rejected", "failed"))
+            if (day > ReadDouble(row, "expires_day", double.MaxValue) && !DialogueService.ContainsAny(ActionPipelineService.NormalizeLookup(ReadString(row, "status", "")), "queued", "completed", "rejected", "failed"))
             {
                 RebellionStore.UpdateNegotiatedActionDrafts(connection, new Dictionary<string, object> { ["day"] = day, ["id"] = id });
                 row["status"] = "expired";
@@ -203,7 +203,7 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                Program.LogOperational("negotiation.action_report_update_failed", new Dictionary<string, object> { ["campaignId"] = campaignId, ["actionId"] = actionId, ["error"] = ex.Message });
+                OperationsService.LogOperational("negotiation.action_report_update_failed", new Dictionary<string, object> { ["campaignId"] = campaignId, ["actionId"] = actionId, ["error"] = ex.Message });
             }
         }
 
@@ -214,9 +214,9 @@ namespace ReignBetaServer
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureRebellionSchema(connection);
-                string normalized = Program.NormalizeLookup(status).Replace(' ', '_');
+                string normalized = ActionPipelineService.NormalizeLookup(status).Replace(' ', '_');
                 string backingStatus = normalized == "completed" ? "completed"
-                    : Program.ContainsAny(normalized, "failed", "invalid", "expired", "cancel") ? "invalidated" : "accepted";
+                    : DialogueService.ContainsAny(normalized, "failed", "invalid", "expired", "cancel") ? "invalidated" : "accepted";
                 RebellionStore.UpdateRebellionBackingRequests(connection, new Dictionary<string, object>
                 {
                     ["status"] = backingStatus, ["terminal"] = backingStatus == "invalidated" ? 1 : 0,
@@ -229,13 +229,13 @@ namespace ReignBetaServer
 
         internal static bool LooksLikeRebellionPreparationRequest(string text)
         {
-            string normalized = Program.NormalizeLookup(text);
+            string normalized = ActionPipelineService.NormalizeLookup(text);
             if (string.IsNullOrWhiteSpace(normalized)
-                || Program.ContainsAny(normalized, "hypothetically", "someday", "what if"))
+                || DialogueService.ContainsAny(normalized, "hypothetically", "someday", "what if"))
                 return false;
-            bool rebellion = Program.ContainsAny(normalized, "rebellion", "rebel", "rise against",
+            bool rebellion = DialogueService.ContainsAny(normalized, "rebellion", "rebel", "rise against",
                 "challenge the ruler", "overthrow the ruler", "depose the ruler");
-            bool support = Program.ContainsAny(normalized, "pledge", "promise", "support me", "stand with me",
+            bool support = DialogueService.ContainsAny(normalized, "pledge", "promise", "support me", "stand with me",
                 "support my rebellion", "support my planned rebellion", "join me", "loyalty",
                 "back me", "follow me", "refuse", "report this conspiracy", "report my",
                 "report me", "warn the ruler", "name me as the author", "name me as its author");
@@ -244,31 +244,31 @@ namespace ReignBetaServer
 
         private static string ClassifyRebellionPreparationReply(string text)
         {
-            string normalized = Program.NormalizeLookup(text);
+            string normalized = ActionPipelineService.NormalizeLookup(text);
             if (string.IsNullOrWhiteSpace(normalized)) return string.Empty;
-            bool negatesReport = Program.ContainsAny(normalized, "not report", "won't report",
+            bool negatesReport = DialogueService.ContainsAny(normalized, "not report", "won't report",
                 "will not report", "never report", "no report");
-            if (!negatesReport && Program.ContainsAny(normalized, "report this", "report it", "report you",
+            if (!negatesReport && DialogueService.ContainsAny(normalized, "report this", "report it", "report you",
                 "report the plot", "report your plot", "report the conspiracy", "report the rebellion",
                 "tell the ruler", "inform the ruler", "warn the ruler", "warning the ruler",
                 "send word to the ruler",
                 "expose your plot", "expose this plot", "name you as the author",
                 "name you as its author", "treason must be reported"))
                 return "report";
-            bool negatesPledge = Program.ContainsAny(normalized, "not pledge", "won't pledge",
+            bool negatesPledge = DialogueService.ContainsAny(normalized, "not pledge", "won't pledge",
                 "wont pledge", "won t pledge", "will not pledge", "cannot pledge", "can't pledge",
                 "cant pledge", "can t pledge", "do not pledge", "don't pledge", "dont pledge",
                 "don t pledge",
                 "never pledge", "no pledge", "not stand with you",
                 "not support your rebellion", "will not join your rebellion");
             if (!negatesPledge
-                && Program.ContainsAny(normalized, "pledge", "stand with you", "stands with you",
+                && DialogueService.ContainsAny(normalized, "pledge", "stand with you", "stands with you",
                     "rides with you",
                     "support your rebellion", "join your rebellion", "my clan stands",
                     "you have my loyalty", "back your claim"))
                 return "pledge";
             if (normalized == "no" || normalized.StartsWith("no ", StringComparison.Ordinal)
-                || Program.ContainsAny(normalized, "i refuse", "we refuse", "no pledge",
+                || DialogueService.ContainsAny(normalized, "i refuse", "we refuse", "no pledge",
                 "cannot pledge", "can't pledge", "cant pledge", "can t pledge",
                 "no support", "cannot support",
                 "will not support", "won't support",
@@ -280,24 +280,24 @@ namespace ReignBetaServer
 
         internal static string ClassifyRebellionSummonsReply(string text)
         {
-            string normalized = Program.NormalizeLookup(text);
+            string normalized = ActionPipelineService.NormalizeLookup(text);
             if (string.IsNullOrWhiteSpace(normalized)) return string.Empty;
-            if (Program.ContainsAny(normalized, "renounce", "recant", "abandon the plot",
+            if (DialogueService.ContainsAny(normalized, "renounce", "recant", "abandon the plot",
                 "submit to your judgment", "submit to your judgement")) return "renounce";
-            if (Program.ContainsAny(normalized, "defy", "declare rebellion", "rebel against you",
+            if (DialogueService.ContainsAny(normalized, "defy", "declare rebellion", "rebel against you",
                 "challenge your rule", "take the throne")) return "defy";
             return string.Empty;
         }
 
         internal static string ClassifyRebellionRulerVerdict(string text)
         {
-            string normalized = Program.NormalizeLookup(text);
+            string normalized = ActionPipelineService.NormalizeLookup(text);
             if (string.IsNullOrWhiteSpace(normalized)) return string.Empty;
-            if (Program.ContainsAny(normalized, "execute", "execution", "put you to death", "death sentence"))
+            if (DialogueService.ContainsAny(normalized, "execute", "execution", "put you to death", "death sentence"))
                 return "execution";
-            if (Program.ContainsAny(normalized, "banish", "exile", "leave my realm")) return "exile";
-            if (Program.ContainsAny(normalized, "imprison", "prison", "dungeon")) return "imprisonment";
-            if (Program.ContainsAny(normalized, "pardon", "forgive", "grant mercy", "go free")) return "pardon";
+            if (DialogueService.ContainsAny(normalized, "banish", "exile", "leave my realm")) return "exile";
+            if (DialogueService.ContainsAny(normalized, "imprison", "prison", "dungeon")) return "imprisonment";
+            if (DialogueService.ContainsAny(normalized, "pardon", "forgive", "grant mercy", "go free")) return "pardon";
             return string.Empty;
         }
 
@@ -307,18 +307,18 @@ namespace ReignBetaServer
         {
             List<Dictionary<string, object>> candidates = new List<Dictionary<string, object>>();
             if (!LooksLikeRebellionPreparationRequest(playerText)) return candidates;
-            string commitment = Program.NormalizeLookup(ReadString(actionGate, "commitment", ""));
+            string commitment = ActionPipelineService.NormalizeLookup(ReadString(actionGate, "commitment", ""));
             bool actionNeeded = ReadBool(actionGate, "needed", false);
             string visibleDecision = ClassifyRebellionPreparationReply(npcText ?? string.Empty);
             // A concealed report may arrive either as the dedicated structured commitment or
             // as explicit private intent alongside a visible refusal. The latter is a normal
             // provider encoding: the reply refuses support while the unshown action reports it.
             // Never infer it from a negated private intent, and always apply eligibility below.
-            string privateIntent = Program.NormalizeLookup(ReadString(actionGate, "intent", ""));
-            bool privateIntentNegated = Program.ContainsAny(privateIntent,
+            string privateIntent = ActionPipelineService.NormalizeLookup(ReadString(actionGate, "intent", ""));
+            bool privateIntentNegated = DialogueService.ContainsAny(privateIntent,
                 "not privately report", "does not privately report", "will not privately report",
                 "never privately report", "no private report");
-            bool explicitPrivateReport = !privateIntentNegated && Program.ContainsAny(privateIntent,
+            bool explicitPrivateReport = !privateIntentNegated && DialogueService.ContainsAny(privateIntent,
                 "privately report", "privately reports", "private report");
             string privateDecision = commitment == "final private report" || explicitPrivateReport
                 ? "report"
@@ -329,10 +329,10 @@ namespace ReignBetaServer
                 && ReadBool(reportEvidence, "eligible", false)
                 && (explicitPrivateReport
                     ? actionNeeded
-                    : Program.ActionGateShouldPlan(actionGate));
+                    : ActionPipelineService.ActionGateShouldPlan(actionGate));
             bool visibleReport = visibleDecision == "report"
                 && ReadBool(reportEvidence, "eligible", false)
-                && Program.ActionGateShouldPlan(actionGate);
+                && ActionPipelineService.ActionGateShouldPlan(actionGate);
             string decision = privateReport || visibleReport
                 ? "report"
                 : commitment == "refused" || visibleDecision == "refuse"
@@ -344,7 +344,7 @@ namespace ReignBetaServer
                 ? actionNeeded && commitment == "refused"
                 : decision == "report" && explicitPrivateReport
                     ? actionNeeded
-                : Program.ActionGateShouldPlan(actionGate);
+                : ActionPipelineService.ActionGateShouldPlan(actionGate);
             if (!finalDecision) return candidates;
             string actorId = ReadFirstString(payload, "playerHeroStringId", "playerId", "actorHeroId");
             string targetId = ReadFirstString(hero, "heroStringId", "heroId", "id");
@@ -380,7 +380,7 @@ namespace ReignBetaServer
             string heroId = ReadFirstString(hero, "heroStringId", "heroId", "id");
             Dictionary<string, object> characteristics = string.IsNullOrWhiteSpace(heroId)
                 ? new Dictionary<string, object>()
-                : Program.LoadCharacterStack(campaignId, heroId);
+                : CharactersService.LoadCharacterStack(campaignId, heroId);
             Dictionary<string, object> reignTraits = DialogueService.TraitPercentageSnapshot(
                 ReadDictionary(characteristics, "traits") ?? new Dictionary<string, object>());
             Dictionary<string, object> nativeTraits =
@@ -416,12 +416,12 @@ namespace ReignBetaServer
 
         private static string NormalizeRebellionPreparationChannel(Dictionary<string, object> payload)
         {
-            string channel = Program.NormalizeLookup(ReadFirstString(payload,
+            string channel = ActionPipelineService.NormalizeLookup(ReadFirstString(payload,
                 "interactionMode", "conversationMode", "channel", "mode"));
-            if (Program.ContainsAny(channel, "correspondence", "letter", "mail"))
+            if (DialogueService.ContainsAny(channel, "correspondence", "letter", "mail"))
                 return "correspondence";
             if (string.IsNullOrWhiteSpace(channel)
-                || Program.ContainsAny(channel, "individual_chat", "individual chat", "in_person",
+                || DialogueService.ContainsAny(channel, "individual_chat", "individual chat", "in_person",
                     "in person", "conversation", "dialogue"))
                 return "individual_chat";
             return channel.Replace(' ', '_');

@@ -2,8 +2,8 @@
 
 Character identity and construction: who knows whom (identity and acquaintances), the character editor, character
 narratives and the profile library, traits and political beliefs, NPC lives, town notables, encountered residents,
-wanderers and the tavern house. The basic character upsert/construct routes are handled in the
-`Program` partials `Program.CharacterConstruction.cs` and `Program.CharacterProfiles.cs` in this folder.
+wanderers and the tavern house. The basic character upsert/construct routes are handled in
+`CharacterConstruction.cs` and `CharacterProfiles.cs` in this folder (`CharactersService`).
 
 > Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) describes the whole server
 > and the restructuring direction. Feature docs: [NpcLives](../../../docs/server/NpcLives.md),
@@ -25,11 +25,11 @@ wanderers and the tavern house. The basic character upsert/construct routes are 
 
 ## Service class
 
-The module's `Program` partials are now `internal static partial class CharactersService` in their existing files. It
+Every file is `internal static partial class CharactersService` except `CharactersRoutes.cs`. It
 calls `Program` members with an explicit `Program.` qualifier, and `Program` and the other modules call it as
-`CharactersService.X`; the members used across that boundary are `internal`. `Program.CharactersRoutes.cs` stays part
-of `Program` and registers the service handlers; `Program.CharacterConstruction.cs` and `Program.CharacterProfiles.cs`
-are `Program` partials split from `Platform/Program.cs`. Dialogue, Relationships, WorldSimulation, Reputation, Court and
+`CharactersService.X`; the members used across that boundary are `internal`. `CharactersRoutes.cs` (the
+`CharactersRoutes` class, called from `Platform/RouteTable.cs`) registers the service handlers;
+`CharacterConstruction.cs` and `CharacterProfiles.cs` were `Program` partials split from `Platform/Program.cs`. Dialogue, Relationships, WorldSimulation, Reputation, Court and
 Platform call into it for identity, traits, profiles and NPC lives. Its static state (narrative and political-profile
 locks, the character editor authority cache, the town profile queue) lives in `CharactersService`. The self-tests
 listed below are `CharactersService` members.

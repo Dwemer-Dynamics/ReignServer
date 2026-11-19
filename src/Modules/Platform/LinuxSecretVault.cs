@@ -5,7 +5,7 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class SettingsService
     {
         // Linux has no DPAPI: authenticate vaults with a separate, owner-only local key.
         private static byte[] LinuxVaultTransform(string vaultPath, byte[] input, bool encrypt)

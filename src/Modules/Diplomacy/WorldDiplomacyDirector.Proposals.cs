@@ -14,7 +14,7 @@ namespace ReignBetaServer
         {
             return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
-                ["command"] = Program.CanonicalCommand(ReadFirstString(decision, "command", "action", "type")),
+                ["command"] = ActionPipelineService.CanonicalCommand(ReadFirstString(decision, "command", "action", "type")),
                 ["actorHeroStringId"] = ReadString(ruler, "leaderHeroId", ""),
                 ["actorKingdomStringId"] = ReadString(ruler, "kingdomId", ""),
                 ["actorClanStringId"] = ReadString(ruler, "rulingClanId", ""),
@@ -64,7 +64,7 @@ namespace ReignBetaServer
                 if (original.TryGetValue(key, out object value)) next[key] = value;
             }
 
-            next["command"] = Program.CanonicalCommand(ReadFirstString(answer,
+            next["command"] = ActionPipelineService.CanonicalCommand(ReadFirstString(answer,
                 "command", "action", "type"));
             string settlementId = ReadFirstString(answer, "targetSettlementId",
                 "targetSettlementStringId");
@@ -110,7 +110,7 @@ namespace ReignBetaServer
             if (failures.Any(x => x.IndexOf("durationDays",
                     StringComparison.OrdinalIgnoreCase) >= 0))
                 return "The proposed treaty omitted a valid duration, so it could not be concluded.";
-            string command = Program.CanonicalCommand(ReadString(candidate, "command", ""))
+            string command = ActionPipelineService.CanonicalCommand(ReadString(candidate, "command", ""))
                 .Replace('_', ' ');
             return "The revised " + (string.IsNullOrWhiteSpace(command)
                 ? "diplomatic" : command) + " terms were not executable, so no agreement was reached.";
@@ -226,9 +226,9 @@ namespace ReignBetaServer
                     "effectiveAttitude", 0d);
                 string command = ReadString(candidate, "command", "");
                 double factor = IsDirectorPeaceCommand(command) ? 0.15d
-                    : Program.ContainsAny(command, "exchange_prisoners", "ransom_package",
+                    : DialogueService.ContainsAny(command, "exchange_prisoners", "ransom_package",
                         "loan_or_subsidy", "supply_agreement") ? 0.10d
-                    : Program.ContainsAny(command, "demand_", "war_indemnity",
+                    : DialogueService.ContainsAny(command, "demand_", "war_indemnity",
                         "protectorate", "vassalage", "demilitarized") ? 0.08d
                     : 0.20d;
                 double cap = IsDirectorPeaceCommand(command) ? 15d
@@ -295,7 +295,7 @@ namespace ReignBetaServer
         private static List<string> ValidateDirectorCandidate(Dictionary<string, object> candidate, Dictionary<string, object> world, string playerKingdomId, string mode, string fixedTargetId)
         {
             List<string> errors = new List<string>();
-            string command = Program.CanonicalCommand(ReadString(candidate, "command", ""));
+            string command = ActionPipelineService.CanonicalCommand(ReadString(candidate, "command", ""));
             string actorId = ReadFirstString(candidate, "actorKingdomStringId", "actorKingdomId");
             string targetId = ReadFirstString(candidate, "targetKingdomStringId", "targetKingdomId");
             Dictionary<string, object> actor = FindDirectorKingdom(world, actorId);
@@ -378,7 +378,7 @@ namespace ReignBetaServer
         internal static void ValidateDirectorTerms(Dictionary<string, object> candidate, Dictionary<string, object> world, Dictionary<string, object> actor, Dictionary<string, object> target, List<string> errors)
         {
             Dictionary<string, object> terms = ReadDictionary(candidate, "terms") ?? new Dictionary<string, object>();
-            string command = Program.CanonicalCommand(ReadString(candidate, "command", ""));
+            string command = ActionPipelineService.CanonicalCommand(ReadString(candidate, "command", ""));
             string settlementId = FirstNonEmpty(ReadFirstString(candidate, "targetSettlementId", "targetSettlementStringId"), ReadFirstString(terms, "targetSettlementId", "settlementId"));
             List<string> settlementIds = ReadStringList(terms, "settlementIds")
                 .Where(x => !string.IsNullOrWhiteSpace(x))
@@ -432,7 +432,7 @@ namespace ReignBetaServer
             }
             if (command == "ransom_package" && ReadInt(terms, "gold", 0) <= 0)
                 errors.Add("ransom package requires positive gold");
-            if (Program.ContainsAny(command, "sign_trade_agreement",
+            if (DialogueService.ContainsAny(command, "sign_trade_agreement",
                     "sign_non_aggression_pact", "sign_alliance",
                     "sign_defensive_pact", "demilitarized_border")
                 && ReadInt(terms, "durationDays", 0) <= 0)

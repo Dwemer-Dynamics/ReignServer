@@ -17,7 +17,7 @@ namespace ReignBetaServer
             // the scheduler's not-started release on busy/stopping rejection or pre-start
             // cancellation. Pending rows, leases and generation fences are untouched; the next
             // existing scheduling trigger re-admits the campaign.
-            Program.TryEnqueuePriorityBackgroundWork("personal_gossip." + campaign, "normal", () =>
+            OperationsService.TryEnqueuePriorityBackgroundWork("personal_gossip." + campaign, "normal", () =>
             {
                 try { RunPersonalGossipWork(campaign, ComposePersonalGossip); }
                 finally { PersonalGossipWorkers.TryRemove(campaign, out _); }
@@ -115,7 +115,7 @@ namespace ReignBetaServer
                     int delaySeconds = PersonalGossipCompositionDelaySeconds(data);
                     if (delaySeconds > 0) Thread.Sleep(delaySeconds * 1000);
                 }
-                catch (Exception ex) { result = GossipFields("error", Program.LimitText(ex.Message, 500)); }
+                catch (Exception ex) { result = GossipFields("error", DialogueService.LimitText(ex.Message, 500)); }
                 Program.CampaignDataGate.EnterReadLock();
                 try
                 {
@@ -334,7 +334,7 @@ namespace ReignBetaServer
         }
 
         private static Dictionary<string, object> ComposePersonalGossip(Dictionary<string, object> data, bool reply)
-            => ComposePersonalGossip(data, reply, Program.ChatWithLlm);
+            => ComposePersonalGossip(data, reply, LlmProviderService.ChatWithLlm);
 
         private static Dictionary<string, object> ComposePersonalGossip(Dictionary<string, object> data, bool reply,
             Func<Dictionary<string, object>, Dictionary<string, object>> respond)
@@ -480,7 +480,7 @@ namespace ReignBetaServer
             double bond = GossipConfidenceBond(c, self, people, ReadStringList(result, "confidenceOwnerIds"), confidencePlayer);
             int chance = GossipDetailChance(traits, ReadString(result, "privacy", "personal"), GossipFeeling(result, "feeling"), affinity, bond,
                 ReadBool(result, "ownCompromising", false), ReadBool(result, "promisedSecrecy", false), 0);
-            chance = Program.GossipAdjustedChance(chance, "disclosure", ReadDictionary(data, "policy"));
+            chance = SettingsService.GossipAdjustedChance(chance, "disclosure", ReadDictionary(data, "policy"));
             if (quote.Length > 0 && GossipDecisionRoll(data, ReadString(data, "messageId", ""), "reply_disclosure") > chance)
             {
                 // A refusal contains no confidence; it does not invite another recipient or provider attempt.
@@ -513,7 +513,7 @@ namespace ReignBetaServer
             }
             data["replyEvidence"] = selectedEvidence;
             data["recipientMemory"] = memory.ToString();
-            data["traits"] = Program.ReadJsonObject(Program.CharacterFile(campaign, speaker, "traits.json"));
+            data["traits"] = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, speaker, "traits.json"));
         }
 
         private static Dictionary<string, object> PersonalGossipReplyEvidenceBrief(Dictionary<string, object> data, Dictionary<string, object> evidence) =>
@@ -556,7 +556,7 @@ namespace ReignBetaServer
                 bool reply = ReadInt(row, "is_reply", 0) != 0;
                 var source = ReadDictionary(data, "speaker");
                 var target = ReadDictionary(data, "recipient");
-                var recipientTraits = Program.ReadJsonObject(Program.CharacterFile(campaign, recipient, "traits.json"));
+                var recipientTraits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, recipient, "traits.json"));
                 int credibility = ReadString(data, "claimKind", "") == "question" ? 50
                     : GossipCredibility(GossipAffinity(c, recipient, speaker, target, source), GossipTrait(recipientTraits, "socialTrust"),
                         ReadString(data, "account", "firsthand"), Math.Max(0, ReadInt(row, "hop", 1) - 1), false, false, false);
@@ -666,7 +666,7 @@ namespace ReignBetaServer
             if (DialogueStore.SelectPersonalGossipTopics4(c, GossipFields("id", id)).Count > 0) return;
             topic["id"] = id; topic["speakerId"] = owner; topic["speaker"] = ReadDictionary(replyData, "speaker");
             topic["policy"] = new Dictionary<string, object>(ReadDictionary(source, "policy"));
-            ReadDictionary(topic, "policy")["chanceAdjustments"] = Program.PersonalGossipChanceOptions(Program.LoadSettings());
+            ReadDictionary(topic, "policy")["chanceAdjustments"] = SettingsService.PersonalGossipChanceOptions(SettingsService.LoadSettings());
             topic["receivedMessageId"] = original; topic["sourceQuote"] = ReadString(source, "body", "");
             topic.Remove("sourceEncounterTurns"); topic.Remove("sourceContextOmittedWholeTurns"); topic.Remove("compositionReview");
             // This quotation was addressed to the new holder by the previous holder.

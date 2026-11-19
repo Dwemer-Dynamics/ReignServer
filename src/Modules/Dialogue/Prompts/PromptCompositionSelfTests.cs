@@ -51,8 +51,8 @@ namespace ReignBetaServer
                     office ? "AUTHORITATIVE_OFFICE_FIXTURE" : "", room, metadata);
                 var rules = ReadDictionaryList(metadata, "rules");
                 bool valid = rules.Count == rules.Select(row => ReadString(row, "ruleId", "")).Distinct().Count()
-                    && prompt.Contains(NormalizePromptSegment(ScopeConversationTone(Program.LoadPromptTemplate("world_tone.txt"))))
-                    && (noble == false ? !prompt.Contains("NOBLE PROMPT") : prompt.Contains(NormalizePromptSegment(ScopeConversationTone(Program.LoadPromptTemplate("noble_prompt.txt")))))
+                    && prompt.Contains(NormalizePromptSegment(ScopeConversationTone(PromptService.LoadPromptTemplate("world_tone.txt"))))
+                    && (noble == false ? !prompt.Contains("NOBLE PROMPT") : prompt.Contains(NormalizePromptSegment(ScopeConversationTone(PromptService.LoadPromptTemplate("noble_prompt.txt")))))
                     && prompt.Contains("Plausibility is not evidence") && prompt.Contains("successful receipt")
                     && prompt.IndexOf("WORLD TONE", StringComparison.Ordinal) < prompt.IndexOf("AUTHORITATIVE FACT BOUNDARY", StringComparison.Ordinal)
                     && (eventMode || prompt.Contains("Always include socialSignals"))
@@ -86,7 +86,7 @@ namespace ReignBetaServer
                 && !structuredPrefix.Contains("ACTION GATE RULES"), null);
             foreach (string schemaName in new[] { "dialogue_output_schema.json", "event_output_schema.json" })
             {
-                var actionOutput = TryParseJsonObject(ConversationActionOutputSchema(Program.LoadPromptTemplate(schemaName), true));
+                var actionOutput = TryParseJsonObject(ConversationActionOutputSchema(PromptService.LoadPromptTemplate(schemaName), true));
                 var decision = ReadDictionary(actionOutput, "structuredActionDecision");
                 add("structured_json_example_has_complete_none_decision_" + schemaName, decision != null
                     && new[] { "kind", "proposalId", "revision", "termsHash", "reason", "clauses" }.All(decision.ContainsKey)
@@ -161,9 +161,9 @@ namespace ReignBetaServer
                             ["role"] = "npc", ["speaker"] = "Fixture Speaker", ["speakerHeroStringId"] = id, ["text"] = "NPC_HISTORY_SENTINEL" }
                     };
                     // The duplicated feed repeats durable statements; the shared beat is not a statement ID.
-                    var rows = Program.CanonicalizePromptTranscript(transcriptFixture.Concat(transcriptFixture), 30);
+                    var rows = DialogueService.CanonicalizePromptTranscript(transcriptFixture.Concat(transcriptFixture), 30);
                     snapshot["priorLines"] = rows;
-                    var messages = Program.BuildTestMessages(empty, payload, snapshot,
+                    var messages = VerificationService.BuildTestMessages(empty, payload, snapshot,
                         new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
                         mode, out string text, out var diagnostics);
                     var drinkBudget = ReadDictionary(diagnostics, "drinkPromptBudget");
@@ -208,10 +208,10 @@ namespace ReignBetaServer
                 ["partyInventoryValue"] = 0, ["visibleWealthTier"] = "destitute", ["personalWealthTier"] = "wealthy", ["clanGold"] = 602877 };
             var facts = PromptWealthFacts(historical);
             add("legacy_no_party_is_not_visible_destitution", !facts.ContainsKey("visibleWealthTier") && !facts.ContainsKey("partyInventoryValue")
-                && ReadString(facts, "personalWealthTier", "") == Program.WealthTier(10000)
+                && ReadString(facts, "personalWealthTier", "") == DialogueService.WealthTier(10000)
                 && ReadString(historical, "visibleWealthTier", "") == "destitute", facts);
             var richDressPoorCash = PromptWealthFacts(new Dictionary<string, object> {
-                ["version"] = 3, ["gold"] = 0, ["personalWealthTier"] = Program.WealthTier(0), ["clanGold"] = 500000,
+                ["version"] = 3, ["gold"] = 0, ["personalWealthTier"] = DialogueService.WealthTier(0), ["clanGold"] = 500000,
                 ["partyInventoryValue"] = null, ["partyInventoryState"] = "not_applicable" });
             add("poor_cash_rich_clan_and_dress_remain_independent", ReadInt(richDressPoorCash, "gold", -1) == 0
                 && ReadInt(richDressPoorCash, "clanGold", 0) == 500000 && !richDressPoorCash.ContainsKey("visibleWealthTier")
@@ -244,8 +244,8 @@ namespace ReignBetaServer
                 add("retirement_archives_exact_original_and_is_idempotent", !File.Exists(known) && archives.Length == 1
                     && File.ReadAllText(archives[0], Encoding.UTF8) == legacyLetter
                     && !Program.PromptFileNames.Contains("correspondence_user_template.txt")
-                    && !Program.DefaultPromptTemplates().ContainsKey("dialogue_user_template.txt")
-                    && !Program.IsPromptFileNameAllowed("dialogue_user_template.txt"), null);
+                    && !PromptService.DefaultPromptTemplates().ContainsKey("dialogue_user_template.txt")
+                    && !PromptService.IsPromptFileNameAllowed("dialogue_user_template.txt"), null);
             }
             finally
             {

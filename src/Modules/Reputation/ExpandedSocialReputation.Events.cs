@@ -160,7 +160,7 @@ namespace ReignBetaServer
                     if (existing != null)
                     {
                         Dictionary<string, object> mappings =
-                            Program.DictionaryOrDefault(existing, "roleMappings",
+                            CharactersService.DictionaryOrDefault(existing, "roleMappings",
                                 new Dictionary<string, object>());
                         List<string> mappedTags = mappings.TryGetValue(role,
                                 out object mappedValue)
@@ -323,7 +323,7 @@ namespace ReignBetaServer
         {
             if (!string.Equals(ReadFirstString(item, "eventType", "event_type", "type"), "social_outcome", StringComparison.OrdinalIgnoreCase))
                 return;
-            Dictionary<string, object> payload = Program.DictionaryOrDefault(item, "payload", item);
+            Dictionary<string, object> payload = CharactersService.DictionaryOrDefault(item, "payload", item);
             string eventId = FirstNonEmpty(ReadFirstString(item, "eventId", "event_id", "id"), ReadString(payload, "sourceEventId", ""));
             string subjectId = ReadFirstString(payload, "subjectId", "heroId");
             string archetypeId = ReadString(payload, "archetypeId", "");
@@ -441,7 +441,7 @@ namespace ReignBetaServer
         {
             if (string.IsNullOrWhiteSpace(eventId)) return;
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            string message = Program.LimitText(error == null ? "Unknown social outcome failure." : error.Message, 1000);
+            string message = DialogueService.LimitText(error == null ? "Unknown social outcome failure." : error.Message, 1000);
             bool ownsConnection = sharedConnection == null;
             ReignDbConnection connection = sharedConnection
                 ?? ReignDatabase.OpenCampaignConnection(campaignId);
@@ -478,7 +478,7 @@ namespace ReignBetaServer
             Dictionary<string, object> archetype = archetypes.FirstOrDefault(x =>
                 string.Equals(ReadString(x, "id", ""), archetypeId, StringComparison.OrdinalIgnoreCase));
             if (archetype != null)
-                outcomeTags.AddRange(Program.DictionaryOrDefault(archetype, "roleMappings", new Dictionary<string, object>())
+                outcomeTags.AddRange(CharactersService.DictionaryOrDefault(archetype, "roleMappings", new Dictionary<string, object>())
                     .Values.SelectMany(ValueTextList));
             // An archetype whose ID is also a tag ID has an unambiguous
             // canonical outcome tag. Always include it: legacy or customized
@@ -521,7 +521,7 @@ namespace ReignBetaServer
                         ["subject"] = subjectId, ["tag"] = counterTag
                     });
                 foreach (Dictionary<string, object> counterArchetype in archetypes.Where(x =>
-                    Program.DictionaryOrDefault(x, "roleMappings", new Dictionary<string, object>()).Values
+                    CharactersService.DictionaryOrDefault(x, "roleMappings", new Dictionary<string, object>()).Values
                         .SelectMany(ValueTextList).Contains(counterTag, StringComparer.OrdinalIgnoreCase)))
                 {
                     ReputationStore.DeleteRumorExposureStreaks(connection, new Dictionary<string, object>

@@ -161,7 +161,7 @@ namespace ReignBetaServer
                     job.Remaining = 0;
                     job.CompletedUtc = DateTime.UtcNow.ToString("o");
                 }
-                Program.LogOperational("portrait.derivatives.completed", PortraitDerivativeJobSnapshot(job));
+                OperationsService.LogOperational("portrait.derivatives.completed", PortraitDerivativeJobSnapshot(job));
             }
             catch (Exception ex)
             {
@@ -319,7 +319,7 @@ namespace ReignBetaServer
                 job.CompletedUtc = DateTime.UtcNow.ToString("o");
                 AddPortraitDerivativeError(job, folder, error);
             }
-            Program.LogOperational("portrait.derivatives.failed", PortraitDerivativeJobSnapshot(job));
+            OperationsService.LogOperational("portrait.derivatives.failed", PortraitDerivativeJobSnapshot(job));
         }
 
         private static void AddPortraitDerivativeError(PortraitDerivativeJobState job, string folder, string error)
@@ -513,7 +513,7 @@ namespace ReignBetaServer
                     ["portraitNanoGptImageModel"] = "step-image-edit-2",
                     ["portraitNanoGptImageEditsUrl"] = "https://unused.invalid"
                 };
-                bool migrated = Program.NormalizePortraitImageSettings(oldSettings);
+                bool migrated = SettingsService.NormalizePortraitImageSettings(oldSettings);
                 AddPortraitDerivativeTest(rows, "step_model_migration", migrated
                     && ReadString(oldSettings, "portraitNanoGptImageModel", "") == "gpt-image-1.5"
                     && !oldSettings.ContainsKey("portraitNanoGptImageEditsUrl"),
@@ -529,7 +529,7 @@ namespace ReignBetaServer
                 File.WriteAllBytes(recoveryPortrait, sourcePng);
                 File.WriteAllBytes(recoverySource, sourcePng);
                 File.WriteAllText(recoveryPrompt, "recovery prompt", Encoding.UTF8);
-                Program.WriteJsonObject(recoveryMetadata, new Dictionary<string, object>
+                CampaignFileService.WriteJsonObject(recoveryMetadata, new Dictionary<string, object>
                 {
                     ["campaignId"] = "campaign_recovery",
                     ["heroStringId"] = "hero_recovery",
@@ -574,7 +574,7 @@ namespace ReignBetaServer
                     PortraitCompositionError(vaminesaFocus) == null
                     && PortraitDerivativeCore.PortraitCompositionError(vaminesaFocus) == null,
                     "The saved Vaminesa receipt's 8.89481008% face passes the one shared client/server gate without regenerating its image.");
-                string compositionSourceRoot = Program.FindVerificationSourceRoot();
+                string compositionSourceRoot = VerificationService.FindVerificationSourceRoot();
                 string compositionClientSource = string.IsNullOrEmpty(compositionSourceRoot) ? "" :
                     VerificationSourceLocator.ReadClientTypeSourceText(Path.Combine(compositionSourceRoot, "ReignBeta"), "PortraitCache");
                 AddPortraitDerivativeTest(rows, "composition_client_shared_gate_wiring",

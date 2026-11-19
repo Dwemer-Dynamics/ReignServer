@@ -31,7 +31,7 @@ namespace ReignBetaServer
                 try
                 {
                     SemanticPumpLastCycleUtc = DateTime.UtcNow;
-                    Dictionary<string, object> settings = Program.LoadSettings();
+                    Dictionary<string, object> settings = SettingsService.LoadSettings();
                     if (ReadBool(settings, "enableSemanticMemory", true) && !stopRequested())
                     {
                         StartManagedSemanticWorker(settings, stopRequested);
@@ -50,7 +50,7 @@ namespace ReignBetaServer
                             if (SemanticIndexShouldYield()) break;
                             string campaignId =
                                 ReadString(campaign, "campaignId", "");
-                            if (Program.HasLocalCampaignMetadata(campaignId))
+                            if (CampaignFileService.HasLocalCampaignMetadata(campaignId))
                             {
                                 Program.CampaignDataGate.EnterReadLock();
                                 try
@@ -81,7 +81,7 @@ namespace ReignBetaServer
                 }
                 if (token.WaitHandle.WaitOne(processed > 0 ? 150 : 3000)) break;
             }
-            Program.LogOperational("semantic.index_pump_stopped", new Dictionary<string, object>
+            OperationsService.LogOperational("semantic.index_pump_stopped", new Dictionary<string, object>
             {
                 ["generation"] = generation,
                 ["cancelled"] = token.IsCancellationRequested,
@@ -97,7 +97,7 @@ namespace ReignBetaServer
             // quiet period was short enough for an embedding batch to start in the
             // middle and make the next foreground semantic search wait several seconds.
             return Program.InteractiveRequestActiveOrRecent(10000)
-                || Program.PriorityBackgroundWorkShouldYield();
+                || OperationsService.PriorityBackgroundWorkShouldYield();
         }
 
         private static int ProcessSemanticJobs(string campaignId, Dictionary<string, object> settings)
@@ -188,7 +188,7 @@ namespace ReignBetaServer
                             ["payload"] = document.Payload
                         }).ToList();
                         Dictionary<string, object> response = TryParseJsonObject(
-                            Program.PostJsonToUrl(SemanticWorkerUrl(settings, "/vectors/upsert"),
+                            DialogueService.PostJsonToUrl(SemanticWorkerUrl(settings, "/vectors/upsert"),
                                 Json.Serialize(request), 60000));
                         if (!ReadBool(response, "ok", false))
                             throw new InvalidOperationException(
@@ -223,7 +223,7 @@ namespace ReignBetaServer
                         Dictionary<string, object> request = SemanticProviderRequest(settings);
                         request["collection"] = SemanticCollection;
                         request["ids"] = ids;
-                        Program.PostJsonToUrl(SemanticWorkerUrl(settings, "/vectors/delete"), Json.Serialize(request), 15000);
+                        DialogueService.PostJsonToUrl(SemanticWorkerUrl(settings, "/vectors/delete"), Json.Serialize(request), 15000);
                     }
                     using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                     using (var deletion = connection.BeginTransaction())
@@ -317,13 +317,13 @@ namespace ReignBetaServer
             Dictionary<string, object> row, string text, Dictionary<string, object> settings)
         {
             string provider = ReadString(settings, "vectorProvider", "local").ToLowerInvariant();
-            var sourcePayload = Program.KnowledgePayload(row);
+            var sourcePayload = DialogueService.KnowledgePayload(row);
             string timeline = FirstNonEmpty(ReadString(row, "timeline_id", ""), ReadString(sourcePayload, "timelineId", ""));
             bool mental = sourceType == "belief" || sourceType == "comprehension";
-            var knownBy = Program.TextListFromJson(ReadString(row, "known_by_json", "[]"));
-            if (!mental) knownBy = knownBy.Concat(Program.TextListFromJson(ReadString(row, "participants_json", "[]")))
-                .Concat(Program.TextListFromJson(ReadString(row, "witnesses_json", "[]")))
-                .Concat(Program.TextListFromJson(ReadString(row, "heard_as_rumor_by_json", "[]"))).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var knownBy = DialogueService.TextListFromJson(ReadString(row, "known_by_json", "[]"));
+            if (!mental) knownBy = knownBy.Concat(DialogueService.TextListFromJson(ReadString(row, "participants_json", "[]")))
+                .Concat(DialogueService.TextListFromJson(ReadString(row, "witnesses_json", "[]")))
+                .Concat(DialogueService.TextListFromJson(ReadString(row, "heard_as_rumor_by_json", "[]"))).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             string vectorId = DeterministicSemanticGuid(campaignId + "|" + ReadString(row, "timeline_id", "") + "|" + sourceType + "|" + sourceId + "|" + SemanticModelVersion);
             Dictionary<string, object> payload = new Dictionary<string, object>
             {
@@ -334,9 +334,9 @@ namespace ReignBetaServer
                 ["memoryLane"] = FirstNonEmpty(ReadFirstString(row, "memory_lane", "memory_domain"), InferEmbeddingLane(sourceType, row)),
                 ["ownerId"] = sourceType == "conversation_turn" ? ReadString(row, "speaker_id", "") : ReadFirstString(row, "owner_id", "believer_id"),
                 ["knownBy"] = mental ? new List<string>() : knownBy,
-                ["hiddenFrom"] = Program.TextListFromJson(ReadString(row, "hidden_from_json", "[]")),
+                ["hiddenFrom"] = DialogueService.TextListFromJson(ReadString(row, "hidden_from_json", "[]")),
                 ["privateMental"] = mental, ["eligibilityVersion"] = 2,
-                ["publicUnscoped"] = !mental && !Program.KnowledgeHasExplicitScope(row, sourcePayload)
+                ["publicUnscoped"] = !mental && !DialogueService.KnowledgeHasExplicitScope(row, sourcePayload)
                     && new[] { "public", "world", "global", "common" }.Contains(ReadString(row, "visibility", "private")),
                 ["sourceHash"] = MemorySourceHash(new[] { row }),
                 ["visibility"] = ReadString(row, "visibility", "private"),
@@ -406,7 +406,7 @@ namespace ReignBetaServer
             DialogueStore.UpdateEmbeddingJobs(connection, new Dictionary<string, object>
                 {
                     ["attempts"] = attempts, ["next"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() + delay,
-                    ["error"] = Program.LimitText(error, 500), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                    ["error"] = DialogueService.LimitText(error, 500), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                     ["type"] = ReadString(job, "source_type", ""), ["id"] = ReadString(job, "source_id", "")
                 });
         }

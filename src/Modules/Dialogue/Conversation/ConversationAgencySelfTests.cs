@@ -90,7 +90,7 @@ namespace ReignBetaServer
                 && ReadString(ReadDictionary(soldierUpdate, "terms"), "conditions", "") == ""
                 && ReadString(soldierUpdate, "reconsideration", "").Contains("transparency")
                 && ReadDictionaryList(soldierReply, "continuityWrites").Count == 1, soldierEvaluation);
-            var ambiguousSoldier = Program.CloneDictionary(soldierReply);
+            var ambiguousSoldier = CloneDictionary(soldierReply);
             soldierContext["playerText"] = "I agree.";
             add("ambiguous_agreement_does_not_clear_soldier_condition",
                 !TryResolveSoldierNoticeCondition(ambiguousSoldier, soldierContext), null);
@@ -223,7 +223,7 @@ namespace ReignBetaServer
             add("condition_does_not_execute_immediately", !ReadBool(EvaluateConversationAgency(AgencyTestReply(condition), context), "ok", true), null);
             condition["disposition"] = "conditional";
             add("conditional_agreement_can_be_recorded", ReadBool(EvaluateConversationAgency(AgencyTestReply(condition), context), "ok", false), null);
-            var conditionalContext = Program.CloneDictionary(context);
+            var conditionalContext = CloneDictionary(context);
             condition["objections"] = new[] { "duty" };
             conditionalContext["records"] = ReadDictionaryList(EvaluateConversationAgency(AgencyTestReply(condition), conditionalContext), "updates");
             var unfulfilled = AgencyTestProposal(conditionalContext, "accepted", "");
@@ -279,10 +279,10 @@ namespace ReignBetaServer
                 && IsTechnicalConversationNotice(ReadString(failedVisible, "reply", ""))
                 && ReadDictionaryList(failedVisible, "proposalDecisions").Count == 0
                 && ReadDictionaryList(failedVisible, "relationshipAssessments").Count == 0
-                && !Program.ActionGateShouldPlan(ReadDictionary(failedVisible, "actionGate"))
+                && !ActionPipelineService.ActionGateShouldPlan(ReadDictionary(failedVisible, "actionGate"))
                 && !ReadBool(ReadDictionary(failedVisible, "conversationAgencyReceipt"), "ok", true), enforced);
             add("failed_repair_marker_survives_display_sanitizer",
-                Program.SanitizeVisibleReply(ReadString(failedVisible, "reply", "")).EndsWith(".,", StringComparison.Ordinal), null);
+                ConversationResponseService.SanitizeVisibleReply(ReadString(failedVisible, "reply", "")).EndsWith(".,", StringComparison.Ordinal), null);
             var failedAuthorityErrors = new List<string>();
             add("failed_visible_reply_cannot_authorize_voluntary_action",
                 !BindConversationAgencyAuthority(TestDict("conversationAgencyReceipt", ReadDictionary(failedVisible, "conversationAgencyReceipt")),

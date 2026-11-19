@@ -91,9 +91,9 @@ namespace ReignBetaServer
                 string eventType = ReadFirstString(payload, "eventType", "event_type", "type");
                 string eventCategory = FirstNonEmpty(ReadFirstString(payload, "eventCategory", "event_category"),
                     ClassifyEventCategory(eventType, payload, ReadString(row, "summary", "")));
-                string domain = Program.MemoryDomainForWorldEventProjection(eventCategory, eventType,
+                string domain = DialogueService.MemoryDomainForWorldEventProjection(eventCategory, eventType,
                     ReadString(row, "memory_type", ""), ReadString(row, "summary", ""),
-                    Program.TextListFromJson(ReadString(row, "tags_json", "[]")), ReadString(row, "source", ""));
+                    DialogueService.TextListFromJson(ReadString(row, "tags_json", "[]")), ReadString(row, "source", ""));
                 DialogueStore.UpdateMemories(connection, new Dictionary<string, object> { ["domain"] = domain, ["id"] = ReadString(row, "memory_id", "") });
             }
             DialogueStore.UpsertSchemaMeta3(connection);
@@ -248,7 +248,7 @@ namespace ReignBetaServer
                     ["type"] = ReadString(signal, "type", ""),
                     ["speakerHeroId"] = ReadString(signal, "speakerHeroId", ""),
                     ["targetHeroId"] = ReadString(signal, "targetHeroId", ""),
-                    ["supportingQuote"] = Program.LimitText(ReadString(signal, "supportingQuote", ""), 512),
+                    ["supportingQuote"] = DialogueService.LimitText(ReadString(signal, "supportingQuote", ""), 512),
                     ["validated"] = ReadBool(signal, "validated", false),
                     ["validationSource"] = ReadString(signal, "validationSource", ""),
                     ["confidence"] = ReadString(signal, "confidence", ""),
@@ -264,9 +264,9 @@ namespace ReignBetaServer
             // Names only bind an explicit whisper recipient on later exact reads;
             // full character profiles and private persona fields are not copied.
             var attendees = ReadDictionaryList(source, "attendees").Take(16)
-                .Where(p => !string.IsNullOrWhiteSpace(Program.CharacterIdFrom(p)))
-                .Select(p => TestDict("heroStringId", Program.LimitText(Program.CharacterIdFrom(p), 160),
-                    "name", Program.LimitText(ReadString(p, "name", ""), 160))).ToList();
+                .Where(p => !string.IsNullOrWhiteSpace(CampaignFileService.CharacterIdFrom(p)))
+                .Select(p => TestDict("heroStringId", DialogueService.LimitText(CampaignFileService.CharacterIdFrom(p), 160),
+                    "name", DialogueService.LimitText(ReadString(p, "name", ""), 160))).ToList();
             if (attendees.Count > 0) compact["attendees"] = attendees;
             if (ReadDictionary(source, "conversationGrounding") is { } grounding)
                 compact["conversationGrounding"] = TestDict("schema", "reign-conversation-grounding-v1",
@@ -343,7 +343,7 @@ namespace ReignBetaServer
             };
             foreach (string key in new[] { "inputSourceId", "contributionId", "conversationGrounding", "playerNarrationProjectionVersion" })
                 if (compact.ContainsKey(key)) fallback[key] = compact[key];
-            Program.LogOperational("storage.conversation_turn_payload_guard", new Dictionary<string, object>
+            OperationsService.LogOperational("storage.conversation_turn_payload_guard", new Dictionary<string, object>
             {
                 ["characters"] = json.Length, ["hardLimitCharacters"] = hardLimitCharacters,
                 ["correlationId"] = ReadString(compact, "correlationId", "")
@@ -376,20 +376,20 @@ namespace ReignBetaServer
 
                 Dictionary<string, object> first = rows[0];
                 string canonicalId = "mem_world_" + Guid.NewGuid().ToString("N");
-                Program.InsertMemoryRow(connection, canonicalId, eventId, "", "world_knowledge",
+                DialogueService.InsertMemoryRow(connection, canonicalId, eventId, "", "world_knowledge",
                     ReadLong(first, "ts", now), ReadDouble(first, "world_day", 0d), ReadString(first, "location_id", ""),
-                    ReadString(first, "summary", ""), Program.TextListFromJson(ReadString(first, "participants_json", "[]")),
-                    Program.TextListFromJson(ReadString(first, "witnesses_json", "[]")), ReadString(first, "about_entities_json", "[]"),
-                    new List<string>(), Program.TextListFromJson(ReadString(first, "heard_as_rumor_by_json", "[]")),
-                    Program.TextListFromJson(ReadString(first, "hidden_from_json", "[]")), ReadString(first, "visibility", "public"),
+                    ReadString(first, "summary", ""), DialogueService.TextListFromJson(ReadString(first, "participants_json", "[]")),
+                    DialogueService.TextListFromJson(ReadString(first, "witnesses_json", "[]")), ReadString(first, "about_entities_json", "[]"),
+                    new List<string>(), DialogueService.TextListFromJson(ReadString(first, "heard_as_rumor_by_json", "[]")),
+                    DialogueService.TextListFromJson(ReadString(first, "hidden_from_json", "[]")), ReadString(first, "visibility", "public"),
                     ReadDouble(first, "importance", 0.5d), ReadDouble(first, "emotional_weight", 0d), ReadDouble(first, "confidence", 1d),
-                    Program.TextListFromJson(ReadString(first, "tags_json", "[]")), "active", "legacy_canonical_migration",
+                    DialogueService.TextListFromJson(ReadString(first, "tags_json", "[]")), "active", "legacy_canonical_migration",
                     ReadString(first, "payload_json", "{}"), "", "not_indexed");
                 DialogueStore.UpdateMemories3(connection, new Dictionary<string, object> { ["id"] = canonicalId });
 
                 HashSet<string> direct = new HashSet<string>(
-                    rows.SelectMany(row => Program.TextListFromJson(ReadString(row, "participants_json", "[]"))
-                        .Concat(Program.TextListFromJson(ReadString(row, "witnesses_json", "[]")))), StringComparer.OrdinalIgnoreCase);
+                    rows.SelectMany(row => DialogueService.TextListFromJson(ReadString(row, "participants_json", "[]"))
+                        .Concat(DialogueService.TextListFromJson(ReadString(row, "witnesses_json", "[]")))), StringComparer.OrdinalIgnoreCase);
                 foreach (Dictionary<string, object> row in rows)
                 {
                     string memoryId = ReadString(row, "memory_id", "");
@@ -398,7 +398,7 @@ namespace ReignBetaServer
                     {
                         DialogueStore.UpdateMemories4(connection, new Dictionary<string, object> { ["known"] = Json.Serialize(new List<string> { ownerId }), ["id"] = memoryId });
                         UpsertKnowledgeReceipt(connection, eventId, ownerId,
-                            Program.TextListFromJson(ReadString(row, "witnesses_json", "[]")).Contains(ownerId, StringComparer.OrdinalIgnoreCase) ? "witness" : "participant",
+                            DialogueService.TextListFromJson(ReadString(row, "witnesses_json", "[]")).Contains(ownerId, StringComparer.OrdinalIgnoreCase) ? "witness" : "participant",
                             ReadDouble(row, "confidence", 1d), 1d, ReadDouble(row, "world_day", 0d), memoryId, now);
                     }
                     else
@@ -411,7 +411,7 @@ namespace ReignBetaServer
 
         private static void ImportLegacyConversationHistory(ReignDbConnection connection, string campaignId)
         {
-            string charactersDir = Path.Combine(Program.CampaignDirectory(campaignId), "characters");
+            string charactersDir = Path.Combine(CampaignFileService.CampaignDirectory(campaignId), "characters");
             if (!Directory.Exists(charactersDir))
             {
                 return;
@@ -478,10 +478,10 @@ namespace ReignBetaServer
             DialogueStore.DeleteMemoryFts(connection);
             foreach (Dictionary<string, object> row in DialogueStore.SelectMemories7(connection))
             {
-                Program.InsertMemoryFts(connection, ReadString(row, "memory_id", ""), ReadString(row, "summary", ""),
-                    Program.TextListFromJson(ReadString(row, "tags_json", "[]")),
-                    Program.TextListFromJson(ReadString(row, "about_entities_json", "[]"))
-                        .Concat(Program.TextListFromJson(ReadString(row, "participants_json", "[]"))).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+                DialogueService.InsertMemoryFts(connection, ReadString(row, "memory_id", ""), ReadString(row, "summary", ""),
+                    DialogueService.TextListFromJson(ReadString(row, "tags_json", "[]")),
+                    DialogueService.TextListFromJson(ReadString(row, "about_entities_json", "[]"))
+                        .Concat(DialogueService.TextListFromJson(ReadString(row, "participants_json", "[]"))).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
             }
             DialogueStore.DeleteConversationTurnFts(connection);
             foreach (Dictionary<string, object> row in DialogueStore.SelectConversationTurns49(connection))
@@ -534,7 +534,7 @@ namespace ReignBetaServer
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             string channel = ReadString(payload, "channel", "in_person");
             string locationId = ReadFirstString(payload, "locationId", "settlementId", "currentSettlementId");
-            List<string> participants = Program.MergeStringLists(ReadStringList(payload, "participants"), new[] { npcId, playerId });
+            List<string> participants = DialogueService.MergeStringLists(ReadStringList(payload, "participants"), new[] { npcId, playerId });
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 DialogueStore.InsertOrIgnoreConversationSessions6(connection, new Dictionary<string, object>
@@ -554,7 +554,7 @@ namespace ReignBetaServer
             string sessionId = ReadFirstString(payload, "sessionId", "conversationSessionId", "conversationId");
             if (string.IsNullOrWhiteSpace(sessionId))
             {
-                return Program.MemoryConversationFinishedApi(payload);
+                return DialogueService.MemoryConversationFinishedApi(payload);
             }
             var finished = FinishConversationSession(campaignId, sessionId, ReadString(payload, "reason", "closed_by_game"),
                 ReadBool(payload, "interrupted", false), ReadDouble(payload, "worldDay", 0d),
@@ -653,7 +653,7 @@ namespace ReignBetaServer
             Dictionary<string,object> arc = ReadDictionary(scene,"arc") ?? new Dictionary<string,object>();
             Dictionary<string,object> continuityArcRepairs = ReadDictionary(scene,"continuityArcRepairs") ?? new Dictionary<string,object>();
             string playerId = ReadString(session, "player_id", "");
-            List<string> memoryOwners = Program.TextListFromJson(ReadString(session, "participants_json", "[]"))
+            List<string> memoryOwners = DialogueService.TextListFromJson(ReadString(session, "participants_json", "[]"))
                 .Where(id => !string.IsNullOrWhiteSpace(id)
                     && !string.Equals(id, playerId, StringComparison.OrdinalIgnoreCase))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -687,13 +687,13 @@ namespace ReignBetaServer
                 courtSocial = new Dictionary<string, object>
                 {
                     ["processed"] = false,
-                    ["error"] = Program.LimitText(ex.Message, 1000)
+                    ["error"] = DialogueService.LimitText(ex.Message, 1000)
                 };
-                Program.LogOperational("court_social.conversation_finish_failed",
+                OperationsService.LogOperational("court_social.conversation_finish_failed",
                     new Dictionary<string, object>
                     {
                         ["campaignId"] = campaignId, ["sessionId"] = sessionId,
-                        ["error"] = Program.LimitText(ex.ToString(), 4000)
+                        ["error"] = DialogueService.LimitText(ex.ToString(), 4000)
                     });
             }
             Dictionary<string, object> ambassadorReport;
@@ -703,10 +703,10 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                ambassadorReport = new Dictionary<string, object> { ["processed"] = false, ["error"] = Program.LimitText(ex.Message, 1000) };
-                Program.LogOperational("ambassador.scene_finalize_failed", new Dictionary<string, object>
+                ambassadorReport = new Dictionary<string, object> { ["processed"] = false, ["error"] = DialogueService.LimitText(ex.Message, 1000) };
+                OperationsService.LogOperational("ambassador.scene_finalize_failed", new Dictionary<string, object>
                 {
-                    ["campaignId"] = campaignId, ["sessionId"] = sessionId, ["error"] = Program.LimitText(ex.ToString(), 4000)
+                    ["campaignId"] = campaignId, ["sessionId"] = sessionId, ["error"] = DialogueService.LimitText(ex.ToString(), 4000)
                 });
             }
             return new Dictionary<string, object>
@@ -743,7 +743,7 @@ namespace ReignBetaServer
             double worldDay = ReadDouble(request, "worldDay", 0d);
             string locationId = ReadFirstString(request, "locationId", "currentSettlementId", "settlementId");
             string channel = ReadString(request, "channel", "in_person");
-            List<string> participants = Program.MergeStringLists(ReadStringList(request, "participants"), new[] { npcId, playerId });
+            List<string> participants = DialogueService.MergeStringLists(ReadStringList(request, "participants"), new[] { npcId, playerId });
             int nextOrder;
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
@@ -827,8 +827,8 @@ namespace ReignBetaServer
             request = request ?? new Dictionary<string, object>();
             channel = string.IsNullOrWhiteSpace(channel) ? "party_chat" : channel;
             string sessionId = FirstNonEmpty(ReadFirstString(request, "conversationSessionId", "sessionId", "conversationId"), fallbackSessionId);
-            List<string> participants = Program.MergeStringLists(
-                Program.MergeStringLists(ReadStringList(request, "participants"), ReadStringList(request, "activeHeroIds")),
+            List<string> participants = DialogueService.MergeStringLists(
+                DialogueService.MergeStringLists(ReadStringList(request, "participants"), ReadStringList(request, "activeHeroIds")),
                 new[] { npcId, playerId });
             double worldDay = ReadDouble(request, "worldDay", 0d);
             string locationId = ReadFirstString(request, "locationId", "currentSettlementId", "settlementId");
@@ -881,8 +881,8 @@ namespace ReignBetaServer
                     return result;
                 }
                 Dictionary<string, object> session = DialogueStore.SelectConversationSessions13(connection, new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault();
-                var sessionParticipants = Program.MergeStringLists(
-                    Program.TextListFromJson(ReadString(session, "participants_json", "[]")),
+                var sessionParticipants = DialogueService.MergeStringLists(
+                    DialogueService.TextListFromJson(ReadString(session, "participants_json", "[]")),
                     participants);
 
                 var existingPlayer = DialogueStore.SelectConversationTurns52(connection, new Dictionary<string, object> { ["turn"] = playerTurnId }).FirstOrDefault();
@@ -985,7 +985,7 @@ namespace ReignBetaServer
             if (ReadString(stored, "session_id", "") != sessionId || ReadString(stored, "exchange_id", "") != (exchangeId ?? "")
                 || ReadString(stored, "role", "") != (role ?? "") || ReadString(stored, "speaker_id", "") != (speakerId ?? "")
                 || ReadString(stored, "text", "") != (text ?? "") || ReadString(stored, "channel", "") != (channel ?? "in_person")
-                || !audience.SetEquals(Program.TextListFromJson(ReadString(stored, "participants_json", "[]")))
+                || !audience.SetEquals(DialogueService.TextListFromJson(ReadString(stored, "participants_json", "[]")))
                 || ReadString(storedPayload, "timelineId", "") != ReadString(payload, "timelineId", ""))
                 throw new InvalidOperationException("A conversation source ID already belongs to different words, identity, audience or timeline.");
             if (!technicalNotice) StoreChatViewFrame(connection, turnId, sessionId, exchangeId, payload);
@@ -1027,7 +1027,7 @@ namespace ReignBetaServer
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             string senderId = ReadString(letter, "sender_id", "");
             string recipientId = ReadString(letter, "recipient_id", "");
-            List<string> participants = Program.MergeStringLists(new[] { senderId, recipientId, npcId, playerId }, new List<string>());
+            List<string> participants = DialogueService.MergeStringLists(new[] { senderId, recipientId, npcId, playerId }, new List<string>());
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 using var transaction = connection.BeginTransaction();

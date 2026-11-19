@@ -82,7 +82,7 @@ namespace ReignBetaServer
         internal static void ResumePendingReputationReasonJobs()
         {
             System.Threading.Volatile.Write(ref ReputationReasonResumeOutcome, "queued");
-            Program.TryEnqueuePriorityBackgroundWork("reputation.reason.resume", "maintenance", () =>
+            OperationsService.TryEnqueuePriorityBackgroundWork("reputation.reason.resume", "maintenance", () =>
             {
                 string outcome = "failed";
                 try { outcome = ReconcileRecordedReputationReasonsAtStartup(); }
@@ -92,11 +92,11 @@ namespace ReignBetaServer
 
         private static string ReconcileRecordedReputationReasonsAtStartup()
         {
-            string root = Program.CampaignsRoot();
+            string root = CampaignFileService.CampaignsRoot();
             if (!Directory.Exists(root)) return "completed";
             foreach (string directory in Directory.GetDirectories(root))
             {
-                if (Program.PriorityBackgroundWorkShouldYield()) return "yielded";
+                if (OperationsService.PriorityBackgroundWorkShouldYield()) return "yielded";
                 string campaignId = Path.GetFileName(directory);
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
@@ -178,7 +178,7 @@ namespace ReignBetaServer
             foreach (Dictionary<string, object> archetype in ReadDictionaryList(catalog, "archetypes")
                 .Where(item => ReadBool(item, "enabled", true) && !ReadBool(item, "directReputation", false)))
             {
-                foreach (KeyValuePair<string, object> role in Program.DictionaryOrDefault(archetype, "roleMappings", new Dictionary<string, object>()))
+                foreach (KeyValuePair<string, object> role in CharactersService.DictionaryOrDefault(archetype, "roleMappings", new Dictionary<string, object>()))
                 {
                     List<Dictionary<string, object>> mapped = ValueTextList(role.Value)
                         .Where(byId.ContainsKey).Select(id => byId[id])
@@ -231,7 +231,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> CharacterEditorSocialRumorAddApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = FirstNonEmpty(ReadString(payload, "campaignId", ""), Program.LatestCampaignId());
+            string campaignId = FirstNonEmpty(ReadString(payload, "campaignId", ""), SettingsService.LatestCampaignId());
             string subjectId = ReadFirstString(payload, "heroStringId", "heroId", "subjectId");
             string archetypeId = ReadString(payload, "archetypeId", "");
             string role = ReadString(payload, "role", "");
@@ -270,7 +270,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> CharacterEditorSocialReputationAddApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = FirstNonEmpty(ReadString(payload, "campaignId", ""), Program.LatestCampaignId());
+            string campaignId = FirstNonEmpty(ReadString(payload, "campaignId", ""), SettingsService.LatestCampaignId());
             string subjectId = ReadFirstString(payload, "heroStringId", "heroId", "subjectId");
             string tagId = ReadString(payload, "tagId", "");
             string incident = (ReadString(payload, "incidentDescription", "") ?? "").Trim();
@@ -330,7 +330,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> CharacterEditorSocialReasonRetryApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = FirstNonEmpty(ReadString(payload, "campaignId", ""), Program.LatestCampaignId());
+            string campaignId = FirstNonEmpty(ReadString(payload, "campaignId", ""), SettingsService.LatestCampaignId());
             string activationId = ReadString(payload, "activationId", "");
             if (string.IsNullOrWhiteSpace(activationId))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "activationId is required." };
@@ -354,7 +354,7 @@ namespace ReignBetaServer
             ReignDbConnection connection, string campaignId, string subjectId, string role)
         {
             Dictionary<string, object> roster = ReputationStore.SelectIdentityRoster(connection, new Dictionary<string, object> { ["id"] = subjectId }).FirstOrDefault();
-            Dictionary<string, object> profile = Program.ReadJsonObject(Program.CharacterFile(campaignId, subjectId, "profile.json"));
+            Dictionary<string, object> profile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, subjectId, "profile.json"));
             bool alive = roster != null ? ReadInt(roster, "is_alive", 1) != 0 : ReadBool(profile, "isAlive", true);
             bool adult = roster != null ? ReadInt(roster, "is_adult", 1) != 0 : !ReadBool(profile, "isChild", false);
             if (!alive || !adult) return null;

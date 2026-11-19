@@ -14,24 +14,24 @@ namespace ReignBetaServer
 
         // Returned by a handler that has already written its own response (HTML, a file or a download) and logged
         // the request. HandleClient then returns without writing JSON, exactly like the former early returns.
-        private static readonly object RouteResponseWritten = new object();
+        internal static readonly object RouteResponseWritten = new object();
 
-        private delegate object RouteHandler(HttpRequest request, RouteContext route);
+        internal delegate object RouteHandler(HttpRequest request, RouteContext route);
 
-        private sealed class RouteContext
+        internal sealed class RouteContext
         {
             public NetworkStream Stream;
             // Only the request that published the pending delete-all owner signals its response.
             public bool DeleteAllResponsePending;
         }
 
-        private enum RouteMatch
+        internal enum RouteMatch
         {
             Exact,
             Prefix
         }
 
-        private enum CampaignGatePolicy
+        internal enum CampaignGatePolicy
         {
             // The request holds a CampaignDataGate read lease for its whole lifetime.
             Read,
@@ -39,7 +39,7 @@ namespace ReignBetaServer
             None
         }
 
-        private sealed class ReignRoute
+        internal sealed class ReignRoute
         {
             public string Method;
             public RouteMatch Match;
@@ -65,7 +65,7 @@ namespace ReignBetaServer
                 + Comparison + " " + Path;
         }
 
-        private sealed class CampaignGateExemptArea
+        internal sealed class CampaignGateExemptArea
         {
             public string Prefix;
             // A path equal to this, or below it, stays gated (compared case-insensitively, like the prefix).
@@ -80,7 +80,7 @@ namespace ReignBetaServer
             }
         }
 
-        private sealed class ReignRouteTable
+        internal sealed class ReignRouteTable
         {
             private readonly List<ReignRoute> _routes = new List<ReignRoute>();
             private readonly List<CampaignGateExemptArea> _exemptAreas = new List<CampaignGateExemptArea>();
@@ -155,26 +155,26 @@ namespace ReignBetaServer
             private static RouteHandler Wrap(Func<HttpRequest, object> handler) => (request, route) => handler(request);
         }
 
-        private static readonly Lazy<ReignRouteTable> ServerRoutes =
+        internal static readonly Lazy<ReignRouteTable> ServerRoutes =
             new Lazy<ReignRouteTable>(BuildServerRouteTable, LazyThreadSafetyMode.ExecutionAndPublication);
 
         private static ReignRouteTable BuildServerRouteTable()
         {
             ReignRouteTable routes = new ReignRouteTable();
             RegisterPlatformRoutes(routes);
-            RegisterPersistenceRoutes(routes);
-            RegisterCharactersRoutes(routes);
-            RegisterDialogueRoutes(routes);
-            RegisterRelationshipsRoutes(routes);
-            RegisterReputationRoutes(routes);
-            RegisterWorldSimulationRoutes(routes);
-            RegisterDiplomacyRoutes(routes);
-            RegisterGovernmentRoutes(routes);
-            RegisterRebellionRoutes(routes);
-            RegisterPortraitsRoutes(routes);
+            PersistenceRoutes.RegisterPersistenceRoutes(routes);
+            CharactersRoutes.RegisterCharactersRoutes(routes);
+            DialogueRoutes.RegisterDialogueRoutes(routes);
+            RelationshipsRoutes.RegisterRelationshipsRoutes(routes);
+            ReputationRoutes.RegisterReputationRoutes(routes);
+            WorldSimulationRoutes.RegisterWorldSimulationRoutes(routes);
+            DiplomacyRoutes.RegisterDiplomacyRoutes(routes);
+            GovernmentRoutes.RegisterGovernmentRoutes(routes);
+            RebellionRoutes.RegisterRebellionRoutes(routes);
+            PortraitsRoutes.RegisterPortraitsRoutes(routes);
 #if !REIGN_EXCLUDE_COURT
-            RegisterCourtRoutes(routes);
-            RegisterSpymasterRoutes(routes);
+            CourtRoutes.RegisterCourtRoutes(routes);
+            SpymasterRoutes.RegisterSpymasterRoutes(routes);
 #endif
             return routes.Seal();
         }

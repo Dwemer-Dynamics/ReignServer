@@ -120,7 +120,7 @@ namespace ReignBetaServer
                 "Modules/Platform/VerificationLab.cs", "Modules/Platform/VerificationLab.Contracts.cs",
                 "Modules/Platform/VerificationLab.Suites.cs", "Modules/Platform/VerificationLab.Support.cs",
                 "Modules/Platform/VerificationSourceLocator.cs",
-                "Modules/Platform/CodexPerformanceVerification.cs", "Modules/Court/CapitalAmbassadorTestSystem.cs",
+                "Modules/Platform/Providers/CodexPerformanceVerification.cs", "Modules/Court/CapitalAmbassadorTestSystem.cs",
                 "Modules/Portraits/BackgroundPortraitContracts.cs", "Modules/Dialogue/Gossip/PersonalGossipCompositionProbe.cs"
             };
         private static readonly Regex TypeDeclarationPattern = new Regex(
@@ -152,6 +152,40 @@ namespace ReignBetaServer
         {
             ClientSourceSnapshot snapshot = GetClientSnapshot(clientRoot);
             return snapshot == null ? string.Empty : snapshot.TypeText(typeName);
+        }
+
+        // The code that was the Program partial class before the module services and providers took it over: files
+        // declaring Program or one of the Platform area services, the domain handler files that were
+        // Program.<Area>.cs, and the module route files.
+        private static readonly Regex ProgramAreaTypePattern = new Regex(
+            @"\bpartial\s+class\s+(Program|LlmProviderService|SettingsService|PromptService|ActionPipelineService|"
+            + @"ConversationResponseService|CampaignFileService|OperationsService|VerificationService)\b",
+            RegexOptions.CultureInvariant);
+        private static readonly HashSet<string> FormerProgramHandlerFiles = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "CharacterConstruction.cs", "CharacterProfiles.cs", "ContextPulls.cs", "DialogueTurns.cs",
+            "EventConversations.cs", "MemoryPacket.cs", "MemoryRetrieval.cs", "MemoryStore.cs", "PromptContext.cs",
+            "PortraitRequests.cs"
+        };
+
+        internal static bool IsProgramAreaSource(string relativePath, string text)
+        {
+            string name = Path.GetFileName(relativePath);
+            return FormerProgramHandlerFiles.Contains(name)
+                || name.EndsWith("Routes.cs", StringComparison.Ordinal)
+                || ProgramAreaTypePattern.IsMatch(text ?? "");
+        }
+
+        /// <summary>
+        /// The product server source of the former <c>Program</c> area (see <see cref="IsProgramAreaSource"/>),
+        /// concatenated in ordinal relative-path order; verification-only sources are left out, as they were from the
+        /// <c>Program</c> type text. Empty when the server root is unavailable.
+        /// </summary>
+        public static string ReadServerProgramAreaSourceText(string serverRoot)
+        {
+            ClientSourceSnapshot snapshot = GetServerProductSnapshot(serverRoot);
+            return snapshot == null ? string.Empty : string.Join("\n\n", snapshot.Files
+                .Where(file => IsProgramAreaSource(file.Key, file.Value)).Select(file => file.Value));
         }
 
         /// <summary>

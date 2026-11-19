@@ -114,7 +114,7 @@ namespace ReignBetaServer
                     Check("exhausted_restored_work_is_explicitly_incomplete", ReadString(RelationshipsSelfTestStore.SelectCorrespondenceDeliveryJobs(connection, TestDict("id", interrupted)).Single(), "status", "") == "incomplete");
                 }
             }
-            catch (Exception ex) { Check("suite_exception", false, Program.LimitText(ex.ToString(), 2400)); }
+            catch (Exception ex) { Check("suite_exception", false, DialogueService.LimitText(ex.ToString(), 2400)); }
             finally { release.Set(); if (work != null) work.Wait(TimeSpan.FromSeconds(25)); ReignPostgreSqlStorage.DropCampaign(campaign); }
             return results;
         }

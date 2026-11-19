@@ -266,7 +266,7 @@ namespace ReignBetaServer
             int modelHeadingLength = ConversationVenueHeadingLength(reply);
             string body = modelHeadingLength > 0 ? reply.Substring(modelHeadingLength) : reply;
             string date = ReadString(payload, "conversationDateLabel", "");
-            string owner = ReadString(MergedInteractionParticipantProfiles(payload).FirstOrDefault(p => Program.CharacterIdFrom(p) == observer), "name", "");
+            string owner = ReadString(MergedInteractionParticipantProfiles(payload).FirstOrDefault(p => CampaignFileService.CharacterIdFrom(p) == observer), "name", "");
             string label = owner.Length > 0 ? Regex.Replace(venue, @"^(?:her|his|their)\s+", owner + "'s ", RegexOptions.IgnoreCase) : venue;
             string settlement = ReadFirstString(payload, "currentSettlementName", "settlementName");
             if (settlement.Length > 0 && !label.Contains(settlement, StringComparison.OrdinalIgnoreCase)) label = settlement + ", " + label;
@@ -343,7 +343,7 @@ namespace ReignBetaServer
                 return true;
             }
             CharactersService.ConstrainNpcLeaveReply(payload, observer, parsed, ref reply);
-            var candidate = Program.CloneDictionary(parsed ?? TestDict()); candidate["reply"] = reply;
+            var candidate = CloneDictionary(parsed ?? TestDict()); candidate["reply"] = reply;
             var issues = FindCriticalConversationContinuityViolations(candidate, payload, observer);
             // Run after any continuity rewrite. A conditional NPC choice cannot
             // safely be repaired by retaining accept and deleting its condition.

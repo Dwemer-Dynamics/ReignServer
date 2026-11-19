@@ -15,7 +15,7 @@ namespace ReignBetaServer
                 ["suite"] = "relationship_throughput", ["summary"] = summary, ["durationMs"] = 0
             });
             string retentionRoot = System.IO.Path.Combine(Program.TestsDir, "v");
-            var retained = Program.VerificationReferencedSandboxNames(retentionRoot, new[]
+            var retained = VerificationService.VerificationReferencedSandboxNames(retentionRoot, new[]
             {
                 new Dictionary<string, object> { ["runId"] = "verify-123-abcdefgh", ["sandboxPath"] = System.IO.Path.Combine(retentionRoot, "r-abcdefgh") },
                 new Dictionary<string, object> { ["sandboxPath"] = System.IO.Path.Combine(retentionRoot, "..", "outside") },
@@ -253,7 +253,7 @@ namespace ReignBetaServer
                 lock (RelationshipReadyGate) { RelationshipReadyCampaigns.Remove(campaign); RelationshipReadyVersions.Remove(campaign); }
                 ReignPostgreSqlStorage.ClearAllPools();
                 try { ReignPostgreSqlStorage.DropCampaign(campaign); } catch { }
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaign));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaign));
             }
             RunRelationshipNativeObservationWriterTests(add);
             RunRelationshipReplaySemanticTests(add);
@@ -306,7 +306,7 @@ namespace ReignBetaServer
                             new Dictionary<string, string>()));
                     PersistenceService.ClearSaveSyncCaches(campaign);
                     ReignPostgreSqlStorage.DropCampaign(campaign);
-                    PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaign));
+                    PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaign));
                 }
                 RelationshipThroughputOriginalReadPath = false;
                 add("queued_hero_changes_preserve_historical_day",
@@ -392,7 +392,7 @@ namespace ReignBetaServer
                 RelationshipThroughputOriginalReadPath = previousOriginalPath;
                 PersistenceService.ClearSaveSyncCaches(campaign);
                 ReignPostgreSqlStorage.DropCampaign(campaign);
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaign));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaign));
             }
         }
 
@@ -542,7 +542,7 @@ namespace ReignBetaServer
                 }
                 ReignPostgreSqlStorage.ClearAllPools();
                 try { ReignPostgreSqlStorage.DropCampaign(campaign); } catch { }
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaign));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaign));
             }
         }
     }

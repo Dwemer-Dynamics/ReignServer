@@ -84,7 +84,7 @@ namespace ReignBetaServer
                     var source = originals.Single();
                     string id = ReadString(source, "turn_id", ""), original = originalInputs[value.Payload];
                     var metadata = TryParseJsonObject(ReadString(source, "payload_json", "{}"));
-                    var authors = Program.TextListFromJson(ReadString(source, "participants_json", "[]"));
+                    var authors = DialogueService.TextListFromJson(ReadString(source, "participants_json", "[]"));
                     return id == captured.SourceId && captured.Original == original && ReadString(source, "text", "") == original
                         && ReadString(source, "role", "") == "player_source" && ReadString(source, "channel", "") == "player_input_source"
                         && ReadString(source, "speaker_id", "") == value.Player && ReadInt(source, "turn_order", 0) < 0
@@ -93,7 +93,7 @@ namespace ReignBetaServer
                         && ReadString(metadata, "exactTextHash", "") == ConversationExactTextHash(original)
                         && ReadString(metadata, "evidenceType", "") == "original_player_input" && !ReadBool(metadata, "retrievalEligible", true)
                         && new[] { value.Hero, "listener" }.All(observer => !PrecisionTurnVisible(source, observer,
-                            Program.BuildKnowledgeAccessContext(observer, value.Player, value.Location, value.Payload), connection))
+                            DialogueService.BuildKnowledgeAccessContext(observer, value.Player, value.Location, value.Payload), connection))
                         && DialogueSelfTestStore.SelectConversationTurnFts(connection, TestDict("id", id)).Count == 0;
                 }
                 var unit = Unit("atomic", effects: true);
@@ -169,7 +169,7 @@ namespace ReignBetaServer
                 mixedRecall.PlayerText = "I just counted eight sealed crates by the inner door. What were my terms from our previous conversation?";
                 mixedRecall.Payload["playerText"] = mixedRecall.PlayerText;
                 mixedRecall.RetrievalEligible = !IsPureConversationRecallRequest(mixedRecall.PlayerText);
-                mixedRecall.Memories = Program.NormalizeMemoryWrites(new[] { TestDict("text", mixedRecall.PlayerText, "ownerId", "npc", "sourceEvidence",
+                mixedRecall.Memories = ActionPipelineService.NormalizeMemoryWrites(new[] { TestDict("text", mixedRecall.PlayerText, "ownerId", "npc", "sourceEvidence",
                     TestDict("turnId", "current_player", "speakerId", "player", "quote", mixedRecall.PlayerText)) }, campaign, "npc", mixedRecall.Timestamp);
                 var mixedRecallReceipt = ReadDictionary(Publish(mixedRecall), "acceptedUnit");
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
@@ -193,7 +193,7 @@ namespace ReignBetaServer
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     var rows = DialogueSelfTestStore.SelectConversationTurns7(connection, TestDict("id", privateUnit.EventId));
-                    var access = Program.BuildKnowledgeAccessContext("listener", "player", "", privateUnit.Payload);
+                    var access = DialogueService.BuildKnowledgeAccessContext("listener", "player", "", privateUnit.Payload);
                     Check("whisper_accepts_both_projections_without_private_leak", AcceptedSourcesMatch(privateUnit, 4)
                         && ReadDictionary(ReadDictionary(whisper, "acceptedUnit"), "privateExchange").Count > 0
                         && rows.Where(r => PrecisionTurnVisible(r, "listener", access)).All(r => !ReadString(r, "text", "").Contains("SECRET-ORCHARD-901")));
@@ -262,7 +262,7 @@ namespace ReignBetaServer
                     string listener = ReadString(DialogueSelfTestStore.SelectConversationSceneHandoffs(connection).Single(), "payload_json", "");
                     Check("private_handoff_and_introduction_do_not_reach_bystander", !listener.Contains("SECRET-SPOKEN-901")
                         && ReadDictionaryList(privateContextReceipt, "introductions").All(item => !ReadBool(item, "ok", true)));
-                    var falseIntroducer = Program.CloneDictionary(contextUnit.Parsed);
+                    var falseIntroducer = CloneDictionary(contextUnit.Parsed);
                     falseIntroducer["identityIntroductions"] = new[] { TestDict("observerId", "player", "subjectId", "npc", "introducerId", "listener",
                         "claimedName", "Michael", "supportingQuote", "Let me introduce Michael.") };
                     var invalid = CharactersService.ApplyIdentityIntroductionWrites(campaign, contextUnit.Payload, falseIntroducer, "test", "npc", "player",
@@ -271,7 +271,7 @@ namespace ReignBetaServer
                     var thought = CharactersService.ApplyIdentityIntroductionWrites(campaign, contextUnit.Payload, contextUnit.Parsed, "test", "npc", "player", "Hello.",
                         "*She thinks: Let me introduce Michael.*", new[] { "npc", "player", "listener" }, connection);
                     Check("private_narration_cannot_verify_an_introduction", thought.Count == 1 && !ReadBool(thought[0], "ok", true));
-                    var playerScene = Program.CloneDictionary(contextUnit.Payload);
+                    var playerScene = CloneDictionary(contextUnit.Payload);
                     var playerUpdate = TestDict("sceneStateUpdates", new[] { TestDict("heroStringId", "player", "location", "garden",
                         "supportingQuote", "I walk into the garden.") });
                     var playerMoved = FinalizeConversationSceneState(campaign, playerScene, "npc", "*I walk into the garden.*",
@@ -345,7 +345,7 @@ namespace ReignBetaServer
                     && pendingPrompt.Contains("MEMORY UPDATE INCOMPLETE") && pendingPrompt.Contains("current revision 2")
                     && pendingPrompt.Contains("The repairs are still under discussion."));
                 Check("pending_source_remains_private_and_time_scoped",
-                    !BuildProtectedConversationContinuity(campaign, "listener", Program.CloneDictionary(resolution.Payload), TestDict()).Contains("MEMORY UPDATE INCOMPLETE")
+                    !BuildProtectedConversationContinuity(campaign, "listener", CloneDictionary(resolution.Payload), TestDict()).Contains("MEMORY UPDATE INCOMPLETE")
                     && !BuildProtectedConversationContinuity(campaign, "npc", new Dictionary<string, object>(resolution.Payload) { ["timelineId"] = "other" }, TestDict()).Contains("MEMORY UPDATE INCOMPLETE")
                     && !BuildProtectedConversationContinuity(campaign, "npc", new Dictionary<string, object>(resolution.Payload) { ["worldDay"] = 19d }, TestDict()).Contains("MEMORY UPDATE INCOMPLETE")
                     && !BuildProtectedConversationContinuity(campaign, "npc", new Dictionary<string, object>(resolution.Payload) { ["memoryAsOfTimestamp"] = 19L }, TestDict()).Contains("MEMORY UPDATE INCOMPLETE"));
@@ -353,7 +353,7 @@ namespace ReignBetaServer
                 {
                     using var transaction = connection.BeginTransaction();
                     DialogueSelfTestStore.UpdateConversationTurns8(connection, TestDict("event", losing.EventId));
-                    var changedPayload = Program.CloneDictionary(resolution.Payload);
+                    var changedPayload = CloneDictionary(resolution.Payload);
                     CaptureContinuityReadSnapshot(connection, changedPayload, "npc");
                     string changedPrompt = BuildPendingContinuityPrompt(connection, changedPayload, "npc", "player", new List<string>());
                     Check("pending_changed_source_is_withheld_with_gap", changedPrompt.Length == 0
@@ -562,7 +562,7 @@ namespace ReignBetaServer
 
                 var noOptIn = Unit("view_insertion_without_opt_in");
                 var noOptInReceipt = ReadDictionary(Publish(noOptIn), "acceptedUnit");
-                var borrowed = Program.CloneDictionary(viewDescriptor); borrowed["unitId"] = noOptIn.EventId;
+                var borrowed = CloneDictionary(viewDescriptor); borrowed["unitId"] = noOptIn.EventId;
                 Check("view_insertion_without_descriptor_or_old_receipt_is_unknown", ReadDictionary(noOptInReceipt, "viewInsertion") == null
                     && ReadString(Ack(borrowed), "reason", "") == "no_view_insertion_descriptor"
                     && ReadString(Ack(viewDescriptor, "unitId", unit.EventId), "reason", "") == "no_view_insertion_descriptor"

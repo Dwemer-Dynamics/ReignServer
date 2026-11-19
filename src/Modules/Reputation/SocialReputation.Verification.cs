@@ -150,7 +150,7 @@ namespace ReignBetaServer
                 "The revisioned catalog contains every combat, ruler-governance, and court-personality producer.", null);
 
             string campaignId = "__social_reputation_test_" + Guid.NewGuid().ToString("N");
-            string campaignPath = Program.CampaignDirectory(campaignId);
+            string campaignPath = CampaignFileService.CampaignDirectory(campaignId);
             try
             {
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
@@ -685,7 +685,7 @@ namespace ReignBetaServer
                     Dictionary<string, object> reaffirmedEvidence = TryParseJsonObject(
                         ReadString(reaffirmedActivation, "evidence_json", "{}"))
                         ?? new Dictionary<string, object>();
-                    string reaffirmedCorrelation = ReadString(Program.DictionaryOrDefault(
+                    string reaffirmedCorrelation = ReadString(CharactersService.DictionaryOrDefault(
                         reaffirmedEvidence, "dynamicEvidence", new Dictionary<string, object>()),
                         "sourceCorrelationId", "");
                     bool rejectedUnauthorizedProducer = ApplyCourtDynamicSocialOutcome(connection,
@@ -706,7 +706,7 @@ namespace ReignBetaServer
                     add("court_noble_judgment_direct_reputation_tags",
                         judgmentResults.OfType<Dictionary<string, object>>().All(x =>
                             ReadBool(x, "handled", false)
-                            && ReadBool(Program.DictionaryOrDefault(x, "result",
+                            && ReadBool(CharactersService.DictionaryOrDefault(x, "result",
                                 new Dictionary<string, object>()), "changed", false))
                         && judgmentRows.Count == NobleJudgmentDirectTagIds.Length
                         && judgmentRows.All(x => ReadString(x, "status", "") == "active")

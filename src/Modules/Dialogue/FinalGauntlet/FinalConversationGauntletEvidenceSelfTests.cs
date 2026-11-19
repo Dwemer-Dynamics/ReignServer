@@ -21,8 +21,8 @@ namespace ReignBetaServer
             string correlation = "corr-evidence";
             try
             {
-                string auditPath = Program.CampaignFile(campaignId, "audit", "audit.jsonl");
-                Program.AppendJsonLineToPath(auditPath, new Dictionary<string, object>
+                string auditPath = CampaignFileService.CampaignFile(campaignId, "audit", "audit.jsonl");
+                CampaignFileService.AppendJsonLineToPath(auditPath, new Dictionary<string, object>
                 {
                     ["correlationId"] = correlation,
                     ["phase"] = "prompt.built",
@@ -51,7 +51,7 @@ namespace ReignBetaServer
                         }
                     }
                 });
-                Program.AppendJsonLineToPath(auditPath, new Dictionary<string, object>
+                CampaignFileService.AppendJsonLineToPath(auditPath, new Dictionary<string, object>
                 {
                     ["correlationId"] = correlation,
                     ["phase"] = "llm.response",
@@ -69,7 +69,7 @@ namespace ReignBetaServer
                         ["retryNumber"] = 1
                     }
                 });
-                Program.AppendJsonLineToPath(auditPath, new Dictionary<string, object>
+                CampaignFileService.AppendJsonLineToPath(auditPath, new Dictionary<string, object>
                 {
                     ["correlationId"] = correlation,
                     ["phase"] = "action.validation",
@@ -142,7 +142,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaignId));
             }
             return checks;
         }

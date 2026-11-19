@@ -25,7 +25,7 @@ namespace ReignBetaServer
             if (proposed == null || proposed.Count == 0) return null;
             var result = new Dictionary<string, object>();
             foreach (string key in new[] { "itemId", "description", "personalMeaning", "supportingQuote", "evidenceEventId" })
-                result[key] = Program.LimitText(ReadString(proposed, key, ""), key == "itemId" || key == "evidenceEventId" ? 160 : 600);
+                result[key] = DialogueService.LimitText(ReadString(proposed, key, ""), key == "itemId" || key == "evidenceEventId" ? 160 : 600);
             result["influence"] = ReadInt(proposed, "influence", 0);
             string quote = ReadString(result, "supportingQuote", "");
             result["quoteValidated"] = quote.Length >= 20 && (visibleReply ?? "").IndexOf(quote, StringComparison.Ordinal) >= 0;
@@ -73,7 +73,7 @@ namespace ReignBetaServer
         {
             if (string.IsNullOrWhiteSpace(exchangeId) || string.IsNullOrWhiteSpace(sessionId))
                 return new Dictionary<string, object> { ["status"] = "rejected", ["reason"] = "missing_conversation_evidence_identity" };
-            var basis = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "narrative.json"));
+            var basis = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "narrative.json"));
             var rows = CharactersStore.SelectDynamicCharacteristics2(connection, new Dictionary<string, object> { ["hero"] = heroId });
             string id = "narrative_development_" + DialogueService.PromptHash(heroId + "|" + ReadString(proposal, "itemId", "") + "|" + exchangeId).Substring(0, 24);
             var replay = rows.FirstOrDefault(x => ReadString(x, "characteristic_id", "") == id);
@@ -93,7 +93,7 @@ namespace ReignBetaServer
             {
                 var history = CharactersStore.SelectWorldHistoryEvents2(connection, new Dictionary<string, object> { ["event"] = evidenceId, ["campaign"] = campaignId, ["day"] = worldDay }).FirstOrDefault();
                 var participants = CharactersStore.SelectWorldHistoryEntities(connection, new Dictionary<string, object> { ["event"] = evidenceId }).Select(x => ReadString(x, "entity_id", "")).ToList();
-                var profile = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json"));
+                var profile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "profile.json"));
                 var family = ReadStringList(profile, "childrenIds").Concat(new[] { ReadString(profile, "fatherId", ""),
                     ReadString(profile, "motherId", ""), ReadString(profile, "spouseId", "") }).Where(x => x.Length > 0).ToList();
                 major = NarrativeMajorEventRelevant(item, history, heroId, family, participants, ReadString(proposal, "supportingQuote", ""));

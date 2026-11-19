@@ -74,10 +74,10 @@ namespace ReignBetaServer
                 old["drinkConsumptions"] = new[] { TestDict("completed", true, "serving", "drink", "count", 20) };
                 Check("old_channels_cannot_double_count", Amount(Turn(Payload("old_channels"), old)) == .25);
                 var duplicate = Action();
-                Check("duplicate_id_once", Amount(Turn(Payload("duplicate_id"), Draft(naturalReplies[0], duplicate, Program.CloneDictionary(duplicate)))) == .25);
+                Check("duplicate_id_once", Amount(Turn(Payload("duplicate_id"), Draft(naturalReplies[0], duplicate, CloneDictionary(duplicate)))) == .25);
                 Check("separate_ids_twice", Amount(Turn(Payload("separate_ids"), Draft(naturalReplies[1], Action(), Action("sip_2")))) == .5);
                 var anonymous = Action(); anonymous.Remove("id");
-                var inferred = Turn(Payload("inferred_id"), Draft(naturalReplies[0], anonymous, Program.CloneDictionary(anonymous)));
+                var inferred = Turn(Payload("inferred_id"), Draft(naturalReplies[0], anonymous, CloneDictionary(anonymous)));
                 Check("missing_ids_locally_deduplicated", Amount(inferred) == .25 && Diagnostic(inferred, "private_action_id_inferred"));
                 foreach (var malformed in new object[] { null, "drink wine", TestDict("operation", "consume"), 5, new object[] { "bad", null } }) {
                     var receipt = Turn(Payload("malformed_" + rows.Count), TestDict("reply", "Tell me more.", "drinkActions", malformed));
@@ -231,7 +231,7 @@ namespace ReignBetaServer
                 Turn(Payload("departure"), departure, true);
                 Check("departure_expires_physical_cups", ReadDictionaryList(Scene(), "vessels").Count == 0);
 
-                var defaults = Program.DefaultPromptTemplates();
+                var defaults = PromptService.DefaultPromptTemplates();
                 foreach (var mode in new[] { CodexConversationContractKind.Individual, CodexConversationContractKind.Group,
                     CodexConversationContractKind.Castle, CodexConversationContractKind.Social }) {
                     var selection = CodexConversationSchemas.Select(mode, defaults, defaults, TestDict());

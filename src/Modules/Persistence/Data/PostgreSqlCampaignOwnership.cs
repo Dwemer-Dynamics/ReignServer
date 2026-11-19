@@ -101,7 +101,7 @@ namespace ReignBetaServer
 
         private static void ClaimInternalCampaignOwnership(string campaignId)
         {
-            if (!Program.IsInternalCampaignId(campaignId))
+            if (!CampaignFileService.IsInternalCampaignId(campaignId))
                 return;
             lock (CampaignOwnershipLock)
             {
@@ -112,7 +112,7 @@ namespace ReignBetaServer
                     if (!CampaignOwnershipCapLogged)
                     {
                         CampaignOwnershipCapLogged = true;
-                        Program.LogOperational("campaign.ownership_cap_reached", new Dictionary<string, object>
+                        OperationsService.LogOperational("campaign.ownership_cap_reached", new Dictionary<string, object>
                         {
                             ["maximum"] = MaximumOwnedInternalCampaigns,
                             ["campaignId"] = campaignId
@@ -159,7 +159,7 @@ namespace ReignBetaServer
                         reclaimed++;
                     }
                 }
-                Program.LogOperational("campaign.ownership_session_reconnected", new Dictionary<string, object>
+                OperationsService.LogOperational("campaign.ownership_session_reconnected", new Dictionary<string, object>
                 {
                     ["operation"] = operation,
                     ["error"] = error.GetType().Name + ": " + error.Message,
@@ -170,7 +170,7 @@ namespace ReignBetaServer
             catch (Exception retryError)
             {
                 ResetCampaignOwnerConnection();
-                Program.LogOperational("campaign.ownership_session_failed", new Dictionary<string, object>
+                OperationsService.LogOperational("campaign.ownership_session_failed", new Dictionary<string, object>
                 {
                     ["operation"] = operation,
                     ["error"] = error.GetType().Name + ": " + error.Message,

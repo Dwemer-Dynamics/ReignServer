@@ -9,7 +9,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> SocialEventApproachRollApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
             string eventId = ReadString(payload, "eventId", "");
             if (string.IsNullOrWhiteSpace(eventId))
             {
@@ -27,7 +27,7 @@ namespace ReignBetaServer
             {
                 Dictionary<string, object> hero = candidates[index];
                 string heroId = ReadFirstString(hero, "heroStringId", "heroId");
-                Dictionary<string, object> traits = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"));
+                Dictionary<string, object> traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"));
                 if (!CharactersService.TraitPercentageDocumentReady(traits))
                 {
                     // Approaches must never trigger LLM construction. A deterministic
@@ -38,7 +38,7 @@ namespace ReignBetaServer
                 else
                 {
                     if (CharactersService.EnsureTraitPercentageData(traits, heroId))
-                        Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"), traits);
+                        CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"), traits);
                 }
 
                 Dictionary<string, object> virtues = ReadDictionary(traits, "courtVirtues") ?? new Dictionary<string, object>();
@@ -81,7 +81,7 @@ namespace ReignBetaServer
                 ["passedCandidates"] = passed,
                 ["relationshipRule"] = "adjustedBoldness = clamp(baseBoldness + round(relationToPlayer * 0.30), 0, 100)"
             };
-            Program.WriteAudit(campaignId, Program.EnsureCorrelationId(payload), "server", "social_event", "social_event.approach_roll", "", "", eventId, "completed", 0, "Social-event approaches resolved from boldness plus the signed player-relationship modifier and a d4 approach quota.", result);
+            OperationsService.WriteAudit(campaignId, OperationsService.EnsureCorrelationId(payload), "server", "social_event", "social_event.approach_roll", "", "", eventId, "completed", 0, "Social-event approaches resolved from boldness plus the signed player-relationship modifier and a d4 approach quota.", result);
             return result;
         }
 

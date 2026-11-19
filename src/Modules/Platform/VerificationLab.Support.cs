@@ -13,7 +13,7 @@ using System.Xml;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class VerificationService
     {
 		private static bool VerificationIndividualChatShellAperturesValid(
 			string path,

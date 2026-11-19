@@ -29,15 +29,15 @@ namespace ReignBetaServer
             Check("arguments_cannot_change_owner", Reject(() => badArgs.Execute("search_character_record", TestDict("query", "amber", "campaignId", "foreign")))
                 && Reject(() => badArgs.Execute("shell", TestDict())), "Models cannot select campaigns, observers, paths, SQL or other tools.");
 
-            var first = Program.BuildCodexRuntimeSelfTestContext("persistent-fixture", "accepted-history", "first");
+            var first = LlmProviderService.BuildCodexRuntimeSelfTestContext("persistent-fixture", "accepted-history", "first");
             first.PersistentRoleplay = true;
             first.IncrementalContext = "CURRENT ENGINE UPDATE: new scene, newly selected memory, latest contribution";
-            var pool = new Program.CodexThreadReusePool();
+            var pool = new LlmProviderService.CodexThreadReusePool();
             var lease = pool.RegisterNew(first, "persistent-thread");
             pool.RecordAcceptedHistorySignature(lease, "accepted-history");
             Check("large_foundation_retained", pool.Finalize(lease, true, false, 40000, true) == "",
                 "A 40k-token character foundation can remain warm; capacity uses the current input rather than summing repeated context counts.");
-            var second = Program.BuildCodexRuntimeSelfTestContext("persistent-fixture", "accepted-history", "second");
+            var second = LlmProviderService.BuildCodexRuntimeSelfTestContext("persistent-fixture", "accepted-history", "second");
             second.PersistentRoleplay = true; second.IncrementalContext = first.IncrementalContext;
             var warm = pool.Acquire(second);
             Check("current_context_delta", pool.TryGetAppendOnlyPrompt(warm, second, out string delta) && delta == second.IncrementalContext,
@@ -46,12 +46,12 @@ namespace ReignBetaServer
             Check("compaction_forces_fresh", pool.Finalize(warm, true, false, 45000, true) == "persistent-thread" && pool.Acquire(second) == null,
                 "Observed compaction retires the thread; the next turn must use a newly assembled game prompt.");
 
-            var previousScope = Program.ActiveCodexConversationScope.Value;
+            var previousScope = LlmProviderService.ActiveCodexConversationScope.Value;
             string campaign = "codex_roleplay_" + Guid.NewGuid().ToString("N");
             try
             {
                 var settings = TestDict("codexOptions", TestDict("lookupMode", "direct"));
-                Program.ActiveCodexConversationScope.Value = new Program.CodexConversationScope { Settings = settings };
+                LlmProviderService.ActiveCodexConversationScope.Value = new LlmProviderService.CodexConversationScope { Settings = settings };
                 var messages = new List<Dictionary<string, object>> {
                     TestDict("role", "system", "content", "Unchanged game rules and response contract"),
                     TestDict("role", "user", "content", "CHARACTER REFERENCE CONTEXT — complete supplied foundation"),
@@ -60,7 +60,7 @@ namespace ReignBetaServer
                     TestDict("role", "user", "content", "LATEST PLAYER TURN {\"speaker\":\"Player\"}\nWhat did you ask?") };
                 var request = TestDict("messages", messages);
                 string before = Json.Serialize(messages);
-                var metadata = TestDict("sessionId", "test-session", "timelineId", Program.CodexConversationTimeline(campaign));
+                var metadata = TestDict("sessionId", "test-session", "timelineId", LlmProviderService.CodexConversationTimeline(campaign));
                 var source = TestDict("worldDay", 5d, "memoryAsOfWorldDay", 3d, "playerHeroStringId", "player");
                 AttachCodexRoleplayContext(request, source, metadata, campaign, "npc", TestDict("knowsIdentity", true), TestDict());
                 Check("game_prompt_parity", Json.Serialize(messages) == before && ReadBool(metadata, "persistentRoleplay", false)
@@ -84,7 +84,7 @@ namespace ReignBetaServer
                 AttachCodexRoleplayContext(request, source, metadata, campaign, "npc", TestDict("knowsIdentity", true), TestDict());
                 Check("changed_rules_invalidate", initialAuthority != ReadString(metadata, "authorityHash", ""),
                     "Changed game rules, character reference or visibility create a different thread identity.");
-                var access = Program.ActiveCodexConversationScope.Value.MemoryAccess;
+                var access = LlmProviderService.ActiveCodexConversationScope.Value.MemoryAccess;
                 Check("default_timeline_and_time_fence", access.Knowledge.TimelineId == "main" && access.Knowledge.WorldDay == 3d,
                     "Missing native timeline means main, never all branches; the supplied memory time fence remains authoritative.");
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
@@ -101,27 +101,27 @@ namespace ReignBetaServer
                 var hits = ReadDictionaryList(access.Execute("search_character_record", TestDict("query", "amber", "limit", 8)), "records");
                 Check("database_visibility", hits.Count == 1 && ReadString(hits[0], "excerpt", "").Contains("old gate"),
                     "Full original-record lookup excludes future events, unheard conversations and another timeline before ranking.");
-                Program.InvalidateCodexConversationTimeline(campaign);
+                LlmProviderService.InvalidateCodexConversationTimeline(campaign);
                 Check("load_invalidates_tools", Reject(() => access.Execute("read_character_record", TestDict("id", ReadString(hits.FirstOrDefault(), "id", "")))),
                     "A save load invalidates even an already cached direct record snapshot.");
-                metadata["timelineId"] = Program.CodexConversationTimeline(campaign);
+                metadata["timelineId"] = LlmProviderService.CodexConversationTimeline(campaign);
                 source["guardedPromptOverride"] = true;
                 AttachCodexRoleplayContext(request, source, metadata, campaign, "npc", TestDict("knowsIdentity", true), TestDict());
-                var excluded = Program.ActiveCodexConversationScope.Value.MemoryAccess.Execute("search_character_record", TestDict("query", "amber"));
+                var excluded = LlmProviderService.ActiveCodexConversationScope.Value.MemoryAccess.Execute("search_character_record", TestDict("query", "amber"));
                 Check("guarded_archive_isolation", ReadString(excluded, "coverage", "") == "archive_unavailable"
                     && ReadDictionaryList(excluded, "records").Count == 0,
                     "Guarded certification contexts cannot regain excluded historical evidence through direct tools.");
                 source.Remove("guardedPromptOverride"); source.Remove("worldDay"); source.Remove("memoryAsOfWorldDay");
                 AttachCodexRoleplayContext(request, source, metadata, campaign, "npc", TestDict("knowsIdentity", true), TestDict());
-                Check("missing_time_is_unavailable", ReadString(Program.ActiveCodexConversationScope.Value.MemoryAccess.Execute("search_character_record", TestDict("query", "amber")), "coverage", "") == "archive_unavailable",
+                Check("missing_time_is_unavailable", ReadString(LlmProviderService.ActiveCodexConversationScope.Value.MemoryAccess.Execute("search_character_record", TestDict("query", "amber")), "coverage", "") == "archive_unavailable",
                     "Missing campaign time reports unavailable archive coverage rather than exposing future records.");
             }
-            catch (Exception ex) { Check("suite_exception", false, Program.LimitText(ex.ToString(), 1800)); }
+            catch (Exception ex) { Check("suite_exception", false, DialogueService.LimitText(ex.ToString(), 1800)); }
             finally
             {
-                Program.ActiveCodexConversationScope.Value = previousScope;
+                LlmProviderService.ActiveCodexConversationScope.Value = previousScope;
                 ReignPostgreSqlStorage.DropCampaign(campaign);
-                lock (Program.CodexTimelineGate) Program.CodexConversationTimelines.Remove(campaign);
+                lock (LlmProviderService.CodexTimelineGate) LlmProviderService.CodexConversationTimelines.Remove(campaign);
             }
             tests.Add(RunCodexPersistentAdapterSelfTest());
             tests.Add(RunCodexMemoryCallbackSelfTest());
@@ -131,7 +131,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> RunCodexPersistentAdapterSelfTest()
         {
-            var previousTransport = Program.CodexRpcTransportOverride;
+            var previousTransport = LlmProviderService.CodexRpcTransportOverride;
             var captured = new List<string>();
             int starts = 0, resumes = 0, turns = 0;
             string thread = "";
@@ -139,7 +139,7 @@ namespace ReignBetaServer
             string summary;
             try
             {
-                Program.CodexRpcTransportOverride = (method, parameters, timeout) =>
+                LlmProviderService.CodexRpcTransportOverride = (method, parameters, timeout) =>
                 {
                     if (method == "thread/start") { thread = "roleplay-adapter-" + ++starts; return TestDict("thread", TestDict("id", thread)); }
                     if (method == "thread/resume") { if (++resumes == 2) throw new InvalidOperationException("Fixture thread expired"); return TestDict("thread", TestDict("id", thread)); }
@@ -147,12 +147,12 @@ namespace ReignBetaServer
                     if (method != "turn/start") throw new InvalidOperationException("Unexpected method " + method);
                     string turn = "roleplay-turn-" + ++turns;
                     captured.Add(string.Join("\n", ReadDictionaryList(parameters, "input").Select(row => ReadString(row, "text", ""))));
-                    var waiter = Program.GetOrCreateCodexTurn(turn, thread);
+                    var waiter = LlmProviderService.GetOrCreateCodexTurn(turn, thread);
                     waiter.Accept(TestDict("method", "item/completed", "params", TestDict("threadId", thread, "turnId", turn,
                         "item", TestDict("type", "agentMessage", "id", "answer", "phase", "final_answer", "text", "{\"response\":\"accepted\"}"))));
                     waiter.Accept(TestDict("method", "thread/tokenUsage/updated", "params", TestDict("threadId", thread, "turnId", turn,
                         "tokenUsage", TestDict("last", TestDict("inputTokens", 40000, "outputTokens", 10, "totalTokens", 40010)))));
-                    if (turns == 2) Program.HandleCodexMessage(TestDict("method", "item/completed", "params", TestDict("threadId", thread,
+                    if (turns == 2) LlmProviderService.HandleCodexMessage(TestDict("method", "item/completed", "params", TestDict("threadId", thread,
                         "turnId", turn, "item", TestDict("type", "contextCompaction"))));
                     waiter.Accept(TestDict("method", "turn/completed", "params", TestDict("threadId", thread, "turnId", turn,
                         "turn", TestDict("id", turn, "status", "completed"))));
@@ -167,9 +167,9 @@ namespace ReignBetaServer
                         "incrementalContext", "CURRENT UPDATED ENGINE STATE " + i, "correlationId", "adapter-corr-" + i, "deferFinalization", true);
                     var payload = TestDict("messages", new[] { TestDict("role", "system", "content", "Full current game foundation " + i),
                         TestDict("role", "user", "content", "Full accepted canonical transcript " + i) });
-                    var raw = TryParseJsonObject(Program.CodexChatCompletionJson(payload, settings, "fixture-model", source));
+                    var raw = TryParseJsonObject(LlmProviderService.CodexChatCompletionJson(payload, settings, "fixture-model", source));
                     // Production ChatWithLlm places usage under raw, rather than at the result root.
-                    Program.FinalizeCodexThreadRequest(TestDict("raw", raw, "accepted", true, "substantivelyChanged", false,
+                    LlmProviderService.FinalizeCodexThreadRequest(TestDict("raw", raw, "accepted", true, "substantivelyChanged", false,
                         "acceptedHistorySignature", "history-" + (i + 1)), source);
                 }
                 passed = starts == 3 && resumes == 2 && turns == 4
@@ -179,28 +179,28 @@ namespace ReignBetaServer
                     && captured[3].Contains("Full current game foundation 3") && captured[3].Contains("Full accepted canonical transcript 3");
                 summary = "Production adapter retained a 40k-token foundation, sent current context on the warm turn, and rebuilt the latest full prompt after compaction and an expired resume, with nested usage receipts.";
             }
-            catch (Exception ex) { summary = Program.LimitText(ex.ToString(), 1800); }
+            catch (Exception ex) { summary = DialogueService.LimitText(ex.ToString(), 1800); }
             finally
             {
-                foreach (string id in Program.CodexRuntimeThreads.InvalidateAll()) { }
-                lock (Program.CodexRuntimeStateLock) Program.CodexPendingThreadLeases.Clear();
-                Program.CodexRpcTransportOverride = previousTransport;
+                foreach (string id in LlmProviderService.CodexRuntimeThreads.InvalidateAll()) { }
+                lock (LlmProviderService.CodexRuntimeStateLock) LlmProviderService.CodexPendingThreadLeases.Clear();
+                LlmProviderService.CodexRpcTransportOverride = previousTransport;
             }
             return TestDict("id", "roleplay_persistent_adapter", "passed", passed, "summary", summary);
         }
 
         private static Dictionary<string, object> RunCodexMemoryCallbackSelfTest()
         {
-            var previousWrite = Program.CodexWriteTransportOverride;
+            var previousWrite = LlmProviderService.CodexWriteTransportOverride;
             using var received = new ManualResetEventSlim();
             Dictionary<string, object> reply = null;
             string thread = "roleplay-callback-fixture";
             try
             {
-                lock (Program.CodexStateLock) CodexMemoryTurns[thread] = new CodexRoleplayMemoryAccess
+                lock (LlmProviderService.CodexStateLock) CodexMemoryTurns[thread] = new CodexRoleplayMemoryAccess
                 { FixtureRecords = new() { TestDict("id", "turn_callback", "text", "Mira asked for the amber token.") } };
-                Program.CodexWriteTransportOverride = message => { reply = message; received.Set(); };
-                Program.HandleCodexMessage(TestDict("id", "string-request-id", "method", "item/tool/call", "params",
+                LlmProviderService.CodexWriteTransportOverride = message => { reply = message; received.Set(); };
+                LlmProviderService.HandleCodexMessage(TestDict("id", "string-request-id", "method", "item/tool/call", "params",
                     TestDict("threadId", thread, "turnId", "callback-turn", "tool", "search_character_record", "arguments", TestDict("query", "amber"))));
                 bool complete = received.Wait(2000);
                 return TestDict("id", "roleplay_dynamic_tool_callback", "passed", complete
@@ -210,16 +210,16 @@ namespace ReignBetaServer
             }
             finally
             {
-                lock (Program.CodexStateLock) CodexMemoryTurns.Remove(thread);
-                Program.CodexWriteTransportOverride = previousWrite;
+                lock (LlmProviderService.CodexStateLock) CodexMemoryTurns.Remove(thread);
+                LlmProviderService.CodexWriteTransportOverride = previousWrite;
             }
         }
 
         private static Dictionary<string, object> RunCodexReasoningWireMatrixSelfTest()
         {
-            var previousTransport = Program.CodexRpcTransportOverride;
+            var previousTransport = LlmProviderService.CodexRpcTransportOverride;
             List<Dictionary<string, object>> previousModels;
-            lock (Program.CodexStateLock) previousModels = Program.CodexModels.ToList();
+            lock (LlmProviderService.CodexStateLock) previousModels = LlmProviderService.CodexModels.ToList();
             var order = new[] { "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra" };
             bool passed = true;
             int calls = 0;
@@ -231,8 +231,8 @@ namespace ReignBetaServer
                     TestDict("model", "fixture-all", "supportedReasoningEfforts", order),
                     TestDict("model", "fixture-limited", "supportedReasoningEfforts", new[] { "low", "high" }),
                     TestDict("model", "fixture-unknown") };
-                lock (Program.CodexStateLock) { Program.CodexModels.Clear(); Program.CodexModels.AddRange(models); }
-                Program.CodexRpcTransportOverride = (method, parameters, timeout) =>
+                lock (LlmProviderService.CodexStateLock) { LlmProviderService.CodexModels.Clear(); LlmProviderService.CodexModels.AddRange(models); }
+                LlmProviderService.CodexRpcTransportOverride = (method, parameters, timeout) =>
                 {
                     if (method == "thread/start") return TestDict("thread", TestDict("id", "reasoning-thread-" + calls));
                     if (method == "thread/delete") return TestDict();
@@ -240,7 +240,7 @@ namespace ReignBetaServer
                     passed &= ReadString(parameters, "model", "") == expectedModel && ReadString(parameters, "effort", "") == expectedEffort;
                     string turn = "reasoning-turn-" + ++calls;
                     string thread = ReadString(parameters, "threadId", "");
-                    var waiter = Program.GetOrCreateCodexTurn(turn, thread);
+                    var waiter = LlmProviderService.GetOrCreateCodexTurn(turn, thread);
                     waiter.Accept(TestDict("method", "item/completed", "params", TestDict("threadId", thread, "turnId", turn,
                         "item", TestDict("type", "agentMessage", "id", "answer", "phase", "final_answer", "text", "{\"response\":\"accepted\"}"))));
                     waiter.Accept(TestDict("method", "turn/completed", "params", TestDict("threadId", thread, "turnId", turn,
@@ -259,16 +259,16 @@ namespace ReignBetaServer
                     var settings = TestDict("llmProvider", "codex_subscription", "providerRequestTimeoutMs", 1000,
                         "codexOptions", TestDict("reasoningMode", mode, "reasoningEffort", effort));
                     var payload = TestDict("messages", new[] { TestDict("role", "user", "content", "Fixture response only") });
-                    var context = Program.BuildCodexGenerationContext(settings, payload, requestType, expectedModel, "reasoning-fixture-" + calls);
-                    Program.CodexChatCompletionJson(payload, settings, expectedModel, context);
+                    var context = LlmProviderService.BuildCodexGenerationContext(settings, payload, requestType, expectedModel, "reasoning-fixture-" + calls);
+                    LlmProviderService.CodexChatCompletionJson(payload, settings, expectedModel, context);
                 }
                 summary = "Checked " + calls + " injected production turns: every effort, model capability shape and disabled-reasoning fallback reached turn/start with its exact resolved model/effort. No provider calls.";
             }
-            catch (Exception ex) { passed = false; summary = Program.LimitText(ex.ToString(), 1800); }
+            catch (Exception ex) { passed = false; summary = DialogueService.LimitText(ex.ToString(), 1800); }
             finally
             {
-                Program.CodexRpcTransportOverride = previousTransport;
-                lock (Program.CodexStateLock) { Program.CodexModels.Clear(); Program.CodexModels.AddRange(previousModels); }
+                LlmProviderService.CodexRpcTransportOverride = previousTransport;
+                lock (LlmProviderService.CodexStateLock) { LlmProviderService.CodexModels.Clear(); LlmProviderService.CodexModels.AddRange(previousModels); }
             }
             return TestDict("id", "roleplay_reasoning_wire_matrix", "passed", passed && calls == 216, "summary", summary);
         }

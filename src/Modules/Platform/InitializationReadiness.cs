@@ -319,7 +319,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> RunInitializationReadinessSelfTests()
+        internal static Dictionary<string, object> RunInitializationReadinessSelfTests()
         {
             string campaignId = "initialization_"
                 + Guid.NewGuid().ToString("N").Substring(0, 12);
@@ -464,7 +464,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                try { Directory.Delete(CampaignDirectory(campaignId), true); }
+                try { Directory.Delete(CampaignFileService.CampaignDirectory(campaignId), true); }
                 catch { }
             }
         }

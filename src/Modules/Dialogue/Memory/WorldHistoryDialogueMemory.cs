@@ -56,7 +56,7 @@ namespace ReignBetaServer
         }
 
         private static List<Dictionary<string, object>> LoadPublicWorldNews(ReignDbConnection connection,
-            string timeline, double day, Program.KnowledgeAccessContext observer, string topic)
+            string timeline, double day, DialogueService.KnowledgeAccessContext observer, string topic)
         {
             var args = TestDict("timeline", timeline, "day", day, "topic", topic ?? "");
             string visible = PublicWorldHistoryTimelineScope(connection, timeline, observer.AsOfWorldHistorySequence, args)
@@ -89,7 +89,7 @@ namespace ReignBetaServer
             }
             // Topic recall also searches every public category without depending
             // on a world-affairs routing decision or vector availability.
-            string fts = Program.BuildFtsQuery(Program.MemoryQueryTerms(topic));
+            string fts = DialogueService.BuildFtsQuery(DialogueService.MemoryQueryTerms(topic));
             if (fts.Length > 0)
             {
                 args["query"] = fts;
@@ -207,7 +207,7 @@ namespace ReignBetaServer
 
         internal static List<Dictionary<string, object>> LoadKnownWorldHistoryForDialogue(
             ReignDbConnection connection, string timelineId, double worldDay,
-            Program.KnowledgeAccessContext knowledge, string topic, Dictionary<string, object> route,
+            DialogueService.KnowledgeAccessContext knowledge, string topic, Dictionary<string, object> route,
             Dictionary<string, object> semanticSearch, bool verifiedInterlocutor)
         {
             var result = new List<Dictionary<string, object>>();
@@ -259,14 +259,14 @@ OR (k.audience_type='kingdom' AND k.audience_id=$kingdom) OR k.audience_type='gl
                 foreach (var row in achievements) recognitionIds.Add(ReadString(row, "event_id", ""));
             }
 
-            List<string> terms = Program.MemoryQueryTerms(topic);
-            bool tournamentQuestion = Program.ContainsAny((topic ?? "").ToLowerInvariant(), "tournament", "champion", "arena");
+            List<string> terms = DialogueService.MemoryQueryTerms(topic);
+            bool tournamentQuestion = DialogueService.ContainsAny((topic ?? "").ToLowerInvariant(), "tournament", "champion", "arena");
             if (worldQuestion)
             {
                 if (tournamentQuestion)
                     add(DialogueStore.SelectWorldHistoryEvents14(connection, visible,parameters));
 
-                string ftsQuery = Program.BuildFtsQuery(terms);
+                string ftsQuery = DialogueService.BuildFtsQuery(terms);
                 if (!string.IsNullOrWhiteSpace(ftsQuery))
                 {
                     parameters["query"] = ftsQuery;
@@ -317,7 +317,7 @@ OR (k.audience_type='kingdom' AND k.audience_id=$kingdom) OR k.audience_type='gl
                 bool aboutPlayer = entities.Any(e => ReadString(e, "entity_id", "").Equals(knowledge.PlayerId, StringComparison.OrdinalIgnoreCase));
                 if (knowledge.PlayerIdentityUnknown && (aboutPlayer || entities.Any(e =>
                     ReadString(e, "entity_id", "") == "main_hero" || ReadString(e, "entity_id", "") == "player_hero"))) continue;
-                if (!Program.UnknownIdentityMemoryEvidenceAllowed(row, knowledge, ReadString(row, "summary", ""))) continue;
+                if (!DialogueService.UnknownIdentityMemoryEvidenceAllowed(row, knowledge, ReadString(row, "summary", ""))) continue;
                 double accessDay = ReadString(row, "event_type", "") == "tournament_finished"
                     && ReadString(row, "source", "") == "bannerlord_native"
                     ? Math.Max(worldDay, Math.Min(worldDay + 0.005d, ReadDouble(row, "world_day", worldDay))) : worldDay;
@@ -379,8 +379,8 @@ OR (k.audience_type='kingdom' AND k.audience_id=$kingdom) OR k.audience_type='gl
                 string line = "- [" + basis + "; day " + ReadDouble(row, "world_day", 0d).ToString("0.###", CultureInfo.InvariantCulture)
                     + "; event " + ReadString(row, "event_id", "") + "] "
                     + (ReadBool(row, "publicWorldNews", false) ? "Public announcement: "
-                        + (ReadBool(row, "publicDirectRecall", false) ? ReadString(row, "summary", "") : Program.LimitText(ReadString(row, "summary", ""), 800))
-                        : Program.LimitText(ReadString(row, "summary", ""), 450)) + teamFact;
+                        + (ReadBool(row, "publicDirectRecall", false) ? ReadString(row, "summary", "") : DialogueService.LimitText(ReadString(row, "summary", ""), 800))
+                        : DialogueService.LimitText(ReadString(row, "summary", ""), 450)) + teamFact;
                 if (text.Length + line.Length + 2 > maxChars) continue;
                 text.AppendLine(line);
             }

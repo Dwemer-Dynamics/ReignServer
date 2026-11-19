@@ -11,18 +11,18 @@ namespace ReignBetaServer
         {
             string campaign = "narrative_contract_" + Guid.NewGuid().ToString("N").Substring(0, 12);
             const string hero = "narrative_contract_hero";
-            string directory = Path.GetFullPath(Program.CampaignDirectory(campaign));
-            string allowedRoot = Path.GetFullPath(Program.CampaignsRoot()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            string directory = Path.GetFullPath(CampaignFileService.CampaignDirectory(campaign));
+            string allowedRoot = Path.GetFullPath(CampaignFileService.CampaignsRoot()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             if (!directory.StartsWith(allowedRoot, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Narrative fixture escaped test campaign storage.");
             try
             {
-                Program.WriteCampaignMetadata(campaign, new Dictionary<string, object> { ["narrativeVersion"] = 5 });
+                CampaignFileService.WriteCampaignMetadata(campaign, new Dictionary<string, object> { ["narrativeVersion"] = 5 });
                 check("campaign_marker_for_unseen_character", ReadInt(WithNarrativeCampaignVersion(campaign, new Dictionary<string, object>()), "narrativeVersion", 0) == 5
                     && ReadInt(WithNarrativeCampaignVersion(campaign, new Dictionary<string, object> { ["narrativeVersion"] = 0 }), "narrativeVersion", -1) == 0,
                     "Unseen characters inherit the saved campaign generation version; an explicit older native save marker stays authoritative.");
                 var basis = DeepCloneProfileDictionary(fixture); basis["heroStringId"] = hero;
-                Program.WriteJsonObject(Program.CharacterFile(campaign, hero, "narrative.json"), basis);
-                Program.WriteJsonObject(Program.CharacterFile(campaign, hero, "profile.json"), new Dictionary<string, object> { ["heroStringId"] = hero, ["narrativeVersion"] = 5 });
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, hero, "narrative.json"), basis);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, hero, "profile.json"), new Dictionary<string, object> { ["heroStringId"] = hero, ["narrativeVersion"] = 5 });
                 var target = ReadDictionaryList(basis, "items").First(x => ReadString(x, "category", "") == "fear");
                 var proposal = new Dictionary<string, object> { ["itemId"] = ReadString(target, "id", ""), ["influence"] = 8,
                     ["description"] = "Approaches the familiar concern with deliberate calm and careful preparation.",
@@ -47,7 +47,7 @@ namespace ReignBetaServer
                     // Fill the ordinary projection beyond its display cap.
                     for (int i = 0; i < 260; i++) CharactersSelfTestStore.InsertDynamicCharacteristics(connection, new Dictionary<string, object> { ["id"] = "ordinary_" + i, ["hero"] = hero });
                     ProjectDynamicCharacteristicsFile(campaign, hero, connection);
-                    var projection = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "dynamic_characteristics.json"));
+                    var projection = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "dynamic_characteristics.json"));
                     check("active_override_survives_projection_cap", ReadDictionaryList(projection, "active")
                         .Any(x => ReadString(x, "characteristic_id", "") == ReadString(accepted, "characteristic_id", "")),
                         "Accepted narrative development remains effective even with more than 250 higher-ranked ordinary characteristics.");
@@ -55,7 +55,7 @@ namespace ReignBetaServer
                     ReadDictionaryList(edited, "items").First(x => ReadString(x, "id", "") == ReadString(target, "id", ""))["influence"] = 2;
                     var effective = ResolveEffectiveNarrative(new Dictionary<string, object> { ["narrative"] = basis, ["dynamicCharacteristics"] = projection });
                     var merged = MergeEditedNarrative(basis, effective, edited);
-                    Program.WriteJsonObject(Program.CharacterFile(campaign, hero, "narrative.json"), merged);
+                    CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, hero, "narrative.json"), merged);
                 }
                 ReconcileEditedNarrative(campaign, hero);
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))

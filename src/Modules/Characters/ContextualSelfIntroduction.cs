@@ -96,16 +96,16 @@ namespace ReignBetaServer
                     && ContextualIntroductionSpokenText(ReadFirstString(row, "text", "content", "message")) == spoken))
                 .TakeLast(4).Select(row => new Dictionary<string, object>
                 {
-                    ["role"] = Program.LimitText(ReadString(row, "role", ""), 32),
+                    ["role"] = DialogueService.LimitText(ReadString(row, "role", ""), 32),
                     ["isCurrentObserver"] = ReadFirstString(row, "speakerHeroStringId", "heroStringId", "npcId")
                         .Equals(ReadString(encounter, "observerHeroStringId", ""), StringComparison.OrdinalIgnoreCase),
-                    ["text"] = Program.LimitText(ReadFirstString(row, "text", "content", "message"), 1000)
+                    ["text"] = DialogueService.LimitText(ReadFirstString(row, "text", "content", "message"), 1000)
                 }).ToList();
             var request = new Dictionary<string, object>
             {
                 ["requestType"] = "identity_self_introduction",
                 ["campaignId"] = ReadString(encounter, "campaignId", "default"),
-                ["correlationId"] = Program.EnsureCorrelationId(encounter) + "-identity-introduction",
+                ["correlationId"] = OperationsService.EnsureCorrelationId(encounter) + "-identity-introduction",
                 ["heroStringId"] = ReadString(encounter, "observerHeroStringId", ""),
                 ["eventId"] = ReadString(encounter, "encounterId", ""),
                 ["promptCacheEligible"] = false,
@@ -154,7 +154,7 @@ namespace ReignBetaServer
                 else
                 {
                     PersistenceService.ThrowIfCampaignRequestReplaced();
-                    var response = responder == null ? Program.ChatWithLlm(request) : responder(request);
+                    var response = responder == null ? LlmProviderService.ChatWithLlm(request) : responder(request);
                     PersistenceService.ThrowIfCampaignRequestReplaced();
                     string content = ReadString(response, "content", "");
                     var parsed = ReadBool(response, "ok", false) && content.Length <= 6000
@@ -181,7 +181,7 @@ namespace ReignBetaServer
                 // Provider details already belong to the normal provider audit.
                 outcome = "resolver_failed";
             }
-            Program.WriteAudit(ReadString(encounter, "campaignId", "default"), Program.EnsureCorrelationId(encounter),
+            OperationsService.WriteAudit(ReadString(encounter, "campaignId", "default"), OperationsService.EnsureCorrelationId(encounter),
                 "server", ReadString(encounter, "mode", "dialogue"), "identity.self_introduction_resolution",
                 ReadString(encounter, "observerHeroStringId", ""), "", ReadString(encounter, "encounterId", ""),
                 outcome, timer.ElapsedMilliseconds, "Bounded contextual self-introduction interpretation.", new Dictionary<string, object>

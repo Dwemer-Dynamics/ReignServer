@@ -38,7 +38,7 @@ namespace ReignBetaServer
         {
             var blocks = InputNarrationBlocks(original);
             var results = ReadDictionaryList(candidate, "narration");
-            var people = MergedInteractionParticipantProfiles(payload).Select(Program.CharacterIdFrom)
+            var people = MergedInteractionParticipantProfiles(payload).Select(CampaignFileService.CharacterIdFrom)
                 .Concat(new[] { ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"),
                     ReadFirstString(payload, "heroStringId", "speakerHeroStringId") })
                 .Where(id => id.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -151,7 +151,7 @@ namespace ReignBetaServer
             string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
             var present = ReadStringList(payload, "activeHeroIds").Concat(new[] { ReadFirstString(payload, "heroStringId", "speakerHeroStringId") })
                 .Where(id => id.Length > 0 && id != player).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            foreach (var person in MergedInteractionParticipantProfiles(payload).Where(p => present.Contains(Program.CharacterIdFrom(p))))
+            foreach (var person in MergedInteractionParticipantProfiles(payload).Where(p => present.Contains(CampaignFileService.CharacterIdFrom(p))))
             {
                 string name = ReadString(person, "name", "");
                 if (name.Length == 0 || player.Length == 0) continue;
@@ -164,7 +164,7 @@ namespace ReignBetaServer
                     if (!arrival.Success || Regex.IsMatch(words, @"\b(?:imagin\w*|dream\w*|hypothetical\w*|absent|empty|away|isn't (?:here|there)|not (?:here|there)|has left)\b", RegexOptions.IgnoreCase)) continue;
                     string quote = arrival.Value.Trim(), venue = arrival.Groups["venue"].Value;
                     scenes.Add(TestDict("quote", quote, "location", venue, "locationClass", InferLocationClass(venue),
-                        "subjectIds", new[] { player, Program.CharacterIdFrom(person) }, "kind", "establish", "linkedWithPlayer", true));
+                        "subjectIds", new[] { player, CampaignFileService.CharacterIdFrom(person) }, "kind", "establish", "linkedWithPlayer", true));
                 }
             }
             return scenes;
@@ -199,10 +199,10 @@ namespace ReignBetaServer
                     result = TestDict("status", "unresolved", "errors", new[] { "interpretation_capacity" }, "providerCalls", 0);
                 else
                 {
-                    var settings = Program.LoadSettings();
+                    var settings = SettingsService.LoadSettings();
                     var request = TestDict("requestType", "conversation_input_grounding", "campaignId", campaign,
-                        "correlationId", Program.EnsureCorrelationId(payload) + "-input-grounding",
-                        "model", Program.ModelForRequest(settings, ReadString(payload, "mode", "dialogue")),
+                        "correlationId", OperationsService.EnsureCorrelationId(payload) + "-input-grounding",
+                        "model", ActionPipelineService.ModelForRequest(settings, ReadString(payload, "mode", "dialogue")),
                         "reasoningDisabled", true, "temperature", 0d, "maxTokens", 4096, "promptCacheEligible", false,
                         "response_format", TestDict("type", "json_object"),
                         "messages", new[] {
@@ -219,11 +219,11 @@ namespace ReignBetaServer
                                 "A whisper's action may be observable; its contents keep their existing recipient restriction. Return [] for absent scene changes."),
                             TestDict("role", "user", "content", Json.Serialize(TestDict("narrationBlocks", blocks,
                                 "playerId", ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"),
-                                "participants", MergedInteractionParticipantProfiles(payload).Select(p => TestDict("heroStringId", Program.CharacterIdFrom(p), "name", ReadString(p, "name", ""))).ToList())))
+                                "participants", MergedInteractionParticipantProfiles(payload).Select(p => TestDict("heroStringId", CampaignFileService.CharacterIdFrom(p), "name", ReadString(p, "name", ""))).ToList())))
                         });
                     try
                     {
-                        var response = (responder ?? Program.ChatWithLlm)(request);
+                        var response = (responder ?? LlmProviderService.ChatWithLlm)(request);
                         result = ReadBool(response, "ok", false)
                             ? ValidateNarrationInterpretation(source.Original, TryParseJsonObject(ReadString(response, "content", "")), payload)
                             : TestDict("status", "unresolved", "errors", new[] { "interpretation_unavailable" }, "providerCalls", 1);

@@ -91,7 +91,7 @@ namespace ReignBetaServer
                     catch (InvalidOperationException) { nestedRejected = true; }
                     try { DialogueService.EnsureSemanticMemorySchema(null); }
                     catch (InvalidOperationException) { semanticRejected = true; }
-                    try { Program.LoadSettings(); }
+                    try { SettingsService.LoadSettings(); }
                     catch (InvalidOperationException) { settingsRejected = true; }
                 }
                 add("schema_reverse_nested_entry_rejected", nestedRejected && semanticRejected && settingsRejected,
@@ -110,8 +110,8 @@ namespace ReignBetaServer
                 if (workersJoined)
                 {
                     ReignPostgreSqlStorage.DropCampaign(campaign);
-                    string directory = Path.GetFullPath(Program.CampaignDirectory(campaign));
-                    string root = Path.GetFullPath(Program.CampaignsRoot()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                    string directory = Path.GetFullPath(CampaignFileService.CampaignDirectory(campaign));
+                    string root = Path.GetFullPath(CampaignFileService.CampaignsRoot()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
                     if (directory.StartsWith(root, StringComparison.OrdinalIgnoreCase)
                         && Path.GetFileName(directory) == campaign && Directory.Exists(directory)) Directory.Delete(directory, true);
                 }
@@ -169,7 +169,7 @@ namespace ReignBetaServer
                             using var connection = ReignDatabase.OpenCampaignConnection(campaign);
                             string generation = ReadString(PersistenceSelfTestStore.SelectSchemaMeta(connection).FirstOrDefault(), "value", "");
                             mainOpened = connection.State == ConnectionState.Open && generation ==
-                                ReadString(Program.LoadSettings(), "vectorProvider", "local").ToLowerInvariant() + "|" + DialogueService.SemanticModelVersion;
+                                ReadString(SettingsService.LoadSettings(), "vectorProvider", "local").ToLowerInvariant() + "|" + DialogueService.SemanticModelVersion;
                         }
                     }
                 }
@@ -225,8 +225,8 @@ namespace ReignBetaServer
                     && closed && !ready && joined && locksFree && retry.State == ConnectionState.Open,
                     "Original cancellation propagates, raw connection closes, both locks release and retry succeeds.");
             ReignPostgreSqlStorage.DropCampaign(campaign);
-            string directory = Path.GetFullPath(Program.CampaignDirectory(campaign));
-            string root = Path.GetFullPath(Program.CampaignsRoot()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            string directory = Path.GetFullPath(CampaignFileService.CampaignDirectory(campaign));
+            string root = Path.GetFullPath(CampaignFileService.CampaignsRoot()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             if (directory.StartsWith(root, StringComparison.OrdinalIgnoreCase)
                 && Path.GetFileName(directory) == campaign && Directory.Exists(directory)) Directory.Delete(directory, true);
         }

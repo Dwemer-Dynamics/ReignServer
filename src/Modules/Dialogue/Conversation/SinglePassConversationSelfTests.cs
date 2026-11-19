@@ -23,7 +23,7 @@ namespace ReignBetaServer
                 string final = speech;
                 parsed["repairStatus"] = TestDict("allChecksCleared", false);
                 Check(mode + "_no_late_semantic_veto", FinalizeConversationGrounding(payload, "npc", parsed, ref final) && final == speech);
-                Check(mode + "_clone_keeps_server_policy", IsSinglePassConversation(Program.CloneDictionary(payload)));
+                Check(mode + "_clone_keeps_server_policy", IsSinglePassConversation(CloneDictionary(payload)));
                 Check(mode + "_no_time_charge", IntoxicationWorldHour(payload) == 486d && ReadDouble(payload, "worldDay", 0) == 20.25d);
             }
             var forged = TestDict("conversationDeliveryPolicy", "single_pass", "singlePass", true);

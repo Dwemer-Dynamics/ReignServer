@@ -18,14 +18,14 @@ namespace ReignBetaServer
             Directory.CreateDirectory(Program.PromptsDir);
             RetireLegacyPromptTemplates(Program.PromptsDir);
 
-            Dictionary<string, string> defaults = Program.DefaultPromptTemplates();
+            Dictionary<string, string> defaults = PromptService.DefaultPromptTemplates();
             foreach (KeyValuePair<string, HashSet<string>> pair in VersionTwoReasoningPromptHashes)
             {
-                string path = Program.PromptPath(pair.Key);
+                string path = PromptService.PromptPath(pair.Key);
                 if (!File.Exists(path)) continue;
                 string current = File.ReadAllText(path, Encoding.UTF8);
                 string currentHash = PromptHash(current);
-                string updated = Program.DefaultPromptText(pair.Key, defaults);
+                string updated = PromptService.DefaultPromptText(pair.Key, defaults);
                 if (string.Equals(currentHash, PromptHash(updated), StringComparison.OrdinalIgnoreCase)) continue;
                 if (pair.Value.Contains(currentHash))
                 {
@@ -42,10 +42,10 @@ namespace ReignBetaServer
             List<string> custom = UnreviewedRetiredPromptFiles(Program.PromptsDir);
             List<string> customReasoning = VersionTwoReasoningPromptHashes.Keys.Where(name =>
             {
-                string path = Program.PromptPath(name);
+                string path = PromptService.PromptPath(name);
                 if (!File.Exists(path)) return false;
                 string currentHash = PromptHash(File.ReadAllText(path, Encoding.UTF8));
-                string defaultHash = PromptHash(Program.DefaultPromptText(name, Program.DefaultPromptTemplates()));
+                string defaultHash = PromptHash(PromptService.DefaultPromptText(name, PromptService.DefaultPromptTemplates()));
                 return !string.Equals(currentHash, defaultHash, StringComparison.OrdinalIgnoreCase) && !VersionTwoReasoningPromptHashes[name].Contains(currentHash);
             }).ToList();
             return new Dictionary<string, object>
@@ -112,8 +112,8 @@ namespace ReignBetaServer
             string key = ReasoningRouteKey(apiUrl, model);
             DateTime cooldownUntil = ReasoningFallbackCooldownUntil(key);
             bool coolingDown = cooldownUntil > DateTime.UtcNow;
-            bool openrouter = Program.IsOpenRouterApiUrl(apiUrl);
-            bool ollama = Program.IsOllamaCloudApiUrl(apiUrl);
+            bool openrouter = LlmProviderService.IsOpenRouterApiUrl(apiUrl);
+            bool ollama = LlmProviderService.IsOllamaCloudApiUrl(apiUrl);
             bool applied = (nano || openrouter || ollama) && (!coolingDown || mandatoryReasoning);
             if (mandatoryReasoning)
             {
@@ -156,7 +156,7 @@ namespace ReignBetaServer
                 ["modelRequiresReasoning"] = mandatoryReasoning,
                 ["effort"] = effort,
                 ["nanoGpt"] = nano,
-                ["openRouter"] = Program.IsOpenRouterApiUrl(apiUrl),
+                ["openRouter"] = LlmProviderService.IsOpenRouterApiUrl(apiUrl),
                 ["ollamaCloud"] = ollama,
                 ["providerControlsApplied"] = applied,
                 ["reasoningExcluded"] = true,
@@ -218,7 +218,7 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> ReasoningPolicyStatus(Dictionary<string, object> settings = null)
         {
-            settings = settings ?? Program.LoadSettings();
+            settings = settings ?? SettingsService.LoadSettings();
             NormalizeReasoningSettings(settings);
             return new Dictionary<string, object>
             {
@@ -307,14 +307,14 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> NormalizeDecisionBrief(Dictionary<string, object> parsed, string intent, Dictionary<string, object> actionGate)
         {
             Dictionary<string, object> source = ReadDictionary(parsed, "decisionBrief") ?? ReadDictionary(parsed, "decision_brief") ?? new Dictionary<string, object>();
-            List<string> facts = ReadStringList(source, "facts").Where(x => !string.IsNullOrWhiteSpace(x)).Take(5).Select(x => Program.LimitText(x, 240)).ToList();
-            List<string> goals = ReadStringList(source, "goals").Where(x => !string.IsNullOrWhiteSpace(x)).Take(3).Select(x => Program.LimitText(x, 240)).ToList();
-            List<string> constraints = ReadStringList(source, "constraints").Where(x => !string.IsNullOrWhiteSpace(x)).Take(4).Select(x => Program.LimitText(x, 240)).ToList();
+            List<string> facts = ReadStringList(source, "facts").Where(x => !string.IsNullOrWhiteSpace(x)).Take(5).Select(x => DialogueService.LimitText(x, 240)).ToList();
+            List<string> goals = ReadStringList(source, "goals").Where(x => !string.IsNullOrWhiteSpace(x)).Take(3).Select(x => DialogueService.LimitText(x, 240)).ToList();
+            List<string> constraints = ReadStringList(source, "constraints").Where(x => !string.IsNullOrWhiteSpace(x)).Take(4).Select(x => DialogueService.LimitText(x, 240)).ToList();
             List<string> activeDomains = ReadStringList(source, "activeDomains").Concat(ReadStringList(source, "active_domains")).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Take(3).ToList();
             List<string> evidenceKeys = ReadStringList(source, "appliedEvidenceKeys").Concat(ReadStringList(source, "applied_evidence_keys")).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Take(24).ToList();
-            string decision = Program.LimitText(FirstNonEmpty(ReadString(source, "decision", ""), intent, ReadString(actionGate, "reason", "")), 360);
-            double confidence = Program.ClampDouble(ReadDouble(source, "confidence", ReadDouble(actionGate, "confidence", 0.5d)), 0d, 1d);
-            string courtTactic = Program.LimitText(ReadFirstString(source, "courtTactic", "court_tactic"), 40).ToLowerInvariant();
+            string decision = DialogueService.LimitText(FirstNonEmpty(ReadString(source, "decision", ""), intent, ReadString(actionGate, "reason", "")), 360);
+            double confidence = DialogueService.ClampDouble(ReadDouble(source, "confidence", ReadDouble(actionGate, "confidence", 0.5d)), 0d, 1d);
+            string courtTactic = DialogueService.LimitText(ReadFirstString(source, "courtTactic", "court_tactic"), 40).ToLowerInvariant();
             return new Dictionary<string, object>
             {
                 ["facts"] = facts,
@@ -324,9 +324,9 @@ namespace ReignBetaServer
                 ["confidence"] = confidence,
                 ["activeDomains"] = activeDomains,
                 ["appliedEvidenceKeys"] = evidenceKeys,
-                ["postureAlignment"] = Program.LimitText(ReadFirstString(source, "postureAlignment", "posture_alignment"), 80),
+                ["postureAlignment"] = DialogueService.LimitText(ReadFirstString(source, "postureAlignment", "posture_alignment"), 80),
                 ["courtTactic"] = courtTactic,
-                ["courtCharacterCell"] = Program.LimitText(ReadFirstString(source, "courtCharacterCell", "court_character_cell"), 40)
+                ["courtCharacterCell"] = DialogueService.LimitText(ReadFirstString(source, "courtCharacterCell", "court_character_cell"), 40)
             };
         }
 
@@ -353,7 +353,7 @@ namespace ReignBetaServer
                 ["mode"] = mode,
                 ["eligible"] = eligible,
                 ["nanoGpt"] = nano,
-                ["openRouter"] = Program.IsOpenRouterApiUrl(apiUrl),
+                ["openRouter"] = LlmProviderService.IsOpenRouterApiUrl(apiUrl),
                 ["cacheCapableRouteRequested"] = routed,
                 ["subscriptionSafeImplicit"] = nano,
                 ["cooldownActive"] = coolingDown,
@@ -476,7 +476,7 @@ namespace ReignBetaServer
                 aggregate.DurationMs += ReadLong(diagnostics, "durationMs", 0);
                 aggregate.LastPrefix = ReadDictionary(diagnostics, "prefix") ?? new Dictionary<string, object>();
                 if (string.IsNullOrWhiteSpace(error)) aggregate.LastSuccessUtc = DateTime.UtcNow.ToString("o");
-                else aggregate.LastError = Program.LimitText(error, 600);
+                else aggregate.LastError = DialogueService.LimitText(error, 600);
             }
         }
 
@@ -489,7 +489,7 @@ namespace ReignBetaServer
                 "detailLocation", "Conversation Diagnostics contains complete request evidence.");
             foreach (string key in new[] { "layoutVersion", "requestType", "variant", "cacheEligible", "globalPrefixChars",
                 "characterPrefixChars", "liveTurnChars", "messageCount", "globalPrefixHash", "characterPrefixHash", "liveTurnHash" })
-                if (prefix.ContainsKey(key)) result[key] = prefix[key] is string text ? Program.LimitText(text, 160) : prefix[key];
+                if (prefix.ContainsKey(key)) result[key] = prefix[key] is string text ? DialogueService.LimitText(text, 160) : prefix[key];
             foreach (string section in new[] { "continuityPreflight", "providerPreflight" })
             {
                 var source = ReadDictionary(prefix, section);
@@ -498,7 +498,7 @@ namespace ReignBetaServer
                 foreach (string key in new[] { "capacityVerified", "verifiedContextTokens", "inputAllowance", "inputTokenEstimate",
                     "estimatedPromptTokens", "requestCharacters", "messageCharacters", "fits", "physicalCapacityFits",
                     "requiredSourceCoverageComplete", "capacityAccounting", "hardCharacterLimit", "hardLimitExceeded" })
-                    if (source.ContainsKey(key)) selected[key] = source[key] is string text ? Program.LimitText(text, 160) : source[key];
+                    if (source.ContainsKey(key)) selected[key] = source[key] is string text ? DialogueService.LimitText(text, 160) : source[key];
                 result[section] = selected;
             }
             return result;
@@ -506,7 +506,7 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> PromptCacheStatusApi()
         {
-            Dictionary<string, object> settings = Program.LoadSettings();
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
             List<Dictionary<string, object>> stats;
             List<Dictionary<string, object>> cooldowns;
             long calls;
@@ -550,7 +550,7 @@ namespace ReignBetaServer
                 ["ok"] = true,
                 ["mode"] = ReadString(settings, "promptCacheMode", "implicit"),
                 ["fallbackCooldownSeconds"] = ReadInt(settings, "promptCacheFallbackCooldownSeconds", 300),
-                ["apiProvider"] = Program.UsesCodexSubscription(settings) ? Program.CodexSubscriptionProvider : Program.IsOpenRouterApiUrl(Program.LlmApiUrl(settings)) ? Program.OpenRouterProvider : IsNanoGptApiUrl(Program.LlmApiUrl(settings)) ? Program.NanoGptProvider : Program.OpenAiCompatibleProvider,
+                ["apiProvider"] = LlmProviderService.UsesCodexSubscription(settings) ? LlmProviderService.CodexSubscriptionProvider : LlmProviderService.IsOpenRouterApiUrl(LlmProviderService.LlmApiUrl(settings)) ? LlmProviderService.OpenRouterProvider : IsNanoGptApiUrl(LlmProviderService.LlmApiUrl(settings)) ? LlmProviderService.NanoGptProvider : LlmProviderService.OpenAiCompatibleProvider,
                 ["routingHealth"] = cooldowns.Count > 0 ? "degraded" : "healthy",
                 ["cooldownState"] = cooldowns.Count > 0 ? "active" : "none",
                 ["totals"] = new Dictionary<string, object>
@@ -573,14 +573,14 @@ namespace ReignBetaServer
         }
 
         internal static bool SupportsPromptCacheProbe(Dictionary<string, object> settings)
-            => !Program.UsesCodexSubscription(settings) && IsNanoGptApiUrl(Program.LlmApiUrl(settings));
+            => !LlmProviderService.UsesCodexSubscription(settings) && IsNanoGptApiUrl(LlmProviderService.LlmApiUrl(settings));
 
         internal static Dictionary<string, object> PromptCacheProbeApi(Dictionary<string, object> payload)
         {
-            Dictionary<string, object> settings = Program.LoadSettings();
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
             if (!SupportsPromptCacheProbe(settings)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The GLM cache diagnostic requires NanoGPT. Select and save NanoGPT before running it." };
-            if (!Program.ProviderKeyConfigured(settings, Program.LlmApiKeySlot(settings))) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The main LLM API key is not configured." };
-            string staticPrefix = BuildDialogueGlobalPrefix(false, false, Program.CompactActionCatalog(Program.ActionCatalog()));
+            if (!SettingsService.ProviderKeyConfigured(settings, SettingsService.LlmApiKeySlot(settings))) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The main LLM API key is not configured." };
+            string staticPrefix = BuildDialogueGlobalPrefix(false, false, ActionPipelineService.CompactActionCatalog(ActionPipelineService.ActionCatalog()));
             string characterPrefix = "CACHE PROBE CHARACTER\nThis synthetic diagnostic character contains no campaign or player data.";
             Dictionary<string, object> first = RunPromptCacheProbeCall(staticPrefix, characterPrefix, "Probe suffix one. Return {\"ok\":true}.");
             if (!ReadBool(first, "ok", false)) return new Dictionary<string, object> { ["ok"] = false, ["first"] = first, ["error"] = ReadString(first, "error", "The first cache probe call failed.") };
@@ -602,7 +602,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> RunPromptCacheProbeCall(string staticPrefix, string characterPrefix, string suffix)
         {
             PromptEnvelope envelope = CreatePromptEnvelope("prompt_cache_probe", "synthetic", staticPrefix, characterPrefix, suffix);
-            return Program.ChatWithLlm(new Dictionary<string, object>
+            return LlmProviderService.ChatWithLlm(new Dictionary<string, object>
             {
                 ["requestType"] = "prompt_cache_probe",
                 ["model"] = "zai-org/glm-5.2",

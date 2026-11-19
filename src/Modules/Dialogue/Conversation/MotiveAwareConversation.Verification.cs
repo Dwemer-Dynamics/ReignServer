@@ -87,7 +87,7 @@ namespace ReignBetaServer
                 && Math.Abs(ReadDouble(courtSeductionPosture, "strategicInterest", 0d)
                     - ReadDouble(courtSeductionPosture, "baseStrategicInterest", 0d) - 20d) < 0.01d
                 && Math.Abs(ReadDouble(ReadDictionary(courtSeductionPosture, "initiative"), "score", 0d)
-                    - Program.ClampDouble(
+                    - DialogueService.ClampDouble(
                         0.55d * ReadDouble(courtSeductionPosture, "receptivity", 0d)
                         + 0.20d * CourtGroup100(courtSeductionTraits, "boldness")
                         + 0.15d * ReadInt(TraitPercentageSnapshot(courtSeductionTraitDocument), "flirtatiousness", 50)
@@ -183,7 +183,7 @@ namespace ReignBetaServer
                 &&Math.Abs(tierSixAxes["power"]-66d)<.001d&&Math.Abs(tierSixAxes["dynasty"]-60d)<.001d,
                 "Known identity exposes the exact native clan-tier ladder to relative power, prestige, protection, and dynasty evaluation.");
             Dictionary<string, object> peerOpportunity =
-                Program.CloneDictionary(recognized);
+                CloneDictionary(recognized);
             peerOpportunity["observerClanTier"] = 5;
             peerOpportunity["targetClanTier"] = 5;
             peerOpportunity["clanTierDelta"] = 0;
@@ -548,7 +548,7 @@ namespace ReignBetaServer
                     "memoryWrites").Count == 0,
                 "A repeated provider contradiction produces a concise, conversational sovereign- and settlement-aware fallback and suppresses contaminated writes.");
             Dictionary<string, object> groupedFallbackContext =
-                Program.CloneDictionary(sovereignContext);
+                CloneDictionary(sovereignContext);
             groupedFallbackContext["subjectId"] =
                 "reign_court_town_A6_child_1";
             groupedFallbackContext["mustAccountForPriorSpeaker"] =
@@ -1069,7 +1069,7 @@ namespace ReignBetaServer
                 }).ToList()
             };
             Dictionary<string, object> pathologicalCourtCharacter =
-                Program.CloneDictionary(
+                CloneDictionary(
                     ReadDictionary(capContext, "courtCharacter")
                     ?? new Dictionary<string, object>());
             pathologicalCourtCharacter["activeScheme"] =
@@ -1296,20 +1296,20 @@ namespace ReignBetaServer
 #endif
 
         private static double InitiativeChanceForTest(double score) { return score < 45d ? 0d : score < 60d ? .25d : score < 75d ? .5d : score < 90d ? .75d : .9d; }
-        private static double Trait01FromPercent(Dictionary<string, object> percentages, string key) { return Program.ClampDouble(ReadDouble(percentages, key, 50d) / 100d, 0d, 1d); }
-        private static double CourtGroup100(Dictionary<string, object> characteristics, string key) { return Program.ClampDouble(ReadDouble(ReadDictionary(ReadDictionary(characteristics, "traits"), "courtVirtues") ?? new Dictionary<string, object>(), key, 50d), 0d, 100d); }
+        private static double Trait01FromPercent(Dictionary<string, object> percentages, string key) { return DialogueService.ClampDouble(ReadDouble(percentages, key, 50d) / 100d, 0d, 1d); }
+        private static double CourtGroup100(Dictionary<string, object> characteristics, string key) { return DialogueService.ClampDouble(ReadDouble(ReadDictionary(ReadDictionary(characteristics, "traits"), "courtVirtues") ?? new Dictionary<string, object>(), key, 50d), 0d, 100d); }
         private static double CourtGroup01(Dictionary<string, object> characteristics, string key) { return CourtGroup100(characteristics, key) / 100d; }
         private static double RomanticPressure01(Dictionary<string, object> characteristics, Dictionary<string, object> relationship, Dictionary<string, object> payload, string text)
         {
             double explicitPressure = ReadDouble(payload, "romanticSocialPressure", ReadDouble(ReadDictionary(characteristics, "pressure"), "romanticOrSocialRisk", 0d)) / 100d;
-            double wording = Program.ContainsAny((text ?? "").ToLowerInvariant(), "kiss", "flirt", "seduc", "desire", "attract", "lover", "affair", "marry") ? 0.65d : 0d;
-            return Program.ClampDouble(Math.Max(wording, explicitPressure), 0d, 1d);
+            double wording = DialogueService.ContainsAny((text ?? "").ToLowerInvariant(), "kiss", "flirt", "seduc", "desire", "attract", "lover", "affair", "marry") ? 0.65d : 0d;
+            return DialogueService.ClampDouble(Math.Max(wording, explicitPressure), 0d, 1d);
         }
         private static double RomanticApproachModifier(string text)
         {
             string lower = (text ?? "").ToLowerInvariant();
-            if (Program.ContainsAny(lower, "threat", "force", "or else", "execute", "kill you")) return -35d;
-            if (Program.ContainsAny(lower, "kiss", "flirt", "desire", "attract", "beautiful", "handsome", "love")) return 5d;
+            if (DialogueService.ContainsAny(lower, "threat", "force", "or else", "execute", "kill you")) return -35d;
+            if (DialogueService.ContainsAny(lower, "kiss", "flirt", "desire", "attract", "beautiful", "handsome", "love")) return 5d;
             return 0d;
         }
     }

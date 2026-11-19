@@ -161,7 +161,7 @@ namespace ReignBetaServer
             int maxDelta = impact == "transformative" ? 60 : impact == "major" ? 30 : 10;
             Dictionary<string, object> raw = ReadDictionary(evaluation, "facetDeltas") ?? new Dictionary<string, object>();
             foreach (string facet in raw.Keys.Where(x => RelationshipFacetKeys.Contains(x, StringComparer.OrdinalIgnoreCase) && Math.Abs(ReadDouble(raw, x, 0d)) > 0.001d).Take(8))
-                relation.Facets[facet] = ClampRelationship(relation.Facets[facet] + Program.ClampDouble(ReadDouble(raw, facet, 0d), -maxDelta, maxDelta));
+                relation.Facets[facet] = ClampRelationship(relation.Facets[facet] + DialogueService.ClampDouble(ReadDouble(raw, facet, 0d), -maxDelta, maxDelta));
             int nativeDelta = ReadInt(evaluation, "nativeRelationDelta", 0);
             if (nativeDelta != 0)
             {
@@ -194,7 +194,7 @@ namespace ReignBetaServer
                 RelationshipSimulationHero leader = run.Heroes[leaderId];
                 List<RelationshipSimulationHero> members = run.Heroes.Values.Where(x => ReadString(x.Data, "clanId", "").Equals(clanId, StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(ReadString(x.Data, "spouseId", ""))).ToList();
                 double urgency = MarriageUrgency(clan, leader.Data, members.Select(x => x.Data).ToList());
-                double chance = Program.ClampDouble(0.01d + 0.04d * urgency, 0.01d, 0.05d);
+                double chance = DialogueService.ClampDouble(0.01d + 0.04d * urgency, 0.01d, 0.05d);
                 if (members.Count == 0 || StableUnit(run.Seed.ToString(CultureInfo.InvariantCulture) + "|marriage|" + period + "|" + leaderId) >= chance) continue;
                 RelationshipSimulationHero best = null, other = null;
                 Dictionary<string, object> bestOtherClan = null;

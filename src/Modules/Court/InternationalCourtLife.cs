@@ -75,7 +75,7 @@ namespace ReignBetaServer
                     Dictionary<string, object> counter = ParseAmbassadorJsonObject(ReadString(reply, "counter_terms_json", "{}"));
                     Dictionary<string, object> world = ReadDictionary(payload, "worldSnapshot") ?? new Dictionary<string, object>();
                     Dictionary<string, object> actor = DiplomacyService.FindDirectorKingdom(world, ReadFirstString(counter, "actorKingdomId", "actorKingdomStringId"));
-                    Dictionary<string, object> normalized = Program.NormalizeActionCommand(counter, ctx.CampaignId, out List<string> errors,
+                    Dictionary<string, object> normalized = ActionPipelineService.NormalizeActionCommand(counter, ctx.CampaignId, out List<string> errors,
                         DiplomacyService.BuildDirectorNormalizationPayload(world, actor ?? new Dictionary<string, object>()), "Exact sovereign counteroffer awaiting the player's acceptance.");
                     reply["normalizedAction"] = normalized;
                     reply["normalizationErrors"] = errors;

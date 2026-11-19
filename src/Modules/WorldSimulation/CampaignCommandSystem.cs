@@ -224,7 +224,7 @@ namespace ReignBetaServer
             }
             payload.Remove("caseLedgerRows");
             payload["metrics"] = metrics;
-            Program.WriteJsonObject(replayPath, payload);
+            CampaignFileService.WriteJsonObject(replayPath, payload);
             sections[profile] = new Dictionary<string, object>
             {
                 ["profile"] = profile, ["status"] = passed ? "passed" : "failed",
@@ -504,7 +504,7 @@ namespace ReignBetaServer
                 ["evaluatedUtc"] = DateTime.UtcNow.ToString("o")
             };
             string summaryPath = Path.Combine(CampaignCommandRunDirectory(runId), "launch-readiness.json");
-            Program.WriteJsonObject(summaryPath, readiness);
+            CampaignFileService.WriteJsonObject(summaryPath, readiness);
             readiness["summaryPath"] = summaryPath;
             return readiness;
         }
@@ -529,7 +529,7 @@ namespace ReignBetaServer
             {
                 File.AppendAllText(Path.Combine(directory, "events.jsonl"),
                     Json.Serialize(evidence) + Environment.NewLine, Encoding.UTF8);
-                Program.WriteJsonObject(Path.Combine(directory, SafeCampaignCommandSegment(orderId) + ".json"), evidence);
+                CampaignFileService.WriteJsonObject(Path.Combine(directory, SafeCampaignCommandSegment(orderId) + ".json"), evidence);
             }
             return new Dictionary<string, object> { ["ok"] = true, ["orderId"] = orderId };
         }
@@ -545,8 +545,8 @@ namespace ReignBetaServer
             Dictionary<string, object> state = ReadDictionary(payload, "state")
                 ?? new Dictionary<string, object>();
             string deterministic = CampaignCommandFallbackOutcome(payload, state);
-            Dictionary<string, object> characterState = Program.ReadJsonObject(
-                Program.CharacterFile(ReadString(payload, "campaignId", "default"), heroId, "state.json"));
+            Dictionary<string, object> characterState = CampaignFileService.ReadJsonObject(
+                CampaignFileService.CharacterFile(ReadString(payload, "campaignId", "default"), heroId, "state.json"));
             string mbti = ReadFirstString(characterState, "mbti", "mbtiType", "personalityType");
             string system = "You are an advisory military judgment layer for Bannerlord Reign. "
                 + "Native state, authority, and identifiers are authoritative. Return only compact JSON with outcome and reason. "
@@ -556,7 +556,7 @@ namespace ReignBetaServer
             string prompt = "Commander MBTI: " + FirstNonEmpty(mbti, "unknown") + "\n"
                 + "Validated order and native state: " + Json.Serialize(payload) + "\n"
                 + "Deterministic safety recommendation: " + deterministic;
-            Dictionary<string, object> llm = Program.ChatWithLlm(new Dictionary<string, object>
+            Dictionary<string, object> llm = LlmProviderService.ChatWithLlm(new Dictionary<string, object>
             {
                 ["campaignId"] = ReadString(payload, "campaignId", "default"),
                 ["correlationId"] = ReadString(payload, "correlationId", ""),
@@ -650,7 +650,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> ReadCampaignCommandState(string runId)
         {
-            return Program.ReadJsonObject(Path.Combine(CampaignCommandRunDirectory(runId), "state.json"));
+            return CampaignFileService.ReadJsonObject(Path.Combine(CampaignCommandRunDirectory(runId), "state.json"));
         }
 
         private static void WriteCampaignCommandState(string runId, Dictionary<string, object> state)
@@ -658,7 +658,7 @@ namespace ReignBetaServer
             string directory = CampaignCommandRunDirectory(runId);
             Directory.CreateDirectory(directory);
             lock (CampaignCommandCertificationLock)
-                Program.WriteJsonObject(Path.Combine(directory, "state.json"), state);
+                CampaignFileService.WriteJsonObject(Path.Combine(directory, "state.json"), state);
         }
 
         private static void AppendCampaignCommandLedger(string runId, Dictionary<string, object> payload)

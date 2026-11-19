@@ -11,13 +11,13 @@ namespace ReignBetaServer
         {
             if (!ReignPostgreSqlStorage.Options.IsValidation || string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value))
                 throw new InvalidOperationException("Witness fixtures require isolated Verification Lab state.");
-            var priorSettings = Program.CodexPerformanceSettings.Value;
+            var priorSettings = LlmProviderService.CodexPerformanceSettings.Value;
             string campaign = "__gossip_test_witness_" + Guid.NewGuid().ToString("N");
-            var settings = Program.DefaultSettings();
+            var settings = SettingsService.DefaultSettings();
             settings["personalGossipEnabled"] = true;
             settings["personalGossipShareAdjustment"] = 100;
             settings["personalGossipDisclosureAdjustment"] = 100;
-            Program.CodexPerformanceSettings.Value = settings;
+            LlmProviderService.CodexPerformanceSettings.Value = settings;
             var source = GossipTestHero("source"); var player = GossipTestHero("player");
             var target = GossipTestHero("target"); var witness = GossipTestHero("witness");
             var second = GossipTestHero("second"); var third = GossipTestHero("third");
@@ -50,7 +50,7 @@ namespace ReignBetaServer
                 RelationshipsService.EnsureConversationRelationshipSchema(c);
                 foreach (string id in new[] { "witness", "second", "third" })
                 {
-                    Program.WriteJsonObject(Program.CharacterFile(campaign, id, "traits.json"), GossipTestTraits("sociability", 100, "curiosity", 100));
+                    CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, id, "traits.json"), GossipTestTraits("sociability", 100, "curiosity", 100));
                     GossipTestPair(c, id, "target", 60, 30);
                 }
                 GossipTestPair(c, "witness", "source", 60, 30);
@@ -230,7 +230,7 @@ namespace ReignBetaServer
                 check("witness_unnamed_remote_friend_does_not_gain_travel_permission", DialogueSelfTestStore.SelectPersonalGossipMessages22(c).Count == 0, null);
             }
             catch (Exception ex) { check("witness_fixture_completed", false, ex.ToString()); }
-            finally { Program.CodexPerformanceSettings.Value = priorSettings; ReignPostgreSqlStorage.DropCampaign(campaign); }
+            finally { LlmProviderService.CodexPerformanceSettings.Value = priorSettings; ReignPostgreSqlStorage.DropCampaign(campaign); }
         }
     }
 }

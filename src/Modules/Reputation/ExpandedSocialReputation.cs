@@ -49,7 +49,7 @@ namespace ReignBetaServer
             // as their assertions finish. Scheduling ordinary background
             // social processing for them can reopen and recreate a fixture's
             // PostgreSQL schema after cleanup.
-            if (Program.IsInternalCampaignId(campaignId)) return;
+            if (CampaignFileService.IsInternalCampaignId(campaignId)) return;
             string workerKey = campaignId + "|" + timelineId;
             lock (PendingSocialWorldHistoryLock)
             {
@@ -137,8 +137,8 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                SocialOutcomeLastError = Program.LimitText(ex.ToString(), 2000);
-                Program.LogOperational("world_history.social_parallel_drain_failed",
+                SocialOutcomeLastError = DialogueService.LimitText(ex.ToString(), 2000);
+                OperationsService.LogOperational("world_history.social_parallel_drain_failed",
                     new Dictionary<string, object>
                     {
                         ["campaignId"] = campaignId,
@@ -275,7 +275,7 @@ namespace ReignBetaServer
                                     ReputationStore.UpdateSocialSubjectWorkQueue2(recoveryConnection, new Dictionary<string, object>
                                         {
                                             ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                                            ["error"] = Program.LimitText(ex.Message, 1000),
+                                            ["error"] = DialogueService.LimitText(ex.Message, 1000),
                                             ["campaign"] = campaignId,
                                             ["timeline"] = timelineId,
                                             ["subject"] = subjectId
@@ -651,7 +651,7 @@ namespace ReignBetaServer
                     }
                     foreach (Dictionary<string, object> row in pending)
                     {
-                        if (Program.PriorityBackgroundWorkShouldYield()) break;
+                        if (OperationsService.PriorityBackgroundWorkShouldYield()) break;
                         Dictionary<string, object> item = new Dictionary<string, object>
                         {
                             ["eventId"] = ReadString(row, "event_id", ""),
@@ -670,13 +670,13 @@ namespace ReignBetaServer
                         {
                             RecordSocialWorldHistoryFailure(campaignId, timelineId,
                                 ReadString(row, "event_id", ""), ex);
-                            Program.LogOperational("world_history.social_outcome_failed",
+                            OperationsService.LogOperational("world_history.social_outcome_failed",
                                 new Dictionary<string, object>
                                 {
                                     ["campaignId"] = campaignId,
                                     ["timelineId"] = timelineId,
                                     ["eventId"] = ReadString(row, "event_id", ""),
-                                    ["error"] = Program.LimitText(ex.Message, 800)
+                                    ["error"] = DialogueService.LimitText(ex.Message, 800)
                                 });
                         }
                     }

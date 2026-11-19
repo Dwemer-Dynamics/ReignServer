@@ -183,7 +183,7 @@ namespace ReignBetaServer
                 AddNpcDialogueAssertion(assertions, "party_session_exchange", turns.All(turn => ReadString(turn, "session_id", "") == sessionId && ReadString(turn, "exchange_id", "") == exchangeId), "Every grouped turn shares the requested session and exchange IDs.", sessionId + "," + exchangeId);
                 AddNpcDialogueAssertion(assertions, "party_participants", turns.All(turn =>
                 {
-                    List<string> participants = Program.TextListFromJson(ReadString(turn, "participants_json", "[]"));
+                    List<string> participants = DialogueService.TextListFromJson(ReadString(turn, "participants_json", "[]"));
                     return heroIds.Concat(new[] { playerId }).All(id => participants.Contains(id, StringComparer.OrdinalIgnoreCase));
                 }), "Every turn carries the full group participant set.", string.Join(",", heroIds.Concat(new[] { playerId })));
                 AddNpcDialogueAssertion(assertions, "party_location", turns.All(turn => !string.IsNullOrWhiteSpace(ReadString(turn, "location_id", ""))), "Every grouped turn retains the native location ID.", string.Join(",", turns.Select(turn => ReadString(turn, "location_id", ""))));
@@ -196,7 +196,7 @@ namespace ReignBetaServer
                     Dictionary<string, object> reply = replies[replyIndex];
                     string heroId = ReadFirstString(reply, "heroId", "heroStringId");
                     string correlationId = ReadString(reply, "correlationId", "");
-                    List<Dictionary<string, object>> auditRows = Program.ReadJsonLinesFromPath(Program.CampaignFile(campaignId, "audit", "audit.jsonl"))
+                    List<Dictionary<string, object>> auditRows = Program.ReadJsonLinesFromPath(CampaignFileService.CampaignFile(campaignId, "audit", "audit.jsonl"))
                         .Where(row => string.Equals(ReadString(row, "correlationId", ""), correlationId, StringComparison.OrdinalIgnoreCase)).ToList();
                     AddNpcDialogueAssertion(assertions, "party_audit_context_" + SafeMemoryKey(heroId), auditRows.Any(row => ReadString(row, "phase", "") == "context.loaded"), "Speaker context was loaded.", correlationId);
                     AddNpcDialogueAssertion(assertions, "party_audit_prompt_" + SafeMemoryKey(heroId), auditRows.Any(row => ReadString(row, "phase", "") == "prompt.built"), "Speaker prompt was audited.", correlationId);
@@ -236,7 +236,7 @@ namespace ReignBetaServer
                 AddNpcDialogueAssertion(assertions, "party_memory_lineage", memories.All(memory =>
                     !string.IsNullOrWhiteSpace(ReadString(memory, "event_id", ""))
                     && new[] { "private", "public", "rumor" }.Contains(ReadString(memory, "visibility", ""), StringComparer.OrdinalIgnoreCase)
-                    && Program.TextListFromJson(ReadString(memory, "known_by_json", "[]")).Contains(ReadString(memory, "owner_id", ""), StringComparer.OrdinalIgnoreCase)), "Party memory writes retain source lineage, visibility, and owner knowledge.", string.Join(",", memories.Select(memory => ReadString(memory, "memory_id", ""))));
+                    && DialogueService.TextListFromJson(ReadString(memory, "known_by_json", "[]")).Contains(ReadString(memory, "owner_id", ""), StringComparer.OrdinalIgnoreCase)), "Party memory writes retain source lineage, visibility, and owner knowledge.", string.Join(",", memories.Select(memory => ReadString(memory, "memory_id", ""))));
                 if (recallTokens.Count > 0)
                 {
                     foreach (string token in recallTokens)
@@ -254,7 +254,7 @@ namespace ReignBetaServer
                     ["sceneIndex"] = ReadInt(payload, "sceneIndex", 0),
                     ["sessionId"] = sessionId,
                     ["exchangeId"] = exchangeId,
-                    ["playerText"] = Program.LimitText(playerText, 1600),
+                    ["playerText"] = DialogueService.LimitText(playerText, 1600),
                     ["replies"] = replies,
                     ["selectedContextPulls"] = pullsByHero,
                     ["memoryIds"] = memories.Select(memory => ReadString(memory, "memory_id", "")).ToList(),
@@ -297,7 +297,7 @@ namespace ReignBetaServer
                     fts = ReadInt(DialogueStore.CountSummaryFts(connection, new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault(), "count", 0);
                     embeddingJobs = ReadInt(DialogueStore.CountEmbeddingJobs4(connection, new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault(), "count", 0);
                 }
-                List<string> participants = Program.TextListFromJson(ReadString(summary, "participants_json", "[]"));
+                List<string> participants = DialogueService.TextListFromJson(ReadString(summary, "participants_json", "[]"));
                 AddNpcDialogueAssertion(assertions, "party_scene_closed", session != null && ReadString(session, "status", "") != "open", "Party conversation session is closed.", sessionId);
                 AddNpcDialogueAssertion(assertions, "party_scene_turn_count", turnCount == ReadInt(payload, "expectedTurns", 12), "Party scene contains the expected grouped raw turns.", turnCount.ToString());
                 AddNpcDialogueAssertion(assertions, "party_scene_summary", summary != null && ReadString(summary, "summary_type", "") == "scene", "Party scene summary exists.", ReadString(summary, "summary_id", ""));
@@ -305,7 +305,7 @@ namespace ReignBetaServer
                 AddNpcDialogueAssertion(assertions, "party_scene_participants", heroIds.Concat(new[] { playerId }).All(id => participants.Contains(id, StringComparer.OrdinalIgnoreCase)), "Party scene summary retains the full participant set.", Json.Serialize(participants));
                 AddNpcDialogueAssertion(assertions, "party_scene_sources", links >= turnCount + 1, "Party scene summary links every raw turn and its session.", links.ToString());
                 AddNpcDialogueAssertion(assertions, "party_scene_fts", fts == 1, "Party scene summary has one FTS row.", fts.ToString());
-                Dictionary<string, object> settings = Program.LoadSettings();
+                Dictionary<string, object> settings = SettingsService.LoadSettings();
                 if (ReadBool(settings, "enableSemanticMemory", true))
                     AddNpcDialogueAssertion(assertions, "party_scene_embedding", embeddingJobs >= 1 || ReadString(summary, "embedding_status", "") == "indexed", "Party scene summary is queued or indexed for semantic memory.", embeddingJobs.ToString());
 
@@ -427,31 +427,31 @@ namespace ReignBetaServer
 
         private static string PartyDialogueAuditDirectory(string campaignId)
         {
-            return Program.CampaignFile(campaignId, "tests", "party-dialogue-audits");
+            return CampaignFileService.CampaignFile(campaignId, "tests", "party-dialogue-audits");
         }
 
         private static string PartyDialogueAuditPath(string campaignId, string runId)
         {
-            return Path.Combine(PartyDialogueAuditDirectory(campaignId), Program.SafePathSegment(runId, "latest") + ".json");
+            return Path.Combine(PartyDialogueAuditDirectory(campaignId), CampaignFileService.SafePathSegment(runId, "latest") + ".json");
         }
 
         private static string PartyDialogueAuditRequestPath(string campaignId)
         {
-            return Program.CampaignFile(campaignId, "tests", "party-dialogue-audits", "requests", "current.json");
+            return CampaignFileService.CampaignFile(campaignId, "tests", "party-dialogue-audits", "requests", "current.json");
         }
 
         private static void SavePartyDialogueAudit(Dictionary<string, object> report)
         {
             string path = PartyDialogueAuditPath(ReadString(report, "campaignId", "default"), ReadString(report, "runId", "latest"));
             Directory.CreateDirectory(Path.GetDirectoryName(path));
-            Program.WriteJsonObject(path, report);
+            CampaignFileService.WriteJsonObject(path, report);
         }
 
         private static Dictionary<string, object> LoadPartyDialogueAudit(string campaignId, string runId)
         {
             if (string.IsNullOrWhiteSpace(runId)) return FindLatestPartyDialogueAudit(campaignId);
             string path = PartyDialogueAuditPath(campaignId, runId);
-            return File.Exists(path) ? Program.ReadJsonObject(path) : null;
+            return File.Exists(path) ? CampaignFileService.ReadJsonObject(path) : null;
         }
 
         private static Dictionary<string, object> FindActivePartyDialogueAudit(string campaignId)
@@ -468,14 +468,14 @@ namespace ReignBetaServer
         {
             string directory = PartyDialogueAuditDirectory(campaignId);
             if (!Directory.Exists(directory)) return Enumerable.Empty<Dictionary<string, object>>();
-            return Directory.GetFiles(directory, "*.json", SearchOption.TopDirectoryOnly).Select(Program.ReadJsonObject).Where(report => report != null && report.Count > 0).ToList();
+            return Directory.GetFiles(directory, "*.json", SearchOption.TopDirectoryOnly).Select(CampaignFileService.ReadJsonObject).Where(report => report != null && report.Count > 0).ToList();
         }
 
         private static Dictionary<string, object> LoadPartyDialogueAuditRequest(string campaignId)
         {
             string path = PartyDialogueAuditRequestPath(campaignId);
             if (!File.Exists(path)) return null;
-            Dictionary<string, object> request = Program.ReadJsonObject(path);
+            Dictionary<string, object> request = CampaignFileService.ReadJsonObject(path);
             return request.Count == 0 ? null : request;
         }
 
@@ -483,7 +483,7 @@ namespace ReignBetaServer
         {
             string path = PartyDialogueAuditRequestPath(ReadString(request, "campaignId", "default"));
             Directory.CreateDirectory(Path.GetDirectoryName(path));
-            Program.WriteJsonObject(path, request);
+            CampaignFileService.WriteJsonObject(path, request);
         }
 
         private static Dictionary<string, object> PartyDialogueAuditRequestSummary(Dictionary<string, object> request)
@@ -576,9 +576,9 @@ namespace ReignBetaServer
                     && ReadBool(status, "found", false) && File.Exists(ReadString(status, "reportPath", "")),
                     "Cancelled party runs remain available as durable partial reports.");
 
-                List<Dictionary<string, object>> incidentalSellerPulls = Program.DeterministicContextPullSelection(
+                List<Dictionary<string, object>> incidentalSellerPulls = DialogueService.DeterministicContextPullSelection(
                     "party_chat", "A spice seller sneezed twice beside my chipped cup.", "", Program.ContextPullIds.ToList());
-                List<Dictionary<string, object>> explicitTradePulls = Program.DeterministicContextPullSelection(
+                List<Dictionary<string, object>> explicitTradePulls = DialogueService.DeterministicContextPullSelection(
                     "party_chat", "Will you sell me that chipped cup, and how much is it worth?", "", Program.ContextPullIds.ToList());
                 add("commerce_term_boundaries",
                     !incidentalSellerPulls.Any(pull => string.Equals(ReadString(pull, "id", ""), "appraise_trade_offer", StringComparison.OrdinalIgnoreCase))
@@ -610,14 +610,14 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                add("fixture", false, "Party dialogue audit fixture failed: " + Program.LimitText(ex.Message, 400));
+                add("fixture", false, "Party dialogue audit fixture failed: " + DialogueService.LimitText(ex.Message, 400));
             }
             finally
             {
                 try
                 {
                     ReignPostgreSqlStorage.ClearAllPools();
-                    string path = Program.CampaignDirectory(campaignId);
+                    string path = CampaignFileService.CampaignDirectory(campaignId);
                     if (Directory.Exists(path)) Directory.Delete(path, true);
                 }
                 catch { }

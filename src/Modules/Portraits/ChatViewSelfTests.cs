@@ -35,12 +35,12 @@ namespace ReignBetaServer
             Check("complete_exchange_retains_every_reply", () => Require(window.Count == 3 && ReadString(window[2], "speakerId", "") == "rhagaea", "A group reply was omitted."));
             Check("unfinished_group_rejected", () => Require(DialogueService.ChatViewCompleteExchange(turns.Take(2).ToList(), "player").Count == 0, "A partial group exchange was accepted."));
             Check("opening_without_player_exchange_rejected", () => Require(DialogueService.ChatViewCompleteExchange(turns.Skip(1).ToList(), "player").Count == 0, "An NPC opening was counted as a player exchange."));
-            Check("missing_snapshot_rejected", () => { var copy = turns.Select(Program.CloneDictionary).ToList(); copy[0]["frame_json"] = "{}"; Require(DialogueService.ChatViewCompleteExchange(copy, "player").Count == 0, "Current roster substituted for missing historical presence."); });
+            Check("missing_snapshot_rejected", () => { var copy = turns.Select(CloneDictionary).ToList(); copy[0]["frame_json"] = "{}"; Require(DialogueService.ChatViewCompleteExchange(copy, "player").Count == 0, "Current roster substituted for missing historical presence."); });
             Check("valid_source_locked_instant", () => ValidateChatViewScene(Scene(), window));
             Check("absent_character_rejected", () => { var scene = Scene(); scene["characterIds"] = new[] { "ira", "absent" }; Require(Reject(() => ValidateChatViewScene(scene, window)), "Absent actor reached image stage."); });
             Check("duplicate_character_rejected", () => { var scene = Scene(); scene["characterIds"] = new[] { "ira", "ira" }; Require(Reject(() => ValidateChatViewScene(scene, window)), "Identity duplicated."); });
             Check("invented_quote_rejected", () => { var scene = Scene(); scene["evidence"] = new[] { TestDict("turnId", "n4i", "quote", "Ira draws a sword.") }; Require(Reject(() => ValidateChatViewScene(scene, window)), "Invented action quote accepted."); });
-            Check("other_exchange_cannot_supply_action", () => { var other = Program.CloneDictionary(window[0]); other["turnId"] = "old"; other["exchangeId"] = "exchange_1"; var scene = Scene(); scene["evidence"] = new[] { TestDict("turnId", "old", "quote", "sealed letter") }; Require(Reject(() => ValidateChatViewScene(scene, window.Concat(new[] { other }).ToList())), "Different instants were merged."); });
+            Check("other_exchange_cannot_supply_action", () => { var other = CloneDictionary(window[0]); other["turnId"] = "old"; other["exchangeId"] = "exchange_1"; var scene = Scene(); scene["evidence"] = new[] { TestDict("turnId", "old", "quote", "sealed letter") }; Require(Reject(() => ValidateChatViewScene(scene, window.Concat(new[] { other }).ToList())), "Different instants were merged."); });
             Check("selected_turn_must_be_in_window", () => { var scene = Scene(); scene["selectedTurnId"] = "outside"; Require(Reject(() => ValidateChatViewScene(scene, window)), "Outside moment accepted."); });
             Check("selected_moment_needs_direct_evidence", () => { var scene = Scene(); scene["evidence"] = new[] { TestDict("turnId", "p4", "quote", "sealed letter") }; Require(Reject(() => ValidateChatViewScene(scene, window)), "Selected instant had no direct evidence."); });
             Check("caption_and_prompt_bounds", () => { var scene = Scene(); scene["description"] = new string('x', 6001); Require(Reject(() => ValidateChatViewScene(scene, window)), "Unbounded image brief accepted."); });
@@ -85,12 +85,12 @@ namespace ReignBetaServer
             Check("transcript_guard_rejects_gray_speech_backing", () => {
                 var document = new System.Xml.XmlDocument();
                 document.LoadXml("<ListPanel><Widget Sprite='BlankWhiteSquare' Color='#171717FF'/></ListPanel>");
-                Require(!Program.VerificationTranscriptBackingsValid(document.DocumentElement), "A speech backing escaped the transparent transcript guard.");
+                Require(!VerificationService.VerificationTranscriptBackingsValid(document.DocumentElement), "A speech backing escaped the transparent transcript guard.");
             });
             Check("transcript_guard_rejects_unbounded_scene_owner", () => {
                 var document = new System.Xml.XmlDocument();
                 document.LoadXml("<ListPanel><Widget Id='ChatViewImageEntry' IsVisible='@IsViewLine' SuggestedWidth='1672'><Children><Widget Sprite='BlankWhiteSquare' Color='#070808FF'/></Children></Widget></ListPanel>");
-                Require(!Program.VerificationTranscriptBackingsValid(document.DocumentElement), "A full-width backing disguised as a scene card passed.");
+                Require(!VerificationService.VerificationTranscriptBackingsValid(document.DocumentElement), "A full-width backing disguised as a scene card passed.");
             });
             RunChatViewPersistenceTests(results);
             return results;

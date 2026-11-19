@@ -22,16 +22,16 @@ namespace ReignBetaServer
             {
                 ["campaignId"] = ReadString(payload, "campaignId", ""), ["savePointId"] = ReadString(payload, "savePointId", ""),
                 ["savePointKind"] = ReadString(payload, "savePointKind", "native_save"),
-                ["campaignLabel"] = Program.LimitText(ReadString(payload, "campaignLabel", ""), 500),
+                ["campaignLabel"] = DialogueService.LimitText(ReadString(payload, "campaignLabel", ""), 500),
                 ["campaignTimeDays"] = ReadDouble(payload, "campaignTimeDays", 0d),
                 ["campaignTimeMilliseconds"] = ReadDouble(payload, "campaignTimeMilliseconds", 0d),
                 ["capturedUtc"] = ReadString(payload, "capturedUtc", DateTime.UtcNow.ToString("o")),
-                ["nativeSaveName"] = Program.LimitText(ReadString(payload, "nativeSaveName", ""), 240),
-                ["nativeCreationUtc"] = Program.LimitText(ReadString(payload, "nativeCreationUtc", ""), 100),
-                ["timelineId"] = Program.LimitText(ReadString(payload, "timelineId", ""), 160),
+                ["nativeSaveName"] = DialogueService.LimitText(ReadString(payload, "nativeSaveName", ""), 240),
+                ["nativeCreationUtc"] = DialogueService.LimitText(ReadString(payload, "nativeCreationUtc", ""), 100),
+                ["timelineId"] = DialogueService.LimitText(ReadString(payload, "timelineId", ""), 160),
                 ["worldHistorySequence"] = ReadLong(payload, "worldHistorySequence", 0),
-                ["worldHistoryHeadEventId"] = Program.LimitText(ReadString(payload, "worldHistoryHeadEventId", ""), 200),
-                ["clientVersion"] = Program.LimitText(ReadString(payload, "clientVersion", ""), 100)
+                ["worldHistoryHeadEventId"] = DialogueService.LimitText(ReadString(payload, "worldHistoryHeadEventId", ""), 200),
+                ["clientVersion"] = DialogueService.LimitText(ReadString(payload, "clientVersion", ""), 100)
             };
         }
 
@@ -90,7 +90,7 @@ namespace ReignBetaServer
         {
             lock (SaveSyncLedgerLock)
             {
-                Dictionary<string, object> ledger = Program.ReadJsonObject(Path.Combine(SaveSyncCampaignRoot(campaignId), "ledger.json"));
+                Dictionary<string, object> ledger = CampaignFileService.ReadJsonObject(Path.Combine(SaveSyncCampaignRoot(campaignId), "ledger.json"));
                 if (ledger.Count == 0) ledger = new Dictionary<string, object>();
                 string storedCampaignId = ReadString(ledger, "campaignId", "");
                 if (!string.IsNullOrWhiteSpace(storedCampaignId) && !storedCampaignId.Equals(campaignId, StringComparison.OrdinalIgnoreCase))
@@ -272,7 +272,7 @@ namespace ReignBetaServer
                     reconciliation["campaignDeleted"] = false;
                     if (remaining == 0)
                     {
-                        Dictionary<string, object> metadata = Program.ReadJsonObject(
+                        Dictionary<string, object> metadata = CampaignFileService.ReadJsonObject(
                             Path.Combine(StrictCampaignDirectory(campaignId),
                                 "campaign.json"));
                         Dictionary<string, object> deletion =
@@ -411,7 +411,7 @@ namespace ReignBetaServer
                 ["recordsRolledBack"] = ReadLong(result, "recordsRolledBack", 0), ["recordsRestored"] = ReadLong(result, "recordsRestored", 0),
                 ["changedFiles"] = ReadInt(result, "changedFiles", 0),
                 ["countsBySubsystem"] = ReadDictionary(result, "countsBySubsystem") ?? new Dictionary<string, object>(),
-                ["error"] = Program.LimitText(ReadString(result, "error", ""), 2000), ["backupId"] = backupId ?? ""
+                ["error"] = DialogueService.LimitText(ReadString(result, "error", ""), 2000), ["backupId"] = backupId ?? ""
             };
             ledger["lastBackupId"] = backupId ?? "";
             ledger["updatedUtc"] = DateTime.UtcNow.ToString("o");
@@ -431,10 +431,10 @@ namespace ReignBetaServer
                     ["durationMs"] = ReadLong(data, "durationMs", 0), ["recordsRolledBack"] = ReadLong(data, "recordsRolledBack", 0),
                     ["recordsRestored"] = ReadLong(data, "recordsRestored", 0), ["changedFiles"] = ReadInt(data, "changedFiles", 0),
                     ["backupId"] = ReadString(data, "backupId", ""), ["countsBySubsystem"] = ReadDictionary(data, "countsBySubsystem") ?? new Dictionary<string, object>(),
-                    ["error"] = Program.LimitText(ReadString(data, "error", ""), 4000)
+                    ["error"] = DialogueService.LimitText(ReadString(data, "error", ""), 4000)
                 };
-                Program.AppendBoundedJsonLineToPath(path, row, 4L * 1024L * 1024L, 2L * 1024L * 1024L);
-                Program.LogOperational("save_sync." + eventType, row);
+                CampaignFileService.AppendBoundedJsonLineToPath(path, row, 4L * 1024L * 1024L, 2L * 1024L * 1024L);
+                OperationsService.LogOperational("save_sync." + eventType, row);
             }
             catch { }
         }
@@ -455,7 +455,7 @@ namespace ReignBetaServer
             {
                 string ledgerPath = Path.Combine(campaignRoot, "ledger.json");
                 if (!File.Exists(ledgerPath)) continue;
-                string campaignId = ReadString(Program.ReadJsonObject(ledgerPath), "campaignId", "");
+                string campaignId = ReadString(CampaignFileService.ReadJsonObject(ledgerPath), "campaignId", "");
                 if (string.IsNullOrWhiteSpace(campaignId)) continue;
                 try { CleanupSaveSyncRecovery(campaignId); } catch { }
             }
@@ -494,7 +494,7 @@ namespace ReignBetaServer
             try
             {
                 full = Path.GetFullPath(path);
-                campaigns = Path.GetFullPath(Program.CampaignsRoot())
+                campaigns = Path.GetFullPath(CampaignFileService.CampaignsRoot())
                     .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
                     + Path.DirectorySeparatorChar;
             }
@@ -567,7 +567,7 @@ namespace ReignBetaServer
         {
             if (SaveSyncActiveStates.TryGetValue(campaignId, out SaveSyncActiveState cached))
                 return cached;
-            Dictionary<string, object> json = Program.ReadJsonObject(SaveSyncActiveStatePath(campaignId));
+            Dictionary<string, object> json = CampaignFileService.ReadJsonObject(SaveSyncActiveStatePath(campaignId));
             SaveSyncActiveState loaded = new SaveSyncActiveState
             {
                 SavePointId = ReadString(json, "savePointId", ""),
@@ -626,7 +626,7 @@ namespace ReignBetaServer
             {
                 string ledgerPath = Path.Combine(campaignRoot, "ledger.json");
                 if (!File.Exists(ledgerPath)) continue;
-                Dictionary<string, object> ledger = Program.ReadJsonObject(ledgerPath);
+                Dictionary<string, object> ledger = CampaignFileService.ReadJsonObject(ledgerPath);
                 string campaignId = ReadString(ledger, "campaignId", "");
                 foreach (Dictionary<string, object> point in ReadDictionaryList(ledger, "points"))
                 {
@@ -634,7 +634,7 @@ namespace ReignBetaServer
                     try
                     {
                         if (snapshotExists(campaignId, pointId)) continue;
-                        Program.LogOperational("save_sync.startup_snapshot_unavailable", new Dictionary<string, object>
+                        OperationsService.LogOperational("save_sync.startup_snapshot_unavailable", new Dictionary<string, object>
                         {
                             ["campaignId"] = campaignId, ["savePointId"] = pointId,
                             ["preserved"] = true
@@ -642,7 +642,7 @@ namespace ReignBetaServer
                     }
                     catch (Exception ex)
                     {
-                        Program.LogOperational("save_sync.startup_snapshot_check_deferred", new Dictionary<string, object>
+                        OperationsService.LogOperational("save_sync.startup_snapshot_check_deferred", new Dictionary<string, object>
                         {
                             ["campaignId"] = campaignId, ["savePointId"] = pointId,
                             ["preserved"] = true, ["errorType"] = ex.GetType().Name
@@ -665,7 +665,7 @@ namespace ReignBetaServer
 
         private static bool IsSaveSyncEnabled()
         {
-            return SaveSyncEnabledOverrideForTests ?? ReadBool(Program.LoadSettings(), "saveSyncEnabled", true);
+            return SaveSyncEnabledOverrideForTests ?? ReadBool(SettingsService.LoadSettings(), "saveSyncEnabled", true);
         }
 
         private static void ValidateSaveSyncId(string value, string name)
@@ -677,7 +677,7 @@ namespace ReignBetaServer
         internal static string StrictCampaignDirectory(string campaignId)
         {
             ValidateSaveSyncId(campaignId, "campaignId");
-            string root = Path.GetFullPath(Program.CampaignsRoot());
+            string root = Path.GetFullPath(CampaignFileService.CampaignsRoot());
             string path = Path.GetFullPath(Path.Combine(root, campaignId));
             string prefix = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
             if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Campaign path escaped the campaign storage root.");

@@ -55,7 +55,7 @@ namespace ReignBetaServer
             literalProposal["memoryWrites"] = new[] { literalWrite };
             literalProposal["reply"] = "I remember Brindle like a missing page returned to its place.";
             Check("literal_book_write_cannot_exempt_reply", FindDeliveredMemoryRecallViolations(literalProposal, payload, "npc").Count > 0);
-            var completeProofPayload = Program.CloneDictionary(payload);
+            var completeProofPayload = CloneDictionary(payload);
             var completeProofRecords = Enumerable.Range(0, 70).Select(i => Record("proof_" + i,
                 original + " " + new string('p', 900) + " Archive detail " + i + ".")).ToList();
             string oversizedProof = Record("proof_larger_than_old_budget", original + " " + new string('q', 49000));
@@ -79,8 +79,8 @@ namespace ReignBetaServer
             var proofRequest = TestDict("requestType", "dialogue_continuity_repair", "model", "recall-proof-fixture",
                 "maxTokens", 8000, "messages", new[] { TestDict("role", "system", "content", "Repair only from supplied originals.") });
             BindDeliveredRecallRepairEvidence(proofRequest, completeProofPayload, "npc");
-            var proofSettings = TestDict("llmProvider", Program.NanoGptProvider, "reasoningMode", "off");
-            string proofRoute = Program.NanoGptProvider + ":recall-proof-fixture:" + PromptHash(PortraitsService.NanoGptChatCompletionsUrl + "|" + CanonicalJson(TestDict())).Substring(0, 20);
+            var proofSettings = TestDict("llmProvider", LlmProviderService.NanoGptProvider, "reasoningMode", "off");
+            string proofRoute = LlmProviderService.NanoGptProvider + ":recall-proof-fixture:" + PromptHash(PortraitsService.NanoGptChatCompletionsUrl + "|" + CanonicalJson(TestDict())).Substring(0, 20);
             var proofCertificate = TestDict("endpoint", PortraitsService.NanoGptChatCompletionsUrl, "model", "recall-proof-fixture", "contextTokens", 1048576,
                 "maxOutputTokens", 8000, "source", "isolated-contract", "validUntilUtc", DateTimeOffset.UtcNow.AddHours(1).ToString("o"));
             proofSettings["verifiedConversationContextWindows"] = TestDict(proofRoute, proofCertificate);
@@ -99,7 +99,7 @@ namespace ReignBetaServer
             authoredMessages.AddRange(trustedAuthored);
             authoredEnvelope["conversationMessageStructure"] = TestDict("serializedMessagesHash", PromptHash(Json.Serialize(authoredMessages)));
             ConversationStructureReceipts.Add(authoredEnvelope, new ConversationStructureReceipt {
-                Messages = authoredMessages.Select(Program.CloneDictionary).ToList() });
+                Messages = authoredMessages.Select(CloneDictionary).ToList() });
             var authoredRequest = TestDict("promptEnvelope", authoredEnvelope, "messages", authoredMessages);
             var repairWindow = RecallRepairAuthoredWindow(authoredRequest, out _);
             Check("repair_window_keeps_latest_thirty_exact_roles_order_and_bodies", repairWindow?.Count == 30
@@ -133,12 +133,12 @@ namespace ReignBetaServer
                     && providerMessages.All(m => !ReadString(m, "content", "").Contains("RECENT SHARED EXCHANGE", StringComparison.Ordinal)));
 
                 const string presenceQuestion = "Is Ellyn here in the hall?";
-                var eventMessages = authoredMessages.Select(Program.CloneDictionary).ToList();
+                var eventMessages = authoredMessages.Select(CloneDictionary).ToList();
                 eventMessages.Last()["content"] = "LATEST PLAYER TURN {}\n" + presenceQuestion;
                 var eventEnvelope = TestDict("conversationMessageStructure",
                     TestDict("serializedMessagesHash", PromptHash(Json.Serialize(eventMessages))));
                 ConversationStructureReceipts.Add(eventEnvelope, new ConversationStructureReceipt {
-                    Messages = eventMessages.Select(Program.CloneDictionary).ToList()
+                    Messages = eventMessages.Select(CloneDictionary).ToList()
                 });
                 var eventRequest = TestDict("requestType", "social_event", "model", "recall-proof-fixture",
                     "messages", eventMessages, "promptEnvelope", eventEnvelope);
@@ -183,18 +183,18 @@ namespace ReignBetaServer
                 && completeProofRecords.All(r => proofMessages.Contains(NormalizePromptSegment(r), StringComparison.Ordinal)));
             Check("repair_wire_preserves_paired_and_buried_source_answers", new[] { pairedContext, buriedContext }.All(r =>
                 proofMessages.Contains(NormalizePromptSegment(r), StringComparison.Ordinal)));
-            var removedProof = Program.CloneDictionary(proofRequest);
+            var removedProof = CloneDictionary(proofRequest);
             removedProof["messages"] = new[] { TestDict("role", "user", "content", string.Join(",", proofSources.Select(r => ReadString(r, "sourceId", "")))) };
             var removedWire = ProofWire(removedProof);
             Check("repair_source_ids_cannot_mask_dropped_prose", ReadString(removedWire, "status", "") == "blocked"
                 && !ReadBool(ReadDictionary(ReadDictionary(removedWire, "providerPreflight"), "continuity"), "requiredSourceCoverageComplete", true)
                 && ReadInt(removedWire, "providerCalls", -1) == 0);
-            var changedProof = Program.CloneDictionary(proofRequest);
+            var changedProof = CloneDictionary(proofRequest);
             var changedProofMessages = ReadDictionaryList(changedProof, "messages");
             changedProofMessages.Last()["content"] = ReadString(changedProofMessages.Last(), "content", "").Replace("pinched his nose", "bit his nose");
             changedProof["messages"] = changedProofMessages;
             Check("repair_source_content_changes_fail_closed", ReadString(ProofWire(changedProof), "status", "") == "blocked");
-            var smallProofSettings = Program.CloneDictionary(proofSettings);
+            var smallProofSettings = CloneDictionary(proofSettings);
             ReadDictionary(ReadDictionary(smallProofSettings, "verifiedConversationContextWindows"), proofRoute)["contextTokens"] = 16000;
             var smallProofWire = ProofWire(proofRequest, smallProofSettings);
             Check("repair_capacity_estimate_is_advisory_with_complete_sources", ReadString(smallProofWire, "status", "") == "captured"
@@ -202,14 +202,14 @@ namespace ReignBetaServer
                 && !ReadBool(ReadDictionary(smallProofWire, "providerPreflight"), "fits", true)
                 && ReadBool(ReadDictionary(smallProofWire, "providerPreflight"), "dispatchAllowed", false)
                 && ReadBool(ReadDictionary(ReadDictionary(smallProofWire, "providerPreflight"), "continuity"), "requiredSourceCoverageComplete", false));
-            var unknownQuery = Program.CloneDictionary(payload); unknownQuery["playerText"] = "Which groom witnessed Brindle and the crab?";
+            var unknownQuery = CloneDictionary(payload); unknownQuery["playerText"] = "Which groom witnessed Brindle and the crab?";
             Bind(unknownQuery, evidence, evidence);
             Check("unknown_question_cannot_resolve_pronoun_to_known_topic", !Violates("I cannot recall him.", unknownQuery));
-            var onlyFailed = Program.CloneDictionary(payload);
+            var onlyFailed = CloneDictionary(payload);
             string failedEvidence = Record("prior_failure", "Do you remember Brindle and the crab? I do not remember Brindle.");
             Bind(onlyFailed, failedEvidence, failedEvidence);
             Check("prior_questions_and_denials_are_not_positive_recall_evidence", !Violates("I do not remember Brindle.", onlyFailed));
-            var mixedSource = Program.CloneDictionary(payload);
+            var mixedSource = CloneDictionary(payload);
             string mixedEvidence = Record("mixed", original + "\n- [Day 1] [source=failed_npc role=npc] Aster: I have a memory gap about Brindle.");
             Bind(mixedSource, mixedEvidence, mixedEvidence);
             Check("failed_partner_cannot_erase_positive_player_source", Violates("I do not remember Brindle.", mixedSource));
@@ -218,7 +218,7 @@ namespace ReignBetaServer
                 BroadRecallLossNarrative(ReadString(contextAnswer, "reply", ""), true).Length == 0
                 && FindDeliveredMemoryRecallViolations(contextAnswer, mixedSource, "npc")
                     .Any(v => ReadString(v, "type", "") == "critical_continuity_recall_context"));
-            var splitContext = Program.CloneDictionary(payload);
+            var splitContext = CloneDictionary(payload);
             string splitEvidence = Record("split_context", original
                 + "\n- [Day 1] [source=split_npc role=npc] Aster: *She notices a page is missing from that scene.*\n\n"
                 + "*She is sorting memory.*\n\nI remember the orchard, but the mule is not there.");
@@ -226,26 +226,26 @@ namespace ReignBetaServer
             Check("same_npc_turn_carries_recall_context_across_sentences",
                 FindDeliveredMemoryRecallViolations(contextAnswer, splitContext, "npc")
                     .Any(v => ReadString(v, "type", "") == "critical_continuity_recall_context"));
-            var literalContext = Program.CloneDictionary(payload);
+            var literalContext = CloneDictionary(payload);
             string literalEvidence = Record("split_book", original
                 + "\n- [Day 1] [source=book_npc role=npc] Aster: I remember reading the old book.\nA page was missing.");
             Bind(literalContext, literalEvidence, literalEvidence);
             Check("split_literal_book_and_page_are_not_recall_loss", !Violates("The crab pinched Brindle's nose.", literalContext));
-            var rememberedLiteralContext = Program.CloneDictionary(payload);
+            var rememberedLiteralContext = CloneDictionary(payload);
             string rememberedLiteralEvidence = literalEvidence.Replace("A page was missing.", "I remember the missing page.");
             Bind(rememberedLiteralContext, rememberedLiteralEvidence, rememberedLiteralEvidence);
             Check("split_literal_book_recall_remains_literal", !Violates("The crab pinched Brindle's nose.", rememberedLiteralContext));
-            var foreignContext = Program.CloneDictionary(payload);
+            var foreignContext = CloneDictionary(payload);
             string foreignEvidence = Record("split_speakers", original
                 + "\n- [Day 1] [source=aster_page role=npc] Aster: A page was missing."
                 + "\n- [Day 1] [source=korin_recall role=npc] Korin: I remember the orchard.");
             Bind(foreignContext, foreignEvidence, foreignEvidence);
             Check("another_npc_cannot_supply_page_recall_context", !Violates("The crab pinched Brindle's nose.", foreignContext));
-            var separateTurnContext = Program.CloneDictionary(payload);
+            var separateTurnContext = CloneDictionary(payload);
             string separateTurnEvidence = foreignEvidence.Replace("Korin: I remember", "Aster: I remember");
             Bind(separateTurnContext, separateTurnEvidence, separateTurnEvidence);
             Check("separate_npc_turn_cannot_supply_page_recall_context", !Violates("The crab pinched Brindle's nose.", separateTurnContext));
-            var splitCausalContext = Program.CloneDictionary(payload);
+            var splitCausalContext = CloneDictionary(payload);
             string splitCausalEvidence = Record("split_causal", original + " Aster lost her memories after a blow to her head."
                 + "\n- [Day 1] [source=causal_npc role=npc] Aster: I lost my memories after a blow to my head.\nI remember an old book.\nA page was missing.");
             Bind(splitCausalContext, splitCausalEvidence, splitCausalEvidence);
@@ -253,13 +253,13 @@ namespace ReignBetaServer
             var reviewed = TestDict("reply", "The crab pinched Brindle's nose beside the watermill.");
             BindDeliveredRecallRewrite(mixedSource, "npc", reviewed);
             Check("reviewed_original_recall_clears_context_risk", FindDeliveredMemoryRecallViolations(reviewed, mixedSource, "npc").Count == 0);
-            var changedReview = Program.CloneDictionary(reviewed); changedReview["reply"] = "You later brought Brindle to the mill as promised.";
+            var changedReview = CloneDictionary(reviewed); changedReview["reply"] = "You later brought Brindle to the mill as promised.";
             Check("changed_reply_cannot_reuse_context_review", FindDeliveredMemoryRecallViolations(changedReview, mixedSource, "npc").Count > 0);
-            changedReview = Program.CloneDictionary(reviewed); changedReview["beliefWrites"] = new[] { TestDict("claim", "The story has returned to its shelf.") };
+            changedReview = CloneDictionary(reviewed); changedReview["beliefWrites"] = new[] { TestDict("claim", "The story has returned to its shelf.") };
             Check("changed_mental_write_cannot_reuse_context_review", FindDeliveredMemoryRecallViolations(changedReview, mixedSource, "npc").Count > 0);
             foreach (string field in DeliveredRecallWriteFields)
             {
-                var changedField = Program.CloneDictionary(reviewed); changedField[field] = new[] { TestDict("text", "The shelf holds the story again.") };
+                var changedField = CloneDictionary(reviewed); changedField[field] = new[] { TestDict("text", "The shelf holds the story again.") };
                 Check("review_binds_every_durable_field_" + field, FindDeliveredMemoryRecallViolations(changedField, mixedSource, "npc").Count > 0);
                 var falseField = TestDict("reply", "The crab pinched Brindle's nose.", field, new[] { TestDict("text", "Aster recovered her lost memories of Brindle.") });
                 Check("every_durable_field_rejects_false_loss_" + field, FindDeliveredMemoryRecallViolations(falseField, payload, "npc").Count > 0);
@@ -272,10 +272,10 @@ namespace ReignBetaServer
             Check("review_attempt_never_exempts_direct_contradiction", FindDeliveredMemoryRecallViolations(stillFalse, mixedSource, "npc").Count > 0);
             BindDeliveredRecallRewrite(mixedSource, "npc", null);
             Check("failed_review_revokes_receipt", FindDeliveredMemoryRecallViolations(unknownAfterConflict, mixedSource, "npc").Count > 0);
-            var forgedReview = Program.CloneDictionary(mixedSource); forgedReview["reviewedResponseHash"] = DeliveredRecallResponseHash(forgedReview, "npc", reviewed);
+            var forgedReview = CloneDictionary(mixedSource); forgedReview["reviewedResponseHash"] = DeliveredRecallResponseHash(forgedReview, "npc", reviewed);
             Bind(forgedReview, mixedEvidence, mixedEvidence);
             Check("client_cannot_supply_context_review", FindDeliveredMemoryRecallViolations(reviewed, forgedReview, "npc").Count > 0);
-            var supportedHistory = Program.CloneDictionary(payload);
+            var supportedHistory = CloneDictionary(payload);
             string causalHistory = mixedEvidence.Replace("I have a memory gap about Brindle.", "I lost my memories of Brindle after a blow to my head.")
                 + "\n" + Record("causal_player", "Aster lost her memories of Brindle after a blow to her head.");
             Bind(supportedHistory, causalHistory, causalHistory);
@@ -288,11 +288,11 @@ namespace ReignBetaServer
             Check("ordinary_memory_write_uses_absence_guard", FilterRoleplayFeedbackWrites(
                 new() { TestDict("text", "Aster recovered her lost memories of Brindle.") }, "memory", rejected).Count == 0
                 && rejected.Any(r => ReadString(r, "reason", "") == "unsupported_recall_absence"));
-            var forged = Program.CloneDictionary(payload); forged["memoryRecallGrounding"] = TestDict("sourceCount", 99);
+            var forged = CloneDictionary(payload); forged["memoryRecallGrounding"] = TestDict("sourceCount", 99);
             Check("client_metadata_cannot_supply_delivery", !Violates("I have a memory gap.", forged));
-            var omitted = Program.CloneDictionary(payload); Bind(omitted, evidence, "Unrelated current input.");
+            var omitted = CloneDictionary(payload); Bind(omitted, evidence, "Unrelated current input.");
             Check("selection_without_delivery_is_not_proof", !Violates("I have a memory gap.", omitted));
-            var other = Program.CloneDictionary(payload); Bind(other, Record("private", original, "other"), Record("private", original, "other"));
+            var other = CloneDictionary(payload); Bind(other, Record("private", original, "other"), Record("private", original, "other"));
             Check("another_observer_cannot_supply_proof", !Violates("I have a memory gap.", other));
             payload["sceneTurnId"] = "different_turn";
             Check("stale_turn_receipt_is_rejected", !Violates("I have a memory gap."));
@@ -321,7 +321,7 @@ namespace ReignBetaServer
             string rendered = RenderExactHistoryTurn(TestDict("role", "npc", "speaker_id", "npc", "speaker_name", "Aster", "text", raw), null);
             Check("historical_annotation_retains_complete_original", rendered.Contains(raw) && rendered.Contains("Recall source status"));
 
-            var longContext = Program.CloneDictionary(payload);
+            var longContext = CloneDictionary(payload);
             string ordinaryHistory = string.Join(" ", Enumerable.Repeat(
                 "We watched Brindle beside the orchard gate while the river boat waited at the watermill.", 64));
             string longEvidence = string.Join("\n", Enumerable.Range(0, 32).Select(i => Record("long_" + i,
@@ -353,7 +353,7 @@ namespace ReignBetaServer
             var recentPositive = Line("recent_positive", "player", "Mira", original);
             var recentFailed = Line("recent_failed", "npc", "Aster", "I have no memory of him.");
             var recentLines = new List<Dictionary<string, object>> { recentPositive, recentFailed };
-            var recentPayload = Program.CloneDictionary(payload); recentPayload["playerHeroStringId"] = "player";
+            var recentPayload = CloneDictionary(payload); recentPayload["playerHeroStringId"] = "player";
             var knownPlayer = TestDict("usableName", "Mira", "canonicalNameAllowed", true);
             void BindRecent(Dictionary<string, object> context, string transcript, List<Dictionary<string, object>> lines,
                 string historical = "", string delivered = null, string section = "canonicalTranscript")
@@ -366,68 +366,68 @@ namespace ReignBetaServer
                 .Any(v => ReadString(v, "type", "") == "critical_continuity_recall_context");
             foreach (string route in new[] { "in_person", "letter", "event" })
             {
-                var lines = recentLines.Select(Program.CloneDictionary).ToList();
+                var lines = recentLines.Select(CloneDictionary).ToList();
                 if (route == "letter") foreach (var line in lines) { line["channel"] = "correspondence"; line["direction"] = "exchanged"; }
                 string Transcript(List<Dictionary<string, object>> rows) => FormatContinuityTranscript(rows, route == "event"
-                    ? group => CharactersService.FormatEventLinesForObserver(group, recentPayload, "npc", knownPlayer) : Program.FormatDialogueForPrompt);
+                    ? group => CharactersService.FormatEventLinesForObserver(group, recentPayload, "npc", knownPlayer) : DialogueService.FormatDialogueForPrompt);
                 string transcript = Transcript(lines);
-                var context = Program.CloneDictionary(recentPayload); BindRecent(context, transcript, lines);
+                var context = CloneDictionary(recentPayload); BindRecent(context, transcript, lines);
                 Check("recent_only_source_conflict_" + route, ContextConflict(context));
                 Check("recent_only_positive_rejects_denial_" + route, Violates("I do not remember Brindle.", context));
-                var positiveOnly = Program.CloneDictionary(recentPayload); BindRecent(positiveOnly, Transcript(lines.Take(1).ToList()), lines.Take(1).ToList());
+                var positiveOnly = CloneDictionary(recentPayload); BindRecent(positiveOnly, Transcript(lines.Take(1).ToList()), lines.Take(1).ToList());
                 Check("recent_positive_without_failure_avoids_rewrite_" + route, !ContextConflict(positiveOnly)
                     && Violates("I do not remember Brindle.", positiveOnly));
-                var mixedRecent = Program.CloneDictionary(recentPayload); BindRecent(mixedRecent, Transcript(lines.Skip(1).ToList()), lines.Skip(1).ToList(), evidence);
+                var mixedRecent = CloneDictionary(recentPayload); BindRecent(mixedRecent, Transcript(lines.Skip(1).ToList()), lines.Skip(1).ToList(), evidence);
                 Check("historical_positive_recent_pronoun_failure_" + route, ContextConflict(mixedRecent));
-                var omittedRecent = Program.CloneDictionary(recentPayload); BindRecent(omittedRecent, transcript, lines, evidence, evidence);
+                var omittedRecent = CloneDictionary(recentPayload); BindRecent(omittedRecent, transcript, lines, evidence, evidence);
                 Check("undelivered_recent_failure_is_not_proof_" + route, !ContextConflict(omittedRecent));
-                var missingRows = Program.CloneDictionary(recentPayload); BindRecent(missingRows, transcript, null, evidence);
+                var missingRows = CloneDictionary(recentPayload); BindRecent(missingRows, transcript, null, evidence);
                 Check("rendered_names_cannot_supply_typed_recent_roles_" + route, !ContextConflict(missingRows));
-                var omittedBody = Program.CloneDictionary(recentPayload);
+                var omittedBody = CloneDictionary(recentPayload);
                 BindRecent(omittedBody, transcript.Replace("I have no memory of him.", "We watched the mill."), lines, evidence);
                 Check("omitted_recent_body_cannot_bind_" + route, !ContextConflict(omittedBody));
-                var foreignObserver = Program.CloneDictionary(recentPayload);
+                var foreignObserver = CloneDictionary(recentPayload);
                 BindRecent(foreignObserver, transcript.Replace("observer=current_observer", "observer=other"), lines, evidence);
                 Check("foreign_recent_observer_cannot_bind_" + route, !ContextConflict(foreignObserver));
-                var wrongSection = Program.CloneDictionary(recentPayload); BindRecent(wrongSection, transcript, lines, evidence, null, "untrustedRecent");
+                var wrongSection = CloneDictionary(recentPayload); BindRecent(wrongSection, transcript, lines, evidence, null, "untrustedRecent");
                 Check("recent_marker_requires_canonical_capture_" + route, !ContextConflict(wrongSection));
-                var otherNpcLines = lines.Select(Program.CloneDictionary).ToList();
+                var otherNpcLines = lines.Select(CloneDictionary).ToList();
                 otherNpcLines[1]["speakerHeroStringId"] = "other";
-                var otherNpc = Program.CloneDictionary(recentPayload); BindRecent(otherNpc, Transcript(otherNpcLines), otherNpcLines, evidence);
+                var otherNpc = CloneDictionary(recentPayload); BindRecent(otherNpc, Transcript(otherNpcLines), otherNpcLines, evidence);
                 Check("other_npc_named_like_observer_cannot_supply_conflict_" + route, !ContextConflict(otherNpc));
                 foreach (string speakerKey in new[] { "speakerId", "speaker_id", "speakerHeroStringId", "heroStringId" })
                 {
-                    var aliasLines = lines.Select(Program.CloneDictionary).ToList();
+                    var aliasLines = lines.Select(CloneDictionary).ToList();
                     aliasLines[1].Remove("speakerHeroStringId"); aliasLines[1][speakerKey] = "other";
-                    var foreignAlias = Program.CloneDictionary(recentPayload); BindRecent(foreignAlias, Transcript(aliasLines), aliasLines, evidence);
+                    var foreignAlias = CloneDictionary(recentPayload); BindRecent(foreignAlias, Transcript(aliasLines), aliasLines, evidence);
                     Check("typed_speaker_alias_rejects_foreign_" + route + "_" + speakerKey, !ContextConflict(foreignAlias));
                     aliasLines[1][speakerKey] = "npc";
-                    var currentAlias = Program.CloneDictionary(recentPayload); BindRecent(currentAlias, Transcript(aliasLines), aliasLines, evidence);
+                    var currentAlias = CloneDictionary(recentPayload); BindRecent(currentAlias, Transcript(aliasLines), aliasLines, evidence);
                     Check("typed_speaker_alias_accepts_current_" + route + "_" + speakerKey, ContextConflict(currentAlias));
                 }
                 var stranger = TestDict("canonicalNameAllowed", false, "usableName", "the stranger");
                 string ProjectIdentity(string text) => CharactersService.SanitizePromptForIdentity(text, "", "Mira", stranger);
-                var anonymousLines = lines.Select(Program.CloneDictionary).ToList(); anonymousLines[0]["text"] = original + " Mira brought him home.";
+                var anonymousLines = lines.Select(CloneDictionary).ToList(); anonymousLines[0]["text"] = original + " Mira brought him home.";
                 string rawAnonymous = Transcript(anonymousLines), projectedAnonymous = ProjectIdentity(rawAnonymous);
-                var anonymous = Program.CloneDictionary(recentPayload);
+                var anonymous = CloneDictionary(recentPayload);
                 CaptureRequiredPromptEvidence(anonymous, "canonicalTranscript", rawAnonymous);
                 string immutableCapture = CanonicalJson(CapturedRequiredPromptEvidence(anonymous));
                 BindDeliveredMemoryRecallEvidence(anonymous, "npc", Messages(projectedAnonymous), "Aster", anonymousLines, ProjectIdentity);
                 Check("unknown_identity_keeps_delivered_recall_" + route, !projectedAnonymous.Contains("Mira")
                     && ContextConflict(anonymous) && Violates("I do not remember Brindle.", anonymous)
                     && immutableCapture == CanonicalJson(CapturedRequiredPromptEvidence(anonymous)));
-                var anonymousOmitted = Program.CloneDictionary(recentPayload);
+                var anonymousOmitted = CloneDictionary(recentPayload);
                 CaptureRequiredPromptEvidence(anonymousOmitted, "canonicalTranscript", rawAnonymous);
                 BindDeliveredMemoryRecallEvidence(anonymousOmitted, "npc", Messages(projectedAnonymous.Replace(original, "A mule.")),
                     "Aster", anonymousLines, ProjectIdentity);
                 Check("identity_projection_cannot_bless_omitted_recall_" + route, !Violates("I do not remember Brindle.", anonymousOmitted));
-                var unknownLines = lines.Select(Program.CloneDictionary).ToList(); unknownLines[1]["text"] = "I cannot recall the groom's name.";
-                var recentUnknown = Program.CloneDictionary(recentPayload); BindRecent(recentUnknown, Transcript(unknownLines), unknownLines);
+                var unknownLines = lines.Select(CloneDictionary).ToList(); unknownLines[1]["text"] = "I cannot recall the groom's name.";
+                var recentUnknown = CloneDictionary(recentPayload); BindRecent(recentUnknown, Transcript(unknownLines), unknownLines);
                 Check("legitimate_recent_uncertainty_is_not_a_conflict_" + route, !ContextConflict(recentUnknown));
-                var causalLines = lines.Select(Program.CloneDictionary).ToList();
+                var causalLines = lines.Select(CloneDictionary).ToList();
                 causalLines[0]["text"] = original + " You lost your memories after a blow to your head.";
                 causalLines[1]["text"] = "I lost my memories after the blow to my head.";
-                var recentCause = Program.CloneDictionary(recentPayload); BindRecent(recentCause, Transcript(causalLines), causalLines);
+                var recentCause = CloneDictionary(recentPayload); BindRecent(recentCause, Transcript(causalLines), causalLines);
                 Check("typed_recent_player_causal_event_preserved_" + route, !Violates("I lost my memories after the blow to my head.", recentCause));
             }
         }
@@ -462,7 +462,7 @@ namespace ReignBetaServer
                                     "text", order == 0 ? "I left the bronze bell at the " + session + " gate." : "I saw the bell beside the " + session + " gate."));
                         }
                     }
-                    var observer = new Program.KnowledgeAccessContext { NpcId = "npc", WorldDay = 2, TimelineId = "order_main" };
+                    var observer = new DialogueService.KnowledgeAccessContext { NpcId = "npc", WorldDay = 2, TimelineId = "order_main" };
                     Dictionary<string, object> Read(int limit, string excluded = "") =>
                         LoadMostRecentClosedConversation(connection, "npc", excluded, 24000, limit, observer);
                     var bounded = Read(2);
@@ -501,7 +501,7 @@ namespace ReignBetaServer
             if (string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)) throw new InvalidOperationException("Recall recovery requires isolated Verification Lab storage.");
             var results = new List<Dictionary<string, object>>();
             void Check(string name, bool passed, object data = null) => results.Add(TestDict("caseId", "memory_recall_" + name, "passed", passed,
-                "summary", name + (passed || data == null ? "" : ": " + Program.LimitText(Json.Serialize(data), 2200)), "data", data));
+                "summary", name + (passed || data == null ? "" : ": " + DialogueService.LimitText(Json.Serialize(data), 2200)), "data", data));
             RunMemoryRecallGroundingAssertions(Check);
             RunMemoryRecallOrderingAssertions(Check);
             string campaign = "memory_recall_" + Guid.NewGuid().ToString("N");
@@ -553,7 +553,7 @@ namespace ReignBetaServer
                 ["payload_json"] = Json.Serialize(TestDict("conversationGrounding", TestDict("status", "checked"))) }, null).Contains("unverified NPC statement"));
             try
             {
-                Program.WriteJsonObject(Program.CharacterFile(campaign, "npc", "state.json"), state);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "npc", "state.json"), state);
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     void Session(string id, long ts) => DialogueSelfTestStore.InsertConversationSessions21(connection, TestDict("id", id, "campaign", campaign, "ts", ts));
@@ -619,11 +619,11 @@ namespace ReignBetaServer
                     string bad = UpsertTemporalAssertion(connection, campaign, "failed_0_n", "comprehension_fixture", "comprehension", item, 80);
                     // Simulate a pre-fix stored assertion; do not use the guarded writer to seed corruption.
                     DialogueSelfTestStore.UpdateTemporalKnowledgeAssertions(connection, TestDict("id", bad, "claim", absence));
-                    var access = Program.BuildKnowledgeAccessContext("npc", "player", "", context);
+                    var access = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", context);
                     var projectedPlayer = DialogueSelfTestStore.SelectConversationTurns65(connection).Single();
                     Check("interpreted_player_mid_clause_survives_eligible_recall", PrecisionTurnVisible(projectedPlayer, "npc", access, connection)
                         && RenderExactHistoryTurn(projectedPlayer, access).Contains(interpretedSpan));
-                    Check("interpreted_player_keeps_automatic_public_topic", Program.TextListFromJson(ReadString(DialogueSelfTestStore.SelectMemorySpecialistSources(connection).Single(), "public_topics_json", "[]")).Contains("botany"));
+                    Check("interpreted_player_keeps_automatic_public_topic", DialogueService.TextListFromJson(ReadString(DialogueSelfTestStore.SelectMemorySpecialistSources(connection).Single(), "public_topics_json", "[]")).Contains("botany"));
                     Check("interpreted_player_keeps_late_interaction_public_view", ReadString(LateInteractionView(projectedPlayer, "public"), "text", "").Contains(interpretedSpan));
                     Check("interpreted_player_keeps_commitment_source_words", CommitmentVisibleSourceText(projectedPlayer, access).Contains(interpretedSpan));
                     var sourceOnly = DialogueSelfTestStore.SelectConversationTurns66(connection).Single();
@@ -635,7 +635,7 @@ namespace ReignBetaServer
                     ReconcileMemorySpecialistIndex(campaign);
                     var rebuiltProjection = DialogueSelfTestStore.SelectMemorySpecialistSources2(connection).Single();
                     Check("old_projection_index_automatically_rebuilds_unchanged_original", ReadString(rebuiltProjection, "schema_version", "") == MemorySpecialistIndexSchema
-                        && Program.TextListFromJson(ReadString(rebuiltProjection, "public_topics_json", "[]")).Contains("botany")
+                        && DialogueService.TextListFromJson(ReadString(rebuiltProjection, "public_topics_json", "[]")).Contains("botany")
                         && MemorySpecialistSourceHash(DialogueSelfTestStore.SelectConversationTurns65(connection).Single()) == projectionOriginalHash);
                     Check("legacy_player_row_keeps_complete_narration_without_interpretation_binding", RenderExactHistoryTurn(new(projectedPlayer) {
                         ["payload_json"] = Json.Serialize(TestDict("playerNarrationProjectionVersion", 2)) }, access).Contains("balance the bronze bell"));
@@ -659,7 +659,7 @@ namespace ReignBetaServer
                     Check("overlapping_anchor_adds_missing_partner_without_duplicate", covered.Contains("gait") && !covered.Contains("gait_question")
                         && ReadString(completedPair, "text", "").Contains("Show me how your mare moves.")
                         && !ReadString(completedPair, "text", "").Contains(longGait));
-                    var earlier = Program.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["memoryAsOfTimestamp"] = 9L });
+                    var earlier = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["memoryAsOfTimestamp"] = 9L });
                     Check("preceding_context_cannot_cross_time_boundary", ExpandMemoryRecallPrecedingTurn(connection, new() { callback }, earlier).Count == 1);
                     Session("context_gate", 96);
                     Turn("context_visible", "context_gate", 0, "context_old", "npc", "An older visible observation.", 44, 90);
@@ -694,9 +694,9 @@ namespace ReignBetaServer
                         && NormalizeSafeConversationStateUpdates(TestDict("currentCrisis", lossClaim), new(), context, "npc", campaign).Count == 1
                         && FilterRoleplayFeedbackWrites(new() { TestDict("text", lossClaim) }, "memory", new(), context, "npc", campaign).Count == 1);
                     Check("different_cause_cannot_inherit_loss_exception", !HasStoredRecallLossSupport(connection, access, "I have memory loss after the fever."));
-                    var beforeLoss = Program.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["worldDay"] = 42d });
+                    var beforeLoss = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["worldDay"] = 42d });
                     Check("future_loss_event_is_not_support", !HasStoredRecallLossSupport(connection, beforeLoss, lossClaim));
-                    var otherObserver = Program.BuildKnowledgeAccessContext("other", "player", "", context);
+                    var otherObserver = DialogueService.BuildKnowledgeAccessContext("other", "player", "", context);
                     Check("unheard_loss_event_is_not_support", !HasStoredRecallLossSupport(connection, otherObserver, lossClaim));
                     foreach (string unsupported in new[] { "Korin lost his memories after a blow to his head.",
                         "Did you lose your memories after a blow to your head?", "You have not lost your memories after a blow to your head." })
@@ -714,7 +714,7 @@ namespace ReignBetaServer
                     var current = LoadTemporalKnowledgeForPrompt(connection, campaign, access, new() { "stable" }, 20);
                     Check("latest_revision_only_for_same_fact", current.Any(r => ReadString(r, "assertion_id", "") == after)
                         && current.All(r => ReadString(r, "assertion_id", "") != before));
-                    var historical = Program.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["worldDay"] = 20d });
+                    var historical = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["worldDay"] = 20d });
                     Check("historical_revision_before_correction", LoadTemporalKnowledgeForPrompt(connection, campaign, historical, new() { "stable" }, 20)
                         .Any(r => ReadString(r, "assertion_id", "") == before));
                 }
@@ -734,7 +734,7 @@ namespace ReignBetaServer
                 {
                     settings["memoryPrecisionMode"] = mode;
                     var callContext = new Dictionary<string, object>(context) { ["memoryQueryText"] = query.Text };
-                    var packet = Program.BuildNpcMemoryPacket(campaign, "npc", "player", "", query.Text + "\n" + string.Concat(Enumerable.Repeat(scene, 40)), 2500, callContext, settings);
+                    var packet = DialogueService.BuildNpcMemoryPacket(campaign, "npc", "player", "", query.Text + "\n" + string.Concat(Enumerable.Repeat(scene, 40)), 2500, callContext, settings);
                     string memory = ReadString(packet, "memoryPacket", "");
                     Check("originals_selected_" + mode + "_" + query.Id, query.Required.All(memory.Contains), TestDict("horse", memory.Contains(horse), "frog", memory.Contains(frog),
                             "reaction", memory.Contains(reaction), "reunion", memory.Contains(reunion), "acceptance", memory.Contains(acceptance),
@@ -780,7 +780,7 @@ namespace ReignBetaServer
                 results.AddRange(RunTemporalRecallRevisionAssertions());
                 results.AddRange(RunMemoryRecallGrowthAssertions());
             }
-            catch (Exception ex) { Check("suite_exception", false, ex.ToString()); results.Last()["summary"] = Program.LimitText(ex.ToString(), 2200); }
+            catch (Exception ex) { Check("suite_exception", false, ex.ToString()); results.Last()["summary"] = DialogueService.LimitText(ex.ToString(), 2200); }
             finally
             {
                 ReignPostgreSqlStorage.DropCampaign(campaign);
@@ -844,7 +844,7 @@ namespace ReignBetaServer
                         {
                             settings["memoryPrecisionMode"] = mode;
                             var callContext = new Dictionary<string, object>(context) { ["memoryQueryText"] = item.Query };
-                            var packet = Program.BuildNpcMemoryPacket(campaign, "npc", "player", "", item.Query, 2500, callContext, settings);
+                            var packet = DialogueService.BuildNpcMemoryPacket(campaign, "npc", "player", "", item.Query, 2500, callContext, settings);
                             string memory = ReadString(packet, "memoryPacket", "");
                             var payload = PromptParityPayload("in_person", false); foreach (var pair in callContext) payload[pair.Key] = pair.Value;
                             payload["playerText"] = item.Query; payload["memoryPrecisionEvidence"] = ReadDictionary(packet, "precisionEvidence");
@@ -871,7 +871,7 @@ namespace ReignBetaServer
                     results.Add(TestDict("caseId", "memory_recall_growth_original_hash_unchanged", "passed", oldHash == MemorySourceHash(DialogueSelfTestStore.SelectConversationTurns74(connection)), "summary", "History growth and recall do not rewrite originals."));
                 }
             }
-            catch (Exception ex) { results.Add(TestDict("caseId", "memory_recall_growth_exception", "passed", false, "summary", Program.LimitText(ex.ToString(), 2200))); }
+            catch (Exception ex) { results.Add(TestDict("caseId", "memory_recall_growth_exception", "passed", false, "summary", DialogueService.LimitText(ex.ToString(), 2200))); }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); PersistenceService.TryDeleteDirectory(PersistenceService.StrictCampaignDirectory(campaign)); }
             return results;
         }
@@ -908,8 +908,8 @@ namespace ReignBetaServer
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     BindRecoveredMemorySources(connection, "parent", "child", 8, "saved_head");
-                    var access = Program.BuildKnowledgeAccessContext("npc", "player", "", context);
-                    List<Dictionary<string, object>> Read(string query, Program.KnowledgeAccessContext boundary = null) =>
+                    var access = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", context);
+                    List<Dictionary<string, object>> Read(string query, DialogueService.KnowledgeAccessContext boundary = null) =>
                         LoadTemporalKnowledgeForPrompt(connection, campaign, boundary ?? access, new() { query }, 20);
                     Check("verified_parent_fact_recalled", Read("stable").Any(r => ReadString(r, "assertion_id", "") == originalId));
                     var originalRow = DialogueSelfTestStore.SelectTemporalKnowledgeAssertions2(connection, TestDict("id", originalId)).Single();
@@ -919,9 +919,9 @@ namespace ReignBetaServer
                     Check("child_correction_replaces_restored_parent", Read("stable").Count == 1 && ReadString(Read("stable").Single(), "assertion_id", "") == correction);
                     Check("old_wording_resolves_latest_value", Read("twenty").Count == 1 && ReadString(Read("twenty").Single(), "assertion_id", "") == correction);
                     Check("unrelated_old_episode_survives", Read("tournament").Any(r => ReadString(r, "assertion_id", "") == episodeId));
-                    var pastDay = Program.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["worldDay"] = 20d });
-                    var pastTime = Program.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["memoryAsOfTimestamp"] = 49L });
-                    var pastSequence = Program.BuildKnowledgeAccessContext("npc", "player", "", context); pastSequence.AsOfAcceptedSequence = 2;
+                    var pastDay = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["worldDay"] = 20d });
+                    var pastTime = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["memoryAsOfTimestamp"] = 49L });
+                    var pastSequence = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", context); pastSequence.AsOfAcceptedSequence = 2;
                     foreach (var boundary in new[] { ("day", pastDay), ("timestamp", pastTime), ("sequence", pastSequence) })
                         Check("asof_" + boundary.Item1 + "_retains_parent", Read("stable", boundary.Item2).Count == 1
                             && ReadString(Read("stable", boundary.Item2).Single(), "assertion_id", "") == originalId);
@@ -943,7 +943,7 @@ namespace ReignBetaServer
                     Check("parent_snapshot_row_unchanged", originalHash == MemorySourceHash(DialogueSelfTestStore.SelectTemporalKnowledgeAssertions2(connection, TestDict("id", originalId))));
                 }
             }
-            catch (Exception ex) { results.Add(TestDict("caseId", "memory_recall_revision_exception", "passed", false, "summary", Program.LimitText(ex.ToString(), 2200))); }
+            catch (Exception ex) { results.Add(TestDict("caseId", "memory_recall_revision_exception", "passed", false, "summary", DialogueService.LimitText(ex.ToString(), 2200))); }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); PersistenceService.TryDeleteDirectory(PersistenceService.StrictCampaignDirectory(campaign)); }
             return results;
         }

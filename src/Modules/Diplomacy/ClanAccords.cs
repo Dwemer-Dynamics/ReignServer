@@ -222,7 +222,7 @@ namespace ReignBetaServer
                     ? " The agreement was later cancelled by " + FirstNonEmpty(ReadString(record, "EndActorName", ""), ReadString(record, "EndActorId", "")) + "; its benefits ended. The original arrangers retain credit for securing it."
                     : " The agreement ended because of " + ReadString(evt, "endReason", "") + "; this was not a voluntary cancellation.";
             else summary += " The agreement is now in effect. Securing it was a beneficial service to their clans.";
-            Program.StoreWorldMemoryEvent(new Dictionary<string, object> {
+            DialogueService.StoreWorldMemoryEvent(new Dictionary<string, object> {
                 ["campaignId"] = campaign, ["timelineId"] = timeline, ["eventId"] = memoryEventId,
                 ["eventType"] = "clan_accord_" + ReadString(evt, "kind", ""), ["worldDay"] = ReadDouble(evt, "worldDay", 0),
                 ["summary"] = summary, ["participants"] = participants,
@@ -317,8 +317,8 @@ namespace ReignBetaServer
             if (command == "cancel_clan_accord" && !ReadDictionaryList(context, "records").Any(x =>
                 ReadString(x, "Id", "") == ReadString(terms, "accordId", "") && ReadBool(x, "IsActive", false)))
                 errors.Add("Cancellation must name an active accord with the speaking noble's clan.");
-            terms["verifiedConsentQuote"] = Program.LimitText(npcReply, 1200);
-            terms["verifiedPlayerQuote"] = Program.LimitText(playerText, 1200);
+            terms["verifiedConsentQuote"] = DialogueService.LimitText(npcReply, 1200);
+            terms["verifiedPlayerQuote"] = DialogueService.LimitText(playerText, 1200);
         }
 
         private static string ValidateClanAccordDialogueAction(string command, Dictionary<string, object> record,

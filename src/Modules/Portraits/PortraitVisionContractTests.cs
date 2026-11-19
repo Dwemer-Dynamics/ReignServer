@@ -13,8 +13,8 @@ namespace ReignBetaServer
             Action<string, bool> check = (id, passed) => AddSharedPortraitSelfTest(rows, "portrait_vision_" + id, passed, id);
             Func<Action, bool> rejects = action => { try { action(); return false; } catch { return true; } };
             var settings = new Dictionary<string, object> { ["portraitProvider"] = "OpenRouter" };
-            check("legacy_default_text", PortraitGenerationMethod(settings) == "text" && PortraitGenerationMethod(Program.DefaultSettings()) == "text");
-            check("strong_nano_default", ReadString(Program.DefaultSettings(), "portraitVisionNanoGptModel", "") == "deepseek/deepseek-v4.1-flash");
+            check("legacy_default_text", PortraitGenerationMethod(settings) == "text" && PortraitGenerationMethod(SettingsService.DefaultSettings()) == "text");
+            check("strong_nano_default", ReadString(SettingsService.DefaultSettings(), "portraitVisionNanoGptModel", "") == "deepseek/deepseek-v4.1-flash");
             settings["portraitGenerationMethod"] = "image";
             check("image_roundtrip", PortraitGenerationMethod(Json.Deserialize<Dictionary<string, object>>(Json.Serialize(settings))) == "image");
             check("invalid_method", ValidatePortraitVisionSettings(new Dictionary<string, object> { ["portraitGenerationMethod"] = "invalid" }).Length > 0);

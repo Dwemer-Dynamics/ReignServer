@@ -1103,7 +1103,7 @@ namespace ReignBetaServer
                 && !string.IsNullOrWhiteSpace(ReadString(intimacyTurn, "playerText", ""));
             Dictionary<string, object> targetTraits = string.IsNullOrWhiteSpace(targetId)
                 ? new Dictionary<string, object>()
-                : Program.ReadJsonObject(Program.CharacterFile(campaignId, targetId, "traits.json"));
+                : CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, targetId, "traits.json"));
             Dictionary<string, object> targetPercentages =
                 DialogueService.TraitPercentageSnapshot(targetTraits);
             Dictionary<string, object> targetVirtues =

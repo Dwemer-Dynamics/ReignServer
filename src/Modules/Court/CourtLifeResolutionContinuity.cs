@@ -16,7 +16,7 @@ namespace ReignBetaServer
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsureCourtLifeSceneStore(connection);
-                foreach (string actor in Program.ObjectsFromValue(payload.TryGetValue("witnessHeroIds", out object witnesses) ? witnesses : null)
+                foreach (string actor in ActionPipelineService.ObjectsFromValue(payload.TryGetValue("witnessHeroIds", out object witnesses) ? witnesses : null)
                     .OfType<string>().Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().Take(4))
                 {
                     string id = "court_resolution:" + CourtHash(timeline + "|" + matter + "|" + actor);
@@ -34,9 +34,9 @@ namespace ReignBetaServer
             if (!new[] { "favor_domestic", "favor_foreign", "compensate", "compromise", "accept", "refuse" }.Contains(outcome)) return null;
             var result = new Dictionary<string, object> { ["schema"] = "reign-court-resolution-knowledge-v1",
                 ["matterId"] = ReadString(payload, "matterId", ""), ["receiptId"] = ReadString(payload, "receiptId", ""),
-                ["title"] = Program.LimitText(ReadString(payload, "title", "Court audience"), 200),
+                ["title"] = DialogueService.LimitText(ReadString(payload, "title", "Court audience"), 200),
                 ["outcome"] = outcome, ["completed"] = true, ["extortion"] = ReadBool(payload, "extortion", false),
-                ["summary"] = Program.LimitText(ReadString(payload, "summary", "The court decision completed."), 700) };
+                ["summary"] = DialogueService.LimitText(ReadString(payload, "summary", "The court decision completed."), 700) };
             var receipt = ReadDictionary(payload, "nativeReceipt");
             if (ReadString(receipt, "type", "") == "DiplomacySignTradeAgreement")
             {

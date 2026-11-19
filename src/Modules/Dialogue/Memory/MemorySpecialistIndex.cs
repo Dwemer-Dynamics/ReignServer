@@ -64,7 +64,7 @@ namespace ReignBetaServer
             Name(ReadString(source, "speaker_name", ""), speaker);
             Name(ReadFirstString(payload, "playerName", "playerHeroName"), ReadFirstString(payload, "playerHeroStringId", "playerId"));
             Name(ReadFirstString(payload, "speakerName", "npcName"), ReadFirstString(payload, "heroStringId", "speakerHeroStringId"));
-            foreach (var profile in MergedInteractionParticipantProfiles(payload)) Name(ReadString(profile, "name", ""), Program.CharacterIdFrom(profile));
+            foreach (var profile in MergedInteractionParticipantProfiles(payload)) Name(ReadString(profile, "name", ""), CampaignFileService.CharacterIdFrom(profile));
             var entities = new List<Dictionary<string, object>>();
             foreach (var pair in names)
                 foreach (Match match in Regex.Matches(text, @"(?<![\p{L}\p{Nd}_])" + Regex.Escape(pair.Key) + @"(?![\p{L}\p{Nd}_])", RegexOptions.IgnoreCase))
@@ -94,7 +94,7 @@ namespace ReignBetaServer
                 topics.AddRange(ReadStringList(extraction, "topics").Where(MemorySpecialistTopics.ContainsKey));
             }
             return TestDict("schema", MemorySpecialistSchema, "sourceId", id, "sourceHash", MemorySpecialistSourceHash(source),
-                "textHash", SemanticSha256Hex(text), "speakerId", speaker, "audienceIds", Program.TextListFromJson(ReadString(source, "participants_json", "[]")),
+                "textHash", SemanticSha256Hex(text), "speakerId", speaker, "audienceIds", DialogueService.TextListFromJson(ReadString(source, "participants_json", "[]")),
                 "actorIds", new string[0], "addresseeIds", new string[0], "entities", entities,
                 "topics", topics.Distinct(StringComparer.Ordinal).OrderBy(x => x).ToList(), "authority", "retrieval_candidates_only",
                 "extractorStatus", extraction == null ? "local_metadata" : valid ? "source_bound_candidates" : "rejected_source_identity",
@@ -167,7 +167,7 @@ namespace ReignBetaServer
                 {
                     string text = ConversationTurnTextForRecall(source);
                     string outcome = "timeout_or_unavailable";
-                    try { extraction = TryParseJsonObject(Program.PostJsonToUrl(SemanticWorkerUrl(settings, "/memory/extract"),
+                    try { extraction = TryParseJsonObject(DialogueService.PostJsonToUrl(SemanticWorkerUrl(settings, "/memory/extract"),
                         Json.Serialize(TestDict("sourceId", ReadString(source, "turn_id", ""), "text", text, "textHash", SemanticSha256Hex(text))), 5000)); }
                     catch { /* A background specialist cannot reject accepted dialogue. */ }
                     if (extraction != null) outcome = ReadString(extraction, "status", ReadBool(extraction, "ok", false) ? "returned_candidates" : "invalid_response");
@@ -185,11 +185,11 @@ namespace ReignBetaServer
                     StoreMemorySpecialistDocument(connection, current, extraction, attempt);
                 transaction.Commit();
             }
-            catch (Exception ex) { Program.LogOperational("memory.specialist_index_deferred", TestDict("sourceId", ReadString(source, "turn_id", ""), "errorType", ex.GetType().Name)); }
+            catch (Exception ex) { OperationsService.LogOperational("memory.specialist_index_deferred", TestDict("sourceId", ReadString(source, "turn_id", ""), "errorType", ex.GetType().Name)); }
         }
 
         private static List<Dictionary<string, object>> FindMemorySpecialistTurns(ReignDbConnection connection, MemoryQueryPlan plan,
-            Program.KnowledgeAccessContext access, int limit, int maximumPages, bool requirePlayerSource)
+            DialogueService.KnowledgeAccessContext access, int limit, int maximumPages, bool requirePlayerSource)
         {
             if (!WorldSimulationService.TableExists(connection, "memory_specialist_sources")) return new List<Dictionary<string, object>>();
             var topics = MemorySpecialistQueryTopics(plan.Query);
@@ -234,13 +234,13 @@ namespace ReignBetaServer
                         .Concat(DialogueStore.Statement4(connection, missing,args))
                         .GroupBy(r => ReadString(r, "turn_id", "")).Select(g => g.First()).ToList();
                 }
-                var settings = Program.LoadSettings();
+                var settings = SettingsService.LoadSettings();
                 foreach (var source in sources)
                 {
-                    if (Program.PriorityBackgroundWorkShouldYield()) break;
+                    if (OperationsService.PriorityBackgroundWorkShouldYield()) break;
                     IndexMemorySpecialistSource(campaign, source, settings, allowExtraction: false);
                 }
-                if (!Program.PriorityBackgroundWorkShouldYield()) ReconcileLateInteractionMemory(campaign, settings);
+                if (!OperationsService.PriorityBackgroundWorkShouldYield()) ReconcileLateInteractionMemory(campaign, settings);
                 // Qualified model upgrades have their own small budget. A cold
                 // load timeout is retried with backoff, never on a dialogue turn;
                 // four failures exhaust this source/model revision.
@@ -251,7 +251,7 @@ namespace ReignBetaServer
                     var upgrades = DialogueStore.SelectConversationTurns78(read, TestDict("schema", MemorySpecialistIndexSchema, "model", modelHash, "now", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
                     foreach (var source in upgrades)
                     {
-                        if (Program.PriorityBackgroundWorkShouldYield()) break;
+                        if (OperationsService.PriorityBackgroundWorkShouldYield()) break;
                         IndexMemorySpecialistSource(campaign, source, settings);
                     }
                 }
@@ -262,14 +262,14 @@ namespace ReignBetaServer
                     var latest = DialogueStore.SelectConversationTurns79(connection);
                     foreach (var row in latest)
                     {
-                        if (Program.PriorityBackgroundWorkShouldYield()) break;
+                        if (OperationsService.PriorityBackgroundWorkShouldYield()) break;
                         string owner = ReadString(row, "speaker_id", "");
-                        CharactersService.RefreshCharacterLifeProjection(campaign, owner, new Program.KnowledgeAccessContext { NpcId = owner, TimelineId = timeline,
+                        CharactersService.RefreshCharacterLifeProjection(campaign, owner, new DialogueService.KnowledgeAccessContext { NpcId = owner, TimelineId = timeline,
                             WorldDay = Math.Max(ReadDouble(row, "day", 0), ReadDouble(native, "day", 0)), AsOfTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                     }
                 }
             }
-            catch (Exception ex) { Program.LogOperational("memory.specialist_reconcile_deferred", TestDict("campaignId", campaign, "errorType", ex.GetType().Name)); }
+            catch (Exception ex) { OperationsService.LogOperational("memory.specialist_reconcile_deferred", TestDict("campaignId", campaign, "errorType", ex.GetType().Name)); }
         }
 
         private static List<Dictionary<string, object>> FuseMemorySpecialistRanks(List<Dictionary<string, object>> lexical,

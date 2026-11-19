@@ -76,7 +76,7 @@ namespace ReignBetaServer
             // Topic hints use the same public observation as new scene summaries.
             // IDs and private narration must not become searchable topic words.
             var topics = BuildMemorySummaryTopics(views.Select(view => TestDict("summary", view)), 8);
-            var tags = Program.MergeStringLists(topics, new[] { "scene", "conversation", "reported_speech", "claim_attribution", "interpersonal_history" });
+            var tags = DialogueService.MergeStringLists(topics, new[] { "scene", "conversation", "reported_speech", "claim_attribution", "interpersonal_history" });
             return new Dictionary<string, object> { ["summary"] = summary, ["ownerId"] = owner, ["timelineId"] = timeline,
                 ["stagingVersion"] = "source-linked-scene-v2", ["tags"] = tags,
                 ["sourceHash"] = MemorySourceHash(turns), ["sourceTurnIds"] = turns.Select(t => ReadString(t, "turn_id", "")).ToList(),
@@ -104,12 +104,12 @@ namespace ReignBetaServer
             string summaryId = "precision_scene_" + PromptHash(id + "|" + MemorySourceHash(turns) + "|" + ReadString(prepared, "stagingVersion", "")).Substring(0, 32);
             string summary = ReadString(prepared, "summary", "");
             var tags = ReadStringList(prepared, "tags");
-            var known = turns.SelectMany(t => Program.TextListFromJson(ReadString(t, "participants_json", "[]"))).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var known = turns.SelectMany(t => DialogueService.TextListFromJson(ReadString(t, "participants_json", "[]"))).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             // A session can contain whispers. A shared summary can be used only
             // by observers present for every source record. Exact turn retrieval
             // continues to expose each narrower audience separately.
             known = known.Where(observer => turns.All(t => ReadString(t, "speaker_id", "") == observer
-                || Program.TextListFromJson(ReadString(t, "participants_json", "[]")).Contains(observer, StringComparer.OrdinalIgnoreCase))).ToList();
+                || DialogueService.TextListFromJson(ReadString(t, "participants_json", "[]")).Contains(observer, StringComparer.OrdinalIgnoreCase))).ToList();
             string owner = ReadString(session, "npc_id", "");
             if (!known.Contains(owner, StringComparer.OrdinalIgnoreCase)) owner = "";
             DialogueStore.InsertOrIgnoreSummaries(connection, new Dictionary<string, object> {
@@ -118,7 +118,7 @@ namespace ReignBetaServer
                 ["start"] = turns.Min(t => ReadLong(t, "ts", 0)), ["end"] = turns.Max(t => ReadLong(t, "ts", 0)), ["count"] = turns.Count,
                 ["location"] = ReadString(session, "location_id", ""), ["known"] = Json.Serialize(known), ["tags"] = Json.Serialize(tags),
                 ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["payload"] = Json.Serialize(prepared) });
-            Program.InsertSummaryFts(connection, summaryId, summary, tags, known);
+            DialogueService.InsertSummaryFts(connection, summaryId, summary, tags, known);
             int ordinal = 0;
             foreach (var turn in turns) LinkMemorySource(connection, "summary", summaryId, "turn", ReadString(turn, "turn_id", ""), ordinal++);
             LinkMemorySource(connection, "summary", summaryId, "session", id, 0);

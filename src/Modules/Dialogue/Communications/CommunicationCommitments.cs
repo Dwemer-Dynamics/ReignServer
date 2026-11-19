@@ -96,7 +96,7 @@ The pending commitments below are your own private dispatch ledger. Mention a pa
                 && ReadString(b, "operation", "send") == ReadString(p, "operation", "send") && ReadString(b, "kind", "inform") == ReadString(p, "kind", "inform")
                 && ReadString(b, "destinationId", "") == ReadString(p, "destinationId", "") && ReadDouble(b, "stayDays", 0) == ReadDouble(p, "stayDays", 0)
                 && ReadDouble(b, "delayDays", 0) == ReadDouble(p, "delayDays", 0))))) return null;
-            var merged = Program.CloneDictionary(original);
+            var merged = CloneDictionary(original);
             merged["communicationPlans"] = plans;
             return merged;
         }
@@ -155,7 +155,7 @@ The pending commitments below are your own private dispatch ledger. Mention a pa
             {
                 if (Json.Serialize(pendingTerms).Length > 24000 || ReadDictionaryList(request, "messages").Sum(m => ReadString(m, "content", "").Length) > 48000)
                     answer = TestDict("ok", false, "error", "Complete revision evidence exceeds the bounded review.");
-                else { providerCalls++; answer = (respond ?? Program.ChatWithLlm)(request); }
+                else { providerCalls++; answer = (respond ?? LlmProviderService.ChatWithLlm)(request); }
             }
             catch (Exception ex) { answer = TestDict("ok", false, "error", ex.GetType().Name); }
             var repaired = ReadBool(answer, "ok", false) ? ApplyCommunicationPlanPatch(parsed, TryParseJsonObject(ReadString(answer, "content", "")), allowSemanticReview: true) : null;
@@ -178,11 +178,11 @@ The pending commitments below are your own private dispatch ledger. Mention a pa
                         semanticPlans++;
                     }
             }
-            var result = Program.CloneDictionary(llm);
+            var result = CloneDictionary(llm);
             var evidence = TestDict("attempted", true, "providerCalls", providerCalls, "completed", repaired != null, "replyUnchanged", true,
                 "draftRevision", drafts.Count > 0, "semanticPlans", semanticPlans);
             result["communicationMetadataRepair"] = evidence;
-            Program.WriteAudit(campaign, correlation, "server", mode, "communication.metadata_repair", hero, "", "", repaired == null ? "failed" : "completed",
+            OperationsService.WriteAudit(campaign, correlation, "server", mode, "communication.metadata_repair", hero, "", "", repaired == null ? "failed" : "completed",
                 ReadLong(answer, "durationMs", 0), "Bounded repair of omitted or unusable communication metadata; no dispatch is authorized by this review.", evidence);
             if (repaired != null) result["content"] = Json.Serialize(repaired);
             else
@@ -311,7 +311,7 @@ The pending commitments below are your own private dispatch ledger. Mention a pa
             var sources = ReadLogicalConversationTurns(c, session, 100).Concat(current)
                 .GroupBy(r => ReadString(r, "turn_id", "")).Select(g => g.Last()).ToList();
             var result = new List<Dictionary<string, object>>();
-            var access = Program.BuildKnowledgeAccessContext(speaker, ReadFirstString(payload, "playerHeroStringId", "playerId"), "", payload);
+            var access = DialogueService.BuildKnowledgeAccessContext(speaker, ReadFirstString(payload, "playerHeroStringId", "playerId"), "", payload);
             foreach (var item in supplied.Take(13))
             {
                 if (result.Count == 12) return new List<Dictionary<string, object>>();
@@ -472,7 +472,7 @@ The pending commitments below are your own private dispatch ledger. Mention a pa
             if (ReadBool(payload, "officialMemoryFirewall", false)) return "";
             EnsureCommunicationSchema(c);
             var text = new StringBuilder(CommunicationContract);
-            var access = Program.BuildKnowledgeAccessContext(hero, ReadFirstString(payload, "playerHeroStringId", "playerId"), "", payload);
+            var access = DialogueService.BuildKnowledgeAccessContext(hero, ReadFirstString(payload, "playerHeroStringId", "playerId"), "", payload);
             var people = ReadDictionaryList(ReadDictionary(payload, "gossipPresence"), "people");
             var self = people.FirstOrDefault(p => GossipHeroId(p) == hero);
             var player = people.FirstOrDefault(p => GossipHeroId(p) == ReadFirstString(payload, "playerHeroStringId", "playerId"));
@@ -508,7 +508,7 @@ The pending commitments below are your own private dispatch ledger. Mention a pa
         internal static bool CommunicationReplyKnown(ReignDbConnection c, string id, string hero, Dictionary<string, object> payload)
         {
             if (c == null || !WorldSimulationService.TableExists(c, "communication_history")) return false;
-            var access = Program.BuildKnowledgeAccessContext(hero, ReadFirstString(payload, "playerHeroStringId", "playerId"), "", payload);
+            var access = DialogueService.BuildKnowledgeAccessContext(hero, ReadFirstString(payload, "playerHeroStringId", "playerId"), "", payload);
             return DialogueStore.SelectCommunicationHistory2(c, TestDict("id", id + "_reply", "timeline", ContinuityTimeline(payload), "hero", hero,
                     "day", ReadDouble(payload, "worldDay", 0), "ts", access.AsOfTimestamp, "sequence", access.AsOfAcceptedSequence)).Count > 0;
         }

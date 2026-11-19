@@ -86,7 +86,7 @@ namespace ReignBetaServer
                 : rules.TrimEnd() + "\n\n" + SourceScopedMemoryWriteRules;
         }
 
-        private static string LoadSourceScopedMemoryWriteRules() => ComposeSourceScopedMemoryWriteRules(Program.LoadPromptTemplate("memory_write_rules.txt"));
+        private static string LoadSourceScopedMemoryWriteRules() => ComposeSourceScopedMemoryWriteRules(PromptService.LoadPromptTemplate("memory_write_rules.txt"));
 
         private static bool HasPastDeliveryOrAccessClaim(string text) => Regex.IsMatch(text ?? "",
             @"\b(?:arrived|reached|opened|intercepted|delivered|received)\b|\b(?:did(?:\s+not|n't)?|failed\s+to)\s+(?:arrive|reach|open|intercept|deliver|receive|read)\b|\b(?:was|were|has|have|had)\s+(?:already\s+)?read\b|\b(?:who|whose)\b.{0,80}\bread\b",
@@ -167,13 +167,13 @@ namespace ReignBetaServer
                 string normalized = DialogueFactIdentityText(sentence.Value, payload, speaker, addressee);
                 foreach (var profile in MergedInteractionParticipantProfiles(payload))
                 {
-                    string actor = Program.CharacterIdFrom(profile).ToLowerInvariant(), spouse = ReadString(profile, "spouseId", "").ToLowerInvariant();
+                    string actor = CampaignFileService.CharacterIdFrom(profile).ToLowerInvariant(), spouse = ReadString(profile, "spouseId", "").ToLowerInvariant();
                     // Empty native fields never erase commoner households, prove
                     // someone has never married or establish their historical choices.
                     if (actor.Length == 0 || spouse.Length == 0) continue;
                     bool falseSingle = Regex.IsMatch(normalized, @"\b" + Regex.Escape(actor) + @"\s+(?:is|am|are)\s+(?:currently\s+)?(?:unmarried|not married)\s*$");
                     var other = Regex.Match(normalized, @"\b" + Regex.Escape(actor) + @"\s+(?:is|am|are)\s+(?:currently\s+)?married to (?<spouse>[\p{L}\p{N}_]+)\b");
-                    var knownIds = MergedInteractionParticipantProfiles(payload).Select(Program.CharacterIdFrom).Select(id => id.ToLowerInvariant()).ToList();
+                    var knownIds = MergedInteractionParticipantProfiles(payload).Select(CampaignFileService.CharacterIdFrom).Select(id => id.ToLowerInvariant()).ToList();
                     bool falseSpouse = other.Success && knownIds.Contains(other.Groups["spouse"].Value) && other.Groups["spouse"].Value != spouse;
                     if (!falseSingle && !falseSpouse) continue;
                     string fact = actor + " has native spouse " + spouse + ".";
@@ -198,7 +198,7 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> sources)
         {
             if (claim.Write == null) return new();
-            var pins = ReadDictionaryList(claim.Write, "sourceEvidenceSpans").Select(Program.CloneDictionary).ToList();
+            var pins = ReadDictionaryList(claim.Write, "sourceEvidenceSpans").Select(CloneDictionary).ToList();
             var primary = ReadDictionary(claim.Write, "sourceEvidence");
             if (primary != null) pins.Insert(0, primary);
             var spans = new List<Dictionary<string, object>>();
@@ -267,7 +267,7 @@ namespace ReignBetaServer
             var coverage = new List<Dictionary<string, object>>();
             string player = FirstNonEmpty(ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"), "current_player");
             var profiles = MergedInteractionParticipantProfiles(payload);
-            var actors = sources.Select(s => ReadString(s, "speakerId", "")).Concat(profiles.Select(Program.CharacterIdFrom))
+            var actors = sources.Select(s => ReadString(s, "speakerId", "")).Concat(profiles.Select(CampaignFileService.CharacterIdFrom))
                 .Concat(claims.Select(c => c.ClaimedActor)).Append(player).Append(speaker).Where(s => s.Length > 0).Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList();
             string Identity(string actor) => "person " + (char)('A' + actors.IndexOf(actor));
             string IdentityText(string text, string actor, string to)
@@ -282,7 +282,7 @@ namespace ReignBetaServer
                 normalized = Regex.Replace(normalized, @"\b(?:you|yourself|yours)\b", to, RegexOptions.IgnoreCase);
                 normalized = Regex.Replace(normalized, @"\byour\b", to + "'s", RegexOptions.IgnoreCase);
                 foreach (var profile in profiles.Where(p => ReadString(p, "name", "").Length > 0).OrderByDescending(p => ReadString(p, "name", "").Length))
-                    normalized = Regex.Replace(normalized, @"\b" + Regex.Escape(ReadString(profile, "name", "")) + @"\b", Program.CharacterIdFrom(profile), RegexOptions.IgnoreCase);
+                    normalized = Regex.Replace(normalized, @"\b" + Regex.Escape(ReadString(profile, "name", "")) + @"\b", CampaignFileService.CharacterIdFrom(profile), RegexOptions.IgnoreCase);
                 foreach (string id in actors.OrderByDescending(a => a.Length))
                     normalized = Regex.Replace(normalized, @"\b" + Regex.Escape(id) + @"\b", Identity(id), RegexOptions.IgnoreCase);
                 return normalized;
@@ -450,14 +450,14 @@ namespace ReignBetaServer
             string value = CanonicalDialogueClause(text, speaker, addressee);
             foreach (var profile in MergedInteractionParticipantProfiles(payload).Where(p => ReadString(p, "name", "").Length > 0)
                 .OrderByDescending(p => ReadString(p, "name", "").Length))
-                value = Regex.Replace(value, @"\b" + Regex.Escape(ReadString(profile, "name", "").ToLowerInvariant()) + @"\b", Program.CharacterIdFrom(profile).ToLowerInvariant());
+                value = Regex.Replace(value, @"\b" + Regex.Escape(ReadString(profile, "name", "").ToLowerInvariant()) + @"\b", CampaignFileService.CharacterIdFrom(profile).ToLowerInvariant());
             return value;
         }
 
         private static List<Dictionary<string, object>> DialogueExplicitMeetingOrder(string text, Dictionary<string, object> payload,
             string actor, string addressee)
         {
-            var identities = MergedInteractionParticipantProfiles(payload).Select(Program.CharacterIdFrom).Append(actor).Append(addressee)
+            var identities = MergedInteractionParticipantProfiles(payload).Select(CampaignFileService.CharacterIdFrom).Append(actor).Append(addressee)
                 .Where(s => s.Length > 0).Distinct().OrderByDescending(s => s.Length).Select(Regex.Escape).ToList();
             if (identities.Count == 0) return new();
             string entity = "(?:" + string.Join("|", identities) + ")";

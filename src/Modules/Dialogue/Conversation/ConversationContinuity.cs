@@ -19,7 +19,7 @@ namespace ReignBetaServer
             string playerClan = ReadFirstString(payload, "playerClanId", "actorClanId");
             string speakerClan = FirstNonEmpty(ReadString(hero, "clanId", ""), ReadString(payload, "speakerClanId", ""));
             return SpeakerInPlayerParty(payload, hero)
-                || (!string.IsNullOrWhiteSpace(playerClan) && Program.KnowledgeIdEquals(playerClan, speakerClan));
+                || (!string.IsNullOrWhiteSpace(playerClan) && DialogueService.KnowledgeIdEquals(playerClan, speakerClan));
         }
 
         private const string ConversationContinuityContract =
@@ -141,7 +141,7 @@ namespace ReignBetaServer
             var result = new List<Dictionary<string, object>>();
             foreach (var original in ReadDictionaryList(handoff, "acceptedExchanges").TakeLast(2))
             {
-                var exchange = Program.CloneDictionary(original);
+                var exchange = CloneDictionary(original);
                 string speaker = ReadString(exchange, "speakerId", "");
                 if (ReadString(exchange, "observerId", "") != observer && speaker != observer)
                 {
@@ -149,7 +149,7 @@ namespace ReignBetaServer
                     // For another speaker's record, recover observer-eligible source
                     // content; absence of that proof must not disclose a whisper.
                     string turn = ReadString(exchange, "turnId", ""), session = ReadString(exchange, "sessionId", "");
-                    var access = Program.BuildKnowledgeAccessContext(observer,
+                    var access = DialogueService.BuildKnowledgeAccessContext(observer,
                         ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"), "", payload);
                     var rows = DialogueStore.SelectConversationTurns15(connection, TestDict("session", session, "turn", turn))
                         .Where(row => PrecisionTurnVisible(row, observer, access, connection)).ToList();
@@ -250,14 +250,14 @@ namespace ReignBetaServer
                 else if (!new[] { "agenda", "relationship", "episode", "question" }.Contains(kind)) reason = "invalid_kind";
                 else if (string.IsNullOrWhiteSpace(subject) || spans.Count == 0) reason = "missing_accepted_source_quote";
                 else if (!new[] { "open", "active", "waiting", "blocked", "deferred", "resolved", "abandoned", "invalidated" }.Contains(status)) reason = "invalid_status";
-                else if (kind == "relationship" && (string.IsNullOrWhiteSpace(peerId) || !Program.KnowledgeIdEquals(pair, peerId))) reason = "unverified_relationship_participant";
+                else if (kind == "relationship" && (string.IsNullOrWhiteSpace(peerId) || !DialogueService.KnowledgeIdEquals(pair, peerId))) reason = "unverified_relationship_participant";
                 else if (ContinuityClosed(status) && string.IsNullOrWhiteSpace(ReadString(write, "transitionReason", ""))) reason = "transition_requires_reason";
                 else if (IsUnsupportedWordingJudgment(subject + " " + ReadString(write, "meaning", ""))) reason = "generated_wording_judgment";
                 if (reason.Length == 0) reason = ConversationContinuityLinkError(connection, write, ownerId, timeline, ReadDouble(payload, "worldDay", 0d));
                 string parentId = CurrentContinuityRecordId(connection, timeline, ownerId, ReadString(write, "parentId", ""));
                 if (!string.IsNullOrWhiteSpace(parentId)
                     && DialogueStore.SelectConversationContinuity2(connection, MemorySourceTimelineSql("conversation_continuity"),                        new Dictionary<string, object> { ["id"] = parentId, ["owner"] = ownerId, ["timeline"] = timeline }).Count == 0) reason = "unverified_parent_concern";
-                if (string.IsNullOrWhiteSpace(id)) id = "continuity_" + PromptHash(timeline + "|" + ownerId + "|" + kind + "|" + pair + "|" + Program.NormalizeLookup(subject)).Substring(0, 32);
+                if (string.IsNullOrWhiteSpace(id)) id = "continuity_" + PromptHash(timeline + "|" + ownerId + "|" + kind + "|" + pair + "|" + ActionPipelineService.NormalizeLookup(subject)).Substring(0, 32);
                 id = CurrentContinuityRecordId(connection, timeline, ownerId, id);
                 var previous = DialogueStore.SelectConversationContinuity3(connection, new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
                 bool inherited = previous != null && ReadString(previous, "timeline_id", "") != timeline;
@@ -312,7 +312,7 @@ namespace ReignBetaServer
                 }) value[field.Key] = field.Value;
                 string json = Json.Serialize(value);
                 var changed = DialogueStore.UpsertConversationContinuity(connection, new Dictionary<string, object> { ["id"] = id, ["timeline"] = timeline, ["owner"] = ownerId, ["peer"] = pair,
-                        ["kind"] = kind, ["status"] = status, ["importance"] = Program.ClampDouble(ReadDouble(write, "importance", 0.5d), 0d, 1d),
+                        ["kind"] = kind, ["status"] = status, ["importance"] = DialogueService.ClampDouble(ReadDouble(write, "importance", 0.5d), 0d, 1d),
                         ["revision"] = revision + 1, ["expected"] = inherited ? 0 : expected, ["event"] = eventId,
                         ["turn"] = ReadString(source, "turnId", ""), ["ts"] = ts, ["payload"] = json });
                 if (changed.Count == 0)
@@ -379,7 +379,7 @@ namespace ReignBetaServer
         }
 
         private static string RenderContinuityEpisodeEvidence(ReignDbConnection connection, Dictionary<string, object> row,
-            Dictionary<string, object> episode, Dictionary<string, object> turn, Program.KnowledgeAccessContext access,
+            Dictionary<string, object> episode, Dictionary<string, object> turn, DialogueService.KnowledgeAccessContext access,
             Dictionary<string, string> supplied = null)
         {
             string turnId = ReadString(row, "source_turn_id", "");
@@ -443,7 +443,7 @@ namespace ReignBetaServer
                     CaptureContinuityReadSnapshot(activityConnection, payload, heroId);
                     text.Append(BuildPendingContinuityPrompt(activityConnection, payload, heroId, peer, sourceIds));
                     text.AppendLine().Append(BuildCommunicationPrompt(activityConnection, heroId, payload, sourceIds));
-                    var mailAccess = Program.BuildKnowledgeAccessContext(heroId, peer, "", payload);
+                    var mailAccess = DialogueService.BuildKnowledgeAccessContext(heroId, peer, "", payload);
                     var selectedLetters = ReadDictionaryList(ReadDictionary(payload, "memoryPrecisionEvidence"), "records")
                         .Where(record => ReadString(record, "kind", "") == "letter")
                         .ToLookup(record => ReadString(record, "sourceId", ""), StringComparer.Ordinal);
@@ -463,7 +463,7 @@ namespace ReignBetaServer
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureConversationContinuitySchema(connection);
-                    var linkAccess = Program.BuildKnowledgeAccessContext(heroId, peer, "", payload);
+                    var linkAccess = DialogueService.BuildKnowledgeAccessContext(heroId, peer, "", payload);
                     foreach (var evidence in LinkedConversationEvidence(connection, heroId, peer, timeline, ReadString(payload, "playerText", ""), linkAccess))
                     {
                         sourceIds.Add(evidence.SourceId);
@@ -558,7 +558,7 @@ namespace ReignBetaServer
         private static string BuildEstablishedRelationshipContinuity(ReignDbConnection connection, string campaignId,
             string timeline, string observer, string peer, List<string> sourceIds, double worldDay,
             List<Dictionary<string, object>> priorLines = null, Func<string> projectTranscript = null,
-            Program.KnowledgeAccessContext readAccess = null)
+            DialogueService.KnowledgeAccessContext readAccess = null)
         {
             if (string.IsNullOrWhiteSpace(observer) || string.IsNullOrWhiteSpace(peer)) return "";
             var parameters = new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timeline,
@@ -612,7 +612,7 @@ namespace ReignBetaServer
             // history. Ordinary topical retrieval used to discard them after a
             // summary replaced the active rows, losing quiet care and closeness.
             bool hasAcceptedHistory = WorldSimulationService.TableExists(connection, "conversation_turns") && WorldSimulationService.TableExists(connection, "conversation_sessions");
-            var historyAccess = new Program.KnowledgeAccessContext { NpcId = observer, TimelineId = timeline, WorldDay = worldDay,
+            var historyAccess = new DialogueService.KnowledgeAccessContext { NpcId = observer, TimelineId = timeline, WorldDay = worldDay,
                 AsOfAcceptedSequence = readAccess?.AsOfAcceptedSequence ?? long.MaxValue,
                 AsOfTimestamp = readAccess?.AsOfTimestamp ?? long.MaxValue };
             parameters["sequence"] = historyAccess.AsOfAcceptedSequence;
@@ -626,13 +626,13 @@ namespace ReignBetaServer
             foreach (var row in sharedMemories.GroupBy(r => ReadString(r,"memory_id","")).Select(g=>g.First()))
             {
                 var memoryPayload = TryParseJsonObject(ReadString(row,"payload_json","{}"));
-                var participants = Program.TextListFromJson(ReadString(row,"participants_json","[]"))
+                var participants = DialogueService.TextListFromJson(ReadString(row,"participants_json","[]"))
                     .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 if (ReadBool(memoryPayload,"continuityQuarantined",false)
                     || IsUnsupportedWordingJudgment(ReadString(row,"summary",""))
                     || participants.Count != 2 || !participants.Contains(observer,StringComparer.OrdinalIgnoreCase)
                     || !participants.Contains(peer,StringComparer.OrdinalIgnoreCase)
-                    || !Program.KnowledgeRowVisibleToNpc("memories",row,new Program.KnowledgeAccessContext { NpcId=observer })) continue;
+                    || !DialogueService.KnowledgeRowVisibleToNpc("memories",row,new DialogueService.KnowledgeAccessContext { NpcId=observer })) continue;
                 var originals = ReadConversationDerivativeOriginals(connection, "memories", row);
                 if (originals.Count == 0 || originals.Any(source => !HeardByPair(source) || !MemoryTimeVisible(source, historyAccess, connection)))
                     continue;
@@ -733,7 +733,7 @@ namespace ReignBetaServer
                         ["detail"] = "A durable continuity write is not supported by an exact quote of the accepted reply. Regenerate or remove that write and every dependent assertion." });
             }
             var people = ReadDictionaryList(CurrentContinuityPresence(payload), "people");
-            var speaker = MergedInteractionParticipantProfiles(payload).FirstOrDefault(p => Program.KnowledgeIdEquals(Program.CharacterIdFrom(p), heroId));
+            var speaker = MergedInteractionParticipantProfiles(payload).FirstOrDefault(p => DialogueService.KnowledgeIdEquals(CampaignFileService.CharacterIdFrom(p), heroId));
             foreach (var person in people)
             {
                 string name = ReadString(person, "name", "");
@@ -831,7 +831,7 @@ namespace ReignBetaServer
 
             // Only the required, identity-projected transcript can replace this copy.
             // Compare the whole attributed line so a redaction or different author cannot qualify.
-            string attributed = NormalizePromptSegment(Program.FormatDialogueForPrompt(new() { source }));
+            string attributed = NormalizePromptSegment(DialogueService.FormatDialogueForPrompt(new() { source }));
             return attributed.Contains(quote, StringComparison.Ordinal) && protectedExchanges.Any(record =>
                 record.SourceId.Split(',').Contains(sourceId, StringComparer.Ordinal)
                 && NormalizePromptSegment(record.Text).Contains("\n" + attributed + "\n", StringComparison.Ordinal));

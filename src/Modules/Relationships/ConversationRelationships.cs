@@ -41,9 +41,9 @@ namespace ReignBetaServer
             string reactionTargetId,
             string sourceTurnId)
         {
-            List<string> participants = Program.MergeStringLists(
-                Program.MergeStringLists(ReadStringList(payload, "participants"), ReadStringList(payload, "activeHeroIds")),
-                Program.MergeStringLists(ReadStringList(payload, "sceneParticipants"), new[]
+            List<string> participants = DialogueService.MergeStringLists(
+                DialogueService.MergeStringLists(ReadStringList(payload, "participants"), ReadStringList(payload, "activeHeroIds")),
+                DialogueService.MergeStringLists(ReadStringList(payload, "sceneParticipants"), new[]
                 {
                     ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId"), observerId
                 }));
@@ -72,7 +72,7 @@ namespace ReignBetaServer
                     evidenceIssue = "negative_assessment_missing_current_conduct";
                 }
                 string actKind = FirstNonEmpty(ReadFirstString(raw, "actKind", "actType", "act_kind"), tier);
-                List<string> sourceIds = Program.MergeStringLists(new[] { sourceTurnId }, ReadStringList(raw, "sourceTurnIds"));
+                List<string> sourceIds = DialogueService.MergeStringLists(new[] { sourceTurnId }, ReadStringList(raw, "sourceTurnIds"));
                 byTarget[target] = new Dictionary<string, object>
                 {
                     ["observerHeroStringId"] = observerId,
@@ -81,19 +81,19 @@ namespace ReignBetaServer
                     ["assessmentIssue"] = evidenceIssue,
                     ["actKind"] = actKind,
                     ["severityTier"] = tier,
-                    ["confidence"] = Program.ClampDouble(ReadDouble(raw, "confidence", 0.65d), 0d, 1d),
+                    ["confidence"] = DialogueService.ClampDouble(ReadDouble(raw, "confidence", 0.65d), 0d, 1d),
                     ["sourceTurnIds"] = sourceIds,
                     ["lieCheckId"] = ReadFirstString(raw, "lieCheckId", "lie_check_id"),
                     ["benefitEventId"] = ReadFirstString(raw, "benefitEventId", "benefitId", "benefit_event_id"),
                     ["giftRecipientHeroStringId"] = ReadFirstString(raw, "giftRecipientHeroStringId", "giftRecipientId", "gift_recipient_hero_string_id"),
-                    ["summary"] = Program.LimitText(ReadFirstString(raw, "summary", "reason"), 1200),
-                    ["importance"] = Program.ClampDouble(ReadDouble(raw, "importance", 0.5d), 0d, 1d),
-                    ["continuedUtility"] = Program.ClampDouble(ReadDouble(raw, "continuedUtility", 1d), 0d, 1d),
-                    ["retainedAppreciation"] = Program.ClampDouble(ReadDouble(raw, "retainedAppreciation", 1d), 0d, 1d),
-                    ["coercionSeverity"] = Program.ClampDouble(ReadDouble(raw, "coercionSeverity", 0d), 0d, 1d),
+                    ["summary"] = DialogueService.LimitText(ReadFirstString(raw, "summary", "reason"), 1200),
+                    ["importance"] = DialogueService.ClampDouble(ReadDouble(raw, "importance", 0.5d), 0d, 1d),
+                    ["continuedUtility"] = DialogueService.ClampDouble(ReadDouble(raw, "continuedUtility", 1d), 0d, 1d),
+                    ["retainedAppreciation"] = DialogueService.ClampDouble(ReadDouble(raw, "retainedAppreciation", 1d), 0d, 1d),
+                    ["coercionSeverity"] = DialogueService.ClampDouble(ReadDouble(raw, "coercionSeverity", 0d), 0d, 1d),
                     ["evidenceSourceIds"] = ReadStringList(raw, "evidenceSourceIds"),
-                    ["currentConductQuote"] = Program.LimitText(ReadFirstString(raw, "currentConductQuote", "current_conduct_quote", "evidenceQuote"), 600),
-                    ["sourceText"] = target.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? Program.LimitText(playerText, 4000) : ""
+                    ["currentConductQuote"] = DialogueService.LimitText(ReadFirstString(raw, "currentConductQuote", "current_conduct_quote", "evidenceQuote"), 600),
+                    ["sourceText"] = target.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? DialogueService.LimitText(playerText, 4000) : ""
                 };
             }
 
@@ -114,7 +114,7 @@ namespace ReignBetaServer
                 caught["actKind"] = "harmful_lie";
                 caught["severityTier"] = "harmful_lie";
                 caught["confidence"] = Math.Max(0.9d, ReadDouble(caught, "confidence", 0d));
-                caught["sourceTurnIds"] = Program.MergeStringLists(ReadStringList(caught, "sourceTurnIds"), new[] { sourceTurnId });
+                caught["sourceTurnIds"] = DialogueService.MergeStringLists(ReadStringList(caught, "sourceTurnIds"), new[] { sourceTurnId });
                 caught["lieCheckId"] = verifiedLieCheckId;
                 caught["benefitEventId"] = ReadString(caught, "benefitEventId", "");
                 caught["giftRecipientHeroStringId"] = ReadString(caught, "giftRecipientHeroStringId", "");
@@ -123,9 +123,9 @@ namespace ReignBetaServer
                 caught["continuedUtility"] = ReadDouble(caught, "continuedUtility", 1d);
                 caught["retainedAppreciation"] = ReadDouble(caught, "retainedAppreciation", 1d);
                 caught["coercionSeverity"] = ReadDouble(caught, "coercionSeverity", 0d);
-                caught["evidenceSourceIds"] = Program.MergeStringLists(ReadStringList(caught, "evidenceSourceIds"), ReadStringList(verifiedLie, "evidenceSourceIds"));
-                caught["currentConductQuote"] = Program.LimitText(playerText, 600);
-                caught["sourceText"] = Program.LimitText(playerText, 4000);
+                caught["evidenceSourceIds"] = DialogueService.MergeStringLists(ReadStringList(caught, "evidenceSourceIds"), ReadStringList(verifiedLie, "evidenceSourceIds"));
+                caught["currentConductQuote"] = DialogueService.LimitText(playerText, 600);
+                caught["sourceText"] = DialogueService.LimitText(playerText, 4000);
                 byTarget[playerId] = caught;
             }
 
@@ -142,7 +142,7 @@ namespace ReignBetaServer
             string playerTier = ReadFirstString(playerAssessment, "severityTier", "tier").ToLowerInvariant();
             if (playerAssessment != null
                 && observerId.Equals(namedGiftRecipient, StringComparison.OrdinalIgnoreCase)
-                && Program.HasExplicitMaterialGiftOffer(playerText)
+                && DialogueService.HasExplicitMaterialGiftOffer(playerText)
                 && ConversationGiftWasAccepted(parsed)
                 && playerTier != "harmful_lie" && playerTier != "hostile" && playerTier != "severe" && playerTier != "gift_leverage")
             {
@@ -152,9 +152,9 @@ namespace ReignBetaServer
                 if (playerTier != "transformative") playerAssessment["severityTier"] = "meaningful";
                 playerAssessment["confidence"] = Math.Max(0.8d, ReadDouble(playerAssessment, "confidence", 0d));
                 playerAssessment["importance"] = Math.Max(0.55d, ReadDouble(playerAssessment, "importance", 0d));
-                playerAssessment["evidenceSourceIds"] = Program.MergeStringLists(
+                playerAssessment["evidenceSourceIds"] = DialogueService.MergeStringLists(
                     ReadStringList(playerAssessment, "evidenceSourceIds"), new[] { "accepted_material_gift" });
-                playerAssessment["currentConductQuote"] = Program.LimitText(playerText, 600);
+                playerAssessment["currentConductQuote"] = DialogueService.LimitText(playerText, 600);
                 string priorSummary = ReadString(playerAssessment, "summary", "");
                 playerAssessment["summary"] = string.IsNullOrWhiteSpace(priorSummary)
                     ? "The named recipient accepted the player's explicit material gift."
@@ -185,7 +185,7 @@ namespace ReignBetaServer
                     ["retainedAppreciation"] = 1d, ["coercionSeverity"] = 0d,
                     ["evidenceSourceIds"] = new List<string>(),
                     ["currentConductQuote"] = "",
-                    ["sourceText"] = fallbackTarget.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? Program.LimitText(playerText, 4000) : ""
+                    ["sourceText"] = fallbackTarget.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? DialogueService.LimitText(playerText, 4000) : ""
                 };
             }
             return byTarget.Values.ToList();
@@ -223,7 +223,7 @@ namespace ReignBetaServer
             // same production lie-check receipt before relationship adjudication.
             string playerId = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
             string playerText = ReadFirstString(payload, "playerText", "text", "message");
-            string settlementName = Program.SceneContextLocationName(ReadString(payload, "sceneContext", ""));
+            string settlementName = DialogueService.SceneContextLocationName(ReadString(payload, "sceneContext", ""));
             string settlementId = ReadString(payload, "locationId", "");
             if (string.IsNullOrWhiteSpace(playerId) || string.IsNullOrWhiteSpace(observerId)
                 || string.IsNullOrWhiteSpace(settlementId) || string.IsNullOrWhiteSpace(settlementName)
@@ -276,18 +276,18 @@ namespace ReignBetaServer
         {
             if (parsed == null) return false;
             Dictionary<string, object> gate = ReadDictionary(parsed, "actionGate") ?? ReadDictionary(parsed, "action_gate") ?? new Dictionary<string, object>();
-            string combined = Program.NormalizeLookup(string.Join(" ", new[]
+            string combined = ActionPipelineService.NormalizeLookup(string.Join(" ", new[]
             {
                 ReadFirstString(parsed, "reply", "response", "text", "content"),
                 ReadString(parsed, "intent", ""),
                 ReadString(gate, "intent", ""),
                 ReadString(gate, "reason", "")
             }));
-            if (Program.ContainsAny(combined,
+            if (DialogueService.ContainsAny(combined,
                 "refuse the gift", "refuses the gift", "decline the gift", "declines the gift", "reject the gift", "rejects the gift",
                 "will not take", "won't take", "would not take", "wouldn't take", "keep your gift", "keep the gift",
                 "do not accept", "don't accept", "does not accept", "doesn't accept")) return false;
-            if (Program.ContainsAny(combined,
+            if (DialogueService.ContainsAny(combined,
                 "accept the gift", "accepts the gift", "accepted the gift", "accept the cup", "accepts the cup", "accepted the cup",
                 "i will take it", "i'll take it", "i take it", "takes the gift", "takes the cup", "physical handover"))
             {
@@ -314,7 +314,7 @@ namespace ReignBetaServer
             Dictionary<string, object> payload,
             string exchangeId)
         {
-            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
             string sessionId = ReadFirstString(payload, "conversationSessionId", "sessionId");
             if (string.IsNullOrWhiteSpace(sessionId))
             {
@@ -366,8 +366,8 @@ namespace ReignBetaServer
                 .Select(x => new Dictionary<string, object>(x))
                 .ToList();
             Dictionary<string, string> participantNames = ReadDictionaryList(payload, "participantProfiles")
-                .Where(row => !string.IsNullOrWhiteSpace(Program.CharacterIdFrom(row)))
-                .GroupBy(Program.CharacterIdFrom, StringComparer.OrdinalIgnoreCase)
+                .Where(row => !string.IsNullOrWhiteSpace(CampaignFileService.CharacterIdFrom(row)))
+                .GroupBy(CampaignFileService.CharacterIdFrom, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => ReadString(group.First(), "name", ""), StringComparer.OrdinalIgnoreCase);
             HashSet<string> eligibleParticipants = new HashSet<string>(ReadStringList(payload, "participants"), StringComparer.OrdinalIgnoreCase);
             eligibleParticipants.UnionWith(participantNames.Keys);
@@ -467,7 +467,7 @@ namespace ReignBetaServer
                     string targetId = ReadFirstString(assessment, "targetHeroStringId", "targetId");
                     if (string.IsNullOrWhiteSpace(ReadString(assessment, "sourceText", ""))
                         && contributions.TryGetValue(targetId, out string sourceText))
-                        assessment["sourceText"] = Program.LimitText(sourceText, 4000);
+                        assessment["sourceText"] = DialogueService.LimitText(sourceText, 4000);
                 }
                 priorSpeakers.Add(speakerId);
                 contributions[speakerId] = replyText;
@@ -478,7 +478,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> ConversationRelationshipEvaluateApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
             lock (CampaignRelationshipWriteLock(campaignId))
                 return ConversationRelationshipEvaluateApiLocked(payload);
         }
@@ -486,7 +486,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> ConversationRelationshipEvaluateApiLocked(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
             string exchangeId = FirstNonEmpty(ReadFirstString(payload, "exchangeId", "turnId", "sceneTurnId"), "conversation_" + Guid.NewGuid().ToString("N"));
             string timelineId = ReadString(payload, "timelineId", "");
             string mode = ReadString(payload, "mode", "conversation");
@@ -652,7 +652,7 @@ namespace ReignBetaServer
                             ["lie"] = ReadString(adjudicated, "lieCheckId", ""), ["benefit"] = ReadString(adjudicated, "benefitEventId", ""),
                             ["giftRecipient"] = ReadString(adjudicated, "giftRecipientHeroStringId", ""),
                             ["confidence"] = ReadDouble(assessment, "confidence", 0d), ["evidence"] = Json.Serialize(ReadStringList(assessment, "evidenceSourceIds")),
-                            ["currentConductQuote"] = Program.LimitText(ReadFirstString(assessment, "currentConductQuote", "current_conduct_quote", "evidenceQuote"), 600),
+                            ["currentConductQuote"] = DialogueService.LimitText(ReadFirstString(assessment, "currentConductQuote", "current_conduct_quote", "evidenceQuote"), 600),
                             ["modifiers"] = Json.Serialize(adjudicated.ContainsKey("modifiers") ? adjudicated["modifiers"] : new List<object>()), ["summary"] = ReadString(assessment, "summary", ""),
                             ["status"] = ReadString(adjudicated, "status", "applied"), ["ts"] = ts
                         };
@@ -762,7 +762,7 @@ namespace ReignBetaServer
                 ["appliedCount"] = receipts.Count(x => !ReadBool(x, "idempotent", false) && ReadInt(x, "finalDelta", 0) != 0),
                 ["idempotentCount"] = receipts.Count(x => ReadBool(x, "idempotent", false))
             };
-            Program.WriteAudit(campaignId, ReadString(payload, "correlationId", ""), "server", mode,
+            OperationsService.WriteAudit(campaignId, ReadString(payload, "correlationId", ""), "server", mode,
                 "relationship.conversation", "", "", exchangeId, "completed", 0,
                 "Conversation relationship consequences adjudicated.", response);
             DialogueService.PersonalGossipRelationshipApplied(campaignId, payload);
@@ -822,7 +822,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> ConversationRelationshipNativeReceiptApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
             List<string> receiptIds = ReadStringList(payload, "receiptIds").Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (receiptIds.Count == 0 || receiptIds.Count > 64) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Between one and 64 relationship receipt ids are required." };
             Dictionary<string, object> nativeReceipt = ReadDictionary(payload, "nativeReceipt")

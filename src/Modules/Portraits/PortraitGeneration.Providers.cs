@@ -21,12 +21,12 @@ namespace ReignBetaServer
             byte[] sourceImagePng,
             string outputSizeOverride)
         {
-            string apiKey = Program.ProviderSecret(settings, "portraitNanoGptApiKey", ReadString(settings, "portraitNanoGptImageGenerationsUrl", NanoGptImageGenerationsUrl),
+            string apiKey = SettingsService.ProviderSecret(settings, "portraitNanoGptApiKey", ReadString(settings, "portraitNanoGptImageGenerationsUrl", NanoGptImageGenerationsUrl),
                 ReadString(settings, "portraitNanoGptChatCompletionsUrl", NanoGptChatCompletionsUrl));
             string model = imageProfile.NanoGptModel;
             if (string.IsNullOrWhiteSpace(apiKey))
             {
-                return PortraitImageCallResult.Fail("NanoGPT", model, Program.ProviderKeyUnavailable(settings, "portraitNanoGptApiKey", apiKey) ? Program.GlobalKeyUnavailableError : "No NanoGPT image API key is set in the server AI Image Generation tab.");
+                return PortraitImageCallResult.Fail("NanoGPT", model, SettingsService.ProviderKeyUnavailable(settings, "portraitNanoGptApiKey", apiKey) ? SettingsService.GlobalKeyUnavailableError : "No NanoGPT image API key is set in the server AI Image Generation tab.");
             }
 
             if (UsesGeminiChatImageAdapter(model))
@@ -132,12 +132,12 @@ namespace ReignBetaServer
             byte[] sourceImagePng,
             string outputSizeOverride)
         {
-            string apiKey = Program.ProviderSecret(settings, "portraitAtlasApiKey", ReadString(settings, "portraitAtlasUploadMediaUrl", AtlasUploadMediaUrl),
+            string apiKey = SettingsService.ProviderSecret(settings, "portraitAtlasApiKey", ReadString(settings, "portraitAtlasUploadMediaUrl", AtlasUploadMediaUrl),
                 ReadString(settings, "portraitAtlasGenerateImageUrl", AtlasGenerateImageUrl), ReadString(settings, "portraitAtlasPredictionUrlPrefix", AtlasPredictionUrlPrefix));
             string model = imageProfile.AtlasModel;
             if (string.IsNullOrWhiteSpace(apiKey))
             {
-                return PortraitImageCallResult.Fail("AtlasCloud", model, Program.ProviderKeyUnavailable(settings, "portraitAtlasApiKey", apiKey) ? Program.GlobalKeyUnavailableError : "No AtlasCloud API key is set in the server AI Image Generation tab.");
+                return PortraitImageCallResult.Fail("AtlasCloud", model, SettingsService.ProviderKeyUnavailable(settings, "portraitAtlasApiKey", apiKey) ? SettingsService.GlobalKeyUnavailableError : "No AtlasCloud API key is set in the server AI Image Generation tab.");
             }
 
             Stopwatch total = Stopwatch.StartNew();
@@ -166,7 +166,7 @@ namespace ReignBetaServer
                 string json = Json.Serialize(body);
                 requestChars += json.Length;
                 string generateUrl = ReadString(settings, "portraitAtlasGenerateImageUrl", AtlasGenerateImageUrl);
-                string response = Program.PostJsonToLlm(generateUrl, apiKey, json, settings);
+                string response = LlmProviderService.PostJsonToLlm(generateUrl, apiKey, json, settings);
                 responseChars += response.Length;
                 string predictionId = ExtractAtlasPredictionId(response);
                 if (string.IsNullOrWhiteSpace(predictionId))
@@ -234,7 +234,7 @@ namespace ReignBetaServer
             string json = Json.Serialize(body);
             try
             {
-                string response = Program.PostJsonToLlm(url, apiKey, json, settings);
+                string response = LlmProviderService.PostJsonToLlm(url, apiKey, json, settings);
                 timer.Stop();
                 byte[] imageBytes = ExtractImageBytesFromJson(response);
                 if (imageBytes == null || imageBytes.Length == 0)
@@ -470,7 +470,7 @@ namespace ReignBetaServer
         {
             if (string.IsNullOrWhiteSpace(heroId))
             {
-                heroId = Program.ResolveHeroIdByCharacterObjectId(campaignId, characterObjectId);
+                heroId = DialogueService.ResolveHeroIdByCharacterObjectId(campaignId, characterObjectId);
             }
 
             if (string.IsNullOrWhiteSpace(heroId))
@@ -478,16 +478,16 @@ namespace ReignBetaServer
                 return "";
             }
 
-            string portraitPath = Program.CharacterFile(campaignId, heroId, "portraits", "portrait.png");
-            string sourcePath = Program.CharacterFile(campaignId, heroId, "portraits", "source.png");
-            string promptPath = Program.CharacterFile(campaignId, heroId, "portraits", "prompt.txt");
+            string portraitPath = CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "portrait.png");
+            string sourcePath = CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "source.png");
+            string promptPath = CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "prompt.txt");
             Directory.CreateDirectory(Path.GetDirectoryName(portraitPath));
             lock (Program.FileLock)
             {
                 File.WriteAllBytes(portraitPath, imageBytes);
                 File.WriteAllBytes(sourcePath, sourceImage);
                 File.WriteAllText(promptPath, prompt ?? "", Encoding.UTF8);
-                Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "portraits", "portrait.json"), new Dictionary<string, object>
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "portrait.json"), new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["heroStringId"] = heroId,
@@ -539,8 +539,8 @@ namespace ReignBetaServer
                 row["error"] = call.Error;
             }
 
-            Program.LogOperational(ok ? "portrait.generate" : "portrait.generate_failed", row);
-            Dictionary<string, object> settings = Program.LoadSettings();
+            OperationsService.LogOperational(ok ? "portrait.generate" : "portrait.generate_failed", row);
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
             if (!ReadBool(settings, "enableLlmLogging", true))
             {
                 return;
@@ -548,7 +548,7 @@ namespace ReignBetaServer
 
             lock (Program.FileLock)
             {
-                Program.AppendBoundedJsonLineToPathLocked(Path.Combine(Program.LogsDir, "llm-log.jsonl"), new Dictionary<string, object>
+                CampaignFileService.AppendBoundedJsonLineToPathLocked(Path.Combine(Program.LogsDir, "llm-log.jsonl"), new Dictionary<string, object>
                 {
                     ["ts"] = DateTimeOffset.UtcNow.ToString("o"),
                     ["ok"] = ok,

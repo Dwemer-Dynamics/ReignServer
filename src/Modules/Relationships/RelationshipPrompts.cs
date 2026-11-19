@@ -99,23 +99,23 @@ Do not expose a private relationship tag merely because it is supplied as behavi
         {
             return new List<Dictionary<string, object>>
             {
-                Program.PromptMeta("relationship_group_rules.txt", "NPC Relationship Rules", "relationship", true, "Shared rules for applying directional NPC-to-NPC relationships in group scenes and when another NPC is discussed."),
-                Program.PromptMeta("relationship_level_nemesis.txt", "Nemesis", "relationship", true, "Behavior when the speaker's relationship is from -100 through -70."),
-                Program.PromptMeta("relationship_level_enemy.txt", "Enemy", "relationship", true, "Behavior when the speaker's relationship is from -69 through -50."),
-                Program.PromptMeta("relationship_level_rival.txt", "Rival", "relationship", true, "Behavior when the speaker's relationship is from -49 through -30."),
-                Program.PromptMeta("relationship_level_irritant.txt", "Irritant", "relationship", true, "Behavior when the speaker's relationship is from -29 through -10."),
-                Program.PromptMeta("relationship_level_neutral.txt", "Neutral", "relationship", true, "Behavior when the speaker's relationship is from -9 through 9."),
-                Program.PromptMeta("relationship_level_acquaintance.txt", "Acquaintance", "relationship", true, "Behavior when the speaker's relationship is from 10 through 29."),
-                Program.PromptMeta("relationship_level_friend.txt", "Friend", "relationship", true, "Behavior when the speaker's relationship is from 30 through 49."),
-                Program.PromptMeta("relationship_level_close_friend.txt", "Close Friend", "relationship", true, "Behavior when the speaker's relationship is from 50 through 69."),
-                Program.PromptMeta("relationship_level_devoted.txt", "Devoted", "relationship", true, "Behavior when the speaker's relationship is from 70 through 84."),
-                Program.PromptMeta("relationship_level_bonded.txt", "Bonded", "relationship", true, "Behavior when the speaker's relationship is from 85 through 100."),
-                Program.PromptMeta("relationship_tag_lovers.txt", "Lovers", "relationship", true, "Additional behavior for NPCs with the lovers lifecycle tag."),
-                Program.PromptMeta("relationship_tag_active_affair.txt", "Active Affair", "relationship", true, "Additional secrecy and scandal behavior for an active affair."),
-                Program.PromptMeta("relationship_tag_married.txt", "Married", "relationship", true, "Additional behavior for NPC spouses."),
-                Program.PromptMeta("relationship_tag_estranged.txt", "Estranged", "relationship", true, "Additional behavior for estranged NPC spouses or lovers."),
-                Program.PromptMeta("relationship_tag_divorced.txt", "Divorced", "relationship", true, "Additional behavior for divorced former spouses."),
-                Program.PromptMeta("relationship_audience_rules.txt", "Audience And Concealment", "relationship", true, "Rules for expressing or concealing relationships when other people are present.")
+                PromptService.PromptMeta("relationship_group_rules.txt", "NPC Relationship Rules", "relationship", true, "Shared rules for applying directional NPC-to-NPC relationships in group scenes and when another NPC is discussed."),
+                PromptService.PromptMeta("relationship_level_nemesis.txt", "Nemesis", "relationship", true, "Behavior when the speaker's relationship is from -100 through -70."),
+                PromptService.PromptMeta("relationship_level_enemy.txt", "Enemy", "relationship", true, "Behavior when the speaker's relationship is from -69 through -50."),
+                PromptService.PromptMeta("relationship_level_rival.txt", "Rival", "relationship", true, "Behavior when the speaker's relationship is from -49 through -30."),
+                PromptService.PromptMeta("relationship_level_irritant.txt", "Irritant", "relationship", true, "Behavior when the speaker's relationship is from -29 through -10."),
+                PromptService.PromptMeta("relationship_level_neutral.txt", "Neutral", "relationship", true, "Behavior when the speaker's relationship is from -9 through 9."),
+                PromptService.PromptMeta("relationship_level_acquaintance.txt", "Acquaintance", "relationship", true, "Behavior when the speaker's relationship is from 10 through 29."),
+                PromptService.PromptMeta("relationship_level_friend.txt", "Friend", "relationship", true, "Behavior when the speaker's relationship is from 30 through 49."),
+                PromptService.PromptMeta("relationship_level_close_friend.txt", "Close Friend", "relationship", true, "Behavior when the speaker's relationship is from 50 through 69."),
+                PromptService.PromptMeta("relationship_level_devoted.txt", "Devoted", "relationship", true, "Behavior when the speaker's relationship is from 70 through 84."),
+                PromptService.PromptMeta("relationship_level_bonded.txt", "Bonded", "relationship", true, "Behavior when the speaker's relationship is from 85 through 100."),
+                PromptService.PromptMeta("relationship_tag_lovers.txt", "Lovers", "relationship", true, "Additional behavior for NPCs with the lovers lifecycle tag."),
+                PromptService.PromptMeta("relationship_tag_active_affair.txt", "Active Affair", "relationship", true, "Additional secrecy and scandal behavior for an active affair."),
+                PromptService.PromptMeta("relationship_tag_married.txt", "Married", "relationship", true, "Additional behavior for NPC spouses."),
+                PromptService.PromptMeta("relationship_tag_estranged.txt", "Estranged", "relationship", true, "Additional behavior for estranged NPC spouses or lovers."),
+                PromptService.PromptMeta("relationship_tag_divorced.txt", "Divorced", "relationship", true, "Additional behavior for divorced former spouses."),
+                PromptService.PromptMeta("relationship_audience_rules.txt", "Audience And Concealment", "relationship", true, "Rules for expressing or concealing relationships when other people are present.")
             };
         }
 
@@ -132,11 +132,11 @@ Do not expose a private relationship tag merely because it is supplied as behavi
             string playerId = ReadFirstString(eventPayload, "playerHeroStringId", "mainHeroStringId", "playerId");
             List<Dictionary<string, object>> attendees = ReadDictionaryList(eventPayload, "attendees");
             Dictionary<string, object> speaker = ReadDictionary(eventPayload, "speaker") ?? new Dictionary<string, object>();
-            if (!string.IsNullOrWhiteSpace(Program.CharacterIdFrom(speaker))) attendees.Add(speaker);
+            if (!string.IsNullOrWhiteSpace(CampaignFileService.CharacterIdFrom(speaker))) attendees.Add(speaker);
 
             Dictionary<string, Dictionary<string, object>> profiles = attendees
-                .Where(x => !string.IsNullOrWhiteSpace(Program.CharacterIdFrom(x)))
-                .GroupBy(Program.CharacterIdFrom, StringComparer.OrdinalIgnoreCase)
+                .Where(x => !string.IsNullOrWhiteSpace(CampaignFileService.CharacterIdFrom(x)))
+                .GroupBy(CampaignFileService.CharacterIdFrom, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
 
             HashSet<string> activeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -154,7 +154,7 @@ Do not expose a private relationship tag merely because it is supplied as behavi
                 if (!profiles.ContainsKey(mentionedId))
                 {
                     Dictionary<string, object> mentionedProfile =
-                        Program.ReadJsonObject(Program.CharacterFile(campaignId, mentionedId, "profile.json"));
+                        CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, mentionedId, "profile.json"));
                     if (mentionedProfile.Count > 0) profiles[mentionedId] = mentionedProfile;
                 }
             }
@@ -173,7 +173,7 @@ Do not expose a private relationship tag merely because it is supplied as behavi
                     profiles, eventPayload);
             StringBuilder builder = new StringBuilder();
             builder.AppendLine("NPC-TO-NPC RELATIONSHIP CONDUCT");
-            builder.AppendLine(Program.LoadPromptTemplate("relationship_group_rules.txt").Trim());
+            builder.AppendLine(PromptService.LoadPromptTemplate("relationship_group_rules.txt").Trim());
             List<Dictionary<string, object>> diagnostics = new List<Dictionary<string, object>>();
             HashSet<string> usedLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var evidenceBudget = new RelationshipPromptEvidenceBudget();
@@ -218,9 +218,9 @@ Do not expose a private relationship tag merely because it is supplied as behavi
 
                     builder.AppendLine();
                     builder.AppendLine("Toward " + label + ":");
-                    builder.AppendLine(Program.LoadPromptTemplate(RelationshipLevelPromptFile(band)).Trim());
+                    builder.AppendLine(PromptService.LoadPromptTemplate(RelationshipLevelPromptFile(band)).Trim());
                     foreach (string tag in tags)
-                        builder.AppendLine(Program.LoadPromptTemplate(RelationshipTagPromptFile(tag)).Trim());
+                        builder.AppendLine(PromptService.LoadPromptTemplate(RelationshipTagPromptFile(tag)).Trim());
                     Dictionary<string, object> socialStanding = ReputationService.BuildKnownSocialStandingView(connection,
                         campaignId, ReadString(eventPayload, "timelineId", "main"), speakerHeroId, targetId,
                         CharactersService.IdentityStateVerified(CharactersService.ReadAcquaintance(connection, speakerHeroId, targetId)),
@@ -253,7 +253,7 @@ Do not expose a private relationship tag merely because it is supplied as behavi
 
             builder.AppendLine();
             builder.AppendLine("AUDIENCE AND CONCEALMENT");
-            builder.AppendLine(Program.LoadPromptTemplate("relationship_audience_rules.txt").Trim());
+            builder.AppendLine(PromptService.LoadPromptTemplate("relationship_audience_rules.txt").Trim());
             string block = builder.ToString().Trim();
             return new Dictionary<string, object>
             {
@@ -420,7 +420,7 @@ Do not expose a private relationship tag merely because it is supplied as behavi
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaignId));
             }
             return results;
         }

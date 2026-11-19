@@ -14,13 +14,13 @@ namespace ReignBetaServer
             string campaign = "player_actions_test_" + Guid.NewGuid().ToString("N");
             Dictionary<string, object> NewContribution(Dictionary<string, object> prior, string id)
             {
-                var next = Program.CloneDictionary(prior);
+                var next = CloneDictionary(prior);
                 PlayerInputSources.Remove(next); // A new authored contribution is not an observer clone of the prior one.
                 next["sceneTurnId"] = id; next["contributionId"] = id; next["correlationId"] = id;
                 next.Remove("inputReceipt"); next.Remove("inputSourceId");
                 return next;
             }
-            var payload = Program.CloneDictionary(ReadDictionary(Program.DefaultActionTestSnapshot(), "payload"));
+            var payload = CloneDictionary(ReadDictionary(VerificationService.DefaultActionTestSnapshot(), "payload"));
             payload["campaignId"] = campaign; payload["timelineId"] = "player_actions_timeline";
             payload["sceneTurnId"] = "captured"; payload["correlationId"] = "captured";
             payload["playerText"] = "*I give her the 2000 denars to join as a companion* You can leave tomorrow.";
@@ -35,10 +35,10 @@ namespace ReignBetaServer
             var first = rows.FirstOrDefault();
             if (first != null)
             {
-                var poll = Program.NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>());
+                var poll = ActionPipelineService.NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>());
                 var delivered = ReadDurableConversationAction(campaign, ReadString(first, "id", ""));
                 delivered["deliveredTs"] = 1L; SaveDurableConversationAction(campaign, delivered);
-                var retry = Program.NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>());
+                var retry = ActionPipelineService.NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>());
                 add("lost_delivery_ack_reuses_id", ReadDictionaryList(poll, "actions").Count == 1
                     && ReadDictionaryList(retry, "actions").Count == 1
                     && ReadString(ReadDictionaryList(retry, "actions").FirstOrDefault(), "serverActionId", "") == ReadString(first, "id", ""), retry);
@@ -58,7 +58,7 @@ namespace ReignBetaServer
                     var held = ReadDurableConversationAction(campaign, heldId);
                     held["ts"] = 1L; held["deliveryCount"] = count; held["deliveredTs"] = now - sinceDelivery;
                     held["deliveryGeneration"] = rowGeneration; SaveDurableConversationAction(campaign, held);
-                    return ReadDictionaryList(Program.NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>()), "actions")
+                    return ReadDictionaryList(ActionPipelineService.NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>()), "actions")
                         .Count(a => ReadString(a, "serverActionId", "") == heldId);
                 };
                 string liveGeneration = ReadString(ReadDurableConversationAction(campaign, heldId), "deliveryGeneration", "");
@@ -86,20 +86,20 @@ namespace ReignBetaServer
                     && ReadInt(holdSummary, "backedOffCount", 0) == 1 && ReadInt(ReadDictionary(holdSummary, "byStatus"), "executing", 0) == 1
                     && ReadLong(holdSummary, "oldestAgeSeconds", 0) >= now - 1 && holdSample != null && ReadLong(holdSample, "deliveryCount", 0) == 10
                     && ReadString(holdSample, "command", "").Length > 0
-                    && ReadInt(ReadDictionary(Program.ActionFailures(TestDict("campaignId", campaign), new Dictionary<string, string>()), "unresolvedDeliveries"), "backedOffCount", 0) == 1, holdSummary);
+                    && ReadInt(ReadDictionary(ActionPipelineService.ActionFailures(TestDict("campaignId", campaign), new Dictionary<string, string>()), "unresolvedDeliveries"), "backedOffCount", 0) == 1, holdSummary);
                 }
                 finally { _actionRedeliveryProcessStartOverride = null; }
-                Program.ReportAction(TestDict("campaignId", campaign, "actionId", ReadString(first, "id", ""), "serverActionId", ReadString(first, "id", ""), "status", "completed", "message", "Verified fixture transfer."));
-                add("terminal_report_stops_delivery", ReadDictionaryList(Program.NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>()), "actions").Count == 0, null);
+                ActionPipelineService.ReportAction(TestDict("campaignId", campaign, "actionId", ReadString(first, "id", ""), "serverActionId", ReadString(first, "id", ""), "status", "completed", "message", "Verified fixture transfer."));
+                add("terminal_report_stops_delivery", ReadDictionaryList(ActionPipelineService.NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>()), "actions").Count == 0, null);
                 var resolvedSummary = UnresolvedActionDeliverySummary(campaign);
                 add("redelivery_backed_off_row_accepts_terminal_report", ReadString(ReadDurableConversationAction(campaign, heldId), "status", "") == "completed"
                     && ReadBool(resolvedSummary, "ok", false) && ReadInt(resolvedSummary, "unresolvedCount", -1) == 0, resolvedSummary);
-                var stale = Program.CloneDictionary(first); stale["status"] = "rejected";
+                var stale = CloneDictionary(first); stale["status"] = "rejected";
                 SaveDurableConversationAction(campaign, stale);
                 add("late_reply_cannot_overwrite_applied_receipt", ReadString(stale, "status", "") == "completed"
                     && ReadString(ReadDurableConversationAction(campaign, ReadString(first, "id", "")), "status", "") == "completed", stale);
             }
-            var alteredRetry = Program.CloneDictionary(payload); alteredRetry["playerText"] = "I give you 2500 gold to join as a companion.";
+            var alteredRetry = CloneDictionary(payload); alteredRetry["playerText"] = "I give you 2500 gold to join as a companion.";
             PlayerInputSources.Remove(alteredRetry);
             bool changedInputRejected = false, changedInputGenerated = false;
             try { RunPlayerActionTurn(alteredRetry, () => { changedInputGenerated = true; return TestDict("ok", true, "reply", "I will consider joining."); }); }
@@ -155,7 +155,7 @@ namespace ReignBetaServer
             catch (InvalidOperationException) { interrupted = true; }
             var afterInterrupt = ReadDurableConversationAction(campaign, protocolId);
             add("terminal_report_interruption_rolls_back_everything", interrupted && !IsProtocolOwnedTerminalAction(afterInterrupt)
-                && !Program.IsTerminalActionReportStatus(ReadString(afterInterrupt, "status", "")) && protocolCount(directionalSql) == 0 && protocolCount(actionReceiptSql) == 0, afterInterrupt);
+                && !ActionPipelineService.IsTerminalActionReportStatus(ReadString(afterInterrupt, "status", "")) && protocolCount(directionalSql) == 0 && protocolCount(actionReceiptSql) == 0, afterInterrupt);
             add("terminal_report_interruption_rolls_back_derived_standing", derivedMetricsBefore == 0 && derivedMetricsInTransaction > 0
                 && derivedCommitted() == derivedBefore, TestDict("inTransaction", derivedMetricsInTransaction, "before", derivedBefore));
             // Read-only preflight: the same predicates, distinct dispositions, no writes and no campaign creation.
@@ -219,11 +219,11 @@ namespace ReignBetaServer
             // (through a metadata connection, never FileLock), the peer releases FileLock, and the
             // acceptance finishes late with the assertion failed.
             string pairTarget = ReadString(protocolRecord, "targetHeroStringId", "");
-            string profilePath = Program.CharacterFile(campaign, pairTarget, "profile.json");
+            string profilePath = CampaignFileService.CharacterFile(campaign, pairTarget, "profile.json");
             string originalProfile;
             lock (Program.FileLock) originalProfile = System.IO.File.Exists(profilePath) ? System.IO.File.ReadAllText(profilePath) : null;
-            var spouseProfile = Program.ReadJsonObject(profilePath); spouseProfile["spouseId"] = protocolActor;
-            Program.WriteJsonObject(profilePath, spouseProfile);
+            var spouseProfile = CampaignFileService.ReadJsonObject(profilePath); spouseProfile["spouseId"] = protocolActor;
+            CampaignFileService.WriteJsonObject(profilePath, spouseProfile);
             var standingKey = TestDict("campaign", campaign, "timeline", "player_actions_timeline", "subject", pairTarget);
             Dictionary<string, object> priorStanding, ordinaryStanding;
             using (var c = ReignDatabase.OpenCampaignConnection(campaign))
@@ -496,14 +496,14 @@ namespace ReignBetaServer
             add("terminal_report_preflight_reports_protocol_owner", ReadString(ownedPreflight, "disposition", "") == "accepted"
                 && ReadString(ownedPreflight, "reason", "") == "protocol_owned", ownedPreflight);
             // A late legacy report of the same status is answered from the protocol row without projections.
-            var legacyLate = Program.ReportAction(TestDict("campaignId", campaign, "serverActionId", protocolId, "status", "completed", "result", TestDict("message", "Late legacy report.")));
+            var legacyLate = ActionPipelineService.ReportAction(TestDict("campaignId", campaign, "serverActionId", protocolId, "status", "completed", "result", TestDict("message", "Late legacy report.")));
             add("terminal_report_legacy_report_defers_to_protocol_owner", ReadString(legacyLate, "terminalReportOwner", "") == "protocol"
                 && ReadString(legacyLate, "status", "") == "completed" && !legacyLate.ContainsKey("memoryStore")
                 && ReadString(ReadDictionary(ReadDurableConversationAction(campaign, protocolId), "report"), "message", "") == "A kind gift was handed over with thanks."
                 && protocolCount(directionalSql) == 2 && protocolCount(actionReceiptSql) == 1, legacyLate);
             // A legacy terminal winner cannot be upgraded into the protocol.
             string legacyId = ReadString(ReadDictionaryList(two, "queuedDialogueActions").ElementAtOrDefault(1), "id", "");
-            Program.ReportAction(TestDict("campaignId", campaign, "serverActionId", legacyId, "status", "completed", "result", TestDict("message", "Legacy handover.")));
+            ActionPipelineService.ReportAction(TestDict("campaignId", campaign, "serverActionId", legacyId, "status", "completed", "result", TestDict("message", "Legacy handover.")));
             var legacyWinner = preflight(campaign, legacyId, protocolGeneration, ReadString(ReadDictionary(ReadDurableConversationAction(campaign, legacyId), "record"), "termsHash", ""));
             add("terminal_report_preflight_keeps_legacy_winner", legacyId.Length > 0 && ReadString(legacyWinner, "disposition", "") == "conflict"
                 && ReadString(legacyWinner, "reason", "") == "legacy_terminal_status"
@@ -538,11 +538,11 @@ namespace ReignBetaServer
             payload["channel"] = "in_person"; payload["guardedPromptOverride"] = true;
             add("test_directive_keeps_existing_gate", CurrentPlayerTransfers(payload).Count == 0, null);
             payload.Remove("guardedPromptOverride");
-            var group = Program.CloneDictionary(payload);
+            var group = CloneDictionary(payload);
             group["attendees"] = new List<Dictionary<string, object>> { TestDict("heroStringId", "npc_a"), TestDict("heroStringId", "npc_b") };
             add("two_npc_attendees_make_you_ambiguous", !SinglePlayerTransferRecipient(group)
                 && CurrentPlayerTransfers(group).All(i => i.Error.Length > 0), null);
-            var hypothetical = Program.CloneDictionary(payload);
+            var hypothetical = CloneDictionary(payload);
             hypothetical["playerText"] = "For example:\nI give you 2000 gold.";
             var hypotheticalRecord = TestDict("source", "dialogue_auto_commit", "actorHeroStringId", ReadString(payload, "playerHeroStringId", ""));
             var hypotheticalErrors = new List<string>();
@@ -586,7 +586,7 @@ namespace ReignBetaServer
             failedNpcPayload["playerText"] = "The weather is pleasant.";
             string failedNpcId = "";
             var failedNpcResult = RunPlayerActionTurn(failedNpcPayload, () => {
-                var row = Program.QueueAction(campaign, stagedNpc("unbound")); failedNpcId = ReadString(row, "id", "");
+                var row = ActionPipelineService.QueueAction(campaign, stagedNpc("unbound")); failedNpcId = ReadString(row, "id", "");
                 return TestDict("ok", false, "queuedDialogueActions", new List<Dictionary<string, object>> { row });
             });
             add("failed_npc_response_discards_staged_native_action", !ReadBool(failedNpcResult, "ok", true)
@@ -596,7 +596,7 @@ namespace ReignBetaServer
             mixedFailurePayload["playerText"] = "I give you 17 gold.";
             string discardedNpcId = "";
             var mixedFailure = RunPlayerActionTurn(mixedFailurePayload, () => {
-                discardedNpcId = ReadString(Program.QueueAction(campaign, stagedNpc("unbound")), "id", "");
+                discardedNpcId = ReadString(ActionPipelineService.QueueAction(campaign, stagedNpc("unbound")), "id", "");
                 throw new InvalidOperationException("Injected storage failure after action staging.");
             });
             add("failed_npc_keeps_only_independent_player_handover", ReadBool(mixedFailure, "ok", false)
@@ -627,7 +627,7 @@ namespace ReignBetaServer
             var duplicateBatch = PublishConversationActionBatch(campaign, batchPayload, acceptedResponse, batchRows(), generation);
             add("atomic_batch_commits_once_without_json_cache", ReadBool(batch, "atomic", false) && ReadInt(batch, "createdCount", 0) == 2
                 && ReadInt(duplicateBatch, "createdCount", -1) == 0
-                && Program.ReadActionQueueUnlocked(campaign).Count(r => ReadString(r, "id", "").StartsWith("da_batch_", StringComparison.Ordinal)) == 2, batch);
+                && ActionPipelineService.ReadActionQueueUnlocked(campaign).Count(r => ReadString(r, "id", "").StartsWith("da_batch_", StringComparison.Ordinal)) == 2, batch);
             var changedBatch = new List<Dictionary<string, object>> { batchRow("da_batch_must_rollback"), batchRow("da_batch_b") };
             bool changedReplyRejected = false;
             try { PublishConversationActionBatch(campaign, batchPayload, TestDict("ok", true, "reply", "I refuse those terms."), changedBatch, generation); }
@@ -668,7 +668,7 @@ namespace ReignBetaServer
                 Func<string, Dictionary<string, object>> markerOf = id => ReadDictionary(ReadDurableConversationAction(campaign, id), "terminalReport");
                 Func<Dictionary<string, object>, string, string, string, Dictionary<string, object>> recover = (envelope, live, session, point) =>
                 {
-                    var e = Program.CloneDictionary(envelope); e["schema"] = P;
+                    var e = CloneDictionary(envelope); e["schema"] = P;
                     e["recovery"] = TestDict("liveGeneration", live, "savePointId", point, "loadSessionId", session);
                     e["loadProof"] = TestDict("loadSessionId", session, "savePointId", point, "restoreGeneration", live);
                     return e;
@@ -984,7 +984,7 @@ namespace ReignBetaServer
             var restored = PersistenceService.SaveSyncLoadApi(point, false);
             add("save_sync_rewinds_outbox_and_ignores_newer_json", ReadBool(registered, "ok", false) && ReadBool(restored, "ok", false)
                 && ReadDurableConversationActions(campaign).Count == before
-                && !Program.ReadActionQueueUnlocked(campaign).Any(r => ReadString(ReadDictionary(r, "record"), "negotiationId", "") == "future_gift"), restored);
+                && !ActionPipelineService.ReadActionQueueUnlocked(campaign).Any(r => ReadString(ReadDictionary(r, "record"), "negotiationId", "") == "future_gift"), restored);
             return results;
         }
     }

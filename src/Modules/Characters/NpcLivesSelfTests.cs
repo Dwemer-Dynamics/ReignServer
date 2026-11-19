@@ -17,12 +17,12 @@ namespace ReignBetaServer
             string campaign = "npc_lives_test_" + Guid.NewGuid().ToString("N");
             try
             {
-                string fixture = Path.Combine(Program.VerificationDir, "npc-lives-options-fixture.json");
-                Program.WriteJsonObject(fixture, TestDict("markup", Program.ReignXpOptionsHtml(), "script", Program.ReignXpOptionsScript(),
-                    "diagnosticsMarkup", Program.NpcLivesDiagnosticsHtml(), "diagnosticsScript", NpcStoryEditorScript(),
+                string fixture = Path.Combine(VerificationService.VerificationDir, "npc-lives-options-fixture.json");
+                CampaignFileService.WriteJsonObject(fixture, TestDict("markup", SettingsService.ReignXpOptionsHtml(), "script", SettingsService.ReignXpOptionsScript(),
+                    "diagnosticsMarkup", SettingsService.NpcLivesDiagnosticsHtml(), "diagnosticsScript", NpcStoryEditorScript(),
                     "definitions", NpcStoryCatalog.All));
                 Check("production_options_browser_fixture", File.Exists(fixture), fixture);
-                string simpleOptions = Program.ReignXpOptionsHtml(), diagnostics = Program.NpcLivesDiagnosticsHtml();
+                string simpleOptions = SettingsService.ReignXpOptionsHtml(), diagnostics = SettingsService.NpcLivesDiagnosticsHtml();
                 Check("story_editor_and_advanced_controls_live_in_diagnostics", !simpleOptions.Contains("npcStoryJson")
                     && !simpleOptions.Contains("npcLivesApproachProvider") && !simpleOptions.Contains("npcLivesResumeHours")
                     && simpleOptions.Contains("npcLivesSummonsTravelTimePercent") && simpleOptions.Contains("npcLivesChance20")
@@ -44,9 +44,9 @@ namespace ReignBetaServer
                     && !diagnostics.Contains("id='" + NpcLivesOptions.InitialApproachKey + "'")
                     && !initialApproachOff.Allows("approach") && initialApproachOff.Allows("major")
                     && initialApproachOff.Allows("announcement") && initialApproachOff.Allows("reaction")
-                    && Program.ValidateNpcLivesOptions(TestDict(NpcLivesOptions.InitialApproachKey, false)).Length == 0
-                    && Program.ValidateNpcLivesOptions(TestDict(NpcLivesOptions.InitialApproachKey, "false")).Length > 0
-                    && !ReadBool(Program.NpcLivesOptionsForClient(TestDict(NpcLivesOptions.InitialApproachKey, false)), NpcLivesOptions.InitialApproachKey, true));
+                    && SettingsService.ValidateNpcLivesOptions(TestDict(NpcLivesOptions.InitialApproachKey, false)).Length == 0
+                    && SettingsService.ValidateNpcLivesOptions(TestDict(NpcLivesOptions.InitialApproachKey, "false")).Length > 0
+                    && !ReadBool(SettingsService.NpcLivesOptionsForClient(TestDict(NpcLivesOptions.InitialApproachKey, false)), NpcLivesOptions.InitialApproachKey, true));
                 Check("approach_has_no_short_timeout_control", !NpcLivesOptions.Numbers.Any(s => s.Key == "npcLivesApproachTimeoutMs")
                     && !simpleOptions.Contains("npcLivesApproachTimeoutMs") && !diagnostics.Contains("npcLivesApproachTimeoutMs"));
                 var fixtureState = new NpcLivesState { CampaignId = campaign, TimelineId = "test" };
@@ -85,7 +85,7 @@ namespace ReignBetaServer
                     var envelope = DialogueService.CreatePromptEnvelope(eventMode ? "social_event" : "dialogue", "test", "Rules.", "Profile.", budget.Structure.WithoutMarkers(budget.LiveTurn));
                     AttachNpcPurposePrompt(envelope, purposePayload, "companion");
                     DialogueService.StructureConversationMessages(envelope, budget.Structure, "", new List<Dictionary<string, object>>(),
-                        Program.FormatDialogueForPrompt, "companion", "Player", purposePlayerText, eventMode, text => text);
+                        DialogueService.FormatDialogueForPrompt, "companion", "Player", purposePlayerText, eventMode, text => text);
                     DialogueService.FinalizeContinuityPromptBudget(envelope, purposePayload, TestDict("inputAllowance", 32000, "outputFits", true));
                     string authority = ReadString(envelope.Messages.Single(m => ReadString(m, "content", "").StartsWith("CURRENT NPC PERSONAL PURPOSE", StringComparison.Ordinal)), "content", "");
                     Check((eventMode ? "event" : "dialogue") + "_purpose_survives_message_structure_as_current_system_authority",
@@ -421,9 +421,9 @@ namespace ReignBetaServer
                 bool allRejected = true;
                 foreach (var change in new[] { TestDict("leaseId", "forged"), TestDict("activeSaveName", "Baseline"), TestDict("timelineId", "foreign"),
                     TestDict("gameInstanceId", "old"), TestDict("nativeSaveInProgress", true), TestDict("timeMode", "FastForward") })
-                { var invalidFixture = Program.CloneDictionary(fixtureRequest); foreach (var field in change) invalidFixture[field.Key] = field.Value;
+                { var invalidFixture = CloneDictionary(fixtureRequest); foreach (var field in change) invalidFixture[field.Key] = field.Value;
                     allRejected &= !NpcLivesFixtureAuthorized(invalidFixture, fixtureRun, fixtureRuntime, fixtureArm); }
-                var altered = Program.CloneDictionary(fixtureRequest); var alteredCase = Program.CloneDictionary(caseFields); alteredCase["chapterId"] = "forged"; altered["testCase"] = alteredCase;
+                var altered = CloneDictionary(fixtureRequest); var alteredCase = CloneDictionary(caseFields); alteredCase["chapterId"] = "forged"; altered["testCase"] = alteredCase;
                 Check("operator_setup_rejects_forged_authority_changed_chapter_and_stale_runtime", allRejected
                     && !NpcLivesFixtureAuthorized(altered, fixtureRun, fixtureRuntime, fixtureArm)
                     && !NpcLivesFixtureAuthorized(fixtureRequest, fixtureRun, TestDict(), fixtureArm)
@@ -966,13 +966,13 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                Check("fixture_completed", false, Program.LimitText(ex.ToString(), 3000));
-                results.Last()["summary"] = "fixture_completed: " + Program.LimitText(ex.Message, 600);
+                Check("fixture_completed", false, DialogueService.LimitText(ex.ToString(), 3000));
+                results.Last()["summary"] = "fixture_completed: " + DialogueService.LimitText(ex.Message, 600);
             }
             finally
             {
-                try { Program.WriteJsonObject(Path.Combine(Program.VerificationDir, "npc-lives-self-tests.json"), TestDict(
-                    "schema", "reign-npc-lives-offline-evidence-v1", "passed", results.All(Program.CheckPassed), "checks", results)); }
+                try { CampaignFileService.WriteJsonObject(Path.Combine(VerificationService.VerificationDir, "npc-lives-self-tests.json"), TestDict(
+                    "schema", "reign-npc-lives-offline-evidence-v1", "passed", results.All(VerificationService.CheckPassed), "checks", results)); }
                 finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             }
             return results;
@@ -997,7 +997,7 @@ namespace ReignBetaServer
                 var saved = CharactersSelfTestStore.SelectConversationSessions(c, TestDict("id", session)).Single();
                 Check(prefix + "_session_retains_timeline_and_full_group", ReadBool(start, "ok", false)
                     && ReadString(TryParseJsonObject(ReadString(saved, "payload_json", "{}")), "timelineId", "") == timeline
-                    && Program.TextListFromJson(ReadString(saved, "participants_json", "[]")).OrderBy(id => id)
+                    && DialogueService.TextListFromJson(ReadString(saved, "participants_json", "[]")).OrderBy(id => id)
                         .SequenceEqual(audience.OrderBy(id => id)));
                 foreach (string hero in npcs)
                 {
@@ -1018,7 +1018,7 @@ namespace ReignBetaServer
                     var accepted = CharactersSelfTestStore.SelectConversationTurns7(c, TestDict("session", session, "hero", hero));
                     Check(prefix + "_" + hero + "_publishes_once_to_whole_group", !encounter.OpeningPending
                         && encounter.LastAcceptedDay == 10 && accepted.Count == 1
-                        && Program.TextListFromJson(ReadString(accepted.Single(), "participants_json", "[]")).OrderBy(id => id)
+                        && DialogueService.TextListFromJson(ReadString(accepted.Single(), "participants_json", "[]")).OrderBy(id => id)
                             .SequenceEqual(audience.OrderBy(id => id)));
                     var resume = NpcLivesOpenApi("open", p, options);
                     Check(prefix + "_" + hero + "_reopens_silently", ReadBool(resume, "ok", false)
@@ -1077,7 +1077,7 @@ namespace ReignBetaServer
                 var envelope = DialogueService.CreatePromptEnvelope(eventMode ? "social_event" : "dialogue", "test", "Rules.", "Profile.", budget.Structure.WithoutMarkers(budget.LiveTurn));
                 AttachNpcPurposePrompt(envelope, payload, "corein");
                 DialogueService.StructureConversationMessages(envelope, budget.Structure, "", new List<Dictionary<string, object>>(),
-                    Program.FormatDialogueForPrompt, "corein", "Player", playerText, eventMode, text => text);
+                    DialogueService.FormatDialogueForPrompt, "corein", "Player", playerText, eventMode, text => text);
                 DialogueService.FinalizeContinuityPromptBudget(envelope, payload, TestDict("inputAllowance", 32000, "outputFits", true));
                 string messages = string.Join("\n", envelope.Messages.Select(m => ReadString(m, "content", "")));
                 bool pendingReference = messages.Contains("PENDING PERSONAL INVITATION [pending_music, revision 1]")

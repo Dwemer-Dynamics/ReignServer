@@ -43,7 +43,7 @@ namespace ReignBetaServer
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (active.Count > 0) return active.Count == 1 ? active[0] : "__private_unknown__";
             var people = MergedInteractionParticipantProfiles(payload ?? TestDict()).Where(p =>
-                !Program.CharacterIdFrom(p).Equals(player, StringComparison.OrdinalIgnoreCase) && ReadString(p, "role", "") != "player").Select(Program.CharacterIdFrom)
+                !CampaignFileService.CharacterIdFrom(p).Equals(player, StringComparison.OrdinalIgnoreCase) && ReadString(p, "role", "") != "player").Select(CampaignFileService.CharacterIdFrom)
                 .Where(id => id.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (people.Count > 0) return people.Count == 1 ? people[0] : "__private_unknown__";
             string solo = ReadFirstString(payload, "heroStringId", "speakerHeroStringId");
@@ -197,7 +197,7 @@ namespace ReignBetaServer
                     if (string.IsNullOrWhiteSpace(pendingWhisperTarget))
                     {
                         var recipients = (attendees ?? new()).Where(a => ReadString(a, "role", "") != "player"
-                            && Program.CharacterIdFrom(a) != "main_hero").Select(Program.CharacterIdFrom).Where(id => id.Length > 0).Distinct().ToList();
+                            && CampaignFileService.CharacterIdFrom(a) != "main_hero").Select(CampaignFileService.CharacterIdFrom).Where(id => id.Length > 0).Distinct().ToList();
                         pendingWhisperTarget = privateFocusId.Length > 0 ? privateFocusId
                             : recipients.Count == 1 ? recipients[0] : "__private_unknown__";
                     }
@@ -267,7 +267,7 @@ namespace ReignBetaServer
             List<string> matches = new List<string>();
             foreach (Dictionary<string, object> attendee in attendees ?? new List<Dictionary<string, object>>())
             {
-                string id = Program.CharacterIdFrom(attendee);
+                string id = CampaignFileService.CharacterIdFrom(attendee);
                 string name = ReadString(attendee, "name", "");
                 if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name)) continue;
                 if (Regex.IsMatch(action, @"\b" + Regex.Escape(name) + @"\b", RegexOptions.IgnoreCase)
@@ -278,7 +278,7 @@ namespace ReignBetaServer
 
         private static string AttendeeName(List<Dictionary<string, object>> attendees, string id)
         {
-            return attendees?.Where(row => string.Equals(Program.CharacterIdFrom(row), id,
+            return attendees?.Where(row => string.Equals(CampaignFileService.CharacterIdFrom(row), id,
                     StringComparison.OrdinalIgnoreCase))
                 .Select(row => ReadString(row, "name", ""))
                 .FirstOrDefault() ?? string.Empty;

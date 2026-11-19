@@ -29,11 +29,11 @@ namespace ReignBetaServer
             });
 
             string campaignId = "__identity_self_test_" + Guid.NewGuid().ToString("N");
-            string campaignPath = Program.CampaignDirectory(campaignId);
+            string campaignPath = CampaignFileService.CampaignDirectory(campaignId);
             string courtCampaignId = campaignId + "_court";
-            string courtCampaignPath = Program.CampaignDirectory(courtCampaignId);
+            string courtCampaignPath = CampaignFileService.CampaignDirectory(courtCampaignId);
             string introductionCampaignId = campaignId + "_introduction";
-            string introductionCampaignPath = Program.CampaignDirectory(introductionCampaignId);
+            string introductionCampaignPath = CampaignFileService.CampaignDirectory(introductionCampaignId);
             try
             {
                 Dictionary<string, object> player = IdentityTestHero("player", "Aeric", "player_clan", "south", true, false);
@@ -66,7 +66,7 @@ namespace ReignBetaServer
                     ["heroes"] = roster
                 };
                 Dictionary<string, object> sync = IdentitySynchronizeApi(syncPayload);
-                Program.WriteJsonObject(Path.Combine(campaignPath, "portrait_roster.json"), new Dictionary<string, object>
+                CampaignFileService.WriteJsonObject(Path.Combine(campaignPath, "portrait_roster.json"), new Dictionary<string, object>
                 {
                     ["version"] = 2,
                     ["campaignId"] = campaignId,
@@ -1147,7 +1147,7 @@ namespace ReignBetaServer
                 List<string> repairedAliases;
                 using (ReignDbConnection identityConnection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    repairedAliases = Program.TextListFromJson(ReadString(ReadStoredAcquaintance(identityConnection, "alias_cleanup_observer", "player"), "aliases_json", "[]"));
+                    repairedAliases = DialogueService.TextListFromJson(ReadString(ReadStoredAcquaintance(identityConnection, "alias_cleanup_observer", "player"), "aliases_json", "[]"));
                 }
                 add("explicit_name_repairs_legacy_address_alias", ReadString(repairedAliasView, "identityState", "") == "verified"
                     && ReadString(repairedAliasView, "usableName", "") == "Aeric"
@@ -1284,7 +1284,7 @@ namespace ReignBetaServer
         {
             try
             {
-                string root = Path.GetFullPath(Program.CampaignsRoot()) + Path.DirectorySeparatorChar;
+                string root = Path.GetFullPath(CampaignFileService.CampaignsRoot()) + Path.DirectorySeparatorChar;
                 string target = Path.GetFullPath(campaignPath ?? "");
                 if (target.StartsWith(root, StringComparison.OrdinalIgnoreCase) && Path.GetFileName(target).StartsWith("__identity_self_test_", StringComparison.OrdinalIgnoreCase) && Directory.Exists(target))
                 {

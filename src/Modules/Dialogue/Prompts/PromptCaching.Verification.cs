@@ -175,7 +175,7 @@ namespace ReignBetaServer
             add("prompt_unidentified_statements_are_not_duplicate_evidence",
                 ReadInt(transcriptDiagnostics, "uniqueLineCount", 0) == 2
                 && ReadInt(transcriptDiagnostics, "duplicateLineCount", -1) == 0
-                && Program.CanonicalizePromptTranscript(unidentified, 30).Count == 2,
+                && DialogueService.CanonicalizePromptTranscript(unidentified, 30).Count == 2,
                 "Equal words in one group beat are retained unless statement identity proves a duplicate.", first.Diagnostics);
             var mixedIdentities = unidentified.Concat(new[]
             {
@@ -184,7 +184,7 @@ namespace ReignBetaServer
             }).ToList();
             AttachPromptSectionDiagnostics(first, new Dictionary<string, string>(), mixedIdentities);
             transcriptDiagnostics = ReadDictionary(first.Diagnostics, "canonicalTranscript");
-            int mixedCanonicalCount = Program.CanonicalizePromptTranscript(mixedIdentities, 30).Count;
+            int mixedCanonicalCount = DialogueService.CanonicalizePromptTranscript(mixedIdentities, 30).Count;
             add("prompt_mixed_identity_diagnostics_match_retained_statements", mixedCanonicalCount == 3
                 && ReadInt(transcriptDiagnostics, "uniqueLineCount", 0) == mixedCanonicalCount
                 && ReadInt(transcriptDiagnostics, "duplicateLineCount", -1) == mixedIdentities.Count - mixedCanonicalCount,
@@ -194,7 +194,7 @@ namespace ReignBetaServer
                 TestDict("turnId", "shared_beat", "sequence", 1, "text", "Agreed.", "role", "npc", "speakerId", "ira"),
                 TestDict("turnId", "shared_beat", "sequence", 1, "text", "Agreed.", "role", "npc", "speakerId", "rhagaea")
             };
-            add("prompt_native_speaker_id_preserves_distinct_authors", Program.CanonicalizePromptTranscript(attributedSequence, 30).Count == 2,
+            add("prompt_native_speaker_id_preserves_distinct_authors", DialogueService.CanonicalizePromptTranscript(attributedSequence, 30).Count == 2,
                 "The native speakerId field participates in identity even when equal words and sequence occur in one beat.", null);
             Dictionary<string, string> oversizedValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -285,8 +285,8 @@ namespace ReignBetaServer
                 modestPrompt.Diagnostics);
             // Compare the runtime tone segments, including scoped language and LF normalization.
             // Raw templates may use CRLF in a Windows checkout of the Linux server source.
-            string worldTone = NormalizePromptSegment(ScopeConversationTone(Program.LoadPromptTemplate("world_tone.txt")));
-            string noblePrompt = NormalizePromptSegment(ScopeConversationTone(Program.LoadPromptTemplate("noble_prompt.txt")));
+            string worldTone = NormalizePromptSegment(ScopeConversationTone(PromptService.LoadPromptTemplate("world_tone.txt")));
+            string noblePrompt = NormalizePromptSegment(ScopeConversationTone(PromptService.LoadPromptTemplate("noble_prompt.txt")));
             string nobleEventPrefix = BuildDialogueGlobalPrefix(true, true, new List<Dictionary<string, object>>());
             string commonerEventPrefix = BuildDialogueGlobalPrefix(true, false, new List<Dictionary<string, object>>());
             bool layeredPromptEnvelope = !string.IsNullOrWhiteSpace(worldTone)
@@ -298,7 +298,7 @@ namespace ReignBetaServer
                 && !commonerEventPrefix.Contains("NOBLE PROMPT")
                 && !commonerEventPrefix.Contains(noblePrompt);
             add("prompt_world_tone_noble_layering", layeredPromptEnvelope, "Social-event prompts always carry World Tone and add Noble Prompt only for noble characters.", null);
-            List<Dictionary<string, object>> fullCatalog = Program.CompactActionCatalog(Program.ActionCatalog());
+            List<Dictionary<string, object>> fullCatalog = ActionPipelineService.CompactActionCatalog(ActionPipelineService.ActionCatalog());
             string routedEventPrefix = BuildDialogueGlobalPrefix(true, true, fullCatalog);
             bool actionCatalogIsOutOfBand = routedEventPrefix.Contains("ACTION ROUTING BOUNDARY")
                 && routedEventPrefix.IndexOf("AVAILABLE ACTION COMMANDS", StringComparison.OrdinalIgnoreCase) < 0

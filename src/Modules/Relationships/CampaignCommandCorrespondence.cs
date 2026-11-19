@@ -28,10 +28,10 @@ namespace ReignBetaServer
                 errors.Add("The letter did not produce an ordered campaign plan.");
             if (steps.Count > 20)
                 errors.Add("A campaign plan may contain at most 20 steps.");
-            bool armyExplicit = Program.ContainsAnyNormalized(request, "army", "call the lords",
+            bool armyExplicit = ActionPipelineService.ContainsAnyNormalized(request, "army", "call the lords",
                 "gather parties", "multiple commanders");
-            bool vagueForces = Program.ContainsAnyNormalized(request, "raise forces", "gather forces", "recruit forces")
-                && !armyExplicit && !Program.ContainsAnyNormalized(request, "party", "warband", "company", "men", "troops");
+            bool vagueForces = ActionPipelineService.ContainsAnyNormalized(request, "raise forces", "gather forces", "recruit forces")
+                && !armyExplicit && !ActionPipelineService.ContainsAnyNormalized(request, "party", "warband", "company", "men", "troops");
             if (vagueForces)
             {
                 // Written orders cannot sustain a synchronous clarification dialogue.
@@ -44,8 +44,8 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> normalizedSteps = new List<Dictionary<string, object>>();
             foreach (Dictionary<string, object> rawStep in steps.Take(20))
             {
-                Dictionary<string, object> step = Program.CampaignCommandCloneDictionary(rawStep);
-                string objective = Program.CanonicalCampaignCommandObjective(ReadString(step, "objective", ""));
+                Dictionary<string, object> step = ActionPipelineService.CampaignCommandCloneDictionary(rawStep);
+                string objective = ActionPipelineService.CanonicalCampaignCommandObjective(ReadString(step, "objective", ""));
                 step["objective"] = objective;
                 if (string.IsNullOrWhiteSpace(objective))
                 {
@@ -69,11 +69,11 @@ namespace ReignBetaServer
                         step["minimumFoodDays"] = Math.Max(3d, ReadDouble(step, "minimumFoodDays", 3d));
                     }
                 }
-                if (Program.CampaignCommandObjectiveNeedsSettlement(objective)
+                if (ActionPipelineService.CampaignCommandObjectiveNeedsSettlement(objective)
                     && string.IsNullOrWhiteSpace(ReadString(step, "targetSettlementStringId", ""))
                     && string.IsNullOrWhiteSpace(ReadString(step, "region", "")))
                     errors.Add("The written " + objective.Replace('_', ' ') + " step lacks a resolvable settlement or region.");
-                if (Program.CampaignCommandObjectiveNeedsParty(objective)
+                if (ActionPipelineService.CampaignCommandObjectiveNeedsParty(objective)
                     && string.IsNullOrWhiteSpace(ReadFirstString(step, "targetPartyId", "targetHeroStringId")))
                     errors.Add("The written " + objective.Replace('_', ' ') + " step lacks a resolvable party or commander.");
                 if ((objective == "timed_hold" || objective == "scout_report")
@@ -112,7 +112,7 @@ namespace ReignBetaServer
                 ["reason"] = "The commander accepted a sovereign's written campaign order; bounded correspondence defaults were applied without inventing targets.",
                 ["terms"] = terms
             };
-            List<Dictionary<string, object>> queued = Program.EvaluateAndQueueActionCandidates(campaignId,
+            List<Dictionary<string, object>> queued = ActionPipelineService.EvaluateAndQueueActionCandidates(campaignId,
                 storedPayload, request + "\n" + ReadString(npcReply, "body", ""),
                 new List<Dictionary<string, object>> { candidate },
                 out List<string> queueErrors, out List<Dictionary<string, object>> rejected);
@@ -142,21 +142,21 @@ namespace ReignBetaServer
                 "TargetSettlement", "targetSettlement", "settlementName");
             if (!string.IsNullOrWhiteSpace(settlementQuery))
             {
-                string settlement = Program.ResolveIndexedEntity(index, "settlements", "settlement", settlementQuery,
+                string settlement = ActionPipelineService.ResolveIndexedEntity(index, "settlements", "settlement", settlementQuery,
                     "settlementId", new[] { "name" }, "campaign plan settlement", errors, true, trace);
                 if (!string.IsNullOrWhiteSpace(settlement)) step["targetSettlementStringId"] = settlement;
             }
             string partyQuery = ReadFirstString(step, "targetPartyId", "TargetParty", "targetParty");
             if (!string.IsNullOrWhiteSpace(partyQuery))
             {
-                string party = Program.ResolveIndexedEntity(index, "parties", "party", partyQuery, "partyId",
+                string party = ActionPipelineService.ResolveIndexedEntity(index, "parties", "party", partyQuery, "partyId",
                     new[] { "name", "leaderName" }, "campaign plan party", errors, true, trace);
                 if (!string.IsNullOrWhiteSpace(party)) step["targetPartyId"] = party;
             }
             string heroQuery = ReadFirstString(step, "targetHeroStringId", "targetHeroId", "TargetHero");
             if (!string.IsNullOrWhiteSpace(heroQuery))
             {
-                string hero = Program.ResolveIndexedEntity(index, "heroes", "hero", heroQuery, "heroStringId",
+                string hero = ActionPipelineService.ResolveIndexedEntity(index, "heroes", "hero", heroQuery, "heroStringId",
                     new[] { "name" }, "campaign plan commander", errors, true, trace);
                 if (!string.IsNullOrWhiteSpace(hero)) step["targetHeroStringId"] = hero;
             }

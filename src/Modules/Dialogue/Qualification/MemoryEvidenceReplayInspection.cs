@@ -45,8 +45,8 @@ namespace ReignBetaServer
             int index = 0;
             foreach (var supplied in ReadDictionaryList(inspection, "writes"))
             {
-                var write = Program.CloneDictionary(supplied);
-                string reason = PrepareQuestionContinuityWrite(connection, write, Program.CloneDictionary(payload), observer, peer,
+                var write = CloneDictionary(supplied);
+                string reason = PrepareQuestionContinuityWrite(connection, write, CloneDictionary(payload), observer, peer,
                     observer + ":question_link_inspection", reply);
                 rows.Add(TestDict("index", index++, "status", reason.Length == 0 ? "source_link_verified" : "source_link_rejected",
                     "reason", reason, "suppliedWriteSha256", PromptHash(CanonicalJson(supplied)),

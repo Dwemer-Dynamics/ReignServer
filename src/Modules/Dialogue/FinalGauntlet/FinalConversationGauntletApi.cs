@@ -38,7 +38,7 @@ namespace ReignBetaServer
                     ["cases"] = catalog.Select(
                         FinalGauntletDescriptorMap).Cast<object>().ToList()
                 };
-            Program.WriteJsonObject(FinalGauntletCatalogPath(), artifact);
+            CampaignFileService.WriteJsonObject(FinalGauntletCatalogPath(), artifact);
             artifact["ok"] = true;
             artifact["path"] = FinalGauntletCatalogPath();
             return artifact;
@@ -232,7 +232,7 @@ namespace ReignBetaServer
             Dictionary<string, string> query)
         {
             Dictionary<string, object> catalog =
-                Program.ReadJsonObject(FinalGauntletCatalogPath());
+                CampaignFileService.ReadJsonObject(FinalGauntletCatalogPath());
             return catalog.Count > 0
                 ? new Dictionary<string, object>
                 {
@@ -251,7 +251,7 @@ namespace ReignBetaServer
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(
-                payload, "campaignId", Program.ResolveLogCampaignId(""));
+                payload, "campaignId", CampaignFileService.ResolveLogCampaignId(""));
             if (string.IsNullOrWhiteSpace(campaignId))
                 return new Dictionary<string, object>
                 {
@@ -268,7 +268,7 @@ namespace ReignBetaServer
                         "An authoritative campaign/clan census fingerprint is required."
                 };
             Dictionary<string, object> catalogArtifact =
-                Program.ReadJsonObject(FinalGauntletCatalogPath());
+                CampaignFileService.ReadJsonObject(FinalGauntletCatalogPath());
             if (catalogArtifact.Count == 0)
                 catalogArtifact = FinalGauntletCatalogBuildApi(payload);
             List<FinalGauntletCaseDescriptor> approved =
@@ -351,7 +351,7 @@ namespace ReignBetaServer
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(
-                payload, "campaignId", Program.ResolveLogCampaignId(""));
+                payload, "campaignId", CampaignFileService.ResolveLogCampaignId(""));
             using (ReignDbConnection connection =
                 FinalGauntletStore.OpenControlConnection())
             {
@@ -385,9 +385,9 @@ namespace ReignBetaServer
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(
-                payload, "campaignId", Program.ResolveLogCampaignId(""));
+                payload, "campaignId", CampaignFileService.ResolveLogCampaignId(""));
             Dictionary<string, object> catalog =
-                Program.ReadJsonObject(FinalGauntletCatalogPath());
+                CampaignFileService.ReadJsonObject(FinalGauntletCatalogPath());
             if (catalog.Count == 0)
                 catalog = FinalGauntletCatalogBuildApi(payload);
             using (ReignDbConnection connection =
@@ -419,7 +419,7 @@ namespace ReignBetaServer
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(
-                payload, "campaignId", Program.ResolveLogCampaignId(""));
+                payload, "campaignId", CampaignFileService.ResolveLogCampaignId(""));
             using (ReignDbConnection connection =
                 FinalGauntletStore.OpenControlConnection())
                 return FinalConversationGauntletScheduler.Resume(
@@ -434,7 +434,7 @@ namespace ReignBetaServer
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(
-                payload, "campaignId", Program.ResolveLogCampaignId(""));
+                payload, "campaignId", CampaignFileService.ResolveLogCampaignId(""));
             using (ReignDbConnection connection =
                 FinalGauntletStore.OpenControlConnection())
                 return FinalConversationGauntletScheduler.RequestPause(
@@ -446,7 +446,7 @@ namespace ReignBetaServer
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(
-                payload, "campaignId", Program.ResolveLogCampaignId(""));
+                payload, "campaignId", CampaignFileService.ResolveLogCampaignId(""));
             using (ReignDbConnection connection =
                 FinalGauntletStore.OpenControlConnection())
             {
@@ -516,7 +516,7 @@ namespace ReignBetaServer
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(
-                payload, "campaignId", Program.ResolveLogCampaignId(""));
+                payload, "campaignId", CampaignFileService.ResolveLogCampaignId(""));
             string runId = ReadString(payload, "runId", "");
             using (ReignDbConnection connection =
                 FinalGauntletStore.OpenControlConnection())
@@ -561,7 +561,7 @@ namespace ReignBetaServer
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(
-                payload, "campaignId", Program.ResolveLogCampaignId(""));
+                payload, "campaignId", CampaignFileService.ResolveLogCampaignId(""));
             string runId = ReadString(payload, "runId", "");
             Dictionary<string, object> runtime =
                 WorldSimulationService.LoadLiveTestRuntime(campaignId);
@@ -613,7 +613,7 @@ namespace ReignBetaServer
             string campaignId = query.TryGetValue(
                 "campaignId", out string campaign)
                 ? campaign
-                : Program.ResolveLogCampaignId("");
+                : CampaignFileService.ResolveLogCampaignId("");
             string runId = query.TryGetValue("runId", out string run)
                 ? run : "";
             using (ReignDbConnection connection =
@@ -655,7 +655,7 @@ namespace ReignBetaServer
             query = query ?? new Dictionary<string, string>();
             string campaignId = query.TryGetValue(
                 "campaignId", out string campaign)
-                ? campaign : Program.ResolveLogCampaignId("");
+                ? campaign : CampaignFileService.ResolveLogCampaignId("");
             string runId = query.TryGetValue("runId", out string run)
                 ? run : "";
             using (ReignDbConnection connection =
@@ -702,7 +702,7 @@ namespace ReignBetaServer
         private static List<FinalGauntletCaseDescriptor>
             BuildFinalGauntletRuntimeCatalog()
         {
-            string root = Program.FindVerificationSourceRoot();
+            string root = VerificationService.FindVerificationSourceRoot();
             string enumPath = string.IsNullOrWhiteSpace(root)
                 ? string.Empty
                 : Path.Combine(
@@ -711,7 +711,7 @@ namespace ReignBetaServer
                     "src",
                     "World",
                     "ReignWorldActionType.cs");
-            List<string> actions = Program.DiscoverActionNames(enumPath)
+            List<string> actions = VerificationService.DiscoverActionNames(enumPath)
                 .Where(value => !string.Equals(
                     value, "Unknown",
                     StringComparison.OrdinalIgnoreCase))

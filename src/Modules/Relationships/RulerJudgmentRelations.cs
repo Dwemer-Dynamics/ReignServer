@@ -81,13 +81,13 @@ namespace ReignBetaServer
         private static Dictionary<string, object> RulerFoundationTraits(string campaign, string victor,
             Dictionary<string, object> nativeProfile, out string source)
         {
-            var stored = ReadDictionary(Program.ReadJsonObject(Program.CharacterFile(campaign, victor, "traits.json")), "foundationTraits");
+            var stored = ReadDictionary(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, victor, "traits.json")), "foundationTraits");
             if (stored != null && stored.Count > 0)
             {
                 source = "campaign_foundation_traits";
                 return stored;
             }
-            var profile = Program.ReadJsonObject(Program.CharacterFile(campaign, victor, "profile.json"));
+            var profile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, victor, "profile.json"));
             if (nativeProfile != null) foreach (var item in nativeProfile) profile[item.Key] = item.Value;
             var library = CharactersService.CharacterProfileLibraryFor(CharactersService.WithNarrativeCampaignVersion(campaign, profile));
             if (library.TryGetValue(victor, out var shipped))

@@ -120,7 +120,7 @@ namespace ReignBetaServer
             string diagnosticsBefore = Json.Serialize(envelope.Diagnostics);
             int coreChars = envelope.TotalChars;
             AttachDrinkPacket(envelope, packet);
-            var afterCore = envelope.Messages.Where((_, i) => i != 1).Select(Program.CloneDictionary).ToList();
+            var afterCore = envelope.Messages.Where((_, i) => i != 1).Select(CloneDictionary).ToList();
             afterCore.Last()["content"] = ReadString(afterCore.Last(), "content", "").Substring(0,
                 ReadString(afterCore.Last(), "content", "").Length - packet.Text.Length - 2);
             Check("core_context_and_allocations_unchanged", Json.Serialize(afterCore) == before
@@ -134,7 +134,7 @@ namespace ReignBetaServer
             Check("aggregate_capacity_still_enforced", !ReadBool(preflight, "fits", true)
                 && ReadInt(preflight, "inputTokenEstimate", 0) == EstimateContinuityTokens(Json.Serialize(envelope.Messages))
                 && ReadInt(ReadDictionary(preflight, "tokenAccounting"), "drinkSubsystem", 0) == ReadInt(packet.Budget, "inputTokenEstimate", -1));
-            var crowded = Program.CloneDictionary(context);
+            var crowded = CloneDictionary(context);
             var many = ReadDictionaryList(ReadDictionary(crowded, "drinkScene"), "vessels");
             many.Insert(0, TestDict("id", "oversized_optional", "holderHeroId", "other", "note", new string('酒', 9000)));
             ReadDictionary(crowded, "drinkScene")["vessels"] = many;
@@ -149,7 +149,7 @@ namespace ReignBetaServer
             Check("mandatory_state_never_truncated", rejected);
             Check("rules_outside_core_budget", !BuildDialogueGlobalPrefix(false, false,
                 new List<Dictionary<string, object>>()).Contains(DrinkingOutputContract));
-            var changedContext = Program.CloneDictionary(context);
+            var changedContext = CloneDictionary(context);
             ReadDictionary(changedContext, "drinkScene")["hour"] = 241d;
             var changedPacket = BuildConversationDrinkPacket(physical + " Now slightly intoxicated.", changedContext, "npc", "player");
             var changedEnvelope = CreatePromptEnvelope("dialogue", "fixture", "core rules", "core character",
