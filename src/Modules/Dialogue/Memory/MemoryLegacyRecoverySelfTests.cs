@@ -26,31 +26,14 @@ namespace ReignBetaServer
             {
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_timelines(timeline_id,campaign_id,parent_timeline_id,fork_event_id,head_sequence,head_event_id,is_active,created_utc,updated_utc)
-VALUES('parent',$campaign,'','',7,$head,1,$created,$created);
-INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-VALUES('past',$campaign,'npc','player','closed',1,4,'[""npc"",""player""]','{""timelineId"":""parent""}'),
-('current',$campaign,'npc','player','open',5,0,'[""npc"",""player""]','{""timelineId"":""child""}');
-INSERT INTO conversation_turns(turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,speaker_name,text,world_day,ts,participants_json,payload_json)
-VALUES('horse','past','horse',1,'horse','player','player','player',$story,19,1,'[""npc"",""player""]','{""timelineId"":""parent""}'),
-('frogs','past','frogs',2,'horse','npc','npc','npc',$reply,19,2,'[""npc"",""player""]','{""timelineId"":""parent""}'),
-('secret','past','secret',3,'secret','npc','npc','npc','Private stable password silverfox.',19,3,'[""npc""]','{""timelineId"":""parent""}'),
-('sibling','past','sibling',4,'sibling','npc','npc','npc','Tempest was sold in an abandoned future.',19,4,'[""npc"",""player""]','{""timelineId"":""sibling""}');
-INSERT INTO beliefs(belief_id,believer_id,claim,ts,payload_json) VALUES('private','npc','I suspect the stablekeeper.',3,'{""timelineId"":""parent""}');
-INSERT INTO memories(memory_id,owner_id,ts,summary,known_by_json,visibility,status,payload_json)
-VALUES('horse_memory','npc',3,'Tempest gets angry with frogs.','[""npc""]','private','active','{""timelineId"":""parent"",""worldDay"":19}');",
-                        TestDict("campaign", campaign, "head", head, "created", DateTimeOffset.UtcNow.AddDays(-1).ToString("o"), "story", story, "reply", reply));
-                    ReignDatabase.ExecuteSql(connection, "INSERT INTO conversation_turn_fts(turn_id,text,speaker,participants,channel) SELECT turn_id,text,speaker_id,participants_json,channel FROM conversation_turns;");
+                    DialogueSelfTestStore.InsertWorldHistoryTimelines(connection, TestDict("campaign", campaign, "head", head, "created", DateTimeOffset.UtcNow.AddDays(-1).ToString("o"), "story", story, "reply", reply));
+                    DialogueSelfTestStore.InsertConversationTurnFts2(connection);
                     foreach (var item in new[] { ("public", 1), ("private", 2), ("changed_receipt", 3), ("changed_native", 4) })
                     {
                         string id = "native_" + item.Item1;
-                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_events(event_id,campaign_id,timeline_id,sequence,world_day,event_type,source,is_complete,dissemination_class,payload_json,created_utc)
-VALUES($id,$campaign,'parent',$sequence,19,'tournament_finished','bannerlord_native',1,$scope,'{}',$created);
-INSERT INTO world_history_entities(event_id,ordinal,entity_id,entity_type,role) VALUES($id,0,'player','hero','winner');",
-                            TestDict("id", id, "campaign", campaign, "sequence", item.Item2, "scope", item.Item1 == "private" ? "participant_only" : "ordinary", "created", DateTimeOffset.UtcNow.ToString("o")));
-                        if (item.Item1 == "private") ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_knowledge_rules(rule_id,event_id,audience_type,audience_id,available_day,acquisition_mode)
-VALUES('private_rule',$id,'entity','npc',19,'participant');", TestDict("id", id));
-                        ProjectPlayerPerformanceEvent(connection, ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_events WHERE event_id=$id;", TestDict("id", id)).Single());
+                        DialogueSelfTestStore.InsertWorldHistoryEvents(connection, TestDict("id", id, "campaign", campaign, "sequence", item.Item2, "scope", item.Item1 == "private" ? "participant_only" : "ordinary", "created", DateTimeOffset.UtcNow.ToString("o")));
+                        if (item.Item1 == "private") DialogueSelfTestStore.InsertWorldHistoryKnowledgeRules(connection, TestDict("id", id));
+                        ProjectPlayerPerformanceEvent(connection, DialogueSelfTestStore.SelectWorldHistoryEvents2(connection, TestDict("id", id)).Single());
                     }
                 }
                 var registered = PersistenceService.SaveSyncRegisterCore(point);
@@ -58,59 +41,47 @@ VALUES('private_rule',$id,'entity','npc',19,'participant');", TestDict("id", id)
                 string oldSchema = ReignPostgreSqlStorage.SnapshotSchemaName(campaign, "old");
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    ReignDatabase.ExecuteSql(connection, "DROP TABLE " + oldSchema + ".memory_restored_sources; DROP TABLE " + oldSchema + ".memory_restored_source_context; DROP TABLE " + oldSchema + ".character_performance_events;");
-                    ReignDatabase.ExecuteSql(connection, "UPDATE character_performance_events SET outcome='loss' WHERE event_id='native_changed_receipt'; UPDATE world_history_events SET payload_json='{\"altered\":true}' WHERE event_id='native_changed_native';");
-                    ReignDatabase.ExecuteSql(connection, @"UPDATE world_history_timelines SET is_active=0;
-INSERT INTO world_history_timelines(timeline_id,campaign_id,parent_timeline_id,fork_event_id,head_sequence,head_event_id,is_active,created_utc,updated_utc)
-VALUES('child',$campaign,'parent',$fork,9,'child_000000000009_abcdef12',1,$created,$created);
-INSERT INTO world_history_events(event_id,campaign_id,timeline_id,sequence,world_day,event_type,created_utc)
-VALUES('child_000000000009_abcdef12',$campaign,'child',9,20,'test',$created);
-INSERT INTO conversation_turns(turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,text,world_day,ts,participants_json,payload_json)
-VALUES('later_parent','past','later_parent',5,'later','player','player','Abandoned parent future: Tempest was given away.',20,5,'[""npc"",""player""]','{""timelineId"":""parent""}'),
-('failed_question','current','failed',1,'failed','player','player','Do you remember Tempest?',20,10,'[""npc"",""player""]','{""timelineId"":""child""}'),
-('failed_reply','current','failed',2,'failed','npc','npc','Tempest? I cannot recall him.',20,11,'[""npc"",""player""]','{""timelineId"":""child""}');",
-                        TestDict("campaign", campaign, "fork", fork, "created", DateTimeOffset.UtcNow.AddSeconds(1).ToString("o")));
+                    DialogueSelfTestSchema.DropMemoryRestoredSources(connection, oldSchema, oldSchema, oldSchema);
+                    DialogueSelfTestStore.UpdateCharacterPerformanceEvents2(connection);
+                    DialogueSelfTestStore.UpdateWorldHistoryTimelines(connection, TestDict("campaign", campaign, "fork", fork, "created", DateTimeOffset.UtcNow.AddSeconds(1).ToString("o")));
                     Check("pruned_fork_requires_immediate_child_witness", VerifiedLegacyMemoryForkSequence(connection,
-                        ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_timelines WHERE timeline_id='child';").Single()) == 8);
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_events(event_id,campaign_id,timeline_id,sequence,world_day,event_type,source,is_complete,dissemination_class,payload_json,created_utc)
-VALUES('native_after_proof',$campaign,'parent',8,20,'tournament_finished','bannerlord_native',1,'ordinary','{}',$created);
-INSERT INTO world_history_entities(event_id,ordinal,entity_id,entity_type,role) VALUES('native_after_proof',0,'player','hero','winner');", TestDict("campaign", campaign, "created", DateTimeOffset.UtcNow.ToString("o")));
-                    ProjectPlayerPerformanceEvent(connection, ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_events WHERE event_id='native_after_proof';").Single());
+                        DialogueSelfTestStore.SelectWorldHistoryTimelines(connection).Single()) == 8);
+                    DialogueSelfTestStore.InsertWorldHistoryEvents2(connection, TestDict("campaign", campaign, "created", DateTimeOffset.UtcNow.ToString("o")));
+                    ProjectPlayerPerformanceEvent(connection, DialogueSelfTestStore.SelectWorldHistoryEvents3(connection).Single());
                 }
                 Check("old_branch_snapshot_registered", ReadBool(PersistenceService.SaveSyncRegisterCore(branchPoint), "ok", false));
                 string branchSchema = ReignPostgreSqlStorage.SnapshotSchemaName(campaign, "branch");
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    ReignDatabase.ExecuteSql(connection, "DROP TABLE " + branchSchema + ".memory_restored_sources; DROP TABLE " + branchSchema + ".memory_restored_source_context;");
-                    Check("preupgrade_parent_sources_invisible", !PrecisionTurnVisible(ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='horse';").Single(), "npc", Program.BuildKnowledgeAccessContext("npc", "player", "", context), connection));
+                    DialogueSelfTestSchema.DropMemoryRestoredSources2(connection, branchSchema, branchSchema);
+                    Check("preupgrade_parent_sources_invisible", !PrecisionTurnVisible(DialogueSelfTestStore.SelectConversationTurns61(connection).Single(), "npc", Program.BuildKnowledgeAccessContext("npc", "player", "", context), connection));
                 }
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "branch");
                 AdvanceMemoryRestoreGeneration(campaign, branchPoint);
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     var access = Program.BuildKnowledgeAccessContext("npc", "player", "", context);
-                    var original = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='horse';").Single();
-                    Check("prior_failed_recall_remains_historical_speech", ReadString(ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='failed_reply';").Single(), "text", "") == "Tempest? I cannot recall him.");
+                    var original = DialogueSelfTestStore.SelectConversationTurns61(connection).Single();
+                    Check("prior_failed_recall_remains_historical_speech", ReadString(DialogueSelfTestStore.SelectConversationTurns62(connection).Single(), "text", "") == "Tempest? I cannot recall him.");
                     Check("legacy_upgrade_recovers_exact_original", PrecisionTurnVisible(original, "npc", access, connection) && ReadString(original, "text", "") == story
                         && ReadString(original, "speaker_id", "") == "player");
                     foreach (string id in new[] { "sibling", "later_parent" })
-                        Check("rejects_" + id, !PrecisionTurnVisible(ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).Single(), "npc", access, connection));
+                        Check("rejects_" + id, !PrecisionTurnVisible(DialogueSelfTestStore.SelectConversationTurns(connection, TestDict("id", id)).Single(), "npc", access, connection));
                     var outsider = Program.BuildKnowledgeAccessContext("other", "player", "", context);
                     Check("native_projection_recovered_from_old_schema_with_empty_checksums", ReadInt(ReadPlayerPerformanceCounts(connection, "child", "player", 21d, access), "tournamentWins", 0) == 2
                         && ReadInt(ReadPlayerPerformanceCounts(connection, "child", "player", 21d, outsider), "tournamentWins", 0) == 1);
-                    Check("native_recovery_does_not_recreate_receipts_or_accept_changed_future", ReignDatabase.QuerySql(connection, "SELECT * FROM character_performance_events;").Count == 5
-                        && ReignDatabase.QuerySql(connection, "SELECT * FROM memory_restored_sources WHERE source_table='character_performance_events';").Count == 2);
+                    Check("native_recovery_does_not_recreate_receipts_or_accept_changed_future", DialogueSelfTestStore.SelectCharacterPerformanceEvents2(connection).Count == 5
+                        && DialogueSelfTestStore.SelectMemoryRestoredSources(connection).Count == 2);
                     var nativeProof = VerifiedLegacyMemorySnapshots(connection, campaign, branchPoint).Single();
-                    string generation = ReadString(ReignDatabase.QuerySql(connection, "SELECT restore_generation FROM memory_restored_source_context WHERE state_id='current';").Single(), "restore_generation", "");
-                    string privateRules = ReadString(ReignDatabase.QuerySql(connection, "SELECT knowledge_rules_json FROM character_performance_events WHERE event_id='native_private';").Single(), "knowledge_rules_json", "");
-                    ReignDatabase.ExecuteSql(connection, "DELETE FROM memory_restored_sources WHERE source_table='character_performance_events'; UPDATE character_performance_events SET knowledge_rules_json=$rules WHERE event_id='native_private';",
-                        TestDict("rules", Json.Serialize(new[] { TestDict("audience_type", "global", "audience_id", "all", "available_day", 19d, "acquisition_mode", "coarse_public_performance") })));
+                    string generation = ReadString(DialogueSelfTestStore.SelectMemoryRestoredSourceContext2(connection).Single(), "restore_generation", "");
+                    string privateRules = ReadString(DialogueSelfTestStore.SelectCharacterPerformanceEvents3(connection).Single(), "knowledge_rules_json", "");
+                    DialogueSelfTestStore.DeleteMemoryRestoredSources(connection, TestDict("rules", Json.Serialize(new[] { TestDict("audience_type", "global", "audience_id", "all", "available_day", 19d, "acquisition_mode", "coarse_public_performance") })));
                     RecoverLegacyPerformanceSources(connection, nativeProof, generation);
-                    Check("widened_native_receipt_audience_is_not_authority", ReignDatabase.QuerySql(connection, "SELECT * FROM memory_restored_sources WHERE source_table='character_performance_events';").Count == 1);
-                    ReignDatabase.ExecuteSql(connection, "UPDATE character_performance_events SET knowledge_rules_json=$rules WHERE event_id='native_private';", TestDict("rules", privateRules));
+                    Check("widened_native_receipt_audience_is_not_authority", DialogueSelfTestStore.SelectMemoryRestoredSources(connection).Count == 1);
+                    DialogueSelfTestStore.UpdateCharacterPerformanceEvents3(connection, TestDict("rules", privateRules));
                     RecoverLegacyPerformanceSources(connection, nativeProof, generation);
-                    Check("recovered_whisper_keeps_audience", !PrecisionTurnVisible(ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='secret';").Single(), "other", outsider, connection));
-                    var belief = ReignDatabase.QuerySql(connection, "SELECT * FROM beliefs WHERE belief_id='private';").Single();
+                    Check("recovered_whisper_keeps_audience", !PrecisionTurnVisible(DialogueSelfTestStore.SelectConversationTurns63(connection).Single(), "other", outsider, connection));
+                    var belief = DialogueSelfTestStore.SelectBeliefs(connection).Single();
                     Check("other_memory_store_recovered_with_privacy", Program.KnowledgeRowVisibleToNpc("beliefs", belief, access, connection) && !Program.KnowledgeRowVisibleToNpc("beliefs", belief, outsider, connection));
                     var early = Program.BuildKnowledgeAccessContext("npc", "player", "", context); early.AsOfAcceptedSequence = ReadLong(original, "accepted_sequence", 0) - 1;
                     Check("same_day_sequence_cutoff_survives_recovery", !PrecisionTurnVisible(original, "npc", early, connection));
@@ -162,21 +133,19 @@ INSERT INTO world_history_entities(event_id,ordinal,entity_id,entity_type,role) 
                         Check("serialized_recall_" + route + "_" + memoryMode + "_" + (query.Contains("Tempest") ? "name" : "horse"), actual.Contains(story) && actual.Contains(reply)
                             && !actual.Contains("no memory of any Tempest") && !actual.Contains("recover the Tempest memory") && !actual.Contains("given away"), TestDict("characters", actual.Length));
                     }
-                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET text='Changed horse source.' WHERE turn_id='horse';");
-                    Check("changed_source_cannot_reuse_legacy_membership", !PrecisionTurnVisible(ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='horse';").Single(), "npc", access, connection));
-                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET text=$story WHERE turn_id='horse';", TestDict("story", story));
-                    ReignDatabase.ExecuteSql(connection, "UPDATE world_history_events SET sequence=10 WHERE timeline_id='child';");
+                    DialogueSelfTestStore.UpdateConversationTurns50(connection);
+                    Check("changed_source_cannot_reuse_legacy_membership", !PrecisionTurnVisible(DialogueSelfTestStore.SelectConversationTurns61(connection).Single(), "npc", access, connection));
+                    DialogueSelfTestStore.UpdateConversationTurns51(connection, TestDict("story", story));
+                    DialogueSelfTestStore.UpdateWorldHistoryEvents(connection);
                     Check("missing_immediate_witness_fails_closed", VerifiedLegacyMemorySnapshots(connection, campaign, branchPoint).Count == 0);
-                    ReignDatabase.ExecuteSql(connection, "INSERT INTO world_history_events(event_id,campaign_id,timeline_id,sequence,world_day,event_type,created_utc) VALUES($fork,$campaign,'parent',8,20,'test',$created);",
-                        TestDict("fork", fork, "campaign", campaign, "created", DateTimeOffset.UtcNow.ToString("o")));
+                    DialogueSelfTestStore.InsertWorldHistoryEvents3(connection, TestDict("fork", fork, "campaign", campaign, "created", DateTimeOffset.UtcNow.ToString("o")));
                     Check("retained_fork_is_independent_boundary_proof", VerifiedLegacyMemorySnapshots(connection, campaign, branchPoint).Count == 1);
-                    ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_events WHERE event_id=$fork;", TestDict("fork", fork));
-                    ReignDatabase.ExecuteSql(connection, "UPDATE world_history_events SET sequence=9 WHERE timeline_id='child';");
+                    DialogueSelfTestStore.DeleteWorldHistoryEvents2(connection, TestDict("fork", fork));
+                    DialogueSelfTestStore.UpdateWorldHistoryEvents2(connection);
                     var beforeProof = VerifiedLegacyMemorySnapshots(connection, campaign, branchPoint).Single();
-                    ReignDatabase.ExecuteSql(connection, "UPDATE reign_meta.save_sync_snapshots SET created_utc=now()+interval '1 day' WHERE campaign_id=$campaign AND save_point_id='old';", TestDict("campaign", campaign));
+                    DialogueSelfTestStore.UpdateSaveSyncSnapshots(connection, TestDict("campaign", campaign));
                     Check("postfork_snapshot_cannot_supply_old_authority", VerifiedLegacyMemorySnapshots(connection, campaign, branchPoint).Count == 0);
-                    ReignDatabase.ExecuteSql(connection, "UPDATE reign_meta.save_sync_snapshots SET created_utc=to_timestamp($epoch) WHERE campaign_id=$campaign AND save_point_id='old';",
-                        TestDict("campaign", campaign, "epoch", ReadDouble(beforeProof, "createdEpoch", 0d)));
+                    DialogueSelfTestStore.UpdateSaveSyncSnapshots2(connection, TestDict("campaign", campaign, "epoch", ReadDouble(beforeProof, "createdEpoch", 0d)));
                     var ledger = PersistenceService.ReadSaveSyncLedger(campaign);
                     var storedPoint = PersistenceService.SaveSyncPoint(ledger, "old");
                     string previousFingerprint = ReadString(storedPoint, "snapshotFingerprint", "");
@@ -189,12 +158,12 @@ INSERT INTO world_history_entities(event_id,ordinal,entity_id,entity_type,role) 
                 }
                 InitializeVerifiedSnapshotMemorySources(campaign, branchPoint, "branch");
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
-                    Check("verified_noop_upgrade_also_recovers_old_sources", PrecisionTurnVisible(ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='horse';").Single(), "npc", Program.BuildKnowledgeAccessContext("npc", "player", "", context), connection));
+                    Check("verified_noop_upgrade_also_recovers_old_sources", PrecisionTurnVisible(DialogueSelfTestStore.SelectConversationTurns61(connection).Single(), "npc", Program.BuildKnowledgeAccessContext("npc", "player", "", context), connection));
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "second");
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "second");
                 AdvanceMemoryRestoreGeneration(campaign, new Dictionary<string, object>(branchPoint) { ["savePointId"] = "second" });
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
-                    Check("second_restore_retains_recovered_history", PrecisionTurnVisible(ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='horse';").Single(), "npc", Program.BuildKnowledgeAccessContext("npc", "player", "", context), connection));
+                    Check("second_restore_retains_recovered_history", PrecisionTurnVisible(DialogueSelfTestStore.SelectConversationTurns61(connection).Single(), "npc", Program.BuildKnowledgeAccessContext("npc", "player", "", context), connection));
             }
             catch (Exception ex) { Check("suite_exception", false, ex.ToString()); results.Last()["summary"] = "Legacy memory recovery exception: " + Program.LimitText(ex.ToString(), 2200); }
             finally

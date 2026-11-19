@@ -188,12 +188,11 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
             if (id.Length == 0 && kind.Length == 0) return "";
             if (!new[] { "answer", "reciprocal_question", "correction", "activity_completion", "abandonment" }.Contains(kind)) return "invalid_relation_kind";
             string quote = ReadString(write, "relatedQuote", "");
-            var row = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';",
-                new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
+            var row = DialogueStore.SelectConversationTurns5(connection, new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
             if (row == null && quote.Length >= 12)
             {
                 var access = new Program.KnowledgeAccessContext { NpcId = owner, TimelineId = timeline, WorldDay = worldDay };
-                var candidates = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$id AND status='active';", TestDict("id", id))
+                var candidates = DialogueStore.SelectConversationTurns40(connection, TestDict("id", id))
                     .Where(candidate => MemoryTimeVisible(candidate, access, connection)
                         && (ReadString(candidate, "speaker_id", "") == owner || Program.TextListFromJson(ReadString(candidate, "participants_json", "[]")).Contains(owner))
                         && ConversationTurnTextForRecall(candidate).Contains(quote, StringComparison.Ordinal)
@@ -225,8 +224,7 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
                 // Adjacent *complete* exchanges keep questions with answers and
                 // reciprocal questions. Historical evaluation still uses as-of guards.
                 long first = group.Min(r => ReadLong(r, "turn_order", 0)), last = group.Max(r => ReadLong(r, "turn_order", 0));
-                var nearby = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_turns WHERE session_id=$session AND status='active'
-AND turn_order BETWEEN $first AND $last ORDER BY turn_order;", new Dictionary<string, object> {
+                var nearby = DialogueStore.SelectConversationTurns41(connection, new Dictionary<string, object> {
                     ["session"] = group.Key, ["first"] = Math.Max(0, first - 2), ["last"] = last + 4 });
                 result.AddRange(nearby.Where(r => MemoryTimeVisible(r, knowledge, connection)
                     && (ReadString(r, "speaker_id", "") == knowledge.NpcId || Program.TextListFromJson(ReadString(r, "participants_json", "[]")).Contains(knowledge.NpcId))));
@@ -269,8 +267,7 @@ AND turn_order BETWEEN $first AND $last ORDER BY turn_order;", new Dictionary<st
                 var ordered = group.OrderBy(row => ReadLong(row, "turn_order", 0)).ToList();
                 var first = ordered.First(); var last = ordered.Last();
                 long start = ReadLong(first, "turn_order", 0), end = ReadLong(last, "turn_order", 0);
-                var nearby = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_turns WHERE session_id=$session AND status='active'
-AND turn_order BETWEEN $first AND $last ORDER BY turn_order;", TestDict("session", group.Key, "first", Math.Max(0, start - 2), "last", end + 4));
+                var nearby = DialogueStore.SelectConversationTurns41(connection, TestDict("session", group.Key, "first", Math.Max(0, start - 2), "last", end + 4));
                 // Inspect actual neighboring order before visibility filtering:
                 // hidden dialogue cannot be skipped to invent adjacency.
                 var previous = nearby.LastOrDefault(row => ReadLong(row, "turn_order", 0) < start);
@@ -339,33 +336,25 @@ AND turn_order BETWEEN $first AND $last ORDER BY turn_order;", TestDict("session
             }).ToList();
             string relatedMatch = relatedParameters.Count == 0 ? "" : " OR payload_json::jsonb->>'relatedTurnId' IN ("
                 + string.Join(",", relatedParameters) + ")";
-            string search = @"SELECT * FROM conversation_continuity WHERE owner_id=$owner AND " + MemorySourceTimelineSql("conversation_continuity", access: knowledge) + @"
-AND (peer_id='' OR peer_id=$peer) AND payload_json::jsonb->>'relatedTurnId'<>'' AND status<>'invalidated'
-AND updated_ts<=$asOf AND CASE WHEN jsonb_typeof(payload_json::jsonb->'worldDay')='number'
-THEN (payload_json::jsonb->>'worldDay')::double precision ELSE 0 END<=$day"
-                + (terms.Count == 0 ? "" : " AND (" + document + " @@ websearch_to_tsquery('english',$query)" + relatedMatch + ")")
-                + " ORDER BY " + (terms.Count == 0 ? "" : "ts_rank_cd(" + document + ",websearch_to_tsquery('english',$query),32) DESC,")
-                + "updated_ts DESC,record_id LIMIT 64 OFFSET $offset;";
+            string search = DialogueStore.SelectConversationContinuitySql2(MemorySourceTimelineSql("conversation_continuity", access: knowledge), terms.Count == 0 ? "" : " AND (" + document + " @@ websearch_to_tsquery('english',$query)" + relatedMatch + ")", terms.Count == 0 ? "" : "ts_rank_cd(" + document + ",websearch_to_tsquery('english',$query),32) DESC,");
             // Rank the eligible lifetime history first. Page past unavailable
             // originals instead of letting 32 newer links hide an old answer.
             for (int offset = 0; results.Count < 6; offset += 64)
             {
                 parameters["offset"] = offset;
-                var rows = ReignDatabase.QuerySql(connection, search, parameters);
+                var rows = DialogueStore.QuerySql(connection, search, parameters);
                 foreach (var row in rows.Where(r => MemoryTimeVisible(r, knowledge, connection)))
                 {
                 var link = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
                 string related = ReadString(link, "relatedTurnId", ""), relation = ReadString(link, "relationKind", "");
                 string quote = ReadString(link, "relatedQuote", "");
-                var source = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';",
-                    new Dictionary<string, object> { ["id"] = related }).FirstOrDefault();
+                var source = DialogueStore.SelectConversationTurns5(connection, new Dictionary<string, object> { ["id"] = related }).FirstOrDefault();
                 if (source == null || !PrecisionTurnVisible(source, owner, knowledge, connection)) continue;
                 if (quote.Length < 12 || !ReadString(source, "text", "").Contains(quote, StringComparison.Ordinal)
                     || !ObserverConversationText(ReadString(source, "text", ""), ReadString(source, "speaker_id", ""), owner, ReadString(source, "role", "") == "player").Contains(quote, StringComparison.Ordinal)
                     || ReadString(link, "relatedSpeakerId", "") != ReadString(source, "speaker_id", "")
                     || ReadString(link, "relatedSourceHash", "") != PromptHash(ReadString(source, "text", ""))) continue;
-                var response = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$event AND status='active' ORDER BY turn_order;",
-                    new Dictionary<string, object> { ["event"] = ReadString(row, "source_event_id", "") })
+                var response = DialogueStore.SelectConversationTurns42(connection, new Dictionary<string, object> { ["event"] = ReadString(row, "source_event_id", "") })
                     .Where(r => PrecisionTurnVisible(r, owner, knowledge, connection)).ToList();
                 if (response.Count == 0) continue; // Never substitute a derivative for missing original evidence.
                 var originals = new[] { source }.Concat(response).GroupBy(r => ReadString(r, "turn_id", "")).Select(g => g.First()).ToList();

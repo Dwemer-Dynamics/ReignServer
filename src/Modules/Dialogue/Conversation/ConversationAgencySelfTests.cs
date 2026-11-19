@@ -250,11 +250,11 @@ namespace ReignBetaServer
             using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 add("postgresql_backend_only", connection is Npgsql.NpgsqlConnection
-                    && ReadString(ReignDatabase.QuerySql(connection, "SELECT version() AS version;").FirstOrDefault(), "version", "").StartsWith("PostgreSQL", StringComparison.Ordinal), null);
+                    && ReadString(DialogueSelfTestStore.SelectStatement2(connection).FirstOrDefault(), "version", "").StartsWith("PostgreSQL", StringComparison.Ordinal), null);
                 var committed = CommitConversationAgency(connection, original, context, "turn_1");
                 var replay = CommitConversationAgency(connection, original, context, "turn_1");
                 add("durable_turn_retry_is_idempotent", ReadBool(committed, "ok", false) && ReadBool(replay, "replayed", false)
-                    && ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_negotiation_turns;").Count == 1, replay);
+                    && DialogueSelfTestStore.SelectConversationNegotiationTurns(connection).Count == 1, replay);
                 add("stale_prepared_reply_rejected", !ReadBool(CommitConversationAgency(connection, original, context, "stale_turn"), "ok", true), null);
             }
             using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
@@ -360,13 +360,13 @@ namespace ReignBetaServer
             add("replayed_reply_cannot_farm_party_reactions", replayParty.Count == 0, replayParty);
             using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
-                int before = ReignDatabase.QuerySql(connection, "SELECT letter_id FROM letters;").Count;
+                int before = DialogueSelfTestStore.SelectLetters2(connection).Count;
                 var staleLetter = AgencyTestReply(AgencyTestProposal(AgencyTestContext()));
                 staleLetter["motiveDecision"] = TestDict("conversationAgency", context);
                 bool rolledBack = false;
                 try { RelationshipsService.InsertLetter(connection, "npc", "Noble", "player", "Traveler", "My household matters to me.", "npc_reply", "test", "stale_parent", "", "", 20, 21, staleLetter); }
                 catch { rolledBack = true; }
-                add("stale_letter_and_negotiation_roll_back_together", rolledBack && ReignDatabase.QuerySql(connection, "SELECT letter_id FROM letters;").Count == before, null);
+                add("stale_letter_and_negotiation_roll_back_together", rolledBack && DialogueSelfTestStore.SelectLetters2(connection).Count == before, null);
                 var letter = AgencyTestReply(AgencyTestProposal(context)); letter["motiveDecision"] = TestDict("conversationAgency", context); letter["agencyTurnId"] = "mail_parent";
                 var sent = RelationshipsService.InsertLetter(connection, "npc", "Noble", "player", "Traveler", "My household matters to me.", "npc_reply", "test", "parent", "", "", 20, 21, letter);
                 var resent = RelationshipsService.InsertLetter(connection, "npc", "Noble", "player", "Traveler", "My household matters to me.", "npc_reply", "test", "parent", "", "", 20, 21, letter);
@@ -384,7 +384,7 @@ namespace ReignBetaServer
             using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 add("save_sync_restores_refusal_revision_and_receipts", ReadBool(registered, "ok", false) && ReadBool(restored, "ok", false)
                     && ReadInt(ReadConversationNegotiations(connection, "agency_timeline", "npc", "player").Single(), "revision", 0) == 2
-                    && ReignDatabase.QuerySql(connection, "SELECT receipt_id FROM conversation_negotiation_turns WHERE turn_id='future_pressure';").Count == 0, restored);
+                    && DialogueSelfTestStore.SelectConversationNegotiationTurns2(connection).Count == 0, restored);
             return results;
         }
     }

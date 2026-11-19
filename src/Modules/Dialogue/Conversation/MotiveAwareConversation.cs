@@ -1386,8 +1386,8 @@ namespace ReignBetaServer
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureConversationMotiveSchema(connection);
-                Dictionary<string, object> sameSession = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_motive_cooldowns WHERE subject_id=$subject AND target_id=$target AND kind='romantic_advance' AND session_id=$session LIMIT 1;", new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId, ["session"] = sessionId ?? "" }).FirstOrDefault();
-                Dictionary<string, object> recent = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_motive_cooldowns WHERE subject_id=$subject AND target_id=$target AND kind='romantic_advance' ORDER BY world_day DESC LIMIT 1;", new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId }).FirstOrDefault();
+                Dictionary<string, object> sameSession = DialogueStore.SelectConversationMotiveCooldowns(connection, new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId, ["session"] = sessionId ?? "" }).FirstOrDefault();
+                Dictionary<string, object> recent = DialogueStore.SelectConversationMotiveCooldowns2(connection, new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId }).FirstOrDefault();
                 bool sessionBlocked = sameSession != null;
                 bool dayBlocked = recent != null && worldDay - ReadDouble(recent, "world_day", 0d) < 3d;
                 return new Dictionary<string, object> { ["blocked"] = sessionBlocked || dayBlocked, ["reason"] = sessionBlocked ? "one_unsolicited_advance_per_session" : dayBlocked ? "three_day_target_cooldown" : "available", ["lastDay"] = recent == null ? -1d : ReadDouble(recent, "world_day", 0d) };

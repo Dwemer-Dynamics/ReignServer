@@ -36,12 +36,7 @@ namespace ReignBetaServer
             int offset = 0;
             do
             {
-                var rows = ReignDatabase.QuerySql(connection, "SELECT m.*,ts_rank(to_tsvector('simple',COALESCE(f.text,'') || ' ' || COALESCE(f.tags,'') || ' ' || COALESCE(f.entities,'')),websearch_to_tsquery('simple',$query)) AS lexical_rank"
-                    + " FROM " + ftsTable + " f JOIN " + table + " m ON m." + key + "=f." + key
-                    + " WHERE m.status='active' AND to_tsvector('simple',COALESCE(f.text,'') || ' ' || COALESCE(f.tags,'') || ' ' || COALESCE(f.entities,'')) @@ websearch_to_tsquery('simple',$query)"
-                    + (knowledge == null ? "" : " AND " + DialogueService.MemoryEligibilitySql(table, "m") + " AND " + DialogueService.MemorySourceTimelineSql(table, "m"))
-                    + " ORDER BY lexical_rank DESC,m." + key + " LIMIT 128 OFFSET $offset;",
-                    new Dictionary<string, object> { ["query"] = query, ["observer"] = knowledge?.NpcId ?? "", ["offset"] = offset, ["timeline"] = knowledge?.TimelineId ?? "" });
+                var rows = DialogueStore.SelectDynamic10(connection, ftsTable, table, key, key, knowledge == null ? "" : " AND " + DialogueService.MemoryEligibilitySql(table, "m") + " AND " + DialogueService.MemorySourceTimelineSql(table, "m"), key,                    new Dictionary<string, object> { ["query"] = query, ["observer"] = knowledge?.NpcId ?? "", ["offset"] = offset, ["timeline"] = knowledge?.TimelineId ?? "" });
                 foreach (var row in rows)
                 {
                     if (knowledge != null && !KnowledgeRowVisibleToNpc(table, row, knowledge, connection)) continue;

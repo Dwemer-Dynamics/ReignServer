@@ -90,7 +90,7 @@ namespace ReignBetaServer
             internal void VerifyStoredSources(Dictionary<string, object> context)
             {
                 using var connection = ReignDatabase.OpenCampaignConnection(campaign);
-                var stored = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$session;", TestDict("session", session));
+                var stored = DialogueStore.SelectConversationTurns86(connection, TestDict("session", session));
                 var access = Program.BuildKnowledgeAccessContext(observer, peer, "", context);
                 if (stored.Count != rows.Count || stored.Any(row => ExactBody(row, access) == null))
                     throw new InvalidOperationException("Published party view does not match the seeded source inventory.");

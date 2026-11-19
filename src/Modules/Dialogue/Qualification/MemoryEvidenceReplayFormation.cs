@@ -65,8 +65,8 @@ namespace ReignBetaServer
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     var key = TestDict("id", sessionId);
-                    session = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id AND status='closed';", key).Single();
-                    turns = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$id ORDER BY accepted_sequence;", key);
+                    session = DialogueStore.SelectConversationSessions21(connection, key).Single();
+                    turns = DialogueStore.SelectConversationTurns85(connection, key);
                 }
                 var arms = new List<Dictionary<string, object>>();
                 List<string> options = null;
@@ -85,10 +85,9 @@ namespace ReignBetaServer
                     string summary = ReadString(result, "summary", ""), id = ReadString(result, "summaryId", "");
                     var diagnostic = ReadDictionary(result, "compactionDiagnostic");
                     using var read = ReignDatabase.OpenCampaignConnection(campaign);
-                    var stored = ReignDatabase.QuerySql(read, "SELECT summary,status,payload_json FROM summaries WHERE summary_id=$id;", TestDict("id", id)).Single();
-                    var indexed = ReignDatabase.QuerySql(read, "SELECT text FROM summary_fts WHERE summary_id=$id;", TestDict("id", id)).Single();
-                    var linked = ReignDatabase.QuerySql(read, @"SELECT source_id FROM memory_sources WHERE document_type='summary' AND document_id=$id
-AND source_type='turn' ORDER BY ordinal;", TestDict("id", id)).Select(row => ReadString(row, "source_id", "")).ToList();
+                    var stored = DialogueStore.SelectSummaries6(read, TestDict("id", id)).Single();
+                    var indexed = DialogueStore.SelectSummaryFts(read, TestDict("id", id)).Single();
+                    var linked = DialogueStore.SelectMemorySources(read, TestDict("id", id)).Select(row => ReadString(row, "source_id", "")).ToList();
                     if (!ReadBool(result, "ok", false) || ReadBool(diagnostic, "providerAttempted", true) || ReadString(stored, "status", "") != "active"
                         || ReadString(stored, "summary", "") != summary || ReadString(indexed, "text", "") != summary
                         || !linked.SequenceEqual(turns.Select(row => ReadString(row, "turn_id", ""))))

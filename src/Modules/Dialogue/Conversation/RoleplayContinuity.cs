@@ -398,12 +398,7 @@ namespace ReignBetaServer
                 {
                     using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                     {
-                        List<Dictionary<string, object>> stored = ReignDatabase.QuerySql(connection, @"SELECT
-turn_id,session_id,turn_order,role,speaker_id,speaker_name AS speaker,text,ts
-FROM conversation_turns
-WHERE status='active' AND role='npc' AND speaker_id=$hero
-ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
-                            new Dictionary<string, object>
+                        List<Dictionary<string, object>> stored = DialogueStore.SelectConversationTurns36(connection, new Dictionary<string, object>
                             {
                                 ["hero"] = heroId,
                                 ["limit"] = limit

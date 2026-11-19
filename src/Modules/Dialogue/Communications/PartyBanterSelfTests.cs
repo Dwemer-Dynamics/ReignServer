@@ -150,7 +150,7 @@ namespace ReignBetaServer
                 var accepted = PartyBanterApi("accept", p); var retry = PartyBanterApi("accept", p);
                 Check("atomic_acceptance_and_retry", ReadInt(accepted, "accepted", 0) == 1 && ReadInt(retry, "accepted", 0) == 1
                     && ReadCurrentSessionDialogueLines(campaign, session, 30).Count == 1);
-                Check("no_manufactured_player_source", ReignDatabase.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id=$id AND role='player';", TestDict("id", session)).Count == 0);
+                Check("no_manufactured_player_source", DialogueSelfTestStore.SelectConversationTurns3(c, TestDict("id", session)).Count == 0);
                 var listener = Program.BuildKnowledgeAccessContext("commoner", "player", "", TestDict("timelineId", "test", "worldDay", 20d));
                 var absent = Program.BuildKnowledgeAccessContext("absent", "player", "", TestDict("timelineId", "test", "worldDay", 20d));
                 Check("accepted_words_recalled_by_listener_only", ReadLogicalConversationTurns(c, session, 30, listener).Count == 1
@@ -161,7 +161,7 @@ namespace ReignBetaServer
                     InsertConversationTurn(c, id, "shared_fixture", id, fixtureOrdinal++,
                         id, "npc", "noble", "Lady Mira", "Words from " + id + " must remain private.", "party_chat", day, 5L, "", audience,
                         TestDict("timelineId", timeline, "worldDay", day));
-                    if (invalid) ReignDatabase.ExecuteSql(c, "UPDATE conversation_turns SET status='invalidated' WHERE turn_id=$id;", TestDict("id", id));
+                    if (invalid) DialogueSelfTestStore.UpdateConversationTurns2(c, TestDict("id", id));
                 }
                 ExcludedShared("foreign_branch", 20d, "sibling", ids);
                 ExcludedShared("future_branch", 21d, "test", ids);
@@ -183,9 +183,8 @@ namespace ReignBetaServer
                     && ReadString(receipts[0], "targetHeroStringId", "") == "noble" && ReadInt(receipts[0], "finalDelta", 0) < 0);
                 p["expectedRevision"] = ReadInt(handoff, "revision", 0);
                 PartyBanterApi("handoff", p);
-                Check("takeover_retry_cannot_duplicate_affinity", ReignDatabase.QuerySql(c,
-                    "SELECT receipt_id FROM conversation_relationship_receipts WHERE exchange_id=$id;", TestDict("id", session + "_relations")).Count == 1);
-                ReignDatabase.ExecuteSql(c, "UPDATE conversation_sessions SET status='closed',close_reason='closed_by_player' WHERE session_id=$id;", TestDict("id", session));
+                Check("takeover_retry_cannot_duplicate_affinity", DialogueSelfTestStore.SelectConversationRelationshipReceipts(c, TestDict("id", session + "_relations")).Count == 1);
+                DialogueSelfTestStore.UpdateConversationSessions(c, TestDict("id", session));
                 Check("reopening_closed_takeover_is_read_only", ReadBool(PartyBanterApi("handoff", p), "readOnly", false));
                 var later = Program.CloneDictionary(p); later["sessionId"] = "banter_" + Guid.NewGuid().ToString("N"); later["worldDay"] = 20 + 7d / 24;
                 Check("takeover_preserves_cooldown", !ReadBool(PartyBanterApi("start", later), "eligible", true));

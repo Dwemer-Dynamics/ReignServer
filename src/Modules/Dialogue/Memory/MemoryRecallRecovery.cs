@@ -456,9 +456,7 @@ namespace ReignBetaServer
             // even when that observation was not phrased as a question. Inspect
             // the actual neighbor before filtering: never jump over an unheard,
             // future or other-branch turn to manufacture a conversation link.
-            var previous = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_turns
-WHERE session_id=$session AND status='active' AND turn_order<$order ORDER BY turn_order DESC LIMIT 1;",
-                TestDict("session", ReadString(first, "session_id", ""), "order", ReadLong(first, "turn_order", 0))).FirstOrDefault();
+            var previous = DialogueStore.SelectConversationTurns69(connection, TestDict("session", ReadString(first, "session_id", ""), "order", ReadLong(first, "turn_order", 0))).FirstOrDefault();
             if (previous == null || ReadString(previous, "role", "") != "npc"
                 || !PrecisionTurnVisible(previous, knowledge.NpcId, knowledge, connection)) return exchange;
             return exchange.Append(previous).DistinctBy(row => ReadString(row, "turn_id", ""))
@@ -547,32 +545,7 @@ WHERE session_id=$session AND status='active' AND turn_order<$order ORDER BY tur
                 + " AND t.accepted_sequence<=$asOfSequence AND t.ts<=$asOfTimestamp"
                 + " AND " + MemorySourceTimelineSql("conversation_turns", "t")
                 + (excludeCurrentSession && plan.Session.Length > 0 ? " AND t.session_id<>$session" : "");
-            string sql = @"WITH eligible AS MATERIALIZED (
- SELECT t.turn_id,length(t.text) AS characters,to_tsvector('english',t.text) AS document
- FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id WHERE " + eligible + @"
-), query_groups AS (
- SELECT value AS query,ordinality AS group_index FROM jsonb_array_elements_text($queryGroups::jsonb) WITH ORDINALITY
-), query_terms AS (
- SELECT DISTINCT group_index,unnest(tsvector_to_array(to_tsvector('english',query))) AS term FROM query_groups
-), weights AS MATERIALIZED (
- SELECT q.group_index,plainto_tsquery('simple',q.term) AS term_query,
- ln(1.0+(SELECT count(*) FROM eligible)::double precision/(1.0+(SELECT count(*) FROM eligible e
-      WHERE e.document @@ plainto_tsquery('simple',q.term)))) AS weight FROM query_terms q
-), group_scores AS (
- SELECT e.turn_id,g.group_index,
- COALESCE((SELECT sum(w.weight) FROM weights w WHERE w.group_index=g.group_index AND e.document @@ w.term_query),0)
- /GREATEST(0.25,0.25+0.75*e.characters/NULLIF((SELECT avg(characters) FROM eligible),0)) AS score
- FROM eligible e CROSS JOIN query_groups g WHERE e.document @@ websearch_to_tsquery('english',g.query)
-), ranked_groups AS (
- SELECT turn_id,group_index,score,row_number() OVER(PARTITION BY group_index ORDER BY score DESC,turn_id) AS query_rank FROM group_scores
-), best_rank AS (
- SELECT DISTINCT ON(turn_id) turn_id,group_index,query_rank,score FROM ranked_groups ORDER BY turn_id,query_rank,group_index
-)
-SELECT t.*,COALESCE(5.0/(r.query_rank+1),0) AS relevance,r.group_index AS recall_query_group,r.query_rank AS recall_query_rank
-FROM eligible e JOIN conversation_turns t ON t.turn_id=e.turn_id
-LEFT JOIN best_rank r ON r.turn_id=t.turn_id
-WHERE e.document @@ websearch_to_tsquery('english',$query)
-ORDER BY r.query_rank NULLS LAST,r.group_index NULLS LAST,r.score DESC,t.ts DESC,t.turn_order DESC,t.turn_id";
+            string sql = DialogueStore.SelectEligibleSql(eligible);
             // Recall attempts can occur inside otherwise substantive sessions.
             // Prefer answer-bearing originals before spending candidate slots on
             // repeated questions or failed-lookup replies. This is retrieval

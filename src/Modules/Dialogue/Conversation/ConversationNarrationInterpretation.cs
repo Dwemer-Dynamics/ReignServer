@@ -190,9 +190,7 @@ namespace ReignBetaServer
             {
                 using var connection = ReignDatabase.OpenCampaignConnection(campaign);
                 EnsureConversationInputSchema(connection);
-                var row = source.InputId.Length == 0 ? null : ReignDatabase.QuerySql(connection,
-                    "SELECT projection_json FROM conversation_input_receipts WHERE input_id=$id AND restore_generation=$generation;",
-                    TestDict("id", source.InputId, "generation", source.Generation)).SingleOrDefault();
+                var row = source.InputId.Length == 0 ? null : DialogueStore.SelectConversationInputReceipts(connection, TestDict("id", source.InputId, "generation", source.Generation)).SingleOrDefault();
                 var cached = TryParseJsonObject(ReadString(row, "projection_json", "{}"));
                 if (ReadString(cached, "sourceHash", "") == ConversationExactTextHash(source.Original))
                     return source.Interpretation = cached;
@@ -235,9 +233,7 @@ namespace ReignBetaServer
                 }
                 result["sourceHash"] = ConversationExactTextHash(source.Original);
                 if (source.InputId.Length > 0)
-                    ReignDatabase.ExecuteSql(connection, @"UPDATE conversation_input_receipts SET projection_json=$json,updated_ts=$now
-WHERE input_id=$id AND restore_generation=$generation;",
-                        TestDict("json", Json.Serialize(result), "now", DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                    DialogueStore.UpdateConversationInputReceipts(connection, TestDict("json", Json.Serialize(result), "now", DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                             "id", source.InputId, "generation", source.Generation));
                 source.Interpretation = result;
                 return result;

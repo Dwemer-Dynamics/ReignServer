@@ -244,18 +244,13 @@ namespace ReignBetaServer
                 int eventFts = 0;
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    turns = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$session AND exchange_id=$exchange ORDER BY turn_order;",
-                        new Dictionary<string, object> { ["session"] = sessionId, ["exchange"] = exchangeId });
-                    evt = ReignDatabase.QuerySql(connection, "SELECT * FROM events WHERE event_id=$id LIMIT 1;",
-                        new Dictionary<string, object> { ["id"] = exchangeId }).FirstOrDefault();
-                    memories = ReignDatabase.QuerySql(connection, "SELECT * FROM memories WHERE event_id=$id;",
-                        new Dictionary<string, object> { ["id"] = exchangeId });
-                    eventFts = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM event_fts WHERE event_id=$id;",
-                        new Dictionary<string, object> { ["id"] = exchangeId }).FirstOrDefault(), "count", 0);
+                    turns = DialogueStore.SelectConversationTurns88(connection, new Dictionary<string, object> { ["session"] = sessionId, ["exchange"] = exchangeId });
+                    evt = DialogueStore.SelectEvents3(connection, new Dictionary<string, object> { ["id"] = exchangeId }).FirstOrDefault();
+                    memories = DialogueStore.SelectMemories14(connection, new Dictionary<string, object> { ["id"] = exchangeId });
+                    eventFts = ReadInt(DialogueStore.CountEventFts(connection, new Dictionary<string, object> { ["id"] = exchangeId }).FirstOrDefault(), "count", 0);
                     foreach (Dictionary<string, object> turn in turns)
                     {
-                        int ftsCount = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM conversation_turn_fts WHERE turn_id=$id;",
-                            new Dictionary<string, object> { ["id"] = ReadString(turn, "turn_id", "") }).FirstOrDefault(), "count", 0);
+                        int ftsCount = ReadInt(DialogueStore.CountConversationTurnFts(connection, new Dictionary<string, object> { ["id"] = ReadString(turn, "turn_id", "") }).FirstOrDefault(), "count", 0);
                         AddNpcDialogueAssertion(assertions, "turn_fts_" + ReadString(turn, "role", ""), ftsCount == 1, "Conversation turn has one FTS row.", ReadString(turn, "turn_id", ""));
                     }
                 }
@@ -368,24 +363,18 @@ namespace ReignBetaServer
                 int turns = 0, links = 0, fts = 0, embeddingJobs = 0, middleTermFts = 0, middleTermEmbeddingJobs = 0, unconsolidatedNpcMemories = 0;
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    session = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault();
+                    session = DialogueStore.SelectConversationSessions8(connection, new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault();
                     string summaryId = ReadString(session, "scene_summary_id", "");
-                    summary = ReignDatabase.QuerySql(connection, "SELECT * FROM summaries WHERE summary_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault();
-                    turns = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM conversation_turns WHERE session_id=$id;", new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault(), "count", 0);
-                    links = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM memory_sources WHERE document_type='summary' AND document_id=$id;", new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault(), "count", 0);
-                    fts = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM summary_fts WHERE summary_id=$id;", new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault(), "count", 0);
-                    embeddingJobs = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM embedding_jobs WHERE source_type='summary' AND source_id=$id;", new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault(), "count", 0);
-                    middleTerm = ReignDatabase.QuerySql(connection, "SELECT * FROM summaries WHERE scope=$scope AND summary_type='middle_term' ORDER BY updated_ts DESC LIMIT 1;",
-                        new Dictionary<string, object> { ["scope"] = "conversation:" + sessionId }).FirstOrDefault();
+                    summary = DialogueStore.SelectSummaries3(connection, new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault();
+                    turns = ReadInt(DialogueStore.CountConversationTurns2(connection, new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault(), "count", 0);
+                    links = ReadInt(DialogueStore.CountMemorySources(connection, new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault(), "count", 0);
+                    fts = ReadInt(DialogueStore.CountSummaryFts(connection, new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault(), "count", 0);
+                    embeddingJobs = ReadInt(DialogueStore.CountEmbeddingJobs4(connection, new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault(), "count", 0);
+                    middleTerm = DialogueStore.SelectSummaries7(connection, new Dictionary<string, object> { ["scope"] = "conversation:" + sessionId }).FirstOrDefault();
                     string middleTermId = ReadString(middleTerm, "summary_id", "");
-                    middleTermFts = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM summary_fts WHERE summary_id=$id;",
-                        new Dictionary<string, object> { ["id"] = middleTermId }).FirstOrDefault(), "count", 0);
-                    middleTermEmbeddingJobs = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM embedding_jobs WHERE source_type='summary' AND source_id=$id;",
-                        new Dictionary<string, object> { ["id"] = middleTermId }).FirstOrDefault(), "count", 0);
-                    unconsolidatedNpcMemories = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) count FROM memories m
-JOIN conversation_turns t ON t.event_id=m.event_id
-WHERE t.session_id=$session AND m.owner_id=$npc AND m.status<>'consolidated';",
-                        new Dictionary<string, object> { ["session"] = sessionId, ["npc"] = ReadString(report, "npcId", "") }).FirstOrDefault(), "count", 0);
+                    middleTermFts = ReadInt(DialogueStore.CountSummaryFts(connection, new Dictionary<string, object> { ["id"] = middleTermId }).FirstOrDefault(), "count", 0);
+                    middleTermEmbeddingJobs = ReadInt(DialogueStore.CountEmbeddingJobs4(connection, new Dictionary<string, object> { ["id"] = middleTermId }).FirstOrDefault(), "count", 0);
+                    unconsolidatedNpcMemories = ReadInt(DialogueStore.CountMemories4(connection, new Dictionary<string, object> { ["session"] = sessionId, ["npc"] = ReadString(report, "npcId", "") }).FirstOrDefault(), "count", 0);
                 }
                 AddNpcDialogueAssertion(assertions, "scene_closed", session != null && ReadString(session, "status", "") != "open", "Conversation session is closed.", sessionId);
                 AddNpcDialogueAssertion(assertions, "scene_turn_count", turns == ReadInt(payload, "expectedTurns", 12), "Scene contains the expected number of raw turns.", turns.ToString());
@@ -538,12 +527,12 @@ WHERE t.session_id=$session AND m.owner_id=$npc AND m.status<>'consolidated';",
             {
                 return new Dictionary<string, object>
                 {
-                    ["sessions"] = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM conversation_sessions WHERE npc_id=$npc;", new Dictionary<string, object> { ["npc"] = npcId }).FirstOrDefault(), "count", 0),
-                    ["turns"] = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM conversation_turns WHERE speaker_id=$npc OR participants_json LIKE $like;", new Dictionary<string, object> { ["npc"] = npcId, ["like"] = "%" + npcId + "%" }).FirstOrDefault(), "count", 0),
-                    ["memories"] = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM memories WHERE owner_id=$npc;", new Dictionary<string, object> { ["npc"] = npcId }).FirstOrDefault(), "count", 0),
-                    ["sceneSummaries"] = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM summaries WHERE owner_id=$npc AND summary_type='scene';", new Dictionary<string, object> { ["npc"] = npcId }).FirstOrDefault(), "count", 0),
-                    ["middleTermSummaries"] = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM summaries WHERE owner_id=$npc AND summary_type='middle_term';", new Dictionary<string, object> { ["npc"] = npcId }).FirstOrDefault(), "count", 0),
-                    ["arcSummaries"] = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM summaries WHERE owner_id=$npc AND summary_type='arc';", new Dictionary<string, object> { ["npc"] = npcId }).FirstOrDefault(), "count", 0)
+                    ["sessions"] = ReadInt(DialogueStore.CountConversationSessions(connection, new Dictionary<string, object> { ["npc"] = npcId }).FirstOrDefault(), "count", 0),
+                    ["turns"] = ReadInt(DialogueStore.CountConversationTurns3(connection, new Dictionary<string, object> { ["npc"] = npcId, ["like"] = "%" + npcId + "%" }).FirstOrDefault(), "count", 0),
+                    ["memories"] = ReadInt(DialogueStore.CountMemories5(connection, new Dictionary<string, object> { ["npc"] = npcId }).FirstOrDefault(), "count", 0),
+                    ["sceneSummaries"] = ReadInt(DialogueStore.CountSummaries(connection, new Dictionary<string, object> { ["npc"] = npcId }).FirstOrDefault(), "count", 0),
+                    ["middleTermSummaries"] = ReadInt(DialogueStore.CountSummaries2(connection, new Dictionary<string, object> { ["npc"] = npcId }).FirstOrDefault(), "count", 0),
+                    ["arcSummaries"] = ReadInt(DialogueStore.CountSummaries3(connection, new Dictionary<string, object> { ["npc"] = npcId }).FirstOrDefault(), "count", 0)
                 };
             }
         }
@@ -658,9 +647,7 @@ WHERE t.session_id=$session AND m.owner_id=$npc AND m.status<>'consolidated';",
                 {
                     indexed = summaryIds.Where(id =>
                     {
-                        Dictionary<string, object> row = ReignDatabase.QuerySql(connection,
-                            "SELECT embedding_status FROM summaries WHERE summary_id=$id LIMIT 1;",
-                            new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
+                        Dictionary<string, object> row = DialogueStore.SelectSummaries8(connection, new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
                         return string.Equals(ReadString(row, "embedding_status", ""), "indexed", StringComparison.OrdinalIgnoreCase);
                     }).ToList();
                 }
@@ -695,9 +682,7 @@ WHERE t.session_id=$session AND m.owner_id=$npc AND m.status<>'consolidated';",
                 string probeText = "";
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    Dictionary<string, object> probe = ReignDatabase.QuerySql(connection,
-                        "SELECT summary FROM summaries WHERE summary_id=$id LIMIT 1;",
-                        new Dictionary<string, object> { ["id"] = probeId }).FirstOrDefault();
+                    Dictionary<string, object> probe = DialogueStore.SelectSummaries9(connection, new Dictionary<string, object> { ["id"] = probeId }).FirstOrDefault();
                     probeText = ReadString(probe, "summary", "");
                 }
                 Dictionary<string, object> route = new Dictionary<string, object>

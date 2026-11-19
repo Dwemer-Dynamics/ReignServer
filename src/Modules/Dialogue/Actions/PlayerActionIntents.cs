@@ -308,7 +308,7 @@ namespace ReignBetaServer
         }
 
         private static void EnsureConversationActionOutbox(ReignDbConnection connection)
-            => ReignDatabase.ExecuteSql(connection, "CREATE TABLE IF NOT EXISTS conversation_action_outbox (action_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,fingerprint TEXT NOT NULL,payload_json TEXT NOT NULL);");
+            => DialogueSchema.CreateConversationActionOutbox(connection);
         internal static bool DurableConversationAction(string id) => id.StartsWith("pa_", StringComparison.Ordinal) || id.StartsWith("da_", StringComparison.Ordinal);
 
         // ---- Bounded redelivery of durable actions that never receive a terminal report. ----
@@ -339,12 +339,10 @@ namespace ReignBetaServer
                 {
                     string generation = "";
                     if (WorldSimulationService.TableExists(connection, "memory_precision_state"))
-                        generation = ReadString(ReignDatabase.QuerySql(connection,
-                            "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';").FirstOrDefault(), "restore_generation", "");
+                        generation = ReadString(DialogueStore.SelectMemoryPrecisionState2(connection).FirstOrDefault(), "restore_generation", "");
                     string session = "";
                     if (WorldSimulationService.TableExists(connection, "memory_restored_source_context"))
-                        session = ReadString(ReignDatabase.QuerySql(connection,
-                            "SELECT to_jsonb(c)->>'load_session_id' AS load_session_id FROM memory_restored_source_context c WHERE c.state_id='current';").FirstOrDefault(),
+                        session = ReadString(DialogueStore.SelectMemoryRestoredSourceContext(connection).FirstOrDefault(),
                             "load_session_id", "");
                     return generation + "|" + session;
                 }
@@ -471,8 +469,7 @@ namespace ReignBetaServer
                 EnsureConversationActionOutbox(connection);
                 using (var transaction = connection.BeginTransaction())
                 {
-                    string currentGeneration = ReadString(ReignDatabase.QuerySql(connection,
-                        "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").Single(), "restore_generation", "");
+                    string currentGeneration = ReadString(DialogueStore.SelectMemoryPrecisionState(connection).Single(), "restore_generation", "");
                     if (currentGeneration != expectedGeneration)
                         throw new InvalidOperationException("The campaign was restored while the conversation was being prepared.");
                     int index = 0;
@@ -483,7 +480,7 @@ namespace ReignBetaServer
                         if (ReadString(row, "campaignId", "") != campaign || ReadString(record, "campaignId", "") != campaign
                             || ReadString(record, "termsHash", "").Length == 0)
                             throw new InvalidOperationException("The staged action is missing its immutable campaign or terms binding.");
-                        bool existing = ReignDatabase.QuerySql(connection, "SELECT action_id FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", id)).Count > 0;
+                        bool existing = DialogueStore.SelectConversationActionOutbox(connection, TestDict("id", id)).Count > 0;
                         row["publicationId"] = publicationId;
                         row["publicationGeneration"] = expectedGeneration;
                         row["publicationEvidence"] = id.StartsWith("pa_", StringComparison.Ordinal)
@@ -521,7 +518,7 @@ namespace ReignBetaServer
             using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsureConversationActionOutbox(connection);
-                var row = ReignDatabase.QuerySql(connection, "SELECT payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", id)).FirstOrDefault();
+                var row = DialogueStore.SelectConversationActionOutbox2(connection, TestDict("id", id)).FirstOrDefault();
                 return row == null ? null : TryParseJsonObject(ReadString(row, "payload_json", "{}"));
             }
         }
@@ -544,7 +541,7 @@ namespace ReignBetaServer
             string id = ReadString(row, "id", "");
             var record = ReadDictionary(row, "record"); var terms = TryParseJsonObject(ReadString(record, "termsJson", "{}"));
             string fingerprint = ReadString(record, "termsHash", "");
-            var previous = ReignDatabase.QuerySql(connection, "SELECT fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;", TestDict("id", id)).FirstOrDefault();
+            var previous = DialogueStore.SelectConversationActionOutbox3(connection, TestDict("id", id)).FirstOrDefault();
             if (previous != null)
             {
                 if (ReadString(previous, "fingerprint", "") != fingerprint) throw new InvalidOperationException("This action ID already has different immutable terms.");
@@ -562,14 +559,8 @@ namespace ReignBetaServer
                 if (!Program.ShouldAcceptActionStatusTransition(ReadString(original, "status", ""), ReadString(row, "status", "")))
                 { row.Clear(); foreach (var pair in original) row[pair.Key] = pair.Value; return; }
             }
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_action_outbox(action_id,timeline_id,fingerprint,payload_json) VALUES($id,$timeline,$fingerprint,$payload)
-ON CONFLICT(action_id) DO UPDATE SET payload_json=excluded.payload_json
-WHERE conversation_action_outbox.fingerprint=excluded.fingerprint
-AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponseHash','')=''
- OR COALESCE(excluded.payload_json::jsonb->>'acceptedResponseHash','')=''
- OR conversation_action_outbox.payload_json::jsonb->>'acceptedResponseHash'=excluded.payload_json::jsonb->>'acceptedResponseHash');",
-                TestDict("id", id, "timeline", ReadString(terms, "timelineId", ReadString(ReadDictionary(terms, "playerAction"), "timelineId", "main")), "fingerprint", fingerprint, "payload", Json.Serialize(row)));
-            var saved = ReignDatabase.QuerySql(connection, "SELECT fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", id)).First();
+            DialogueStore.UpsertConversationActionOutbox(connection, TestDict("id", id, "timeline", ReadString(terms, "timelineId", ReadString(ReadDictionary(terms, "playerAction"), "timelineId", "main")), "fingerprint", fingerprint, "payload", Json.Serialize(row)));
+            var saved = DialogueStore.SelectConversationActionOutbox4(connection, TestDict("id", id)).First();
             if (ReadString(saved, "fingerprint", "") != fingerprint) throw new InvalidOperationException("This action ID already has different immutable terms.");
             string expectedHash = ReadString(row, "acceptedResponseHash", "");
             if (expectedHash.Length > 0 && ReadString(TryParseJsonObject(ReadString(saved, "payload_json", "{}")), "acceptedResponseHash", "") != expectedHash)
@@ -580,7 +571,7 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
             using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 if (!WorldSimulationService.TableExists(connection, "conversation_action_outbox")) return new List<Dictionary<string, object>>();
-                return ReignDatabase.QuerySql(connection, "SELECT payload_json FROM conversation_action_outbox;").Select(r => TryParseJsonObject(ReadString(r, "payload_json", "{}"))).Where(r => r != null).ToList();
+                return DialogueStore.SelectConversationActionOutbox5(connection).Select(r => TryParseJsonObject(ReadString(r, "payload_json", "{}"))).Where(r => r != null).ToList();
             }
         }
 
@@ -678,8 +669,7 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
                     // The receipt/memory triggers later UPDATE this row; a shared lock here could be held
                     // by a second writer queued on the outbox row and deadlock that upgrade. Take it once,
                     // still before the outbox row, in the mode the trigger needs.
-                    string current = ReadString(ReignDatabase.QuerySql(connection,
-                        "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR NO KEY UPDATE;").FirstOrDefault(), "restore_generation", "");
+                    string current = ReadString(DialogueStore.SelectMemoryPrecisionState3(connection).FirstOrDefault(), "restore_generation", "");
                     // Under the generation lock, before the outbox row: a proof that no longer names the
                     // campaign's current verified load mutates nothing. Recovery's proof is its own
                     // {loadSessionId, savePointId, liveGeneration}; its context must also name this
@@ -690,8 +680,7 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
                     if (recovery && ReadString(restoreContext, "timeline_id", "") != timeline)
                         return Reply(TerminalActionReportProtocol.Unknown, TerminalActionReportProtocol.RecoveryUnprovenPrefix + "timeline");
                     string sourceGeneration = recovery ? ReadString(restoreContext, "source_generation", "") : "";
-                    var stored = ReignDatabase.QuerySql(connection, "SELECT timeline_id,fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;",
-                        TestDict("id", actionId)).FirstOrDefault();
+                    var stored = DialogueStore.SelectConversationActionOutbox6(connection, TestDict("id", actionId)).FirstOrDefault();
                     var row = stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}"));
                     if (row == null) return Reply(TerminalActionReportProtocol.Unknown, "unknown_action");
                     // Order: stored ownership/identity, existing protocol marker, legacy terminal
@@ -729,10 +718,7 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
                             if (admits)
                             {
                                 var admission = TerminalReportAdmission(liveGeneration, recoveryPoint, recoverySession, now);
-                                ReignDatabase.ExecuteSql(connection, @"UPDATE conversation_action_outbox
-SET payload_json=jsonb_set(payload_json::jsonb,'{terminalReport,admission}',CAST($admission AS jsonb))::text
-WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
-                                    TestDict("id", actionId, "sha", sha, "admission", Json.Serialize(admission)));
+                                DialogueStore.UpdateConversationActionOutbox(connection, TestDict("id", actionId, "sha", sha, "admission", Json.Serialize(admission)));
                                 marker[TerminalActionReportProtocol.AdmissionField] = admission;
                             }
                             string adoptedReceipt = ReadString(marker, "receiptId", "");
@@ -775,9 +761,7 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
                         string authoritative = Program.NormalizeActionReportStatus(record, report, status);
                         var directions = RelationshipsService.CompletedActionRelationshipDirections(report, timeline);
                         string evidence = directions.Count == 0 ? "not_applicable" : "evaluated";
-                        if (directions.Any(d => ReignDatabase.QuerySql(connection,
-                            "SELECT event_id FROM relationship_interaction_receipts WHERE event_id=$event AND subject_id=$subject AND target_id=$target LIMIT 1;",
-                            TestDict("event", ReadString(d, "eventId", ""), "subject", ReadString(d, "subjectId", ""), "target", ReadString(d, "targetId", ""))).Count > 0))
+                        if (directions.Any(d => DialogueStore.SelectRelationshipInteractionReceipts(connection, TestDict("event", ReadString(d, "eventId", ""), "subject", ReadString(d, "subjectId", ""), "target", ReadString(d, "targetId", ""))).Count > 0))
                         { evidence = "pre_protocol"; directions.Clear(); }
                         beforeCommit?.Invoke(0, connection);
                         int shared;
@@ -861,7 +845,7 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
         private static Dictionary<string, object> TerminalReportRestoreContext(ReignDbConnection connection)
         {
             if (!WorldSimulationService.TableExists(connection, "memory_restored_source_context")) return null;
-            var row = ReignDatabase.QuerySql(connection, "SELECT to_jsonb(c)::text AS context FROM memory_restored_source_context c WHERE c.state_id='current';").FirstOrDefault();
+            var row = DialogueStore.SelectMemoryRestoredSourceContext2(connection).FirstOrDefault();
             return row == null ? null : TryParseJsonObject(ReadString(row, "context", "{}"));
         }
 
@@ -912,7 +896,7 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
         internal static Dictionary<string, object> TerminalReportMarkerAdmission(ReignDbConnection connection, string actionId, string sha)
         {
             if (string.IsNullOrEmpty(actionId) || !WorldSimulationService.TableExists(connection, "conversation_action_outbox")) return null;
-            var stored = ReignDatabase.QuerySql(connection, "SELECT payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", actionId)).FirstOrDefault();
+            var stored = DialogueStore.SelectConversationActionOutbox2(connection, TestDict("id", actionId)).FirstOrDefault();
             var marker = ReadDictionary(stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}")), "terminalReport");
             return marker != null && ReadString(marker, "sha256", "") == sha ? ReadDictionary(marker, TerminalActionReportProtocol.AdmissionField) : null;
         }
@@ -939,10 +923,8 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
             using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 if (!WorldSimulationService.TableExists(connection, "conversation_action_outbox") || !WorldSimulationService.TableExists(connection, "memory_precision_state")) return null;
-                string current = ReadString(ReignDatabase.QuerySql(connection,
-                    "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';").FirstOrDefault(), "restore_generation", "");
-                var stored = ReignDatabase.QuerySql(connection, "SELECT timeline_id,fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id;",
-                    TestDict("id", actionId)).FirstOrDefault();
+                string current = ReadString(DialogueStore.SelectMemoryPrecisionState2(connection).FirstOrDefault(), "restore_generation", "");
+                var stored = DialogueStore.SelectConversationActionOutbox7(connection, TestDict("id", actionId)).FirstOrDefault();
                 var row = stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}"));
                 var record = ReadDictionary(row, "record");
                 target = ReadString(record, "targetHeroStringId", "");
@@ -1007,13 +989,11 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
             using (connection.BeginTransaction(System.Data.IsolationLevel.RepeatableRead))
             {
                 // First statement of the transaction; disposal rolls back and restores search_path.
-                ReignDatabase.ExecuteSql(connection, "SET TRANSACTION READ ONLY;");
-                ReignDatabase.QuerySql(connection, "SELECT set_config('search_path', $path, true) AS path;", TestDict("path", "\"" + schema + "\", reign_meta, public"));
+                DialogueStore.Set(connection);
+                DialogueStore.SelectStatement(connection, TestDict("path", "\"" + schema + "\", reign_meta, public"));
                 if (!WorldSimulationService.TableExists(connection, "conversation_action_outbox")) return Reply(TerminalActionReportProtocol.Unknown, "unknown_action");
-                string current = !WorldSimulationService.TableExists(connection, "memory_precision_state") ? "" : ReadString(ReignDatabase.QuerySql(connection,
-                    "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';").FirstOrDefault(), "restore_generation", "");
-                var stored = ReignDatabase.QuerySql(connection, "SELECT timeline_id,fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id;",
-                    TestDict("id", actionId)).FirstOrDefault();
+                string current = !WorldSimulationService.TableExists(connection, "memory_precision_state") ? "" : ReadString(DialogueStore.SelectMemoryPrecisionState2(connection).FirstOrDefault(), "restore_generation", "");
+                var stored = DialogueStore.SelectConversationActionOutbox7(connection, TestDict("id", actionId)).FirstOrDefault();
                 var row = stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}"));
                 if (row == null) return Reply(TerminalActionReportProtocol.Unknown, "unknown_action");
                 // Same order as POST: ownership/identity, protocol marker, legacy terminal
@@ -1073,8 +1053,7 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
             foreach (var probe in new[] { "negotiated_action_drafts|queued_action_id", "rebellion_backing_requests|action_id" })
             {
                 string[] part = probe.Split('|');
-                if (WorldSimulationService.TableExists(connection, part[0]) && ReignDatabase.QuerySql(connection, "SELECT 1 AS hit FROM " + part[0] + " WHERE " + part[1] + "=$id LIMIT 1;",
-                    TestDict("id", actionId)).Count > 0) return "foreign_projection_owner";
+                if (WorldSimulationService.TableExists(connection, part[0]) && DialogueStore.SelectDynamic(connection, part[0], part[1],                    TestDict("id", actionId)).Count > 0) return "foreign_projection_owner";
             }
             return "";
         }
@@ -1113,10 +1092,8 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
                     using (var transaction = connection.BeginTransaction())
                     {
                         // Same order and mode as acceptance: the memory trigger updates this row.
-                        string current = ReadString(ReignDatabase.QuerySql(connection,
-                            "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR NO KEY UPDATE;").FirstOrDefault(), "restore_generation", "");
-                        var stored = ReignDatabase.QuerySql(connection, "SELECT payload_json FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;",
-                            TestDict("id", actionId)).FirstOrDefault();
+                        string current = ReadString(DialogueStore.SelectMemoryPrecisionState3(connection).FirstOrDefault(), "restore_generation", "");
+                        var stored = DialogueStore.SelectConversationActionOutbox8(connection, TestDict("id", actionId)).FirstOrDefault();
                         var marker = ReadDictionary(stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}")), "terminalReport");
                         // Reread under the lock: the accepted marker must still be this exact report, and
                         // the generation it projects in (its admission, else its own) must be current.
@@ -1147,12 +1124,7 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
                             }
                         }
                         beforeMarker?.Invoke(connection);
-                        ReignDatabase.ExecuteSql(connection, @"UPDATE conversation_action_outbox
-SET payload_json=jsonb_set(jsonb_set(payload_json::jsonb,'{terminalReport,projectedTs}',
- COALESCE(payload_json::jsonb->'terminalReport'->'projectedTs',to_jsonb(CAST($ts AS bigint)))),
- '{terminalReport,projectedShared}',to_jsonb(CAST($ts AS bigint)))::text
-WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
-                            TestDict("id", actionId, "sha", sha, "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+                        DialogueStore.UpdateConversationActionOutbox2(connection, TestDict("id", actionId, "sha", sha, "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
                         transaction.Commit();
                         return true;
                     }

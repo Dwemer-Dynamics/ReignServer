@@ -267,20 +267,12 @@ namespace ReignBetaServer
                     "The campaign heartbeat remained offline across 12 consecutive qualification checks.");
                 using (ReignDbCommand command = connection.CreateCommand())
                 {
-                    command.CommandText = @"INSERT INTO final_gauntlet_evidence(
-run_id,case_instance_id,evidence_key,schema_version,payload_json,created_ts)
-VALUES('pause-heartbeat-run','LIVE-SINGLE-031::stage-b',
-'production_result',4,'{""liveRun"":{}}',1);";
+                    command.CommandText = DialogueSelfTestStore.InsertFinalGauntletEvidenceSql;
                     command.ExecuteNonQuery();
                 }
                 using (ReignDbCommand command = connection.CreateCommand())
                 {
-                    command.CommandText = @"UPDATE final_gauntlet_runs
-SET stage='ExhaustiveReview',state='completed_with_failures'
-WHERE run_id='pause-heartbeat-run';
-UPDATE final_gauntlet_schedule
-SET state='completed_with_failures',pause_requested=0
-WHERE run_id='pause-heartbeat-run';";
+                    command.CommandText = DialogueSelfTestStore.UpdateFinalGauntletRunsSql;
                     command.ExecuteNonQuery();
                 }
                 Dictionary<string, object> heartbeatResume =
@@ -332,12 +324,7 @@ WHERE run_id='pause-heartbeat-run';";
                     "A task was canceled.");
                 using (ReignDbCommand command = connection.CreateCommand())
                 {
-                    command.CommandText = @"UPDATE final_gauntlet_runs
-SET stage='ExhaustiveReview',state='completed_with_failures'
-WHERE run_id='pause-heartbeat-run';
-UPDATE final_gauntlet_schedule
-SET state='completed_with_failures',pause_requested=0
-WHERE run_id='pause-heartbeat-run';";
+                    command.CommandText = DialogueSelfTestStore.UpdateFinalGauntletRunsSql;
                     command.ExecuteNonQuery();
                 }
                 Dictionary<string, object> cancelledResume =
@@ -382,12 +369,7 @@ WHERE run_id='pause-heartbeat-run';";
                     "The campaign heartbeat remained offline across 150 consecutive qualification checks.");
                 using (ReignDbCommand command = connection.CreateCommand())
                 {
-                    command.CommandText = @"UPDATE final_gauntlet_runs
-SET stage='ExhaustiveReview',state='completed_with_failures'
-WHERE run_id='pause-heartbeat-run';
-UPDATE final_gauntlet_schedule
-SET state='completed_with_failures',pause_requested=0
-WHERE run_id='pause-heartbeat-run';";
+                    command.CommandText = DialogueSelfTestStore.UpdateFinalGauntletRunsSql;
                     command.ExecuteNonQuery();
                 }
                 Dictionary<string, object> fourthSetupResume =
@@ -460,13 +442,8 @@ WHERE run_id='pause-heartbeat-run';";
                     ReignPostgreSqlStorage.OpenCampaignConnection(
                         postgresCampaign))
                 {
-                    ReignDatabase.ExecuteSql(
-                        campaignConnection,
-                        @"CREATE TABLE IF NOT EXISTS gauntlet_rollback_probe(
-id TEXT PRIMARY KEY,value TEXT NOT NULL);
-INSERT INTO gauntlet_rollback_probe(id,value)
-VALUES('state','before')
-ON CONFLICT(id) DO UPDATE SET value=excluded.value;");
+                    DialogueSelfTestSchema.CreateGauntletRollbackProbe(
+                        campaignConnection);
                 }
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(
                     postgresCampaign, postgresSnapshot);
@@ -477,9 +454,8 @@ ON CONFLICT(id) DO UPDATE SET value=excluded.value;");
                     FinalGauntletStore.OpenControlConnection())
                 {
                     string schema = ReadString(
-                        ReignDatabase.QuerySql(
-                            control,
-                            "SELECT current_schema() AS schema;")
+                        DialogueSelfTestStore.SelectStatement3(
+                            control)
                             .FirstOrDefault(),
                         "schema", "");
                     FinalGauntletCaseDescriptor descriptor =
@@ -542,10 +518,8 @@ ON CONFLICT(id) DO UPDATE SET value=excluded.value;");
                 using (ReignDbConnection campaignConnection =
                     ReignPostgreSqlStorage.OpenCampaignConnection(
                         postgresCampaign))
-                    ReignDatabase.ExecuteSql(
-                        campaignConnection,
-                        @"UPDATE gauntlet_rollback_probe
-SET value='after' WHERE id='state';");
+                    DialogueSelfTestStore.UpdateGauntletRollbackProbe(
+                        campaignConnection);
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(
                     postgresCampaign, postgresSnapshot);
                 using (ReignDbConnection control =
@@ -555,38 +529,26 @@ SET value='after' WHERE id='state';");
                         postgresCampaign))
                 {
                     long runRows = ReadLong(
-                        ReignDatabase.QuerySql(
-                            control,
-                            @"SELECT COUNT(*) AS count
-FROM final_gauntlet_runs WHERE run_id=$run;",
-                            new Dictionary<string, object>
+                        DialogueSelfTestStore.CountFinalGauntletRuns(
+                            control, new Dictionary<string, object>
                             {
                                 ["run"] = postgresRun
                             }).FirstOrDefault(),
                         "count", 0);
                     long providerRows = ReadLong(
-                        ReignDatabase.QuerySql(
-                            control,
-                            @"SELECT COUNT(*) AS count
-FROM final_gauntlet_provider_calls WHERE run_id=$run;",
-                            new Dictionary<string, object>
+                        DialogueSelfTestStore.CountFinalGauntletProviderCalls(
+                            control, new Dictionary<string, object>
                             {
                                 ["run"] = postgresRun
                             }).FirstOrDefault(),
                         "count", 0);
                     string restoredValue = ReadString(
-                        ReignDatabase.QuerySql(
-                            campaignConnection,
-                            @"SELECT value FROM gauntlet_rollback_probe
-WHERE id='state';").FirstOrDefault(),
+                        DialogueSelfTestStore.SelectGauntletRollbackProbe(
+                            campaignConnection).FirstOrDefault(),
                         "value", "");
                     long campaignControlTables = ReadLong(
-                        ReignDatabase.QuerySql(
-                            campaignConnection,
-                            @"SELECT COUNT(*) AS count
-FROM information_schema.tables
-WHERE table_schema=current_schema()
-AND table_name LIKE 'final_gauntlet_%';")
+                        DialogueSelfTestStore.CountTables(
+                            campaignConnection)
                             .FirstOrDefault(),
                         "count", 0);
                     add(
@@ -612,11 +574,8 @@ AND table_name LIKE 'final_gauntlet_%';")
                 {
                     using (ReignDbConnection control =
                         FinalGauntletStore.OpenControlConnection())
-                        ReignDatabase.ExecuteSql(
-                            control,
-                            @"DELETE FROM final_gauntlet_runs
-WHERE run_id=$run;",
-                            new Dictionary<string, object>
+                        DialogueSelfTestStore.DeleteFinalGauntletRuns(
+                            control, new Dictionary<string, object>
                             {
                                 ["run"] = postgresRun
                             });

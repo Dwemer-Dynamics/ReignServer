@@ -50,14 +50,7 @@ namespace ReignBetaServer
         private static bool ReviewedRecoverySourceSuperseded(ReignDbConnection connection, Program.KnowledgeAccessContext access, string turnId)
         {
             // Check a replacement's existence without admitting its possibly private text to the prompt.
-            return ReignDatabase.QuerySql(connection, @"SELECT 1 FROM conversation_continuity_versions v
-JOIN conversation_continuity c ON c.record_id=v.record_id
-WHERE c.owner_id=$observer AND c.timeline_id=$timeline AND c.revision>v.revision
- AND c.updated_ts<=$time AND COALESCE((c.payload_json::jsonb->>'worldDay')::double precision,0)<=$day
- AND v.payload_json::jsonb->>'sourceTurnId'=$turn
- AND (c.source_turn_id='' OR EXISTS (SELECT 1 FROM conversation_turns t WHERE t.turn_id=c.source_turn_id
-  AND t.accepted_sequence<=$cutoff AND t.ts<=$time AND t.world_day<=$day)) LIMIT 1;",
-                TestDict("observer", access.NpcId, "timeline", access.TimelineId, "time", access.AsOfTimestamp,
+            return DialogueStore.SelectConversationContinuityVersions(connection, TestDict("observer", access.NpcId, "timeline", access.TimelineId, "time", access.AsOfTimestamp,
                     "day", access.WorldDay, "turn", turnId, "cutoff", access.AsOfAcceptedSequence)).Count != 0;
         }
 
@@ -89,8 +82,7 @@ WHERE c.owner_id=$observer AND c.timeline_id=$timeline AND c.revision>v.revision
                 .Where(key => key.Exchange.Length > 0 && pinnedExchanges.Contains(key)).Distinct().Take(2).ToList();
             if (anchors.Count != 1) return null;
             var anchor = anchors[0];
-            var rows = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_turns WHERE session_id=$session AND exchange_id=$exchange
-ORDER BY turn_order LIMIT 5;", TestDict("session", anchor.Session, "exchange", anchor.Exchange));
+            var rows = DialogueStore.SelectConversationTurns87(connection, TestDict("session", anchor.Session, "exchange", anchor.Exchange));
             if (rows.Count is < 1 or > 4) return null;
             var proofs = new List<Dictionary<string, object>>();
             var lines = new List<string>();

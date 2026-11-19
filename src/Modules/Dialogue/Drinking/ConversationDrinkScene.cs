@@ -38,8 +38,8 @@ namespace ReignBetaServer
 
         private static DrinkScene LoadDrinkScene(ReignDbConnection connection, Dictionary<string, object> payload, double hour, bool forUpdate = false)
         {
-            if (forUpdate) ReignDatabase.ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_drink_scene(scene_id,state_json) VALUES('active','{}');");
-            var row = ReignDatabase.QuerySql(connection, "SELECT state_json FROM conversation_drink_scene WHERE scene_id='active'" + (forUpdate ? " FOR UPDATE;" : ";")).SingleOrDefault();
+            if (forUpdate) DialogueStore.InsertOrIgnoreConversationDrinkScene(connection);
+            var row = DialogueStore.SelectConversationDrinkScene(connection, forUpdate ? " FOR UPDATE;" : ";").SingleOrDefault();
             var stored = TryParseJsonObject(ReadString(row, "state_json", "{}"));
             var scene = new DrinkScene { Scope = DrinkSceneScope(payload), Hour = hour,
                 Stored = stored, BaseHash = PromptHash(CanonicalJson(stored)) };
@@ -234,12 +234,12 @@ namespace ReignBetaServer
         {
             var proposed = ReadDictionary(receipt, "drinkScene");
             if (proposed == null) return;
-            ReignDatabase.ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_drink_scene(scene_id,state_json) VALUES('active','{}');");
-            var row = ReignDatabase.QuerySql(connection, "SELECT state_json FROM conversation_drink_scene WHERE scene_id='active' FOR UPDATE;").Single();
+            DialogueStore.InsertOrIgnoreConversationDrinkScene(connection);
+            var row = DialogueStore.SelectConversationDrinkScene2(connection).Single();
             string hash = PromptHash(CanonicalJson(TryParseJsonObject(ReadString(row, "state_json", "{}"))));
             if (hash != ReadString(receipt, "baseDrinkSceneHash", ""))
                 throw new InvalidOperationException("The shared drink scene changed while the response was prepared.");
-            ReignDatabase.ExecuteSql(connection, "UPDATE conversation_drink_scene SET state_json=$state WHERE scene_id='active';", TestDict("state", Json.Serialize(proposed)));
+            DialogueStore.UpdateConversationDrinkScene(connection, TestDict("state", Json.Serialize(proposed)));
         }
 
         private static bool DrinkSceneDeparture(Dictionary<string, object> payload, Dictionary<string, object> parsed, string hero, string reply)

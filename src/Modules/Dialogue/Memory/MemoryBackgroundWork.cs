@@ -14,28 +14,20 @@ namespace ReignBetaServer
 
         internal static void EnsureMemoryBackgroundWorkSchema(ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS memory_background_jobs (
-job_id TEXT PRIMARY KEY,job_type TEXT NOT NULL,owner_id TEXT NOT NULL DEFAULT '',group_key TEXT NOT NULL DEFAULT '',
-session_id TEXT NOT NULL DEFAULT '',priority TEXT NOT NULL DEFAULT 'maintenance',status TEXT NOT NULL DEFAULT 'pending',
-attempt_count INTEGER NOT NULL DEFAULT 0,last_error TEXT NOT NULL DEFAULT '',result_json TEXT NOT NULL DEFAULT '{}',
-created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);");
+            DialogueSchema.CreateMemoryBackgroundJobs(connection);
             foreach (var column in new Dictionary<string, string> {
                 ["lease_token"] = "TEXT NOT NULL DEFAULT ''", ["lease_until"] = "BIGINT NOT NULL DEFAULT 0",
                 ["next_attempt_ts"] = "BIGINT NOT NULL DEFAULT 0", ["source_hash"] = "TEXT NOT NULL DEFAULT ''",
                 ["processing_version"] = "TEXT NOT NULL DEFAULT 'legacy'", ["restore_generation"] = "TEXT NOT NULL DEFAULT ''" })
-                ReignDatabase.EnsureDatabaseColumn(connection, "memory_background_jobs", column.Key, column.Value);
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_memory_background_due ON memory_background_jobs(status,next_attempt_ts,lease_until);");
+                DialogueSchema.EnsureDatabaseColumn(connection, "memory_background_jobs", column.Key, column.Value);
+            DialogueSchema.CreateIndexMemoryBackgroundDue(connection);
         }
 
         private static string MemoryJobSourceHash(ReignDbConnection connection, string type, string owner, string session)
         {
             if (type == "scene_summary")
-                return MemorySourceHash(ReignDatabase.QuerySql(connection,
-                    "SELECT * FROM conversation_turns WHERE session_id=$session AND status='active' ORDER BY turn_order;",
-                    new Dictionary<string, object> { ["session"] = session }));
-            return MemorySourceHash(ReignDatabase.QuerySql(connection,
-                "SELECT * FROM memories WHERE owner_id=$owner AND status='active' ORDER BY memory_id;",
-                new Dictionary<string, object> { ["owner"] = owner }));
+                return MemorySourceHash(DialogueStore.SelectConversationTurns58(connection, new Dictionary<string, object> { ["session"] = session }));
+            return MemorySourceHash(DialogueStore.SelectMemories8(connection, new Dictionary<string, object> { ["owner"] = owner }));
         }
 
         private static string EnqueueMemoryJob(ReignDbConnection connection, string campaign, string type, string owner, string group, string session)
@@ -45,10 +37,7 @@ created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);");
             string jobId = "memory_" + PromptHash(campaign + "|" + type + "|" + owner + "|" + group + "|" + session
                 + "|" + sourceHash + "|" + MemoryPrecisionVersion + "|" + generation).Substring(0, 32);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO memory_background_jobs
-(job_id,job_type,owner_id,group_key,session_id,status,source_hash,processing_version,restore_generation,created_ts,updated_ts)
-VALUES($id,$type,$owner,$group,$session,'pending',$hash,$version,$generation,$ts,$ts) ON CONFLICT(job_id) DO NOTHING;",
-                new Dictionary<string, object> { ["id"] = jobId, ["type"] = type, ["owner"] = owner ?? "", ["group"] = group ?? "",
+            DialogueStore.InsertOrIgnoreMemoryBackgroundJobs(connection, new Dictionary<string, object> { ["id"] = jobId, ["type"] = type, ["owner"] = owner ?? "", ["group"] = group ?? "",
                     ["session"] = session ?? "", ["hash"] = sourceHash, ["version"] = MemoryPrecisionVersion,
                     ["generation"] = generation, ["ts"] = ts });
             return jobId;
@@ -69,11 +58,7 @@ VALUES($id,$type,$owner,$group,$session,'pending',$hash,$version,$generation,$ts
         private static Dictionary<string, object> ClaimMemoryJob(ReignDbConnection connection, string id, string token, long now)
         {
             // One UPDATE claims the lease; enqueue never revives completed work.
-            return ReignDatabase.QuerySql(connection, @"UPDATE memory_background_jobs SET status='running',attempt_count=attempt_count+1,
-lease_token=$token,lease_until=$until,updated_ts=$now
-WHERE job_id=$id AND attempt_count<4 AND next_attempt_ts<=$now
-AND (status IN ('pending','failed') OR (status='running' AND lease_until<=$now)) RETURNING *;",
-                new Dictionary<string, object> { ["id"] = id, ["token"] = token, ["until"] = now + 120, ["now"] = now }).SingleOrDefault();
+            return DialogueStore.UpdateMemoryBackgroundJobs(connection, new Dictionary<string, object> { ["id"] = id, ["token"] = token, ["until"] = now + 120, ["now"] = now }).SingleOrDefault();
         }
 
         internal static void VerifyMemoryPublicationFence(ReignDbConnection connection)
@@ -83,8 +68,7 @@ AND (status IN ('pending','failed') OR (status='running' AND lease_until<=$now))
             if (fence == null) return;
             // Publication holds this row lock through commit. A reassigned worker
             // cannot publish its old provider result after a lease expiry/rewind.
-            var row = ReignDatabase.QuerySql(connection, "SELECT * FROM memory_background_jobs WHERE job_id=$id FOR UPDATE;",
-                new Dictionary<string, object> { ["id"] = fence.JobId }).SingleOrDefault();
+            var row = DialogueStore.SelectMemoryBackgroundJobs2(connection, new Dictionary<string, object> { ["id"] = fence.JobId }).SingleOrDefault();
             if (row == null || ReadString(row, "status", "") != "running" || ReadString(row, "lease_token", "") != fence.Token
                 || ReadLong(row, "lease_until", 0) <= DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                 || ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "") != fence.Generation)
@@ -96,8 +80,7 @@ AND (status IN ('pending','failed') OR (status='running' AND lease_until<=$now))
             try
             {
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
-                    ReignDatabase.ExecuteSql(connection, "UPDATE memory_background_jobs SET lease_until=$until,updated_ts=$now WHERE job_id=$id AND status='running' AND lease_token=$token;",
-                        new Dictionary<string, object> { ["id"] = id, ["token"] = token, ["now"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                    DialogueStore.UpdateMemoryBackgroundJobs2(connection, new Dictionary<string, object> { ["id"] = id, ["token"] = token, ["now"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                             ["until"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 120 });
             }
             catch (Exception ex) { Program.LogOperational("memory.lease_renew_failed", new Dictionary<string, object> { ["jobId"] = id, ["error"] = Program.LimitText(ex.Message, 300) }); }
@@ -135,8 +118,8 @@ AND (status IN ('pending','failed') OR (status='running' AND lease_until<=$now))
                         List<Dictionary<string, object>> turns;
                         using (var connection = ReignDatabase.OpenCampaignConnection(campaignId))
                         {
-                            session = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id;", new Dictionary<string, object> { ["id"] = sessionId }).Single();
-                            turns = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$id AND status='active' ORDER BY turn_order;", new Dictionary<string, object> { ["id"] = sessionId });
+                            session = DialogueStore.SelectConversationSessions2(connection, new Dictionary<string, object> { ["id"] = sessionId }).Single();
+                            turns = DialogueStore.SelectConversationTurns50(connection, new Dictionary<string, object> { ["id"] = sessionId });
                         }
                         var playerTurns = turns.Where(t => ReadString(t, "role", "") == "player").ToList();
                         bool recall = playerTurns.Count > 0 && playerTurns.All(t => IsPureConversationRecallRequest(ReadString(t, "text", "")));
@@ -184,13 +167,11 @@ AND (status IN ('pending','failed') OR (status='running' AND lease_until<=$now))
         }
 
         private static void FinishMemoryJob(ReignDbConnection connection, string id, string token, string status, Dictionary<string, object> result) =>
-            ReignDatabase.ExecuteSql(connection, @"UPDATE memory_background_jobs SET status=$status,result_json=$result,last_error='',lease_token='',lease_until=0,updated_ts=$now
-WHERE job_id=$id AND lease_token=$token AND status='running';", new Dictionary<string, object> {
+            DialogueStore.UpdateMemoryBackgroundJobs3(connection, new Dictionary<string, object> {
                 ["id"] = id, ["token"] = token, ["status"] = status, ["result"] = Json.Serialize(result), ["now"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
 
         private static void RetryMemoryJob(ReignDbConnection connection, string id, string token, int attempt, string error, Dictionary<string, object> result) =>
-            ReignDatabase.ExecuteSql(connection, @"UPDATE memory_background_jobs SET status=$status,last_error=$error,result_json=$result,lease_token='',lease_until=0,next_attempt_ts=$next,updated_ts=$now
-WHERE job_id=$id AND lease_token=$token AND status='running';", new Dictionary<string, object> {
+            DialogueStore.UpdateMemoryBackgroundJobs4(connection, new Dictionary<string, object> {
                 ["id"] = id, ["token"] = token, ["status"] = attempt >= 4 ? "incomplete" : "failed", ["error"] = error,
                 ["result"] = Json.Serialize(result), ["next"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 30L * (1L << Math.Min(6, attempt)),
                 ["now"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
@@ -219,14 +200,13 @@ WHERE job_id=$id AND lease_token=$token AND status='running';", new Dictionary<s
                         using (var connection = ReignDatabase.OpenCampaignConnection(campaignId))
                         {
                             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                            ReignDatabase.ExecuteSql(connection, "UPDATE memory_background_jobs SET status='incomplete',last_error='Retry limit reached after lease expiry' WHERE status='running' AND lease_until<=$now AND attempt_count>=4;", new Dictionary<string, object> { ["now"] = now });
-                            foreach (var legacy in ReignDatabase.QuerySql(connection, "SELECT * FROM memory_background_jobs WHERE processing_version='legacy' AND status IN ('pending','running','failed');"))
+                            DialogueStore.UpdateMemoryBackgroundJobs5(connection, new Dictionary<string, object> { ["now"] = now });
+                            foreach (var legacy in DialogueStore.SelectMemoryBackgroundJobs3(connection))
                             {
                                 EnqueueMemoryJob(connection, campaignId, ReadString(legacy, "job_type", "memory_consolidation"), ReadString(legacy, "owner_id", ""), ReadString(legacy, "group_key", ""), ReadString(legacy, "session_id", ""));
-                                ReignDatabase.ExecuteSql(connection, "UPDATE memory_background_jobs SET status='superseded' WHERE job_id=$id;", new Dictionary<string, object> { ["id"] = ReadString(legacy, "job_id", "") });
+                                DialogueStore.UpdateMemoryBackgroundJobs6(connection, new Dictionary<string, object> { ["id"] = ReadString(legacy, "job_id", "") });
                             }
-                            foreach (string id in ReignDatabase.QuerySql(connection, @"SELECT job_id FROM memory_background_jobs WHERE attempt_count<4 AND next_attempt_ts<=$now
-AND (status IN ('pending','failed') OR (status='running' AND lease_until<=$now)) ORDER BY created_ts LIMIT 50;", new Dictionary<string, object> { ["now"] = now })
+                            foreach (string id in DialogueStore.SelectMemoryBackgroundJobs4(connection, new Dictionary<string, object> { ["now"] = now })
                                 .Select(r => ReadString(r, "job_id", "")).ToList())
                             {
                                 // A refused resume leaves its row pending and unclaimed; the next tick retries.
@@ -247,8 +227,8 @@ AND (status IN ('pending','failed') OR (status='running' AND lease_until<=$now))
             if (string.IsNullOrWhiteSpace(campaign) || !Program.HasCampaignPostgreSqlStorage(campaign)) return new Dictionary<string, object> { ["ok"] = true, ["jobs"] = new List<object>() };
             using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
-                var counts = ReignDatabase.QuerySql(connection, "SELECT status,COUNT(*) AS count FROM memory_background_jobs GROUP BY status;");
-                var jobs = ReignDatabase.QuerySql(connection, "SELECT * FROM memory_background_jobs ORDER BY updated_ts DESC LIMIT 100;");
+                var counts = DialogueStore.SelectMemoryBackgroundJobs5(connection);
+                var jobs = DialogueStore.SelectMemoryBackgroundJobs6(connection);
                 var result = new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaign,
                     ["jobs"] = jobs,
                     ["counts"] = counts, ["precision"] = ReadMemoryPrecisionState(connection), ["leaseSeconds"] = 120,

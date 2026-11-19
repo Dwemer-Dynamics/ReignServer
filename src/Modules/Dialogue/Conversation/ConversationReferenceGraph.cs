@@ -282,16 +282,7 @@ namespace ReignBetaServer
 
         private static void EnsureConversationReferenceGraphSchema(ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_reference_edges (
-edge_id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,timeline_id TEXT NOT NULL,restore_generation TEXT NOT NULL,
-from_type TEXT NOT NULL,from_id TEXT NOT NULL,from_hash TEXT NOT NULL,
-to_type TEXT NOT NULL,to_id TEXT NOT NULL,to_hash TEXT NOT NULL,relation TEXT NOT NULL,
-source_event_id TEXT NOT NULL,as_of_sequence BIGINT NOT NULL,world_day DOUBLE PRECISION NOT NULL,
-created_ts BIGINT NOT NULL,payload_json TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS idx_conversation_reference_forward ON conversation_reference_edges
-(owner_id,timeline_id,restore_generation,from_type,from_id);
-CREATE INDEX IF NOT EXISTS idx_conversation_reference_reverse ON conversation_reference_edges
-(owner_id,timeline_id,restore_generation,to_type,to_id);");
+            DialogueSchema.CreateConversationReferenceEdges(connection);
         }
 
         private static ConversationReferenceSource ResolveConversationReferenceSource(ReignDbConnection connection,
@@ -301,7 +292,7 @@ CREATE INDEX IF NOT EXISTS idx_conversation_reference_reverse ON conversation_re
             Dictionary<string, object> row;
             if (type == "turn")
             {
-                row = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).SingleOrDefault();
+                row = DialogueStore.SelectConversationTurns6(connection, TestDict("id", id)).SingleOrDefault();
                 if (row == null || !PrecisionTurnVisible(row, access.NpcId, access, connection)) return null;
                 string original = ReadString(row, "text", "");
                 string view = ObserverConversationText(ConversationTurnTextForRecall(row), ReadString(row, "speaker_id", ""),
@@ -314,7 +305,7 @@ CREATE INDEX IF NOT EXISTS idx_conversation_reference_reverse ON conversation_re
                     Sequence = ReadLong(row, "accepted_sequence", 0), Timestamp = ReadLong(row, "ts", 0), Day = ReadDouble(row, "world_day", 0) };
             }
             if (type != "letter" || !WorldSimulationService.TableExists(connection, "letters")) return null;
-            row = ReignDatabase.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", id)).SingleOrDefault();
+            row = DialogueStore.SelectLetters2(connection, TestDict("id", id)).SingleOrDefault();
             if (!LetterVisibleToObserver(connection, row, access.NpcId, access, out double learned)) return null;
             string letterView = NormalizePromptSegment(Program.SanitizeUnknownIdentityEvidenceText(ReadString(row, "body", ""), access));
             return letterView.Length == 0 ? null : new ConversationReferenceSource { Type = type, Id = id, Row = row,
@@ -421,11 +412,7 @@ CREATE INDEX IF NOT EXISTS idx_conversation_reference_reverse ON conversation_re
                     "relationEntailmentVerified", false, "changesAgreementStatus", false);
                 metadata["requestedTargetType"] = requestedType;
                 metadata["targetTypeDerivedFromUniqueOffer"] = type != requestedType;
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_reference_edges
-(edge_id,owner_id,timeline_id,restore_generation,from_type,from_id,from_hash,to_type,to_id,to_hash,relation,
-source_event_id,as_of_sequence,world_day,created_ts,payload_json)
-VALUES($id,$owner,$timeline,$generation,'turn',$from,$fromHash,$type,$to,$toHash,$relation,$event,$sequence,$day,$ts,$payload)
-ON CONFLICT(edge_id) DO NOTHING;", TestDict("id", edgeId, "owner", unit.Hero, "timeline", ContinuityTimeline(unit.Payload),
+                DialogueStore.InsertOrIgnoreConversationReferenceEdges(connection, TestDict("id", edgeId, "owner", unit.Hero, "timeline", ContinuityTimeline(unit.Payload),
                     "generation", unit.Generation, "from", from, "fromHash", fromHash, "type", type, "to", id,
                     "toHash", target.Hash, "relation", relation, "event", unit.EventId,
                     "sequence", ReadLong(origin, "accepted_sequence", 0), "day", ReadDouble(origin, "world_day", 0),
@@ -465,10 +452,7 @@ ON CONFLICT(edge_id) DO NOTHING;", TestDict("id", edgeId, "owner", unit.Hero, "t
                 string end = incoming ? "to" : "from";
                 // Associations remain observer-owned. Seeing two passages does
                 // not grant another character's unspoken inference about them.
-                var rows = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_reference_edges
-WHERE owner_id=$owner AND timeline_id=$timeline AND restore_generation=$generation
-AND as_of_sequence<=$sequence AND world_day<=$day AND " + end + @"_type=$type AND " + end + @"_id=$id
-ORDER BY as_of_sequence DESC,edge_id LIMIT $limit;", TestDict("owner", access.NpcId, "timeline", access.TimelineId,
+                var rows = DialogueStore.SelectConversationReferenceEdges(connection, end, end,TestDict("owner", access.NpcId, "timeline", access.TimelineId,
                     "generation", generation, "sequence", access.AsOfAcceptedSequence, "day", access.WorldDay,
                     "type", seed.Type, "id", seed.Id, "limit", limit));
                 queries++; scanned += rows.Count;
@@ -554,10 +538,7 @@ ORDER BY as_of_sequence DESC,edge_id LIMIT $limit;", TestDict("owner", access.Np
             if (!double.IsFinite(day) || day < 0) return;
             var sourceCache = new Dictionary<string, ConversationReferenceSource>(StringComparer.Ordinal);
             var memberCache = new Dictionary<string, bool>(StringComparer.Ordinal);
-            foreach (var edge in ReignDatabase.QuerySql(connection, @"SELECT e.* FROM conversation_reference_edges e
-JOIN memory_restored_sources m ON m.source_table='conversation_turns' AND m.source_id=e.from_id AND m.restore_generation=$generation
-WHERE e.restore_generation<>$generation AND e.from_type='turn' AND e.world_day<=$day ORDER BY e.edge_id;",
-                TestDict("generation", generation, "day", day)))
+            foreach (var edge in DialogueStore.SelectConversationReferenceEdges2(connection, TestDict("generation", generation, "day", day)))
             {
                 string owner = ReadString(edge, "owner_id", "");
                 var access = new Program.KnowledgeAccessContext { NpcId = owner, TimelineId = timeline, WorldDay = day };
@@ -576,9 +557,7 @@ WHERE e.restore_generation<>$generation AND e.from_type='turn' AND e.world_day<=
                     string key = ConversationReferenceKey(source.Type, source.Id);
                     if (memberCache.TryGetValue(key, out bool member)) return member;
                     member = source.Type == "turn" ? IsVerifiedRestoredMemorySource(connection, source.Row, timeline)
-                    : RestoredLetterContext(connection, timeline) != null && ReignDatabase.QuerySql(connection,
-                        "SELECT letter_id FROM memory_restored_letters WHERE letter_id=$id AND restore_generation=$generation AND content_hash=$hash;",
-                        TestDict("id", source.Id, "generation", generation, "hash", source.Hash)).Count == 1;
+                    : RestoredLetterContext(connection, timeline) != null && DialogueStore.SelectMemoryRestoredLetters2(connection, TestDict("id", source.Id, "generation", generation, "hash", source.Hash)).Count == 1;
                     memberCache[key] = member;
                     return member;
                 }
@@ -592,11 +571,7 @@ WHERE e.restore_generation<>$generation AND e.from_type='turn' AND e.world_day<=
                 metadata["restoredSavePointId"] = ReadString(point, "savePointId", "");
                 string id = ConversationReferenceEdgeId(owner, timeline, generation, from.Type, from.Id, from.Hash,
                     to.Type, to.Id, to.Hash, ReadString(edge, "relation", ""), ReadString(metadata, "originQuote", ""), ReadString(metadata, "targetQuote", ""));
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_reference_edges
-(edge_id,owner_id,timeline_id,restore_generation,from_type,from_id,from_hash,to_type,to_id,to_hash,relation,
-source_event_id,as_of_sequence,world_day,created_ts,payload_json)
-VALUES($id,$owner,$timeline,$generation,$fromType,$from,$fromHash,$toType,$to,$toHash,$relation,$event,$sequence,$day,$ts,$payload)
-ON CONFLICT(edge_id) DO NOTHING;", TestDict("id", id, "owner", owner, "timeline", timeline, "generation", generation,
+                DialogueStore.InsertOrIgnoreConversationReferenceEdges2(connection, TestDict("id", id, "owner", owner, "timeline", timeline, "generation", generation,
                     "fromType", from.Type, "from", from.Id, "fromHash", from.Hash, "toType", to.Type, "to", to.Id, "toHash", to.Hash,
                     "relation", ReadString(edge, "relation", ""), "event", ReadString(edge, "source_event_id", ""),
                     "sequence", ReadLong(edge, "as_of_sequence", from.Sequence), "day", ReadDouble(edge, "world_day", from.Day),
@@ -605,7 +580,7 @@ ON CONFLICT(edge_id) DO NOTHING;", TestDict("id", id, "owner", owner, "timeline"
             // These are derivative hints in this restored database. Exact old
             // snapshots retain their own rows; canonical sources are untouched.
             // Prevent one complete duplicate graph accumulating per restore.
-            ReignDatabase.ExecuteSql(connection, "DELETE FROM conversation_reference_edges WHERE restore_generation<>$generation;", TestDict("generation", generation));
+            DialogueStore.DeleteConversationReferenceEdges(connection, TestDict("generation", generation));
         }
 
         private static string BuildConversationReferenceContext(string campaign, string observer, string query,

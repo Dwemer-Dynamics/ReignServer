@@ -47,20 +47,13 @@ namespace ReignBetaServer
 
         internal static void EnsureConversationAgencySchema(ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_negotiations (
-record_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,owner_id TEXT NOT NULL,peer_id TEXT NOT NULL,
-topic TEXT NOT NULL,object_id TEXT NOT NULL,revision INTEGER NOT NULL,payload_json TEXT NOT NULL);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_negotiation_identity ON conversation_negotiations(timeline_id,owner_id,peer_id,topic,object_id);
-CREATE TABLE IF NOT EXISTS conversation_negotiation_turns (
-receipt_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,owner_id TEXT NOT NULL,peer_id TEXT NOT NULL,
-turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
+            DialogueSchema.CreateConversationNegotiations(connection);
         }
 
         private static List<Dictionary<string, object>> ReadConversationNegotiations(ReignDbConnection connection, string timeline, string owner, string peer)
         {
             if (!WorldSimulationService.TableExists(connection, "conversation_negotiations")) return new List<Dictionary<string, object>>();
-            return ReignDatabase.QuerySql(connection, "SELECT payload_json FROM conversation_negotiations WHERE timeline_id=$timeline AND owner_id=$owner AND peer_id=$peer ORDER BY record_id;",
-                new Dictionary<string, object> { ["timeline"] = timeline, ["owner"] = owner, ["peer"] = peer })
+            return DialogueStore.SelectConversationNegotiations(connection, new Dictionary<string, object> { ["timeline"] = timeline, ["owner"] = owner, ["peer"] = peer })
                 .Select(row => TryParseJsonObject(ReadString(row, "payload_json", "{}"))).Where(row => row != null).ToList();
         }
 
@@ -107,18 +100,15 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                     }
                     // Existing dated shared milestones, not an invented trust counter or the length of today's speech.
                     facts["relationship.sharedHistory"] = WorldSimulationService.TableExists(connection, "conversation_continuity")
-                        ? ReignDatabase.QuerySql(connection, "SELECT record_id FROM conversation_continuity WHERE timeline_id=$timeline AND owner_id=$owner AND peer_id=$peer AND kind='relationship' AND status<>'invalidated';",
-                            new Dictionary<string, object> { ["timeline"] = ContinuityTimeline(payload), ["owner"] = owner, ["peer"] = peer }).Count : 0;
+                        ? DialogueStore.SelectConversationContinuity(connection, new Dictionary<string, object> { ["timeline"] = ContinuityTimeline(payload), ["owner"] = owner, ["peer"] = peer }).Count : 0;
                     if (WorldSimulationService.TableExists(connection, "conversation_relationship_receipts"))
                         facts["relationship.sharedHistory"] = ReadInt(facts, "relationship.sharedHistory", 0)
-                            + ReignDatabase.QuerySql(connection, "SELECT receipt_id FROM conversation_relationship_receipts WHERE timeline_id=$timeline AND observer_id=$owner AND target_id=$peer AND status='applied' AND valence='positive' AND severity_tier<>'routine';",
-                                new Dictionary<string, object> { ["timeline"] = ContinuityTimeline(payload), ["owner"] = owner, ["peer"] = peer }).Count;
+                            + DialogueStore.SelectConversationRelationshipReceipts(connection, new Dictionary<string, object> { ["timeline"] = ContinuityTimeline(payload), ["owner"] = owner, ["peer"] = peer }).Count;
                     if (Regex.IsMatch(ReadString(context, "playerText", ""), @"\b(?:blackmail|expose|secret|evidence|scandal|betray|affair)\b", RegexOptions.IgnoreCase)
                         && WorldSimulationService.TableExists(connection, "memories"))
                     {
                         var knowledge = Program.BuildKnowledgeAccessContext(owner, peer, ReadFirstString(payload, "locationId", "settlementId"), payload);
-                        var memories = ReignDatabase.QuerySql(connection, "SELECT * FROM memories WHERE owner_id=$owner AND world_day<=$day AND status='active' ORDER BY ts DESC LIMIT 32;",
-                            new Dictionary<string, object> { ["owner"] = owner, ["day"] = ReadDouble(payload, "worldDay", 0d) });
+                        var memories = DialogueStore.SelectMemories(connection, new Dictionary<string, object> { ["owner"] = owner, ["day"] = ReadDouble(payload, "worldDay", 0d) });
                         foreach (var memory in memories.Where(m => Program.KnowledgeRowVisibleToNpc("memories", m, knowledge, connection))
                             .Where(m => Regex.IsMatch(ReadString(m, "summary", ""), @"\b(?:secret|scandal|betray|affair|bribe|crime|murder|treason)\w*\b", RegexOptions.IgnoreCase)).Take(4))
                         {
@@ -485,13 +475,13 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
             EnsureConversationAgencySchema(connection);
             string timeline = ReadString(context, "timelineId", "main"), owner = ReadString(context, "ownerId", ""), peer = ReadString(context, "peerId", "");
             string receiptId = "negturn_" + PromptHash(timeline + "|" + owner + "|" + peer + "|" + turnId);
-            if (ownsTransaction) ReignDatabase.ExecuteSql(connection, "BEGIN;");
+            if (ownsTransaction) DialogueStore.Begin(connection);
             try
             {
-                var prior = ReignDatabase.QuerySql(connection, "SELECT payload_json FROM conversation_negotiation_turns WHERE receipt_id=$id;", new Dictionary<string, object> { ["id"] = receiptId }).FirstOrDefault();
+                var prior = DialogueStore.SelectConversationNegotiationTurns(connection, new Dictionary<string, object> { ["id"] = receiptId }).FirstOrDefault();
                 if (prior != null)
                 {
-                    if (ownsTransaction) ReignDatabase.ExecuteSql(connection, "ROLLBACK;");
+                    if (ownsTransaction) DialogueStore.Rollback(connection);
                     var receipt = TryParseJsonObject(ReadString(prior, "payload_json", "{}"));
                     receipt["replayed"] = true;
                     return receipt;
@@ -501,7 +491,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                     ["records"] = ReadConversationNegotiations(connection, timeline, owner, peer)
                 };
                 var evaluation = EvaluateConversationAgency(parsed, current);
-                if (!ReadBool(evaluation, "ok", false)) { if (ownsTransaction) ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); return evaluation; }
+                if (!ReadBool(evaluation, "ok", false)) { if (ownsTransaction) DialogueStore.Rollback(connection); return evaluation; }
                 foreach (var next in ReadDictionaryList(evaluation, "updates"))
                 {
                     string id = ReadString(next, "id", "");
@@ -511,10 +501,10 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                         ["topic"] = ReadString(next, "topic", ""), ["object"] = ReadString(next, "objectId", ""), ["revision"] = revision,
                         ["expected"] = revision - 1, ["payload"] = Json.Serialize(next) };
                     if (revision == 1)
-                        ReignDatabase.ExecuteSql(connection, "INSERT INTO conversation_negotiations(record_id,timeline_id,owner_id,peer_id,topic,object_id,revision,payload_json) VALUES($id,$timeline,$owner,$peer,$topic,$object,$revision,$payload);", args);
+                        DialogueStore.InsertConversationNegotiations(connection, args);
                     else
-                        ReignDatabase.ExecuteSql(connection, "UPDATE conversation_negotiations SET revision=$revision,payload_json=$payload WHERE record_id=$id AND revision=$expected;", args);
-                    var observed = ReignDatabase.QuerySql(connection, "SELECT payload_json FROM conversation_negotiations WHERE record_id=$id;", args).FirstOrDefault();
+                        DialogueStore.UpdateConversationNegotiations(connection, args);
+                    var observed = DialogueStore.SelectConversationNegotiations2(connection, args).FirstOrDefault();
                     if (ReadString(observed, "payload_json", "") != Json.Serialize(next)) throw new InvalidOperationException("Negotiation changed while the reply was being committed.");
                 }
                 evaluation["receiptId"] = receiptId;
@@ -526,12 +516,11 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                 acceptedResponse.Remove("conversationAgencyReceipt");
                 acceptedResponse.Remove("motiveDecision");
                 evaluation["response"] = acceptedResponse;
-                ReignDatabase.ExecuteSql(connection, "INSERT INTO conversation_negotiation_turns(receipt_id,timeline_id,owner_id,peer_id,turn_id,payload_json) VALUES($id,$timeline,$owner,$peer,$turn,$payload);",
-                    new Dictionary<string, object> { ["id"] = receiptId, ["timeline"] = timeline, ["owner"] = owner, ["peer"] = peer, ["turn"] = turnId, ["payload"] = Json.Serialize(evaluation) });
-                if (ownsTransaction) ReignDatabase.ExecuteSql(connection, "COMMIT;");
+                DialogueStore.InsertConversationNegotiationTurns(connection, new Dictionary<string, object> { ["id"] = receiptId, ["timeline"] = timeline, ["owner"] = owner, ["peer"] = peer, ["turn"] = turnId, ["payload"] = Json.Serialize(evaluation) });
+                if (ownsTransaction) DialogueStore.Commit(connection);
                 return evaluation;
             }
-            catch { if (ownsTransaction) ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); throw; }
+            catch { if (ownsTransaction) DialogueStore.Rollback(connection); throw; }
         }
 
         private static string AgencyEvidenceKey(string value, Dictionary<string, object> facts)

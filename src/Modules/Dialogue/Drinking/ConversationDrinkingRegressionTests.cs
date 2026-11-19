@@ -549,8 +549,7 @@ namespace ReignBetaServer
                 var concurrent = ReadDictionary(payload, "intoxicationContext");
                 int receipts;
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
-                    receipts = ReignDatabase.QuerySql(connection, "SELECT turn_key FROM conversation_drinking_turns WHERE hero_id=$hero AND turn_key=$turn;",
-                        new Dictionary<string, object> { ["hero"] = "concurrent", ["turn"] = "main:concurrent-sip" }).Count;
+                    receipts = DialogueSelfTestStore.SelectConversationDrinkingTurns2(connection, new Dictionary<string, object> { ["hero"] = "concurrent", ["turn"] = "main:concurrent-sip" }).Count;
                 check("DRINK-084", ReadDouble(concurrent, "drinks", -1) == .25 && ReadDouble(ReadDictionary(concurrent, "vessel"), "remaining", -1) == .75
                     && receipts == 1, concurrent, .25);
                 check("drink_concurrent_retry_one_event", ReadLong(concurrent, "consumptionEvents", -1) == 1

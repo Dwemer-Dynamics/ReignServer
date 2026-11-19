@@ -23,27 +23,16 @@ namespace ReignBetaServer
                     ["ok"] = false,
                     ["error"] = "Final gauntlet run was not found."
                 };
-            List<Dictionary<string, object>> cases = ReignDatabase.QuerySql(
-                connection,
-                @"SELECT * FROM final_gauntlet_cases
-WHERE run_id=$run ORDER BY created_ts,case_instance_id;",
-                new Dictionary<string, object> { ["run"] = runId });
-            List<Dictionary<string, object>> attempts = ReignDatabase.QuerySql(
-                connection,
-                "SELECT * FROM final_gauntlet_attempts WHERE run_id=$run ORDER BY case_instance_id,attempt_number;",
-                new Dictionary<string, object> { ["run"] = runId });
-            List<Dictionary<string, object>> assertions = ReignDatabase.QuerySql(
-                connection,
-                "SELECT * FROM final_gauntlet_assertions WHERE run_id=$run ORDER BY case_instance_id,assertion_id;",
-                new Dictionary<string, object> { ["run"] = runId });
-            List<Dictionary<string, object>> evidence = ReignDatabase.QuerySql(
-                connection,
-                "SELECT * FROM final_gauntlet_evidence WHERE run_id=$run ORDER BY case_instance_id,evidence_key;",
-                new Dictionary<string, object> { ["run"] = runId });
-            List<Dictionary<string, object>> providerCalls = ReignDatabase.QuerySql(
-                connection,
-                "SELECT * FROM final_gauntlet_provider_calls WHERE run_id=$run ORDER BY ordinal;",
-                new Dictionary<string, object> { ["run"] = runId });
+            List<Dictionary<string, object>> cases = DialogueStore.SelectFinalGauntletCases2(
+                connection, new Dictionary<string, object> { ["run"] = runId });
+            List<Dictionary<string, object>> attempts = DialogueStore.SelectFinalGauntletAttempts2(
+                connection, new Dictionary<string, object> { ["run"] = runId });
+            List<Dictionary<string, object>> assertions = DialogueStore.SelectFinalGauntletAssertions2(
+                connection, new Dictionary<string, object> { ["run"] = runId });
+            List<Dictionary<string, object>> evidence = DialogueStore.SelectFinalGauntletEvidence2(
+                connection, new Dictionary<string, object> { ["run"] = runId });
+            List<Dictionary<string, object>> providerCalls = DialogueStore.SelectFinalGauntletProviderCalls(
+                connection, new Dictionary<string, object> { ["run"] = runId });
             string root = FinalGauntletRunArtifactRoot(campaignId, runId);
             Directory.CreateDirectory(root);
             Directory.CreateDirectory(Path.Combine(root, "evidence"));
@@ -70,7 +59,7 @@ WHERE run_id=$run ORDER BY created_ts,case_instance_id;",
                     ["run"] = run,
                     ["catalogFingerprint"] = ReadScalarString(
                         connection,
-                        "SELECT catalog_fingerprint FROM final_gauntlet_schedule WHERE run_id=$run;",
+                        DialogueStore.SelectFinalGauntletScheduleSql,
                         runId),
                     ["exportedUtc"] = DateTime.UtcNow.ToString("o")
                 };

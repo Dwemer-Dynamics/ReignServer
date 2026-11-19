@@ -39,17 +39,16 @@ namespace ReignBetaServer
                 .Any(d => ReadString(d, "reason", "") == reason);
             Dictionary<string, object> State(string hero = "arytha") {
                 using var c = ReignDatabase.OpenCampaignConnection(campaign); EnsureIntoxicationSchema(c);
-                return TryParseJsonObject(ReadString(ReignDatabase.QuerySql(c, "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero;",
-                    TestDict("hero", hero)).SingleOrDefault(), "state_json", "{}"));
+                return TryParseJsonObject(ReadString(DialogueSelfTestStore.SelectConversationIntoxication2(c, TestDict("hero", hero)).SingleOrDefault(), "state_json", "{}"));
             }
             Dictionary<string, object> Scene() {
                 using var c = ReignDatabase.OpenCampaignConnection(campaign); EnsureIntoxicationSchema(c);
-                return TryParseJsonObject(ReadString(ReignDatabase.QuerySql(c, "SELECT state_json FROM conversation_drink_scene WHERE scene_id='active';")
+                return TryParseJsonObject(ReadString(DialogueSelfTestStore.SelectConversationDrinkScene(c)
                     .SingleOrDefault(), "state_json", "{}"));
             }
             void ClearScene() {
                 using var c = ReignDatabase.OpenCampaignConnection(campaign); EnsureIntoxicationSchema(c);
-                ReignDatabase.ExecuteSql(c, "DELETE FROM conversation_drink_scene WHERE scene_id='active';");
+                DialogueSelfTestStore.DeleteConversationDrinkScene(c);
             }
             string Generation() {
                 using var c = ReignDatabase.OpenCampaignConnection(campaign); return ReadString(ReadMemoryPrecisionState(c), "restore_generation", "");

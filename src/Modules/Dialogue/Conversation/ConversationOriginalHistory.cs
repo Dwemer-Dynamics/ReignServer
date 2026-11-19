@@ -15,13 +15,7 @@ namespace ReignBetaServer
             string timeline = ContinuityTimeline(payload);
             if (player.Length == 0) return legacy;
             using var connection = ReignDatabase.OpenCampaignConnection(campaign);
-            var rows = ReignDatabase.QuerySql(connection, @"SELECT t.*,s.npc_id,s.player_id,s.payload_json AS session_payload
-FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id
-WHERE s.player_id=$player AND ($session='' OR t.session_id=$session)
-AND ($npc='' OR s.npc_id=$npc OR (t.channel='party_announcement' AND t.participants_json::jsonb @> jsonb_build_array($npc)) OR EXISTS(SELECT 1 FROM conversation_turns n
- WHERE n.session_id=t.session_id AND n.speaker_id=$npc AND n.role='npc'))
-AND t.status IN ('active','source_only') ORDER BY t.ts DESC,t.session_id DESC,t.turn_order DESC,t.turn_id DESC LIMIT $limit;",
-                TestDict("player", player, "session", session, "npc", npc, "limit", Math.Max(1000, Math.Min(10000, limit * 8))));
+            var rows = DialogueStore.SelectConversationTurns26(connection, TestDict("player", player, "session", session, "npc", npc, "limit", Math.Max(1000, Math.Min(10000, limit * 8))));
             bool official = ReadString(payload, "conversationMode", "") == "ambassador_official";
             string posting = ReadString(payload, "postingId", "");
             var historyAccess = new Program.KnowledgeAccessContext { NpcId = player, TimelineId = timeline,
@@ -46,8 +40,7 @@ AND t.status IN ('active','source_only') ORDER BY t.ts DESC,t.session_id DESC,t.
             {
                 var args = TestDict("player", player);
                 var parameters = batch.Select((id, index) => { args["source" + index] = id; return "$source" + index; }).ToList();
-                foreach (var source in ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE status='source_only' AND speaker_id=$player AND turn_id IN ("
-                    + string.Join(",", parameters) + ");", args).Where(r => MemoryTimeVisible(r, historyAccess, connection)))
+                foreach (var source in DialogueStore.SelectConversationTurns27(connection, string.Join(",", parameters),args).Where(r => MemoryTimeVisible(r, historyAccess, connection)))
                     sources[ReadString(source, "turn_id", "")] = source;
             }
             // Recovery links are stored on private originals so inherited accepted
@@ -58,8 +51,7 @@ AND t.status IN ('active','source_only') ORDER BY t.ts DESC,t.session_id DESC,t.
             {
                 var args = TestDict("player", player);
                 var parameters = batch.Select((id, index) => { args["turn" + index] = id; return "$turn" + index; }).ToList();
-                foreach (var source in ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE status='source_only' AND speaker_id=$player"
-                    + " AND payload_json::jsonb->'originalRecovery'->>'acceptedTurnId' IN (" + string.Join(",", parameters) + ");", args)
+                foreach (var source in DialogueStore.SelectConversationTurns28(connection, string.Join(",", parameters),args)
                     .Where(r => MemoryTimeVisible(r, historyAccess, connection)))
                     sources[ReadString(source, "turn_id", "")] = source;
             }

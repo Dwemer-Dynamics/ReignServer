@@ -244,9 +244,7 @@ namespace ReignBetaServer
                             connection.CreateCommand())
                         {
                             errorCommand.CommandText =
-                                @"SELECT error FROM final_gauntlet_attempts
-WHERE run_id='run-a' AND case_instance_id='CON-001'
-AND attempt_number=1;";
+                                DialogueSelfTestStore.SelectFinalGauntletAttemptsSql;
                             recordedError = Convert.ToString(
                                 errorCommand.ExecuteScalar());
                         }

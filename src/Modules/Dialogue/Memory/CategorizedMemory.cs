@@ -14,51 +14,32 @@ namespace ReignBetaServer
     {
         internal static void EnsureCategorizedMemorySchema(ReignDbConnection connection)
         {
-            ReignDatabase.EnsureDatabaseColumn(connection, "events", "event_category", "TEXT NOT NULL DEFAULT ''");
-            ReignDatabase.EnsureDatabaseColumn(connection, "events", "event_subtype", "TEXT NOT NULL DEFAULT ''");
-            ReignDatabase.EnsureDatabaseColumn(connection, "memories", "memory_domain", "TEXT NOT NULL DEFAULT ''");
-            ReignDatabase.EnsureDatabaseColumn(connection, "summaries", "memory_lane", "TEXT NOT NULL DEFAULT ''");
+            DialogueSchema.EnsureColumnEventsEventCategory(connection);
+            DialogueSchema.EnsureColumnEventsEventSubtype(connection);
+            DialogueSchema.EnsureColumnMemoriesMemoryDomain(connection);
+            DialogueSchema.EnsureColumnSummariesMemoryLane(connection);
 
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS knowledge_receipts (
-receipt_id TEXT PRIMARY KEY,event_id TEXT NOT NULL,npc_id TEXT NOT NULL,acquisition_type TEXT NOT NULL DEFAULT 'known',
-confidence REAL NOT NULL DEFAULT 1.0,reliability REAL NOT NULL DEFAULT 1.0,acquired_day REAL NOT NULL DEFAULT 0,
-source_id TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'active',payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,
-UNIQUE(event_id,npc_id,acquisition_type,source_id));");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_knowledge_receipts_npc ON knowledge_receipts(npc_id,status,acquired_day DESC);");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_knowledge_receipts_event ON knowledge_receipts(event_id,status);");
+            DialogueSchema.CreateKnowledgeReceipts(connection);
+            DialogueSchema.CreateIndexKnowledgeReceiptsNpc(connection);
+            DialogueSchema.CreateIndexKnowledgeReceiptsEvent(connection);
 
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_sessions (
-session_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,npc_id TEXT NOT NULL,player_id TEXT NOT NULL DEFAULT '',
-channel TEXT NOT NULL DEFAULT 'in_person',status TEXT NOT NULL DEFAULT 'open',start_ts INTEGER NOT NULL,end_ts INTEGER NOT NULL DEFAULT 0,
-start_world_day REAL NOT NULL DEFAULT 0,end_world_day REAL NOT NULL DEFAULT 0,location_id TEXT NOT NULL DEFAULT '',
-participants_json TEXT NOT NULL DEFAULT '[]',close_reason TEXT NOT NULL DEFAULT '',scene_summary_id TEXT NOT NULL DEFAULT '',
-legacy_inferred INTEGER NOT NULL DEFAULT 0,payload_json TEXT NOT NULL DEFAULT '{}');");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_conversation_sessions_npc ON conversation_sessions(npc_id,status,start_ts DESC);");
+            DialogueSchema.CreateConversationSessions(connection);
+            DialogueSchema.CreateIndexConversationSessionsNpc(connection);
 
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_turns (
-turn_id TEXT PRIMARY KEY,session_id TEXT NOT NULL,event_id TEXT NOT NULL DEFAULT '',turn_order INTEGER NOT NULL,
-exchange_id TEXT NOT NULL DEFAULT '',role TEXT NOT NULL,speaker_id TEXT NOT NULL DEFAULT '',speaker_name TEXT NOT NULL DEFAULT '',
-text TEXT NOT NULL,channel TEXT NOT NULL DEFAULT 'in_person',world_day REAL NOT NULL DEFAULT 0,ts INTEGER NOT NULL,
-location_id TEXT NOT NULL DEFAULT '',participants_json TEXT NOT NULL DEFAULT '[]',status TEXT NOT NULL DEFAULT 'active',
-payload_json TEXT NOT NULL DEFAULT '{}',UNIQUE(session_id,turn_order));");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_conversation_turns_session ON conversation_turns(session_id,turn_order);");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_conversation_turns_ts ON conversation_turns(ts DESC);");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_conversation_turns_speaker_ts ON conversation_turns(speaker_id,ts DESC);");
+            DialogueSchema.CreateConversationTurns(connection);
+            DialogueSchema.CreateIndexConversationTurnsSession(connection);
+            DialogueSchema.CreateIndexConversationTurnsTs(connection);
+            DialogueSchema.CreateIndexConversationTurnsSpeakerTs(connection);
             EnsureChatViewSchema(connection);
-            ReignDatabase.ExecuteSql(connection, @"CREATE VIRTUAL TABLE IF NOT EXISTS conversation_turn_fts USING fts5(
-turn_id UNINDEXED,text,speaker,participants,channel UNINDEXED);");
+            DialogueSchema.CreateConversationTurnFts(connection);
 
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS memory_sources (
-document_type TEXT NOT NULL,document_id TEXT NOT NULL,source_type TEXT NOT NULL,source_id TEXT NOT NULL,
-ordinal INTEGER NOT NULL DEFAULT 0,payload_json TEXT NOT NULL DEFAULT '{}',
-PRIMARY KEY(document_type,document_id,source_type,source_id));");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_memory_sources_source ON memory_sources(source_type,source_id);");
+            DialogueSchema.CreateMemorySources(connection);
+            DialogueSchema.CreateIndexMemorySourcesSource(connection);
         }
 
         internal static void RunCategorizedMemoryMigration(ReignDbConnection connection, string campaignId)
         {
-            Dictionary<string, object> applied = ReignDatabase.QuerySql(connection,
-                "SELECT value FROM schema_meta WHERE key='categorized_memory_v1' LIMIT 1;").FirstOrDefault();
+            Dictionary<string, object> applied = DialogueStore.SelectSchemaMeta2(connection).FirstOrDefault();
             if (string.Equals(ReadString(applied, "value", ""), "complete", StringComparison.OrdinalIgnoreCase))
             {
                 RunMemoryDomainV2Migration(connection);
@@ -68,13 +49,12 @@ PRIMARY KEY(document_type,document_id,source_type,source_id));");
             }
 
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection, "SELECT event_id,event_type,summary,payload_json FROM events;"))
+            foreach (Dictionary<string, object> row in DialogueStore.SelectEvents(connection))
             {
                 Dictionary<string, object> payload = TryParseJsonObject(ReadString(row, "payload_json", "")) ?? new Dictionary<string, object>();
                 string eventType = ReadString(row, "event_type", "unknown");
                 string summary = ReadString(row, "summary", "");
-                ReignDatabase.ExecuteSql(connection, "UPDATE events SET event_category=$category,event_subtype=$subtype WHERE event_id=$id;",
-                    new Dictionary<string, object>
+                DialogueStore.UpdateEvents(connection, new Dictionary<string, object>
                     {
                         ["category"] = ClassifyEventCategory(eventType, payload, summary),
                         ["subtype"] = ClassifyEventSubtype(eventType, summary),
@@ -82,17 +62,16 @@ PRIMARY KEY(document_type,document_id,source_type,source_id));");
                     });
             }
 
-            foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection, "SELECT memory_id,memory_type,summary,source,tags_json,payload_json FROM memories;"))
+            foreach (Dictionary<string, object> row in DialogueStore.SelectMemories4(connection))
             {
                 string domain = ClassifyMemoryDomain(row);
-                ReignDatabase.ExecuteSql(connection, "UPDATE memories SET memory_domain=$domain WHERE memory_id=$id;",
-                    new Dictionary<string, object> { ["domain"] = domain, ["id"] = ReadString(row, "memory_id", "") });
+                DialogueStore.UpdateMemories(connection, new Dictionary<string, object> { ["domain"] = domain, ["id"] = ReadString(row, "memory_id", "") });
             }
 
             MigrateLegacyPublicProjections(connection, now);
             ImportLegacyConversationHistory(connection, campaignId);
             RebuildCategorizedSearchIndexes(connection);
-            ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('categorized_memory_v1','complete');");
+            DialogueStore.UpsertSchemaMeta2(connection);
             RunMemoryDomainV2Migration(connection);
             RunConversationTurnPayloadV2Migration(connection);
             RunPlayerLieDetectionRemovalMigration(connection);
@@ -100,15 +79,13 @@ PRIMARY KEY(document_type,document_id,source_type,source_id));");
 
         private static void RunMemoryDomainV2Migration(ReignDbConnection connection)
         {
-            Dictionary<string, object> applied = ReignDatabase.QuerySql(connection,
-                "SELECT value FROM schema_meta WHERE key='categorized_memory_domain_v2' LIMIT 1;").FirstOrDefault();
+            Dictionary<string, object> applied = DialogueStore.SelectSchemaMeta3(connection).FirstOrDefault();
             if (string.Equals(ReadString(applied, "value", ""), "complete", StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
 
-            foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection,
-                "SELECT memory_id,memory_type,summary,source,tags_json,payload_json FROM memories;"))
+            foreach (Dictionary<string, object> row in DialogueStore.SelectMemories4(connection))
             {
                 Dictionary<string, object> payload = TryParseJsonObject(ReadString(row, "payload_json", "")) ?? new Dictionary<string, object>();
                 string eventType = ReadFirstString(payload, "eventType", "event_type", "type");
@@ -117,28 +94,24 @@ PRIMARY KEY(document_type,document_id,source_type,source_id));");
                 string domain = Program.MemoryDomainForWorldEventProjection(eventCategory, eventType,
                     ReadString(row, "memory_type", ""), ReadString(row, "summary", ""),
                     Program.TextListFromJson(ReadString(row, "tags_json", "[]")), ReadString(row, "source", ""));
-                ReignDatabase.ExecuteSql(connection, "UPDATE memories SET memory_domain=$domain WHERE memory_id=$id;",
-                    new Dictionary<string, object> { ["domain"] = domain, ["id"] = ReadString(row, "memory_id", "") });
+                DialogueStore.UpdateMemories(connection, new Dictionary<string, object> { ["domain"] = domain, ["id"] = ReadString(row, "memory_id", "") });
             }
-            ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('categorized_memory_domain_v2','complete');");
+            DialogueStore.UpsertSchemaMeta3(connection);
         }
 
         private static void RunConversationTurnPayloadV2Migration(ReignDbConnection connection)
         {
-            Dictionary<string, object> applied = ReignDatabase.QuerySql(connection,
-                "SELECT value FROM schema_meta WHERE key='conversation_turn_payload_v2' LIMIT 1;").FirstOrDefault();
+            Dictionary<string, object> applied = DialogueStore.SelectSchemaMeta4(connection).FirstOrDefault();
             if (string.Equals(ReadString(applied, "value", ""), "complete", StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
 
             Dictionary<string, object> result = CompactConversationTurnPayloadRows(connection);
-            ReignDatabase.ExecuteSql(connection,
-                "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('conversation_turn_payload_v2','complete');");
+            DialogueStore.UpsertSchemaMeta4(connection);
             if (ReadLong(result, "bytesRemoved", 0L) > 0)
             {
-                ReignDatabase.ExecuteSql(connection,
-                    "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('campaign_compaction_required','1');");
+                DialogueStore.UpsertSchemaMeta5(connection);
             }
         }
 
@@ -151,7 +124,7 @@ PRIMARY KEY(document_type,document_id,source_type,source_id));");
             List<Tuple<string, string>> updates = new List<Tuple<string, string>>();
             using (ReignDbCommand command = connection.CreateCommand())
             {
-                command.CommandText = "SELECT turn_id,payload_json FROM conversation_turns WHERE length(payload_json)>2048;";
+                command.CommandText = DialogueStore.SelectConversationTurnsSql2;
                 command.CommandTimeout = 300;
                 using (ReignDbDataReader reader = command.ExecuteReader())
                 {
@@ -182,12 +155,12 @@ PRIMARY KEY(document_type,document_id,source_type,source_id));");
 
             if (updates.Count > 0)
             {
-                ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                DialogueStore.Begin2(connection);
                 try
                 {
                     using (ReignDbCommand update = connection.CreateCommand())
                     {
-                        update.CommandText = "UPDATE conversation_turns SET payload_json=$payload WHERE turn_id=$id;";
+                        update.CommandText = DialogueStore.UpdateConversationTurnsSql;
                         update.CommandTimeout = 300;
                         System.Data.Common.DbParameter id = update.Parameters.Add("$id", NpgsqlDbType.Text);
                         System.Data.Common.DbParameter payload = update.Parameters.Add("$payload", NpgsqlDbType.Text);
@@ -198,11 +171,11 @@ PRIMARY KEY(document_type,document_id,source_type,source_id));");
                             update.ExecuteNonQuery();
                         }
                     }
-                    ReignDatabase.ExecuteSql(connection, "COMMIT;");
+                    DialogueStore.Commit(connection);
                 }
                 catch
                 {
-                    try { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { DialogueStore.Rollback(connection); } catch { }
                     throw;
                 }
             }
@@ -391,15 +364,11 @@ PRIMARY KEY(document_type,document_id,source_type,source_id));");
 
         private static void MigrateLegacyPublicProjections(ReignDbConnection connection, long now)
         {
-            List<Dictionary<string, object>> groups = ReignDatabase.QuerySql(connection, @"SELECT event_id,COUNT(*) AS row_count
-FROM memories WHERE event_id<>'' AND visibility LIKE 'public%' AND status='active'
-GROUP BY event_id HAVING COUNT(*)>1;");
+            List<Dictionary<string, object>> groups = DialogueStore.SelectMemories5(connection);
             foreach (Dictionary<string, object> group in groups)
             {
                 string eventId = ReadString(group, "event_id", "");
-                List<Dictionary<string, object>> rows = ReignDatabase.QuerySql(connection,
-                    "SELECT * FROM memories WHERE event_id=$event AND status='active' ORDER BY ts,memory_id;",
-                    new Dictionary<string, object> { ["event"] = eventId });
+                List<Dictionary<string, object>> rows = DialogueStore.SelectMemories6(connection, new Dictionary<string, object> { ["event"] = eventId });
                 if (rows.Count == 0)
                 {
                     continue;
@@ -416,8 +385,7 @@ GROUP BY event_id HAVING COUNT(*)>1;");
                     ReadDouble(first, "importance", 0.5d), ReadDouble(first, "emotional_weight", 0d), ReadDouble(first, "confidence", 1d),
                     Program.TextListFromJson(ReadString(first, "tags_json", "[]")), "active", "legacy_canonical_migration",
                     ReadString(first, "payload_json", "{}"), "", "not_indexed");
-                ReignDatabase.ExecuteSql(connection, "UPDATE memories SET memory_domain='world_affairs' WHERE memory_id=$id;",
-                    new Dictionary<string, object> { ["id"] = canonicalId });
+                DialogueStore.UpdateMemories3(connection, new Dictionary<string, object> { ["id"] = canonicalId });
 
                 HashSet<string> direct = new HashSet<string>(
                     rows.SelectMany(row => Program.TextListFromJson(ReadString(row, "participants_json", "[]"))
@@ -428,17 +396,14 @@ GROUP BY event_id HAVING COUNT(*)>1;");
                     string ownerId = ReadString(row, "owner_id", "");
                     if (!string.IsNullOrWhiteSpace(ownerId) && direct.Contains(ownerId))
                     {
-                        ReignDatabase.ExecuteSql(connection, @"UPDATE memories SET memory_type='personal_experience',memory_domain='world_affairs',
-visibility='private',known_by_json=$known WHERE memory_id=$id;",
-                            new Dictionary<string, object> { ["known"] = Json.Serialize(new List<string> { ownerId }), ["id"] = memoryId });
+                        DialogueStore.UpdateMemories4(connection, new Dictionary<string, object> { ["known"] = Json.Serialize(new List<string> { ownerId }), ["id"] = memoryId });
                         UpsertKnowledgeReceipt(connection, eventId, ownerId,
                             Program.TextListFromJson(ReadString(row, "witnesses_json", "[]")).Contains(ownerId, StringComparer.OrdinalIgnoreCase) ? "witness" : "participant",
                             ReadDouble(row, "confidence", 1d), 1d, ReadDouble(row, "world_day", 0d), memoryId, now);
                     }
                     else
                     {
-                        ReignDatabase.ExecuteSql(connection, "UPDATE memories SET status='superseded',memory_domain='world_affairs' WHERE memory_id=$id;",
-                            new Dictionary<string, object> { ["id"] = memoryId });
+                        DialogueStore.UpdateMemories5(connection, new Dictionary<string, object> { ["id"] = memoryId });
                     }
                 }
             }
@@ -485,11 +450,7 @@ visibility='private',known_by_json=$known WHERE memory_id=$id;",
                     long startTs = ReadLong(sessionLines.First(), "ts", 0);
                     long endTs = ReadLong(sessionLines.Last(), "ts", startTs);
                     string sessionId = "legacy_" + SafeMemoryKey(heroId) + "_" + startTs.ToString(CultureInfo.InvariantCulture) + "_" + sessionOrdinal.ToString(CultureInfo.InvariantCulture);
-                    ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO conversation_sessions(
-session_id,campaign_id,npc_id,player_id,channel,status,start_ts,end_ts,start_world_day,end_world_day,location_id,
-participants_json,close_reason,scene_summary_id,legacy_inferred,payload_json)
-VALUES($id,$campaign,$npc,'',$channel,'closed',$start,$end,$start_day,$end_day,'','[]','legacy_import','',1,'{}');",
-                        new Dictionary<string, object>
+                    DialogueStore.InsertOrIgnoreConversationSessions5(connection, new Dictionary<string, object>
                         {
                             ["id"] = sessionId, ["campaign"] = campaignId, ["npc"] = heroId,
                             ["channel"] = ReadString(sessionLines.First(), "channel", "in_person"),
@@ -514,16 +475,16 @@ VALUES($id,$campaign,$npc,'',$channel,'closed',$start,$end,$start_day,$end_day,'
 
         internal static void RebuildCategorizedSearchIndexes(ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, "DELETE FROM memory_fts;");
-            foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection, "SELECT * FROM memories WHERE status='active';"))
+            DialogueStore.DeleteMemoryFts(connection);
+            foreach (Dictionary<string, object> row in DialogueStore.SelectMemories7(connection))
             {
                 Program.InsertMemoryFts(connection, ReadString(row, "memory_id", ""), ReadString(row, "summary", ""),
                     Program.TextListFromJson(ReadString(row, "tags_json", "[]")),
                     Program.TextListFromJson(ReadString(row, "about_entities_json", "[]"))
                         .Concat(Program.TextListFromJson(ReadString(row, "participants_json", "[]"))).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
             }
-            ReignDatabase.ExecuteSql(connection, "DELETE FROM conversation_turn_fts;");
-            foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE status='active';"))
+            DialogueStore.DeleteConversationTurnFts(connection);
+            foreach (Dictionary<string, object> row in DialogueStore.SelectConversationTurns49(connection))
             {
                 if (string.IsNullOrWhiteSpace(ConversationTurnTextForRecall(row))) continue;
                 InsertConversationTurnFts(connection, ReadString(row, "turn_id", ""), ConversationTurnTextForRecall(row),
@@ -560,9 +521,7 @@ VALUES($id,$campaign,$npc,'',$channel,'closed',$start,$end,$start_day,$end_day,'
             List<string> interrupted;
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                interrupted = ReignDatabase.QuerySql(connection,
-                    "SELECT session_id FROM conversation_sessions WHERE npc_id=$npc AND status='open' ORDER BY start_ts;",
-                    new Dictionary<string, object> { ["npc"] = npcId })
+                interrupted = DialogueStore.SelectConversationSessions9(connection, new Dictionary<string, object> { ["npc"] = npcId })
                     .Select(row => ReadString(row, "session_id", "")).Where(id => !string.IsNullOrWhiteSpace(id)).ToList();
             }
             foreach (string sessionId in interrupted)
@@ -578,11 +537,7 @@ VALUES($id,$campaign,$npc,'',$channel,'closed',$start,$end,$start_day,$end_day,'
             List<string> participants = Program.MergeStringLists(ReadStringList(payload, "participants"), new[] { npcId, playerId });
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO conversation_sessions(
-session_id,campaign_id,npc_id,player_id,channel,status,start_ts,end_ts,start_world_day,end_world_day,location_id,
-participants_json,close_reason,scene_summary_id,legacy_inferred,payload_json)
-VALUES($id,$campaign,$npc,$player,$channel,'open',$ts,0,$day,0,$location,$participants,'','',0,$payload);",
-                    new Dictionary<string, object>
+                DialogueStore.InsertOrIgnoreConversationSessions6(connection, new Dictionary<string, object>
                     {
                         ["id"] = id, ["campaign"] = campaignId, ["npc"] = npcId, ["player"] = playerId,
                         ["channel"] = channel, ["ts"] = ts, ["day"] = worldDay, ["location"] = locationId,
@@ -607,7 +562,7 @@ VALUES($id,$campaign,$npc,$player,$channel,'open',$ts,0,$day,0,$location,$partic
             if (ReadBool(finished, "ok", false))
             using (var connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                var session = ReignDatabase.QuerySql(connection, "SELECT payload_json FROM conversation_sessions WHERE session_id=$id;", TestDict("id", sessionId)).FirstOrDefault();
+                var session = DialogueStore.SelectConversationSessions10(connection, TestDict("id", sessionId)).FirstOrDefault();
                 string timeline = ContinuityTimeline(GossipJson(session));
                 if (timeline == WorldSimulationService.ActiveWorldHistoryTimeline(connection))
                 {
@@ -628,7 +583,7 @@ VALUES($id,$campaign,$npc,$player,$channel,'open',$ts,0,$day,0,$location,$partic
             List<string> openSessions;
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                openSessions = ReignDatabase.QuerySql(connection, "SELECT session_id FROM conversation_sessions WHERE status='open' ORDER BY start_ts;")
+                openSessions = DialogueStore.SelectConversationSessions11(connection)
                     .Select(row => ReadString(row, "session_id", "")).Where(id => !string.IsNullOrWhiteSpace(id)).ToList();
             }
             List<Dictionary<string, object>> recovered = new List<Dictionary<string, object>>();
@@ -648,8 +603,7 @@ VALUES($id,$campaign,$npc,$player,$channel,'open',$ts,0,$day,0,$location,$partic
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             using (var closure = connection.BeginTransaction())
             {
-                session = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id LIMIT 1;",
-                    new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault();
+                session = DialogueStore.SelectConversationSessions8(connection, new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault();
                 if (session == null)
                 {
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Conversation session was not found.", ["sessionId"] = sessionId };
@@ -659,15 +613,12 @@ VALUES($id,$campaign,$npc,$player,$channel,'open',$ts,0,$day,0,$location,$partic
                 string existingReason = ReadString(session, "close_reason", "");
                 if (new[] { "closed_by_player", "conversation_ended", "goodbye" }.Contains(existingReason))
                     reason = existingReason;
-                turns = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$id AND status='active' ORDER BY turn_order;",
-                    new Dictionary<string, object> { ["id"] = sessionId });
-                var existingScene=ReignDatabase.QuerySql(connection,"SELECT payload_json FROM summaries WHERE summary_id=$id;",
-                    new Dictionary<string,object>{["id"]=ReadString(session,"scene_summary_id","")}).FirstOrDefault();
+                turns = DialogueStore.SelectConversationTurns50(connection, new Dictionary<string, object> { ["id"] = sessionId });
+                var existingScene=DialogueStore.SelectSummaries4(connection, new Dictionary<string,object>{["id"]=ReadString(session,"scene_summary_id","")}).FirstOrDefault();
                 if (existingScene != null && ReadString(TryParseJsonObject(ReadString(existingScene,"payload_json","{}")),"sourceHash","")==MemorySourceHash(turns))
                 {
                     if (ReadString(session,"status","")!="closed" && ReadString(session,"status","")!="interrupted")
-                        ReignDatabase.ExecuteSql(connection,"UPDATE conversation_sessions SET status=$status,end_ts=$ts,end_world_day=$day,close_reason=$reason WHERE session_id=$id;",
-                            new Dictionary<string,object>{["status"]=interrupted?"interrupted":"closed",["ts"]=ts,["day"]=worldDay,["reason"]=reason??"",["id"]=sessionId});
+                        DialogueStore.UpdateConversationSessions4(connection, new Dictionary<string,object>{["status"]=interrupted?"interrupted":"closed",["ts"]=ts,["day"]=worldDay,["reason"]=reason??"",["id"]=sessionId});
                     ReleaseCommunicationSession(connection, session, reason, worldDay);
                     closure.Commit();
                     return new Dictionary<string, object>
@@ -678,8 +629,7 @@ VALUES($id,$campaign,$npc,$player,$channel,'open',$ts,0,$day,0,$location,$partic
                 }
                 sceneJobId = EnqueueMemoryJob(connection, campaignId, "scene_summary", ReadString(session, "npc_id", ""), "scene:" + sessionId, sessionId);
                 ReleaseCommunicationSession(connection, session, reason, worldDay);
-                ReignDatabase.ExecuteSql(connection, @"UPDATE conversation_sessions SET status=$status,end_ts=$ts,end_world_day=$day,
-close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
+                DialogueStore.UpdateConversationSessions5(connection, new Dictionary<string, object>
                 {
                     ["status"] = interrupted ? "interrupted" : "closed", ["ts"] = ts, ["day"] = worldDay,
                     ["reason"] = reason ?? "", ["id"] = sessionId
@@ -696,8 +646,7 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
             Dictionary<string, object> scene;
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                var job = ReignDatabase.QuerySql(connection, "SELECT result_json FROM memory_background_jobs WHERE job_id=$id;",
-                    new Dictionary<string, object> { ["id"] = sceneJobId }).Single();
+                var job = DialogueStore.SelectMemoryBackgroundJobs(connection, new Dictionary<string, object> { ["id"] = sceneJobId }).Single();
                 scene = TryParseJsonObject(ReadString(job, "result_json", "{}")) ?? new Dictionary<string, object>();
             }
             string sceneId = ReadString(scene, "summaryId", "");
@@ -800,9 +749,7 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
             {
                 using var transaction = connection.BeginTransaction();
                 LockConversationSourcePublication(connection, sessionId);
-                Dictionary<string, object> max = ReignDatabase.QuerySql(connection,
-                    "SELECT COALESCE(MAX(turn_order),-1)+1 AS next_order FROM conversation_turns WHERE session_id=$session;",
-                    new Dictionary<string, object> { ["session"] = sessionId }).FirstOrDefault();
+                Dictionary<string, object> max = DialogueStore.SelectConversationTurns51(connection, new Dictionary<string, object> { ["session"] = sessionId }).FirstOrDefault();
                 nextOrder = ReadInt(max, "next_order", 0);
                 string exchangeId = eventId;
                 string playerTurnId = eventId + "_player";
@@ -813,8 +760,7 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
                 acceptanceBoundary?.Invoke("after_player_source");
                 InsertConversationTurn(connection, npcTurnId, sessionId, eventId, nextOrder + 1, exchangeId, "npc", npcId,
                     npcName, reply, channel, worldDay, ts, locationId, participants, request);
-                ReignDatabase.ExecuteSql(connection, "UPDATE conversation_sessions SET end_ts=$ts,end_world_day=$day,location_id=CASE WHEN $location<>'' THEN $location ELSE location_id END WHERE session_id=$id;",
-                    new Dictionary<string, object> { ["ts"] = ts, ["day"] = worldDay, ["location"] = locationId, ["id"] = sessionId });
+                DialogueStore.UpdateConversationSessions6(connection, new Dictionary<string, object> { ["ts"] = ts, ["day"] = worldDay, ["location"] = locationId, ["id"] = sessionId });
                 var result = new Dictionary<string, object>
                 {
                     ["ok"] = true, ["sessionId"] = sessionId, ["exchangeId"] = exchangeId,
@@ -891,8 +837,7 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 sessionExists = !string.IsNullOrWhiteSpace(sessionId)
-                    && ReignDatabase.QuerySql(connection, "SELECT session_id FROM conversation_sessions WHERE session_id=$id LIMIT 1;",
-                        new Dictionary<string, object> { ["id"] = sessionId }).Count > 0;
+                    && DialogueStore.SelectConversationSessions12(connection, new Dictionary<string, object> { ["id"] = sessionId }).Count > 0;
             }
             if (!sessionExists)
             {
@@ -930,22 +875,17 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
                 // call. The interpreted writer projection must not collide with it.
                 // Keep its bytes, but retire that provisional view atomically when
                 // the same original receives its accepted observer projection.
-                if (floorProjection && ReignDatabase.QuerySql(connection, "SELECT turn_id FROM conversation_turns WHERE turn_id=$id AND status='active';",
-                    TestDict("id", exchangeId + "_player")).Count > 0)
+                if (floorProjection && DialogueStore.SelectConversationTurns20(connection, TestDict("id", exchangeId + "_player")).Count > 0)
                 {
                     transaction.Commit();
                     return result;
                 }
-                Dictionary<string, object> session = ReignDatabase.QuerySql(connection,
-                    "SELECT participants_json FROM conversation_sessions WHERE session_id=$id LIMIT 1;",
-                    new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault();
+                Dictionary<string, object> session = DialogueStore.SelectConversationSessions13(connection, new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault();
                 var sessionParticipants = Program.MergeStringLists(
                     Program.TextListFromJson(ReadString(session, "participants_json", "[]")),
                     participants);
 
-                var existingPlayer = ReignDatabase.QuerySql(connection,
-                    "SELECT * FROM conversation_turns WHERE turn_id=$turn LIMIT 1;",
-                    new Dictionary<string, object> { ["turn"] = playerTurnId }).FirstOrDefault();
+                var existingPlayer = DialogueStore.SelectConversationTurns52(connection, new Dictionary<string, object> { ["turn"] = playerTurnId }).FirstOrDefault();
                 bool playerExists = existingPlayer != null;
                 // The shared player turn belongs to the first NPC's event ID.
                 // Later speakers may reference it, but cannot change its words,
@@ -956,9 +896,7 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
                     || ContinuityTimeline(TryParseJsonObject(ReadString(existingPlayer, "payload_json", "{}"))) != ContinuityTimeline(request)))
                     throw new InvalidOperationException("This group beat already has different accepted player words or source scope.");
                 PreservePlayerInputSource(connection, request, sessionId, eventId, exchangeId, playerId, playerName, worldDay, ts, locationId);
-                int nextOrder = ReadInt(ReignDatabase.QuerySql(connection,
-                    "SELECT COALESCE(MAX(turn_order),-1)+1 AS next_order FROM conversation_turns WHERE session_id=$session;",
-                    new Dictionary<string, object> { ["session"] = sessionId }).FirstOrDefault(), "next_order", 0);
+                int nextOrder = ReadInt(DialogueStore.SelectConversationTurns51(connection, new Dictionary<string, object> { ["session"] = sessionId }).FirstOrDefault(), "next_order", 0);
                 if (!playerExists)
                 {
                     InsertConversationTurn(connection, playerTurnId, sessionId, eventId, nextOrder++, exchangeId,
@@ -966,20 +904,17 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
                 }
                 if (!floorProjection && ReadString(request, "inputSourceId", "").Length > 0)
                 {
-                    var provisional = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND session_id=$session AND speaker_id=$player AND status='active';",
-                        TestDict("id", exchangeId + "_floor_player", "session", sessionId, "player", playerId)).SingleOrDefault();
+                    var provisional = DialogueStore.SelectConversationTurns53(connection, TestDict("id", exchangeId + "_floor_player", "session", sessionId, "player", playerId)).SingleOrDefault();
                     if (ReadString(TryParseJsonObject(ReadString(provisional, "payload_json", "{}")), "inputSourceId", "") == ReadString(request, "inputSourceId", ""))
                     {
-                        ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET status='superseded_projection' WHERE turn_id=$id;", TestDict("id", exchangeId + "_floor_player"));
-                        ReignDatabase.ExecuteSql(connection, "DELETE FROM conversation_turn_fts WHERE turn_id=$id;", TestDict("id", exchangeId + "_floor_player"));
+                        DialogueStore.UpdateConversationTurns3(connection, TestDict("id", exchangeId + "_floor_player"));
+                        DialogueStore.DeleteConversationTurnFts2(connection, TestDict("id", exchangeId + "_floor_player"));
                     }
                 }
                 acceptanceBoundary?.Invoke("after_player_source");
                 InsertConversationTurn(connection, npcTurnId, sessionId, eventId, nextOrder, exchangeId,
                     "npc", npcId, npcName, reply, channel, worldDay, ts, locationId, participants, request);
-                ReignDatabase.ExecuteSql(connection, @"UPDATE conversation_sessions SET end_ts=$ts,end_world_day=$day,
-location_id=CASE WHEN $location<>'' THEN $location ELSE location_id END,participants_json=$participants
-WHERE session_id=$id;", new Dictionary<string, object>
+                DialogueStore.UpdateConversationSessions7(connection, new Dictionary<string, object>
                 {
                     ["ts"] = ts,
                     ["day"] = worldDay,
@@ -1012,14 +947,14 @@ WHERE session_id=$id;", new Dictionary<string, object>
         }
 
         private static void LockConversationSourceSession(ReignDbConnection connection, string sessionId) =>
-            ReignDatabase.ExecuteSql(connection, "SELECT pg_advisory_xact_lock(hashtextextended($key,0));", TestDict("key", "conversation_source:" + sessionId));
+            DialogueStore.SelectStatement6(connection, TestDict("key", "conversation_source:" + sessionId));
 
         private static void LockConversationSourcePublication(ReignDbConnection connection, string sessionId)
         {
             LockConversationSourceSession(connection, sessionId);
             if (!string.IsNullOrWhiteSpace(_playerActionGeneration))
             {
-                var current = ReignDatabase.QuerySql(connection, "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").Single();
+                var current = DialogueStore.SelectMemoryPrecisionState(connection).Single();
                 if (ReadString(current, "restore_generation", "") != _playerActionGeneration)
                     throw new InvalidOperationException("The campaign changed before conversation source publication.");
             }
@@ -1034,11 +969,7 @@ WHERE session_id=$id;", new Dictionary<string, object>
                 return;
             }
             bool technicalNotice = role == "npc" && !HasRecallableConversationSpeech(text);
-            ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO conversation_turns(
-turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,speaker_name,text,channel,world_day,ts,location_id,
-participants_json,status,payload_json)
-VALUES($turn,$session,$event,$ordinal,$exchange,$role,$speaker_id,$speaker_name,$text,$channel,$day,$ts,$location,$participants,$status,$payload);",
-                new Dictionary<string, object>
+            DialogueStore.InsertOrIgnoreConversationTurns(connection, new Dictionary<string, object>
                 {
                     ["turn"] = turnId, ["session"] = sessionId, ["event"] = eventId ?? "", ["ordinal"] = turnOrder,
                     ["exchange"] = exchangeId ?? "", ["role"] = role ?? "", ["speaker_id"] = speakerId ?? "",
@@ -1048,7 +979,7 @@ VALUES($turn,$session,$event,$ordinal,$exchange,$role,$speaker_id,$speaker_name,
                     ["status"] = technicalNotice ? "technical_notice" : "active",
                     ["payload"] = SerializeConversationTurnStoragePayload(payload)
                 });
-            var stored = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", turnId)).Single();
+            var stored = DialogueStore.SelectConversationTurns6(connection, TestDict("id", turnId)).Single();
             var storedPayload = TryParseJsonObject(ReadString(stored, "payload_json", "{}"));
             var audience = new HashSet<string>(participants ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
             if (ReadString(stored, "session_id", "") != sessionId || ReadString(stored, "exchange_id", "") != (exchangeId ?? "")
@@ -1083,9 +1014,8 @@ VALUES($turn,$session,$event,$ordinal,$exchange,$role,$speaker_id,$speaker_name,
 
         private static void InsertConversationTurnFts(ReignDbConnection connection, string turnId, string text, string speaker, string participants, string channel)
         {
-            ReignDatabase.ExecuteSql(connection, "DELETE FROM conversation_turn_fts WHERE turn_id=$id;", new Dictionary<string, object> { ["id"] = turnId });
-            ReignDatabase.ExecuteSql(connection, "INSERT INTO conversation_turn_fts(turn_id,text,speaker,participants,channel) VALUES($id,$text,$speaker,$participants,$channel);",
-                new Dictionary<string, object> { ["id"] = turnId, ["text"] = text ?? "", ["speaker"] = speaker ?? "", ["participants"] = participants ?? "", ["channel"] = channel ?? "" });
+            DialogueStore.DeleteConversationTurnFts2(connection, new Dictionary<string, object> { ["id"] = turnId });
+            DialogueStore.InsertConversationTurnFts(connection, new Dictionary<string, object> { ["id"] = turnId, ["text"] = text ?? "", ["speaker"] = speaker ?? "", ["participants"] = participants ?? "", ["channel"] = channel ?? "" });
         }
 
         internal static void StoreCorrespondenceTurn(string campaignId, string npcId, string playerId, Dictionary<string, object> letter, double worldDay)
@@ -1102,11 +1032,7 @@ VALUES($turn,$session,$event,$ordinal,$exchange,$role,$speaker_id,$speaker_name,
             {
                 using var transaction = connection.BeginTransaction();
                 LockConversationSourcePublication(connection, sessionId);
-                ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO conversation_sessions(
-session_id,campaign_id,npc_id,player_id,channel,status,start_ts,end_ts,start_world_day,end_world_day,location_id,
-participants_json,close_reason,scene_summary_id,legacy_inferred,payload_json)
-VALUES($id,$campaign,$npc,$player,'correspondence','closed',$ts,$ts,$day,$day,'',$participants,'letter_delivered','',0,$payload);",
-                    new Dictionary<string, object>
+                DialogueStore.InsertOrIgnoreConversationSessions7(connection, new Dictionary<string, object>
                     {
                         ["id"] = sessionId, ["campaign"] = campaignId, ["npc"] = npcId, ["player"] = playerId ?? "",
                         ["ts"] = ts, ["day"] = worldDay, ["participants"] = Json.Serialize(participants), ["payload"] = Json.Serialize(letter)

@@ -10,17 +10,10 @@ namespace ReignBetaServer
     {
         internal static void EnsureCorrespondenceMemorySchema(ReignDbConnection connection)
         {
-            ReignDatabase.EnsureDatabaseColumn(connection, "letters", "timeline_id", "TEXT NOT NULL DEFAULT ''");
-            ReignDatabase.EnsureDatabaseColumn(connection, "letters", "dispatch_sequence", "BIGINT NOT NULL DEFAULT 0");
-            ReignDatabase.EnsureDatabaseColumn(connection, "letters", "delivery_timeline_id", "TEXT NOT NULL DEFAULT ''");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS memory_restored_letters (
-letter_id TEXT PRIMARY KEY, restore_generation TEXT NOT NULL, content_hash TEXT NOT NULL,
-received_day DOUBLE PRECISION NOT NULL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS memory_restored_letter_context (
-state_id TEXT PRIMARY KEY, restore_generation TEXT NOT NULL, timeline_id TEXT NOT NULL,
-save_point_id TEXT NOT NULL, world_day DOUBLE PRECISION NOT NULL, head_sequence BIGINT NOT NULL,
-head_event_id TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS idx_letters_observer_memory ON letters(sender_id,recipient_id,dispatch_day);");
+            DialogueSchema.EnsureColumnLettersTimelineId(connection);
+            DialogueSchema.EnsureColumnLettersDispatchSequence(connection);
+            DialogueSchema.EnsureColumnLettersDeliveryTimelineId(connection);
+            DialogueSchema.CreateMemoryRestoredLetters(connection);
         }
 
         internal static string LetterSourceTimeline(Dictionary<string, object> letter) => FirstNonEmpty(
@@ -37,20 +30,17 @@ CREATE INDEX IF NOT EXISTS idx_letters_observer_memory ON letters(sender_id,reci
         private static void CaptureRestoredLetterSources(ReignDbConnection connection, Dictionary<string, object> point)
         {
             EnsureCorrespondenceMemorySchema(connection);
-            ReignDatabase.ExecuteSql(connection, "DELETE FROM memory_restored_letters; DELETE FROM memory_restored_letter_context;");
+            DialogueStore.DeleteMemoryRestoredLetters(connection);
             if (point == null || ReadString(point, "savePointId", "").Length == 0 || ReadString(point, "timelineId", "").Length == 0) return;
             string generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
             RelationshipsService.EnsureCorrespondenceDeliverySchema(connection);
             RelationshipsService.RebindRestoredCorrespondenceJobs(connection, ReadString(point, "timelineId", ""), generation);
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO memory_restored_letter_context
-(state_id,restore_generation,timeline_id,save_point_id,world_day,head_sequence,head_event_id)
-VALUES('current',$generation,$timeline,$point,$day,$sequence,$head);", TestDict("generation", generation,
+            DialogueStore.InsertMemoryRestoredLetterContext(connection, TestDict("generation", generation,
                 "timeline", ReadString(point, "timelineId", ""), "point", ReadString(point, "savePointId", ""),
                 "day", ReadDouble(point, "campaignTimeDays", 0d), "sequence", ReadLong(point, "worldHistorySequence", 0),
                 "head", ReadString(point, "worldHistoryHeadEventId", "")));
-            foreach (var letter in ReignDatabase.QuerySql(connection, "SELECT * FROM letters WHERE dispatch_day<=$day;", TestDict("day", ReadDouble(point, "campaignTimeDays", 0d))))
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO memory_restored_letters(letter_id,restore_generation,content_hash,received_day)
-VALUES($id,$generation,$hash,$received);", TestDict("id", ReadString(letter, "letter_id", ""), "generation", generation,
+            foreach (var letter in DialogueStore.SelectLetters(connection, TestDict("day", ReadDouble(point, "campaignTimeDays", 0d))))
+                DialogueStore.InsertMemoryRestoredLetters(connection, TestDict("id", ReadString(letter, "letter_id", ""), "generation", generation,
                     "hash", LetterContentHash(letter), "received", ReadString(letter, "status", "") == "read" ? ReadDouble(letter, "read_day", 0d) : 0d));
         }
 
@@ -59,9 +49,7 @@ VALUES($id,$generation,$hash,$received);", TestDict("id", ReadString(letter, "le
         {
             if (!WorldSimulationService.TableExists(connection, "memory_restored_letter_context")) return;
             string generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
-            ReignDatabase.ExecuteSql(connection, @"UPDATE memory_restored_letter_context SET timeline_id=$recovered
-WHERE state_id='current' AND restore_generation=$generation AND timeline_id=$requested
-AND head_sequence=$sequence AND head_event_id=$head;", TestDict("recovered", recovered, "generation", generation,
+            DialogueStore.UpdateMemoryRestoredLetterContext(connection, TestDict("recovered", recovered, "generation", generation,
                 "requested", requested, "sequence", savedSequence, "head", savedHead));
             var verified = RestoredLetterContext(connection, recovered);
             if (verified != null && ReadLong(verified, "head_sequence", -1) == savedSequence
@@ -72,9 +60,7 @@ AND head_sequence=$sequence AND head_event_id=$head;", TestDict("recovered", rec
         internal static Dictionary<string, object> RestoredLetterContext(ReignDbConnection connection, string timeline)
         {
             if (!WorldSimulationService.TableExists(connection, "memory_restored_letter_context")) return null;
-            return ReignDatabase.QuerySql(connection, @"SELECT c.* FROM memory_restored_letter_context c
-JOIN memory_precision_state s ON c.restore_generation=s.restore_generation AND s.state_id='current'
-WHERE c.state_id='current' AND c.timeline_id=$timeline;", TestDict("timeline", timeline)).FirstOrDefault();
+            return DialogueStore.SelectMemoryRestoredLetterContext(connection, TestDict("timeline", timeline)).FirstOrDefault();
         }
 
         internal static bool LetterVisibleToObserver(ReignDbConnection connection, Dictionary<string, object> letter,
@@ -98,8 +84,7 @@ WHERE c.state_id='current' AND c.timeline_id=$timeline;", TestDict("timeline", t
             if (LetterSourceTimeline(letter) == timeline) return true;
             var restored = RestoredLetterContext(connection, timeline);
             if (restored == null) return false;
-            var member = ReignDatabase.QuerySql(connection, @"SELECT * FROM memory_restored_letters WHERE letter_id=$id
-AND restore_generation=$generation;", TestDict("id", ReadString(letter, "letter_id", ""),
+            var member = DialogueStore.SelectMemoryRestoredLetters(connection, TestDict("id", ReadString(letter, "letter_id", ""),
                 "generation", ReadString(restored, "restore_generation", ""))).FirstOrDefault();
             if (member == null || ReadString(member, "content_hash", "") != LetterContentHash(letter)) return false;
             if (author) return true;
@@ -139,9 +124,9 @@ AND (COALESCE(NULLIF(l.timeline_id,''),NULLIF(l.payload_json::jsonb->>'timelineI
 OR EXISTS(SELECT 1 FROM memory_restored_letters r JOIN memory_restored_letter_context c ON c.restore_generation=r.restore_generation
 JOIN memory_precision_state s ON s.restore_generation=c.restore_generation AND s.state_id='current'
 WHERE r.letter_id=l.letter_id AND c.state_id='current' AND c.timeline_id=$timeline))";
-            var rows = ReignDatabase.QuerySql(connection, "SELECT l.*" + eligible + " ORDER BY dispatch_day DESC,created_ts DESC,letter_id LIMIT 2;", args);
+            var rows = DialogueStore.SelectStatement4(connection, eligible,args);
             if (terms.Count > 0)
-                rows.AddRange(ReignDatabase.QuerySql(connection, "SELECT l.*" + eligible + " AND " + rank + ">0 ORDER BY " + rank + " DESC,dispatch_day DESC,letter_id LIMIT 12;", args));
+                rows.AddRange(DialogueStore.SelectStatement5(connection, eligible, rank, rank,args));
             var chosen = new HashSet<string>(StringComparer.Ordinal);
             foreach (var letter in rows)
             {
@@ -184,7 +169,7 @@ WHERE r.letter_id=l.letter_id AND c.state_id='current' AND c.timeline_id=$timeli
             string quote, string requestedSpeaker, string observer, string peer, Dictionary<string, object> context)
         {
             if (!id.StartsWith("letter_", StringComparison.Ordinal) || quote.Length < 4) return null;
-            var row = ReignDatabase.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", id)).FirstOrDefault();
+            var row = DialogueStore.SelectLetters2(connection, TestDict("id", id)).FirstOrDefault();
             if (!LetterVisibleToObserver(connection, row, observer, Program.BuildKnowledgeAccessContext(observer, peer, "", context), out double day)
                 || ReadString(row, "sender_id", "") != requestedSpeaker) return null;
             string body = ReadString(row, "body", ""); int start = body.IndexOf(quote, StringComparison.Ordinal);

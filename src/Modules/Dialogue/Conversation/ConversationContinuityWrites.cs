@@ -30,9 +30,7 @@ namespace ReignBetaServer
             var snapshot = new ContinuityReadSnapshot { Timeline = ContinuityTimeline(payload) };
             string peer = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
             var access = Program.BuildKnowledgeAccessContext(owner, peer, "", payload);
-            foreach (var row in ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_continuity
-WHERE owner_id=$owner AND " + MemorySourceTimelineSql("conversation_continuity", access: access) + @" AND status<>'invalidated'
-AND (peer_id='' OR peer_id=$peer);", new Dictionary<string, object> {
+            foreach (var row in DialogueStore.SelectConversationContinuity5(connection, MemorySourceTimelineSql("conversation_continuity", access: access),new Dictionary<string, object> {
                 ["timeline"] = snapshot.Timeline, ["owner"] = owner, ["peer"] = peer }))
             {
                 var record = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
@@ -109,10 +107,7 @@ AND (peer_id='' OR peer_id=$peer);", new Dictionary<string, object> {
             var value = TestDict("proposal", Program.CloneDictionary(write), "sourceEvidence", source,
                 "expectedRevision", expected, "observedRevision", current,
                 "reason", "concurrent_revision_changed", "meaning", "Unapplied proposal, not established memory.");
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_continuity_pending
-(pending_id,record_id,timeline_id,owner_id,peer_id,source_event_id,source_turn_id,source_hash,world_day,status,payload_json,created_ts)
-VALUES($id,$record,$timeline,$owner,$peer,$event,$turn,$hash,$day,'pending',$payload,$ts)
-ON CONFLICT(pending_id) DO NOTHING;", TestDict("id", pendingId, "record", recordId, "timeline", timeline,
+            DialogueStore.InsertOrIgnoreConversationContinuityPending(connection, TestDict("id", pendingId, "record", recordId, "timeline", timeline,
                 "owner", owner, "peer", peer, "event", eventId, "turn", turn, "hash", PromptHash(reply ?? ""),
                 "day", ReadDouble(payload, "worldDay", 0d), "payload", Json.Serialize(value), "ts", ts));
             return TestDict("status", "pending_reconciliation", "recoverable", true, "pendingId", pendingId,
@@ -127,18 +122,13 @@ ON CONFLICT(pending_id) DO NOTHING;", TestDict("id", pendingId, "record", record
             snapshot.DeliveredPending.Clear();
             var text = new StringBuilder();
             var access = Program.BuildKnowledgeAccessContext(owner, peer, "", payload);
-            var rows = ReignDatabase.QuerySql(connection, @"SELECT p.* FROM conversation_continuity_pending p
-LEFT JOIN conversation_turns t ON t.turn_id=p.source_turn_id
-WHERE p.timeline_id=$timeline AND p.owner_id=$owner AND p.peer_id=$peer AND p.status='pending' AND p.world_day<=$day
-AND p.created_ts<=$asof AND COALESCE(t.accepted_sequence,0)<=$sequence
-ORDER BY p.created_ts,p.pending_id LIMIT 17;", TestDict("timeline", ContinuityTimeline(payload), "owner", owner,
+            var rows = DialogueStore.SelectConversationContinuityPending(connection, TestDict("timeline", ContinuityTimeline(payload), "owner", owner,
                 "peer", peer, "day", access.WorldDay, "asof", access.AsOfTimestamp, "sequence", access.AsOfAcceptedSequence));
             var gaps = new List<string>();
             foreach (var row in rows.Take(16))
             {
                 string id = ReadString(row, "pending_id", ""), recordId = ReadString(row, "record_id", "");
-                var turn = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;",
-                    TestDict("id", ReadString(row, "source_turn_id", ""))).SingleOrDefault();
+                var turn = DialogueStore.SelectConversationTurns6(connection, TestDict("id", ReadString(row, "source_turn_id", ""))).SingleOrDefault();
                 var value = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
                 var source = ReadDictionary(value, "sourceEvidence");
                 string original = ReadString(turn, "text", "");
@@ -157,8 +147,7 @@ ORDER BY p.created_ts,p.pending_id LIMIT 17;", TestDict("timeline", ContinuityTi
                 })) { gaps.Add(id + ": source spans unavailable or changed"); continue; }
                 // Reread current state alongside the rejected update. Do not rebase
                 // a prepared write onto a newer revision or execute its effects.
-                var current = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id=$id AND owner_id=$owner AND timeline_id=$timeline;",
-                    TestDict("id", recordId, "owner", owner, "timeline", snapshot.Timeline)).SingleOrDefault();
+                var current = DialogueStore.SelectConversationContinuity6(connection, TestDict("id", recordId, "owner", owner, "timeline", snapshot.Timeline)).SingleOrDefault();
                 var currentValue = TryParseJsonObject(ReadString(current, "payload_json", "{}"));
                 if (current == null || !MemoryTimeVisible(current, access, connection))
                 { gaps.Add(id + ": current continuity state unavailable"); continue; }
@@ -185,9 +174,7 @@ ORDER BY p.created_ts,p.pending_id LIMIT 17;", TestDict("timeline", ContinuityTi
         {
             if (snapshot == null) return;
             foreach (var pending in snapshot.DeliveredPending.Where(p => p.Value == recordId))
-                ReignDatabase.ExecuteSql(connection, @"UPDATE conversation_continuity_pending SET status='superseded_after_reread',resolved_event_id=$event
-WHERE pending_id=$id AND record_id=$record AND timeline_id=$timeline AND status='pending' AND source_event_id<>$event;",
-                    TestDict("event", eventId, "id", pending.Key, "record", recordId, "timeline", snapshot.Timeline));
+                DialogueStore.UpdateConversationContinuityPending(connection, TestDict("event", eventId, "id", pending.Key, "record", recordId, "timeline", snapshot.Timeline));
         }
 
         private static Dictionary<string, object> BindAcceptedContinuityEvidence(ReignDbConnection connection,
@@ -195,9 +182,7 @@ WHERE pending_id=$id AND record_id=$record AND timeline_id=$timeline AND status=
         {
             // The accepted event is server-issued. sceneTurnId can identify a
             // preceding client scene; it is never the canonical source of a reply.
-            var turn = WorldSimulationService.TableExists(connection, "conversation_turns") ? ReignDatabase.QuerySql(connection, @"SELECT turn_id
-FROM conversation_turns WHERE event_id=$event AND speaker_id=$owner AND text=$text AND status='active'
-ORDER BY turn_order DESC LIMIT 1;", new Dictionary<string, object> {
+            var turn = WorldSimulationService.TableExists(connection, "conversation_turns") ? DialogueStore.SelectConversationTurns21(connection, new Dictionary<string, object> {
                 ["event"] = eventId, ["owner"] = owner, ["text"] = acceptedReply ?? "" }).FirstOrDefault() : null;
             string quoted = string.Join("\n", spans.Select(s => ReadString(s, "quote", "")));
             string type = HasUncertainty(quoted)

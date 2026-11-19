@@ -22,18 +22,17 @@ namespace ReignBetaServer
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     ReadMemoryPrecisionState(connection);
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json)
-VALUES('source_session',$campaign,'npc','player','open',1,1,'[""player"",""npc""]');", TestDict("campaign", campaign));
+                    DialogueSelfTestStore.InsertConversationSessions8(connection, TestDict("campaign", campaign));
                 }
                 int Count(string table, string turn = "")
                 {
                     using var connection = ReignDatabase.OpenCampaignConnection(campaign);
-                    return ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS n FROM " + table + (turn.Length == 0 ? "" : " WHERE turn_id=$turn") + ";", TestDict("turn", turn)).Single(), "n", 0);
+                    return ReadInt(DialogueSelfTestStore.CountDynamicDynamic(connection, table, turn.Length == 0 ? "" : " WHERE turn_id=$turn",TestDict("turn", turn)).Single(), "n", 0);
                 }
                 string Stored(string table, string id, string field)
                 {
                     using var connection = ReignDatabase.OpenCampaignConnection(campaign);
-                    return ReadString(ReignDatabase.QuerySql(connection, "SELECT * FROM " + table + " WHERE turn_id=$id;", TestDict("id", id)).Single(), field, "");
+                    return ReadString(DialogueSelfTestStore.SelectDynamic(connection, table,TestDict("id", id)).Single(), field, "");
                 }
                 Dictionary<string, object> Store(string id, Action<string> boundary = null) => StoreConversationExchange(campaign,
                     payload, "npc", "player", "Player", "Mira", "The old mill is my answer.", "I understand your answer.", id, 100, boundary);
@@ -72,7 +71,7 @@ VALUES('source_session',$campaign,'npc','player','open',1,1,'[""player"",""npc""
                         && Stored("conversation_turn_fts", "accepted_npc", "text") == "I understand your answer.");
                 }
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
-                    ReignDatabase.ExecuteSql(connection, "DELETE FROM conversation_turn_fts WHERE turn_id='accepted_npc';");
+                    DialogueSelfTestStore.DeleteConversationTurnFts(connection);
                 Store("accepted");
                 Check("repairs_derived_index_from_immutable_source", Count("conversation_turn_fts") == 2
                     && Stored("conversation_turn_fts", "accepted_npc", "text") == Stored("conversation_turns", "accepted_npc", "text"));
@@ -80,7 +79,7 @@ VALUES('source_session',$campaign,'npc','player','open',1,1,'[""player"",""npc""
                 Task.WaitAll(Enumerable.Range(0, 6).Select(index => Task.Run(() => Store("parallel_" + index))).ToArray());
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var turns = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id='source_session' ORDER BY turn_order;");
+                    var turns = DialogueSelfTestStore.SelectConversationTurns25(connection);
                     Check("concurrent_complete_pairs_have_distinct_order", turns.Count == 14
                         && turns.Select(t => ReadInt(t, "turn_order", -1)).Distinct().Count() == 14
                         && turns.GroupBy(t => ReadString(t, "exchange_id", "")).All(group => group.Count() == 2
@@ -150,13 +149,13 @@ VALUES('source_session',$campaign,'npc','player','open',1,1,'[""player"",""npc""
                     InsertConversationTurn(connection, "technical_new", "source_session", "technical_event", 99,
                         "technical_exchange", "npc", "npc", "Mira", notice, "in_person", 4d, 105L, "",
                         new List<string> { "npc", "player" }, payload);
-                    var technical = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='technical_new';").Single();
+                    var technical = DialogueSelfTestStore.SelectConversationTurns26(connection).Single();
                     Check("technical_notice_is_inactive_and_unindexed", ReadString(technical, "status", "") == "technical_notice"
-                        && !ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turn_fts WHERE turn_id='technical_new';").Any()
+                        && !DialogueSelfTestStore.SelectConversationTurnFts2(connection).Any()
                         && !ReadLogicalConversationTurns(connection, "source_session", 100).Any(t => ReadString(t, "turn_id", "") == "technical_new"));
-                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET status='active' WHERE turn_id='technical_new';");
+                    DialogueSelfTestStore.UpdateConversationTurns25(connection);
                     Check("legacy_active_notice_excluded_without_rewriting_row", !PrecisionTurnVisible(
-                        ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='technical_new';").Single(), "npc", null)
+                        DialogueSelfTestStore.SelectConversationTurns26(connection).Single(), "npc", null)
                         && !ReadLogicalConversationTurns(connection, "source_session", 100).Any(t => ReadString(t, "turn_id", "") == "technical_new"));
                     const string safeSpeech = "The old mill is settled. Which gate should we use?";
                     string mixed = safeSpeech + "\n\n" + notice + ".,";
@@ -174,9 +173,9 @@ VALUES('source_session',$campaign,'npc','player','open',1,1,'[""player"",""npc""
                         .Any(t => ReadString(t, "turn_id", "") == "recovered_speech" && ReadString(t, "text", "") == safeSpeech)
                         && continued.Any(t => ReadString(t, "turn_id", "") == "next_answer" && ReadString(t, "text", "") == "Use the east gate.")
                         && continued.Any(t => ReadString(t, "turn_id", "") == "next_reply")
-                        && ReignDatabase.QuerySql(connection, "SELECT text FROM conversation_turns WHERE turn_id='recovered_speech';")
+                        && DialogueSelfTestStore.SelectConversationTurns27(connection)
                             .Any(t => ReadString(t, "text", "") == mixed)
-                        && ReignDatabase.QuerySql(connection, "SELECT text FROM conversation_turn_fts WHERE turn_id='recovered_speech';")
+                        && DialogueSelfTestStore.SelectConversationTurnFts3(connection)
                             .Any(t => ReadString(t, "text", "") == safeSpeech));
                     RebuildCategorizedSearchIndexes(connection);
                     Check("diagnostic_cannot_support_future_continuity", ConversationContinuityLinkError(connection,
@@ -185,10 +184,9 @@ VALUES('source_session',$campaign,'npc','player','open',1,1,'[""player"",""npc""
                             == "related_source_quote_mismatch"
                         && ConversationContinuityLinkError(connection, TestDict("relatedTurnId", "recovered_speech",
                             "relationKind", "answer", "relatedQuote", "Which gate should we use?"), "npc", "source_branch", 4d) == "");
-                    Check("index_rebuild_keeps_safe_speech_without_diagnostic", ReignDatabase.QuerySql(connection,
-                        "SELECT text FROM conversation_turn_fts WHERE turn_id='recovered_speech';")
+                    Check("index_rebuild_keeps_safe_speech_without_diagnostic", DialogueSelfTestStore.SelectConversationTurnFts3(connection)
                         .Any(t => ReadString(t, "text", "") == safeSpeech)
-                        && !ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turn_fts WHERE turn_id='technical_new';").Any());
+                        && !DialogueSelfTestStore.SelectConversationTurnFts2(connection).Any());
                 }
             }
             finally

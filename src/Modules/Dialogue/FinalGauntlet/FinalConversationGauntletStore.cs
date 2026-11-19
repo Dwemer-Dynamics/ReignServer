@@ -13,91 +13,9 @@ namespace ReignBetaServer
 
         internal static void EnsureSchema(ReignDbConnection connection)
         {
-            Execute(connection, @"
-CREATE TABLE IF NOT EXISTS final_gauntlet_runs(
-    run_id TEXT PRIMARY KEY,
-    campaign_id TEXT NOT NULL,
-    stage TEXT NOT NULL,
-    build_version TEXT NOT NULL,
-    state TEXT NOT NULL,
-    created_ts INTEGER NOT NULL,
-    updated_ts INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS final_gauntlet_cases(
-    run_id TEXT NOT NULL,
-    case_instance_id TEXT NOT NULL,
-    family TEXT NOT NULL,
-    evaluation_kind TEXT NOT NULL,
-    execution_kind TEXT NOT NULL,
-    mode TEXT NOT NULL,
-    requires_provider INTEGER NOT NULL,
-    requires_game INTEGER NOT NULL,
-    requirement_ids TEXT NOT NULL,
-    tags TEXT NOT NULL,
-    behavioral_requirement TEXT NOT NULL,
-    hard_prohibitions TEXT NOT NULL,
-    prerequisite_capabilities TEXT NOT NULL,
-    evidence_needs TEXT NOT NULL,
-    state TEXT NOT NULL,
-    created_ts INTEGER NOT NULL,
-    updated_ts INTEGER NOT NULL,
-    PRIMARY KEY(run_id,case_instance_id));
-CREATE TABLE IF NOT EXISTS final_gauntlet_attempts(
-    run_id TEXT NOT NULL,
-    case_instance_id TEXT NOT NULL,
-    attempt_number INTEGER NOT NULL,
-    correlation_id TEXT NOT NULL,
-    status TEXT NOT NULL,
-    error TEXT NOT NULL DEFAULT '',
-    created_ts INTEGER NOT NULL,
-    PRIMARY KEY(run_id,case_instance_id,attempt_number),
-    UNIQUE(run_id,correlation_id));
-CREATE TABLE IF NOT EXISTS final_gauntlet_assertions(
-    run_id TEXT NOT NULL,
-    case_instance_id TEXT NOT NULL,
-    assertion_id TEXT NOT NULL,
-    passed INTEGER NOT NULL,
-    payload_json TEXT NOT NULL,
-    created_ts INTEGER NOT NULL,
-    PRIMARY KEY(run_id,case_instance_id,assertion_id));
-CREATE TABLE IF NOT EXISTS final_gauntlet_evidence(
-    run_id TEXT NOT NULL,
-    case_instance_id TEXT NOT NULL,
-    evidence_key TEXT NOT NULL,
-    schema_version INTEGER NOT NULL,
-    payload_json TEXT NOT NULL,
-    created_ts INTEGER NOT NULL,
-    PRIMARY KEY(run_id,case_instance_id,evidence_key));
-CREATE TABLE IF NOT EXISTS final_gauntlet_review_items(
-    run_id TEXT NOT NULL,
-    review_id TEXT NOT NULL,
-    case_instance_id TEXT NOT NULL,
-    blinded_payload_json TEXT NOT NULL,
-    answer_key_json TEXT NOT NULL,
-    created_ts INTEGER NOT NULL,
-    PRIMARY KEY(run_id,review_id));
-CREATE TABLE IF NOT EXISTS final_gauntlet_provider_correlations(
-    run_id TEXT NOT NULL,
-    case_instance_id TEXT NOT NULL,
-    correlation_id TEXT NOT NULL,
-    created_ts INTEGER NOT NULL,
-    PRIMARY KEY(run_id,correlation_id));
-CREATE TABLE IF NOT EXISTS final_gauntlet_provider_calls(
-    run_id TEXT NOT NULL,
-    provider_call_id TEXT NOT NULL,
-    case_instance_id TEXT NOT NULL,
-    correlation_id TEXT NOT NULL,
-    request_type TEXT NOT NULL,
-    model TEXT NOT NULL,
-    physical_attempt INTEGER NOT NULL,
-    ordinal INTEGER NOT NULL,
-    status TEXT NOT NULL,
-    started_ts INTEGER NOT NULL,
-    completed_ts INTEGER NOT NULL DEFAULT 0,
-    error TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY(run_id,provider_call_id),
-    UNIQUE(run_id,ordinal));");
+            Execute(connection, DialogueSchema.CreateFinalGauntletRunsSql);
             Execute(connection,
-                "ALTER TABLE final_gauntlet_attempts ADD COLUMN IF NOT EXISTS error TEXT NOT NULL DEFAULT '';");
+                DialogueSchema.AlterFinalGauntletAttemptsSql);
         }
 
         internal static void RecordAttemptError(
@@ -108,8 +26,7 @@ CREATE TABLE IF NOT EXISTS final_gauntlet_provider_calls(
             string error)
         {
             Execute(connection,
-                @"UPDATE final_gauntlet_attempts SET error=$error
-WHERE run_id=$run AND case_instance_id=$case AND attempt_number=$attempt;",
+                DialogueStore.UpdateFinalGauntletAttemptsSql,
                 null,
                 ("$error", error ?? string.Empty),
                 ("$run", runId),
@@ -141,9 +58,7 @@ WHERE run_id=$run AND case_instance_id=$case AND attempt_number=$attempt;",
             {
                 Execute(
                     connection,
-                    @"INSERT INTO final_gauntlet_runs(
-run_id,campaign_id,stage,build_version,state,created_ts,updated_ts)
-VALUES($run,$campaign,$stage,$build,'planned',$ts,$ts);",
+                    DialogueStore.InsertFinalGauntletRunsSql,
                     transaction,
                     ("$run", runId),
                     ("$campaign", campaignId),
@@ -154,12 +69,7 @@ VALUES($run,$campaign,$stage,$build,'planned',$ts,$ts);",
                 {
                     Execute(
                         connection,
-                        @"INSERT INTO final_gauntlet_cases(
-run_id,case_instance_id,family,evaluation_kind,execution_kind,mode,
-requires_provider,requires_game,requirement_ids,tags,behavioral_requirement,
-hard_prohibitions,prerequisite_capabilities,evidence_needs,state,created_ts,updated_ts)
-VALUES($run,$case,$family,$evaluation,$execution,$mode,$provider,$game,
-$requirements,$tags,$behavior,$prohibitions,$prerequisites,$evidence,'Planned',$ts,$ts);",
+                        DialogueStore.InsertFinalGauntletCasesSql2,
                         transaction,
                         ("$run", runId),
                         ("$case", descriptor.CaseId),
@@ -192,9 +102,7 @@ $requirements,$tags,$behavior,$prohibitions,$prerequisites,$evidence,'Planned',$
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             using (ReignDbCommand command = connection.CreateCommand())
             {
-                command.CommandText = ReignPostgreSqlDialect.Normalize(connection, @"UPDATE final_gauntlet_cases
-SET state=$next,updated_ts=$ts
-WHERE run_id=$run AND case_instance_id=$case AND state=$expected;");
+                command.CommandText = ReignPostgreSqlDialect.Normalize(connection, DialogueStore.UpdateFinalGauntletCasesSql7);
                 Add(command, "$next", next.ToString());
                 Add(command, "$ts", now);
                 Add(command, "$run", runId);
@@ -223,9 +131,7 @@ WHERE run_id=$run AND case_instance_id=$case AND state=$expected;");
             {
                 Execute(
                     connection,
-                    @"INSERT INTO final_gauntlet_attempts(
-run_id,case_instance_id,attempt_number,correlation_id,status,created_ts)
-VALUES($run,$case,$attempt,$correlation,$status,$ts);",
+                    DialogueStore.InsertFinalGauntletAttemptsSql,
                     null,
                     ("$run", runId),
                     ("$case", caseInstanceId),
@@ -251,8 +157,7 @@ VALUES($run,$case,$attempt,$correlation,$status,$ts);",
             using (ReignDbCommand command = connection.CreateCommand())
             {
                 command.CommandText = ReignPostgreSqlDialect.Normalize(connection,
-                    @"SELECT run_id,campaign_id,stage,build_version,state
-FROM final_gauntlet_runs WHERE run_id=$run LIMIT 1;");
+                    DialogueStore.SelectFinalGauntletRunsSql2);
                 Add(command, "$run", runId);
                 using (ReignDbDataReader reader = command.ExecuteReader())
                 {
@@ -268,12 +173,7 @@ FROM final_gauntlet_runs WHERE run_id=$run LIMIT 1;");
             using (ReignDbCommand command = connection.CreateCommand())
             {
                 command.CommandText = ReignPostgreSqlDialect.Normalize(connection,
-                    @"SELECT c.case_instance_id,c.family,c.mode,c.state,
-(SELECT COUNT(*) FROM final_gauntlet_attempts a
- WHERE a.run_id=c.run_id AND a.case_instance_id=c.case_instance_id)
-FROM final_gauntlet_cases c
-WHERE c.run_id=$run
-ORDER BY c.created_ts,c.case_instance_id;");
+                    DialogueStore.SelectFinalGauntletAttemptsSql2);
                 Add(command, "$run", runId);
                 using (ReignDbDataReader reader = command.ExecuteReader())
                 {

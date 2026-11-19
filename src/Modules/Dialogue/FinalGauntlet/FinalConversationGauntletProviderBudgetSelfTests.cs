@@ -43,10 +43,7 @@ namespace ReignBetaServer
                     && registered != null && backfill != null,
                 "The final gauntlet exposes correlation registration, physical dispatch reservation, and completion contracts.");
 
-            const string evidenceSql = @"SELECT case_instance_id,payload_json
-FROM final_gauntlet_evidence
-WHERE run_id=$run AND evidence_key='production_result'
-ORDER BY case_instance_id;";
+            const string evidenceSql = DialogueSelfTestStore.SelectFinalGauntletEvidenceSql;
             using (NpgsqlConnection postgreSql = new NpgsqlConnection())
             {
                 string normalized = ReignPostgreSqlDialect.Normalize(
@@ -65,11 +62,7 @@ ORDER BY case_instance_id;";
                 bool ledgerExists;
                 using (ReignDbCommand command = connection.CreateCommand())
                 {
-                    command.CommandText = @"SELECT COUNT(*)
-FROM information_schema.tables
-WHERE table_schema=current_schema()
-  AND table_type='BASE TABLE'
-  AND table_name='final_gauntlet_provider_calls';";
+                    command.CommandText = DialogueSelfTestStore.CountTablesSql;
                     ledgerExists = Convert.ToInt64(
                         command.ExecuteScalar()) == 1;
                 }
@@ -98,9 +91,7 @@ WHERE table_schema=current_schema()
                     });
                 using (ReignDbCommand command = connection.CreateCommand())
                 {
-                    command.CommandText = @"INSERT INTO final_gauntlet_evidence(
-run_id,case_instance_id,evidence_key,schema_version,payload_json,created_ts)
-VALUES('run-audit','case-audit','production_result',4,@payload,1);";
+                    command.CommandText = DialogueSelfTestStore.InsertFinalGauntletEvidenceSql2;
                     command.Parameters.AddWithValue(
                         "payload",
                         "{\"sourceAuditEntries\":["
@@ -124,8 +115,7 @@ VALUES('run-audit','case-audit','production_result',4,@payload,1);";
                 string auditedStatus;
                 using (ReignDbCommand command = connection.CreateCommand())
                 {
-                    command.CommandText = @"SELECT COUNT(*),MAX(status)
-FROM final_gauntlet_provider_calls WHERE run_id='run-audit';";
+                    command.CommandText = DialogueSelfTestStore.CountFinalGauntletProviderCallsSql;
                     using (ReignDbDataReader reader = command.ExecuteReader())
                     {
                         reader.Read();
@@ -226,30 +216,12 @@ FROM final_gauntlet_provider_calls WHERE run_id='run-audit';";
                 "final_gauntlet_review_items"
             })
             {
-                ReignDatabase.ExecuteSql(connection,
-                    "DELETE FROM " + table + " WHERE run_id=$run;",
-                    parameters);
+                DialogueSelfTestStore.DeleteDynamic(connection, table,                    parameters);
             }
-            ReignDatabase.ExecuteSql(connection,
-                "DELETE FROM final_gauntlet_cases WHERE run_id=$run;",
-                parameters);
-            ReignDatabase.ExecuteSql(connection,
-                "DELETE FROM final_gauntlet_runs WHERE run_id=$run;",
-                parameters);
-            ReignDatabase.ExecuteSql(connection, @"
-INSERT INTO final_gauntlet_runs(
-run_id,campaign_id,stage,build_version,state,created_ts,updated_ts)
-VALUES($run,'self-test','stage-a','self-test','running',1,1);",
-                parameters);
-            ReignDatabase.ExecuteSql(connection, @"
-INSERT INTO final_gauntlet_cases(
-run_id,case_instance_id,family,evaluation_kind,execution_kind,mode,
-requires_provider,requires_game,requirement_ids,tags,
-behavioral_requirement,hard_prohibitions,prerequisite_capabilities,
-evidence_needs,state,created_ts,updated_ts)
-VALUES($run,$case,'self-test','deterministic','server','individual',
-1,0,'[]','[]','self-test','[]','[]','[]','ready',1,1);",
-                parameters);
+            DialogueSelfTestStore.DeleteFinalGauntletCases(connection, parameters);
+            DialogueSelfTestStore.DeleteFinalGauntletRuns2(connection, parameters);
+            DialogueSelfTestStore.InsertFinalGauntletRuns(connection, parameters);
+            DialogueSelfTestStore.InsertFinalGauntletCases(connection, parameters);
         }
     }
 }

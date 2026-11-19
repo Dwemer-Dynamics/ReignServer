@@ -131,15 +131,7 @@ namespace ReignBetaServer
             catch { }
         }
 
-        private static void EnsureLateInteractionMemorySchema(ReignDbConnection connection) => ReignDatabase.ExecuteSql(connection, @"
-CREATE TABLE IF NOT EXISTS memory_late_interaction_sources (
- turn_id TEXT NOT NULL,view TEXT NOT NULL,source_hash TEXT NOT NULL,text_hash TEXT NOT NULL,
- source_revision TEXT NOT NULL,model_hash TEXT NOT NULL,schema_version TEXT NOT NULL,
- worker_epoch TEXT NOT NULL,updated_ts BIGINT NOT NULL,PRIMARY KEY(turn_id,view));
-ALTER TABLE memory_late_interaction_sources ADD COLUMN IF NOT EXISTS transcript_hash TEXT NOT NULL DEFAULT '';
-CREATE TABLE IF NOT EXISTS memory_late_interaction_attempts (
- turn_id TEXT PRIMARY KEY,source_revision TEXT NOT NULL,model_hash TEXT NOT NULL,schema_version TEXT NOT NULL,
- attempts INTEGER NOT NULL,next_attempt_ts BIGINT NOT NULL,outcome TEXT NOT NULL);");
+        private static void EnsureLateInteractionMemorySchema(ReignDbConnection connection) => DialogueSchema.CreateMemoryLateInteractionSources(connection);
 
         private static bool LateInteractionQualified(Dictionary<string, object> settings)
         {
@@ -280,14 +272,7 @@ AND t.world_day<=$day AND t.accepted_sequence<=$asOfSequence AND t.ts<=$asOfTime
                 // Receipts bind exact source content to PostgreSQL's current row
                 // revision. Read metadata for the whole eligible history, not all
                 // prose and not just the current lexical candidate pool.
-                var metadata = ReignDatabase.QuerySql(connection, @"SELECT t.turn_id,t.session_id,t.exchange_id,t.speaker_id,t.status,
-t.world_day,t.ts,t.accepted_sequence,t.participants_json,t.payload_json,i.source_hash,i.text_hash,i.transcript_hash,
-CASE WHEN t.speaker_id=$npc THEN 'self' ELSE 'public' END AS view
-FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id
-LEFT JOIN memory_late_interaction_sources i ON i.turn_id=t.turn_id
- AND i.view=CASE WHEN t.speaker_id=$npc THEN 'self' ELSE 'public' END
- AND i.source_revision=t.xmin::text AND i.model_hash=$model AND i.schema_version=$schema
-WHERE " + eligible + " ORDER BY t.turn_id LIMIT 50001;", args);
+                var metadata = DialogueStore.SelectConversationTurns55(connection, eligible,args);
                 if (metadata.Count > 50000) { audit["status"] = "eligibility_limit_exceeded"; return empty; }
                 metadata = metadata.Where(r => MemoryTimeVisible(r, knowledge, connection)
                     && !(plan.SuppliedSources != null && plan.SuppliedSources.TryGetValue(ReadString(r,"turn_id",""), out string suppliedHash)
@@ -296,8 +281,7 @@ WHERE " + eligible + " ORDER BY t.turn_id LIMIT 50001;", args);
                 {
                     // Reject recall-only source sessions before scoring, including
                     // as-of limits. An unseen future answer cannot qualify a session.
-                    var players = ReignDatabase.QuerySql(connection, "SELECT t.* FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id WHERE "
-                        + eligible + " AND t.role='player' ORDER BY t.turn_id LIMIT 50001;", args);
+                    var players = DialogueStore.SelectConversationTurns56(connection, eligible,args);
                     if (players.Count > 50000) { audit["status"] = "source_session_limit_exceeded"; return empty; }
                     var sourceSessions = players.Where(r => PrecisionTurnVisible(r, knowledge.NpcId, knowledge, connection)
                         && !IsPureConversationRecallRequest(ReadString(r, "text", "")))
@@ -335,7 +319,7 @@ WHERE " + eligible + " ORDER BY t.turn_id LIMIT 50001;", args);
                     { audit["status"] = "invalid_source_result"; return empty; }
                     // Reload original words after the worker returns. A deleted,
                     // edited or restored-out row invalidates its cached score.
-                    var row = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).SingleOrDefault();
+                    var row = DialogueStore.SelectConversationTurns6(connection, TestDict("id", id)).SingleOrDefault();
                     if (row == null || !PrecisionTurnVisible(row, knowledge.NpcId, knowledge, connection)
                         || MemorySpecialistSourceHash(row) != ReadString(hit, "sourceHash", "")) continue;
                     var view = LateInteractionView(row, ReadString(hit, "view", ""));
@@ -388,16 +372,11 @@ WHERE " + eligible + " ORDER BY t.turn_id LIMIT 50001;", args);
                 List<Dictionary<string, object>> sources;
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    string missing = @"SELECT t.*,t.xmin::text AS source_revision FROM conversation_turns t
-LEFT JOIN memory_late_interaction_attempts a ON a.turn_id=t.turn_id AND a.source_revision=t.xmin::text
- AND a.model_hash=$model AND a.schema_version=$schema
-WHERE t.status='active' AND t.text<>'' AND (a.turn_id IS NULL OR (a.attempts<4 AND a.next_attempt_ts<=$now))
-AND (SELECT COUNT(*) FROM memory_late_interaction_sources i WHERE i.turn_id=t.turn_id
-AND i.source_revision=t.xmin::text AND i.model_hash=$model AND i.schema_version=$schema AND i.worker_epoch=$epoch AND i.transcript_hash<>'')<2";
+                    string missing = DialogueStore.SelectConversationTurnsSql3;
                     var args = TestDict("model", LateInteractionModelHash, "schema", LateInteractionIndexSchema, "epoch", epoch,
                         "now", DateTimeOffset.UtcNow.ToUnixTimeSeconds(), "limit", Math.Clamp(limit, 1, 64));
-                    sources = ReignDatabase.QuerySql(connection, missing + " ORDER BY t.accepted_sequence DESC,t.turn_id LIMIT $limit;", args)
-                        .Concat(ReignDatabase.QuerySql(connection, missing + " ORDER BY t.accepted_sequence,t.turn_id LIMIT $limit;", args))
+                    sources = DialogueStore.Statement3(connection, missing,args)
+                        .Concat(DialogueStore.Statement4(connection, missing,args))
                         .GroupBy(r => ReadString(r, "turn_id", "")).Select(g => g.First()).ToList();
                 }
                 foreach (var source in sources)
@@ -429,7 +408,7 @@ AND i.source_revision=t.xmin::text AND i.model_hash=$model AND i.schema_version=
                     using var connection = ReignDatabase.OpenCampaignConnection(campaign);
                     using var transaction = connection.BeginTransaction();
                     AcquirePostgreSqlTransactionMutationLock(connection);
-                    var current = ReignDatabase.QuerySql(connection, "SELECT *,xmin::text AS source_revision FROM conversation_turns WHERE turn_id=$id;", TestDict("id", source["turn_id"])).SingleOrDefault();
+                    var current = DialogueStore.SelectConversationTurns57(connection, TestDict("id", source["turn_id"])).SingleOrDefault();
                     if (current != null && MemorySpecialistSourceHash(current) == MemorySpecialistSourceHash(source))
                     {
                         foreach (var receipt in ReadDictionaryList(response, "sources"))
@@ -439,7 +418,7 @@ AND i.source_revision=t.xmin::text AND i.model_hash=$model AND i.schema_version=
                             if (expected == null) continue;
                             StoreLateInteractionReceipt(connection, current, expected, epoch);
                         }
-                        ReignDatabase.ExecuteSql(connection, "DELETE FROM memory_late_interaction_attempts WHERE turn_id=$id;", TestDict("id", source["turn_id"]));
+                        DialogueStore.DeleteMemoryLateInteractionAttempts(connection, TestDict("id", source["turn_id"]));
                         // Empty observer projections have no searchable text but
                         // still need a completion receipt, preventing endless work.
                         foreach (string missingView in new[] { "self", "public" }.Except(views.Select(v => ReadString(v, "view", ""))))
@@ -456,13 +435,7 @@ AND i.source_revision=t.xmin::text AND i.model_hash=$model AND i.schema_version=
         private static void RecordLateInteractionIndexFailure(string campaign, Dictionary<string, object> source, string outcome, Dictionary<string, object> response = null)
         {
             using var connection = ReignDatabase.OpenCampaignConnection(campaign);
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO memory_late_interaction_attempts(turn_id,source_revision,model_hash,schema_version,attempts,next_attempt_ts,outcome)
-VALUES($id,$revision,$model,$schema,1,$next,$outcome) ON CONFLICT(turn_id) DO UPDATE SET
-attempts=CASE WHEN memory_late_interaction_attempts.source_revision=excluded.source_revision
- AND memory_late_interaction_attempts.model_hash=excluded.model_hash AND memory_late_interaction_attempts.schema_version=excluded.schema_version
- THEN memory_late_interaction_attempts.attempts+1 ELSE 1 END,source_revision=excluded.source_revision,
-model_hash=excluded.model_hash,schema_version=excluded.schema_version,next_attempt_ts=excluded.next_attempt_ts,outcome=excluded.outcome;",
-                TestDict("id", ReadString(source, "turn_id", ""), "revision", ReadString(source, "source_revision", ""),
+            DialogueStore.UpsertMemoryLateInteractionAttempts(connection, TestDict("id", ReadString(source, "turn_id", ""), "revision", ReadString(source, "source_revision", ""),
                     "model", LateInteractionModelHash, "schema", LateInteractionIndexSchema, "next", DateTimeOffset.UtcNow.ToUnixTimeSeconds()+300,
                     "outcome", LateInteractionIndexOutcome(outcome)));
             var audit = response != null ? LateInteractionWorkerFailureDetails(response) : TestDict();
@@ -477,13 +450,7 @@ model_hash=excluded.model_hash,schema_version=excluded.schema_version,next_attem
         }
 
         private static void StoreLateInteractionReceipt(ReignDbConnection connection, Dictionary<string, object> source,
-            Dictionary<string, object> view, string epoch) => ReignDatabase.ExecuteSql(connection, @"INSERT INTO memory_late_interaction_sources
-(turn_id,view,source_hash,text_hash,source_revision,model_hash,schema_version,worker_epoch,updated_ts,transcript_hash)
-VALUES($id,$view,$source,$text,$revision,$model,$schema,$epoch,$ts,$transcript)
-ON CONFLICT(turn_id,view) DO UPDATE SET source_hash=excluded.source_hash,text_hash=excluded.text_hash,
-source_revision=excluded.source_revision,model_hash=excluded.model_hash,schema_version=excluded.schema_version,
-worker_epoch=excluded.worker_epoch,updated_ts=excluded.updated_ts,transcript_hash=excluded.transcript_hash;",
-            TestDict("id", ReadString(source, "turn_id", ""), "view", ReadString(view, "view", ""),
+            Dictionary<string, object> view, string epoch) => DialogueStore.UpsertMemoryLateInteractionSources(connection, TestDict("id", ReadString(source, "turn_id", ""), "view", ReadString(view, "view", ""),
                 "source", ReadString(view, "sourceHash", ""), "text", ReadString(view, "textHash", ""),
                 "revision", ReadString(source, "source_revision", ""), "model", LateInteractionModelHash,
                 "schema", LateInteractionIndexSchema, "epoch", epoch, "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds(),

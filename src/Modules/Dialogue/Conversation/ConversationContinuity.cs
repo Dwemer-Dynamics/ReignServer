@@ -67,22 +67,7 @@ namespace ReignBetaServer
 
         private static void EnsureConversationContinuitySchema(ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_continuity (
-record_id TEXT PRIMARY KEY, timeline_id TEXT NOT NULL, owner_id TEXT NOT NULL, peer_id TEXT NOT NULL,
-kind TEXT NOT NULL, status TEXT NOT NULL, importance REAL NOT NULL, revision INTEGER NOT NULL,
-source_event_id TEXT NOT NULL, source_turn_id TEXT NOT NULL, updated_ts INTEGER NOT NULL, payload_json TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS idx_continuity_owner ON conversation_continuity(timeline_id,owner_id,kind,status);
-CREATE TABLE IF NOT EXISTS conversation_continuity_versions (
-version_id TEXT PRIMARY KEY, record_id TEXT NOT NULL, source_event_id TEXT NOT NULL,
-revision INTEGER NOT NULL, payload_json TEXT NOT NULL, created_ts INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS conversation_scene_handoffs (
-handoff_id TEXT PRIMARY KEY, timeline_id TEXT NOT NULL, owner_id TEXT NOT NULL, anchor TEXT NOT NULL,
-source_turn_id TEXT NOT NULL, world_day REAL NOT NULL, payload_json TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS conversation_continuity_pending (
-pending_id TEXT PRIMARY KEY,record_id TEXT NOT NULL,timeline_id TEXT NOT NULL,owner_id TEXT NOT NULL,peer_id TEXT NOT NULL,
-source_event_id TEXT NOT NULL,source_turn_id TEXT NOT NULL,source_hash TEXT NOT NULL,world_day REAL NOT NULL,
-status TEXT NOT NULL,payload_json TEXT NOT NULL,created_ts BIGINT NOT NULL,resolved_event_id TEXT NOT NULL DEFAULT '');
-CREATE INDEX IF NOT EXISTS idx_continuity_pending_owner ON conversation_continuity_pending(timeline_id,owner_id,status);");
+            DialogueSchema.CreateConversationContinuity(connection);
         }
 
         internal static string ContinuityTimeline(Dictionary<string, object> payload) =>
@@ -121,15 +106,12 @@ CREATE INDEX IF NOT EXISTS idx_continuity_pending_owner ON conversation_continui
             EnsureConversationContinuitySchema(connection);
             string owner = ReadString(participant, "heroStringId", "");
             string timeline = ContinuityTimeline(payload);
-            var row = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_scene_handoffs WHERE handoff_id=$id;",
-                new Dictionary<string, object> { ["id"] = timeline + ":" + owner }).FirstOrDefault();
-            if (row == null) return ReignDatabase.QuerySql(connection, "SELECT handoff_id FROM conversation_scene_handoffs WHERE owner_id=$owner LIMIT 1;",
-                TestDict("owner", owner)).Count > 0 ? new Dictionary<string, object>() : null;
+            var row = DialogueStore.SelectConversationSceneHandoffs(connection, new Dictionary<string, object> { ["id"] = timeline + ":" + owner }).FirstOrDefault();
+            if (row == null) return DialogueStore.SelectConversationSceneHandoffs2(connection, TestDict("owner", owner)).Count > 0 ? new Dictionary<string, object>() : null;
             if (ReadString(row, "anchor", "") != ContinuitySceneAnchor(payload, participant)
                 || ReadDouble(payload, "worldDay", 0d) < ReadDouble(row, "world_day", 0d))
             {
-                ReignDatabase.ExecuteSql(connection, "DELETE FROM conversation_scene_state WHERE hero_id=$id;",
-                    new Dictionary<string, object> { ["id"] = owner });
+                DialogueStore.DeleteConversationSceneState(connection, new Dictionary<string, object> { ["id"] = owner });
                 return new Dictionary<string, object>();
             }
             var result = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
@@ -169,9 +151,7 @@ CREATE INDEX IF NOT EXISTS idx_continuity_pending_owner ON conversation_continui
                     string turn = ReadString(exchange, "turnId", ""), session = ReadString(exchange, "sessionId", "");
                     var access = Program.BuildKnowledgeAccessContext(observer,
                         ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"), "", payload);
-                    var rows = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_turns
-WHERE session_id=$session AND (exchange_id=$turn OR event_id=$turn OR turn_id=$turn)
-AND status='active' ORDER BY turn_order LIMIT 16;", TestDict("session", session, "turn", turn))
+                    var rows = DialogueStore.SelectConversationTurns15(connection, TestDict("session", session, "turn", turn))
                         .Where(row => PrecisionTurnVisible(row, observer, access, connection)).ToList();
                     var npc = rows.LastOrDefault(row => ReadString(row, "speaker_id", "") == speaker);
                     if (npc == null) continue;
@@ -204,11 +184,9 @@ AND status='active' ORDER BY turn_order LIMIT 16;", TestDict("session", session,
             {
                 string owner = ReadString(participant, "heroStringId", "");
                 if (hearingAudience != null && !hearingAudience.Contains(owner, StringComparer.OrdinalIgnoreCase)) continue;
-                var row = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_scene_state WHERE hero_id=$id;",
-                    new Dictionary<string, object> { ["id"] = owner }).FirstOrDefault();
+                var row = DialogueStore.SelectConversationSceneState(connection, new Dictionary<string, object> { ["id"] = owner }).FirstOrDefault();
                 string timeline = ContinuityTimeline(payload);
-                var old = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_scene_handoffs WHERE handoff_id=$id;",
-                    new Dictionary<string, object> { ["id"] = timeline + ":" + owner }).FirstOrDefault();
+                var old = DialogueStore.SelectConversationSceneHandoffs(connection, new Dictionary<string, object> { ["id"] = timeline + ":" + owner }).FirstOrDefault();
                 var previous = TryParseJsonObject(ReadString(old, "payload_json", "{}"));
                 row = row ?? (ReadString(old, "anchor", "") == ContinuitySceneAnchor(payload, participant)
                     ? new Dictionary<string, object>(previous ?? new Dictionary<string, object>()) : new Dictionary<string, object>());
@@ -237,9 +215,7 @@ AND status='active' ORDER BY turn_order LIMIT 16;", TestDict("session", session,
                     ["reply"] = ObserverConversationText(reply, speakerId, owner), ["worldDay"] = ReadDouble(payload, "worldDay", 0d),
                     ["sessionId"] = ReadFirstString(payload, "conversationSessionId", "sessionId", "eventId") });
                 row["acceptedExchanges"] = exchanges.Skip(Math.Max(0, exchanges.Count - 2)).ToList();
-                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO conversation_scene_handoffs
-(handoff_id,timeline_id,owner_id,anchor,source_turn_id,world_day,payload_json) VALUES($id,$timeline,$owner,$anchor,$turn,$day,$payload);",
-                    new Dictionary<string, object> { ["id"] = timeline + ":" + owner, ["timeline"] = timeline, ["owner"] = owner,
+                DialogueStore.UpsertConversationSceneHandoffs(connection, new Dictionary<string, object> { ["id"] = timeline + ":" + owner, ["timeline"] = timeline, ["owner"] = owner,
                         ["anchor"] = ContinuitySceneAnchor(payload, participant), ["turn"] = turnId,
                         ["day"] = ReadDouble(payload, "worldDay", 0d), ["payload"] = Json.Serialize(row) });
             }
@@ -280,12 +256,10 @@ AND status='active' ORDER BY turn_order LIMIT 16;", TestDict("session", session,
                 if (reason.Length == 0) reason = ConversationContinuityLinkError(connection, write, ownerId, timeline, ReadDouble(payload, "worldDay", 0d));
                 string parentId = CurrentContinuityRecordId(connection, timeline, ownerId, ReadString(write, "parentId", ""));
                 if (!string.IsNullOrWhiteSpace(parentId)
-                    && ReignDatabase.QuerySql(connection, "SELECT record_id FROM conversation_continuity WHERE record_id=$id AND owner_id=$owner AND " + MemorySourceTimelineSql("conversation_continuity") + " AND kind='agenda';",
-                        new Dictionary<string, object> { ["id"] = parentId, ["owner"] = ownerId, ["timeline"] = timeline }).Count == 0) reason = "unverified_parent_concern";
+                    && DialogueStore.SelectConversationContinuity2(connection, MemorySourceTimelineSql("conversation_continuity"),                        new Dictionary<string, object> { ["id"] = parentId, ["owner"] = ownerId, ["timeline"] = timeline }).Count == 0) reason = "unverified_parent_concern";
                 if (string.IsNullOrWhiteSpace(id)) id = "continuity_" + PromptHash(timeline + "|" + ownerId + "|" + kind + "|" + pair + "|" + Program.NormalizeLookup(subject)).Substring(0, 32);
                 id = CurrentContinuityRecordId(connection, timeline, ownerId, id);
-                var previous = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id=$id;",
-                    new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
+                var previous = DialogueStore.SelectConversationContinuity3(connection, new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
                 bool inherited = previous != null && ReadString(previous, "timeline_id", "") != timeline;
                 if (previous != null && (ReadString(previous, "owner_id", "") != ownerId
                     || (inherited && (snapshot == null || !snapshot.Records.ContainsKey(id)
@@ -337,15 +311,7 @@ AND status='active' ORDER BY turn_order LIMIT 16;", TestDict("session", session,
                     ["sourceEvidence"] = source
                 }) value[field.Key] = field.Value;
                 string json = Json.Serialize(value);
-                var changed = ReignDatabase.QuerySql(connection, @"INSERT INTO conversation_continuity
-(record_id,timeline_id,owner_id,peer_id,kind,status,importance,revision,source_event_id,source_turn_id,updated_ts,payload_json)
-VALUES($id,$timeline,$owner,$peer,$kind,$status,$importance,$revision,$event,$turn,$ts,$payload)
-ON CONFLICT(record_id) DO UPDATE SET status=excluded.status,importance=excluded.importance,
-revision=excluded.revision,source_event_id=excluded.source_event_id,source_turn_id=excluded.source_turn_id,
-updated_ts=excluded.updated_ts,payload_json=excluded.payload_json
-WHERE conversation_continuity.revision=$expected AND conversation_continuity.owner_id=$owner
-AND conversation_continuity.timeline_id=$timeline RETURNING record_id;",
-                    new Dictionary<string, object> { ["id"] = id, ["timeline"] = timeline, ["owner"] = ownerId, ["peer"] = pair,
+                var changed = DialogueStore.UpsertConversationContinuity(connection, new Dictionary<string, object> { ["id"] = id, ["timeline"] = timeline, ["owner"] = ownerId, ["peer"] = pair,
                         ["kind"] = kind, ["status"] = status, ["importance"] = Program.ClampDouble(ReadDouble(write, "importance", 0.5d), 0d, 1d),
                         ["revision"] = revision + 1, ["expected"] = inherited ? 0 : expected, ["event"] = eventId,
                         ["turn"] = ReadString(source, "turnId", ""), ["ts"] = ts, ["payload"] = json });
@@ -357,8 +323,7 @@ AND conversation_continuity.timeline_id=$timeline RETURNING record_id;",
                     continue;
                 }
                 if (inherited) LinkBranchedContinuityRecord(connection, timeline, ownerId, inheritedId, id);
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_continuity_versions(version_id,record_id,source_event_id,revision,payload_json,created_ts)
-VALUES($id,$record,$event,$revision,$payload,$ts);", new Dictionary<string, object> { ["id"] = id + "_" + (revision + 1),
+                DialogueStore.InsertConversationContinuityVersions(connection, new Dictionary<string, object> { ["id"] = id + "_" + (revision + 1),
                     ["record"] = id, ["event"] = eventId, ["revision"] = revision + 1, ["payload"] = json, ["ts"] = ts });
                 applied.Add(id);
                 SupersedeReadPendingContinuity(connection, snapshot, id, eventId);
@@ -410,10 +375,7 @@ VALUES($id,$record,$event,$revision,$payload,$ts);", new Dictionary<string, obje
                 .Select(row => ReadString(row, "source_turn_id", "")).Where(id => id.Length > 0).Distinct(StringComparer.Ordinal).ToArray();
             if (ids.Length == 0 || !WorldSimulationService.TableExists(connection, "conversation_turns"))
                 return new Dictionary<string, Dictionary<string, object>>(StringComparer.Ordinal);
-            return ReignDatabase.QuerySql(connection, @"SELECT turn.* FROM conversation_turns turn
-JOIN jsonb_array_elements_text(CAST($ids AS jsonb)) requested ON requested.value=turn.turn_id
-WHERE turn.speaker_id=$owner AND turn.role='npc' AND turn.status='active';",
-                TestDict("ids", Json.Serialize(ids), "owner", owner)).ToDictionary(turn => ReadString(turn, "turn_id", ""), StringComparer.Ordinal);
+            return DialogueStore.SelectConversationTurns16(connection, TestDict("ids", Json.Serialize(ids), "owner", owner)).ToDictionary(turn => ReadString(turn, "turn_id", ""), StringComparer.Ordinal);
         }
 
         private static string RenderContinuityEpisodeEvidence(ReignDbConnection connection, Dictionary<string, object> row,
@@ -509,10 +471,7 @@ WHERE turn.speaker_id=$owner AND turn.role='npc' AND turn.status='active';",
                     }
                     text.Append(BuildEstablishedRelationshipContinuity(connection, campaignId, timeline, heroId, peer, sourceIds,
                         ReadDouble(payload, "worldDay", 0d), priorLines, projectTranscript, linkAccess));
-                    var records = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_continuity WHERE owner_id=$owner AND " + MemorySourceTimelineSql("conversation_continuity", access: linkAccess) + @"
-AND status<>'invalidated' AND kind<>'question' AND (kind<>'agenda' OR status NOT IN ('resolved','abandoned')) AND (kind<>'relationship' OR peer_id=$peer)
-ORDER BY CASE WHEN kind='relationship' THEN 0 WHEN kind='agenda' THEN 1 ELSE 2 END,importance DESC,updated_ts DESC;",
-                        new Dictionary<string, object> { ["timeline"] = timeline, ["owner"] = heroId, ["peer"] = peer });
+                    var records = DialogueStore.SelectConversationContinuity4(connection, MemorySourceTimelineSql("conversation_continuity", access: linkAccess),                        new Dictionary<string, object> { ["timeline"] = timeline, ["owner"] = heroId, ["peer"] = peer });
                     var episodeSources = LoadContinuityEpisodeSources(connection, records, heroId);
                     string section = "";
                     foreach (var row in records)
@@ -555,8 +514,7 @@ ORDER BY CASE WHEN kind='relationship' THEN 0 WHEN kind='agenda' THEN 1 ELSE 2 E
                             text.AppendLine("  The mechanical activity step is already complete (source=" + ReadString(record, "completionEventId", "")
                                 + "). Do not restart it; only the separate unresolved concern remains.");
                     }
-                    var handoff = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_scene_handoffs WHERE handoff_id=$id;",
-                        new Dictionary<string, object> { ["id"] = timeline + ":" + heroId }).FirstOrDefault();
+                    var handoff = DialogueStore.SelectConversationSceneHandoffs(connection, new Dictionary<string, object> { ["id"] = timeline + ":" + heroId }).FirstOrDefault();
                     if (handoff != null && ReadDouble(handoff, "world_day", 0d) <= ReadDouble(payload, "worldDay", 0d))
                     {
                         var handoffValue = TryParseJsonObject(ReadString(handoff, "payload_json", "{}"));
@@ -606,10 +564,7 @@ ORDER BY CASE WHEN kind='relationship' THEN 0 WHEN kind='agenda' THEN 1 ELSE 2 E
             var parameters = new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timeline,
                 ["observer"] = observer, ["peer"] = peer, ["day"] = worldDay };
             var text = new StringBuilder();
-            var intimacy = WorldSimulationService.TableExists(connection, "court_social_signal_evidence") ? ReignDatabase.QuerySql(connection, @"SELECT * FROM court_social_signal_evidence
-WHERE campaign_id=$campaign AND " + MemorySourceTimelineSql("court_social_signal_evidence") + @" AND accepted=1 AND signal_type='sexual_intimacy_completed'
-AND ((speaker_id=$observer AND target_id=$peer) OR (speaker_id=$peer AND target_id=$observer))
-ORDER BY created_ts ASC;", parameters) : new List<Dictionary<string, object>>();
+            var intimacy = WorldSimulationService.TableExists(connection, "court_social_signal_evidence") ? DialogueStore.SelectCourtSocialSignalEvidence(connection, MemorySourceTimelineSql("court_social_signal_evidence"),parameters) : new List<Dictionary<string, object>>();
             // The underlying accepted signal store remains authoritative. This is
             // a read projection, never another relationship score or romance tag.
             if (intimacy.Count > 0)
@@ -625,8 +580,7 @@ ORDER BY created_ts ASC;", parameters) : new List<Dictionary<string, object>>();
                         .Append("; accepted quote: ").AppendLine(ReadString(row, "supporting_quote", ""));
                 }
             }
-            var milestones = WorldSimulationService.TableExists(connection, "relationship_milestones") ? ReignDatabase.QuerySql(connection, @"SELECT * FROM relationship_milestones
-WHERE subject_id=$observer AND target_id=$peer AND status='active' ORDER BY stability DESC,updated_ts DESC;", parameters) : new List<Dictionary<string, object>>();
+            var milestones = WorldSimulationService.TableExists(connection, "relationship_milestones") ? DialogueStore.SelectRelationshipMilestones(connection, parameters) : new List<Dictionary<string, object>>();
             foreach (var row in milestones)
             {
                 string id = ReadString(row, "milestone_id", "");
@@ -636,9 +590,7 @@ WHERE subject_id=$observer AND target_id=$peer AND status='active' ORDER BY stab
                     .Append("; original source=").Append(ReadString(row, "created_event_id", ""))
                     .Append("; latest source=").AppendLine(ReadString(row, "last_event_id", ""));
             }
-            var receipts = WorldSimulationService.TableExists(connection, "conversation_relationship_receipts") ? ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_relationship_receipts
-WHERE campaign_id=$campaign AND " + MemorySourceTimelineSql("conversation_relationship_receipts") + @" AND observer_id=$observer AND target_id=$peer
-AND status='applied' AND severity_tier<>'routine' ORDER BY created_ts;", parameters) : new List<Dictionary<string, object>>();
+            var receipts = WorldSimulationService.TableExists(connection, "conversation_relationship_receipts") ? DialogueStore.SelectConversationRelationshipReceipts2(connection, MemorySourceTimelineSql("conversation_relationship_receipts"),parameters) : new List<Dictionary<string, object>>();
             var protectedExchanges = priorLines?.Count > 0 && projectTranscript != null && receipts.Count > 0
                 ? ContinuityPromptRecords(projectTranscript(), true).Where(r => r.Required && r.Kind == "accepted_exchange").ToList()
                 : new List<ContinuityPromptRecord>();
@@ -670,15 +622,7 @@ AND status='applied' AND severity_tier<>'routine' ORDER BY created_ts;", paramet
             bool HeardByPair(Dictionary<string, object> turn) =>
                 PrecisionTurnVisible(turn, observer, null) && PrecisionTurnVisible(turn, peer, null);
 
-            var sharedMemories = hasAcceptedHistory && WorldSimulationService.TableExists(connection, "memories") ? ReignDatabase.QuerySql(connection, @"SELECT m.*,t.turn_id AS accepted_turn_id,t.world_day AS accepted_world_day,
-t.session_id AS accepted_session_id FROM memories m JOIN conversation_turns t ON t.event_id=m.event_id
-JOIN conversation_sessions s ON s.session_id=t.session_id
-WHERE m.owner_id=$observer AND m.status IN ('active','consolidated') AND t.speaker_id=$observer
-AND t.role='npc' AND s.player_id=$peer AND " + visibleTurn + @"
-AND m.ts<=$asOf AND m.world_day<=$day AND " + MemorySourceTimelineSql("memories", "m") + @"
-AND (lower(m.tags_json) LIKE '%intima%' OR lower(m.tags_json) LIKE '%milestone%'
- OR lower(m.tags_json) LIKE '%vulnerability%' OR lower(m.tags_json) LIKE '%trust%'
- OR lower(m.tags_json) LIKE '%betray%' OR lower(m.tags_json) LIKE '%boundary%') ORDER BY t.ts,m.ts;", parameters) : new List<Dictionary<string, object>>();
+            var sharedMemories = hasAcceptedHistory && WorldSimulationService.TableExists(connection, "memories") ? DialogueStore.SelectMemories2(connection, visibleTurn, MemorySourceTimelineSql("memories", "m"),parameters) : new List<Dictionary<string, object>>();
             foreach (var row in sharedMemories.GroupBy(r => ReadString(r,"memory_id","")).Select(g=>g.First()))
             {
                 var memoryPayload = TryParseJsonObject(ReadString(row,"payload_json","{}"));
@@ -704,12 +648,7 @@ AND (lower(m.tags_json) LIKE '%intima%' OR lower(m.tags_json) LIKE '%milestone%'
             // explicit relational words from this NPC's own accepted pair history,
             // with the source exchange intact. They are attributed history, never
             // another NPC's private interpretation or a new score/consent decision.
-            var prior = hasAcceptedHistory ? ReignDatabase.QuerySql(connection, @"SELECT t.* FROM conversation_turns t
-JOIN conversation_sessions s ON s.session_id=t.session_id
-WHERE t.speaker_id=$observer AND t.role='npc' AND s.player_id=$peer AND " + visibleTurn + @"
-AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.text) LIKE '%slept together%'
- OR lower(t.text) LIKE '%our night%' OR lower(t.text) LIKE '%trust you%' OR lower(t.text) LIKE '%betrayed me%'
- OR lower(t.text) LIKE '%our partnership%' OR lower(t.text) LIKE '%shared a bed%') ORDER BY t.ts,t.turn_order;", parameters) : new List<Dictionary<string, object>>();
+            var prior = hasAcceptedHistory ? DialogueStore.SelectConversationTurns17(connection, visibleTurn,parameters) : new List<Dictionary<string, object>>();
             var dimensions = prior.Where(r => HeardByPair(r) && PairHistoryDimension(ReadString(r, "text", "")).Length > 0)
                 .GroupBy(r => PairHistoryDimension(ReadString(r, "text", "")));
             foreach (var dimension in dimensions)
@@ -723,9 +662,7 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
                 foreach (var row in new[] { dimension.First(), dimension.Last() }.GroupBy(r => ReadString(r, "turn_id", "")).Select(g => g.First()))
                 {
                     string exchange = ReadString(row, "exchange_id", "");
-                    var turns = exchange.Length == 0 ? new List<Dictionary<string, object>> { row } : ReignDatabase.QuerySql(connection,
-                        "SELECT t.* FROM conversation_turns t WHERE t.session_id=$session AND t.exchange_id=$exchange AND "
-                        + visibleTurn + " ORDER BY t.turn_order;", new Dictionary<string, object>(parameters) {
+                    var turns = exchange.Length == 0 ? new List<Dictionary<string, object>> { row } : DialogueStore.SelectConversationTurns18(connection, visibleTurn,new Dictionary<string, object>(parameters) {
                             ["session"] = ReadString(row, "session_id", ""), ["exchange"] = exchange });
                     text.Append("HISTORICAL session=").Append(ReadString(row,"session_id", "")).Append("; source day=")
                         .Append(ReadDouble(row,"world_day",0d).ToString("0.#####",CultureInfo.InvariantCulture)).AppendLine(". Listed speakers heard this exchange; that is not evidence they witnessed events being described.");

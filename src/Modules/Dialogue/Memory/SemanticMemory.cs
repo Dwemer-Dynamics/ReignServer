@@ -64,18 +64,10 @@ namespace ReignBetaServer
             string providerGeneration)
         {
             if (providerGeneration == null) throw new ArgumentNullException(nameof(providerGeneration));
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS embedding_documents (
-source_type TEXT NOT NULL,source_id TEXT NOT NULL,model_version TEXT NOT NULL,provider TEXT NOT NULL,
-campaign_id TEXT NOT NULL DEFAULT '',timeline_id TEXT NOT NULL DEFAULT '',content_hash TEXT NOT NULL DEFAULT '',
-vector_id TEXT NOT NULL DEFAULT '',dimensions INTEGER NOT NULL DEFAULT 384,status TEXT NOT NULL DEFAULT 'pending',
-attempt_count INTEGER NOT NULL DEFAULT 0,last_error TEXT NOT NULL DEFAULT '',updated_ts INTEGER NOT NULL DEFAULT 0,
-payload_json TEXT NOT NULL DEFAULT '{}',PRIMARY KEY(source_type,source_id,model_version,provider));");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_embedding_documents_status ON embedding_documents(status,updated_ts);");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS embedding_jobs (
-source_type TEXT NOT NULL,source_id TEXT NOT NULL,operation TEXT NOT NULL DEFAULT 'upsert',status TEXT NOT NULL DEFAULT 'pending',
-attempt_count INTEGER NOT NULL DEFAULT 0,next_attempt_ts INTEGER NOT NULL DEFAULT 0,last_error TEXT NOT NULL DEFAULT '',
-enqueued_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,PRIMARY KEY(source_type,source_id));");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_embedding_jobs_ready ON embedding_jobs(status,next_attempt_ts,enqueued_ts);");
+            DialogueSchema.CreateEmbeddingDocuments(connection);
+            DialogueSchema.CreateIndexEmbeddingDocumentsStatus(connection);
+            DialogueSchema.CreateEmbeddingJobs(connection);
+            DialogueSchema.CreateIndexEmbeddingJobsReady(connection);
 
             CreateEventEmbeddingTriggers(connection);
             CreateEmbeddingTrigger(connection, "memories", "memory", "memory_id", "summary,memory_type,memory_domain,tags_json,participants_json,about_entities_json,location_id,visibility,status", true);
@@ -88,26 +80,25 @@ enqueued_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,PRIMARY KEY(source_type
             EnsureWorldHistoryEmbeddingFilter(connection);
             EnsureConversationEmbeddingPolicy(connection);
             // Only the derivative index is backfilled. Original transcripts and campaign effects are untouched.
-            if (ReadString(ReignDatabase.QuerySql(connection, "SELECT value FROM schema_meta WHERE key='semantic_original_dialogue_v1' LIMIT 1;").FirstOrDefault(), "value", "") != "complete")
+            if (ReadString(DialogueStore.SelectSchemaMeta6(connection).FirstOrDefault(), "value", "") != "complete")
             {
                 SeedEmbeddingJobs(connection, "conversation_turns", "conversation_turn", "turn_id");
-                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_original_dialogue_v1','complete');");
+                DialogueStore.UpsertSchemaMeta9(connection);
             }
 
-            Dictionary<string, object> seeded = ReignDatabase.QuerySql(connection, "SELECT value FROM schema_meta WHERE key='semantic_memory_v1_seeded' LIMIT 1;").FirstOrDefault();
+            Dictionary<string, object> seeded = DialogueStore.SelectSchemaMeta7(connection).FirstOrDefault();
             if (!string.Equals(ReadString(seeded, "value", ""), "complete", StringComparison.OrdinalIgnoreCase))
             {
                 QueueAllEmbeddingJobs(connection, false);
-                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_memory_v1_seeded','complete');");
+                DialogueStore.UpsertSchemaMeta10(connection);
             }
-            string activeGeneration = ReadString(ReignDatabase.QuerySql(connection, "SELECT value FROM schema_meta WHERE key='semantic_memory_provider_generation' LIMIT 1;").FirstOrDefault(), "value", "");
+            string activeGeneration = ReadString(DialogueStore.SelectSchemaMeta8(connection).FirstOrDefault(), "value", "");
             if (!string.Equals(providerGeneration, activeGeneration, StringComparison.OrdinalIgnoreCase))
             {
                 QueueAllEmbeddingJobs(connection, true);
-                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_memory_provider_generation',$value);",
-                    new Dictionary<string, object> { ["value"] = providerGeneration });
+                DialogueStore.UpsertSchemaMeta11(connection, new Dictionary<string, object> { ["value"] = providerGeneration });
             }
-            ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_memory_version','1');");
+            DialogueStore.UpsertSchemaMeta12(connection);
         }
 
         private static void CreateEmbeddingTrigger(ReignDbConnection connection, string table, string sourceType, string idColumn, string updateColumns, bool hasStatus)
@@ -118,15 +109,10 @@ enqueued_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,PRIMARY KEY(source_type
                 return;
             }
             string safe = "semantic_" + table;
-            string upsert = "INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts) "
-                + "VALUES('" + sourceType + "',NEW." + idColumn + ",'upsert','pending',0,0,'',strftime('%s','now'),strftime('%s','now')) "
-                + "ON CONFLICT(source_type,source_id) DO UPDATE SET operation='upsert',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now');";
-            ReignDatabase.ExecuteSql(connection, "CREATE TRIGGER IF NOT EXISTS trg_" + safe + "_insert AFTER INSERT ON " + table + " BEGIN " + upsert + " END;");
-            ReignDatabase.ExecuteSql(connection, "CREATE TRIGGER IF NOT EXISTS trg_" + safe + "_update AFTER UPDATE OF " + updateColumns + " ON " + table + " BEGIN " + upsert + " END;");
-            ReignDatabase.ExecuteSql(connection, "CREATE TRIGGER IF NOT EXISTS trg_" + safe + "_delete AFTER DELETE ON " + table + " BEGIN "
-                + "INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts) "
-                + "VALUES('" + sourceType + "',OLD." + idColumn + ",'delete','pending',0,0,'',strftime('%s','now'),strftime('%s','now')) "
-                + "ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now'); END;");
+            string upsert = DialogueStore.UpsertEmbeddingJobsSql(sourceType, idColumn);
+            DialogueSchema.CreateStatement3(connection, safe, table, upsert);
+            DialogueSchema.CreateStatement4(connection, safe, updateColumns, table, upsert);
+            DialogueSchema.CreateStatement5(connection, safe, table, sourceType, idColumn);
         }
 
         private static void DropEmbeddingTriggers(ReignDbConnection connection, string table)
@@ -134,20 +120,20 @@ enqueued_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,PRIMARY KEY(source_type
             string safe = "semantic_" + table;
             if (ReignPostgreSqlDialect.IsPostgreSql(connection))
             {
-                ReignDatabase.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_insert ON " + table + ";");
-                ReignDatabase.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_update ON " + table + ";");
-                ReignDatabase.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_update_ineligible ON " + table + ";");
-                ReignDatabase.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_delete ON " + table + ";");
+                DialogueSchema.DropStatement(connection, safe, table);
+                DialogueSchema.DropStatement2(connection, safe, table);
+                DialogueSchema.DropStatement3(connection, safe, table);
+                DialogueSchema.DropStatement4(connection, safe, table);
                 // Interrupted schema upgrades can leave a trigger with an older
                 // name attached to this table. CASCADE makes function recreation
                 // idempotent by removing every stale dependent trigger as well.
-                ReignDatabase.ExecuteSql(connection, "DROP FUNCTION IF EXISTS fn_" + safe + "_queue() CASCADE;");
+                DialogueSchema.DropStatement5(connection, safe);
                 return;
             }
-            ReignDatabase.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_insert;");
-            ReignDatabase.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_update;");
-            ReignDatabase.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_update_ineligible;");
-            ReignDatabase.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_delete;");
+            DialogueSchema.DropStatement6(connection, safe);
+            DialogueSchema.DropStatement7(connection, safe);
+            DialogueSchema.DropStatement8(connection, safe);
+            DialogueSchema.DropStatement9(connection, safe);
         }
 
         private static string EventEmbeddingEligibilitySql(string prefix)
@@ -180,48 +166,31 @@ enqueued_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,PRIMARY KEY(source_type
                 return;
             }
             DropEmbeddingTriggers(connection, table);
-            string upsert = "INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts) "
-                + "VALUES('" + sourceType + "',NEW." + idColumn + ",'upsert','pending',0,0,'',strftime('%s','now'),strftime('%s','now')) "
-                + "ON CONFLICT(source_type,source_id) DO UPDATE SET operation='upsert',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now');";
-            string remove = "INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts) "
-                + "VALUES('" + sourceType + "',NEW." + idColumn + ",'delete','pending',0,0,'',strftime('%s','now'),strftime('%s','now')) "
-                + "ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now');";
+            string upsert = DialogueStore.UpsertEmbeddingJobsSql(sourceType, idColumn);
+            string remove = DialogueStore.UpsertEmbeddingJobsSql2(sourceType, idColumn);
             string eligible = EventEmbeddingEligibilitySql("NEW.");
-            ReignDatabase.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_insert AFTER INSERT ON " + table
-                + " WHEN " + eligible + " BEGIN " + upsert + " END;");
-            ReignDatabase.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_update AFTER UPDATE OF " + updateColumns + " ON " + table
-                + " WHEN " + eligible + " BEGIN " + upsert + " END;");
-            ReignDatabase.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_update_ineligible AFTER UPDATE OF " + updateColumns + " ON " + table
-                + " WHEN NOT " + eligible + " BEGIN " + remove + " END;");
-            ReignDatabase.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_delete AFTER DELETE ON " + table + " BEGIN "
-                + "INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts) "
-                + "VALUES('" + sourceType + "',OLD." + idColumn + ",'delete','pending',0,0,'',strftime('%s','now'),strftime('%s','now')) "
-                + "ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now'); END;");
+            DialogueSchema.CreateStatement6(connection, safe, table, eligible, upsert);
+            DialogueSchema.CreateStatement7(connection, safe, updateColumns, table, eligible, upsert);
+            DialogueSchema.CreateStatement8(connection, safe, updateColumns, table, eligible, remove);
+            DialogueSchema.CreateStatement9(connection, safe, table, sourceType, idColumn);
         }
 
         private static void EnsureConversationEmbeddingPolicy(ReignDbConnection connection)
         {
-            Dictionary<string, object> applied = ReignDatabase.QuerySql(connection,
-                "SELECT value FROM schema_meta WHERE key='semantic_conversation_embedding_policy' LIMIT 1;").FirstOrDefault();
+            Dictionary<string, object> applied = DialogueStore.SelectSchemaMeta9(connection).FirstOrDefault();
             if (!string.Equals(ReadString(applied, "value", ""), ConversationEmbeddingPolicyVersion, StringComparison.OrdinalIgnoreCase))
             {
                 // Raw turns remain canonical and FTS-searchable for the configured recent/exact
                 // history window. Durable memories and summaries are the semantic layer.
-                ReignDatabase.ExecuteSql(connection, @"UPDATE events SET embedding_status='skipped'
-WHERE LOWER(COALESCE(event_category,'')) IN ('conversation','correspondence');");
+                DialogueStore.UpdateEvents3(connection);
 
                 // Before this policy, each ordinary conversation event projected one generic
                 // interpersonal memory per participant. Retain explicit episodic/model writes,
                 // but retire the mechanically duplicated projections.
-                ReignDatabase.ExecuteSql(connection, @"DELETE FROM memory_fts WHERE memory_id IN
-(SELECT memory_id FROM memories WHERE LOWER(COALESCE(memory_type,''))='interpersonal_experience'
- AND LOWER(COALESCE(source,'')) IN ('dialogue_turn','party_chat_turn','social_event_turn'));" );
-                ReignDatabase.ExecuteSql(connection, @"DELETE FROM memories
-WHERE LOWER(COALESCE(memory_type,''))='interpersonal_experience'
- AND LOWER(COALESCE(source,'')) IN ('dialogue_turn','party_chat_turn','social_event_turn');");
+                DialogueStore.DeleteMemoryFts3(connection);
+                DialogueStore.DeleteMemories2(connection);
 
-                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_conversation_embedding_policy',$value);",
-                    new Dictionary<string, object> { ["value"] = ConversationEmbeddingPolicyVersion });
+                DialogueStore.UpsertSchemaMeta13(connection, new Dictionary<string, object> { ["value"] = ConversationEmbeddingPolicyVersion });
             }
             QueueRetiredEmbeddingDeletes(connection);
         }
@@ -230,15 +199,9 @@ WHERE LOWER(COALESCE(memory_type,''))='interpersonal_experience'
         {
             // Original attributed turns are active semantic sources again; deletion is driven by their own status/trigger.
             string ineligibleEvent = "NOT " + EventEmbeddingEligibilitySql("e.");
-            ReignDatabase.ExecuteSql(connection, @"DELETE FROM embedding_jobs WHERE source_type='event' AND source_id IN
-(SELECT e.event_id FROM events e WHERE " + ineligibleEvent + ");");
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts)
-SELECT 'event',d.source_id,'delete','pending',0,0,'',strftime('%s','now'),strftime('%s','now')
-FROM embedding_documents d JOIN events e ON e.event_id=d.source_id
-WHERE d.source_type='event' AND d.status='indexed' AND " + ineligibleEvent + @"
-ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now');");
-            ReignDatabase.ExecuteSql(connection, @"DELETE FROM embedding_documents WHERE source_type='event' AND status<>'indexed' AND source_id IN
-(SELECT e.event_id FROM events e WHERE " + ineligibleEvent + ");");
+            DialogueStore.DeleteEmbeddingJobs2(connection, ineligibleEvent);
+            DialogueStore.UpsertEmbeddingJobs(connection, ineligibleEvent);
+            DialogueStore.DeleteEmbeddingDocuments(connection, ineligibleEvent);
         }
 
         private static string WorldHistoryEmbeddingEligibilitySql(string prefix)
@@ -271,27 +234,17 @@ ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pend
                     connection, table, sourceType, idColumn, WorldHistoryEmbeddingEligibilitySql("NEW."));
                 return;
             }
-            ReignDatabase.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_insert;");
-            ReignDatabase.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_update;");
-            ReignDatabase.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_update_ineligible;");
-            ReignDatabase.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_delete;");
-            string upsert = "INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts) "
-                + "VALUES('" + sourceType + "',NEW." + idColumn + ",'upsert','pending',0,0,'',strftime('%s','now'),strftime('%s','now')) "
-                + "ON CONFLICT(source_type,source_id) DO UPDATE SET operation='upsert',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now');";
-            string remove = "INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts) "
-                + "VALUES('" + sourceType + "',NEW." + idColumn + ",'delete','pending',0,0,'',strftime('%s','now'),strftime('%s','now')) "
-                + "ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now');";
+            DialogueSchema.DropStatement6(connection, safe);
+            DialogueSchema.DropStatement7(connection, safe);
+            DialogueSchema.DropStatement8(connection, safe);
+            DialogueSchema.DropStatement9(connection, safe);
+            string upsert = DialogueStore.UpsertEmbeddingJobsSql(sourceType, idColumn);
+            string remove = DialogueStore.UpsertEmbeddingJobsSql2(sourceType, idColumn);
             string eligible = WorldHistoryEmbeddingEligibilitySql("NEW.");
-            ReignDatabase.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_insert AFTER INSERT ON " + table
-                + " WHEN " + eligible + " BEGIN " + upsert + " END;");
-            ReignDatabase.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_update AFTER UPDATE OF " + updateColumns + " ON " + table
-                + " WHEN " + eligible + " BEGIN " + upsert + " END;");
-            ReignDatabase.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_update_ineligible AFTER UPDATE OF " + updateColumns + " ON " + table
-                + " WHEN NOT " + eligible + " BEGIN " + remove + " END;");
-            ReignDatabase.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_delete AFTER DELETE ON " + table + " BEGIN "
-                + "INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts) "
-                + "VALUES('" + sourceType + "',OLD." + idColumn + ",'delete','pending',0,0,'',strftime('%s','now'),strftime('%s','now')) "
-                + "ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now'); END;");
+            DialogueSchema.CreateStatement6(connection, safe, table, eligible, upsert);
+            DialogueSchema.CreateStatement7(connection, safe, updateColumns, table, eligible, upsert);
+            DialogueSchema.CreateStatement8(connection, safe, updateColumns, table, eligible, remove);
+            DialogueSchema.CreateStatement9(connection, safe, table, sourceType, idColumn);
         }
 
         private static void CreatePostgreSqlEmbeddingTriggers(
@@ -306,75 +259,21 @@ ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pend
             string function = "fn_" + safe + "_queue";
             string source = sourceType.Replace("'", "''");
             string eligibility = string.IsNullOrWhiteSpace(eligibleSql) ? "TRUE" : eligibleSql;
-            ReignDatabase.ExecuteSql(connection, @"
-CREATE OR REPLACE FUNCTION " + function + @"() RETURNS trigger
-LANGUAGE plpgsql AS $$
-DECLARE
-    source_id_value text;
-    requested_operation text;
-    now_epoch bigint := CAST(EXTRACT(EPOCH FROM clock_timestamp()) AS bigint);
-BEGIN
-    IF TG_OP='DELETE' THEN
-        source_id_value := OLD." + idColumn + @"::text;
-        requested_operation := 'delete';
-    ELSE
-        source_id_value := NEW." + idColumn + @"::text;
-        IF " + eligibility + @" THEN
-            requested_operation := 'upsert';
-        ELSIF TG_OP='INSERT' THEN
-            -- An ineligible row has never had a semantic document to retire.
-            -- Match the SQLite trigger policy by leaving no no-op delete job.
-            RETURN NEW;
-        ELSE
-            requested_operation := 'delete';
-        END IF;
-    END IF;
-
-    INSERT INTO embedding_jobs(
-        source_type,source_id,operation,status,attempt_count,next_attempt_ts,
-        last_error,enqueued_ts,updated_ts)
-    VALUES('" + source + @"',source_id_value,requested_operation,'pending',0,0,'',
-           now_epoch,now_epoch)
-    ON CONFLICT(source_type,source_id) DO UPDATE SET
-        operation=excluded.operation,status='pending',attempt_count=0,
-        next_attempt_ts=0,last_error='',enqueued_ts=excluded.enqueued_ts,
-        updated_ts=excluded.updated_ts;
-    IF TG_OP='DELETE' THEN
-        RETURN OLD;
-    END IF;
-    RETURN NEW;
-END
-$$;");
-            ReignDatabase.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe
-                + "_insert AFTER INSERT ON " + table
-                + " FOR EACH ROW EXECUTE FUNCTION " + function + "();");
-            ReignDatabase.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe
-                + "_update AFTER UPDATE ON " + table
-                + " FOR EACH ROW EXECUTE FUNCTION " + function + "();");
-            ReignDatabase.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe
-                + "_delete AFTER DELETE ON " + table
-                + " FOR EACH ROW EXECUTE FUNCTION " + function + "();");
+            DialogueSchema.CreateStatement10(connection, function, idColumn, idColumn, eligibility, source);
+            DialogueSchema.CreateStatement11(connection, safe, table, function);
+            DialogueSchema.CreateStatement12(connection, safe, table, function);
+            DialogueSchema.CreateStatement13(connection, safe, table, function);
         }
 
         private static void EnsureWorldHistoryEmbeddingFilter(ReignDbConnection connection)
         {
-            Dictionary<string, object> applied = ReignDatabase.QuerySql(connection,
-                "SELECT value FROM schema_meta WHERE key='semantic_world_history_filter' LIMIT 1;").FirstOrDefault();
+            Dictionary<string, object> applied = DialogueStore.SelectSchemaMeta10(connection).FirstOrDefault();
             if (string.Equals(ReadString(applied, "value", ""), WorldHistoryEmbeddingFilterVersion, StringComparison.OrdinalIgnoreCase)) return;
             string eligible = WorldHistoryEmbeddingEligibilitySql("w.");
-            ReignDatabase.ExecuteSql(connection, @"DELETE FROM embedding_jobs
-WHERE source_type='world_history_event' AND source_id IN
-(SELECT w.event_id FROM world_history_events w WHERE NOT " + eligible + ");");
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts)
-SELECT 'world_history_event',d.source_id,'delete','pending',0,0,'',strftime('%s','now'),strftime('%s','now')
-FROM embedding_documents d JOIN world_history_events w ON w.event_id=d.source_id
-WHERE d.source_type='world_history_event' AND d.status='indexed' AND NOT " + eligible + @"
-ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now');");
-            ReignDatabase.ExecuteSql(connection, @"DELETE FROM embedding_documents
-WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
-(SELECT w.event_id FROM world_history_events w WHERE NOT " + eligible + ");");
-            ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_world_history_filter',$value);",
-                new Dictionary<string, object> { ["value"] = WorldHistoryEmbeddingFilterVersion });
+            DialogueStore.DeleteEmbeddingJobs3(connection, eligible);
+            DialogueStore.UpsertEmbeddingJobs2(connection, eligible);
+            DialogueStore.DeleteEmbeddingDocuments2(connection, eligible);
+            DialogueStore.UpsertSchemaMeta14(connection, new Dictionary<string, object> { ["value"] = WorldHistoryEmbeddingFilterVersion });
         }
 
         private static void SeedEmbeddingJobs(ReignDbConnection connection, string table, string sourceType, string idColumn)
@@ -385,13 +284,12 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
                     ? " WHERE " + EventEmbeddingEligibilitySql("")
                     : string.Equals(sourceType, "conversation_turn", StringComparison.OrdinalIgnoreCase)
                         ? " WHERE LOWER(COALESCE(status,'active'))='active'" : "";
-            ReignDatabase.ExecuteSql(connection, "INSERT OR IGNORE INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts) "
-                + "SELECT '" + sourceType + "'," + idColumn + ",'upsert','pending',0,0,'',strftime('%s','now'),strftime('%s','now') FROM " + table + where + ";");
+            DialogueStore.InsertOrIgnoreEmbeddingJobs(connection, sourceType, idColumn, table, where);
         }
 
         private static void QueueAllEmbeddingJobs(ReignDbConnection connection, bool resetExisting)
         {
-            if (resetExisting) ReignDatabase.ExecuteSql(connection, "DELETE FROM embedding_jobs;");
+            if (resetExisting) DialogueStore.DeleteEmbeddingJobs4(connection);
             SeedEmbeddingJobs(connection, "events", "event", "event_id");
             SeedEmbeddingJobs(connection, "memories", "memory", "memory_id");
             SeedEmbeddingJobs(connection, "summaries", "summary", "summary_id");
@@ -780,7 +678,7 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
                 Dictionary<string, object> payload = ReadDictionary(hit, "payload") ?? new Dictionary<string, object>();
                 string id = ReadString(payload, "sourceId", "");
                 if (string.IsNullOrWhiteSpace(id)) continue;
-                Dictionary<string, object> row = ReignDatabase.QuerySql(connection, "SELECT * FROM " + table + " WHERE " + idColumn + "=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
+                Dictionary<string, object> row = DialogueStore.SelectDynamic7(connection, table, idColumn,new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
                 if (row == null || !EmbeddingRowActive(sourceType, row) || !Program.KnowledgeRowVisibleToNpc(table, row, knowledge, connection)) continue;
                 if (ReadString(payload, "sourceHash", "") != MemorySourceHash(new[] { row })) continue;
                 row["vectorSemanticScore"] = Program.ClampDouble(ReadDouble(hit, "score", 0d), -1d, 1d);
@@ -836,9 +734,7 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
                 Dictionary<string, object> row;
                 if (!byId.TryGetValue(eventId, out row))
                 {
-                    row = ReignDatabase.QuerySql(connection, @"SELECT * FROM world_history_events WHERE event_id=$id AND timeline_id=$timeline
-AND ($location='' OR location_id=$location) AND ($from<0 OR world_day>=$from) AND world_day<=$to LIMIT 1;",
-                        new Dictionary<string, object>
+                    row = DialogueStore.SelectWorldHistoryEvents7(connection, new Dictionary<string, object>
                         {
                             ["id"] = eventId, ["timeline"] = timelineId, ["location"] = locationId ?? "",
                             ["from"] = fromDay, ["to"] = toDay <= 0 ? double.MaxValue : toDay
@@ -876,9 +772,9 @@ AND ($location='' OR location_id=$location) AND ($from<0 OR world_day>=$from) AN
             {
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    counts["documents"] = ReignDatabase.QuerySql(connection, "SELECT status,COUNT(*) count FROM embedding_documents GROUP BY status;");
-                    counts["jobs"] = ReignDatabase.QuerySql(connection, "SELECT status,COUNT(*) count FROM embedding_jobs GROUP BY status;");
-                    counts["failures"] = ReignDatabase.QuerySql(connection, "SELECT source_type,source_id,attempt_count,last_error,next_attempt_ts FROM embedding_jobs WHERE last_error<>'' ORDER BY updated_ts DESC LIMIT 25;");
+                    counts["documents"] = DialogueStore.SelectEmbeddingDocuments3(connection);
+                    counts["jobs"] = DialogueStore.SelectEmbeddingJobs6(connection);
+                    counts["failures"] = DialogueStore.SelectEmbeddingJobs7(connection);
                 }
             }
             Dictionary<string, object> pump;
@@ -925,12 +821,9 @@ AND ($location='' OR location_id=$location) AND ($from<0 OR world_day>=$from) AN
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 string eligible = WorldHistoryEmbeddingEligibilitySql("w.");
-                ReignDatabase.ExecuteSql(connection, @"UPDATE embedding_documents SET status='stale',updated_ts=$ts
-WHERE source_type<>'world_history_event' OR source_id IN
-(SELECT w.event_id FROM world_history_events w WHERE " + eligible + ");",
-                    new Dictionary<string, object> { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
+                DialogueStore.UpdateEmbeddingDocuments2(connection, eligible,                    new Dictionary<string, object> { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                 QueueAllEmbeddingJobs(connection, true);
-                int queued = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM embedding_jobs;").FirstOrDefault(), "count", 0);
+                int queued = ReadInt(DialogueStore.CountEmbeddingJobs2(connection).FirstOrDefault(), "count", 0);
                 return new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaignId, ["queued"] = queued };
             }
         }
@@ -941,10 +834,9 @@ WHERE source_type<>'world_history_event' OR source_id IN
             if (string.IsNullOrWhiteSpace(campaignId)) campaignId = Program.LatestCampaignId();
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                ReignDatabase.ExecuteSql(connection, "UPDATE embedding_jobs SET status='pending',attempt_count=0,next_attempt_ts=0,last_error='',updated_ts=$ts WHERE last_error<>'';",
-                    new Dictionary<string, object> { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
+                DialogueStore.UpdateEmbeddingJobs2(connection, new Dictionary<string, object> { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                 return new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaignId,
-                    ["queued"] = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM embedding_jobs WHERE status='pending';").FirstOrDefault(), "count", 0) };
+                    ["queued"] = ReadInt(DialogueStore.CountEmbeddingJobs3(connection).FirstOrDefault(), "count", 0) };
             }
         }
 
