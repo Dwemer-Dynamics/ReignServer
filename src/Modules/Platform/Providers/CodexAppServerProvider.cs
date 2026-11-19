@@ -657,9 +657,12 @@ namespace ReignBetaServer
             Dictionary<string, object> settings, Dictionary<string, object> cacheRouting, string correlationId, string requestType, string model,
             Dictionary<string, object> codexContext, Action<string> contentDelta = null, Func<bool> canceled = null)
         {
-            if (UsesCodexSubscription(settings)) return CodexChatCompletionWithRecovery(requestBody, settings, model, codexContext, contentDelta, canceled);
-            return PersistenceService.WithCampaignProviderWait(requestType,
-                () => ProviderPostJson(apiUrl, apiKey, outboundJson, settings, cacheRouting, correlationId, requestType, model, contentDelta, canceled));
+            return LlmProviders.Select(settings, apiUrl).PostChat(new LlmProviderRequest
+            {
+                ApiUrl = apiUrl, ApiKey = apiKey, OutboundJson = outboundJson, RequestBody = requestBody, Settings = settings,
+                CacheRouting = cacheRouting, CorrelationId = correlationId, RequestType = requestType, Model = model,
+                CodexContext = codexContext, ContentDelta = contentDelta, Canceled = canceled
+            });
         }
 
         internal static string BuildCodexPrompt(List<Dictionary<string, object>> messages)

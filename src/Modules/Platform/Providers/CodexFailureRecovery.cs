@@ -121,7 +121,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static string CodexChatCompletionWithRecovery(Dictionary<string, object> requestBody,
+        internal static string CodexChatCompletionWithRecovery(Dictionary<string, object> requestBody,
             Dictionary<string, object> settings, string model, Dictionary<string, object> context,
             Action<string> contentDelta, Func<bool> canceled)
         {
