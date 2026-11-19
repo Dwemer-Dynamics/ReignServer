@@ -24,11 +24,11 @@ prompts and scene generation. `ExcludeCourt=true` compiles this folder (and Spym
 
 ## Service class
 
-Every file except `Program.CourtRoutes.cs` holds `internal static partial class CourtService` (not a `Program`
+Every file except `CourtRoutes.cs` holds `internal static partial class CourtService` (not a `Program`
 partial), apart from the test classes that were already their own types (`CastleChatSelfTests`,
 `CastleSceneImageContractSelfTests`, `FamilyChambersSelfTests`, `WarCouncilScrollSelfTests`). It calls `Program`
 members with an explicit `Program.` qualifier, and `Program` and the other modules call it as `CourtService.X`; the
-members used across that boundary are `internal`. `Program.CourtRoutes.cs` stays part of `Program` and registers the
+members used across that boundary are `internal`. `CourtRoutes.cs` (an `internal static` route class called from `Platform/RouteTable.cs`) registers the
 service handlers, and Spymaster's route file passes its handlers to `CourtService.CapitalCourtApi`. Characters,
 Dialogue, Relationships and Platform call into it for court character data (`EnsureCourtCharacterData`,
 `LoadCourtCharacterScheme`) and court context in prompts.

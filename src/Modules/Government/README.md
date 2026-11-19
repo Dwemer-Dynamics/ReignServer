@@ -12,7 +12,7 @@ arrives in each request payload; this module creates no tables of its own.
 `GovernmentSystem.cs` (`GovernmentSpeakerStatement`), `GovernmentHearingDiscussion.cs`, `GovernmentCrownDecision.cs`,
 `GovernmentPaymentOwnership.cs`. These files and the test files below form `internal static partial class
 GovernmentService` (not a `Program` partial); it calls `Program` members with an explicit `Program.` qualifier.
-`Program.GovernmentRoutes.cs` stays part of `Program` and registers the service handlers. The dialogue pipeline calls
+`GovernmentRoutes.cs` (an `internal static` route class called from `Platform/RouteTable.cs`) registers the service handlers. The dialogue pipeline calls
 `GovernmentService.BuildGovernmentPrivateConversationPrompt`, `ReserveGovernmentPaymentOwnership` and
 `ValidateGovernmentPaymentOwnership`.
 

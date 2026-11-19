@@ -58,28 +58,44 @@ flowchart LR
 
 ## Process composition
 
-`internal static partial class Program` (namespace `ReignBetaServer`) is now the Platform core: 88 of the 513 `.cs`
-files under `src/Modules` contribute to it (66 Platform files, the twelve `Program.<Module>Routes.cs` route files and
-ten `Program.<Area>.cs` handler files in the Characters, Dialogue and Portraits folders). Every domain module is its own `internal static partial class <Module>Service`: `DialogueService`,
-`CharactersService`, `WorldSimulationService`, `RelationshipsService`, `PersistenceService`, `ReputationService`,
-`DiplomacyService`, `CourtService`, `PortraitsService`, `GovernmentService`, `RebellionService` and
-`SpymasterService`. The other exceptions are a few helper types (for example
-`ReignPostgreSqlStorage`, `ReignPostgreSqlDialect`, the `FinalConversationGauntlet*` classes) and the stateless
-helpers in `Platform/ServerCore.cs` (see [Direction](#direction-2026-11-restructuring-programme), steps 3 and 4).
-`src/Modules/Platform/Program.cs` is the hub (about 1.3k lines): the core fields, `Main`, `RunServer`, the startup
-helpers, `HandleClient`, the campaign request gate, `RunInteractiveRequest`, `ControlCenterHtml` and `HttpRequest`.
-The rest of the former 27.9k-line file was split verbatim (same class, same members, no renames) into partial files
-of at most about 1,500 lines, grouped by area:
+`internal static partial class Program` (namespace `ReignBetaServer`) is now only the host: `Platform/Program.cs`
+(the core fields, `Main`, `RunServer`, the startup helpers, `HandleClient`, the campaign request gate,
+`RunInteractiveRequest`, `ControlCenterHtml` and `HttpRequest`), `Platform/Program.HttpIngress.cs` (ingress limits,
+`ReadRequest`, response writers), the router (`Platform/RouteTable.cs`, `Platform/Program.PlatformRoutes.cs`) and the
+bootstrap files `Platform/ServerActivation.cs` and `Platform/InitializationReadiness.cs`. No module file is a
+`Program` partial (P3-3). Every domain module is its own `internal static partial class <Module>Service`:
+`DialogueService`, `CharactersService`, `WorldSimulationService`, `RelationshipsService`, `PersistenceService`,
+`ReputationService`, `DiplomacyService`, `CourtService`, `PortraitsService`, `GovernmentService`, `RebellionService`
+and `SpymasterService`, and registers its routes from an `internal static class <Module>Routes` in
+`<Module>Routes.cs`, which `RouteTable.cs` calls. The rest of Platform is split by area into service classes:
 
-| Folder | `Program.<Area>.cs` files |
+| Service | Files (in `src/Modules/Platform`) |
 |---|---|
-| Platform | `HttpIngress` (ingress limits, `ReadRequest`, response writers), `CampaignFiles` (campaign directories and JSON file IO), `Settings`, `PromptTemplates`, `DefaultPromptTemplates`, `LlmTransport` (`ChatWithLlm`, provider requests), `ConversationResponses` (structured-response repair, visible-reply sanitising), `LogsAndAudit`, `PipelineTestRunner` and `DefaultTestCases` (the `/tests/*` prompt test cases), and the action pipeline: `DialogueActions`, `ActionGates`, `ActionPlanner`, `ActionRouter`, `DirectiveTerms`, `DirectivePackages`, `ActionReferences`, `ActionValidation`, `ActionQueue` |
-| Dialogue | `MemoryStore` (event ingest, memory APIs and writes, consolidation), `MemoryPacket` (memory packets, knowledge visibility), `MemoryRetrieval`, `ContextPulls`, `DialogueTurns` (`/dialogue/respond`, `/dialogue/history`), `EventConversations` (social events, party chat, generated wilderness plans), `PromptContext` (prompt transcripts and context text) |
-| Characters | `CharacterConstruction` (upserts, portrait roster, construction and enrichment), `CharacterProfiles` (profile upsert, schema, diagnostics, construction prompt and defaults) |
-| Portraits | `PortraitRequests` (the portrait register, status, request and diagnose routes) |
+| `LlmProviderService` | `Providers/`: `LlmTransport` (`ChatWithLlm`, provider requests), `ProviderMiddleware`, `CodexAppServerProvider`, `CodexRuntime*`, `CodexFailureRecovery`, `CodexPerformance*`, `LlmProviderProfiles`, `LlmProviderControlCenter`, and the provider contract tests |
+| `SettingsService` | `Settings`, `SettingsSecretVault`, `LinuxSecretVault`, `GlobalKeyBridge`, `RuntimeData` and the `*Options` files |
+| `PromptService` | `PromptTemplates`, `DefaultPromptTemplates`, `PromptEditorPersistence` |
+| `ActionPipelineService` | `DialogueActions`, `ActionGates`, `ActionPlanner`, `ActionRouter`, `DirectiveTerms`, `DirectivePackages`, `ActionReferences`, `ActionValidation`, `ActionQueue`, `CampaignCommandDialogueDrafts` |
+| `ConversationResponseService` | `ConversationResponses` (structured-response repair, visible-reply sanitising), `ConversationResponseParsing`, `ConversationDiagnostics*` |
+| `CampaignFileService` | `CampaignFiles` (campaign directories and JSON file IO) |
+| `OperationsService` | `LogsAndAudit`, `SupportBundle`, `ReignObservability`, `PriorityBackgroundScheduler` |
+| `VerificationService` | `VerificationLab*`, `ArchitectureSelfTests`, `RouteTableContractSelfTests`, `PipelineTestRunner`, `DefaultTestCases` |
 
-These handlers still call into the module services. Static fields whose initializers depend on other `Program` state
-stay in `Program.cs`, so the type's initialization order is unchanged.
+The main turn handlers that were `Program.<Area>.cs` files are module service files: Dialogue's
+`Memory/MemoryStore.cs`, `Memory/MemoryPacket.cs`, `Memory/MemoryRetrieval.cs`, `Memory/ContextPulls.cs`,
+`Conversation/DialogueTurns.cs` (`/dialogue/respond`, `/dialogue/history`), `Conversation/EventConversations.cs`
+and `Prompts/PromptContext.cs` (`DialogueService`); Characters' `CharacterConstruction.cs` and
+`CharacterProfiles.cs` (`CharactersService`); Portraits' `PortraitRequests.cs` (`PortraitsService`). Member names
+did not change and no overload group was split. Static fields that moved out of `Program` have side-effect-free
+initializers, so initializing them with their new class instead of with `Program` does not change behaviour.
+
+LLM chat providers implement `ILlmProvider` (`Providers/ILlmProvider.cs`): the Codex subscription, OpenRouter,
+Ollama Cloud and an OpenAI-compatible fallback (NanoGPT and custom endpoints) in `Providers/ChatProviders.cs`.
+`LlmProviders.Select` picks one in that order, and `ChatWithLlm` dispatches through it. The HTTP providers share
+the campaign provider wait and `ProviderMiddleware` (concurrency slots, response cache, streaming).
+
+Source-text contracts that used to read the `Program` type read the former Program area instead:
+`VerificationSourceLocator.ReadServerProgramAreaSourceText` on the server and `TestSourceLocator.ServerProgramText`
+in the client tests.
 
 `Main` (`Platform/Program.cs`) runs in this order:
 
@@ -104,7 +120,7 @@ The accept loop hands each connection to `Task.Run(() => HandleClient(client))`,
 ### Request handling
 
 `HandleClient` (`Platform/Program.cs`) dispatches through the route table in `Platform/RouteTable.cs`. Each module
-registers its routes in `src/Modules/<Module>/Program.<Module>Routes.cs`, giving the method, the exact path or prefix
+registers its routes in `src/Modules/<Module>/<Module>Routes.cs`, giving the method, the exact path or prefix
 (with its comparison), the handler and the campaign-gate policy, and the first match in registration order wins; an
 unmatched request gets the "Unknown route." 404. `RouteTableContractSelfTests.cs` (interaction architecture suite)
 checks the table against the pre-table route inventory, gate decisions and precedence. Per request `HandleClient`:
@@ -263,7 +279,7 @@ dependencies on other modules.
 
 | Module | Role |
 |---|---|
-| [Platform](../src/Modules/Platform/README.md) | `Program.cs` entry point and router hub with its `Program.<Area>.cs` partials, settings, providers, Codex runtime, diagnostics, VerificationLab |
+| [Platform](../src/Modules/Platform/README.md) | `Program.cs` host and router, the area services (`LlmProviderService` under `Providers/`, `SettingsService`, `PromptService`, `ActionPipelineService` and others), settings, providers, Codex runtime, diagnostics, VerificationLab |
 | [Persistence](../src/Modules/Persistence/README.md) | PostgreSQL storage, `reign_meta`, campaign backups, Save Sync |
 | [Characters](../src/Modules/Characters/README.md) | identity, character editor, narratives, NPC lives, notables, tavern house |
 | [Dialogue](../src/Modules/Dialogue/README.md) | conversation pipeline, memory, prompts, gossip, communications, final gauntlet |
@@ -321,19 +337,17 @@ lands.
    `<Module>Service.X`, and the members used across that boundary are `internal` (every overload of a name together).
    Each module's static state (locks, caches, job state, counters) moved with it and is still a single static
    instance; its field initializers are side-effect free, so initializing them lazily with the service class instead
-   of with `Program` does not change behaviour. The module route files (`Program.<Module>Routes.cs`) stay part of
+   of with `Program` does not change behaviour. The module route files (`<Module>Routes.cs`) stay part of
    `Program` and name the service handlers. Test classes that were already separate types (for example
    `CastleChatSelfTests`) are unchanged apart from qualifiers. None of these modules has SQL-only code that separates
    cleanly without moving code between files, so there is no `<Module>Store` yet. One method group stays split on
    purpose: the private `V` factories in `CharactersService` (`string, int, bool`) and `RelationshipsService`
    (`int, int, int, int`) each build a nested type of their own module, are called only from their own file, and
-   their parameter lists cannot convert into each other. What stays `Program` is the Platform core: the entry point,
-   `HandleClient` and the route table, settings,
-   providers, the main turn handlers (now in `Program.<Area>.cs` partial files, see
-   [Process composition](#process-composition)) and the verification lab, plus the module route files. Server
-   source-text contracts read `Program` through `VerificationSourceLocator.ReadServerTypeSourceText(serverRoot,
-   "Program")` (every product file declaring the partial class), so moving members between its files keeps them
-   valid.
+   their parameter lists cannot convert into each other. P3-3 finished the split: the module route files became
+   `<Module>Routes` classes, the domain handler files became service files, and the rest of Platform moved into area
+   services (`LlmProviderService`, `SettingsService`, `PromptService`, `ActionPipelineService`,
+   `ConversationResponseService`, `CampaignFileService`, `OperationsService`, `VerificationService`), so `Program`
+   keeps only the host, bootstrap and routing (see [Process composition](#process-composition)).
 4a. Data layer (P3-1): `Platform/Data/ReignDatabase.cs` is the data core (`OpenCampaignConnection`, the campaign
    schema caches, `ExecuteSql`, `QuerySql`, `EnsureDatabaseColumn`; formerly `Program.CampaignSql.cs`), and the
    low-level PostgreSQL types live in `Persistence/Data`. Every module owns its SQL under `Modules/<Module>/Data`:

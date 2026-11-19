@@ -16,9 +16,9 @@ arrests and dialogue marriage actions. It also hosts the live interaction test c
 - World Test: `WorldTest.cs` (with its `WorldTest.Domains.cs` and `WorldTest.Pipeline.cs` partials), `WorldTestReadiness.cs`, `WorldTestReports.cs`, `WorldTestTelemetry.cs`,
   `WorldTestRollupWorker.cs` (started by `RunServer`).
 - Campaign commands and actions: `CampaignCommandSystem.cs`, `DialogueActionAuthority.cs`,
-  `DialogueMarriageActions.cs`, `ArrestSystem.cs` (its `/arrests/*` routes are registered in `Program.WorldSimulationRoutes.cs`).
+  `DialogueMarriageActions.cs`, `ArrestSystem.cs` (its `/arrests/*` routes are registered in `WorldSimulationRoutes.cs`).
 - Social events: `SocialEventTurns.cs`, `SocialEventApproaches.cs`, `GeneratedWildernessVariety.cs`. The start,
-  respond, resolve and history routes for social events are in `Dialogue/Program.EventConversations.cs` (part of `Program`).
+  respond, resolve and history routes for social events are in `Dialogue/Conversation/EventConversations.cs` (`DialogueService`).
 - `LiveInteractionTest.cs`: the server side of the live in-game test harness (`/tests/live/*`), driven by
   `tests/ReignLiveTest`. Split verbatim into `LiveInteractionTest.Assertions.cs`, `.Evidence.cs`, `.Lifecycle.cs`,
   `.SelfChecks.cs` (`RunLiveInteractionTestSelfTests`) and `.State.cs` partial files.
@@ -28,7 +28,7 @@ arrests and dialogue marriage actions. It also hosts the live interaction test c
 The module's `Program` partials are now `internal static partial class WorldSimulationService` in their existing
 files. It calls `Program` members with an explicit `Program.` qualifier, and `Program` and the other modules call it
 as `WorldSimulationService.X`; the members used across that boundary are `internal`.
-`Program.WorldSimulationRoutes.cs` stays part of `Program` and registers the service handlers. Dialogue,
+`WorldSimulationRoutes.cs` (an `internal static` route class called from `Platform/RouteTable.cs`) registers the service handlers. Dialogue,
 Relationships, Reputation and Platform call into it for world history, campaign commands, arrests and the world test.
 Its static state (the world history claim cache and lock, world test telemetry) lives in `WorldSimulationService`. The
 self-tests listed below are `WorldSimulationService` members.
