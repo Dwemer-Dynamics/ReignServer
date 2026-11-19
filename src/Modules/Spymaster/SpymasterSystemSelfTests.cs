@@ -149,9 +149,7 @@ namespace ReignBetaServer
                 List<Dictionary<string, object>> excludedRows = ReadDictionaryList(exclusionStatus, "candidates");
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(exclusionCampaign))
                 {
-                    int assignmentCount = ReignDatabase.QuerySql(connection,
-                        "SELECT agent_hero_id FROM foreign_agent_assignments WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                        new Dictionary<string, object> { ["campaign"] = exclusionCampaign, ["timeline"] = exclusionTimeline }).Count;
+                    int assignmentCount = SpymasterSelfTestStore.SelectForeignAgentAssignments(connection, new Dictionary<string, object> { ["campaign"] = exclusionCampaign, ["timeline"] = exclusionTimeline }).Count;
                     add("agent_candidate_exclusions",
                         ReadInt(exclusionStatus, "eligibleCandidateCount", -1) == 0
                         && excludedRows.Any(x => ReadString(x, "heroId", "") == exclusionPlayer
@@ -196,20 +194,11 @@ namespace ReignBetaServer
                 {
                     EnsureSpymasterSchema(connection);
                     RelationshipsService.EnsureMbtiRelationshipSchema(connection);
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
-pair_key,hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,
-effective_affinity_a_to_b,effective_affinity_b_to_a,first_day,last_day,
-last_context_kind,last_context_id,state_revision,updated_ts)
-VALUES($pair,'enemy_ruler','player_ruler',-29,-80,-95,-95,0,0,
-'fixture_initialization','directional-outlook-fixture',1,0);",
-                        new Dictionary<string, object>
+                    SpymasterSelfTestStore.InsertRelationshipPairChemistry(connection, new Dictionary<string, object>
                         {
                             ["pair"] = RelationshipsService.AmbientPairKey("enemy_ruler", "player_ruler")
                         });
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO foreign_agent_assignments(campaign_id,timeline_id,agent_hero_id,sponsor_kingdom_id,
-sponsor_ruler_id,settlement_id,is_notable,status,recruited_day,next_action_day,last_action_day,payload_json,updated_ts)
-VALUES($campaign,$timeline,$agent,'enemy_kingdom','enemy_ruler','player_town',0,'active',0,1000,-1,'{}',0);",
-                        new Dictionary<string, object>
+                    SpymasterSelfTestStore.InsertForeignAgentAssignments(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent
                         });
@@ -220,12 +209,7 @@ VALUES($campaign,$timeline,$agent,'enemy_kingdom','enemy_ruler','player_town',0,
                 {
                     using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign))
                     {
-                        ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
-affinity_a_to_b=$outlook,affinity_b_to_a=$reverse,
-effective_affinity_a_to_b=$effective,last_day=$day,
-last_context_kind='fixture_explicit_player_incident',
-last_context_id='directional-outlook-fixture',state_revision=state_revision+1
-WHERE pair_key=$pair;", new Dictionary<string, object>
+                        SpymasterSelfTestStore.UpdateRelationshipPairChemistry(connection, new Dictionary<string, object>
                         {
                             ["outlook"] = rulerOutlook, ["reverse"] = reverseOutlook,
                             ["effective"] = effectiveOutlook, ["day"] = day,
@@ -252,14 +236,12 @@ WHERE pair_key=$pair;", new Dictionary<string, object>
                 Dictionary<string, object> suspended = tickAt(10d, -29d, -100d, -100d);
                 Dictionary<string, object> suspendedRow;
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign))
-                    suspendedRow = ReignDatabase.QuerySql(connection, "SELECT status,last_action_day FROM foreign_agent_assignments WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;",
-                        new Dictionary<string, object> { ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent }).FirstOrDefault();
+                    suspendedRow = SpymasterSelfTestStore.SelectForeignAgentAssignments2(connection, new Dictionary<string, object> { ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent }).FirstOrDefault();
 
                 Dictionary<string, object> activated = tickAt(11d, -30d, 100d, 100d);
                 Dictionary<string, object> activatedRow;
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign))
-                    activatedRow = ReignDatabase.QuerySql(connection, "SELECT status,last_action_day FROM foreign_agent_assignments WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;",
-                        new Dictionary<string, object> { ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent }).FirstOrDefault();
+                    activatedRow = SpymasterSelfTestStore.SelectForeignAgentAssignments2(connection, new Dictionary<string, object> { ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent }).FirstOrDefault();
 
                 Dictionary<string, object> effectiveChangedOnly = tickAt(12d, -30d, 100d, -100d);
                 Dictionary<string, object> effectiveChangedRow;
@@ -278,14 +260,12 @@ WHERE pair_key=$pair;", new Dictionary<string, object>
                     }
                 });
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign))
-                    effectiveChangedRow = ReignDatabase.QuerySql(connection, "SELECT status,last_action_day FROM foreign_agent_assignments WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;",
-                        new Dictionary<string, object> { ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent }).FirstOrDefault();
+                    effectiveChangedRow = SpymasterSelfTestStore.SelectForeignAgentAssignments2(connection, new Dictionary<string, object> { ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent }).FirstOrDefault();
 
                 Dictionary<string, object> resuspended = tickAt(13d, -29d, -100d, -100d);
                 Dictionary<string, object> resuspendedRow;
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign))
-                    resuspendedRow = ReignDatabase.QuerySql(connection, "SELECT status,last_action_day FROM foreign_agent_assignments WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;",
-                        new Dictionary<string, object> { ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent }).FirstOrDefault();
+                    resuspendedRow = SpymasterSelfTestStore.SelectForeignAgentAssignments2(connection, new Dictionary<string, object> { ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent }).FirstOrDefault();
 
                 add("agent_activation_suspension_transition",
                     ReadString(suspendedRow, "status", "") == "dormant"
@@ -316,11 +296,8 @@ WHERE pair_key=$pair;", new Dictionary<string, object>
 
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign))
                 {
-                    ReignDatabase.ExecuteSql(connection, "UPDATE relationship_pair_chemistry SET affinity_a_to_b=-30 WHERE pair_key=$pair;",
-                        new Dictionary<string, object> { ["pair"] = RelationshipsService.AmbientPairKey("enemy_ruler", "player_ruler") });
-                    ReignDatabase.ExecuteSql(connection, @"UPDATE foreign_agent_assignments SET status='active',next_action_day=14,last_action_day=-1
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;",
-                        new Dictionary<string, object>
+                    SpymasterSelfTestStore.UpdateRelationshipPairChemistry2(connection, new Dictionary<string, object> { ["pair"] = RelationshipsService.AmbientPairKey("enemy_ruler", "player_ruler") });
+                    SpymasterSelfTestStore.UpdateForeignAgentAssignments(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = activationCampaign,
                             ["timeline"] = activationTimeline, ["agent"] = activationAgent
