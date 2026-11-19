@@ -74,7 +74,7 @@ namespace ReignBetaServer
             Dictionary<string, object> request = new Dictionary<string, object>
             {
                 ["requestType"] = "ruler_petition_reaction", ["campaignId"] = campaignId,
-                ["correlationId"] = Program.EnsureCorrelationId(payload),
+                ["correlationId"] = OperationsService.EnsureCorrelationId(payload),
                 ["messages"] = DialogueService.BuildSimplePromptEnvelope("ruler_petition_reaction", phase,
                     "Write the petitioner's bounded visible line and return valid JSON.", prompt.ToString()).Messages,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }

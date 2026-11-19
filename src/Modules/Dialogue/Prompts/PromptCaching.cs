@@ -163,7 +163,7 @@ namespace ReignBetaServer
             string npcRelationshipBlock,
             string templateOverride = null)
         {
-            string liveTurn = RenderConversationTemplate(templateOverride ?? Program.LoadPromptTemplate(templateName), values);
+            string liveTurn = RenderConversationTemplate(templateOverride ?? PromptService.LoadPromptTemplate(templateName), values);
             if (!string.IsNullOrWhiteSpace(conversationScenePrompt))
                 liveTurn = conversationScenePrompt.Trim() + "\n\n" + liveTurn;
             if (!string.IsNullOrWhiteSpace(roleAttribution))
@@ -183,7 +183,7 @@ namespace ReignBetaServer
             string transcript = values.TryGetValue(transcriptValueKey, out string t) ? t ?? "" : "";
             string relationship = npcRelationshipBlock ?? "";
             string initialContext = context, initialTranscript = transcript;
-            var settings = Program.LoadSettings();
+            var settings = SettingsService.LoadSettings();
             // Warnings are observability settings, never semantic truncation limits.
             // One allocator accounts for every fixed section, including protected
             // relationship and agenda context. Final serialized preflight follows.
@@ -263,7 +263,7 @@ namespace ReignBetaServer
                 liveTurn = assemble();
                 finalEstimate = serializedEstimate(liveTurn);
             }
-            var structure = CreateConversationTemplateSlots(Program.LoadPromptTemplate(templateName), transcriptValueKey);
+            var structure = CreateConversationTemplateSlots(PromptService.LoadPromptTemplate(templateName), transcriptValueKey);
             structure.MarkedLiveTurn = AssembleConversationLiveTurn(templateName, values,
                 conversationScenePrompt, roleAttribution, relationship, structure.Template);
             if (NormalizePromptSegment(structure.WithoutMarkers(structure.MarkedLiveTurn)) != NormalizePromptSegment(liveTurn))
@@ -492,15 +492,15 @@ namespace ReignBetaServer
                 ["characterLiveStateText"] = liveState,
                 ["contextPullText"] = contextPullText,
                 ["priorDialogueText"] = canonicalTranscript,
-                ["worldTone"] = Program.LoadPromptTemplate("world_tone.txt"),
-                ["globalResponseOverride"] = Program.LoadPromptTemplate("global_response_override.txt"),
+                ["worldTone"] = PromptService.LoadPromptTemplate("world_tone.txt"),
+                ["globalResponseOverride"] = PromptService.LoadPromptTemplate("global_response_override.txt"),
                 ["characterFoundationText"] = characterPrefix + "\n\n" + liveState,
                 ["noblePromptBlock"] = DialogueService.BuildNoblePromptBlock(profile),
                 ["actionCatalogJson"] = CanonicalActionCatalogJson(actionCatalog),
-                ["actionSuggestionRules"] = Program.LoadPromptTemplate("action_suggestion_rules.txt"),
+                ["actionSuggestionRules"] = PromptService.LoadPromptTemplate("action_suggestion_rules.txt"),
                 ["memoryWriteRules"] = LoadSourceScopedMemoryWriteRules(),
-                ["internalPosture"] = Program.LoadPromptTemplate("dialogue_internal_posture.txt"),
-                ["outputSchema"] = ConversationActionOutputSchema(Program.LoadPromptTemplate("dialogue_output_schema.json"), UsesStructuredActions(turnPayload))
+                ["internalPosture"] = PromptService.LoadPromptTemplate("dialogue_internal_posture.txt"),
+                ["outputSchema"] = ConversationActionOutputSchema(PromptService.LoadPromptTemplate("dialogue_output_schema.json"), UsesStructuredActions(turnPayload))
             };
             string conversationScenePrompt = ReadString(turnPayload, "conversationScenePrompt", "");
             string roleAttribution = BuildInteractionRoleAttribution(turnPayload, heroId, heroName, playerName);
@@ -535,7 +535,7 @@ namespace ReignBetaServer
             roleAttribution += "\n\n" + BuildProtectedConversationContinuity(campaignId, heroId, turnPayload, state, contextPullText,
                 priorLines, () => CharactersService.SanitizePromptForIdentity(canonicalTranscript, playerText, canonicalPlayerName, identityView), structuredMessages: true);
             var capacity = ResolveConversationPromptCapacity(turnPayload, "dialogue",
-                CharactersService.IsNpcLifeApproach(turnPayload) ? Program.BanterProviderSettings(TestDict("requestType", "npc_approach"), Program.LoadSettings()) : null);
+                CharactersService.IsNpcLifeApproach(turnPayload) ? SettingsService.BanterProviderSettings(TestDict("requestType", "npc_approach"), SettingsService.LoadSettings()) : null);
             PromptLiveTurnBudgetResult budgeted = BuildBudgetedConversationLiveTurn(
                 "dialogue_live_turn_template.txt", "priorDialogueText", values,
                 conversationScenePrompt, roleAttribution,
@@ -711,14 +711,14 @@ namespace ReignBetaServer
                 ["characterLiveStateText"] = liveState,
                 ["contextPullText"] = contextPullText,
                 ["eventHistoryText"] = canonicalTranscript,
-                ["worldTone"] = Program.LoadPromptTemplate("world_tone.txt"),
-                ["globalResponseOverride"] = Program.LoadPromptTemplate("global_response_override.txt"),
+                ["worldTone"] = PromptService.LoadPromptTemplate("world_tone.txt"),
+                ["globalResponseOverride"] = PromptService.LoadPromptTemplate("global_response_override.txt"),
                 ["characterFoundationText"] = characterPrefix + "\n\n" + liveState,
                 ["noblePromptBlock"] = DialogueService.BuildNoblePromptBlock(profile),
                 ["actionCatalogJson"] = CanonicalActionCatalogJson(actionCatalog),
-                ["actionSuggestionRules"] = Program.LoadPromptTemplate("action_suggestion_rules.txt"),
+                ["actionSuggestionRules"] = PromptService.LoadPromptTemplate("action_suggestion_rules.txt"),
                 ["memoryWriteRules"] = LoadSourceScopedMemoryWriteRules(),
-                ["outputSchema"] = ConversationActionOutputSchema(Program.LoadPromptTemplate("event_output_schema.json"), UsesStructuredActions(eventPayload))
+                ["outputSchema"] = ConversationActionOutputSchema(PromptService.LoadPromptTemplate("event_output_schema.json"), UsesStructuredActions(eventPayload))
             };
             string conversationScenePrompt = ReadString(eventPayload, "conversationScenePrompt", "");
             string roleAttribution = BuildInteractionRoleAttribution(eventPayload, heroId, heroName, playerName);
@@ -822,7 +822,7 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> profiles = MergedInteractionParticipantProfiles(payload);
             string playerId = FirstNonEmpty(
                 ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"),
-                profiles.Select(x => ReadString(x, "role", "").Equals("player", StringComparison.OrdinalIgnoreCase) ? Program.CharacterIdFrom(x) : "")
+                profiles.Select(x => ReadString(x, "role", "").Equals("player", StringComparison.OrdinalIgnoreCase) ? CampaignFileService.CharacterIdFrom(x) : "")
                     .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)),
                 "main_hero");
             Dictionary<string, Dictionary<string, object>> participantViews =
@@ -862,7 +862,7 @@ namespace ReignBetaServer
             Func<Dictionary<string, object>, Dictionary<string, object>>
                 observerView = participant =>
                 {
-                    string id = Program.CharacterIdFrom(participant);
+                    string id = CampaignFileService.CharacterIdFrom(participant);
                     return participantViews.TryGetValue(
                         id, out Dictionary<string, object> view)
                             ? view
@@ -871,7 +871,7 @@ namespace ReignBetaServer
             Func<Dictionary<string, object>, string> observerSafeName =
                 participant =>
                 {
-                    string id = Program.CharacterIdFrom(participant);
+                    string id = CampaignFileService.CharacterIdFrom(participant);
                     if (id.Equals(
                             speakerId ?? "",
                             StringComparison.OrdinalIgnoreCase))
@@ -891,8 +891,8 @@ namespace ReignBetaServer
             block.AppendLine("- PLAYER ROLE: hero id " + playerId + "; usable address is " + FirstNonEmpty(usablePlayerName, "the stranger") + ".");
             block.AppendLine("- CURRENT NPC SPEAKER: hero id " + FirstNonEmpty(speakerId, "unknown") + "; name " + FirstNonEmpty(speakerName, speakerId, "unknown") + ".");
             foreach (Dictionary<string, object> participant in profiles
-                .Where(x => !Program.CharacterIdFrom(x).Equals(playerId, StringComparison.OrdinalIgnoreCase)
-                    && !Program.CharacterIdFrom(x).Equals(speakerId, StringComparison.OrdinalIgnoreCase)))
+                .Where(x => !CampaignFileService.CharacterIdFrom(x).Equals(playerId, StringComparison.OrdinalIgnoreCase)
+                    && !CampaignFileService.CharacterIdFrom(x).Equals(speakerId, StringComparison.OrdinalIgnoreCase)))
             {
                 Dictionary<string, object> view =
                     observerView(participant);
@@ -901,7 +901,7 @@ namespace ReignBetaServer
                     ?? new Dictionary<string, object>();
                 block.AppendLine(
                     "- OTHER NPC PARTICIPANT: hero id "
-                    + Program.CharacterIdFrom(participant)
+                    + CampaignFileService.CharacterIdFrom(participant)
                     + "; observer-safe identity "
                     + observerSafeName(participant)
                     + "; identity state "
@@ -922,8 +922,8 @@ namespace ReignBetaServer
                     + ". Mechanical IDs and hidden profile names do not grant identity knowledge.");
             }
             Dictionary<string, string> names = profiles
-                .Where(x => !string.IsNullOrWhiteSpace(Program.CharacterIdFrom(x)))
-                .GroupBy(Program.CharacterIdFrom, StringComparer.OrdinalIgnoreCase)
+                .Where(x => !string.IsNullOrWhiteSpace(CampaignFileService.CharacterIdFrom(x)))
+                .GroupBy(CampaignFileService.CharacterIdFrom, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key,
                     group => observerSafeName(group.First()),
                     StringComparer.OrdinalIgnoreCase);
@@ -934,7 +934,7 @@ namespace ReignBetaServer
             foreach (Dictionary<string, object> participant in profiles.Where(x =>
                 !ReadString(x, "role", "npc").Equals("player", StringComparison.OrdinalIgnoreCase)))
             {
-                string participantId = Program.CharacterIdFrom(participant);
+                string participantId = CampaignFileService.CharacterIdFrom(participant);
                 Dictionary<string, object> view =
                     observerView(participant);
                 if (!participantId.Equals(
@@ -968,12 +968,12 @@ namespace ReignBetaServer
             // The current native snapshot may explicitly clear a home. Do not fill
             // its empty fields from older scene participants or remembered plans.
             Dictionary<string, object> homeProfile = ReadDictionary(payload, "hero");
-            if (homeProfile == null || !Program.CharacterIdFrom(homeProfile).Equals(speakerId ?? "", StringComparison.OrdinalIgnoreCase))
+            if (homeProfile == null || !CampaignFileService.CharacterIdFrom(homeProfile).Equals(speakerId ?? "", StringComparison.OrdinalIgnoreCase))
                 homeProfile = ReadDictionaryList(payload, "attendees")
                     .Concat(ReadDictionaryList(payload, "participantProfiles"))
                     .Concat(ReadDictionaryList(payload, "sceneParticipants"))
-                    .FirstOrDefault(x => Program.CharacterIdFrom(x).Equals(speakerId ?? "", StringComparison.OrdinalIgnoreCase))
-                    ?? profiles.FirstOrDefault(x => Program.CharacterIdFrom(x).Equals(speakerId ?? "", StringComparison.OrdinalIgnoreCase));
+                    .FirstOrDefault(x => CampaignFileService.CharacterIdFrom(x).Equals(speakerId ?? "", StringComparison.OrdinalIgnoreCase))
+                    ?? profiles.FirstOrDefault(x => CampaignFileService.CharacterIdFrom(x).Equals(speakerId ?? "", StringComparison.OrdinalIgnoreCase));
             block.AppendLine();
             block.AppendLine("AUTHORITATIVE NATIVE HOME - CURRENT SPEAKER");
             block.AppendLine(Json.Serialize(new Dictionary<string, object>

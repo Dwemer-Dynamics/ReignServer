@@ -59,10 +59,10 @@ namespace ReignBetaServer
             foreach (Dictionary<string, object> item in raw)
             {
                 string text = ReadFirstString(item, "text", "fact", "characteristic", "summary").Trim();
-                string category = Program.NormalizeLookup(ReadString(item, "category", "personal_history")).Replace(' ', '_').Replace('-', '_');
+                string category = ActionPipelineService.NormalizeLookup(ReadString(item, "category", "personal_history")).Replace(' ', '_').Replace('-', '_');
                 if (!DynamicCharacteristicCategories.Contains(category)) category = "personal_history";
                 string topicKey = NormalizeDynamicTopicKey(ReadFirstString(item, "topicKey", "topic_key"), category, text);
-                string sourceBasis = Program.NormalizeLookup(ReadFirstString(item, "sourceBasis", "source_basis"));
+                string sourceBasis = ActionPipelineService.NormalizeLookup(ReadFirstString(item, "sourceBasis", "source_basis"));
                 if (string.IsNullOrWhiteSpace(sourceBasis)) sourceBasis = "npc_generated_personal_history";
                 string rejection = DynamicCharacteristicRejectionReason(text, heroId, profile, payload, visibleReply);
                 var evidence = DialogueService.BindConversationSource(item, DialogueService.CurrentConversationSources("", heroId, "", visibleReply,
@@ -155,7 +155,7 @@ namespace ReignBetaServer
             string frequency = match.Groups[1].Value.Trim().ToLowerInvariant();
             string detail = Regex.Replace(match.Groups[2].Value.Trim(), @"\s+", " ")
                 .Trim(' ', ',', ';', ':', '-', '\u2014');
-            string normalized = Program.NormalizeLookup(detail);
+            string normalized = ActionPipelineService.NormalizeLookup(detail);
             if (detail.Length < 3
                 || DynamicCharacteristicMatchIsMetalinguistic(reply, match, detail)
                 || Regex.IsMatch(normalized,
@@ -198,7 +198,7 @@ namespace ReignBetaServer
                 string article = match.Groups[1].Value.Trim().ToLowerInvariant();
                 string detail = Regex.Replace(match.Groups[2].Value.Trim(), @"\s+", " ")
                     .Trim(' ', ',', ';', ':', '-', '\u2014');
-                string normalized = Program.NormalizeLookup(detail);
+                string normalized = ActionPipelineService.NormalizeLookup(detail);
                 if (detail.Length < 3
                     || DynamicCharacteristicMatchIsMetalinguistic(reply, match, detail)
                     || DialogueService.MemoryQueryTerms(detail).Distinct(StringComparer.OrdinalIgnoreCase).Count() < 1
@@ -250,7 +250,7 @@ namespace ReignBetaServer
 
         private static string NormalizeDynamicTopicKey(string supplied, string category, string text)
         {
-            string value = Regex.Replace(Program.NormalizeLookup(supplied), @"[^a-z0-9]+", "_").Trim('_');
+            string value = Regex.Replace(ActionPipelineService.NormalizeLookup(supplied), @"[^a-z0-9]+", "_").Trim('_');
             if (!string.IsNullOrWhiteSpace(value)) return DialogueService.LimitText(value, 80);
             List<string> terms = DialogueService.MemoryQueryTerms(text).Take(5).ToList();
             return DialogueService.LimitText((category ?? "personal_history") + "_" + string.Join("_", terms), 80);
@@ -269,7 +269,7 @@ namespace ReignBetaServer
                     && !HasDynamicTextEvidence(clean, visibleReply))
                 return "not_expressed_in_visible_reply";
             if (DialogueService.IsConversationCharacteristicRhetoric(clean)) return "conversation_rhetoric_is_not_stable_characterization";
-            string q = Program.NormalizeLookup(clean);
+            string q = ActionPipelineService.NormalizeLookup(clean);
             if (!DynamicCharacteristicIsAboutSpeaker(clean, profile))
                 return "not_about_speaking_character";
             if (Regex.IsMatch(q, @"\b(?:we|i)\s+(?:am|are|'m|'re)\s+(?:currently|presently|now)\s+(?:in|at)\b", RegexOptions.IgnoreCase)
@@ -348,7 +348,7 @@ namespace ReignBetaServer
 
         private static bool DynamicCharacteristicIsAboutSpeaker(string text, Dictionary<string, object> profile)
         {
-            string normalized = Program.NormalizeLookup(text);
+            string normalized = ActionPipelineService.NormalizeLookup(text);
             if (Regex.IsMatch(normalized, @"\b(i|my|me|mine|we|our|this character|the speaker)\b", RegexOptions.IgnoreCase)) return true;
             string fullName = ReadString(profile, "name", "").Trim();
             if (!string.IsNullOrWhiteSpace(fullName) && text.IndexOf(fullName, StringComparison.OrdinalIgnoreCase) >= 0) return true;
@@ -397,7 +397,7 @@ namespace ReignBetaServer
                         continue;
                     }
                     string text = ReadString(write, "text", "").Trim();
-                    string normalized = Program.NormalizeLookup(text);
+                    string normalized = ActionPipelineService.NormalizeLookup(text);
                     if (string.IsNullOrWhiteSpace(normalized)) continue;
                     string id = "dynamic_" + DialogueService.PromptHash(heroId + "|" + normalized).Substring(0, 24).ToLowerInvariant();
                     string status = ReadString(write, "status", "rejected");
@@ -473,7 +473,7 @@ namespace ReignBetaServer
             // the bounded display projection. History remains in the temporal database.
             var narrativeRows = CharactersStore.SelectDynamicCharacteristics9(connection, new Dictionary<string, object> { ["owner"] = heroId });
             rows = rows.Concat(narrativeRows).GroupBy(x => ReadString(x, "characteristic_id", "")).Select(x => x.First()).ToList();
-            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "dynamic_characteristics.json"), new Dictionary<string, object>
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "dynamic_characteristics.json"), new Dictionary<string, object>
             {
                 ["schemaVersion"] = 1,
                 ["sectionName"] = "Dynamic Characteristics",
@@ -542,7 +542,7 @@ namespace ReignBetaServer
                 "event_a", "dialogue", "town_ES1", 100, new[] { hero, "main_hero" });
             add("compatible_personal_history_persists", ReadInt(stored, "storedCount", 0) == 1,
                 "A compatible self-created personal detail becomes durable soft canon with source lineage.", stored);
-            Dictionary<string, object> projected = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "dynamic_characteristics.json"));
+            Dictionary<string, object> projected = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "dynamic_characteristics.json"));
             string prompt = FormatDynamicCharacteristicsForPrompt(projected);
             add("active_entries_reach_prompt", prompt.Contains("market lanes", StringComparison.OrdinalIgnoreCase)
                 && prompt.Contains("soft personal canon", StringComparison.OrdinalIgnoreCase),

@@ -7,7 +7,7 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class SettingsService
     {
         private static readonly object SettingsSecretVaultLock = new object();
         private static readonly byte[] SettingsSecretVaultEntropy =
@@ -58,7 +58,7 @@ namespace ReignBetaServer
                     out restoredSettingCount);
                 if (restoredSettingCount > 0)
                 {
-                    LogOperational("settings.secrets_recovered", new Dictionary<string, object>
+                    OperationsService.LogOperational("settings.secrets_recovered", new Dictionary<string, object>
                     {
                         ["keyCount"] = recoveredKeys.Count,
                         ["keys"] = recoveredKeys,
@@ -70,7 +70,7 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                LogOperational("settings.secrets_recovery_failed", new Dictionary<string, object>
+                OperationsService.LogOperational("settings.secrets_recovery_failed", new Dictionary<string, object>
                 {
                     ["errorType"] = ex.GetType().Name,
                     ["error"] = ex.Message
@@ -96,7 +96,7 @@ namespace ReignBetaServer
                     settings,
                     allowEmptySecretOverwrite))
                 {
-                    LogOperational("settings.secrets_persist_skipped_empty", new Dictionary<string, object>
+                    OperationsService.LogOperational("settings.secrets_persist_skipped_empty", new Dictionary<string, object>
                     {
                         ["vaultExists"] = File.Exists(vaultPath),
                         ["explicitClear"] = allowEmptySecretOverwrite
@@ -108,7 +108,7 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                LogOperational("settings.secrets_persist_failed", new Dictionary<string, object>
+                OperationsService.LogOperational("settings.secrets_persist_failed", new Dictionary<string, object>
                 {
                     ["errorType"] = ex.GetType().Name,
                     ["error"] = ex.Message
@@ -290,7 +290,7 @@ namespace ReignBetaServer
             return vaultKeyId.Length > 0 && vaultKeyId == BoundKeyId(settings, slot);
         }
 
-        private static Dictionary<string, object> RunSettingsSecretVaultSelfTest()
+        internal static Dictionary<string, object> RunSettingsSecretVaultSelfTest()
         {
             string root = Path.Combine(Path.GetTempPath(), "reign-settings-vault-" + Guid.NewGuid().ToString("N"));
             string path = Path.Combine(root, "settings-secrets.dpapi");

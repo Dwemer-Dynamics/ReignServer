@@ -34,7 +34,7 @@ namespace ReignBetaServer
                 "fullyReplayedCases", 0, "providerCalls", 0, "certificateEligible", false,
                 "scope", "Synthetic run-owned PostgreSQL archive, source identity and cleanup contracts only; no retained native campaign imported.");
             string path = Path.Combine(Program.TestsDir, "memory-accuracy", "evidence-result-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".json");
-            Program.WriteJsonObject(path, report);
+            CampaignFileService.WriteJsonObject(path, report);
             return TestDict("ok", ok, "resultPath", path, "inputSha256", inputHash,
                 "completedCases", checks.Count, "fullyReplayedCases", 0, "providerCalls", 0, "certificateEligible", false);
         }

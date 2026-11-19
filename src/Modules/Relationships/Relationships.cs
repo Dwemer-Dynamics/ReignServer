@@ -217,15 +217,15 @@ namespace ReignBetaServer
             Dictionary<string, object> existing = RelationshipsStore.SelectRelationships3(connection, new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId }).FirstOrDefault();
             if (existing != null) return existing;
 
-            Dictionary<string, object> subject = Program.ReadJsonObject(Program.CharacterFile(campaignId, subjectId, "profile.json"));
-            Dictionary<string, object> target = Program.ReadJsonObject(Program.CharacterFile(campaignId, targetId, "profile.json"));
+            Dictionary<string, object> subject = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, subjectId, "profile.json"));
+            Dictionary<string, object> target = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, targetId, "profile.json"));
             Dictionary<string, object> suppliedSubject = ReadDictionary(payload, "subject") ?? new Dictionary<string, object>();
             Dictionary<string, object> suppliedTarget = ReadDictionary(payload, "target") ?? new Dictionary<string, object>();
             if(subject.Count==0)subject=new Dictionary<string, object>(suppliedSubject,StringComparer.OrdinalIgnoreCase);
             if(target.Count==0)target=new Dictionary<string, object>(suppliedTarget,StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, object> subjectTraitDocument = Program.ReadJsonObject(Program.CharacterFile(campaignId, subjectId, "traits.json"));
+            Dictionary<string, object> subjectTraitDocument = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, subjectId, "traits.json"));
             if (subjectTraitDocument.Count == 0) subjectTraitDocument = ReadDictionary(suppliedSubject, "traits") ?? CharactersService.BuildTraitDocument(suppliedSubject);
-            Dictionary<string, object> targetTraitDocument = Program.ReadJsonObject(Program.CharacterFile(campaignId, targetId, "traits.json"));
+            Dictionary<string, object> targetTraitDocument = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, targetId, "traits.json"));
             if (targetTraitDocument.Count == 0) targetTraitDocument = ReadDictionary(suppliedTarget, "traits") ?? CharactersService.BuildTraitDocument(suppliedTarget);
             int nativeRelation = Clamp(ReadInt(payload, "nativeRelation", ReadInt(payload, "relation", 0)), -100, 100);
             bool spouse = ReadString(subject, "spouseId", "").Equals(targetId, StringComparison.OrdinalIgnoreCase);
@@ -653,7 +653,7 @@ namespace ReignBetaServer
             string campaignId = ReadString(payload, "campaignId", "default");
             string actionId = ReadFirstString(payload, "serverActionId", "actionId", "id");
             string actionType = ReadFirstString(payload, "type", "command");
-            if (IsTemporaryPartyGuestLifecycleAction(Program.CanonicalCommand(actionType)))
+            if (IsTemporaryPartyGuestLifecycleAction(ActionPipelineService.CanonicalCommand(actionType)))
             {
                 return directions;
             }
@@ -842,13 +842,13 @@ namespace ReignBetaServer
             string recipientId,
             string body)
         {
-            string command = Program.LooksLikeExplicitPlayerRebellionDeclaration(body)
+            string command = ActionPipelineService.LooksLikeExplicitPlayerRebellionDeclaration(body)
                 ? "start_ruling_clan_rebellion"
-                : Program.LooksLikeExplicitPlayerRebellionSurrender(body) ? "surrender_rebellion" : string.Empty;
+                : ActionPipelineService.LooksLikeExplicitPlayerRebellionSurrender(body) ? "surrender_rebellion" : string.Empty;
             if (string.IsNullOrWhiteSpace(command)) return new List<Dictionary<string, object>>();
             Dictionary<string, object> sender = ReadDictionary(payload, "sender") ?? new Dictionary<string, object>();
             Dictionary<string, object> recipient = ReadDictionary(payload, "recipient") ?? new Dictionary<string, object>();
-            Dictionary<string, object> candidate = Program.BuildRebellionActionCandidate(
+            Dictionary<string, object> candidate = ActionPipelineService.BuildRebellionActionCandidate(
                 command,
                 senderId,
                 FirstNonEmpty(ReadFirstString(payload, "playerKingdomId", "actorKingdomId"), ReadString(sender, "kingdomId", "")),
@@ -859,11 +859,11 @@ namespace ReignBetaServer
                 command == "start_ruling_clan_rebellion"
                     ? "The player dispatched an explicit unilateral challenge and declaration of rebellion to the current ruler."
                     : "The player dispatched an explicit surrender of their named rebellion leadership.");
-            List<Dictionary<string, object>> queued = Program.EvaluateAndQueueActionCandidates(
+            List<Dictionary<string, object>> queued = ActionPipelineService.EvaluateAndQueueActionCandidates(
                 campaignId, payload, body, new List<Dictionary<string, object>> { candidate },
                 out List<string> errors, out List<Dictionary<string, object>> rejected);
             if (queued.Count == 0 && errors.Count > 0)
-                Program.LogOperational("correspondence.rebellion_action_failed",
+                OperationsService.LogOperational("correspondence.rebellion_action_failed",
                     new Dictionary<string, object> { ["campaignId"] = campaignId, ["errors"] = errors, ["rejected"] = rejected });
             return queued;
         }
@@ -904,11 +904,11 @@ namespace ReignBetaServer
                     ["reportId"] = ReadFirstString(reportPayload, "reportId", "report_id")
                 }
             };
-            List<Dictionary<string, object>> queued = Program.EvaluateAndQueueActionCandidates(
+            List<Dictionary<string, object>> queued = ActionPipelineService.EvaluateAndQueueActionCandidates(
                 campaignId, payload, body, new List<Dictionary<string, object>> { candidate },
                 out List<string> errors, out List<Dictionary<string, object>> rejected);
             if (queued.Count == 0 && errors.Count > 0)
-                Program.LogOperational("correspondence.campaign_guidance_action_failed",
+                OperationsService.LogOperational("correspondence.campaign_guidance_action_failed",
                     new Dictionary<string, object>
                     {
                         ["campaignId"] = campaignId,
@@ -922,15 +922,15 @@ namespace ReignBetaServer
 
         private static string NormalizeCampaignOrderGuidance(string text)
         {
-            string q = Program.NormalizeLookup(text);
+            string q = ActionPipelineService.NormalizeLookup(text);
             if (string.IsNullOrWhiteSpace(q)
-                || Program.ContainsAnyPhrase(q, new[] { "should i", "could i", "would i", "maybe", "perhaps" }))
+                || ActionPipelineService.ContainsAnyPhrase(q, new[] { "should i", "could i", "would i", "maybe", "perhaps" }))
                 return string.Empty;
-            if (Program.ContainsAnyPhrase(q, new[] { "cancel the order", "cancel this order", "abort the order" })) return "cancel";
-            if (Program.ContainsAnyPhrase(q, new[] { "withdraw", "retreat", "fall back" })) return "withdraw";
-            if (Program.ContainsAnyPhrase(q, new[] { "hold position", "hold your position", "wait there", "stay put" })) return "hold";
-            if (Program.ContainsAnyPhrase(q, new[] { "adapt", "change the plan", "use your judgment", "use your judgement" })) return "adapt";
-            if (Program.ContainsAnyPhrase(q, new[] { "continue", "proceed", "carry on", "execute the order" })) return "continue";
+            if (ActionPipelineService.ContainsAnyPhrase(q, new[] { "cancel the order", "cancel this order", "abort the order" })) return "cancel";
+            if (ActionPipelineService.ContainsAnyPhrase(q, new[] { "withdraw", "retreat", "fall back" })) return "withdraw";
+            if (ActionPipelineService.ContainsAnyPhrase(q, new[] { "hold position", "hold your position", "wait there", "stay put" })) return "hold";
+            if (ActionPipelineService.ContainsAnyPhrase(q, new[] { "adapt", "change the plan", "use your judgment", "use your judgement" })) return "adapt";
+            if (ActionPipelineService.ContainsAnyPhrase(q, new[] { "continue", "proceed", "carry on", "execute the order" })) return "continue";
             return string.Empty;
         }
 
@@ -965,7 +965,7 @@ namespace ReignBetaServer
                 || string.Equals(source, "campaign_command_report", StringComparison.OrdinalIgnoreCase);
             double baseTransit = immediate ? 0d : CorrespondenceTransitPolicy.NormalizeBaseDays(deliveryDay - dispatchDay);
             deliveryDay = dispatchDay + CorrespondenceTransitPolicy.NewTransitDays(baseTransit, immediate,
-                travelTimeMultiplier ?? Program.CorrespondenceOption(Program.LoadSettings(), "correspondenceTravelTimeMultiplier"));
+                travelTimeMultiplier ?? SettingsService.CorrespondenceOption(SettingsService.LoadSettings(), "correspondenceTravelTimeMultiplier"));
             RelationshipsStore.InsertLetters(connection, new Dictionary<string, object> { ["id"] = letterId, ["thread"] = threadId, ["sender"] = senderId, ["senderName"] = senderName, ["recipient"] = recipientId, ["recipientName"] = recipientName, ["body"] = body, ["source"] = source, ["reason"] = reason, ["parent"] = parentLetterId, ["origin"] = originId, ["destination"] = destinationId, ["dispatch"] = dispatchDay, ["delivery"] = deliveryDay, ["payload"] = Json.Serialize(payload ?? new Dictionary<string, object>()), ["ts"] = ts,
                     ["policy"] = CorrespondenceTransitPolicy.Version, ["baseTransit"] = baseTransit });
             RelationshipsStore.UpdateCorrespondenceThreads(connection, new Dictionary<string, object> { ["letter"] = letterId, ["day"] = dispatchDay, ["ts"] = ts, ["thread"] = threadId });
@@ -1165,7 +1165,7 @@ namespace ReignBetaServer
             if (candidates.Count == 0) return candidates;
             string request = ReadString(receivedLetter, "body", "");
             string replyBody = ReadString(npcReply, "body", "");
-            return Program.EvaluateAndQueueActionCandidates(campaignId, storedPayload,
+            return ActionPipelineService.EvaluateAndQueueActionCandidates(campaignId, storedPayload,
                 request + "\n" + replyBody, candidates,
                 out List<string> errors, out List<Dictionary<string, object>> rejected);
         }
@@ -1201,18 +1201,18 @@ namespace ReignBetaServer
             string decision = ReadString(npcReply, "rebellionDecision", "none").ToLowerInvariant();
             string command = string.Empty;
             bool npcIsActor = false;
-            if (Program.LooksLikeRebellionRecruitmentRequest(request)
-                && (decision == "accept_recruitment" || (decision == "none" && Program.IsUnambiguousActionAcceptance(replyBody))))
+            if (ActionPipelineService.LooksLikeRebellionRecruitmentRequest(request)
+                && (decision == "accept_recruitment" || (decision == "none" && ActionPipelineService.IsUnambiguousActionAcceptance(replyBody))))
             {
                 command = "recruit_lord_to_rebellion";
             }
-            else if (Program.LooksLikePlayerJoinRebellionRequest(request)
-                && (decision == "accept_player_join" || (decision == "none" && Program.IsUnambiguousActionAcceptance(replyBody))))
+            else if (ActionPipelineService.LooksLikePlayerJoinRebellionRequest(request)
+                && (decision == "accept_player_join" || (decision == "none" && ActionPipelineService.IsUnambiguousActionAcceptance(replyBody))))
             {
                 command = "join_rebellion";
             }
-            else if (Program.LooksLikeRebellionSurrenderDemand(request)
-                && (decision == "surrender" || Program.LooksLikeExplicitNpcRebellionSurrender(replyBody)))
+            else if (ActionPipelineService.LooksLikeRebellionSurrenderDemand(request)
+                && (decision == "surrender" || ActionPipelineService.LooksLikeExplicitNpcRebellionSurrender(replyBody)))
             {
                 command = "surrender_rebellion";
                 npcIsActor = true;
@@ -1221,10 +1221,10 @@ namespace ReignBetaServer
 
             Dictionary<string, object> player = ReadDictionary(storedPayload, "sender") ?? new Dictionary<string, object>();
             Dictionary<string, object> candidate = npcIsActor
-                ? Program.BuildRebellionActionCandidate(command, npcId, ReadString(recipient, "kingdomId", ""), ReadString(recipient, "clanId", ""),
+                ? ActionPipelineService.BuildRebellionActionCandidate(command, npcId, ReadString(recipient, "kingdomId", ""), ReadString(recipient, "clanId", ""),
                     playerId, ReadString(player, "kingdomId", ""), ReadString(player, "clanId", ""),
                     "The NPC's delivered written reply explicitly surrendered their named rebellion leadership.")
-                : Program.BuildRebellionActionCandidate(command, playerId, ReadString(player, "kingdomId", ""), ReadString(player, "clanId", ""),
+                : ActionPipelineService.BuildRebellionActionCandidate(command, playerId, ReadString(player, "kingdomId", ""), ReadString(player, "clanId", ""),
                     npcId, ReadString(recipient, "kingdomId", ""), ReadString(recipient, "clanId", ""),
                     command == "recruit_lord_to_rebellion"
                         ? "The NPC's delivered written reply explicitly accepted recruitment into the player's active rebellion."
@@ -1257,8 +1257,8 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> GenerateNpcLetter(string campaignId, string senderId, string recipientId, Dictionary<string, object> receivedLetter, double day, bool autonomousInitiation = false, bool firstIntroduction = false)
         {
-            var settings = Program.LoadSettings();
-            Dictionary<string, object> profile = Program.ReadJsonObject(Program.CharacterFile(campaignId, senderId, "profile.json"));
+            var settings = SettingsService.LoadSettings();
+            Dictionary<string, object> profile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, senderId, "profile.json"));
             profile = MergeCorrespondenceRecipientProfile(profile, receivedLetter, senderId);
             Dictionary<string, object> characteristics = CharactersService.LoadCharacterStack(campaignId, senderId);
             Dictionary<string, object> relationship = RelationshipContextApi(new Dictionary<string, object> { ["campaignId"] = campaignId, ["subjectId"] = senderId, ["targetId"] = recipientId });
@@ -1295,7 +1295,7 @@ namespace ReignBetaServer
                 ["promptCacheEligible"] = true,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
             };
-            string correlationId = Program.EnsureCorrelationId(llmRequest);
+            string correlationId = OperationsService.EnsureCorrelationId(llmRequest);
             if (DialogueService.UsesStructuredActions(memoryContextPayload)) llmRequest["structuredActionProtocolVersion"] = Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion;
             memoryContextPayload["turnId"] = "mail_" + ReadString(receivedLetter, "letter_id", correlationId);
             memoryContextPayload["playerText"] = letterBody;
@@ -1364,7 +1364,7 @@ namespace ReignBetaServer
             line["recipientId"] = recipientId;
             line["worldDay"] = day;
             line["direction"] = senderId.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? "sent" : "received";
-            Program.AppendJsonLineToPath(Program.CharacterFile(campaignId, npcId, "history", "dialogue.jsonl"), line);
+            CampaignFileService.AppendJsonLineToPath(CampaignFileService.CharacterFile(campaignId, npcId, "history", "dialogue.jsonl"), line);
             DialogueService.StoreCorrespondenceTurn(campaignId, npcId, playerId, letter, day);
             using (var pregnancyConnection = ReignDatabase.OpenCampaignConnection(campaignId))
                 AcceptPregnancyDisclosures(pregnancyConnection, ReadString(letter, "timeline_id", "main"), senderId,

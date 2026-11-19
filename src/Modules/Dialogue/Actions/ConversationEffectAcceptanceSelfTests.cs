@@ -43,8 +43,8 @@ namespace ReignBetaServer
                 double Amount() { using var c = ReignDatabase.OpenCampaignConnection(campaign); return ReadDouble(TryParseJsonObject(ReadString(DialogueSelfTestStore.SelectConversationIntoxication(c).SingleOrDefault(), "state_json", "{}")), "drinks", 0); }
                 Check("prepare_has_no_negotiation_or_drink_effect", Negotiations() == 0 && Drinks() == 0 && Amount() == 0
                     && ReadString(ReadDictionary(payload, "conversationAgencyReceipt"), "commitState", "") == "prepared");
-                var quietPayload = Program.CloneDictionary(payload);
-                var quietDraft = Program.CloneDictionary(prepared);
+                var quietPayload = VerificationService.CloneDictionary(payload);
+                var quietDraft = VerificationService.CloneDictionary(prepared);
                 quietDraft["beliefWrites"] = new List<Dictionary<string, object>> { TestDict("content", "The player asked about travel.") };
                 var quiet = CommitFinalConversationEffects(campaign, "npc", quietPayload, motive, profile, null, quietDraft, "", generation);
                 Check("quiet_discards_unspoken_effects_preserves_observations", ReadBool(quiet, "ok", false)
@@ -54,8 +54,8 @@ namespace ReignBetaServer
                     && ReadDictionaryList(quietDraft, "beliefWrites").Count == 1 && Negotiations() == 0 && Drinks() == 0);
                 foreach (string earlyReturn in new[] { "quiet", "malformed", "isolated", "missing_turn" })
                 {
-                    var reused = Program.CloneDictionary(payload);
-                    var reusedDraft = Program.CloneDictionary(prepared);
+                    var reused = VerificationService.CloneDictionary(payload);
+                    var reusedDraft = VerificationService.CloneDictionary(prepared);
                     if (earlyReturn == "isolated") reused["governmentCertificationMemoryIsolation"] = true;
                     if (earlyReturn == "missing_turn") { reused.Remove("turnId"); reused.Remove("sceneTurnId"); reused.Remove("correlationId"); }
                     ApplyLegacyConversationDrinking(campaign, "npc", reused, profile, null,
@@ -75,7 +75,7 @@ namespace ReignBetaServer
                     "My household does not matter to me. *She takes a sip of wine.*", generation); }
                 catch (InvalidOperationException) { changedQuoteRejected = true; }
                 Check("final_prose_invalidates_old_negotiation_quote", changedQuoteRejected && Negotiations() == 0 && Drinks() == 0);
-                var replayPayload = Program.CloneDictionary(payload);
+                var replayPayload = VerificationService.CloneDictionary(payload);
                 string finalReply = reply + "\n\n[Reign: Action pending native confirmation.]";
                 var accepted = CommitFinalConversationEffects(campaign, "npc", payload, motive, profile, null, prepared, finalReply, generation);
                 var replay = CommitFinalConversationEffects(campaign, "npc", replayPayload, motive, profile, null, prepared, finalReply, generation);
@@ -115,7 +115,7 @@ namespace ReignBetaServer
                 var unpublished = RunPlayerActionTurn(authorityPayload, () => {
                     plannerAllowed = BindConversationAgencyAuthority(authorityPayload, "accept_temporary_party_guest",
                         TestDict("durationDays", 1d), TestDict(), new List<string>());
-                    var row = Program.QueueAction(campaign, TestDict("campaignId", campaign, "source", "dialogue_auto_commit",
+                    var row = ActionPipelineService.QueueAction(campaign, TestDict("campaignId", campaign, "source", "dialogue_auto_commit",
                         "command", "accept_temporary_party_guest", "actorHeroStringId", "npc", "targetHeroStringId", "player",
                         "termsHash", "uncommitted_terms", "termsJson", "{}"));
                     unpublishedId = ReadString(row, "id", "");
@@ -158,7 +158,7 @@ namespace ReignBetaServer
                 structuredDrinkDraft.Remove("proposalDecisions");
                 string structuredDrinkReply = ApplyLegacyConversationDrinking(campaign, "structured_npc", structuredDrinkPayload,
                     profile, null, structuredDrinkDraft, ReadString(structuredDrinkDraft, "reply", ""), persist: false);
-                var structuredDrinkReplayPayload = Program.CloneDictionary(structuredDrinkPayload);
+                var structuredDrinkReplayPayload = VerificationService.CloneDictionary(structuredDrinkPayload);
                 var structuredDrinkAccepted = CommitFinalConversationEffects(campaign, "structured_npc", structuredDrinkPayload,
                     motive, profile, null, structuredDrinkDraft, structuredDrinkReply, generation);
                 var structuredDrinkReplay = CommitFinalConversationEffects(campaign, "structured_npc", structuredDrinkReplayPayload,

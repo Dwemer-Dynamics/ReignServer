@@ -855,7 +855,7 @@ namespace ReignBetaServer
                 ["isRuler"] = ReadInt(roster, "is_ruler", 0) != 0,
                 ["sex"] = ReadString(roster, "sex", ""),
                 ["spouseId"] = string.IsNullOrWhiteSpace(campaignId) ? "" : ReadString(
-                    Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json")), "spouseId", "")
+                    CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "profile.json")), "spouseId", "")
             };
         }
 

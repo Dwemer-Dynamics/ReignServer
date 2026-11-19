@@ -309,7 +309,7 @@ namespace ReignBetaServer
                 || string.IsNullOrWhiteSpace(targetId))
                 return null;
 
-            string source = Program.NormalizeLookup(
+            string source = ActionPipelineService.NormalizeLookup(
                 ReadString(assessment, "sourceText", "")
                 + " " + ReadFirstString(assessment,
                     "currentConductQuote", "current_conduct_quote",
@@ -389,7 +389,7 @@ namespace ReignBetaServer
                 {
                     Row = row,
                     Score = sourceTerms.Count(term =>
-                        Program.NormalizeLookup(
+                        ActionPipelineService.NormalizeLookup(
                             ReadString(row, "benefit_kind", "")
                             + " " + ReadString(
                                 row, "description", "")
@@ -512,8 +512,8 @@ namespace ReignBetaServer
 
         private static bool ConversationCurrentConductIsSupported(Dictionary<string, object> assessment)
         {
-            string source = Program.NormalizeLookup(ReadString(assessment, "sourceText", ""));
-            string quote = Program.NormalizeLookup(ReadFirstString(assessment,
+            string source = ActionPipelineService.NormalizeLookup(ReadString(assessment, "sourceText", ""));
+            string quote = ActionPipelineService.NormalizeLookup(ReadFirstString(assessment,
                 "currentConductQuote", "current_conduct_quote", "evidenceQuote"));
             if (string.IsNullOrWhiteSpace(source) || quote.Length < 6) return false;
             if (!source.Contains(quote)) return false;
@@ -524,9 +524,9 @@ namespace ReignBetaServer
             Dictionary<string, object> assessment)
         {
             if (!ConversationCurrentConductIsSupported(assessment)) return false;
-            string quote = Program.NormalizeLookup(ReadFirstString(assessment,
+            string quote = ActionPipelineService.NormalizeLookup(ReadFirstString(assessment,
                 "currentConductQuote", "current_conduct_quote", "evidenceQuote"));
-            string source = Program.NormalizeLookup(ReadString(assessment, "sourceText", ""));
+            string source = ActionPipelineService.NormalizeLookup(ReadString(assessment, "sourceText", ""));
             string conduct = quote + " " + source;
             if (ConversationDirectSevereSpeechIsSupported(conduct)) return true;
 
@@ -557,7 +557,7 @@ namespace ReignBetaServer
             // target's current line. Inspect the full current line for the severe
             // semantics because a valid quote may be only the object of a threat
             // (for example, "kill your family") rather than its modal prefix.
-            string source = Program.NormalizeLookup(ReadString(assessment, "sourceText", ""));
+            string source = ActionPipelineService.NormalizeLookup(ReadString(assessment, "sourceText", ""));
             if (ConversationDirectSevereSpeechIsSupported(source)) return true;
 
             bool lineageRequired = (actKind ?? "").Contains("betray")
@@ -608,10 +608,10 @@ namespace ReignBetaServer
             if (phase == "planned" || phase == "proposed" || phase == "cancelled"
                 || phase == "failed" || phase == "rumored")
                 return false;
-            string kind = Program.NormalizeLookup(
+            string kind = ActionPipelineService.NormalizeLookup(
                 ReadString(evidence, "event_type", "") + " "
                 + ReadString(evidence, "category", ""));
-            string details = Program.NormalizeLookup(
+            string details = ActionPipelineService.NormalizeLookup(
                 ReadString(evidence, "summary", "") + " "
                 + ReadString(evidence, "payload_json", "{}"));
             if (DialogueService.ContainsAny(kind, "dialogue", "conversation", "reported speech")
@@ -654,7 +654,7 @@ namespace ReignBetaServer
 
         private static string ConversationGiftWitnessValence(string campaignId, string observerId, string requestedValence)
         {
-            Dictionary<string, object> traits = Program.ReadJsonObject(Program.CharacterFile(campaignId, observerId, "traits.json"));
+            Dictionary<string, object> traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, observerId, "traits.json"));
             double jealousy = FindConversationTrait(traits, "jealousy", "envy");
             double empathy = FindConversationTrait(traits, "empathy", "generosity", "compassion");
             if (jealousy >= 75d && jealousy >= empathy + 15d) return "negative";
@@ -706,8 +706,8 @@ namespace ReignBetaServer
                         targetId, StringComparer.OrdinalIgnoreCase);
             }
             if (!pairMatches) return false;
-            string kind = Program.NormalizeLookup(ReadString(evidence, "event_type", "") + " " + ReadString(evidence, "category", ""));
-            string details = Program.NormalizeLookup(ReadString(evidence, "summary", "") + " " + ReadString(evidence, "payload_json", "{}")
+            string kind = ActionPipelineService.NormalizeLookup(ReadString(evidence, "event_type", "") + " " + ReadString(evidence, "category", ""));
+            string details = ActionPipelineService.NormalizeLookup(ReadString(evidence, "summary", "") + " " + ReadString(evidence, "payload_json", "{}")
                 + " " + ReadString(assessment, "summary", ""));
             bool gift = actKind.Contains("gift");
             if (gift)
@@ -760,7 +760,7 @@ namespace ReignBetaServer
 
         private static int ConversationPersonalityModifier(string campaignId, string observerId, string actKind, string valence)
         {
-            Dictionary<string, object> traits = Program.ReadJsonObject(Program.CharacterFile(campaignId, observerId, "traits.json"));
+            Dictionary<string, object> traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, observerId, "traits.json"));
             double honor = FindConversationTrait(traits, "honor", "integrity", "honesty");
             double generosity = FindConversationTrait(traits, "generosity", "empathy");
             double pride = FindConversationTrait(traits, "pride", "vengefulness", "authorityRespect");
@@ -915,7 +915,7 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> ConversationRelationshipRecentApi(Dictionary<string, string> query)
         {
-            string campaignId = query != null && query.TryGetValue("campaignId", out string supplied) ? supplied : Program.LatestCampaignId();
+            string campaignId = query != null && query.TryGetValue("campaignId", out string supplied) ? supplied : SettingsService.LatestCampaignId();
             int limit = Math.Max(1, Math.Min(250, query != null && query.TryGetValue("limit", out string raw) && int.TryParse(raw, out int parsed) ? parsed : 80));
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {

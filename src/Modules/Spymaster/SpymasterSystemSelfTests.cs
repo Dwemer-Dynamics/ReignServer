@@ -175,7 +175,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(exclusionCampaign));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(exclusionCampaign));
             }
             add("agent_activation_relation_boundaries",
                 ReignSpymasterCore.ForeignAgentCanDisrupt(-31d)
@@ -330,7 +330,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(activationCampaign));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(activationCampaign));
             }
 
             string fallbackCampaign = "_spymaster_relationship_fallback_" + Guid.NewGuid().ToString("N");
@@ -375,7 +375,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(fallbackCampaign));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(fallbackCampaign));
             }
 
             add("social_rumor_outcomes", ReignSpymasterCore.SocialMitigationOutcome("mitigate_own_rumor", 0.819999d) == "disproven"

@@ -33,20 +33,20 @@ namespace ReignBetaServer
                 && PartyBanterPolicy.ReadingSeconds(string.Join(" ", Enumerable.Repeat("word", 100))) == 6);
             Check("unicode_character_limit", PartyBanterPolicy.CharacterCount("e\u0301🙂") == 2 && PartyBanterPolicy.Fits("e\u0301🙂", 2) && !PartyBanterPolicy.Fits("e\u0301🙂!", 2));
             Check("output_scales_with_options", PartyBanterPolicy.OutputTokens(12, 1000) > 5000 && PartyBanterPolicy.OutputTokens(6, 360) > 1200);
-            Check("settings_validation", Program.ValidateBanterOptions(TestDict("banterEnabled", false, "banterMaxResponses", 12, "banterMaxCharacters", 1000)) == ""
-                && Program.ValidateBanterOptions(TestDict("banterMaxResponses", 2.5)) != "" && Program.ValidateBanterOptions(TestDict("banterMaxCharacters", 79)) != ""
-                && Program.ValidateBanterOptions(TestDict("banterEnabled", "true")) != "");
+            Check("settings_validation", SettingsService.ValidateBanterOptions(TestDict("banterEnabled", false, "banterMaxResponses", 12, "banterMaxCharacters", 1000)) == ""
+                && SettingsService.ValidateBanterOptions(TestDict("banterMaxResponses", 2.5)) != "" && SettingsService.ValidateBanterOptions(TestDict("banterMaxCharacters", 79)) != ""
+                && SettingsService.ValidateBanterOptions(TestDict("banterEnabled", "true")) != "");
             Check("topic_range", BanterTopicSeeds.Split('\n').Length >= 60 && BanterTopicSeeds.Split('\n').Select(x => x.Split('|')[0]).Distinct().Count() == 12);
             string canceledUrl = "http://banter-offline.invalid/canceled";
-            string canceledProvider = Program.NormalizeLookup(canceledUrl) + "|" + Program.NormalizeLookup("fixture");
-            Program.ProviderState providerState;
-            lock (Program.ProviderMiddlewareLock) providerState = Program.GetProviderStateLocked(canceledProvider, TestDict());
+            string canceledProvider = ActionPipelineService.NormalizeLookup(canceledUrl) + "|" + ActionPipelineService.NormalizeLookup("fixture");
+            LlmProviderService.ProviderState providerState;
+            lock (LlmProviderService.ProviderMiddlewareLock) providerState = LlmProviderService.GetProviderStateLocked(canceledProvider, TestDict());
             long priorFailures = providerState.Failures; bool cancellationObserved = false;
-            try { Program.ProviderPostJson(canceledUrl, "", "{}", TestDict(), TestDict(), "banter_cancel_fixture", "party_banter", "fixture", _ => { }, () => true); }
+            try { LlmProviderService.ProviderPostJson(canceledUrl, "", "{}", TestDict(), TestDict(), "banter_cancel_fixture", "party_banter", "fixture", _ => { }, () => true); }
             catch (OperationCanceledException) { cancellationObserved = true; }
             Check("cancellation_preserves_shared_provider_circuit", cancellationObserved && providerState.Failures == priorFailures && providerState.ConsecutiveFailures == 0);
             bool subscriptionCanceled = false;
-            try { Program.CodexChatCompletionJson(TestDict(), TestDict(), "fixture", null, null, () => true); }
+            try { LlmProviderService.CodexChatCompletionJson(TestDict(), TestDict(), "fixture", null, null, () => true); }
             catch (OperationCanceledException) { subscriptionCanceled = true; }
             Check("subscription_cancellation_precedes_runtime_startup", subscriptionCanceled);
             var options = TestDict("maxResponses", 6, "maxCharacters", 80); var ids = new List<string> { "noble", "commoner" };
@@ -79,10 +79,10 @@ namespace ReignBetaServer
                     "age", 30, "isAlive", true, "isLord", noble, "isRuler", ruler, "isFemale", noble, "currentPartyId", "main_party", "cultureId", "vlandia", "occupation", noble ? "Lord" : "Wanderer");
                 var heroes = new List<Dictionary<string, object>> { Hero("noble", true, true), Hero("commoner", false) };
                 string core = string.Join(" ", Enumerable.Repeat("They are reserved yet generous, proud of their work, slow to trust and quick to defend a friend.", 14));
-                foreach (string id in ids) Program.WriteJsonObject(Program.CharacterFile(campaign, id, "traits.json"), TestDict("basePersonalitySummary", core));
+                foreach (string id in ids) CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, id, "traits.json"), TestDict("basePersonalitySummary", core));
                 string prompt = BuildBanterPrompt(c, campaign, heroes, "travel|the wind", options, new(), TestDict(), false);
                 var politicalBlocks = heroes.Select(h => {
-                    string id = Program.CharacterIdFrom(h); var traits = Program.ReadJsonObject(Program.CharacterFile(campaign, id, "traits.json"));
+                    string id = CampaignFileService.CharacterIdFrom(h); var traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, id, "traits.json"));
                     return CharactersService.RequiredPoliticalPrompt(id, h, TestDict("traits", traits, "politicalProfile",
                         TryParseJsonObject(System.Text.Json.JsonSerializer.Serialize(CharactersService.EnsurePoliticalProfile(campaign, id, h, traits)))));
                 }).ToList();
@@ -117,8 +117,8 @@ namespace ReignBetaServer
                         && ReadString(row, "toward", "") == "commoner" && !ReadBool(row, "nameKnown", true)));
                 var p = TestDict("campaignId", campaign, "timelineId", "test", "generation", generation, "sessionId", session,
                     "playerHeroStringId", "player", "partyId", "main_party", "worldDay", 20d, "traveling", true, "heroes", heroes);
-                var ineligible = Program.CloneDictionary(heroes[1]); ineligible["isPrisoner"] = true;
-                var rp = Program.CloneDictionary(p); rp["heroes"] = new[] { heroes[0], ineligible, Hero("player", false) };
+                var ineligible = VerificationService.CloneDictionary(heroes[1]); ineligible["isPrisoner"] = true;
+                var rp = VerificationService.CloneDictionary(p); rp["heroes"] = new[] { heroes[0], ineligible, Hero("player", false) };
                 Check("strict_party_roster", BanterRoster(rp).Count == 1);
                 int calls = 0; bool requestContentValid = false;
                 BanterTestProvider = (request, emit, canceled) => {
@@ -170,7 +170,7 @@ namespace ReignBetaServer
                 var shared = BanterSharedExcerpt(c, ids, p);
                 Check("shared_excerpt_excludes_foreign_future_private_and_invalidated", shared.Count == 1
                     && !ReadString(shared[0], "sourceId", "").Contains("branch") && ReadString(shared[0], "quote", "").Contains("worthless coward"));
-                var cutoff = Program.CloneDictionary(p); cutoff["memoryAsOfTimestamp"] = 0L;
+                var cutoff = VerificationService.CloneDictionary(p); cutoff["memoryAsOfTimestamp"] = 0L;
                 Check("shared_excerpt_respects_as_of_before_limit", BanterSharedExcerpt(c, ids, cutoff).Count == 0);
                 p["expectedRevision"] = ReadInt(accepted, "revision", 0);
                 var handoff = PartyBanterApi("handoff", p);
@@ -186,7 +186,7 @@ namespace ReignBetaServer
                 Check("takeover_retry_cannot_duplicate_affinity", DialogueSelfTestStore.SelectConversationRelationshipReceipts(c, TestDict("id", session + "_relations")).Count == 1);
                 DialogueSelfTestStore.UpdateConversationSessions(c, TestDict("id", session));
                 Check("reopening_closed_takeover_is_read_only", ReadBool(PartyBanterApi("handoff", p), "readOnly", false));
-                var later = Program.CloneDictionary(p); later["sessionId"] = "banter_" + Guid.NewGuid().ToString("N"); later["worldDay"] = 20 + 7d / 24;
+                var later = VerificationService.CloneDictionary(p); later["sessionId"] = "banter_" + Guid.NewGuid().ToString("N"); later["worldDay"] = 20 + 7d / 24;
                 Check("takeover_preserves_cooldown", !ReadBool(PartyBanterApi("start", later), "eligible", true));
                 p["generation"] = "old_generation";
                 Check("stale_callback_fence", ReadString(PartyBanterApi("accept", p), "errorCode", "") == "banter_stale_generation");
@@ -197,12 +197,12 @@ namespace ReignBetaServer
                 var context = PartyBanterApi("context", later); var restored = ReadDictionary(context, "episode");
                 Check("restore_retains_drafts_and_rebinds", ReadString(restored, "generation", "") == generation && ReadBool(restored, "generationDone", false)
                     && ReadInt(restored, "draftCount", 0) == 1);
-                var abandoned = Program.CloneDictionary(saved); abandoned["sessionId"] = "empty_restored_banter"; abandoned["drafts"] = new List<Dictionary<string, object>>();
+                var abandoned = VerificationService.CloneDictionary(saved); abandoned["sessionId"] = "empty_restored_banter"; abandoned["drafts"] = new List<Dictionary<string, object>>();
                 abandoned["effectsFinalized"] = false; WriteBanter(c, abandoned);
                 PartyBanterApi("context", later);
                 Check("empty_restore_finalizes_without_cooldown", ReadBool(ReadBanter(c, "empty_restored_banter"), "effectsFinalized", false)
                     && ReadDouble(ReadBanter(c, "empty_restored_banter"), "endedDay", 0) == -1);
-                var stopped = ReadBanter(c, "restored_banter"); var stop = Program.CloneDictionary(later);
+                var stopped = ReadBanter(c, "restored_banter"); var stop = VerificationService.CloneDictionary(later);
                 stop["sessionId"] = "restored_banter"; stop["expectedRevision"] = -1; stop["reason"] = "campaign_exit";
                 var exited = PartyBanterApi("finish", stop);
                 Check("exit_discards_unspoken_drafts_despite_inflight_revision", ReadBool(exited, "ok", false)
@@ -210,7 +210,7 @@ namespace ReignBetaServer
                 foreach (bool withPrefix in new[] { false, true })
                 {
                     string legacyId = "banter_" + Guid.NewGuid().ToString("N");
-                    var legacy = Program.CloneDictionary(saved);
+                    var legacy = VerificationService.CloneDictionary(saved);
                     legacy["sessionId"] = legacyId; legacy["generation"] = generation; legacy["revision"] = 1;
                     legacy["state"] = "ready"; legacy["effectsFinalized"] = false; legacy["accepted"] = 0;
                     legacy["startedDay"] = 25d; legacy["endedDay"] = -1d;
@@ -222,7 +222,7 @@ namespace ReignBetaServer
                         "npcId", "noble", "playerId", "player", "channel", "party_chat", "worldDay", 25d,
                         "participants", ids.Concat(new[] { "player" }).ToList()));
                     WriteBanter(c, legacy); // Simulate persisted output from the old installed prompt.
-                    var legacyRequest = Program.CloneDictionary(later);
+                    var legacyRequest = VerificationService.CloneDictionary(later);
                     legacyRequest["sessionId"] = legacyId; legacyRequest["worldDay"] = 25d;
                     legacyRequest["expectedRevision"] = 1; legacyRequest["sequence"] = 1;
                     if (withPrefix)

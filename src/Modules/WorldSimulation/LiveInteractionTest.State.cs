@@ -47,21 +47,21 @@ namespace ReignBetaServer
         private static string LiveTestRoot() { return Path.Combine(Program.TestsDir, "live-interaction"); }
         internal static string LiveTestArmPath() { return Path.Combine(LiveTestRoot(), "arm.json"); }
         private static string LiveTestLatestRuntimePath() { return Path.Combine(LiveTestRoot(), "runtime-latest.json"); }
-        private static string LiveTestRuntimePath(string campaignId) { return Path.Combine(LiveTestRoot(), "runtime", Program.SafePathSegment(campaignId, "unknown") + ".json"); }
-        internal static string LiveTestRunsRoot(string campaignId) { return Program.CampaignFile(campaignId, "tests", "live-interaction", "runs"); }
-        private static string LiveTestActiveRunPath(string campaignId) { return Program.CampaignFile(campaignId, "tests", "live-interaction", "active-run.json"); }
-        private static string LiveTestRunPath(string campaignId, string runId) { return Path.Combine(LiveTestRunsRoot(campaignId), Program.SafePathSegment(runId, "run") + ".json"); }
-        internal static Dictionary<string, object> LoadLiveTestRuntime(string campaignId) { return string.IsNullOrWhiteSpace(campaignId) ? Program.ReadJsonObject(LiveTestLatestRuntimePath()) : Program.ReadJsonObject(LiveTestRuntimePath(campaignId)); }
-        internal static Dictionary<string, object> LoadLiveTestRun(string campaignId, string runId) { return string.IsNullOrWhiteSpace(campaignId) || string.IsNullOrWhiteSpace(runId) ? new Dictionary<string, object>() : Program.ReadJsonObject(LiveTestRunPath(campaignId, runId)); }
+        private static string LiveTestRuntimePath(string campaignId) { return Path.Combine(LiveTestRoot(), "runtime", CampaignFileService.SafePathSegment(campaignId, "unknown") + ".json"); }
+        internal static string LiveTestRunsRoot(string campaignId) { return CampaignFileService.CampaignFile(campaignId, "tests", "live-interaction", "runs"); }
+        private static string LiveTestActiveRunPath(string campaignId) { return CampaignFileService.CampaignFile(campaignId, "tests", "live-interaction", "active-run.json"); }
+        private static string LiveTestRunPath(string campaignId, string runId) { return Path.Combine(LiveTestRunsRoot(campaignId), CampaignFileService.SafePathSegment(runId, "run") + ".json"); }
+        internal static Dictionary<string, object> LoadLiveTestRuntime(string campaignId) { return string.IsNullOrWhiteSpace(campaignId) ? CampaignFileService.ReadJsonObject(LiveTestLatestRuntimePath()) : CampaignFileService.ReadJsonObject(LiveTestRuntimePath(campaignId)); }
+        internal static Dictionary<string, object> LoadLiveTestRun(string campaignId, string runId) { return string.IsNullOrWhiteSpace(campaignId) || string.IsNullOrWhiteSpace(runId) ? new Dictionary<string, object>() : CampaignFileService.ReadJsonObject(LiveTestRunPath(campaignId, runId)); }
         internal static void SaveLiveTestRun(Dictionary<string, object> run)
         {
             string campaignId = ReadString(run, "campaignId", "");
             string runId = ReadString(run, "runId", "");
-            Program.WriteJsonObject(LiveTestRunPath(campaignId, runId), run);
+            CampaignFileService.WriteJsonObject(LiveTestRunPath(campaignId, runId), run);
             string indexPath = LiveTestActiveRunPath(campaignId);
             if (!LiveTestTerminalRunStates.Contains(ReadString(run, "status", "")))
             {
-                Program.WriteJsonObject(indexPath, new Dictionary<string, object>
+                CampaignFileService.WriteJsonObject(indexPath, new Dictionary<string, object>
                 {
                     ["runId"] = runId,
                     ["status"] = ReadString(run, "status", ""),
@@ -69,7 +69,7 @@ namespace ReignBetaServer
                 });
                 return;
             }
-            Dictionary<string, object> indexed = Program.ReadJsonObject(indexPath);
+            Dictionary<string, object> indexed = CampaignFileService.ReadJsonObject(indexPath);
             if (ReadString(indexed, "runId", "").Equals(
                     runId, StringComparison.OrdinalIgnoreCase))
             {
@@ -82,13 +82,13 @@ namespace ReignBetaServer
             string root = LiveTestRunsRoot(campaignId);
             if (!Directory.Exists(root)) return null;
             string path = Directory.GetFiles(root, "*.json", SearchOption.TopDirectoryOnly).OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
-            return string.IsNullOrWhiteSpace(path) ? null : Program.ReadJsonObject(path);
+            return string.IsNullOrWhiteSpace(path) ? null : CampaignFileService.ReadJsonObject(path);
         }
 
         private static Dictionary<string, object> FindActiveLiveTestRun(string campaignId)
         {
             string indexPath = LiveTestActiveRunPath(campaignId);
-            Dictionary<string, object> indexed = Program.ReadJsonObject(indexPath);
+            Dictionary<string, object> indexed = CampaignFileService.ReadJsonObject(indexPath);
             string indexedRunId = ReadString(indexed, "runId", "");
             if (string.IsNullOrWhiteSpace(indexedRunId)
                 && ReadBool(indexed, "scanComplete", false))
@@ -116,10 +116,10 @@ namespace ReignBetaServer
             }
             foreach (string path in Directory.GetFiles(root, "*.json", SearchOption.TopDirectoryOnly).OrderByDescending(File.GetLastWriteTimeUtc))
             {
-                Dictionary<string, object> run = Program.ReadJsonObject(path);
+                Dictionary<string, object> run = CampaignFileService.ReadJsonObject(path);
                 if (!LiveTestTerminalRunStates.Contains(ReadString(run, "status", "")))
                 {
-                    Program.WriteJsonObject(indexPath, new Dictionary<string, object>
+                    CampaignFileService.WriteJsonObject(indexPath, new Dictionary<string, object>
                     {
                         ["runId"] = ReadString(run, "runId", ""),
                         ["status"] = ReadString(run, "status", ""),
@@ -134,7 +134,7 @@ namespace ReignBetaServer
 
         private static void WriteIdleLiveTestRunIndex(string indexPath)
         {
-            Program.WriteJsonObject(indexPath, new Dictionary<string, object>
+            CampaignFileService.WriteJsonObject(indexPath, new Dictionary<string, object>
             {
                 ["runId"] = string.Empty,
                 ["status"] = "idle",

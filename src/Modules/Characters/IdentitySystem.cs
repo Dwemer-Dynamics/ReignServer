@@ -135,7 +135,7 @@ namespace ReignBetaServer
             var syncPhases = new Dictionary<string, object>();
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
-            string correlationId = Program.EnsureCorrelationId(payload);
+            string correlationId = OperationsService.EnsureCorrelationId(payload);
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             List<Dictionary<string, object>> heroes = ReadDictionaryList(payload, "heroes")
                 .Where(x => !string.IsNullOrWhiteSpace(IdentityHeroId(x)) && ReadBool(x, "isAlive", true))
@@ -144,8 +144,8 @@ namespace ReignBetaServer
                 .ToList();
             string fingerprint = FirstNonEmpty(ReadString(payload, "rosterFingerprint", ""), ComputeIdentityRosterFingerprint(heroes));
             string expectedPortraitRosterFingerprint = ReadString(payload, "portraitRosterFingerprint", "");
-            Dictionary<string, object> savedPortraitRoster = Program.ReadJsonObject(
-                Program.CampaignFile(campaignId, "portrait_roster.json"));
+            Dictionary<string, object> savedPortraitRoster = CampaignFileService.ReadJsonObject(
+                CampaignFileService.CampaignFile(campaignId, "portrait_roster.json"));
             string savedPortraitRosterFingerprint = ReadString(savedPortraitRoster, "rosterFingerprint", "");
             bool portraitRosterSyncRequired = !string.IsNullOrWhiteSpace(expectedPortraitRosterFingerprint)
                 && !string.Equals(
@@ -278,7 +278,7 @@ namespace ReignBetaServer
                 result["portraitRosterFingerprint"] = savedPortraitRosterFingerprint;
                 result["financeCensus"] = financeCensus;
                 result["performance"] = syncPhases;
-                Program.WriteAudit(campaignId, correlationId, "server", "identity", "identity.synchronized", "", "", "", "completed", 0, "Directional identity network synchronized.", result);
+                OperationsService.WriteAudit(campaignId, correlationId, "server", "identity", "identity.synchronized", "", "", "", "completed", 0, "Directional identity network synchronized.", result);
                 return result;
             }
         }
@@ -565,7 +565,7 @@ namespace ReignBetaServer
             string observerId = ReadFirstString(payload, "observerHeroStringId", "observerId", "npcId", "speakerHeroStringId");
             string subjectId = ReadFirstString(payload, "subjectHeroStringId", "subjectId", "playerHeroStringId");
             string encounterId = FirstNonEmpty(ReadFirstString(payload, "encounterId", "conversationSessionId", "sessionId", "eventId"), "encounter_" + Guid.NewGuid().ToString("N"));
-            string correlationId = Program.EnsureCorrelationId(payload);
+            string correlationId = OperationsService.EnsureCorrelationId(payload);
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             if (string.IsNullOrWhiteSpace(observerId) || string.IsNullOrWhiteSpace(subjectId))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "observerHeroStringId and subjectHeroStringId are required." };
@@ -736,7 +736,7 @@ namespace ReignBetaServer
                                 ReadLong(rowValue, "count", 0))
                             .FirstOrDefault() > 0
                 };
-                Program.WriteAudit(campaignId, correlationId, "server", "identity", "identity.encounter", observerId, "", encounterId, "completed", 0, "Identity view resolved for encounter.", response);
+                OperationsService.WriteAudit(campaignId, correlationId, "server", "identity", "identity.encounter", observerId, "", encounterId, "completed", 0, "Identity view resolved for encounter.", response);
                 return response;
             }
         }
@@ -953,7 +953,7 @@ namespace ReignBetaServer
             string kind = ReadString(payload, "kind", string.IsNullOrWhiteSpace(introducerId) || string.Equals(introducerId, subjectId, StringComparison.OrdinalIgnoreCase) ? "self" : "third_party");
             string encounterId = ReadFirstString(payload, "encounterId", "conversationSessionId", "eventId");
             double worldDay = ReadDouble(payload, "worldDay", 0d);
-            string correlationId = Program.EnsureCorrelationId(payload);
+            string correlationId = OperationsService.EnsureCorrelationId(payload);
             if (string.IsNullOrWhiteSpace(observerId) || string.IsNullOrWhiteSpace(subjectId) || string.IsNullOrWhiteSpace(claimedName))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "observer, subject, and claimedName are required." };
 
@@ -986,7 +986,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> view = BuildIdentityView(ReadAcquaintance(connection, observerId, subjectId), payload);
                 // The conversation's accepted-unit receipt owns audit visibility
                 // until its outer transaction commits.
-                if (existingConnection == null) Program.WriteAudit(campaignId, correlationId, "server", "identity", "identity.introduction", observerId, "", encounterId, "completed", 0, verified ? "Trusted introduction verified identity." : "Claimed identity recorded.", view);
+                if (existingConnection == null) OperationsService.WriteAudit(campaignId, correlationId, "server", "identity", "identity.introduction", observerId, "", encounterId, "completed", 0, verified ? "Trusted introduction verified identity." : "Claimed identity recorded.", view);
                 return new Dictionary<string, object> { ["ok"] = true, ["verified"] = verified, ["identityView"] = view };
             }
         }
@@ -994,7 +994,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> IdentityQueryApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
             string observerId = ReadFirstString(payload, "observerHeroStringId", "observerId");
             string subjectId = ReadFirstString(payload, "subjectHeroStringId", "subjectId");
             int limit = Math.Max(1, Math.Min(2000, ReadInt(payload, "limit", 500)));
@@ -1031,7 +1031,7 @@ namespace ReignBetaServer
             string campaignId = ReadString(payload, "campaignId", "default");
             string observerId = ReadFirstString(payload, "observerHeroStringId", "observerId");
             string subjectId = ReadFirstString(payload, "subjectHeroStringId", "subjectId");
-            string correlationId = Program.EnsureCorrelationId(payload);
+            string correlationId = OperationsService.EnsureCorrelationId(payload);
             if (string.IsNullOrWhiteSpace(observerId) || string.IsNullOrWhiteSpace(subjectId)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "observer and subject are required." };
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
@@ -1039,7 +1039,7 @@ namespace ReignBetaServer
                 CharactersStore.DeleteAcquaintances2(connection, args);
                 CharactersStore.DeleteIdentityEvidence2(connection, args);
             }
-            Program.WriteAudit(campaignId, correlationId, "server", "identity", "identity.reset", observerId, "", "", "completed", 0, "Identity knowledge reset for beta testing.", new Dictionary<string, object> { ["observerId"] = observerId, ["subjectId"] = subjectId });
+            OperationsService.WriteAudit(campaignId, correlationId, "server", "identity", "identity.reset", observerId, "", "", "completed", 0, "Identity knowledge reset for beta testing.", new Dictionary<string, object> { ["observerId"] = observerId, ["subjectId"] = subjectId });
             return new Dictionary<string, object> { ["ok"] = true, ["observerId"] = observerId, ["subjectId"] = subjectId };
         }
 
@@ -1049,7 +1049,7 @@ namespace ReignBetaServer
             if (!ReadBool(payload, "testMode", false)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Know-everyone is available only in beta test mode." };
 
             string campaignId = ReadString(payload, "campaignId", "default");
-            string correlationId = Program.EnsureCorrelationId(payload);
+            string correlationId = OperationsService.EnsureCorrelationId(payload);
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             Dictionary<string, object> observer = ReadDictionary(payload, "observer") ?? new Dictionary<string, object>
             {
@@ -1102,7 +1102,7 @@ namespace ReignBetaServer
                 ["upgraded"] = upgraded,
                 ["unchanged"] = unchanged
             };
-            Program.WriteAudit(campaignId, correlationId, "server", "identity", "identity.debug.know_everyone", observerId, "", "", "completed", 0, "Player debug identity knowledge populated.", resultPayload);
+            OperationsService.WriteAudit(campaignId, correlationId, "server", "identity", "identity.debug.know_everyone", observerId, "", "", "completed", 0, "Player debug identity knowledge populated.", resultPayload);
             return resultPayload;
         }
     }

@@ -120,7 +120,7 @@ namespace ReignBetaServer
                 "Modules/Platform/VerificationLab.cs", "Modules/Platform/VerificationLab.Contracts.cs",
                 "Modules/Platform/VerificationLab.Suites.cs", "Modules/Platform/VerificationLab.Support.cs",
                 "Modules/Platform/VerificationSourceLocator.cs",
-                "Modules/Platform/CodexPerformanceVerification.cs", "Modules/Court/CapitalAmbassadorTestSystem.cs",
+                "Modules/Platform/Providers/CodexPerformanceVerification.cs", "Modules/Court/CapitalAmbassadorTestSystem.cs",
                 "Modules/Portraits/BackgroundPortraitContracts.cs", "Modules/Dialogue/Gossip/PersonalGossipCompositionProbe.cs"
             };
         private static readonly Regex TypeDeclarationPattern = new Regex(

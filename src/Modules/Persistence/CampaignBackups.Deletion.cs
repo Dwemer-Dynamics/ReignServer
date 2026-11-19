@@ -28,7 +28,7 @@ namespace ReignBetaServer
             string campaignId = ReadString(payload, "campaignId", "");
             ValidateSaveSyncId(campaignId, "campaignId");
             string confirmation = ReadString(payload, "confirmation", "");
-            string campaignDir = Program.CampaignDirectory(campaignId);
+            string campaignDir = CampaignFileService.CampaignDirectory(campaignId);
             bool databaseExists =
                 ReignPostgreSqlStorage.ListCampaignMetadata().Any(row =>
                     ReadString(row, "campaignId", "")
@@ -39,7 +39,7 @@ namespace ReignBetaServer
                     ["ok"] = false,
                     ["error"] = "Campaign was not found."
                 };
-            Dictionary<string, object> meta = Program.ReadJsonObject(Path.Combine(campaignDir, "campaign.json"));
+            Dictionary<string, object> meta = CampaignFileService.ReadJsonObject(Path.Combine(campaignDir, "campaign.json"));
             string label = ReadString(meta, "campaignLabel", ReadString(meta, "mainHeroName", campaignId));
             if (!confirmation.Equals(campaignId, StringComparison.OrdinalIgnoreCase) && !confirmation.Equals(label, StringComparison.OrdinalIgnoreCase))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Confirmation must exactly match the campaign ID or label." };
@@ -78,7 +78,7 @@ namespace ReignBetaServer
                 string campaignDir = StrictCampaignDirectory(campaignId);
                 string portraitDir = CampaignPortraitCacheDirectory(campaignId);
                 string saveSyncDir = SaveSyncCampaignRoot(campaignId);
-                string campaignRoot = Program.CampaignsRoot();
+                string campaignRoot = CampaignFileService.CampaignsRoot();
                 string portraitRoot = CampaignPortraitCacheRoot();
                 string saveSyncRoot = SaveSyncRoot();
                 ValidateCampaignOwnedDirectory(campaignDir, campaignRoot, false);
@@ -116,7 +116,7 @@ namespace ReignBetaServer
                     ? ReignPostgreSqlStorage.ListSnapshots(campaignId).Count
                     : 0;
 
-                string operationId = Program.SafePathSegment(campaignId, "campaign") + "_" +
+                string operationId = CampaignFileService.SafePathSegment(campaignId, "campaign") + "_" +
                     Guid.NewGuid().ToString("N");
                 string dataStageRoot = Path.Combine(
                     Program.DataDir, "campaign-retirement-staging", operationId);
@@ -219,7 +219,7 @@ namespace ReignBetaServer
                             ? "Campaign data, Save Sync storage, semantic vectors, and its portrait cache were permanently deleted."
                             : "The campaign is no longer active, but staged files remain for startup cleanup."
                     };
-                    Program.LogOperational("campaign.deleted", result);
+                    OperationsService.LogOperational("campaign.deleted", result);
                     return result;
                 }
                 catch (Exception ex)
@@ -250,7 +250,7 @@ namespace ReignBetaServer
                         ["rollbackErrors"] = rollbackErrors,
                         ["error"] = ex.Message
                     };
-                    Program.LogOperational("campaign.delete_failed", failed);
+                    OperationsService.LogOperational("campaign.delete_failed", failed);
                     return failed;
                 }
             }
@@ -286,13 +286,13 @@ namespace ReignBetaServer
             string running = CampaignMutationBlockReason();
             if (!string.IsNullOrWhiteSpace(running)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = running };
 #if !REIGN_EXCLUDE_VERIFICATION
-            if (Program.VerificationTask != null && !Program.VerificationTask.IsCompleted)
+            if (VerificationService.VerificationTask != null && !VerificationService.VerificationTask.IsCompleted)
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Wait for the active verification run to finish before deleting all campaign and test data." };
 #endif
 
             lock (CampaignBackupMutationLock)
             {
-                string campaignsRoot = Program.CampaignsRoot();
+                string campaignsRoot = CampaignFileService.CampaignsRoot();
                 string backupsRoot = Path.Combine(Program.DataDir, "backups");
                 string vectorsRoot = Path.Combine(Program.DataDir, "vectors");
                 string portraitsRoot = CampaignPortraitCacheRoot();
@@ -301,7 +301,7 @@ namespace ReignBetaServer
                 string testRunsRoot = Path.Combine(Program.TestsDir, "runs");
                 string testSnapshotsRoot = Path.Combine(Program.TestsDir, "snapshots");
                 string verificationRoot = Path.Combine(Program.TestsDir, "verification");
-                Dictionary<string, object> settings = Program.LoadSettings();
+                Dictionary<string, object> settings = SettingsService.LoadSettings();
                 bool localVectors = !ReadString(settings, "vectorProvider", "local").Equals("qdrant", StringComparison.OrdinalIgnoreCase);
                 int campaignCount = SafeDirectoryCount(campaignsRoot);
                 int backupCount = SafeFileCount(backupsRoot, "*.reignbackup");
@@ -335,7 +335,7 @@ namespace ReignBetaServer
                 }
                 if (!scheduled)
                 {
-                    Program.LogOperational("campaign.all_delete_failed", new Dictionary<string, object> { ["error"] = refusal });
+                    OperationsService.LogOperational("campaign.all_delete_failed", new Dictionary<string, object> { ["error"] = refusal });
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = refusal };
                 }
                 Dictionary<string, object> result = new Dictionary<string, object>
@@ -349,7 +349,7 @@ namespace ReignBetaServer
                     ["cleanupMode"] = "server_shutdown",
                     ["message"] = "Campaign deletion is scheduled. Reign is shutting down; once background work has stopped, this same server process will remove all campaign data, campaign-specific portraits, backups, queued actions, semantic indexes, and accumulated test results. If cleanup cannot start safely, nothing is deleted; logs/delete-all-last.json records the outcome and how to retry after restarting. The pregenerated shared portrait library, test definitions, global settings, API key, and native Bannerlord saves are preserved. Restart the Reign server after this page disconnects."
                 };
-                Program.LogOperational("campaign.all_delete_scheduled", result);
+                OperationsService.LogOperational("campaign.all_delete_scheduled", result);
                 return result;
             }
         }
@@ -360,7 +360,7 @@ namespace ReignBetaServer
             string running = CampaignMutationBlockReason();
             if (!string.IsNullOrWhiteSpace(running)) return running;
 #if !REIGN_EXCLUDE_VERIFICATION
-            if (Program.VerificationTask != null && !Program.VerificationTask.IsCompleted)
+            if (VerificationService.VerificationTask != null && !VerificationService.VerificationTask.IsCompleted)
                 return "A verification run was still active.";
 #endif
             return "";
@@ -371,8 +371,8 @@ namespace ReignBetaServer
             try
             {
                 Directory.CreateDirectory(Program.LogsDir);
-                Program.WriteJsonObject(Path.Combine(Program.LogsDir, "delete-all-last.json"), result);
-                Program.LogOperational("campaign.all_delete_failed", result);
+                CampaignFileService.WriteJsonObject(Path.Combine(Program.LogsDir, "delete-all-last.json"), result);
+                OperationsService.LogOperational("campaign.all_delete_failed", result);
             }
             catch { }
         }
@@ -464,8 +464,8 @@ namespace ReignBetaServer
                         ["error"] = ex.Message
                     };
                     Directory.CreateDirectory(Program.LogsDir);
-                    Program.WriteJsonObject(Path.Combine(Program.LogsDir, "delete-all-last.json"), result);
-                    Program.LogOperational("campaign.all_delete_failed", result);
+                    CampaignFileService.WriteJsonObject(Path.Combine(Program.LogsDir, "delete-all-last.json"), result);
+                    OperationsService.LogOperational("campaign.all_delete_failed", result);
                 }
                 catch { }
                 return 1;
@@ -488,7 +488,7 @@ namespace ReignBetaServer
                 ReignPostgreSqlStorage.DropAllCampaigns();
                 List<string> directoryTargets = new List<string>
                 {
-                    Program.CampaignsRoot(),
+                    CampaignFileService.CampaignsRoot(),
                     Path.Combine(Program.DataDir, "backups"),
                     SaveSyncRoot(),
                     Path.Combine(Program.DataDir, "save-sync"),
@@ -518,8 +518,8 @@ namespace ReignBetaServer
                 result["settingsPreserved"] = File.Exists(Program.SettingsPath);
                 result["message"] = "All Reign campaign and accumulated test data was deleted after the server released its files. The pregenerated shared portrait library, test definitions, global settings, API key, and native Bannerlord saves were preserved.";
                 Directory.CreateDirectory(Program.LogsDir);
-                Program.WriteJsonObject(Path.Combine(Program.LogsDir, "delete-all-last.json"), result);
-                Program.LogOperational("campaign.all_deleted", result);
+                CampaignFileService.WriteJsonObject(Path.Combine(Program.LogsDir, "delete-all-last.json"), result);
+                OperationsService.LogOperational("campaign.all_deleted", result);
                 return 0;
             }
             catch (Exception ex)
@@ -528,8 +528,8 @@ namespace ReignBetaServer
                 try
                 {
                     Directory.CreateDirectory(Program.LogsDir);
-                    Program.WriteJsonObject(Path.Combine(Program.LogsDir, "delete-all-last.json"), result);
-                    Program.LogOperational("campaign.all_delete_failed", result);
+                    CampaignFileService.WriteJsonObject(Path.Combine(Program.LogsDir, "delete-all-last.json"), result);
+                    OperationsService.LogOperational("campaign.all_delete_failed", result);
                 }
                 catch { }
                 return 1;
@@ -574,7 +574,7 @@ namespace ReignBetaServer
                 foreach (string root in (directoryTargets ?? Enumerable.Empty<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase))
                 {
                     if (!Directory.Exists(root)) continue;
-                    string stagedRoot = Path.Combine(stagingRoot, "root_" + (++rootSerial).ToString("D2", CultureInfo.InvariantCulture) + "_" + Program.SafePathSegment(Path.GetFileName(root), "data"));
+                    string stagedRoot = Path.Combine(stagingRoot, "root_" + (++rootSerial).ToString("D2", CultureInfo.InvariantCulture) + "_" + CampaignFileService.SafePathSegment(Path.GetFileName(root), "data"));
                     Directory.CreateDirectory(stagedRoot);
                     int entrySerial = 0;
                     foreach (string source in Directory.GetDirectories(root, "*", SearchOption.TopDirectoryOnly))
@@ -594,7 +594,7 @@ namespace ReignBetaServer
                 foreach (string source in (fileTargets ?? Enumerable.Empty<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase))
                 {
                     if (!File.Exists(source)) continue;
-                    string destination = Path.Combine(stagingRoot, "file_" + (++serial).ToString("D2", CultureInfo.InvariantCulture) + "_" + Program.SafePathSegment(Path.GetFileName(source), "data"));
+                    string destination = Path.Combine(stagingRoot, "file_" + (++serial).ToString("D2", CultureInfo.InvariantCulture) + "_" + CampaignFileService.SafePathSegment(Path.GetFileName(source), "data"));
                     MoveFileWithRetries(source, destination);
                     movedFiles.Add(new KeyValuePair<string, string>(source, destination));
                 }

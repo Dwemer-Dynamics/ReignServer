@@ -32,7 +32,7 @@ namespace ReignBetaServer
             // A caller must not carry the reverse order into the cold path.
             if (Monitor.IsEntered(Program.CampaignSchemaLock) && !Monitor.IsEntered(Program.FileLock))
                 throw new InvalidOperationException("Campaign schema access requires FileLock before CampaignSchemaLock.");
-            Directory.CreateDirectory(Program.CampaignDirectory(campaignId));
+            Directory.CreateDirectory(CampaignFileService.CampaignDirectory(campaignId));
             ReignDbConnection connection = ReignPostgreSqlStorage.OpenCampaignConnection(campaignId);
             try
             {
@@ -48,9 +48,9 @@ namespace ReignBetaServer
                 // Holding it through initialization also keeps the provider snapshot
                 // consistent with settings saves. Warm checkouts never take FileLock.
                 CampaignSchemaColdWaitObserverForTests?.Invoke(Monitor.IsEntered(Program.CampaignSchemaLock));
-                lock (Program.SettingsSaveGate)
+                lock (SettingsService.SettingsSaveGate)
                 {
-                    string providerGeneration = ReadString(Program.LoadSettings(), "vectorProvider", "local")
+                    string providerGeneration = ReadString(SettingsService.LoadSettings(), "vectorProvider", "local")
                         .ToLowerInvariant() + "|" + DialogueService.SemanticModelVersion;
                     lock (Program.CampaignSchemaLock)
                     {

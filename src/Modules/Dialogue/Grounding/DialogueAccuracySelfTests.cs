@@ -18,7 +18,7 @@ namespace ReignBetaServer
                 var row = AgencyTestReply(null);
                 row["reply"] = text; row["body"] = text;
                 row["actionGate"] = TestDict("needed", false, "commitment", "roleplay_only", "intent", "", "confidence", 1d);
-                return Program.CompleteConversationStructuredResponse(row, "dialogue", out _);
+                return ConversationResponseService.CompleteConversationStructuredResponse(row, "dialogue", out _);
             }
             Dictionary<string, object> Assessment(string valence, string quote, string tier = "routine") => TestDict(
                 "targetHeroStringId", "player", "valence", valence, "confidence", .9d,
@@ -128,7 +128,7 @@ namespace ReignBetaServer
                 refusal["evidenceKeys"] = new[] { "trait.judgment=99" };
                 Check("altered_fact_value_is_rejected", !ReadBool(EvaluateConversationAgency(AgencyTestReply(refusal), evidenceContext), "ok", true));
                 var originalRefusal = AgencyTestReply(refusal);
-                var altered = Program.CloneDictionary(refusal); altered["evidenceKeys"] = new[] { "trait.judgment" };
+                var altered = VerificationService.CloneDictionary(refusal); altered["evidenceKeys"] = new[] { "trait.judgment" };
                 altered["disposition"] = "accepted"; altered["terms"] = TestDict("gold", 99999d);
                 var patch = TestDict("proposalDecisions", new List<Dictionary<string, object>> { altered },
                     "relationshipAssessments", new List<Dictionary<string, object>> { Assessment("negative", "anything") });
@@ -137,7 +137,7 @@ namespace ReignBetaServer
                     && ReadString(ReadDictionaryList(merged, "proposalDecisions").Single(), "disposition", "") == "terms_refusal"
                     && ReadDouble(ReadDictionary(ReadDictionaryList(merged, "proposalDecisions").Single(), "terms"), "gold", -1) == 0d
                     && ReadDictionaryList(merged, "relationshipAssessments").Count == 0);
-                var assessedRefusal = Program.CloneDictionary(originalRefusal);
+                var assessedRefusal = VerificationService.CloneDictionary(originalRefusal);
                 assessedRefusal["relationshipAssessments"] = new List<Dictionary<string, object>> {
                     Assessment("positive", ReadString(evidenceContext, "playerText", "")) };
                 assessedRefusal["memoryWrites"] = new List<Dictionary<string, object>> {
@@ -202,13 +202,13 @@ namespace ReignBetaServer
                     && StructuredConversationFailureKind(TestDict("content", "{}", "finishReason", "length")) == "empty_object_at_output_limit");
                 int formatCalls = 0;
                 var formatRequest = TestDict("requestType", "dialogue", "prompt", "Good afternoon.");
-                var recovered = Program.RetryMalformedStructuredResponse(Program.CloneDictionary(empty), formatRequest, campaign, "format-success", "dialogue", "npc", "",
+                var recovered = ConversationResponseService.RetryMalformedStructuredResponse(VerificationService.CloneDictionary(empty), formatRequest, campaign, "format-success", "dialogue", "npc", "",
                     req => { formatCalls++; return TestDict("ok", true, "content", "{\"reply\":\"A fine afternoon to you as well.\"}", "finishReason", "stop"); });
                 Check("empty_output_recovers_once_with_local_metadata", formatCalls == 1 && ReadBool(recovered, "ok", false)
-                    && Program.StructuredResponseIsComplete(ReadString(recovered, "content", ""), "dialogue"), recovered);
+                    && ConversationResponseService.StructuredResponseIsComplete(ReadString(recovered, "content", ""), "dialogue"), recovered);
                 formatCalls = 0;
-                var failed = Program.RetryMalformedStructuredResponse(Program.CloneDictionary(empty), formatRequest, campaign, "format-failed", "dialogue", "npc", "",
-                    req => { formatCalls++; return Program.CloneDictionary(empty); });
+                var failed = ConversationResponseService.RetryMalformedStructuredResponse(VerificationService.CloneDictionary(empty), formatRequest, campaign, "format-failed", "dialogue", "npc", "",
+                    req => { formatCalls++; return VerificationService.CloneDictionary(empty); });
                 Check("empty_output_stops_after_two_attempts_without_effects", formatCalls == 2 && !ReadBool(failed, "ok", true)
                     && ReadString(failed, "errorCode", "") == "structured_response_incomplete_after_retries"
                     && ReadDictionaryList(ReadDictionary(failed, "formatRetry"), "attempts").Count == 2, failed);

@@ -57,13 +57,13 @@ namespace ReignBetaServer
         internal const int CharacterConstructionEngineVersion = 5;
         internal const int CharacterConstructionTokenCeiling = 50000;
         internal const int AuditMaxStringChars = 16000;
-        private const int AuditMaxListItems = 120;
+        internal const int AuditMaxListItems = 120;
         // Prompt evidence contains data -> promptEnvelope ->
         // npcRelationshipPrompt -> targets -> target -> history-id list. Keep
         // enough structural depth to preserve those stable lineage IDs while
         // the independent string, list-item, and file-size caps still bound
         // audit growth.
-        private const int AuditMaxDepth = 12;
+        internal const int AuditMaxDepth = 12;
         internal static readonly object CampaignSchemaLock = new object();
         internal static readonly HashSet<string> CampaignSchemaReady =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -86,8 +86,8 @@ namespace ReignBetaServer
         internal static readonly object CharacterEnrichmentLock = new object();
         internal static readonly HashSet<string> PendingCharacterEnrichments =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        private static TcpListener ActiveListener;
-        private static readonly string[] ActionPromptFileNames =
+        internal static TcpListener ActiveListener;
+        internal static readonly string[] ActionPromptFileNames =
         {
             "action_declare_war.txt",
             "action_make_peace.txt",
@@ -231,7 +231,7 @@ namespace ReignBetaServer
             string path = Path.Combine(evidenceDirectory, "motive-conversation-" + Guid.NewGuid().ToString("N") + ".json");
             File.WriteAllText(path, fullJson, new UTF8Encoding(false));
             var rows = ReadDictionaryList(result, "results");
-            var failed = rows.Where(row => !CheckPassed(row)).ToList();
+            var failed = rows.Where(row => !VerificationService.CheckPassed(row)).ToList();
             return TestDict("schema", "reign-motive-cli-summary-v1", "ok", ReadBool(result, "ok", false) && rows.Count > 0 && failed.Count == 0,
                 "passedCount", rows.Count - failed.Count, "failedCount", failed.Count, "totalCount", rows.Count,
                 "failures", failed.Take(32).Select(row => TestDict("caseId", DialogueService.LimitText(ReadFirstString(row, "caseId", "id", "name"), 160),
@@ -251,7 +251,7 @@ namespace ReignBetaServer
                 // storage before deciding whether a server already owns it.
                 if (HasArg(args, "--activate-only"))
                 {
-                    Environment.ExitCode = ActivateExistingServerFromLauncher(ReadPort(args, LoadSettings()), args);
+                    Environment.ExitCode = ActivateExistingServerFromLauncher(ReadPort(args, SettingsService.LoadSettings()), args);
                     return;
                 }
                 if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("ReignServer runs inside its own Linux WSL distro.");
@@ -271,7 +271,7 @@ namespace ReignBetaServer
                 Console.WriteLine(ex.ToString());
                 Console.WriteLine();
                 Console.WriteLine("Use the ReignServer launcher to restart ReignServer.");
-                LogOperational("server.unhandled_startup_exception", new Dictionary<string, object>
+                OperationsService.LogOperational("server.unhandled_startup_exception", new Dictionary<string, object>
                 {
                     ["error"] = ex.Message,
                     ["type"] = ex.GetType().FullName ?? ""
@@ -315,20 +315,20 @@ namespace ReignBetaServer
                 Console.WriteLine(Json.Serialize(CharactersService.GenerateCharacterProfileLibrary(args ?? new string[0])));
                 return;
             }
-            MigrateLegacyRuntimeDataIfNeeded();
+            SettingsService.MigrateLegacyRuntimeDataIfNeeded();
             Directory.CreateDirectory(DataDir);
             Directory.CreateDirectory(LogsDir);
             Directory.CreateDirectory(PromptsDir);
             Directory.CreateDirectory(CharacterTemplatesDir);
             Directory.CreateDirectory(TestsDir);
-            CompactOperationalLogsAtStartup();
+            CampaignFileService.CompactOperationalLogsAtStartup();
             PersistenceService.PurgeLegacySaveSyncSnapshotsAtStartup();
             PersistenceService.CleanupAllSaveSyncRecoveryAtStartup();
-            CleanupInternalCampaignArtifactsAtStartup();
-            PruneTestRuns(100);
-            EnsurePromptTemplates();
+            CampaignFileService.CleanupInternalCampaignArtifactsAtStartup();
+            VerificationService.PruneTestRuns(100);
+            PromptService.EnsurePromptTemplates();
             DialogueService.EnsurePromptCacheLayoutMigration();
-            EnsureDefaultTestCases();
+            VerificationService.EnsureDefaultTestCases();
 
 #if !REIGN_EXCLUDE_VERIFICATION
             if (HasArg(args, "--run-verification") || HasArg(args, "--cancel-verification"))
@@ -336,7 +336,7 @@ namespace ReignBetaServer
                 string[] verificationArgs = HasArg(args, "--cancel-verification") && !HasArg(args, "--cancel")
                     ? args.Concat(new[] { "--cancel" }).ToArray()
                     : args;
-                Dictionary<string, object> result = RunVerificationCli(verificationArgs);
+                Dictionary<string, object> result = VerificationService.RunVerificationCli(verificationArgs);
                 Console.WriteLine(HasArg(args, "--json") ? Json.Serialize(result) : Json.Serialize(result));
                 Environment.ExitCode = ReadBool(result, "passed", ReadBool(result, "ok", false)) ? 0 : 1;
                 return;
@@ -700,13 +700,13 @@ namespace ReignBetaServer
 #if !REIGN_EXCLUDE_VERIFICATION
             if (HasArg(args, "--run-tests"))
             {
-                Dictionary<string, object> cliResult = RunTestsCli(args ?? new string[0]);
-                Console.WriteLine(HasArg(args, "--json") ? Json.Serialize(cliResult) : FormatTestCliResult(cliResult));
+                Dictionary<string, object> cliResult = VerificationService.RunTestsCli(args ?? new string[0]);
+                Console.WriteLine(HasArg(args, "--json") ? Json.Serialize(cliResult) : VerificationService.FormatTestCliResult(cliResult));
                 return;
             }
 #endif
 
-            Dictionary<string, object> settings = LoadSettings();
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
             int port = ReadPort(args, settings);
             ReignPostgreSqlStorage.EnsureInfrastructure();
             Console.WriteLine("ReignServer database versioning check completed. Schema version "
@@ -726,9 +726,9 @@ namespace ReignBetaServer
                 return;
             }
 
-            InitializeReignTelemetry(settings);
+            OperationsService.InitializeReignTelemetry(settings);
             ShutdownRequested = false;
-            StartPriorityBackgroundScheduler();
+            OperationsService.StartPriorityBackgroundScheduler();
             // Startup maintenance is admitted first, ahead of every other producer and memory fan-out.
             ReputationService.ResumePendingReputationReasonJobs();
             RelationshipsService.StartContinuousRelationshipWorker();
@@ -743,7 +743,7 @@ namespace ReignBetaServer
             Console.WriteLine("Managed by ReignServer.");
             Console.WriteLine();
 
-            LogOperational("server.start", new Dictionary<string, object>
+            OperationsService.LogOperational("server.start", new Dictionary<string, object>
             {
                 ["port"] = port,
                 ["dataDir"] = DataDir,
@@ -806,7 +806,7 @@ namespace ReignBetaServer
                     DeleteAllScheduledSettings = null;
                 }
                 // Idempotent; also closes admission when the listener exited exceptionally.
-                Task backgroundFence = StopPriorityBackgroundScheduler("listener_closed");
+                Task backgroundFence = OperationsService.StopPriorityBackgroundScheduler("listener_closed");
                 // Published before any quiescence snapshot so the semantic pump observes it.
                 ShutdownRequested = true;
                 if (deleteAllClaimed)
@@ -852,7 +852,7 @@ namespace ReignBetaServer
                     }
                 }
                 else DialogueService.StopSemanticMemorySubsystem();
-                LogOperational("server.stop", new Dictionary<string, object>
+                OperationsService.LogOperational("server.stop", new Dictionary<string, object>
                 {
                     ["port"] = port, ["requestedFromUi"] = requestedFromUi, ["backgroundSettled"] = backgroundFence.IsCompleted
                 });
@@ -925,15 +925,15 @@ namespace ReignBetaServer
             // Close background admission before the accept loop can observe shutdown. This never
             // waits for the active callback, but the first caller settles queued never-started
             // releases synchronously, so no caller may hold a campaign or backup lock here.
-            StopPriorityBackgroundScheduler(source ?? "control_center");
+            OperationsService.StopPriorityBackgroundScheduler(source ?? "control_center");
             if (ShutdownRequested)
             {
                 return new Dictionary<string, object> { ["ok"] = true, ["status"] = "stopping" };
             }
 
             ShutdownRequested = true;
-            StopCodexAppServer();
-            LogOperational("server.shutdown_requested", new Dictionary<string, object> { ["source"] = source ?? "control_center" });
+            LlmProviderService.StopCodexAppServer();
+            OperationsService.LogOperational("server.shutdown_requested", new Dictionary<string, object> { ["source"] = source ?? "control_center" });
             TcpListener listener = ActiveListener;
             IPEndPoint endpoint = listener?.LocalEndpoint as IPEndPoint;
             Thread shutdownThread = new Thread(() =>
@@ -966,7 +966,7 @@ namespace ReignBetaServer
                 Console.WriteLine("An existing Bannerlord Reign server is already running.");
                 Console.WriteLine("Opened the existing control center and brought its server window forward:");
                 Console.WriteLine(url);
-                LogOperational("server.already_running", new Dictionary<string, object>
+                OperationsService.LogOperational("server.already_running", new Dictionary<string, object>
                 {
                     ["port"] = port,
                     ["url"] = url,
@@ -981,7 +981,7 @@ namespace ReignBetaServer
                 Console.WriteLine("Its terminal window was brought forward so it can be inspected or closed.");
                 Console.WriteLine("The Control Center address is:");
                 Console.WriteLine(url);
-                LogOperational("server.unresponsive_instance_activated", new Dictionary<string, object>
+                OperationsService.LogOperational("server.unresponsive_instance_activated", new Dictionary<string, object>
                 {
                     ["port"] = port,
                     ["url"] = url
@@ -992,7 +992,7 @@ namespace ReignBetaServer
             Console.WriteLine("Something else is using this port, or the existing server is not responding.");
             Console.WriteLine("Close the other process or change the server port in settings.");
             Console.WriteLine("Socket error: " + ex.Message);
-            LogOperational("server.port_in_use", new Dictionary<string, object>
+            OperationsService.LogOperational("server.port_in_use", new Dictionary<string, object>
             {
                 ["port"] = port,
                 ["error"] = ex.Message
@@ -1053,7 +1053,7 @@ namespace ReignBetaServer
             using (NetworkStream stream = client.GetStream())
             {
                 HttpRequest request = null;
-                ConversationDiagnosticRequest diagnosticRequest = null;
+                ConversationResponseService.ConversationDiagnosticRequest diagnosticRequest = null;
                 try
                 {
                     // Access policy and framing limits are enforced inside ReadRequest, before the body, any campaign lock
@@ -1068,7 +1068,7 @@ namespace ReignBetaServer
                         && request.ReignProtocol != Reign.Core.Contracts.Platform.ReignInstallation.SupportedProtocol.ToString(CultureInfo.InvariantCulture))
                         throw new InvalidDataException("Reign and ReignServer use different protocols. Install the matching Reign package.");
                     campaignAccess = EnterCampaignRequestAccess(request.Path);
-                    diagnosticRequest = new ConversationDiagnosticRequest(request.Path, request.JsonBody);
+                    diagnosticRequest = new ConversationResponseService.ConversationDiagnosticRequest(request.Path, request.JsonBody);
 
                     object response;
                     int status = 200;
@@ -1086,12 +1086,12 @@ namespace ReignBetaServer
 
                     WriteJson(stream, status, response, request.Method, request.Path);
                     diagnosticRequest?.Delivered(status);
-                    LogRequest(request, status);
+                    OperationsService.LogRequest(request, status);
                     if (routeContext.DeleteAllResponsePending) DeleteAllCampaignResponseSent.Set();
                 }
                 catch (HttpIngressException ex)
                 {
-                    LogOperational(ex.Status == 403 ? "http.forbidden" : "http.rejected", new Dictionary<string, object>
+                    OperationsService.LogOperational(ex.Status == 403 ? "http.forbidden" : "http.rejected", new Dictionary<string, object>
                     {
                         ["status"] = ex.Status,
                         ["path"] = DialogueService.LimitText(ex.RequestPath, 200),
@@ -1106,7 +1106,7 @@ namespace ReignBetaServer
                     // disconnect. Preserve the full diagnostic and return a normal
                     // failure response so callers do not see a misleading socket
                     // reset with no actionable cause.
-                    LogOperational("server.error", new Dictionary<string, object>
+                    OperationsService.LogOperational("server.error", new Dictionary<string, object>
                     {
                         ["method"] = request?.Method ?? string.Empty,
                         ["path"] = request?.Path ?? string.Empty,
@@ -1123,7 +1123,7 @@ namespace ReignBetaServer
                     }
                     catch (IOException writeException)
                     {
-                        LogOperational("server.client_disconnect", new Dictionary<string, object>
+                        OperationsService.LogOperational("server.client_disconnect", new Dictionary<string, object>
                         {
                             ["method"] = request?.Method ?? string.Empty,
                             ["path"] = request?.Path ?? string.Empty,
@@ -1135,7 +1135,7 @@ namespace ReignBetaServer
                 }
                 catch (IOException ex)
                 {
-                    LogOperational("server.client_disconnect", new Dictionary<string, object>
+                    OperationsService.LogOperational("server.client_disconnect", new Dictionary<string, object>
                     {
                         ["method"] = request?.Method ?? string.Empty,
                         ["path"] = request?.Path ?? string.Empty,
@@ -1145,7 +1145,7 @@ namespace ReignBetaServer
                 }
                 catch (SocketException ex)
                 {
-                    LogOperational("server.client_disconnect", new Dictionary<string, object>
+                    OperationsService.LogOperational("server.client_disconnect", new Dictionary<string, object>
                     {
                         ["method"] = request?.Method ?? string.Empty,
                         ["path"] = request?.Path ?? string.Empty,
@@ -1155,14 +1155,14 @@ namespace ReignBetaServer
                 }
                 catch (Exception ex)
                 {
-                    LogOperational("server.error", new Dictionary<string, object> { ["error"] = ex.ToString() });
+                    OperationsService.LogOperational("server.error", new Dictionary<string, object> { ["error"] = ex.ToString() });
                     try
                     {
                         WriteJson(stream, 500, new Dictionary<string, object> { ["ok"] = false, ["error"] = ex.Message });
                     }
                     catch (IOException writeException)
                     {
-                        LogOperational("server.client_disconnect", new Dictionary<string, object>
+                        OperationsService.LogOperational("server.client_disconnect", new Dictionary<string, object>
                         {
                             ["method"] = request?.Method ?? string.Empty,
                             ["path"] = request?.Path ?? string.Empty,
@@ -1210,7 +1210,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> RunInteractiveRequest(Func<Dictionary<string, object>> request)
         {
             Interlocked.Increment(ref InteractiveRequestCount);
-            ReignTraceScope trace = BeginReignSpan("interaction.production", new Dictionary<string, object>
+            OperationsService.ReignTraceScope trace = OperationsService.BeginReignSpan("interaction.production", new Dictionary<string, object>
             { ["activeRequests"] = Volatile.Read(ref InteractiveRequestCount) });
             try
             {
@@ -1254,7 +1254,7 @@ namespace ReignBetaServer
                 if (!announced)
                 {
                     announced = true;
-                    LogOperational("characters.construct_batch_paused", new Dictionary<string, object>
+                    OperationsService.LogOperational("characters.construct_batch_paused", new Dictionary<string, object>
                     {
                         ["reason"] = "interactive_request_active",
                         ["activeInteractiveRequests"] = Volatile.Read(ref InteractiveRequestCount)
@@ -1268,12 +1268,12 @@ namespace ReignBetaServer
         internal static string ControlCenterHtml()
         {
             string html = File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui", "index.html")).Replace("@IMAGE_PROFILE_CARDS@", PortraitsService.ImageProfileCards())
-                .Replace("@CHAT_PROVIDER_KEYS@", ChatProviderKeysHtml()).Replace("@CHAT_PROVIDER_SCRIPT@", ChatProviderScript())
-                .Replace("@CODEX_PERFORMANCE_CONTROLS@", CodexPerformanceControlCenterHtml())
-                .Replace("@CODEX_MODEL_AVAILABILITY@", CodexModelAvailabilityHtml())
-                .Replace("@CODEX_PERFORMANCE_SCRIPT@", CodexPerformanceControlCenterScript() + ReignXpOptionsScript() + CharactersService.NpcStoryEditorScript())
-                .Replace("@REIGN_XP_OPTIONS@", ReignXpOptionsHtml())
-                .Replace("@NPC_LIVES_DIAGNOSTICS@", NpcLivesDiagnosticsHtml())
+                .Replace("@CHAT_PROVIDER_KEYS@", LlmProviderService.ChatProviderKeysHtml()).Replace("@CHAT_PROVIDER_SCRIPT@", LlmProviderService.ChatProviderScript())
+                .Replace("@CODEX_PERFORMANCE_CONTROLS@", LlmProviderService.CodexPerformanceControlCenterHtml())
+                .Replace("@CODEX_MODEL_AVAILABILITY@", LlmProviderService.CodexModelAvailabilityHtml())
+                .Replace("@CODEX_PERFORMANCE_SCRIPT@", LlmProviderService.CodexPerformanceControlCenterScript() + SettingsService.ReignXpOptionsScript() + CharactersService.NpcStoryEditorScript())
+                .Replace("@REIGN_XP_OPTIONS@", SettingsService.ReignXpOptionsHtml())
+                .Replace("@NPC_LIVES_DIAGNOSTICS@", SettingsService.NpcLivesDiagnosticsHtml())
                 .Replace("@SERVER_CONTROL_SCRIPT@", File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui", "server-control.js")))
                 .Replace("@CONVERSATION_DIAGNOSTICS_SCRIPT@", File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui", "conversation-diagnostics.js")));
             html = html.Replace("Unified Control Center is always attached", "Managed by ReignServer")

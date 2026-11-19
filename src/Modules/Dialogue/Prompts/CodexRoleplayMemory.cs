@@ -37,7 +37,7 @@ namespace ReignBetaServer
                 || string.IsNullOrWhiteSpace(ReadString(metadata, "sessionId", ""))
                 || string.IsNullOrWhiteSpace(ReadString(metadata, "timelineId", ""))) return;
             metadata["persistentRoleplay"] = true;
-            string mode = NormalizeCodexLookupMode(ReadString(ReadDictionary(Program.ActiveCodexConversationScope.Value.Settings, "codexOptions"), "lookupMode", "auto"));
+            string mode = NormalizeCodexLookupMode(ReadString(ReadDictionary(LlmProviderService.ActiveCodexConversationScope.Value.Settings, "codexOptions"), "lookupMode", "auto"));
             var stable = messages.Take(reference).ToList();
             // Include every stable game message and lookup mode. Changes to permissions,
             // character construction, rules or model must never reuse the old foundation.
@@ -64,7 +64,7 @@ namespace ReignBetaServer
                 || ReadBool(source, "governmentPrivateContext", false)
                 || ReadBool(source, "ambassadorOfficialContext", false)
                 || ReadBool(source, "guardedPromptOverride", false);
-            Program.ActiveCodexConversationScope.Value.MemoryAccess = new CodexRoleplayMemoryAccess
+            LlmProviderService.ActiveCodexConversationScope.Value.MemoryAccess = new CodexRoleplayMemoryAccess
             {
                 Campaign = campaign, Observer = observer, TimelineGeneration = ReadString(metadata, "timelineId", ""),
                 Knowledge = knowledge, Firewall = firewall,
@@ -93,7 +93,7 @@ namespace ReignBetaServer
             {
                 if (Records != null) return Records;
                 if (FixtureRecords != null) return Records = FixtureRecords;
-                if (!string.Equals(Program.CodexConversationTimeline(Campaign), TimelineGeneration, StringComparison.Ordinal))
+                if (!string.Equals(LlmProviderService.CodexConversationTimeline(Campaign), TimelineGeneration, StringComparison.Ordinal))
                     throw new InvalidOperationException("Campaign load generation changed; this lookup is no longer valid.");
                 var result = new List<Dictionary<string, object>>();
                 if (Firewall || !string.IsNullOrEmpty(ArchiveUnavailableReason)) return Records = result;
@@ -141,7 +141,7 @@ namespace ReignBetaServer
             {
                 lock (Sync)
                 {
-                    if (FixtureRecords == null && !string.Equals(Program.CodexConversationTimeline(Campaign), TimelineGeneration, StringComparison.Ordinal))
+                    if (FixtureRecords == null && !string.Equals(LlmProviderService.CodexConversationTimeline(Campaign), TimelineGeneration, StringComparison.Ordinal))
                         throw new InvalidOperationException("Campaign load generation changed; start a fresh conversation context.");
                     if (++Calls > 4) throw new InvalidOperationException("Lookup budget exhausted. Answer using established evidence; no more tool calls.");
                     args ??= TestDict();
@@ -195,7 +195,7 @@ namespace ReignBetaServer
 
         internal static readonly Dictionary<string, CodexRoleplayMemoryAccess> CodexMemoryTurns = new(StringComparer.OrdinalIgnoreCase);
 
-        internal static void ConfigureCodexRoleplayThread(Dictionary<string, object> parameters, Program.CodexRuntimeRequestContext context)
+        internal static void ConfigureCodexRoleplayThread(Dictionary<string, object> parameters, LlmProviderService.CodexRuntimeRequestContext context)
         {
             parameters["config"] = TestDict("web_search", "disabled", "project_doc_max_bytes", 0,
                 "features", TestDict("shell_tool", false, "multi_agent", false, "apps", false, "code_mode", false, "image_generation", false));
@@ -210,7 +210,7 @@ namespace ReignBetaServer
             var parameters = ReadDictionary(message, "params");
             string thread = ReadString(parameters, "threadId", "");
             CodexRoleplayMemoryAccess access;
-            lock (Program.CodexStateLock) CodexMemoryTurns.TryGetValue(thread, out access);
+            lock (LlmProviderService.CodexStateLock) CodexMemoryTurns.TryGetValue(thread, out access);
             if (access == null) return false;
             // Never block the stdout reader on a database lookup or interruption RPC.
             ThreadPool.QueueUserWorkItem(_ =>
@@ -221,11 +221,11 @@ namespace ReignBetaServer
                 catch (Exception ex) { success = false; output = TestDict("error", DialogueService.LimitText(ex.Message, 300), "instruction", "Correct arguments within the remaining budget. A rejected call is not evidence of an empty archive."); }
                 try
                 {
-                    Program.WriteCodexMessage(TestDict("id", message["id"], "result", TestDict("success", success,
+                    LlmProviderService.WriteCodexMessage(TestDict("id", message["id"], "result", TestDict("success", success,
                         "contentItems", new[] { TestDict("type", "inputText", "text", Json.Serialize(output)) })));
-                    if (access.CallCount > 5) Program.InterruptCodexTurn(thread, ReadString(parameters, "turnId", ""), Program.LoadSettings());
+                    if (access.CallCount > 5) LlmProviderService.InterruptCodexTurn(thread, ReadString(parameters, "turnId", ""), SettingsService.LoadSettings());
                 }
-                catch (Exception ex) { Program.SetCodexError(DialogueService.LimitText(ex.Message, 300)); }
+                catch (Exception ex) { LlmProviderService.SetCodexError(DialogueService.LimitText(ex.Message, 300)); }
             });
             return true;
         }

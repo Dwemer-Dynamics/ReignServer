@@ -161,7 +161,7 @@ namespace ReignBetaServer
             });
             test("native_initialization_and_catalog_contract", () =>
             {
-                string root = Program.FindVerificationSourceRoot();
+                string root = VerificationService.FindVerificationSourceRoot();
                 string clientRoot = Path.Combine(root, "ReignBeta");
                 string adapter = VerificationSourceLocator.ReadClientSourceText(clientRoot);
                 string adapterScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignStartingChildrenCampaignBehavior");

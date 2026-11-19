@@ -115,7 +115,7 @@ namespace ReignBetaServer
                                 {
                                     ["pair"] = ReadString(receipt, "pairKey", ""),
                                     ["revision"] = ReadInt(receipt, "revision", 0),
-                                    ["status"] = Program.NormalizeLookup(ReadString(
+                                    ["status"] = ActionPipelineService.NormalizeLookup(ReadString(
                                             receipt, "status", "failed"))
                                         .Replace(' ', '_'),
                                     ["observed"] = ReadInt(receipt,
@@ -218,7 +218,7 @@ namespace ReignBetaServer
                 // result back to the protocol's underscore form before
                 // comparing it, otherwise "already_aligned" is treated as
                 // a failure and recycled forever.
-                string status = Program.NormalizeLookup(ReadString(
+                string status = ActionPipelineService.NormalizeLookup(ReadString(
                         receipt, "status", "failed"))
                     .Replace(' ', '_');
                 Dictionary<string, object> current = RelationshipsStore.SelectRelationshipNativeTargets8(connection, new Dictionary<string, object>

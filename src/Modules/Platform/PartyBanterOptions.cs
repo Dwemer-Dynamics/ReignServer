@@ -5,7 +5,7 @@ using ReignBeta.Shared.Dialogue;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class SettingsService
     {
         internal static Dictionary<string, object> BanterOptions(Dictionary<string, object> settings) => TestDict(
             "enabled", ReadBool(settings, "banterEnabled", true),
@@ -25,7 +25,7 @@ namespace ReignBetaServer
                     return bounds[0] + " must be a whole number from " + bounds[1] + " to " + bounds[2] + ".";
             }
             if (incoming.ContainsKey("banterProvider") && !string.IsNullOrWhiteSpace(ReadString(incoming, "banterProvider", ""))
-                && Array.IndexOf(ChatProviders, ReadString(incoming, "banterProvider", "")) < 0) return "Select a supported banter provider.";
+                && Array.IndexOf(LlmProviderService.ChatProviders, ReadString(incoming, "banterProvider", "")) < 0) return "Select a supported banter provider.";
             return "";
         }
 
@@ -40,7 +40,7 @@ namespace ReignBetaServer
             {
                 result["llmProvider"] = provider;
                 var bank = ReadDictionary(ReadDictionary(settings, "llmModelProfiles"), provider);
-                foreach (string key in ChatModelKeys) result[key] = ReadString(bank, key, "");
+                foreach (string key in LlmProviderService.ChatModelKeys) result[key] = ReadString(bank, key, "");
             }
             bool inheritBanterModel = !approach || string.IsNullOrWhiteSpace(ReadString(settings, "npcLivesApproachProvider", ""))
                 || provider == ReadString(settings, "banterProvider", "");

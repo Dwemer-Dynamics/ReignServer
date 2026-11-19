@@ -23,10 +23,10 @@ namespace ReignBetaServer
                 "text", "If you put me down, I will announce my defeat.");
             var eventLine = TestDict("id", "event_file_row", "turnId", "wager", "role", "npc", "speakerHeroStringId", "ira", "text", ReadString(durable, "text", ""));
             add("event_adapter_binds_full_source_without_guessing_suffix", MatchPromptSource(eventLine, new[] { durable }) == durable, null);
-            var clipped = Program.CloneDictionary(eventLine); clipped["text"] = "If you put me down";
-            var wrongSpeaker = Program.CloneDictionary(eventLine); wrongSpeaker["speakerHeroStringId"] = "player";
-            var duplicateSource = Program.CloneDictionary(durable); duplicateSource["turn_id"] = "another_turn";
-            var staleSource = Program.CloneDictionary(eventLine); staleSource["sourceTurnId"] = "stale_durable_id";
+            var clipped = VerificationService.CloneDictionary(eventLine); clipped["text"] = "If you put me down";
+            var wrongSpeaker = VerificationService.CloneDictionary(eventLine); wrongSpeaker["speakerHeroStringId"] = "player";
+            var duplicateSource = VerificationService.CloneDictionary(durable); duplicateSource["turn_id"] = "another_turn";
+            var staleSource = VerificationService.CloneDictionary(eventLine); staleSource["sourceTurnId"] = "stale_durable_id";
             add("ambiguous_clipped_or_wrong_author_never_suppresses_source", MatchPromptSource(clipped, new[] { durable }) == null
                 && MatchPromptSource(wrongSpeaker, new[] { durable }) == null
                 && MatchPromptSource(eventLine, new[] { durable, duplicateSource }) == null
@@ -63,7 +63,7 @@ namespace ReignBetaServer
                 && ReadInt(ReadDictionary(incompleteDiagnostics, "reasons"), "no_record_fits_summary_budget", 0) == 1
                 && !Json.Serialize(incompleteDiagnostics).Contains("PRIVATE_SOURCE_SENTINEL"), null);
             string campaign = "memory_precision_test_" + Guid.NewGuid().ToString("N");
-            var defaultPolicy = Program.DefaultSettings();
+            var defaultPolicy = SettingsService.DefaultSettings();
             add("new_memory_is_default", !ReadBool(defaultPolicy, "legacyMemoryMode", true)
                 && !defaultPolicy.ContainsKey("memoryPrecisionMode") && !defaultPolicy.ContainsKey("memoryReferenceGraphMode")
                 && ResolveMemoryMode(defaultPolicy) == "precision" && ResolveConversationReferenceMode(defaultPolicy) == "enabled"
@@ -83,7 +83,7 @@ namespace ReignBetaServer
                     && ResolveConversationReferenceMode(migrated) == "enabled", null);
             }
             var malformedPolicy = TestDict("legacyMemoryMode", "invalid", "temperature", .7d, "dialogueModel", "fixture/model", "apiKey", "fixture-key");
-            Program.NormalizeMemorySettings(malformedPolicy);
+            SettingsService.NormalizeMemorySettings(malformedPolicy);
             add("missing_or_malformed_toggle_defaults_new_without_changing_provider", malformedPolicy["legacyMemoryMode"] is false
                 && ResolveMemoryMode(null) == "precision" && ReadDouble(malformedPolicy, "temperature", 0) == .7d
                 && ReadString(malformedPolicy, "dialogueModel", "") == "fixture/model"
@@ -508,7 +508,7 @@ namespace ReignBetaServer
                 add("schema_compaction_preserves_custom_instructions_" + PromptHash(custom).Substring(0, 8), CompactPrecisionSchema(custom) == custom, null);
             foreach (string name in new[] { "dialogue_output_schema.json", "event_output_schema.json" })
             {
-                var output = TryParseJsonObject(ConversationMemoryOutputSchema(Program.DefaultPromptText(name, Program.DefaultPromptTemplates())));
+                var output = TryParseJsonObject(ConversationMemoryOutputSchema(PromptService.DefaultPromptText(name, PromptService.DefaultPromptTemplates())));
                 add("ordinary_json_example_source_fields_" + name, new[] { "memoryWrites", "beliefWrites", "obligationWrites", "comprehensionWrites" }
                     .All(field => ReadDictionaryList(output, field).Count > 0 && ReadDictionaryList(output, field)
                         .All(write => ReadDictionary(write, "sourceEvidence")?.ContainsKey("quote") == true)), null);
@@ -768,10 +768,10 @@ namespace ReignBetaServer
                 "useMemoryLlmForConsolidation", false, "memoryPrecisionMode", "precision");
             var knowledge = DialogueService.BuildKnowledgeAccessContext("observer", "player", "", context);
             var plan = PlanMemoryQuery("observer", "player", "Continue our conversation", context);
-            var priorSettings = Program.CodexPerformanceSettings.Value;
+            var priorSettings = LlmProviderService.CodexPerformanceSettings.Value;
             var envelopeSettings = new Dictionary<string, object>(settings)
             {
-                ["llmProvider"] = Program.NanoGptProvider, ["dialogueModel"] = "recent-window-fixture",
+                ["llmProvider"] = LlmProviderService.NanoGptProvider, ["dialogueModel"] = "recent-window-fixture",
                 ["eventsModel"] = "recent-window-fixture"
             };
             var certificates = TestDict();
@@ -784,7 +784,7 @@ namespace ReignBetaServer
                     "source", "isolated recent-window fixture", "validUntilUtc", DateTimeOffset.UtcNow.AddHours(1).ToString("o"));
             }
             envelopeSettings["verifiedConversationContextWindows"] = certificates;
-            Program.CodexPerformanceSettings.Value = envelopeSettings;
+            LlmProviderService.CodexPerformanceSettings.Value = envelopeSettings;
             try
             {
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
@@ -929,7 +929,7 @@ namespace ReignBetaServer
                             ["mainHeroStringId"] = "player", ["mainHeroName"] = "Michael", ["heroStringId"] = "observer" };
                         // Exercise the actual adapter shapes: event JSONL id is not
                         // the durable turn key, and turnId is the shared exchange.
-                        var routedLines = priorLines.Select(Program.CloneDictionary).ToList();
+                        var routedLines = priorLines.Select(VerificationService.CloneDictionary).ToList();
                         if (route != "dialogue")
                         {
                             foreach (var line in routedLines)
@@ -974,7 +974,7 @@ namespace ReignBetaServer
                     DialogueSelfTestStore.InsertConversationSessions19(connection, TestDict("campaign", campaign));
                     // Bind through a second connection only after publishing the fixture.
                     bindingFixture.Commit();
-                    var bindingContext = Program.CloneDictionary(context);
+                    var bindingContext = VerificationService.CloneDictionary(context);
                     bindingContext["playerHeroStringId"] = "player";
                     bindingContext["sceneTurnId"] = "binding_exchange";
                     bindingContext["identityView"] = TestDict("knowsIdentity", true);
@@ -995,14 +995,14 @@ namespace ReignBetaServer
                         .All(line => PlannedPromptSources(bindingContext).ContainsKey(ReadString(line, "sourceTurnId", ""))));
                     Check("storage_ids_survive_binding_and_unbound_collision_is_not_removed", ReadString(repeatedReplies[0], "id", "") == "jsonl_489"
                         && repeatedReplies.Any(line => ReadString(line, "id", "") == "binding_520"));
-                    var unknownBinding = Program.CloneDictionary(bindingContext); unknownBinding["identityView"] = TestDict("knowsIdentity", false);
+                    var unknownBinding = VerificationService.CloneDictionary(bindingContext); unknownBinding["identityView"] = TestDict("knowsIdentity", false);
                     BindPromptTranscriptSources(campaign, "observer", unknownBinding, repeatedReplies);
                     Check("unknown_identity_does_not_export_raw_statement_ids", PlannedPromptSources(unknownBinding).Count == 0
                         && PromptStatementSources.TryGetValue(unknownBinding, out var unknownStatements) && unknownStatements.Count == 0);
                 }
             }
             catch (Exception ex) { Check("fixture_completed", false, ex.ToString()); }
-            finally { Program.CodexPerformanceSettings.Value = priorSettings; ReignPostgreSqlStorage.DropCampaign(campaign); }
+            finally { LlmProviderService.CodexPerformanceSettings.Value = priorSettings; ReignPostgreSqlStorage.DropCampaign(campaign); }
             return results;
         }
 

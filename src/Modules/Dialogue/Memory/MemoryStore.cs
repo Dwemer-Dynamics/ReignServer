@@ -28,7 +28,7 @@ namespace ReignBetaServer
             List<string> actorIds = ReadStringList(payload, "actorIds");
             string locationId = ReadString(payload, "locationId", "");
             string summary = ReadString(payload, "summary", ReadString(payload, "text", ""));
-            List<string> tags = Program.SimpleTags(summary);
+            List<string> tags = CampaignFileService.SimpleTags(summary);
             long id = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
             Dictionary<string, object> row = new Dictionary<string, object>
@@ -42,7 +42,7 @@ namespace ReignBetaServer
                 ["payload"] = payload
             };
 
-            Program.AppendJsonLineToPath(Program.CampaignFile(campaignId, "world", "events.jsonl"), row);
+            CampaignFileService.AppendJsonLineToPath(CampaignFileService.CampaignFile(campaignId, "world", "events.jsonl"), row);
             bool volatileCurrentState =
                 ReadBool(payload, "volatileCurrentState", false)
                 || eventType.Equals(
@@ -63,8 +63,8 @@ namespace ReignBetaServer
             Dictionary<string, object> memoryStore;
             if (volatileCurrentState)
             {
-                Program.WriteJsonObject(
-                    Program.CampaignFile(
+                CampaignFileService.WriteJsonObject(
+                    CampaignFileService.CampaignFile(
                         campaignId, "world",
                         "current_native_world_state.json"),
                     memoryPayload);
@@ -98,16 +98,16 @@ namespace ReignBetaServer
                         ["text"] = summary,
                         ["sourceEventId"] = id
                     };
-                    Program.AppendJsonLineToPath(Program.CampaignFile(campaignId, "world", "memories.jsonl"), memoryRow);
+                    CampaignFileService.AppendJsonLineToPath(CampaignFileService.CampaignFile(campaignId, "world", "memories.jsonl"), memoryRow);
                     if (!string.IsNullOrWhiteSpace(ownerId))
                     {
-                        Program.AppendJsonLineToPath(Program.CharacterFile(campaignId, ownerId, "memory", "memories.jsonl"), memoryRow);
+                        CampaignFileService.AppendJsonLineToPath(CampaignFileService.CharacterFile(campaignId, ownerId, "memory", "memories.jsonl"), memoryRow);
                     }
                 }
             }
 
             Console.WriteLine("Ingested event " + eventType + " campaign=" + campaignId + " tags=" + string.Join(",", tags));
-            Program.LogOperational("event.ingest", new Dictionary<string, object>
+            OperationsService.LogOperational("event.ingest", new Dictionary<string, object>
             {
                 ["eventId"] = id,
                 ["campaignId"] = campaignId,
@@ -125,16 +125,16 @@ namespace ReignBetaServer
             List<string> actorIds = ReadStringList(payload, "actorIds");
             string query = ReadString(payload, "query", "");
             int limit = ReadInt(payload, "limit", 12);
-            List<string> queryTags = Program.SimpleTags(query);
+            List<string> queryTags = CampaignFileService.SimpleTags(query);
 
-            List<Dictionary<string, object>> memories = Program.ReadCampaignMemoryLines(campaignId, actorIds)
+            List<Dictionary<string, object>> memories = CampaignFileService.ReadCampaignMemoryLines(campaignId, actorIds)
                 .Where(x => actorIds.Count == 0 || actorIds.Contains(ReadString(x, "ownerId", "")))
                 .Where(x => queryTags.Count == 0 || ReadStringList(x, "tags").Any(queryTags.Contains))
                 .OrderByDescending(x => ReadLong(x, "ts", 0))
                 .Take(limit)
                 .ToList();
 
-            Program.LogOperational("context.build", new Dictionary<string, object>
+            OperationsService.LogOperational("context.build", new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,
                 ["actorIds"] = actorIds,
@@ -155,7 +155,7 @@ namespace ReignBetaServer
             payload = payload ?? new Dictionary<string, object>();
             Dictionary<string, object> stored = StoreWorldMemoryEvent(payload, "memory_event_api");
             string campaignId = ReadString(payload, "campaignId", "default");
-            Program.LogOperational("memory.event", new Dictionary<string, object>
+            OperationsService.LogOperational("memory.event", new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,
                 ["eventId"] = ReadString(stored, "eventId", ""),
@@ -283,7 +283,7 @@ namespace ReignBetaServer
                 aboutEntityIds = MergeStringLists(ReadStringList(payload, "aboutEntityIds"), ReadStringList(payload, "about_entities"));
             }
 
-            List<string> tags = MergeStringLists(ReadStringList(payload, "tags"), Program.SimpleTags(summary + " " + eventType));
+            List<string> tags = MergeStringLists(ReadStringList(payload, "tags"), CampaignFileService.SimpleTags(summary + " " + eventType));
             string aboutEntitiesJson = aboutEntitiesValue == null || aboutEntityIds.Count > 0 && !(aboutEntitiesValue is ArrayList) ? Json.Serialize(aboutEntityIds) : Json.Serialize(aboutEntitiesValue);
             string eventCategory = DialogueService.ClassifyEventCategory(eventType, payload, summary);
             string eventSubtype = DialogueService.ClassifyEventSubtype(eventType, summary);
@@ -653,7 +653,7 @@ namespace ReignBetaServer
 
         internal static bool IsPracticeDuelActionReport(Dictionary<string, object> payload)
         {
-            return Program.CanonicalCommand(ReadFirstString(payload, "type", "command")) == "duel_player"
+            return ActionPipelineService.CanonicalCommand(ReadFirstString(payload, "type", "command")) == "duel_player"
                 && ReadString(ReadDictionary(payload, "result"), "resultCode", "") == "practice_duel_completed";
         }
 
@@ -809,7 +809,7 @@ namespace ReignBetaServer
                 ["memoryGroupKey"] = memoryGroupKey ?? "",
                 ["visibility"] = "private",
                 ["importance"] = CalculateTurnImportance(memoryWrites, preparedBeliefs, preparedObligations, preparedComprehension),
-                ["tags"] = MergeStringLists(Program.SimpleTags(summary + " " + eventType), new[] { "conversation" }),
+                ["tags"] = MergeStringLists(CampaignFileService.SimpleTags(summary + " " + eventType), new[] { "conversation" }),
                 // Canonical conversation_turns plus their FTS window preserve the
                 // recent raw exchange. Do not duplicate every low-salience line as
                 // an event-FTS hit and two durable participant memories; explicit
@@ -860,7 +860,7 @@ namespace ReignBetaServer
                     List<string> tags = MergeStringLists(ReadStringList(copy, "tags"), new[] { "conversation" });
                     if (tags.Count == 0)
                     {
-                        tags = Program.SimpleTags(text);
+                        tags = CampaignFileService.SimpleTags(text);
                     }
 
                     object aboutRaw = copy.ContainsKey("about_entities") ? copy["about_entities"] : copy.ContainsKey("aboutEntities") ? copy["aboutEntities"] : null;
@@ -1054,7 +1054,7 @@ namespace ReignBetaServer
                 return FirstNonEmpty(prefix, "memory") + ":" + explicitId.Trim();
             }
 
-            Dictionary<string, object> settings = Program.LoadSettings();
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
             int windowMinutes = Math.Max(5, Math.Min(240, ReadInt(settings, "memoryConsolidationWindowMinutes", 30)));
             long bucket = Math.Max(0, ts) / (windowMinutes * 60L);
             List<string> actors = MergeStringLists(new[] { npcId, playerId }, new List<string>())
@@ -1119,7 +1119,7 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> ConsolidateNpcMemory(string campaignId, string npcId, bool force, string requestedGroupKey)
         {
-            Dictionary<string, object> settings = Program.LoadSettings();
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
             if (!force && !ReadBool(settings, "enableMemoryConsolidation", true))
             {
                 return new Dictionary<string, object> { ["ok"] = true, ["enabled"] = false, ["summaryCount"] = 0 };
@@ -1261,7 +1261,7 @@ namespace ReignBetaServer
                     publication.Commit();
                 }
 
-                Program.WriteJsonObject(Program.CharacterFile(campaignId, npcId, "memory", "summary.json"), new Dictionary<string, object>
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, npcId, "memory", "summary.json"), new Dictionary<string, object>
                 {
                     ["version"] = 2,
                     ["summaryId"] = summaryId,
@@ -1337,7 +1337,7 @@ namespace ReignBetaServer
             if (!useLlm) return DialogueService.MemoryCompactionOutcome(retained, "generation_disabled");
             if (joined != string.Join("\n---\n", sourceText))
                 return DialogueService.MemoryCompactionOutcome(retained, "source_input_exceeds_budget");
-            if (responder == null && !Program.LlmProviderConfigured(settings))
+            if (responder == null && !LlmProviderService.LlmProviderConfigured(settings))
                 return DialogueService.MemoryCompactionOutcome(retained, "provider_not_configured");
             {
                 var request = new Dictionary<string, object>
@@ -1370,7 +1370,7 @@ namespace ReignBetaServer
                     },
                     ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
                 };
-                var llm = responder == null ? Program.ChatWithLlm(request) : responder(request);
+                var llm = responder == null ? LlmProviderService.ChatWithLlm(request) : responder(request);
                 return DialogueService.EvaluateMemoryCompactionResponse(llm, rows, sourceText, topics, maxChars, dialogueDerived);
             }
         }

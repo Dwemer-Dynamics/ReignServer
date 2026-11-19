@@ -151,7 +151,7 @@ namespace ReignBetaServer
                 }
             }
             var narrative = new Dictionary<string, object> {
-                ["schema"] = NarrativeSchema, ["heroStringId"] = Program.CharacterIdFrom(hero), ["seed"] = seed,
+                ["schema"] = NarrativeSchema, ["heroStringId"] = CampaignFileService.CharacterIdFrom(hero), ["seed"] = seed,
                 ["revision"] = 1, ["status"] = "blueprint", ["items"] = items,
                 ["definingIds"] = SelectDefiningNarrativeIds(items, seed, new List<string>()),
                 ["influenceLevels"] = NarrativeInfluenceLevels, ["realismPolicy"] = NarrativeRealismPolicy
@@ -226,7 +226,7 @@ namespace ReignBetaServer
 
         private static string NarrativeMeaningKey(Dictionary<string, object> item)
         {
-            return Program.NormalizeLookup(FirstNonEmpty(ReadString(item, "meaningKey", ""), ReadString(item, "title", "")));
+            return ActionPipelineService.NormalizeLookup(FirstNonEmpty(ReadString(item, "meaningKey", ""), ReadString(item, "title", "")));
         }
 
         internal static bool NarrativeDocumentReady(Dictionary<string, object> narrative)
@@ -387,8 +387,8 @@ namespace ReignBetaServer
                 narrative = ReadDictionary(ReadDictionaryList(catalog, "profiles").FirstOrDefault(x => ReadString(x, "heroStringId", "") == hero), "narrative");
             else
             {
-                narrative = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "narrative.json"));
-                dynamic = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "dynamic_characteristics.json"));
+                narrative = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "narrative.json"));
+                dynamic = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "dynamic_characteristics.json"));
             }
             var stack = new Dictionary<string, object> { ["narrative"] = narrative, ["dynamicCharacteristics"] = dynamic };
             return new Dictionary<string, object> { ["ok"] = true, ["schema"] = NarrativeSchema,
@@ -434,7 +434,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> ReadShippedNarrativeCatalog()
         {
-            var catalog = Program.ReadJsonObject(CharacterProfileCatalogPath);
+            var catalog = CampaignFileService.ReadJsonObject(CharacterProfileCatalogPath);
             if (ReadString(catalog, "packVersion", "") != NarrativePack) return catalog;
             var profiles = ReadDictionaryList(catalog, "profiles");
             foreach (var profile in profiles)
@@ -442,7 +442,7 @@ namespace ReignBetaServer
                 string id = ReadString(profile, "heroStringId", "");
                 string file = DialogueService.PromptHash(id).Substring(0, 24) + ".json";
                 if (ReadString(profile, "narrativeFile", "") != file) throw new InvalidDataException("Invalid shipped narrative reference: " + id);
-                var narrative = Program.ReadJsonObject(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "profiles", "narrative", "profiles", file));
+                var narrative = CampaignFileService.ReadJsonObject(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "profiles", "narrative", "profiles", file));
                 if (ReadString(narrative, "heroStringId", "") != id || ReadString(narrative, "status", "") != "ready"
                     || ValidateCharacterNarrative(narrative, true).Count > 0) throw new InvalidDataException("Incomplete shipped narrative: " + id);
                 profile["narrative"] = narrative;

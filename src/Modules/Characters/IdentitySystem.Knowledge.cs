@@ -23,7 +23,7 @@ namespace ReignBetaServer
             if (writes.Count == 0) return results;
             HashSet<string> present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (string id in ReadStringList(payload, "activeHeroIds")) present.Add(id);
-            foreach (Dictionary<string, object> attendee in ReadDictionaryList(payload, "attendees")) present.Add(Program.CharacterIdFrom(attendee));
+            foreach (Dictionary<string, object> attendee in ReadDictionaryList(payload, "attendees")) present.Add(CampaignFileService.CharacterIdFrom(attendee));
             present.Add(ReadFirstString(payload, "speakerHeroStringId", "heroStringId"));
             present.Add(ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId"));
             present.RemoveWhere(string.IsNullOrWhiteSpace);
@@ -61,7 +61,7 @@ namespace ReignBetaServer
                     ["kind"] = string.Equals(introducer, subject, StringComparison.OrdinalIgnoreCase) ? "self" : "third_party",
                     ["encounterId"] = encounterId,
                     ["worldDay"] = ReadDouble(payload, "worldDay", 0d),
-                    ["correlationId"] = Program.EnsureCorrelationId(payload)
+                    ["correlationId"] = OperationsService.EnsureCorrelationId(payload)
                 };
                 results.Add(IdentityIntroductionApi(request, connection));
             }
@@ -331,7 +331,7 @@ namespace ReignBetaServer
                     diplomacy, "playerEnemyKingdoms");
             string subjectId = IdentityHeroId(subject);
             string observerId = IdentityHeroId(observer);
-            string encounterMode = Program.NormalizeLookup(
+            string encounterMode = ActionPipelineService.NormalizeLookup(
                 ReadString(context, "mode", ""));
             bool institutionalEncounter =
                 ReadBool(context, "officialAudience", false)
@@ -621,7 +621,7 @@ namespace ReignBetaServer
             if (ReadBool(hero, "isWanderer",
                     ReadInt(hero, "is_wanderer", 0) != 0))
                 roles.Add("wanderer");
-            string occupation = Program.NormalizeLookup(
+            string occupation = ActionPipelineService.NormalizeLookup(
                 ReadString(hero, "occupation", ""));
             if (roles.Count == 0)
             {

@@ -5,7 +5,7 @@ using Reign.Core.Contracts.Dialogue;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class SettingsService
     {
         private static readonly string[] ReignXpCategoryOptionKeys = {
             "reignXpConversationMultiplier", "reignXpSocialCharmMultiplier",

@@ -5,9 +5,9 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class SettingsService
     {
-        private static List<Dictionary<string, object>> RunReignXpOptionsSelfTests()
+        internal static List<Dictionary<string, object>> RunReignXpOptionsSelfTests()
         {
             var results = new List<Dictionary<string, object>>();
             results.AddRange(RunCorrespondenceOptionsAssertions());
@@ -37,8 +37,8 @@ namespace ReignBetaServer
             settings["xp_test_unrelated"] = "retain";
             double[] values = { 0, .25, 2, 5 };
             for (int i = 0; i < ReignXpCategoryOptionKeys.Length; i++)
-                MergeProviderSettings(settings, TestDict(ReignXpCategoryOptionKeys[i], values[i]));
-            MergeProviderSettings(settings, TestDict("reignXpMultiplier", .25, "reignXpEnabled", false));
+                LlmProviderService.MergeProviderSettings(settings, TestDict(ReignXpCategoryOptionKeys[i], values[i]));
+            LlmProviderService.MergeProviderSettings(settings, TestDict("reignXpMultiplier", .25, "reignXpEnabled", false));
             var roundTrip = TryParseJsonObject(Json.Serialize(settings));
             var projected = ReignXpOptionsForClient(roundTrip);
             Check("partial_merge_roundtrip", ReignXpCategoryOptionKeys.Select((key, i) =>

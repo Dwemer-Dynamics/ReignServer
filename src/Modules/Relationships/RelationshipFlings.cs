@@ -114,8 +114,8 @@ namespace ReignBetaServer
                 return true;
             }
 
-            Dictionary<string, object> campaignTraits = Program.ReadJsonObject(
-                Program.CharacterFile(campaignId, heroId, "traits.json"));
+            Dictionary<string, object> campaignTraits = CampaignFileService.ReadJsonObject(
+                CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"));
             if (TryExtractFlingJudgment(hero, out judgment))
                 source = "daily_snapshot";
             else if (TryExtractFlingJudgment(campaignTraits, out judgment))

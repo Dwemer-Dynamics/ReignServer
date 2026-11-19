@@ -141,7 +141,7 @@ namespace ReignBetaServer
             var result = new List<Dictionary<string, object>>();
             foreach (var original in ReadDictionaryList(handoff, "acceptedExchanges").TakeLast(2))
             {
-                var exchange = Program.CloneDictionary(original);
+                var exchange = VerificationService.CloneDictionary(original);
                 string speaker = ReadString(exchange, "speakerId", "");
                 if (ReadString(exchange, "observerId", "") != observer && speaker != observer)
                 {
@@ -257,7 +257,7 @@ namespace ReignBetaServer
                 string parentId = CurrentContinuityRecordId(connection, timeline, ownerId, ReadString(write, "parentId", ""));
                 if (!string.IsNullOrWhiteSpace(parentId)
                     && DialogueStore.SelectConversationContinuity2(connection, MemorySourceTimelineSql("conversation_continuity"),                        new Dictionary<string, object> { ["id"] = parentId, ["owner"] = ownerId, ["timeline"] = timeline }).Count == 0) reason = "unverified_parent_concern";
-                if (string.IsNullOrWhiteSpace(id)) id = "continuity_" + PromptHash(timeline + "|" + ownerId + "|" + kind + "|" + pair + "|" + Program.NormalizeLookup(subject)).Substring(0, 32);
+                if (string.IsNullOrWhiteSpace(id)) id = "continuity_" + PromptHash(timeline + "|" + ownerId + "|" + kind + "|" + pair + "|" + ActionPipelineService.NormalizeLookup(subject)).Substring(0, 32);
                 id = CurrentContinuityRecordId(connection, timeline, ownerId, id);
                 var previous = DialogueStore.SelectConversationContinuity3(connection, new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
                 bool inherited = previous != null && ReadString(previous, "timeline_id", "") != timeline;
@@ -733,7 +733,7 @@ namespace ReignBetaServer
                         ["detail"] = "A durable continuity write is not supported by an exact quote of the accepted reply. Regenerate or remove that write and every dependent assertion." });
             }
             var people = ReadDictionaryList(CurrentContinuityPresence(payload), "people");
-            var speaker = MergedInteractionParticipantProfiles(payload).FirstOrDefault(p => DialogueService.KnowledgeIdEquals(Program.CharacterIdFrom(p), heroId));
+            var speaker = MergedInteractionParticipantProfiles(payload).FirstOrDefault(p => DialogueService.KnowledgeIdEquals(CampaignFileService.CharacterIdFrom(p), heroId));
             foreach (var person in people)
             {
                 string name = ReadString(person, "name", "");

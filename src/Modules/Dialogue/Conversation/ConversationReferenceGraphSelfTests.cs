@@ -355,7 +355,7 @@ namespace ReignBetaServer
                     && ReadInt(ReadDictionary(deliveredGraph, "referenceGraph"), "sourceCount", -1) == 0
                     && MemoryRecallTurnSignature(readPayload, "npc") == signature);
                 const string budgetModel = "z-ai/glm-5.3-flash";
-                var budgetSettings = TestDict("llmProvider", Program.NanoGptProvider, "dialogueModel", budgetModel, "eventsModel", budgetModel,
+                var budgetSettings = TestDict("llmProvider", LlmProviderService.NanoGptProvider, "dialogueModel", budgetModel, "eventsModel", budgetModel,
                     "conversationInputTokenLimit", 120000);
                 var budgetCatalog = new ConversationCapacityCatalog(() => Json.Serialize(TestDict("data", new[] {
                     TestDict("id", budgetModel, "context_length", 1048576, "max_output_tokens", 131072) })), () => DateTimeOffset.UtcNow);

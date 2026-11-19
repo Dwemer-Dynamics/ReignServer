@@ -6,7 +6,7 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class SettingsService
     {
         internal static readonly Dictionary<string, string> PersonalGossipChanceLabels = new Dictionary<string, string> {
             ["share"] = "Sharing a conversation", ["negative"] = "Choosing malicious gossip",

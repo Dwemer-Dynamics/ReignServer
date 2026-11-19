@@ -151,13 +151,13 @@ namespace ReignBetaServer
             }
             int insertion = receipt.Messages.FindIndex(row => ReadString(row, "content", "").StartsWith("HISTORICAL ", StringComparison.Ordinal));
             if (insertion < 0) throw new InvalidOperationException("Reviewed recovery cannot find the protected authored window.");
-            var request = Program.CloneDictionary(initial);
-            nativeMessages = nativeMessages.Select(Program.CloneDictionary).ToList();
+            var request = VerificationService.CloneDictionary(initial);
+            nativeMessages = nativeMessages.Select(VerificationService.CloneDictionary).ToList();
             nativeMessages.InsertRange(insertion, additions);
             request["messages"] = nativeMessages;
             var envelope = ReadDictionary(request, "promptEnvelope");
-            var expected = receipt.Messages.Select(Program.CloneDictionary).ToList();
-            expected.InsertRange(insertion, additions.Select(Program.CloneDictionary));
+            var expected = receipt.Messages.Select(VerificationService.CloneDictionary).ToList();
+            expected.InsertRange(insertion, additions.Select(VerificationService.CloneDictionary));
             ConversationStructureReceipts.Remove(envelope);
             ConversationStructureReceipts.Add(envelope, new ConversationStructureReceipt { Messages = expected, CanonicalTranscript = receipt.CanonicalTranscript });
             var structure = ReadDictionary(envelope, "conversationMessageStructure");

@@ -41,7 +41,7 @@ namespace ReignBetaServer
             Dictionary<string, object> terms, Dictionary<string, object> payload,
             string command, List<string> errors)
         {
-            if (command != "marriage_alliance" || !Program.IsDialogueActionSource(ReadString(raw, "source", ""))) return;
+            if (command != "marriage_alliance" || !ActionPipelineService.IsDialogueActionSource(ReadString(raw, "source", ""))) return;
             Dictionary<string, object> hero = ReadDictionary(payload, "hero") ?? new Dictionary<string, object>();
             string player = FirstNonEmpty(ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"),
                 ReadFirstString(hero, "mainHeroStringId", "playerHeroStringId"));
@@ -80,8 +80,8 @@ namespace ReignBetaServer
                 }
             }
             Dictionary<string, object> index = ReadDictionary(payload, "actionResolutionIndex");
-            Dictionary<string, object> playerRow = Program.FindIndexedRow(index, "heroes", "heroStringId", player);
-            Dictionary<string, object> speakerRow = Program.FindIndexedRow(index, "heroes", "heroStringId", speaker);
+            Dictionary<string, object> playerRow = ActionPipelineService.FindIndexedRow(index, "heroes", "heroStringId", player);
+            Dictionary<string, object> speakerRow = ActionPipelineService.FindIndexedRow(index, "heroes", "heroStringId", speaker);
             if (playerRow == null || speakerRow == null)
             {
                 errors.Add("Both consenting spouses must exist in the live hero index.");
@@ -126,8 +126,8 @@ namespace ReignBetaServer
                 ReadString(hero, "heroStringId", ""));
             if (string.IsNullOrWhiteSpace(player) || string.IsNullOrWhiteSpace(speaker)) return false;
             Dictionary<string, object> index = ReadDictionary(payload, "actionResolutionIndex");
-            Dictionary<string, object> playerRow = Program.FindIndexedRow(index, "heroes", "heroStringId", player);
-            Dictionary<string, object> speakerRow = Program.FindIndexedRow(index, "heroes", "heroStringId", speaker) ?? hero;
+            Dictionary<string, object> playerRow = ActionPipelineService.FindIndexedRow(index, "heroes", "heroStringId", player);
+            Dictionary<string, object> speakerRow = ActionPipelineService.FindIndexedRow(index, "heroes", "heroStringId", speaker) ?? hero;
             return player.Equals(ReadString(speakerRow, "spouseId", ""), StringComparison.OrdinalIgnoreCase)
                 && speaker.Equals(ReadString(playerRow, "spouseId", ""), StringComparison.OrdinalIgnoreCase);
         }
@@ -155,7 +155,7 @@ namespace ReignBetaServer
                     : "[Reign: The marriage has not been confirmed in the game. The ceremony described in dialogue did not complete it.]";
             }
             if ((queued == null || queued.Count == 0) && errors != null && errors.Count > 0)
-                return (reply ?? "").TrimEnd() + "\n\n" + Program.DialogueActionFailureNotice;
+                return (reply ?? "").TrimEnd() + "\n\n" + ConversationResponseService.DialogueActionFailureNotice;
             return reply;
         }
     }

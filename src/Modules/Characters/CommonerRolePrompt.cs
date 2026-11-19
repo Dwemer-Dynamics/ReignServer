@@ -16,7 +16,7 @@ namespace ReignBetaServer
             var resident = ReadDictionary(profile, "encounteredResident");
             string role = ReadString(resident, "occupation", "resident");
             var builder = new StringBuilder();
-            DialogueService.AppendPromptSection(builder, "COMMONER ROLE - CONTINUING CHARACTER LAYER", Program.LoadPromptTemplate("commoner_prompt.txt"));
+            DialogueService.AppendPromptSection(builder, "COMMONER ROLE - CONTINUING CHARACTER LAYER", PromptService.LoadPromptTemplate("commoner_prompt.txt"));
             DialogueService.AppendPromptLine(builder, "Native livelihood", role);
             DialogueService.AppendPromptLine(builder, "Home", ReadString(resident, "homeSettlementName", ""));
             builder.AppendLine(BuildCommonerHouseholdPrompt(profile));

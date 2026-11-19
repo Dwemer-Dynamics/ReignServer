@@ -175,7 +175,7 @@ namespace ReignBetaServer
                 List<string> expectedPulls = ReadStringList(payload, "expectedContextPulls");
                 List<Dictionary<string, object>> assertions = new List<Dictionary<string, object>>();
 
-                List<Dictionary<string, object>> auditRows = Program.ReadJsonLinesFromPath(Program.CampaignFile(campaignId, "audit", "audit.jsonl"))
+                List<Dictionary<string, object>> auditRows = Program.ReadJsonLinesFromPath(CampaignFileService.CampaignFile(campaignId, "audit", "audit.jsonl"))
                     .Where(row => string.Equals(ReadString(row, "correlationId", ""), correlationId, StringComparison.OrdinalIgnoreCase)).ToList();
                 AddNpcDialogueAssertion(assertions, "audit_context_select", auditRows.Any(row => ReadString(row, "phase", "") == "context.select"), "Context selector audit exists.", correlationId);
                 AddNpcDialogueAssertion(assertions, "audit_context_loaded", auditRows.Any(row => ReadString(row, "phase", "") == "context.loaded"), "Context-loaded audit exists.", correlationId);
@@ -391,7 +391,7 @@ namespace ReignBetaServer
                     && DialogueService.TextListFromJson(ReadString(summary, "participants_json", "[]")).Contains(playerId, StringComparer.OrdinalIgnoreCase)
                     && DialogueService.TextListFromJson(ReadString(summary, "known_by_json", "[]")).Contains(npcId, StringComparer.OrdinalIgnoreCase),
                     "Scene summary ownership, participants, visibility, and knowledge are correct.", ReadString(summary, "summary_id", ""));
-                Dictionary<string, object> settings = Program.LoadSettings();
+                Dictionary<string, object> settings = SettingsService.LoadSettings();
                 if (ReadBool(settings, "enableSemanticMemory", true))
                     AddNpcDialogueAssertion(assertions, "scene_embedding_job", embeddingJobs >= 1 || ReadString(summary, "embedding_status", "") == "indexed", "Scene summary is queued or indexed for semantic memory.", embeddingJobs.ToString());
                 int minimumItems = Math.Max(1, ReadInt(settings, "memoryConsolidationMinItems", 4));
@@ -474,7 +474,7 @@ namespace ReignBetaServer
                         relatedMax >= 4 ? "A rolling arc exists after four related scenes." : "No lane reached four related scenes; the arc threshold correctly remained ineligible.",
                         "laneCounts=" + Json.Serialize(laneCounts) + " newArc=" + arcExists);
 
-                    Dictionary<string, object> settings = Program.LoadSettings();
+                    Dictionary<string, object> settings = SettingsService.LoadSettings();
                     if (ReadBool(settings, "enableSemanticMemory", true))
                     {
                         List<string> summaryIds = scenes.SelectMany(scene => new[]
@@ -513,7 +513,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> NpcDialogueAuditStatusApi(Dictionary<string, string> query)
         {
             query = query ?? new Dictionary<string, string>();
-            string campaignId = query.TryGetValue("campaignId", out string campaign) ? campaign : Program.ResolveLogCampaignId("");
+            string campaignId = query.TryGetValue("campaignId", out string campaign) ? campaign : CampaignFileService.ResolveLogCampaignId("");
             string runId = query.TryGetValue("runId", out string run) ? run : "";
             Dictionary<string, object> report = string.IsNullOrWhiteSpace(runId) ? FindLatestNpcDialogueAudit(campaignId) : LoadNpcDialogueAudit(campaignId, runId);
             return report == null
@@ -618,7 +618,7 @@ namespace ReignBetaServer
                 ["workerAvailable"] = false,
                 ["workerError"] = ""
             };
-            Dictionary<string, object> settings = Program.LoadSettings();
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
             try
             {
                 Dictionary<string, object> health = TryParseJsonObject(DialogueService.GetTextFromUrl(
@@ -750,19 +750,19 @@ namespace ReignBetaServer
 
         private static string NpcDialogueAuditDirectory(string campaignId)
         {
-            return Program.CampaignFile(campaignId, "tests", "npc-dialogue-audits");
+            return CampaignFileService.CampaignFile(campaignId, "tests", "npc-dialogue-audits");
         }
 
         private static string NpcDialogueAuditRequestPath(string campaignId)
         {
-            return Program.CampaignFile(campaignId, "tests", "npc-dialogue-audits", "requests", "current.json");
+            return CampaignFileService.CampaignFile(campaignId, "tests", "npc-dialogue-audits", "requests", "current.json");
         }
 
         private static Dictionary<string, object> LoadNpcDialogueAuditRequest(string campaignId)
         {
             string path = NpcDialogueAuditRequestPath(campaignId);
             if (!File.Exists(path)) return null;
-            Dictionary<string, object> request = Program.ReadJsonObject(path);
+            Dictionary<string, object> request = CampaignFileService.ReadJsonObject(path);
             return request.Count == 0 ? null : request;
         }
 
@@ -770,7 +770,7 @@ namespace ReignBetaServer
         {
             string path = NpcDialogueAuditRequestPath(ReadString(request, "campaignId", "default"));
             Directory.CreateDirectory(Path.GetDirectoryName(path));
-            Program.WriteJsonObject(path, request);
+            CampaignFileService.WriteJsonObject(path, request);
         }
 
         private static Dictionary<string, object> NpcDialogueAuditRequestSummary(Dictionary<string, object> request)
@@ -793,13 +793,13 @@ namespace ReignBetaServer
 
         private static string NpcDialogueAuditPath(string campaignId, string runId)
         {
-            return Path.Combine(NpcDialogueAuditDirectory(campaignId), Program.SafePathSegment(runId, "latest") + ".json");
+            return Path.Combine(NpcDialogueAuditDirectory(campaignId), CampaignFileService.SafePathSegment(runId, "latest") + ".json");
         }
 
         private static string NpcDialogueAuditResponsePath(string campaignId, string correlationId)
         {
             string key = NpcDialogueAuditResponseKey(correlationId);
-            return Program.CampaignFile(campaignId, "tests", "npc-dialogue-audits", "responses", key + ".json");
+            return CampaignFileService.CampaignFile(campaignId, "tests", "npc-dialogue-audits", "responses", key + ".json");
         }
 
         private static string NpcDialogueAuditResponseKey(string correlationId)
@@ -809,7 +809,7 @@ namespace ReignBetaServer
             string original = string.IsNullOrWhiteSpace(correlationId)
                 ? "response"
                 : correlationId.Trim();
-            string safe = Program.SafePathSegment(original, "response");
+            string safe = CampaignFileService.SafePathSegment(original, "response");
             if (safe.Length <= maximumKeyLength) return safe;
 
             string digest;
@@ -830,27 +830,27 @@ namespace ReignBetaServer
         {
             string path = NpcDialogueAuditResponsePath(campaignId, correlationId);
             if (!File.Exists(path)) return null;
-            Dictionary<string, object> response = Program.ReadJsonObject(path);
+            Dictionary<string, object> response = CampaignFileService.ReadJsonObject(path);
             return response.Count == 0 ? null : response;
         }
 
         internal static void SaveNpcDialogueAuditResponse(string campaignId, string correlationId, Dictionary<string, object> response)
         {
-            Program.WriteJsonObject(NpcDialogueAuditResponsePath(campaignId, correlationId), response ?? new Dictionary<string, object>());
+            CampaignFileService.WriteJsonObject(NpcDialogueAuditResponsePath(campaignId, correlationId), response ?? new Dictionary<string, object>());
         }
 
         private static void SaveNpcDialogueAudit(Dictionary<string, object> report)
         {
             string path = NpcDialogueAuditPath(ReadString(report, "campaignId", "default"), ReadString(report, "runId", "latest"));
             Directory.CreateDirectory(Path.GetDirectoryName(path));
-            Program.WriteJsonObject(path, report);
+            CampaignFileService.WriteJsonObject(path, report);
         }
 
         private static Dictionary<string, object> LoadNpcDialogueAudit(string campaignId, string runId)
         {
             if (string.IsNullOrWhiteSpace(runId)) return FindLatestNpcDialogueAudit(campaignId);
             string path = NpcDialogueAuditPath(campaignId, runId);
-            return File.Exists(path) ? Program.ReadJsonObject(path) : null;
+            return File.Exists(path) ? CampaignFileService.ReadJsonObject(path) : null;
         }
 
         private static Dictionary<string, object> FindActiveNpcDialogueAudit(string campaignId)
@@ -868,7 +868,7 @@ namespace ReignBetaServer
             string directory = NpcDialogueAuditDirectory(campaignId);
             if (!Directory.Exists(directory)) return Enumerable.Empty<Dictionary<string, object>>();
             return Directory.GetFiles(directory, "*.json", SearchOption.TopDirectoryOnly)
-                .Select(Program.ReadJsonObject).Where(report => report != null && report.Count > 0).ToList();
+                .Select(CampaignFileService.ReadJsonObject).Where(report => report != null && report.Count > 0).ToList();
         }
 
         internal static List<Dictionary<string, object>> RunNpcDialogueAuditSelfTests()
@@ -1019,7 +1019,7 @@ namespace ReignBetaServer
                 try
                 {
                     ReignPostgreSqlStorage.ClearAllPools();
-                    string path = Program.CampaignDirectory(campaignId);
+                    string path = CampaignFileService.CampaignDirectory(campaignId);
                     if (Directory.Exists(path)) Directory.Delete(path, true);
                 }
                 catch

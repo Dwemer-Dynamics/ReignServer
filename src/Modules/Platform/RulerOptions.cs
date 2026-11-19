@@ -7,7 +7,7 @@ using ReignBeta.Shared.Rulers;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class SettingsService
     {
         internal static Dictionary<string, object> RulerOptionsForClient(Dictionary<string, object> settings) =>
             RulerOptions.Switches.Keys.ToDictionary(k => k, k => (object)ReadBool(settings, k, true), StringComparer.Ordinal);

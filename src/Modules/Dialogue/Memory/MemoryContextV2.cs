@@ -112,7 +112,7 @@ namespace ReignBetaServer
         }
 
         internal static string MemoryPrecisionMode(ReignDbConnection connection, Dictionary<string, object> settings = null) =>
-            ResolveMemoryMode(settings ?? Program.LoadSettings(), IsIsolatedMemoryValidation);
+            ResolveMemoryMode(settings ?? SettingsService.LoadSettings(), IsIsolatedMemoryValidation);
 
         // Only the Save Sync rollback passes its load session; any other restore stays
         // unproven for terminal report recovery (fail closed).
@@ -309,7 +309,7 @@ namespace ReignBetaServer
                 return MemoryCompactionOutcome(retained, "provider_refused", provider);
             if (!ReadBool(provider, "ok", false))
             {
-                bool transient = Program.IsTransientLlmFailure(ReadString(provider, "error", ""));
+                bool transient = LlmProviderService.IsTransientLlmFailure(ReadString(provider, "error", ""));
                 return MemoryCompactionOutcome(retained, transient ? "provider_transient_failure" : "provider_failure", provider, transient);
             }
             var parsed = TryParseJsonObject(ReadString(provider, "content", ""));
@@ -491,7 +491,7 @@ namespace ReignBetaServer
                 plan.WorldDay = Math.Min(plan.WorldDay, Math.Max(0d, ReadDouble(context, "memoryAsOfWorldDay", plan.WorldDay)));
             foreach (var profile in MergedInteractionParticipantProfiles(context ?? new Dictionary<string, object>()))
             {
-                string name = ReadString(profile, "name", ""), id = Program.CharacterIdFrom(profile);
+                string name = ReadString(profile, "name", ""), id = CampaignFileService.CharacterIdFrom(profile);
                 if (name.Length > 0 && id.Length > 0 && Regex.IsMatch(plan.Query, @"(?<![\p{L}\p{Nd}_])" + Regex.Escape(name) + @"(?![\p{L}\p{Nd}_])", RegexOptions.IgnoreCase))
                 { plan.Entities.Add(id); plan.ExplicitEntities.Add(id); }
             }
@@ -736,9 +736,9 @@ namespace ReignBetaServer
                     + Json.Serialize(ConversationQuestionExample()) + ". communicationPlans is required: use [] without a communication commitment, otherwise entries like "
                     + Json.Serialize(CommunicationPlanExample()) + ". Fill exact source values; never copy example placeholders.";
             string hash = PromptHash(source);
-            var defaults = Program.DefaultPromptTemplates();
+            var defaults = PromptService.DefaultPromptTemplates();
             bool stock = new[] { "dialogue_output_schema.json", "event_output_schema.json" }.Any(name =>
-                hash == PromptHash(Program.DefaultPromptText(name, defaults)) || VersionTwoReasoningPromptHashes[name].Contains(hash));
+                hash == PromptHash(PromptService.DefaultPromptText(name, defaults)) || VersionTwoReasoningPromptHashes[name].Contains(hash));
             if (stock)
             {
                 // These stock example descriptions repeat the owning field rules.

@@ -20,7 +20,7 @@ namespace ReignBetaServer
             var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (string key in new[] { "attendees", "participants", "sceneParticipants", "activeHeroIds" })
             {
-                foreach (var row in ReadDictionaryList(payload, key)) ids.Add(Program.CharacterIdFrom(row));
+                foreach (var row in ReadDictionaryList(payload, key)) ids.Add(CampaignFileService.CharacterIdFrom(row));
                 if (payload.TryGetValue(key, out object raw) && raw is System.Collections.IEnumerable items && !(raw is string))
                     foreach (object item in items) if (item is string id) ids.Add(id);
             }
@@ -65,7 +65,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> RunPlayerActionTurn(Dictionary<string, object> payload, Func<Dictionary<string, object>> respond)
         {
             string key = ReadString(payload, "campaignId", "default") + "|" + ContinuityTimeline(payload) + "|"
-                + FirstNonEmpty(ReadFirstString(payload, "contributionId", "sceneTurnId", "turnId"), Program.EnsureCorrelationId(payload)) + "|"
+                + FirstNonEmpty(ReadFirstString(payload, "contributionId", "sceneTurnId", "turnId"), OperationsService.EnsureCorrelationId(payload)) + "|"
                 + ReadFirstString(payload, "speakerHeroStringId", "heroStringId");
             lock (ConversationInputDispatchLocks[(uint)StringComparer.Ordinal.GetHashCode(key) % ConversationInputDispatchLocks.Length])
                 return RunPlayerActionTurnCore(payload, respond);
@@ -84,7 +84,7 @@ namespace ReignBetaServer
             using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 publicationGeneration = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
             string inputObserver = FirstNonEmpty(ReadFirstString(payload, "speakerHeroStringId", "heroStringId", "heroId"),
-                Program.CharacterIdFrom(ReadDictionary(payload, "hero") ?? ReadDictionary(payload, "speaker") ?? TestDict()));
+                CampaignFileService.CharacterIdFrom(ReadDictionary(payload, "hero") ?? ReadDictionary(payload, "speaker") ?? TestDict()));
             AdmitConversationInput(campaign, payload, publicationGeneration, inputObserver);
             var inputReplay = ReadConversationInputReplay(campaign, payload, inputObserver);
             if (inputReplay != null) return inputReplay;
@@ -111,7 +111,7 @@ namespace ReignBetaServer
                     }
                 }
                 catch (Exception ex) when (intents.Count > 0 && !(ex is PersistenceService.CampaignRequestReplacedException) && !(ex is OperationCanceledException))
-                { Program.LogOperational("dialogue.player_action_reply_failed", TestDict("correlationId", Program.EnsureCorrelationId(payload), "error", ex.GetType().Name));
+                { OperationsService.LogOperational("dialogue.player_action_reply_failed", TestDict("correlationId", OperationsService.EnsureCorrelationId(payload), "error", ex.GetType().Name));
                     response = TestDict("ok", false, "error", "The NPC response failed. Your explicit handover is evaluated separately."); }
             }
             finally { _playerActionTurn = null; _stagedTurnActions = null; _playerActionGeneration = null; }
@@ -153,8 +153,8 @@ namespace ReignBetaServer
             }
             catch (Exception ex) when (!(ex is PersistenceService.CampaignRequestReplacedException) && !(ex is OperationCanceledException))
             {
-                Program.LogOperational("dialogue.action_publication_failed", TestDict("campaignId", campaign,
-                    "correlationId", Program.EnsureCorrelationId(payload), "error", ex.GetType().Name));
+                OperationsService.LogOperational("dialogue.action_publication_failed", TestDict("campaignId", campaign,
+                    "correlationId", OperationsService.EnsureCorrelationId(payload), "error", ex.GetType().Name));
                 if (!IsSinglePassConversation(payload) || string.IsNullOrWhiteSpace(ReadString(response, "reply", "")))
                     response["ok"] = false;
                 response["stage"] = "action_publication";
@@ -176,7 +176,7 @@ namespace ReignBetaServer
             var merged = playerRows.Concat(ordinary).GroupBy(r => ReadString(r, "id", "")).Select(g => g.First()).ToList();
             response["queuedDialogueActions"] = merged;
             response["playerActionOutcomes"] = outcomes;
-            response["correlationId"] = Program.EnsureCorrelationId(payload);
+            response["correlationId"] = OperationsService.EnsureCorrelationId(payload);
             if (!IsSinglePassConversation(payload) && intents.Count > 0 && !ReadBool(response, "ok", false))
             {
                 response["dialogueSucceeded"] = false;
@@ -197,7 +197,7 @@ namespace ReignBetaServer
             var hero = ReadDictionary(payload, "hero") ?? ReadDictionary(payload, "speaker") ?? new Dictionary<string, object>();
             string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
             string recipient = FirstNonEmpty(ReadFirstString(payload, "speakerHeroStringId", "heroStringId", "heroId"), ReadString(hero, "heroStringId", ""));
-            string turn = FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), Program.EnsureCorrelationId(payload));
+            string turn = FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), OperationsService.EnsureCorrelationId(payload));
             for (int slot = 0; slot < intents.Count; slot++)
             {
                 var intent = intents[slot];
@@ -233,19 +233,19 @@ namespace ReignBetaServer
                     if (ReadString(terms, "itemId", "").Length == 0 || ReadInt(terms, "amount", 0) <= 0)
                     { result["message"] = "Specify one exact owned item, variant and quantity."; continue; }
                 }
-                var normalized = Program.NormalizeActionCommand(candidate, campaign, out var errors, payload, intent.Quote);
+                var normalized = ActionPipelineService.NormalizeActionCommand(candidate, campaign, out var errors, payload, intent.Quote);
                 if (normalized == null || errors.Count > 0) { result["message"] = string.Join(" ", errors); continue; }
                 try
                 {
-                    var row = Program.QueueAction(campaign, normalized);
+                    var row = ActionPipelineService.QueueAction(campaign, normalized);
                     string status = ReadString(row, "status", "queued");
-                    if (!Program.IsTerminalActionReportStatus(status) || status == "completed") rows.Add(row);
-                    result["status"] = Program.IsTerminalActionReportStatus(status) && status != "completed" ? "unresolved" : status;
+                    if (!ActionPipelineService.IsTerminalActionReportStatus(status) || status == "completed") rows.Add(row);
+                    result["status"] = ActionPipelineService.IsTerminalActionReportStatus(status) && status != "completed" ? "unresolved" : status;
                     result["message"] = ReadString(ReadDictionary(row, "report"), "message", "Awaiting native handover result.");
                 }
                 catch (InvalidOperationException ex) { result["message"] = ex.Message; }
             }
-            if (intents.Count > 0) Program.WriteAudit(campaign, Program.EnsureCorrelationId(payload), "server", "dialogue", "action.player_intents", recipient, "", "", "completed", 0,
+            if (intents.Count > 0) OperationsService.WriteAudit(campaign, OperationsService.EnsureCorrelationId(payload), "server", "dialogue", "action.player_intents", recipient, "", "", "completed", 0,
                 "Player handovers evaluated independently of NPC negotiation.", TestDict("outcomes", outcomes));
             return rows;
         }
@@ -259,7 +259,7 @@ namespace ReignBetaServer
             string recipient = FirstNonEmpty(ReadFirstString(payload, "speakerHeroStringId", "heroStringId", "heroId"), ReadString(ReadDictionary(payload, "hero"), "heroStringId", ""));
             var intents = CurrentPlayerTransfers(payload);
             int slot = ReadInt(grant, "slot", -1);
-            string turn = FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), Program.EnsureCorrelationId(payload));
+            string turn = FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), OperationsService.EnsureCorrelationId(payload));
             if (ReadString(grant, "schema", "") != PlayerActionRules.Schema || ReadString(grant, "turnId", "") != turn
                 || ReadString(grant, "campaignId", "") != ReadString(payload, "campaignId", "default")
                 || ReadString(grant, "timelineId", "") != ContinuityTimeline(payload)
@@ -277,14 +277,14 @@ namespace ReignBetaServer
             record["negotiationId"] = ReadString(grant, "turnId", "");
             terms["authorityReceipt"] = TestDict("policy", PlayerActionRules.Policy, "acceptedByHeroStringId", player,
                 "actorHeroStringId", player, "targetHeroStringId", recipient, "command", command);
-            record["termsJson"] = Json.Serialize(terms); record["termsHash"] = Program.ComputeActionTermsHash(command, terms);
+            record["termsJson"] = Json.Serialize(terms); record["termsHash"] = ActionPipelineService.ComputeActionTermsHash(command, terms);
             return true;
         }
 
         internal static void BindPaymentRefund(Dictionary<string, object> record, Dictionary<string, object> terms,
             Dictionary<string, object> payload, string command, List<string> errors)
         {
-            if ((command != "transfer_gold" && command != "give_gold_to_player") || !Program.IsDialogueActionSource(ReadString(record, "source", ""))) return;
+            if ((command != "transfer_gold" && command != "give_gold_to_player") || !ActionPipelineService.IsDialogueActionSource(ReadString(record, "source", ""))) return;
             string playerText = ReadFirstString(payload, "playerText", "text", "message");
             if (!Regex.IsMatch(playerText, @"\b(?:refund|return (?:my|the) (?:gold|coins|money|advance|payment))\b", RegexOptions.IgnoreCase)) return;
             string from = FirstNonEmpty(ReadString(terms, "fromHeroStringId", ""), ReadString(record, "actorHeroStringId", ""));
@@ -300,7 +300,7 @@ namespace ReignBetaServer
 
         internal static bool IsCurrentPlayerTransferAlternative(Dictionary<string, object> action, Dictionary<string, object> payload)
         {
-            string command = Program.CanonicalCommand(ReadString(action, "command", ""));
+            string command = ActionPipelineService.CanonicalCommand(ReadString(action, "command", ""));
             if (command != "transfer_gold" && command != "transfer_item") return false;
             var terms = ReadDictionary(action, "terms");
             string from = FirstNonEmpty(ReadFirstString(action, "FromHero", "actorHeroStringId"), ReadString(terms, "fromHeroStringId", ""));
@@ -350,7 +350,7 @@ namespace ReignBetaServer
             catch (Exception ex)
             {
                 if (System.Threading.Interlocked.Exchange(ref _actionDeliveryGenerationFailureLogged, 1) == 0)
-                    Program.LogOperational("action.redelivery_generation_unavailable", TestDict("campaignId", campaign ?? "", "error", ex.GetType().Name));
+                    OperationsService.LogOperational("action.redelivery_generation_unavailable", TestDict("campaignId", campaign ?? "", "error", ex.GetType().Name));
                 return "";
             }
         }
@@ -387,7 +387,7 @@ namespace ReignBetaServer
             {
                 // Never creates a campaign directory; an existing campaign is read through
                 // OpenCampaignConnection exactly as an action poll would.
-                if (string.IsNullOrWhiteSpace(campaign) || !System.IO.Directory.Exists(Program.CampaignDirectory(campaign)))
+                if (string.IsNullOrWhiteSpace(campaign) || !System.IO.Directory.Exists(CampaignFileService.CampaignDirectory(campaign)))
                 {
                     summary["ok"] = true; summary["unresolvedCount"] = 0; summary["backedOffCount"] = 0;
                     return summary;
@@ -395,7 +395,7 @@ namespace ReignBetaServer
                 long nowTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 var unresolved = ReadDurableConversationActions(campaign)
                     .Where(r => DurableConversationAction(ReadString(r, "id", ""))
-                        && !Program.IsTerminalActionReportStatus(ReadString(r, "status", ""))
+                        && !ActionPipelineService.IsTerminalActionReportStatus(ReadString(r, "status", ""))
                         && ReadLong(r, "deliveredTs", 0) > 0)
                     .OrderBy(r => ReadLong(r, "ts", 0)).ThenBy(r => ReadString(r, "id", ""), StringComparer.Ordinal).ToList();
                 var backedOff = unresolved.Where(r => ReadLong(r, "deliveryCount", 0) > ActionRedeliveryFreeDeliveries).ToList();
@@ -423,7 +423,7 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                Program.LogOperational("action.redelivery_summary_failed", TestDict("campaignId", campaign, "error", ex.GetType().Name));
+                OperationsService.LogOperational("action.redelivery_summary_failed", TestDict("campaignId", campaign, "error", ex.GetType().Name));
                 summary["ok"] = false; summary["error"] = "Unresolved action deliveries are unavailable.";
             }
             return summary;
@@ -447,7 +447,7 @@ namespace ReignBetaServer
                     if (ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "") != expectedGeneration)
                         throw new InvalidOperationException("The campaign was restored while the directive was being prepared.");
                 lock (Program.FileLock)
-                    foreach (var row in rows) Program.QueueAction(campaign, ReadDictionary(row, "record"));
+                    foreach (var row in rows) ActionPipelineService.QueueAction(campaign, ReadDictionary(row, "record"));
                 return TestDict("schema", "reign-conversation-action-publication-v1", "status", "legacy_directive_path",
                     "committed", true, "atomic", false, "actionIds", rows.Select(r => ReadString(r, "id", "")).ToList());
             }
@@ -501,7 +501,7 @@ namespace ReignBetaServer
                 try
                 {
                     if (auditWriter != null) auditWriter(row);
-                    else Program.WriteAudit(campaign, ReadString(row, "correlationId", Program.EnsureCorrelationId(payload)), "server", "action", "action.queued",
+                    else OperationsService.WriteAudit(campaign, ReadString(row, "correlationId", OperationsService.EnsureCorrelationId(payload)), "server", "action", "action.queued",
                         ReadFirstString(ReadDictionary(row, "record"), "actorHeroStringId", "targetHeroStringId"),
                         ReadString(row, "id", ""), "", "queued", 0, "Accepted conversation action batch committed to the durable outbox.",
                         TestDict("publicationId", publicationId, "row", row));
@@ -556,7 +556,7 @@ namespace ReignBetaServer
                 // Status acknowledgments must retain the original publication evidence.
                 foreach (string key in new[] { "publicationId", "publicationGeneration", "publicationEvidence", "acceptedResponseHash" })
                     if (original.ContainsKey(key)) row[key] = original[key];
-                if (!Program.ShouldAcceptActionStatusTransition(ReadString(original, "status", ""), ReadString(row, "status", "")))
+                if (!ActionPipelineService.ShouldAcceptActionStatusTransition(ReadString(original, "status", ""), ReadString(row, "status", "")))
                 { row.Clear(); foreach (var pair in original) row[pair.Key] = pair.Value; return; }
             }
             DialogueStore.UpsertConversationActionOutbox(connection, TestDict("id", id, "timeline", ReadString(terms, "timelineId", ReadString(ReadDictionary(terms, "playerAction"), "timelineId", "main")), "fingerprint", fingerprint, "payload", Json.Serialize(row)));
@@ -742,7 +742,7 @@ namespace ReignBetaServer
                     else
                     {
                         // A legacy terminal row may already carry a legacy delta; never upgrade it.
-                        if (Program.IsTerminalActionReportStatus(ReadString(row, "status", "")))
+                        if (ActionPipelineService.IsTerminalActionReportStatus(ReadString(row, "status", "")))
                             return Reply(TerminalActionReportProtocol.Conflict, "legacy_terminal_status");
                         // Recovery never answers Stale: the generation authority is the verified context.
                         if (!recovery && (current.Length == 0 || current != generation))
@@ -758,7 +758,7 @@ namespace ReignBetaServer
                         // report's own generation (exact locked row identity is already proven above).
                         if (recovery && sourceGeneration != generation)
                             return Reply(TerminalActionReportProtocol.Unknown, TerminalActionReportProtocol.RecoveryUnprovenPrefix + "source_generation");
-                        string authoritative = Program.NormalizeActionReportStatus(record, report, status);
+                        string authoritative = ActionPipelineService.NormalizeActionReportStatus(record, report, status);
                         var directions = RelationshipsService.CompletedActionRelationshipDirections(report, timeline);
                         string evidence = directions.Count == 0 ? "not_applicable" : "evaluated";
                         if (directions.Any(d => DialogueStore.SelectRelationshipInteractionReceipts(connection, TestDict("event", ReadString(d, "eventId", ""), "subject", ReadString(d, "subjectId", ""), "target", ReadString(d, "targetId", ""))).Count > 0))
@@ -809,15 +809,15 @@ namespace ReignBetaServer
                 {
                     // Best-effort diagnostic, first acceptance only. Nothing retries it:
                     // exact replays never append, and the response does not certify it.
-                    lock (Program.FileLock) Program.AppendJsonLineToPath(Program.CampaignFile(campaign, "actions", "actions.jsonl"), TestDict("id", actionId,
+                    lock (Program.FileLock) CampaignFileService.AppendJsonLineToPath(CampaignFileService.CampaignFile(campaign, "actions", "actions.jsonl"), TestDict("id", actionId,
                         "ts", now, "campaignId", campaign, "status", ReadString(marker, "authoritativeStatus", ""), "report", report, "protocol", TerminalActionReportProtocol.RequestSchema));
-                    Program.WriteAudit(campaign, ReadString(record, "correlationId", ""), "game_client", "action", "action.execution_report", player, actionId, "",
+                    OperationsService.WriteAudit(campaign, ReadString(record, "correlationId", ""), "game_client", "action", "action.execution_report", player, actionId, "",
                         ReadString(marker, "authoritativeStatus", ""), 0, "Game client filed a durable terminal action report.",
                         TestDict("record", record, "report", report, "reportSha256", sha, "receiptId", ReadString(marker, "receiptId", "")));
                 }
                 catch (Exception ex) when (!(ex is PersistenceService.CampaignRequestReplacedException) && !(ex is OperationCanceledException))
                 {
-                    Program.LogOperational("action.terminal_report_audit_incomplete", TestDict("campaignId", campaign, "actionId", actionId,
+                    OperationsService.LogOperational("action.terminal_report_audit_incomplete", TestDict("campaignId", campaign, "actionId", actionId,
                         "error", ex.GetType().Name, "bestEffort", true, "retry", "none"));
                 }
             // Shared activity and action memory only; independently retryable by exact replay.
@@ -932,7 +932,7 @@ namespace ReignBetaServer
                 if (row == null || !TerminalReportScopeMatches(stored, row, record, campaign, actionId, timeline, player, termsHash)
                     || ReadString(report, "actorHeroStringId", "") != player || ReadString(report, "targetHeroStringId", "") != target
                     || ReadString(directions[0], "subjectId", "") != player || ReadString(directions[0], "targetId", "") != target
-                    || ReadDictionary(row, "terminalReport") != null || Program.IsTerminalActionReportStatus(ReadString(row, "status", ""))
+                    || ReadDictionary(row, "terminalReport") != null || ActionPipelineService.IsTerminalActionReportStatus(ReadString(row, "status", ""))
                     || current.Length == 0 || current != generation
                     || TerminalReportIneligibility(connection, row, campaign, actionId, ReadString(stored, "timeline_id", "")).Length > 0
                     || expectedType.Length == 0 || ReadString(report, "type", "") != expectedType)
@@ -955,7 +955,7 @@ namespace ReignBetaServer
         {
             string command = ReadString(record, "command", "");
             if (record == null || record.ContainsKey("typeValue") || (command != "transfer_gold" && command != "transfer_item")) return "";
-            string expected = Program.MapCommandToActionType(command);
+            string expected = ActionPipelineService.MapCommandToActionType(command);
             return !record.TryGetValue("type", out object stored) || (stored is string type && type == expected) ? expected : "";
         }
 
@@ -1014,7 +1014,7 @@ namespace ReignBetaServer
                         return Reply(TerminalActionReportProtocol.Stale, "generation_mismatch");
                     return Reply(TerminalActionReportProtocol.Accepted, "protocol_owned", ReadString(marker, "authoritativeStatus", ""), reportType);
                 }
-                if (Program.IsTerminalActionReportStatus(ReadString(row, "status", "")))
+                if (ActionPipelineService.IsTerminalActionReportStatus(ReadString(row, "status", "")))
                     return Reply(TerminalActionReportProtocol.Conflict, "legacy_terminal_status", ReadString(row, "status", ""));
                 if (current.Length == 0 || current != generation) return Reply(TerminalActionReportProtocol.Stale, "generation_mismatch");
                 string ineligible = TerminalReportIneligibility(connection, row, campaign, actionId, ReadString(stored, "timeline_id", ""));
@@ -1036,7 +1036,7 @@ namespace ReignBetaServer
             var record = ReadDictionary(row, "record");
             var terms = TryParseJsonObject(ReadString(record, "termsJson", "{}")) ?? new Dictionary<string, object>();
             var grant = ReadDictionary(terms, "playerAction");
-            string command = Program.CanonicalCommand(ReadString(record, "command", ""));
+            string command = ActionPipelineService.CanonicalCommand(ReadString(record, "command", ""));
             string actor = ReadString(record, "actorHeroStringId", ""), target = ReadString(record, "targetHeroStringId", "");
             if (record == null || grant == null || ReadString(row, "id", "") != actionId || ReadString(row, "campaignId", "") != campaign
                 || ReadString(record, "serverActionId", "") != actionId || ReadString(record, "campaignId", "") != campaign
@@ -1076,7 +1076,7 @@ namespace ReignBetaServer
         {
             Func<string, bool> pending = error =>
             {
-                Program.LogOperational("action.terminal_report_projection_pending", TestDict("campaignId", campaign, "actionId", actionId, "error", error));
+                OperationsService.LogOperational("action.terminal_report_projection_pending", TestDict("campaignId", campaign, "actionId", actionId, "error", error));
                 return false;
             };
             // LogOperational takes FileLock, and legacy ReportAction can hold FileLock while

@@ -37,7 +37,7 @@ namespace ReignBetaServer
             string sessionId = FirstNonEmpty(ReadString(payload, "councilSessionId", ""), "royal_council_" + Guid.NewGuid().ToString("N"));
             string turnId = FirstNonEmpty(ReadString(payload, "turnId", ""), "council_turn_" + Guid.NewGuid().ToString("N"));
             Dictionary<string, object> speaker = ReadDictionary(payload, "speaker") ?? new Dictionary<string, object>();
-            string speakerId = Program.CharacterIdFrom(speaker);
+            string speakerId = CampaignFileService.CharacterIdFrom(speaker);
             string speakerName = FirstNonEmpty(ReadString(speaker, "name", ""), role + " advisor");
             string playerText = ReadString(payload, "playerText", "");
             bool opening = ReadBool(payload, "isOpening", false), expand = ReadBool(payload, "expand", false);
@@ -55,7 +55,7 @@ namespace ReignBetaServer
             prompt.AppendLine(opening ? "Give the opening briefing now." : "Player question: " + playerText);
             Dictionary<string, object> request = new Dictionary<string, object>
             {
-                ["requestType"] = "royal_council_advice", ["campaignId"] = campaignId, ["correlationId"] = Program.EnsureCorrelationId(payload),
+                ["requestType"] = "royal_council_advice", ["campaignId"] = campaignId, ["correlationId"] = OperationsService.EnsureCorrelationId(payload),
                 ["messages"] = DialogueService.BuildSimplePromptEnvelope("royal_council_advice", role, "Give bounded advisory-only counsel and return valid JSON.", prompt.ToString()).Messages,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
             };

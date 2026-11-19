@@ -25,7 +25,7 @@ namespace ReignBetaServer
             foreach (string correlation in ReadStringList(command, "correlationIds")
                 .Where(value => !string.IsNullOrWhiteSpace(value)))
             {
-                Dictionary<string, object> audit = Program.AuditQuery(new Dictionary<string, string>
+                Dictionary<string, object> audit = OperationsService.AuditQuery(new Dictionary<string, string>
                 {
                     ["campaignId"] = ReadString(run, "campaignId", ""),
                     ["correlationId"] = correlation,
@@ -203,7 +203,7 @@ namespace ReignBetaServer
         {
             if (enrollment == null || ReadString(enrollment, "source", "") != "reign_mcp_npc_lives"
                 || !ReadBool(enrollment, "recoveryCheckpointVerified", false)) return false;
-            var contract = Program.CloneDictionary(enrollment); contract["source"] = "reign_mcp_structured_actions";
+            var contract = VerificationService.CloneDictionary(enrollment); contract["source"] = "reign_mcp_structured_actions";
             return StructuredActionEnrollmentValid(contract, campaignId);
         }
 
@@ -211,7 +211,7 @@ namespace ReignBetaServer
         {
             if (enrollment == null || ReadString(enrollment, "source", "") != "reign_mcp_personal_gossip"
                 || !ReadBool(enrollment, "recoveryCheckpointVerified", false)) return false;
-            var contract = Program.CloneDictionary(enrollment); contract["source"] = "reign_mcp_structured_actions";
+            var contract = VerificationService.CloneDictionary(enrollment); contract["source"] = "reign_mcp_structured_actions";
             return StructuredActionEnrollmentValid(contract, campaignId);
         }
 
@@ -234,7 +234,7 @@ namespace ReignBetaServer
                     || string.IsNullOrWhiteSpace(ReadString(input, "probeId", ""))
                     || ReadString(input, "probeId", "").Length > 128
                     || ReadString(input, "expectedSaveName", "") != ReadString(enrollment, "disposableSaveName", "")) return null;
-                var scope = Program.CloneDictionary(enrollment); scope["source"] = "reign_mcp_structured_actions";
+                var scope = VerificationService.CloneDictionary(enrollment); scope["source"] = "reign_mcp_structured_actions";
                 if (!StructuredActionEnrollmentValid(scope, ReadString(run, "campaignId", ""))) return null;
                 // No caller-selected duration, raw clock value or action is admitted.
                 if (input.ContainsKey("minutes") || input.ContainsKey("days") || input.ContainsKey("ticks")) return null;
@@ -438,7 +438,7 @@ namespace ReignBetaServer
             HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (string correlation in ReadDictionaryList(run, "commands").SelectMany(x => ReadStringList(x, "correlationIds")).Where(x => !string.IsNullOrWhiteSpace(x)))
             {
-                Dictionary<string, object> audit = Program.AuditQuery(new Dictionary<string, string> { ["campaignId"] = campaignId, ["correlationId"] = correlation, ["limit"] = "500", ["oldestFirst"] = "true" });
+                Dictionary<string, object> audit = OperationsService.AuditQuery(new Dictionary<string, string> { ["campaignId"] = campaignId, ["correlationId"] = correlation, ["limit"] = "500", ["oldestFirst"] = "true" });
                 foreach (Dictionary<string, object> row in ReadDictionaryList(audit, "entries"))
                 {
                     if (seen.Add(ReadString(row, "auditId", Guid.NewGuid().ToString("N")))) evidence.Add(row);

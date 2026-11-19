@@ -64,12 +64,12 @@ namespace ReignBetaServer
                 var clothingEvidence = ReadChatViewCoverageEvidence(connection, session, window, wardrobeHistory);
                 if (Json.Serialize(ChatViewClothingSelectionInput(window, wardrobeHistory, clothingEvidence)).Length > 180000)
                     throw new InvalidOperationException("The scene and retained clothing evidence exceed the View input limit; no source was truncated.");
-                var settings = Program.CloneDictionary(Program.LoadSettings());
+                var settings = VerificationService.CloneDictionary(SettingsService.LoadSettings());
                 var profile = ResolveImageGenerationProfile(settings, "scenery");
                 var capability = ChatViewImageCapability(profile);
                 MigrateChatViewPromptDefaults();
-                string selectionPrompt = ChatViewEffectivePrompt(ChatViewSelectionPromptName, Program.LoadPromptTemplate(ChatViewSelectionPromptName));
-                string photoPrompt = ChatViewEffectivePrompt(ChatViewPhotoPromptName, Program.LoadPromptTemplate(ChatViewPhotoPromptName));
+                string selectionPrompt = ChatViewEffectivePrompt(ChatViewSelectionPromptName, PromptService.LoadPromptTemplate(ChatViewSelectionPromptName));
+                string photoPrompt = ChatViewEffectivePrompt(ChatViewPhotoPromptName, PromptService.LoadPromptTemplate(ChatViewPhotoPromptName));
                 string promptRevision = DialogueService.PromptHash(selectionPrompt + "|" + photoPrompt + "|" + ChatViewReferenceContract + "|" + ChatViewWardrobeContract);
                 var hashes = new Dictionary<string, object>(StringComparer.Ordinal);
                 foreach (var actor in window.SelectMany(t => ReadDictionaryList(ReadDictionary(t, "frame"), "actors")).GroupBy(p => ReadString(p, "id", "")).Select(g => g.First()))
@@ -83,7 +83,7 @@ namespace ReignBetaServer
                     "wardrobeContract", ChatViewWardrobeContract, "wardrobeHistory", wardrobeHistory,
                     "wardrobeCoverageContract", ChatViewCoverageContract, "wardrobeCoverageEvidence", clothingEvidence,
                     "playerId", player, "window", window, "referenceHashes", hashes, "capability", capability,
-                    "dialogueProvider", ReadString(settings, "llmProvider", ""), "dialogueModel", Program.ModelForRequest(settings, "dialogue"),
+                    "dialogueProvider", ReadString(settings, "llmProvider", ""), "dialogueModel", ActionPipelineService.ModelForRequest(settings, "dialogue"),
                     "dialogueOptions", ChatViewDialogueOptions(settings), "promptRevision", promptRevision);
                 string jobId = DialogueService.PromptHash(Json.Serialize(identity)), key = campaign + "|" + jobId;
                 lock (ChatViewCreationGate)
@@ -128,8 +128,8 @@ namespace ReignBetaServer
                     "player", ReadString(job, "playerId", ""), "ts", ReadLong(job, "createdTs", 0), "payload", Json.Serialize(job)));
         }
 
-        private static string ChatViewImagePath(string campaign, string timeline, string id) => Path.Combine(Program.CampaignDirectory(campaign),
-            "chat_view", Program.SafePathSegment(timeline, "main"), Program.SafePathSegment(id, "image") + ".png");
+        private static string ChatViewImagePath(string campaign, string timeline, string id) => Path.Combine(CampaignFileService.CampaignDirectory(campaign),
+            "chat_view", CampaignFileService.SafePathSegment(timeline, "main"), CampaignFileService.SafePathSegment(id, "image") + ".png");
 
         private static Dictionary<string, object> ChatViewResponse(string campaign, Dictionary<string, object> job, bool image)
         {
@@ -196,7 +196,7 @@ namespace ReignBetaServer
                 string selectionData = clothingContract ? Json.Serialize(ChatViewClothingSelectionInput(window, history,
                     coverageContract.Length == 0 ? null : ReadDictionaryList(identity, "wardrobeCoverageEvidence"))) : Json.Serialize(ChatViewSelectionWindow(window));
                 var envelope = DialogueService.BuildSimplePromptEnvelope("chat_view", "chat_view", ReadString(identity, "selectionPrompt", ""), selectionData);
-                var reply = PersistenceService.WithCampaignReadLeaseSuspended(() => Program.ChatWithLlm(TestDict("requestType", "chat_view", "campaignId", campaign, "model", ReadString(identity, "dialogueModel", ""),
+                var reply = PersistenceService.WithCampaignReadLeaseSuspended(() => LlmProviderService.ChatWithLlm(TestDict("requestType", "chat_view", "campaignId", campaign, "model", ReadString(identity, "dialogueModel", ""),
                     "correlationId", "view_" + id, "messages", envelope.Messages, "promptEnvelope", envelope.Diagnostics,
                     "singleProviderAttempt", true, "response_format", TestDict("type", "json_object")), null, () => !current(), settings));
                 if (!ReadBool(reply, "ok", false)) throw new InvalidOperationException(ReadString(reply, "error", "The scene could not be selected."));
@@ -256,7 +256,7 @@ namespace ReignBetaServer
                     || ReadBool(job, "selectionAttempted", false) && !ReadBool(job, "selectionReturned", false) ? "uncertain" : "failed";
                 job["error"] = DialogueService.LimitText(ex.Message, 1200);
                 try { persist(); } catch { /* A changed/restored campaign owns its own records. */ }
-                Program.LogOperational("chat_view.failed", TestDict("campaignId", campaign, "jobId", id, "status", job["status"], "error", job["error"]));
+                OperationsService.LogOperational("chat_view.failed", TestDict("campaignId", campaign, "jobId", id, "status", job["status"], "error", job["error"]));
             }
             finally { Program.ExitCampaignRequestAccess(access); ChatViewGate.Release(); ChatViewWorkers.TryRemove(key, out _); }
         }

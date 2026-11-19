@@ -96,7 +96,7 @@ namespace ReignBetaServer
             string mode = ConversationReferenceValidationMode.Value;
             if (!string.IsNullOrEmpty(mode) && (!ReignPostgreSqlStorage.Options.IsValidation || string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)))
                 throw new InvalidOperationException("Reference graph fixtures require isolated validation.");
-            settings ??= Program.LoadSettings();
+            settings ??= SettingsService.LoadSettings();
             if (string.IsNullOrEmpty(mode)) mode = ResolveConversationReferenceMode(settings, IsIsolatedMemoryValidation);
             return mode is "capture" or "enabled" ? mode : "off";
         }
@@ -566,7 +566,7 @@ namespace ReignBetaServer
                     || !Member(from) || !Member(to) || from.Hash != ReadString(edge, "from_hash", "") || to.Hash != ReadString(edge, "to_hash", "")
                     || !from.View.Contains(ReadString(metadata, "originQuote", ""), StringComparison.Ordinal)
                     || !to.View.Contains(ReadString(metadata, "targetQuote", ""), StringComparison.Ordinal)) continue;
-                metadata = Program.CloneDictionary(metadata);
+                metadata = VerificationService.CloneDictionary(metadata);
                 metadata["reboundFromEdge"] = ReadString(edge, "edge_id", "");
                 metadata["restoredSavePointId"] = ReadString(point, "savePointId", "");
                 string id = ConversationReferenceEdgeId(owner, timeline, generation, from.Type, from.Id, from.Hash,
@@ -591,7 +591,7 @@ namespace ReignBetaServer
                 throw new InvalidOperationException("Reference graph settings fixtures require isolated validation.");
             if (ConversationReferenceMode() != "enabled" || payload == null || campaign.Length == 0
                 || ReadBool(payload, "officialMemoryFirewall", false)) return "";
-            var settings = settingsOverride ?? Program.LoadSettings();
+            var settings = settingsOverride ?? SettingsService.LoadSettings();
             var plan = PlanMemoryQuery(observer, ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"), query, payload);
             var access = DialogueService.BuildKnowledgeAccessContext(observer, plan.Peer, ReadFirstString(payload, "locationId", "settlementId"), payload);
             access.WorldDay = plan.WorldDay;

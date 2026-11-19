@@ -11,10 +11,10 @@ namespace ReignBetaServer
             var results = new List<Dictionary<string, object>>();
             Action<string, bool, object> add = (id, pass, data) => results.Add(TestDict(
                 "caseId", "action_reliability_" + id, "passed", pass, "summary", id, "data", data));
-            var payload = ReadDictionary(Program.DefaultActionTestSnapshot(), "payload");
+            var payload = ReadDictionary(VerificationService.DefaultActionTestSnapshot(), "payload");
             var hero = ReadDictionary(payload, "hero");
             payload["campaignCalendar"] = TestDict("daysPerSeason", 31.5, "daysPerWeek", 7, "daysPerYear", 126);
-            var settings = new Dictionary<string, object>(Program.LoadSettings()) { ["enableMinimeMemoryWorker"] = false };
+            var settings = new Dictionary<string, object>(SettingsService.LoadSettings()) { ["enableMinimeMemoryWorker"] = false };
             Func<string, Dictionary<string, object>> accepted = intent => TestDict("needed", true, "commitment", "accepted", "intent", intent);
             var allowed = new HashSet<string>(new[] { "accept_temporary_party_guest", "renew_temporary_party_guest", "end_temporary_party_guest" });
 
@@ -23,15 +23,15 @@ namespace ReignBetaServer
                 "Serve as my scout for the season.", "Join us on the road." })
             {
                 var gate = accepted("The speaker accepts temporary travel with the player.");
-                var choices = Program.BuildAllowedActionPlannerChoices(settings, payload, hero, gate, text, "I agree. Let us go.", 3);
-                var fallback = Program.BuildAcceptedTemporaryPartyGuestFallbackAction(gate, payload, hero, text, "I agree. Let us go.", allowed);
+                var choices = ActionPipelineService.BuildAllowedActionPlannerChoices(settings, payload, hero, gate, text, "I agree. Let us go.", 3);
+                var fallback = ActionPipelineService.BuildAcceptedTemporaryPartyGuestFallbackAction(gate, payload, hero, text, "I agree. Let us go.", allowed);
                 add("companion_" + results.Count, choices.Any(x => ReadString(x, "command", "") == "accept_temporary_party_guest")
                     && fallback != null && ReadBool(ReadDictionary(fallback, "terms"), "consentConfirmed", false), choices);
             }
             var season = new Dictionary<string, object>();
             add("reign_season", TryCompleteAcceptedGuestSchedule(season, payload, "Join my party for the season")
                 && ReadDouble(season, "durationDays", 0) == 31.5 && ReadBool(season, "startNow", false), season);
-            var customCalendar = Program.CloneDictionary(payload);
+            var customCalendar = VerificationService.CloneDictionary(payload);
             customCalendar["campaignCalendar"] = TestDict("daysPerSeason", 28, "daysPerWeek", 7, "daysPerYear", 112);
             var custom = new Dictionary<string, object>();
             add("modded_native_season", TryCompleteAcceptedGuestSchedule(custom, customCalendar, "Join my party for one season")
@@ -54,13 +54,13 @@ namespace ReignBetaServer
                 "500 denars per season and 600 denars per season", "Join my party until the tournament is over", "Join my party for 127 days" })
                 add("unresolved_service_" + results.Count, !TryCompleteAcceptedGuestSchedule(new Dictionary<string, object>(), payload, text), text);
             foreach (string commitment in new[] { "refused", "conditional", "considering", "roleplay_only" })
-                add("companion_consent_" + commitment, Program.TemporaryPartyGuestCandidateToPreserve(
+                add("companion_consent_" + commitment, ActionPipelineService.TemporaryPartyGuestCandidateToPreserve(
                     TestDict("needed", true, "commitment", commitment, "intent", "Join my party"), "Travel with me.") == "", null);
 
             var together = accepted("travel_to_tournament: We will take a detour together if the others agree.");
             const string shared = "We could all go to Chaikand together if Temur agrees to one more day.";
             add("captured_shared_detour", IsSharedTravelOnly(together, shared), null);
-            var mainPartyHero = Program.CloneDictionary(hero);
+            var mainPartyHero = VerificationService.CloneDictionary(hero);
             mainPartyHero["currentPartyId"] = "player_party";
             foreach (string command in SeparatePartyCommands)
                 add("main_party_excluded_" + command, !DialoguePlannerCandidateEligible(command, payload, mainPartyHero, together, shared), null);
@@ -73,7 +73,7 @@ namespace ReignBetaServer
             add("no_unearned_banishment", !DialoguePlannerCandidateEligible("acknowledge_own_faction_combat_risk",
                 payload, hero, accepted("Employment under the player's banner"), "You will ride under my banner."), null);
 
-            var speakerGoldGift = Program.BuildAllowedActionPlannerChoices(settings, payload, hero,
+            var speakerGoldGift = ActionPipelineService.BuildAllowedActionPlannerChoices(settings, payload, hero,
                 accepted("Catella gives 25 denars from her purse to the player."),
                 "I need 25 denars; will you give them to me?", "Twenty-five. Here.", 3);
             add("speaker_gold_gift_uses_specialized_schema",
@@ -82,26 +82,26 @@ namespace ReignBetaServer
                 speakerGoldGift);
 
             string conditionalProbeReply = "I may do that after you clarify the earlier sum.";
-            var conditionalProbeGate = Program.NormalizeActionGate(TestDict(
+            var conditionalProbeGate = ActionPipelineService.NormalizeActionGate(TestDict(
                 "needed", false, "commitment", "conditional",
                 "intent", "Payment awaits clarification."),
                 "Please pay Derthert 17 denars.", conditionalProbeReply);
-            bool cooperationRepaired = Program.EnforceActionAcceptanceCooperationGate(
+            bool cooperationRepaired = ActionPipelineService.EnforceActionAcceptanceCooperationGate(
                 true, conditionalProbeGate, "Please pay Derthert 17 denars.",
                 ref conditionalProbeReply);
             add("cooperation_override_makes_positive_probe_unconditional",
-                cooperationRepaired && Program.ActionGateShouldPlan(conditionalProbeGate)
+                cooperationRepaired && ActionPipelineService.ActionGateShouldPlan(conditionalProbeGate)
                 && ReadString(conditionalProbeGate, "commitment", "") == "accepted"
                 && conditionalProbeReply.Contains("I agree", StringComparison.Ordinal),
                 conditionalProbeGate);
 
             string acceptedProbeReply = "I agree and will pay Derthert now.";
-            var acceptedProbeGate = Program.NormalizeActionGate(TestDict(
+            var acceptedProbeGate = ActionPipelineService.NormalizeActionGate(TestDict(
                 "needed", true, "commitment", "accepted",
                 "intent", "Pay Derthert now."),
                 "Please pay Derthert 17 denars.", acceptedProbeReply);
             add("cooperation_override_preserves_accepted_probe",
-                !Program.EnforceActionAcceptanceCooperationGate(true, acceptedProbeGate,
+                !ActionPipelineService.EnforceActionAcceptanceCooperationGate(true, acceptedProbeGate,
                     "Please pay Derthert 17 denars.", ref acceptedProbeReply)
                 && acceptedProbeReply == "I agree and will pay Derthert now.",
                 acceptedProbeGate);
@@ -111,19 +111,19 @@ namespace ReignBetaServer
                 string originalReply = typedReply;
                 var typedGate = TestDict("needed", false, "commitment", "uncommitted");
                 add("typed_cooperation_preserves_" + decision,
-                    !Program.EnforceActionAcceptanceCooperationGate(true, typedGate,
+                    !ActionPipelineService.EnforceActionAcceptanceCooperationGate(true, typedGate,
                         "A typed action sentence.", ref typedReply, structuredActionProtocol: true)
                     && typedReply == originalReply
                     && !ReadBool(typedGate, "needed", true)
                     && ReadString(typedGate, "commitment", "") == "uncommitted",
                     typedGate);
             }
-            var uncommittedResidentGate = Program.NormalizeActionGate(TestDict(
+            var uncommittedResidentGate = ActionPipelineService.NormalizeActionGate(TestDict(
                 "needed", true, "commitment", "uncommitted",
                 "intent", "The resident is asking for terms before signing."),
                 "Will you join me?", "Tell me the payment and duration first.");
             add("uncommitted_resident_does_not_launch_planner",
-                !Program.ActionGateShouldPlan(uncommittedResidentGate), uncommittedResidentGate);
+                !ActionPipelineService.ActionGateShouldPlan(uncommittedResidentGate), uncommittedResidentGate);
 
             var movementAllowed = new HashSet<string>(new[]
             {
@@ -151,10 +151,10 @@ namespace ReignBetaServer
                 string text = ReadString(movementCase, "text", "");
                 var movementGate = accepted(
                     "The speaker accepts the explicit party movement order now.");
-                var fallback = Program.BuildAcceptedPartyMovementFallbackAction(
+                var fallback = ActionPipelineService.BuildAcceptedPartyMovementFallbackAction(
                     movementGate, payload, hero, text, movementAllowed);
                 add("accepted_party_movement_" + expected + "_" + results.Count,
-                    Program.AcceptedPartyMovementCandidateToPreserve(
+                    ActionPipelineService.AcceptedPartyMovementCandidateToPreserve(
                         movementGate, text) == expected
                     && fallback != null
                     && ReadString(fallback, "actorHeroStringId", "")
@@ -169,21 +169,21 @@ namespace ReignBetaServer
                 TestDict("command", "patrol_around_settlement")
             };
             add("accepted_travel_removes_wrong_patrol_result",
-                Program.RemoveSupersededPartyMovementCandidates(
+                ActionPipelineService.RemoveSupersededPartyMovementCandidates(
                     mismatchedMovementCandidates, "go_to_settlement")
                 && mismatchedMovementCandidates.Count == 0,
                 mismatchedMovementCandidates);
-            var patrolCollisionChoices = Program.BuildAllowedActionPlannerChoices(
+            var patrolCollisionChoices = ActionPipelineService.BuildAllowedActionPlannerChoices(
                 settings, payload, hero,
                 accepted("Adram will circle Lycaron, then return to report."),
                 "Circle Lycaron and watch its approaches.",
                 "I will circle Lycaron and return to report.", 10);
             add("accepted_patrol_request_overrides_return_to_report_prose",
                 patrolCollisionChoices.Any(choice => string.Equals(
-                    Program.CanonicalCommand(ReadString(choice, "command", "")),
+                    ActionPipelineService.CanonicalCommand(ReadString(choice, "command", "")),
                     "patrol_around_settlement", StringComparison.OrdinalIgnoreCase))
                 && !patrolCollisionChoices.Any(choice => string.Equals(
-                    Program.CanonicalCommand(ReadString(choice, "command", "")),
+                    ActionPipelineService.CanonicalCommand(ReadString(choice, "command", "")),
                     "go_to_settlement", StringComparison.OrdinalIgnoreCase)),
                 patrolCollisionChoices);
             var followAllowed = new HashSet<string>(new[]
@@ -212,14 +212,14 @@ namespace ReignBetaServer
                 string text = ReadString(followCase, "text", "");
                 var followGate = accepted(
                     "The speaker accepts the explicit map party order now.");
-                var fallback = Program.BuildAcceptedPartyMovementFallbackAction(
+                var fallback = ActionPipelineService.BuildAcceptedPartyMovementFallbackAction(
                     followGate, payload, hero, text, followAllowed);
                 bool targetOk = expected == "stop_following"
                     || ReadString(fallback, "targetHeroStringId", "")
                         == ReadFirstString(payload, "playerHeroStringId",
                             "mainHeroStringId", "playerId");
                 add("accepted_map_follow_" + expected + "_" + results.Count,
-                    Program.AcceptedPartyMovementCandidateToPreserve(
+                    ActionPipelineService.AcceptedPartyMovementCandidateToPreserve(
                         followGate, text) == expected
                     && fallback != null
                     && ReadString(fallback, "actorHeroStringId", "")
@@ -228,17 +228,17 @@ namespace ReignBetaServer
                     && targetOk,
                     fallback);
             }
-            var followGuestCollisionChoices = Program.BuildAllowedActionPlannerChoices(
+            var followGuestCollisionChoices = ActionPipelineService.BuildAllowedActionPlannerChoices(
                 settings, payload, hero,
                 accepted("Adram agrees to ride with the player's column."),
                 "Adram, follow my party on the campaign map.",
                 "I will ride with you and join your column.", 10);
             add("accepted_follow_request_overrides_temporary_guest_prose",
                 followGuestCollisionChoices.Any(choice => string.Equals(
-                    Program.CanonicalCommand(ReadString(choice, "command", "")),
+                    ActionPipelineService.CanonicalCommand(ReadString(choice, "command", "")),
                     "follow", StringComparison.OrdinalIgnoreCase))
                 && !followGuestCollisionChoices.Any(choice => string.Equals(
-                    Program.CanonicalCommand(ReadString(choice, "command", "")),
+                    ActionPipelineService.CanonicalCommand(ReadString(choice, "command", "")),
                     "accept_temporary_party_guest",
                     StringComparison.OrdinalIgnoreCase)),
                 followGuestCollisionChoices);
@@ -256,13 +256,13 @@ namespace ReignBetaServer
                     TestDict("command", "follow")
                 };
                 bool removedNegatedChoices =
-                    Program.RemoveAllPartyMovementCandidates(negatedStopChoices);
+                    ActionPipelineService.RemoveAllPartyMovementCandidates(negatedStopChoices);
                 add("negated_stop_following_creates_no_movement_action_"
                         + results.Count,
-                    Program.NegatesPartyMovementStateChange(text)
-                    && Program.AcceptedPartyMovementCandidateToPreserve(
+                    ActionPipelineService.NegatesPartyMovementStateChange(text)
+                    && ActionPipelineService.AcceptedPartyMovementCandidateToPreserve(
                         accepted("Adram agrees to keep following."), text) == ""
-                    && Program.BuildAcceptedPartyMovementFallbackAction(
+                    && ActionPipelineService.BuildAcceptedPartyMovementFallbackAction(
                         accepted("Adram agrees to keep following."), payload,
                         hero, text, followAllowed) == null
                     && removedNegatedChoices
@@ -273,10 +273,10 @@ namespace ReignBetaServer
                 "commitment", "roleplay_only",
                 "intent", "Recall a past journey.");
             add("travel_narration_does_not_create_movement_fallback",
-                Program.AcceptedPartyMovementCandidateToPreserve(
+                ActionPipelineService.AcceptedPartyMovementCandidateToPreserve(
                     narrationMovementGate,
                     "I remember when we both went to Lycaron last spring.") == ""
-                && Program.BuildAcceptedPartyMovementFallbackAction(
+                && ActionPipelineService.BuildAcceptedPartyMovementFallbackAction(
                     narrationMovementGate, payload, hero,
                     "I remember when we both went to Lycaron last spring.",
                     movementAllowed) == null,
@@ -289,7 +289,7 @@ namespace ReignBetaServer
                 "Send 13 denars from your own funds to Derthert."
             })
             {
-                var thirdPartyGold = Program.BuildAllowedActionPlannerChoices(settings, payload, hero,
+                var thirdPartyGold = ActionPipelineService.BuildAllowedActionPlannerChoices(settings, payload, hero,
                     accepted("Rhagaea transfers denars from her purse to Derthert."),
                     text, "I agree. I will pay Derthert.", 3);
                 add("named_third_party_gold_uses_generic_schema_" + results.Count,
@@ -307,10 +307,10 @@ namespace ReignBetaServer
             })
             {
                 var clanGate = accepted("The speaker accepts membership under the player's banner.");
-                var clanFallback = Program.BuildAcceptedClanMembershipFallbackAction(
+                var clanFallback = ActionPipelineService.BuildAcceptedClanMembershipFallbackAction(
                     clanGate, payload, hero, text, clanAllowed);
                 add("accepted_clan_wording_" + results.Count,
-                    Program.AcceptedClanMembershipCandidateToPreserve(clanGate, text) == "join_clan"
+                    ActionPipelineService.AcceptedClanMembershipCandidateToPreserve(clanGate, text) == "join_clan"
                     && clanFallback != null
                     && ReadString(clanFallback, "actorHeroStringId", "") == ReadFirstString(payload, "speakerHeroStringId", "heroStringId")
                     && ReadString(clanFallback, "targetClanStringId", "") == ReadFirstString(payload, "playerClanId", "actorClanId", "actorClanStringId"),
@@ -318,12 +318,12 @@ namespace ReignBetaServer
             }
             var roleplayClanGate = TestDict("needed", false, "commitment", "roleplay_only",
                 "intent", "Continue the conversation naturally.");
-            bool promotedClanGate = Program.PromoteAcceptedClanMembershipGate(roleplayClanGate, payload, hero,
+            bool promotedClanGate = ActionPipelineService.PromoteAcceptedClanMembershipGate(roleplayClanGate, payload, hero,
                 "Hulara, join my clan as one of our own.",
                 "I accept. I stand beneath your banner as a member of your clan.");
             add("roleplay_only_clan_acceptance_is_promoted",
-                promotedClanGate && Program.ActionGateShouldPlan(roleplayClanGate)
-                && Program.AcceptedClanMembershipCandidateToPreserve(roleplayClanGate,
+                promotedClanGate && ActionPipelineService.ActionGateShouldPlan(roleplayClanGate)
+                && ActionPipelineService.AcceptedClanMembershipCandidateToPreserve(roleplayClanGate,
                     "Hulara, join my clan as one of our own.") == "join_clan", roleplayClanGate);
             foreach (var rejectedPromotion in new[]
             {
@@ -335,17 +335,17 @@ namespace ReignBetaServer
             {
                 var rejectedGate = TestDict("needed", false, "commitment", "roleplay_only", "intent", "Talk only.");
                 add("roleplay_clan_promotion_rejects_nonfinal_" + results.Count,
-                    !Program.PromoteAcceptedClanMembershipGate(rejectedGate, payload, hero,
+                    !ActionPipelineService.PromoteAcceptedClanMembershipGate(rejectedGate, payload, hero,
                         rejectedPromotion.Player, rejectedPromotion.Reply)
-                    && !Program.ActionGateShouldPlan(rejectedGate), rejectedGate);
+                    && !ActionPipelineService.ActionGateShouldPlan(rejectedGate), rejectedGate);
             }
-            var intoxicatedPayload = Program.CloneDictionary(payload);
+            var intoxicatedPayload = VerificationService.CloneDictionary(payload);
             intoxicatedPayload["intoxicationReceipt"] = TestDict("suppressedCommitments", true);
             var intoxicatedClanGate = TestDict("needed", false, "commitment", "roleplay_only", "intent", "Talk only.");
             add("intoxication_blocks_clan_gate_promotion",
-                !Program.PromoteAcceptedClanMembershipGate(intoxicatedClanGate, intoxicatedPayload, hero,
+                !ActionPipelineService.PromoteAcceptedClanMembershipGate(intoxicatedClanGate, intoxicatedPayload, hero,
                     "Join my clan as one of our own.", "I accept membership in your clan.")
-                && !Program.ActionGateShouldPlan(intoxicatedClanGate), intoxicatedClanGate);
+                && !ActionPipelineService.ActionGateShouldPlan(intoxicatedClanGate), intoxicatedClanGate);
             var clanLeaveAllowed = new HashSet<string> { "leave_clan" };
             foreach (string text in new[]
             {
@@ -355,10 +355,10 @@ namespace ReignBetaServer
             })
             {
                 var clanGate = accepted("The speaker accepts leaving their current clan now.");
-                var clanFallback = Program.BuildAcceptedClanMembershipFallbackAction(
+                var clanFallback = ActionPipelineService.BuildAcceptedClanMembershipFallbackAction(
                     clanGate, payload, hero, text, clanLeaveAllowed);
                 add("accepted_leave_clan_wording_" + results.Count,
-                    Program.AcceptedClanMembershipCandidateToPreserve(clanGate, text) == "leave_clan"
+                    ActionPipelineService.AcceptedClanMembershipCandidateToPreserve(clanGate, text) == "leave_clan"
                     && clanFallback != null
                     && ReadString(clanFallback, "command", "") == "leave_clan"
                     && ReadString(clanFallback, "actorHeroStringId", "") == ReadFirstString(payload, "speakerHeroStringId", "heroStringId")
@@ -371,7 +371,7 @@ namespace ReignBetaServer
                 TestDict("command", "join_clan")
             };
             add("accepted_join_clan_suppresses_intermediate_leave_clan",
-                Program.RemoveSupersededClanMembershipCandidates(competingClanCandidates, "join_clan")
+                ActionPipelineService.RemoveSupersededClanMembershipCandidates(competingClanCandidates, "join_clan")
                 && competingClanCandidates.Count == 1
                 && ReadString(competingClanCandidates[0], "command", "") == "join_clan",
                 competingClanCandidates);
@@ -380,7 +380,7 @@ namespace ReignBetaServer
                 TestDict("command", "leave_clan")
             };
             add("accepted_join_clan_removes_leave_only_planner_result",
-                Program.RemoveSupersededClanMembershipCandidates(mismatchedClanCandidates, "join_clan")
+                ActionPipelineService.RemoveSupersededClanMembershipCandidates(mismatchedClanCandidates, "join_clan")
                 && mismatchedClanCandidates.Count == 0,
                 mismatchedClanCandidates);
             var competingLeaveCandidates = new List<Dictionary<string, object>>
@@ -389,7 +389,7 @@ namespace ReignBetaServer
                 TestDict("command", "leave_clan")
             };
             add("accepted_leave_clan_suppresses_join_clan",
-                Program.RemoveSupersededClanMembershipCandidates(competingLeaveCandidates, "leave_clan")
+                ActionPipelineService.RemoveSupersededClanMembershipCandidates(competingLeaveCandidates, "leave_clan")
                 && competingLeaveCandidates.Count == 1
                 && ReadString(competingLeaveCandidates[0], "command", "") == "leave_clan",
                 competingLeaveCandidates);
@@ -409,10 +409,10 @@ namespace ReignBetaServer
             })
             {
                 var kingdomGate = accepted("The speaker accepts defection and joining the player's kingdom now.");
-                var kingdomFallback = Program.BuildAcceptedKingdomMembershipFallbackAction(
+                var kingdomFallback = ActionPipelineService.BuildAcceptedKingdomMembershipFallbackAction(
                     kingdomGate, payload, hero, text, kingdomAllowed);
                 add("accepted_join_kingdom_wording_" + results.Count,
-                    Program.AcceptedKingdomMembershipCandidateToPreserve(kingdomGate, text) == "join_kingdom"
+                    ActionPipelineService.AcceptedKingdomMembershipCandidateToPreserve(kingdomGate, text) == "join_kingdom"
                     && kingdomFallback != null
                     && ReadString(kingdomFallback, "actorHeroStringId", "") == ReadFirstString(payload, "speakerHeroStringId", "heroStringId")
                     && ReadString(kingdomFallback, "actorClanStringId", "") == ReadFirstString(payload, "speakerClanId", "npcClanId")
@@ -426,7 +426,7 @@ namespace ReignBetaServer
                 TestDict("command", "join_kingdom")
             };
             add("accepted_join_kingdom_suppresses_personal_and_intermediate_membership",
-                Program.RemoveSupersededKingdomMembershipCandidates(competingKingdomCandidates, "join_kingdom")
+                ActionPipelineService.RemoveSupersededKingdomMembershipCandidates(competingKingdomCandidates, "join_kingdom")
                 && competingKingdomCandidates.Count == 1
                 && ReadString(competingKingdomCandidates[0], "command", "") == "join_kingdom",
                 competingKingdomCandidates);
@@ -447,10 +447,10 @@ namespace ReignBetaServer
             })
             {
                 var leaveKingdomGate = accepted("The speaker accepts breaking allegiance and leaving their kingdom now.");
-                var leaveKingdomFallback = Program.BuildAcceptedKingdomMembershipFallbackAction(
+                var leaveKingdomFallback = ActionPipelineService.BuildAcceptedKingdomMembershipFallbackAction(
                     leaveKingdomGate, payload, hero, text, leaveKingdomAllowed);
                 add("accepted_leave_kingdom_wording_" + results.Count,
-                    Program.AcceptedKingdomMembershipCandidateToPreserve(leaveKingdomGate, text) == "leave_kingdom"
+                    ActionPipelineService.AcceptedKingdomMembershipCandidateToPreserve(leaveKingdomGate, text) == "leave_kingdom"
                     && leaveKingdomFallback != null
                     && ReadString(leaveKingdomFallback, "actorHeroStringId", "") == ReadFirstString(payload, "speakerHeroStringId", "heroStringId")
                     && ReadString(leaveKingdomFallback, "actorClanStringId", "") == ReadFirstString(payload, "speakerClanId", "npcClanId")
@@ -489,10 +489,10 @@ namespace ReignBetaServer
                 string expected = ReadString(serviceCase, "command", "");
                 string text = ReadString(serviceCase, "text", "");
                 var serviceGate = accepted("The sovereign accepts the player's requested service change now.");
-                var fallback = Program.BuildAcceptedPlayerServiceFallbackAction(
+                var fallback = ActionPipelineService.BuildAcceptedPlayerServiceFallbackAction(
                     serviceGate, payload, hero, text, playerServiceAllowed);
                 add("accepted_player_service_" + expected,
-                    Program.AcceptedPlayerServiceCandidateToPreserve(serviceGate, text) == expected
+                    ActionPipelineService.AcceptedPlayerServiceCandidateToPreserve(serviceGate, text) == expected
                     && fallback != null
                     && ReadString(fallback, "actorHeroStringId", "") == ReadFirstString(payload, "speakerHeroStringId", "heroStringId")
                     && ReadString(fallback, "targetClanStringId", "") == ReadFirstString(payload, "playerClanId", "actorClanId", "actorClanStringId")
@@ -503,10 +503,10 @@ namespace ReignBetaServer
                 "Derthert accepts hiring fen Domus as paid mercenaries under Vlandia's banner.");
             const string mercenaryContractText =
                 "Derthert, offer us a mercenary contract under Vlandia's banner.";
-            string acceptedMercenaryContract = Program.AcceptedPlayerServiceCandidateToPreserve(
+            string acceptedMercenaryContract = ActionPipelineService.AcceptedPlayerServiceCandidateToPreserve(
                 mercenaryContractGate, mercenaryContractText);
             string lowerPriorityClanMembership = string.IsNullOrWhiteSpace(acceptedMercenaryContract)
-                ? Program.AcceptedClanMembershipCandidateToPreserve(
+                ? ActionPipelineService.AcceptedClanMembershipCandidateToPreserve(
                     mercenaryContractGate, mercenaryContractText)
                 : "";
             add("accepted_player_service_precedes_clan_banner_wording",
@@ -529,12 +529,12 @@ namespace ReignBetaServer
                 var clanGate = TestDict("needed", true, "commitment", commitment,
                     "intent", "The speaker might join the player's clan.");
                 add("clan_fallback_requires_" + commitment,
-                    Program.AcceptedClanMembershipCandidateToPreserve(clanGate, "Join my clan.") == ""
-                    && Program.BuildAcceptedClanMembershipFallbackAction(
+                    ActionPipelineService.AcceptedClanMembershipCandidateToPreserve(clanGate, "Join my clan.") == ""
+                    && ActionPipelineService.BuildAcceptedClanMembershipFallbackAction(
                         clanGate, payload, hero, "Join my clan.", clanAllowed) == null, null);
             }
 
-            var compactLivePayload = Program.CloneDictionary(payload);
+            var compactLivePayload = VerificationService.CloneDictionary(payload);
             compactLivePayload["actionResolutionIndex"] = TestDict("version", "2", "heroesCount", 4275);
             var compactLiveHero = ReadDictionary(compactLivePayload, "hero");
             compactLiveHero["spouseName"] = "Derthert";
@@ -544,7 +544,7 @@ namespace ReignBetaServer
                 "Please pay Derthert 17 denars."
             })
             {
-                var thirdPartyGold = Program.BuildAllowedActionPlannerChoices(settings, compactLivePayload, compactLiveHero,
+                var thirdPartyGold = ActionPipelineService.BuildAllowedActionPlannerChoices(settings, compactLivePayload, compactLiveHero,
                     accepted("Rhagaea transfers denars from her purse to her husband Derthert."),
                     text, "I agree. I will pay Derthert.", 3);
                 add("compact_live_named_third_party_gold_" + results.Count,
@@ -553,7 +553,7 @@ namespace ReignBetaServer
                     thirdPartyGold);
             }
 
-            var catalog = ReadDictionaryList(Program.ActionCatalog(), "commands");
+            var catalog = ReadDictionaryList(ActionPipelineService.ActionCatalog(), "commands");
             add("registered_catalog_count", catalog.Count == 92, catalog.Count);
             foreach (var entry in catalog)
             {
@@ -571,8 +571,8 @@ namespace ReignBetaServer
                 add("exact_terms_" + command, ReadInt(terms, "gold", 0) == 437 && ReadInt(terms, "amount", 0) == 2
                     && ReadInt(terms, "durationDays", 0) == 17 && ReadString(terms, "itemModifierId", "") == "fine"
                     && ReadString(precise, "TargetSettlement", "") == "Explicit destination"
-                    && Program.MapCommandToActionType(command) == ReadString(entry, "mapsTo", "")
-                    && Program.PlannerCanExposeAction(command, false), terms);
+                    && ActionPipelineService.MapCommandToActionType(command) == ReadString(entry, "mapsTo", "")
+                    && ActionPipelineService.PlannerCanExposeAction(command, false), terms);
             }
             var gift = TestDict("command", "transfer_item", "terms", TestDict("delivery", "equip", "itemId", "aserai_armor_02_b", "amount", 1));
             BindAcceptedItemDelivery(gift, "fixture_temurtai");
@@ -585,7 +585,7 @@ namespace ReignBetaServer
             add("empty_candidate_errors_survive", ClassifyDialogueQueueOutcome(0, 0, true, new List<string> { "A required item is missing" }) == "missing_required_field", null);
 
             var incomplete = TestDict("command", "transfer_gold", "FromHero", "player", "ToHero", "rhagaea");
-            var resolved = Program.CloneDictionary(incomplete);
+            var resolved = VerificationService.CloneDictionary(incomplete);
             resolved["terms"] = TestDict("gold", 437);
             add("incomplete_guess_needs_planner", ExecutableRouterCandidates(
                 new List<Dictionary<string, object>> { incomplete }, "test_campaign", payload, "Give her some gold.").Count == 0, null);
@@ -605,11 +605,11 @@ namespace ReignBetaServer
             var itemIndex = TestDict("assets", TestDict("player", TestDict("inventory",
                 TestDict("items", inventoryRows, "topItems", inventoryRows.Take(32).ToList()))));
             var itemTerms = new Dictionary<string, object>();
-            Program.ResolveItemReference(itemIndex, TestDict("Item", "Pernach"), itemTerms, new List<Dictionary<string, object>>());
+            ActionPipelineService.ResolveItemReference(itemIndex, TestDict("Item", "Pernach"), itemTerms, new List<Dictionary<string, object>>());
             add("gift_below_inventory_display_cutoff", ReadString(itemTerms, "itemId", "") == "pernach"
                 && ReadString(itemTerms, "itemModifierId", "") == "fine", itemTerms);
-            var giftPayload = Program.CloneDictionary(payload);
-            giftPayload["actionResolutionIndex"] = Program.CloneDictionary(ReadDictionary(payload, "actionResolutionIndex"));
+            var giftPayload = VerificationService.CloneDictionary(payload);
+            giftPayload["actionResolutionIndex"] = VerificationService.CloneDictionary(ReadDictionary(payload, "actionResolutionIndex"));
             ReadDictionary(giftPayload, "actionResolutionIndex")["assets"] = ReadDictionary(itemIndex, "assets");
             const string capturedGift = "Here is the pernach I won, would you like it?";
             var giftGate = accepted("The speaker accepts the pernach as a gift.");
@@ -625,14 +625,14 @@ namespace ReignBetaServer
                     capturedGift, new HashSet<string> { "transfer_item" }) == null, null);
             inventoryRows.Add(TestDict("itemId", "pernach", "name", "Pernach", "itemModifierId", "rusty", "count", 1));
             itemTerms = new Dictionary<string, object>();
-            Program.ResolveItemReference(itemIndex, TestDict("Item", "Pernach"), itemTerms, new List<Dictionary<string, object>>());
+            ActionPipelineService.ResolveItemReference(itemIndex, TestDict("Item", "Pernach"), itemTerms, new List<Dictionary<string, object>>());
             add("duplicate_copy_needs_native_resolution", ReadString(itemTerms, "itemId", "") == "pernach"
                 && !itemTerms.ContainsKey("itemModifierId"), itemTerms);
             inventoryRows.Add(TestDict("itemId", "other_pernach", "name", "Pernach", "count", 1));
             itemTerms = new Dictionary<string, object>();
-            Program.ResolveItemReference(itemIndex, TestDict("Item", "Pernach"), itemTerms, new List<Dictionary<string, object>>());
+            ActionPipelineService.ResolveItemReference(itemIndex, TestDict("Item", "Pernach"), itemTerms, new List<Dictionary<string, object>>());
             add("ambiguous_item_name_is_not_guessed", !itemTerms.ContainsKey("itemId"), itemTerms);
-            add("ambiguous_armor_is_not_most_expensive", Program.ResolveSemanticItemReference("armor",
+            add("ambiguous_armor_is_not_most_expensive", ActionPipelineService.ResolveSemanticItemReference("armor",
                 new List<Dictionary<string, object>> { TestDict("itemId", "a", "isArmorOrClothing", true, "value", 1),
                     TestDict("itemId", "b", "isArmorOrClothing", true, "value", 9000) }) == null, null);
             foreach (double value in new[] { double.NaN, double.PositiveInfinity, 0, -1, 500.5 })

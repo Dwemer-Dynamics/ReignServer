@@ -19,13 +19,13 @@ namespace ReignBetaServer
                 ["suite"] = "campaign_provider_wait", ["summary"] = summary
             });
             string campaign = "__provider_wait_" + Guid.NewGuid().ToString("N");
-            string directory = Program.CampaignDirectory(campaign);
+            string directory = CampaignFileService.CampaignDirectory(campaign);
             string marker = Path.Combine(directory, "provider-result.json");
             try
             {
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                     PersistenceSelfTestSchema.CreateProviderWaitContract(connection);
-                Program.WriteJsonObject(marker, new Dictionary<string, object> { ["value"] = "snapshot" });
+                CampaignFileService.WriteJsonObject(marker, new Dictionary<string, object> { ["value"] = "snapshot" });
                 RunCampaignProviderWaitCase(campaign, marker, false, false, add);
                 RunCampaignProviderWaitCase(campaign, marker, true, false, add);
                 RunCampaignProviderWaitCase(campaign, marker, true, true, add);
@@ -46,7 +46,7 @@ namespace ReignBetaServer
             finally
             {
                 ReignPostgreSqlStorage.DropCampaign(campaign);
-                string root = Path.GetFullPath(Program.CampaignsRoot()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                string root = Path.GetFullPath(CampaignFileService.CampaignsRoot()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
                 string exact = Path.GetFullPath(directory);
                 if (exact.StartsWith(root, StringComparison.OrdinalIgnoreCase)
                     && Path.GetFileName(exact) == campaign && Directory.Exists(exact)) Directory.Delete(exact, true);
@@ -130,7 +130,7 @@ namespace ReignBetaServer
                                 stale = true;
                                 // Deliberately imitate a broad caller catch trying to
                                 // cache a failure. Both precomputed paths and SQL must fail.
-                                try { Program.WriteJsonObject(marker, new Dictionary<string, object> { ["value"] = "stale" }); }
+                                try { CampaignFileService.WriteJsonObject(marker, new Dictionary<string, object> { ["value"] = "stale" }); }
                                 catch (CampaignRequestReplacedException) { fileDenied = true; }
                                 try { PersistenceSelfTestStore.InsertProviderWaitContract(null); }
                                 catch (CampaignRequestReplacedException) { sqlDenied = true; }
@@ -138,7 +138,7 @@ namespace ReignBetaServer
                             catch (IOException ex) { providerFailurePreserved = ex.Message == "fixture provider failure"; }
                             readLeaseRestored = Program.CampaignDataGate.IsReadLockHeld;
                             if (!stale)
-                                Program.WriteJsonObject(marker, new Dictionary<string, object> { ["value"] = providerFails ? "failure" : "complete" });
+                                CampaignFileService.WriteJsonObject(marker, new Dictionary<string, object> { ["value"] = providerFails ? "failure" : "complete" });
                         }
                     }
                     catch (Exception ex) { requestError = ex; }
@@ -172,7 +172,7 @@ namespace ReignBetaServer
                             {
                                 var registered = SaveSyncPoint(ReadSaveSyncLedger(campaign), point);
                                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, SaveSyncPostgreSqlSnapshotPointId(registered));
-                                Program.WriteJsonObject(marker, new Dictionary<string, object> { ["value"] = "restored" });
+                                CampaignFileService.WriteJsonObject(marker, new Dictionary<string, object> { ["value"] = "restored" });
                             }
                             finally { Program.CampaignDataGate.ExitWriteLock(); }
                         }
@@ -198,7 +198,7 @@ namespace ReignBetaServer
                     bool saveJoined = save.Join(10000);
                     joined = requestJoined && duplicateJoined && saveJoined;
                 }
-                string value = ReadString(Program.ReadJsonObject(marker), "value", "");
+                string value = ReadString(CampaignFileService.ReadJsonObject(marker), "value", "");
                 bool correctResult = restore ? stale && fileDenied && sqlDenied && value == "restored" && !duplicateEntered
                     : !stale && duplicateEntered && value == (providerFails ? "failure" : "complete")
                         && providerFailurePreserved == providerFails;

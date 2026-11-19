@@ -75,7 +75,7 @@ namespace ReignBetaServer
                 ["importance"] = 1d,
                 ["ts"] = ReadLong(item, "created_ts", now)
             }));
-            Dictionary<string, object> summarySettings = settingsOverride ?? Program.LoadSettings();
+            Dictionary<string, object> summarySettings = settingsOverride ?? SettingsService.LoadSettings();
             string summaryCorrelationId = ReadFirstString(
                 identitySource,
                 "correlationId",
@@ -342,7 +342,7 @@ namespace ReignBetaServer
                 };
             }
             scenes = scenes.Take(8).OrderBy(row => ReadLong(row, "updated_ts", 0)).ToList();
-            Dictionary<string, object> arcSettings = Program.LoadSettings();
+            Dictionary<string, object> arcSettings = SettingsService.LoadSettings();
             string arcCorrelationId = scenes
                 .Select(DialogueService.StoredConversationArtifactCorrelationId)
                 .LastOrDefault(value =>
@@ -434,7 +434,7 @@ namespace ReignBetaServer
                 };
             }
             int maxChars = Math.Max(500, Math.Min(5000,
-                ReadInt(Program.LoadSettings(), "memoryConsolidationMaxSummaryChars", 1800)));
+                ReadInt(SettingsService.LoadSettings(), "memoryConsolidationMaxSummaryChars", 1800)));
             List<string> repairedIds = new List<string>();
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {

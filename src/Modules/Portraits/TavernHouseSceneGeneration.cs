@@ -20,7 +20,7 @@ namespace ReignBetaServer
         {
             try
             {
-                if (!ReadBool(payload, "imagesEnabled", true) || !ReadBool(Program.LoadSettings(), "tavernHouseSceneImagesEnabled", true)) return CharactersService.TavernHouseError("Scene images are disabled.", "images_disabled");
+                if (!ReadBool(payload, "imagesEnabled", true) || !ReadBool(SettingsService.LoadSettings(), "tavernHouseSceneImagesEnabled", true)) return CharactersService.TavernHouseError("Scene images are disabled.", "images_disabled");
                 string path = CharactersService.TavernHouseSessionPath(payload), kind = ReadString(payload, "kind", "arrival");
                 if (kind != "arrival" && kind != "look_again") return CharactersService.TavernHouseError("Scene kind must be arrival or look_again.");
                 Dictionary<string, object> state;
@@ -44,12 +44,12 @@ namespace ReignBetaServer
                     profiles = TavernHouseSceneProfiles(state);
                 }
                 string templateName = kind == "arrival" ? "tavern_house_arrival_image.txt" : "tavern_house_look_again_image.txt";
-                string imageTemplate = Program.LoadPromptTemplate(templateName), summaryTemplate = Program.LoadPromptTemplate("tavern_house_look_again_summary.txt");
+                string imageTemplate = PromptService.LoadPromptTemplate(templateName), summaryTemplate = PromptService.LoadPromptTemplate("tavern_house_look_again_summary.txt");
                 string promptRevision = CharactersService.TavernHouseHash(TavernHouseSceneContract + "|" + TavernHouseScenePromptPurpose(kind) + "|" + imageTemplate + "|" + (kind == "look_again" ? summaryTemplate : ""));
                 var sourceHashes = new List<Dictionary<string, object>>(); var images = new List<byte[]>();
                 foreach (var profile in profiles)
                 {
-                    string heroId = Program.CharacterIdFrom(profile);
+                    string heroId = CampaignFileService.CharacterIdFrom(profile);
                     string source = CharactersService.ResolveCharacterEditorPortraitPath(ReadString(state, "campaignId", ""), heroId, "active");
                     if (!File.Exists(source)) return CharactersService.TavernHouseError("Generate the missing portrait for " + ReadString(profile, "name", heroId) + " and retry.", "missing_portrait");
                     byte[] bytes = File.ReadAllBytes(source);
@@ -100,7 +100,7 @@ namespace ReignBetaServer
             string folder = Path.Combine(Path.GetDirectoryName(CharactersService.TavernHouseSessionPath(state)), "scenes");
             string image = Path.Combine(folder, key + ".png"), manifest = Path.Combine(folder, key + ".json");
             if (!File.Exists(image) || !File.Exists(manifest)) return null;
-            var data = Program.ReadJsonObject(manifest);
+            var data = CampaignFileService.ReadJsonObject(manifest);
             if (ReadString(data, "visitId", "") != ReadString(ReadDictionary(state, "receipt"), "visitId", "") || ReadString(data, "kind", "") != "arrival") return null;
             return TestDict("ok", true, "cached", true, "cacheKey", key, "imageBase64", Convert.ToBase64String(File.ReadAllBytes(image)),
                 "transcriptRevision", revision, "promptRevision", ReadString(data, "promptRevision", ""), "manifestPath", manifest);
@@ -111,14 +111,14 @@ namespace ReignBetaServer
             var player = ReadDictionary(state, "player");
             var selected = ReadStringList(ReadDictionary(state, "receipt"), "participantHeroIds");
             var roster = ReadDictionaryList(state, "roster");
-            if (player == null || Program.CharacterIdFrom(player) != ReadString(state, "playerHeroStringId", "") || ReadDouble(player, "age", 0) < 18 || ReadBool(player, "isChild", false))
+            if (player == null || CampaignFileService.CharacterIdFrom(player) != ReadString(state, "playerHeroStringId", "") || ReadDouble(player, "age", 0) < 18 || ReadBool(player, "isChild", false))
                 throw new InvalidDataException("The adult player's reference identity is required.");
-            if (selected.Count < 1 || selected.Count > 4 || selected.Distinct(StringComparer.Ordinal).Count() != selected.Count || selected.Contains(Program.CharacterIdFrom(player), StringComparer.Ordinal))
+            if (selected.Count < 1 || selected.Count > 4 || selected.Distinct(StringComparer.Ordinal).Count() != selected.Count || selected.Contains(CampaignFileService.CharacterIdFrom(player), StringComparer.Ordinal))
                 throw new InvalidDataException("The image requires one player and exactly one to four distinct agreed participants.");
             var result = new List<Dictionary<string, object>> { player };
             foreach (string id in selected)
             {
-                var profile = roster.SingleOrDefault(x => Program.CharacterIdFrom(x) == id);
+                var profile = roster.SingleOrDefault(x => CampaignFileService.CharacterIdFrom(x) == id);
                 if (profile == null || !CharactersService.TavernHouseAdultAvailable(profile)) throw new InvalidDataException("An agreed participant's adult identity is missing.");
                 result.Add(profile);
             }
@@ -132,12 +132,12 @@ namespace ReignBetaServer
             string imagePath = Path.Combine(folder, key + ".png"), manifestPath = Path.Combine(folder, key + ".json");
             if (File.Exists(imagePath) && File.Exists(manifestPath)) return new Dictionary<string, object> { ["ok"] = true, ["cached"] = true, ["cacheKey"] = key,
                 ["imageBase64"] = Convert.ToBase64String(File.ReadAllBytes(imagePath)), ["transcriptRevision"] = revision, ["promptRevision"] = promptRevision, ["manifestPath"] = manifestPath };
-            string mapping = string.Join("\n", profiles.Select((profile, index) => "Reference cell " + (index + 1) + " from left to right: " + ReadString(profile, "name", "") + " [" + Program.CharacterIdFrom(profile) + "]" + (index == 0 ? " is the player." : " is a selected participant.")));
+            string mapping = string.Join("\n", profiles.Select((profile, index) => "Reference cell " + (index + 1) + " from left to right: " + ReadString(profile, "name", "") + " [" + CampaignFileService.CharacterIdFrom(profile) + "]" + (index == 0 ? " is the player." : " is a selected participant.")));
             string summary = "The agreed participants approach the player in the bedroom, greeting them warmly before sitting together for conversation.";
             if (kind == "look_again")
             {
                 string summaryPath = Path.Combine(folder, key + ".summary.json");
-                var stored = Program.ReadJsonObject(summaryPath);
+                var stored = CampaignFileService.ReadJsonObject(summaryPath);
                 if (stored != null && !string.IsNullOrWhiteSpace(ReadString(stored, "summary", ""))) summary = ReadString(stored, "summary", "");
                 else
                 {

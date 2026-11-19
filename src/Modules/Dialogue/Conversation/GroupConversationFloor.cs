@@ -26,7 +26,7 @@ namespace ReignBetaServer
             }
             // Submitted player speech survives even if everybody listens. No NPC
             // line, summary, relationship score or provider request is invented.
-            var source = Program.CloneDictionary(payload);
+            var source = VerificationService.CloneDictionary(payload);
             CopyPlayerInputSource(payload, source);
             ApplyPlayerInputAudienceToPayload(source, "", allowInterpretation: false);
             string publicText = ReadString(source, "publicPlayerText", ReadString(source, "playerText", ""));
@@ -61,7 +61,7 @@ namespace ReignBetaServer
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (campaign.Length == 0 || session.Length == 0 || beat.Length == 0 || active.Count == 0 || active.Count > 64)
                 return TestDict("ok", false, "error", "A group speaking turn requires a campaign, session, turn and bounded audience.");
-            if (active.Any(id => !profiles.Any(p => Program.CharacterIdFrom(p).Equals(id, StringComparison.OrdinalIgnoreCase))))
+            if (active.Any(id => !profiles.Any(p => CampaignFileService.CharacterIdFrom(p).Equals(id, StringComparison.OrdinalIgnoreCase))))
                 return TestDict("ok", false, "error", "A present group participant has no profile.");
 
             bool opening = ReadBool(payload, "castleOpening", false) || ReadBool(payload, "approachOpening", false);
@@ -85,7 +85,7 @@ namespace ReignBetaServer
                 if (ReadString(existing, "inputHash", "") != signature)
                     return TestDict("ok", false, "error", "This group turn already has a different speaking plan input.");
                 transaction.Commit();
-                var replay = Program.CloneDictionary(existing); replay["replayed"] = true;
+                var replay = VerificationService.CloneDictionary(existing); replay["replayed"] = true;
                 return replay;
             }
             // Never reroll an old delivered turn after its small plan cache expires.
@@ -99,15 +99,15 @@ namespace ReignBetaServer
             publicText = ObserverConversationText(publicText, "__player_source__", "");
             foreach (string id in active)
             {
-                var profile = profiles.First(p => Program.CharacterIdFrom(p).Equals(id, StringComparison.OrdinalIgnoreCase));
+                var profile = profiles.First(p => CampaignFileService.CharacterIdFrom(p).Equals(id, StringComparison.OrdinalIgnoreCase));
                 roster.Add(new GroupTurnParticipant { Id = id, Name = ReadString(profile, "name", "") });
             }
             var selected = GroupConversationTurnOrder.Plan(roster, publicText, campaign + "|" + timeline + "|" + session + "|" + beat, lines, replyFocusId);
             foreach (string id in active)
             {
                 ProjectPlayerInputForAudience(text, id, profiles, out _, out bool privatelyAddressed, privateFocusId: privateFocus);
-                var actionInput = Program.CloneDictionary(payload);
-                actionInput["hero"] = profiles.First(p => Program.CharacterIdFrom(p).Equals(id, StringComparison.OrdinalIgnoreCase));
+                var actionInput = VerificationService.CloneDictionary(payload);
+                actionInput["hero"] = profiles.First(p => CampaignFileService.CharacterIdFrom(p).Equals(id, StringComparison.OrdinalIgnoreCase));
                 // The existing exact current handover parser identifies an action
                 // recipient. It is a local read; selection executes no transfer.
                 bool actionRecipient = id == actionRecipientId || CurrentPlayerTransfers(actionInput).Count > 0;
@@ -169,7 +169,7 @@ namespace ReignBetaServer
                 var matches = profiles.Where(p => ReadString(p, "name", "").Length > 0
                     && text.StartsWith(ReadString(p, "name", "") + ":", StringComparison.OrdinalIgnoreCase)).ToList();
                 int colon = text.IndexOf(':');
-                return new GroupTurnLine { SpeakerId = matches.Count == 1 ? Program.CharacterIdFrom(matches[0]) : "",
+                return new GroupTurnLine { SpeakerId = matches.Count == 1 ? CampaignFileService.CharacterIdFrom(matches[0]) : "",
                     Role = matches.Count == 1 ? "npc" : "player", Text = colon < 0 ? text : text.Substring(colon + 1).Trim() };
             }).ToList();
         }
@@ -191,8 +191,8 @@ namespace ReignBetaServer
             // Old saves have no field 28. The first named person in the visible
             // approach is a bounded compatibility cue, never private hidden context.
             string approach = ReadString(payload, "wildernessApproachText", "");
-            var matches = profiles.Where(p => active.Contains(Program.CharacterIdFrom(p)))
-                .Select(p => new { Id = Program.CharacterIdFrom(p), Name = ReadString(p, "name", "") })
+            var matches = profiles.Where(p => active.Contains(CampaignFileService.CharacterIdFrom(p)))
+                .Select(p => new { Id = CampaignFileService.CharacterIdFrom(p), Name = ReadString(p, "name", "") })
                 .Where(p => p.Name.Length > 0)
                 .Select(p => new { p.Id, Match = System.Text.RegularExpressions.Regex.Match(approach,
                     @"(?<![\p{L}\p{N}])" + System.Text.RegularExpressions.Regex.Escape(p.Name) + @"(?![\p{L}\p{N}])", System.Text.RegularExpressions.RegexOptions.IgnoreCase) })

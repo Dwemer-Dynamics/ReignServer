@@ -34,7 +34,7 @@ namespace ReignBetaServer
             {
                 var payload = subject(score, 25, "female");
                 string selected = SelectPortraitPhysicalConfidencePromptFile(payload);
-                string confidence = ExpandPortraitIdentityTokens(payload, Program.LoadPromptTemplate(selected).Trim());
+                string confidence = ExpandPortraitIdentityTokens(payload, PromptService.LoadPromptTemplate(selected).Trim());
                 string normal = BuildPortraitPrompt(payload, "", false);
                 string edit = BuildAdultPortraitClothingPrompt(payload);
                 check("adult_portrait_prompt_split_" + score, !string.IsNullOrWhiteSpace(confidence)
@@ -43,7 +43,7 @@ namespace ReignBetaServer
                     && selected.Contains(score <= 80 ? "61_80" : "81_100"), "Normal prompt omits the selected confidence layer; edit uses only the correct clothing band and preservation instructions.");
             }
             var settings = new Dictionary<string, object> { ["portraitProvider"] = "NanoGPT", ["portraitAtlasImageModel"] = AtlasModelWan25ImageEdit };
-            Program.NormalizePortraitImageSettings(settings);
+            SettingsService.NormalizePortraitImageSettings(settings);
             check("adult_image_profile_defaults", new[] { "adultPortrait", "adultScenery" }.All(prefix =>
                 ReadString(settings, prefix + "Provider", "") == "AtlasCloud"
                 && ReadString(settings, prefix + "AtlasImageModel", "") == AtlasModelSeedreamV5ProEdit)
@@ -53,7 +53,7 @@ namespace ReignBetaServer
             settings["adultPortraitImageStrength"] = 0.91d;
             settings["adultSceneryAtlasWanNegativePrompt"] = "independent scenery negative";
             var restored = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(settings));
-            Program.NormalizePortraitImageSettings(restored);
+            SettingsService.NormalizePortraitImageSettings(restored);
             var profile = ResolveImageGenerationProfile(restored, "adultPortrait");
             check("adult_image_profile_roundtrip", profile.Name == "adultPortrait" && profile.Provider == "NanoGPT"
                 && profile.NanoGptModel == "flux-kontext" && Math.Abs(profile.ImageStrength - 0.91d) < 0.001
@@ -64,11 +64,11 @@ namespace ReignBetaServer
                 restored[prefix + "Provider"] = "Reign Image Generator";
                 restored[prefix + "ReignGeneratorSteps"] = 9;
             }
-            Program.NormalizePortraitImageSettings(restored);
+            SettingsService.NormalizePortraitImageSettings(restored);
             check("retired_image_provider_migration", ImageProfilePrefixes.All(prefix =>
                 ReadString(restored, prefix + "Provider", "") == "AtlasCloud"
                 && ReadString(restored, prefix + "AtlasImageModel", "") == AtlasModelSeedreamV5ProEdit
-                && !restored.ContainsKey(prefix + "ReignGeneratorSteps")) && !Program.NormalizePortraitImageSettings(restored),
+                && !restored.ContainsKey(prefix + "ReignGeneratorSteps")) && !SettingsService.NormalizePortraitImageSettings(restored),
                 "Retired selections migrate once to AtlasCloud Seedream v5 and obsolete tuning is removed.");
             string html = Program.ControlCenterHtml();
             check("four_image_profile_catalog_parity", ImageProfilePrefixes.All(prefix =>
@@ -138,7 +138,7 @@ namespace ReignBetaServer
                     "The common stored-product recovery reader retains stage evidence, fallback warning and selected master bytes.");
             }
             finally { Directory.Delete(fixture, true); }
-            string previewDirectory = Path.Combine(Program.VerificationDir, "portrait-profiles");
+            string previewDirectory = Path.Combine(VerificationService.VerificationDir, "portrait-profiles");
             Directory.CreateDirectory(previewDirectory);
             string previewPath = Path.Combine(previewDirectory, "control-center.html");
             File.WriteAllText(previewPath, html);

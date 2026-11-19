@@ -5,9 +5,9 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class ConversationResponseService
     {
-        private static List<Dictionary<string, object>> RunConversationResponseParsingSelfTests()
+        internal static List<Dictionary<string, object>> RunConversationResponseParsingSelfTests()
         {
             var rows = new List<Dictionary<string, object>>();
             void Check(string id, bool pass, object data = null) => rows.Add(TestDict("caseId", "response_recovery_" + id,
@@ -203,7 +203,7 @@ namespace ReignBetaServer
                     var generationRequest = DialogueService.BuildConversationGenerationRequest(TestDict("maxTokens", 900), envelope,
                         campaign, "budget", "npc", "Hello.", social);
                     generationRequest["hero"] = profile;
-                    var body = BuildChatRequestBody(TestDict(), generationRequest, ReadDictionaryList(generationRequest, "messages"), "fixture-model");
+                    var body = LlmProviderService.BuildChatRequestBody(TestDict(), generationRequest, ReadDictionaryList(generationRequest, "messages"), "fixture-model");
                     Check("actual_outbound_16000_" + social, ReadInt(body, "max_tokens", 0) == 16000
                         && ConversationResponseNeedsDrinkActions(generationRequest));
                 }
@@ -211,7 +211,7 @@ namespace ReignBetaServer
                 var payload = TestDict("campaignId", campaign, "timelineId", "fixture", "turnId", "same-turn",
                     "sceneTurnId", "same-turn", "worldDay", 10d, "playerHeroStringId", "player", "conversationSessionId", "fixture");
                 DialogueService.ApplyConversationDrinking(campaign, "npc", payload, profile, null, accepted, ReadString(accepted, "reply", ""));
-                var retryPayload = CloneDictionary(payload);
+                var retryPayload = VerificationService.CloneDictionary(payload);
                 DialogueService.ApplyConversationDrinking(campaign, "npc", retryPayload, profile, null, accepted, ReadString(accepted, "reply", ""));
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {

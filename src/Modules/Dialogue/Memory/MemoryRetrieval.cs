@@ -232,7 +232,7 @@ namespace ReignBetaServer
         private static string MemoryPacketDedupeKey(Dictionary<string, object> row)
         {
             string eventId = ReadString(row, "event_id", "");
-            string summary = Program.NormalizeLookup(ReadString(row, "summary", ""));
+            string summary = ActionPipelineService.NormalizeLookup(ReadString(row, "summary", ""));
             if (!string.IsNullOrWhiteSpace(eventId))
             {
                 return eventId + "|" + summary;
@@ -678,7 +678,7 @@ namespace ReignBetaServer
                     continue;
                 }
 
-                string key = Program.NormalizeLookup(clean);
+                string key = ActionPipelineService.NormalizeLookup(clean);
                 if (string.IsNullOrWhiteSpace(key) || seen.Contains(key))
                 {
                     continue;
@@ -698,7 +698,7 @@ namespace ReignBetaServer
         private static List<string> ExtractEntityIds(object raw)
         {
             List<string> ids = new List<string>();
-            foreach (object item in Program.ObjectsFromValue(raw))
+            foreach (object item in ActionPipelineService.ObjectsFromValue(raw))
             {
                 if (item is Dictionary<string, object> dict)
                 {
@@ -749,7 +749,7 @@ namespace ReignBetaServer
             try
             {
                 object parsed = Json.DeserializeObject(json);
-                return Program.ObjectsFromValue(parsed).Select(Convert.ToString).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+                return ActionPipelineService.ObjectsFromValue(parsed).Select(Convert.ToString).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
             }
             catch
             {

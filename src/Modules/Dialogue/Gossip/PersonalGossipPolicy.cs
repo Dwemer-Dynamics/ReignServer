@@ -22,10 +22,10 @@ namespace ReignBetaServer
             "namedRecipientMultiplier", 4d, "localDelayHours", 1d,
             "maximumCandidates", 8, "maximumOriginalsPerConversation", 2,
             "maximumOutgoingPerDay", 3, "maximumOutwardHops", 2, "expiryDays", 14d,
-            "chanceAdjustments", Program.PersonalGossipChanceOptions(null));
+            "chanceAdjustments", SettingsService.PersonalGossipChanceOptions(null));
 
         private static Dictionary<string, object> PersonalGossipSettings()
-            => PersonalGossipSettings(Program.LoadSettings());
+            => PersonalGossipSettings(SettingsService.LoadSettings());
         private static Dictionary<string, object> PersonalGossipSettings(Dictionary<string, object> saved)
         {
             var settings = DefaultPersonalGossipSettings();
@@ -33,7 +33,7 @@ namespace ReignBetaServer
             if (configured != null)
                 foreach (string key in settings.Keys.ToList())
                     if (configured.ContainsKey(key)) settings[key] = configured[key];
-            settings["chanceAdjustments"] = Program.PersonalGossipChanceOptions(saved);
+            settings["chanceAdjustments"] = SettingsService.PersonalGossipChanceOptions(saved);
             settings["enabled"] = ReadBool(settings, "enabled", true) && ReadBool(saved, "personalGossipEnabled", true);
             // A future policy requires an explicit implementation, not guessed semantics.
             if (ReadString(settings, "policyVersion", "") != PersonalGossipVersion) settings["enabled"] = false;

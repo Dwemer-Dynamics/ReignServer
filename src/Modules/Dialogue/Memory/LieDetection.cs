@@ -121,7 +121,7 @@ namespace ReignBetaServer
             List<string> evidenceIds = ReadStringList(verification, "evidenceEventIds").Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
             List<string> mismatched = ReadStringList(verification, "mismatchedComponents");
             List<string> matched = ReadStringList(verification, "matchedComponents");
-            string normalizedClaim = Program.NormalizeLookup(claim);
+            string normalizedClaim = ActionPipelineService.NormalizeLookup(claim);
 
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
@@ -243,7 +243,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> VerifySelfAdmittedFalsehood(
             Dictionary<string, object> payload, string claim, string claimantId, string targetId)
         {
-            string q = Program.NormalizeLookup(claim);
+            string q = ActionPipelineService.NormalizeLookup(claim);
             if (string.IsNullOrWhiteSpace(q)
                 || DialogueService.ContainsAny(q, "if i said", "if i were", "suppose i", "hypothetically", "as an example"))
             {
@@ -315,8 +315,8 @@ namespace ReignBetaServer
                 || !claimantSettlementId.Equals(targetSettlementId, StringComparison.OrdinalIgnoreCase)
                 || string.IsNullOrWhiteSpace(settlementName)) return null;
 
-            string q = Program.NormalizeLookup(claim);
-            string normalizedSettlement = Program.NormalizeLookup(settlementName);
+            string q = ActionPipelineService.NormalizeLookup(claim);
+            string normalizedSettlement = ActionPipelineService.NormalizeLookup(settlementName);
             if (!ContradictsNativeCurrentSettlement(claim, settlementName)) return null;
             bool deniedPresent = DialogueService.ContainsAny(q, "i am not presently in", "im not presently in", "i am not currently in", "im not currently in", "i am not in", "im not in",
                     "we are not presently in", "were not presently in", "we are not currently in", "were not currently in", "we are not in", "were not in")
@@ -377,15 +377,15 @@ namespace ReignBetaServer
 
         internal static bool ContradictsNativeCurrentSettlement(string claim, string settlementName)
         {
-            string normalizedSettlement = Program.NormalizeLookup(settlementName);
+            string normalizedSettlement = ActionPipelineService.NormalizeLookup(settlementName);
             if (string.IsNullOrWhiteSpace(claim) || string.IsNullOrWhiteSpace(normalizedSettlement))
             {
                 return false;
             }
             foreach (string clause in Regex.Split(claim, @"(?<=[.!?;\r\n])\s*"))
             {
-                string q = Program.NormalizeLookup(clause);
-                if (string.IsNullOrWhiteSpace(q) || !Program.ContainsNormalizedPhrase(q, normalizedSettlement)
+                string q = ActionPipelineService.NormalizeLookup(clause);
+                if (string.IsNullOrWhiteSpace(q) || !ActionPipelineService.ContainsNormalizedPhrase(q, normalizedSettlement)
                     || DialogueService.ContainsAny(q, "if i said", "if i were", "suppose i", "hypothetically", "as an example"))
                     continue;
                 string place = Regex.Escape(normalizedSettlement).Replace("\\ ", @"\s+");
@@ -407,7 +407,7 @@ namespace ReignBetaServer
 
         internal static bool ContainsConversationDeceptiveIntentEvidence(string claim)
         {
-            string q = Program.NormalizeLookup(claim);
+            string q = ActionPipelineService.NormalizeLookup(claim);
             if (string.IsNullOrWhiteSpace(q)) return false;
             return DialogueService.ContainsExplicitDeceptionAdmission(q) || DialogueService.ContainsAny(q,
                 "i personally verified", "i verified it myself", "i inspected", "i saw it myself", "i witnessed it myself",
@@ -419,7 +419,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> WorldHistoryLieChecksApi(Dictionary<string, string> query)
         {
             query = query ?? new Dictionary<string, string>();
-            string campaignId = query.ContainsKey("campaignId") ? query["campaignId"] : Program.LatestCampaignId();
+            string campaignId = query.ContainsKey("campaignId") ? query["campaignId"] : SettingsService.LatestCampaignId();
             string claimantId = query.ContainsKey("claimantId") ? query["claimantId"] : string.Empty;
             string targetId = query.ContainsKey("targetId") ? query["targetId"] : string.Empty;
             int limit = Math.Max(1, Math.Min(250, WorldSimulationService.ParseIntInvariant(query.ContainsKey("limit") ? query["limit"] : "", 50)));
@@ -448,7 +448,7 @@ namespace ReignBetaServer
             Dictionary<string, object> supplied = ReadDictionary(payload, payloadKey) ?? new Dictionary<string, object>();
             if (!TryReadLieSkill(supplied, "roguery", out double roguery) || !TryReadLieSkill(supplied, "charm", out double charm))
             {
-                Dictionary<string, object> profile = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json"));
+                Dictionary<string, object> profile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "profile.json"));
                 supplied = ReadDictionary(profile, "skills") ?? ReadDictionary(ReadDictionary(profile, "sourceFacts"), "skills") ?? new Dictionary<string, object>();
                 if (!TryReadLieSkill(supplied, "roguery", out roguery) || !TryReadLieSkill(supplied, "charm", out charm))
                 {
@@ -518,7 +518,7 @@ namespace ReignBetaServer
 
         internal static bool IsFirsthandWorldHistoryRole(string eventType, string role)
         {
-            string normalized = Program.NormalizeLookup(role);
+            string normalized = ActionPipelineService.NormalizeLookup(role);
             if (string.IsNullOrWhiteSpace(normalized) || DialogueService.ContainsAny(normalized, "mentioned", "affiliate", "kingdom member", "kingdom affiliation", "clan member", "clan affiliation", "settlement", "item", "troop", "casualty")) return false;
             return DialogueService.ContainsAny(normalized,
                 "participant", "leader", "commander", "attacker", "defender", "winner", "loser", "raider", "besieger", "conqueror",
@@ -548,7 +548,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> SelectLieReaction(ReignDbConnection connection, string campaignId, string claimantId, string targetId, Dictionary<string, object> payload)
         {
-            Dictionary<string, object> traitDocument = Program.ReadJsonObject(Program.CharacterFile(campaignId, targetId, "traits.json"));
+            Dictionary<string, object> traitDocument = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, targetId, "traits.json"));
             Dictionary<string, object> traits = ReadDictionary(traitDocument, "foundationTraits") ?? ReadDictionary(traitDocument, "hiddenReignTraits") ?? traitDocument;
             int tact = CharactersService.TraitInt(traits, "tact"), pragmatism = CharactersService.TraitInt(traits, "pragmatism"), patience = CharactersService.TraitInt(traits, "patience");
             int ambition = CharactersService.TraitInt(traits, "ambition"), power = CharactersService.TraitInt(traits, "powerMotivation"), vengeance = CharactersService.TraitInt(traits, "vengefulness");
@@ -625,7 +625,7 @@ namespace ReignBetaServer
             }
             else if (accepted)
             {
-                Dictionary<string, object> traitDocument = Program.ReadJsonObject(Program.CharacterFile(campaignId, targetId, "traits.json"));
+                Dictionary<string, object> traitDocument = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, targetId, "traits.json"));
                 Dictionary<string, object> traits = ReadDictionary(traitDocument, "foundationTraits") ?? ReadDictionary(traitDocument, "hiddenReignTraits") ?? traitDocument;
                 double confidence = DialogueService.ClampDouble(0.6d + 0.1d * CharactersService.TraitInt(traits, "socialTrust"), 0.35d, 0.8d);
                 string beliefId = "whb_" + Guid.NewGuid().ToString("N");
@@ -870,21 +870,21 @@ namespace ReignBetaServer
                 add("later_reconciliation", belief != null && ReadString(belief, "state", "") == "disproven" && ReadDouble(belief, "disproven_day", -1d) == 104d,
                     "Relevant regional evidence disproves the earlier accepted claim on retrieval.");
 
-                string characterDir = Path.GetDirectoryName(Program.CharacterFile(campaignId, "reaction_feign", "traits.json"));
+                string characterDir = Path.GetDirectoryName(CampaignFileService.CharacterFile(campaignId, "reaction_feign", "traits.json"));
                 Directory.CreateDirectory(characterDir);
-                Program.WriteJsonObject(Program.CharacterFile(campaignId, "reaction_feign", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, "reaction_feign", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>
                 {
                     ["tact"] = 2, ["pragmatism"] = 2, ["patience"] = 1, ["ambition"] = 2, ["powerMotivation"] = 2, ["vengefulness"] = 1
                 }});
-                Program.WriteJsonObject(Program.CharacterFile(campaignId, "reaction_confront", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, "reaction_confront", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>
                 {
                     ["honesty"] = 2, ["assertiveness"] = 2, ["pride"] = 2, ["fearfulness"] = -1
                 }});
-                Program.WriteJsonObject(Program.CharacterFile(campaignId, "reaction_probe", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, "reaction_probe", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>
                 {
                     ["curiosity"] = 2, ["tact"] = 1, ["patience"] = 1
                 }});
-                Program.WriteJsonObject(Program.CharacterFile(campaignId, "reaction_quiet", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>() });
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, "reaction_quiet", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>() });
                 Dictionary<string, object> safeRisk = new Dictionary<string, object> { ["sceneRisk"] = new Dictionary<string, object> { ["powerDisadvantage"] = 0d } };
                 Dictionary<string, object> unsafeRisk = new Dictionary<string, object> { ["sceneRisk"] = new Dictionary<string, object> { ["powerDisadvantage"] = 2d } };
                 Dictionary<string, object> feign = SelectLieReaction(connection, campaignId, "main_hero", "reaction_feign", unsafeRisk);

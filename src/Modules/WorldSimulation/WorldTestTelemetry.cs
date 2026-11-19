@@ -585,14 +585,14 @@ namespace ReignBetaServer
             string route,
             string status)
         {
-            string normalizedRoute = Program.NormalizeLookup(route).Replace(' ', '_');
+            string normalizedRoute = ActionPipelineService.NormalizeLookup(route).Replace(' ', '_');
             if (normalizedRoute != "organic"
                 && normalizedRoute != "arranged"
                 && normalizedRoute != "diplomatic"
                 && normalizedRoute != "pregnancy_commitment"
                 && normalizedRoute != "affair_commitment")
                 normalizedRoute = "unknown";
-            string normalizedStatus = Program.NormalizeLookup(status);
+            string normalizedStatus = ActionPipelineService.NormalizeLookup(status);
             Dictionary<string, object> counters = new Dictionary<string, object>();
             string prefix = normalizedRoute == "pregnancy_commitment"
                 ? "pregnancyCommitment"
@@ -616,7 +616,7 @@ namespace ReignBetaServer
         internal static string WorldTestMarriageOutcomeRoute(
             Dictionary<string, object> actionPayload)
         {
-            string route = Program.NormalizeLookup(ReadString(actionPayload,
+            string route = ActionPipelineService.NormalizeLookup(ReadString(actionPayload,
                 "route", "")).Replace(' ', '_');
             if (route == "pregnancy_commitment")
                 return "pregnancy_commitment";
@@ -631,7 +631,7 @@ namespace ReignBetaServer
             bool isPlayerClan,
             string exclusionReason)
         {
-            string exclusion = Program.NormalizeLookup(exclusionReason);
+            string exclusion = ActionPipelineService.NormalizeLookup(exclusionReason);
             Dictionary<string, object> counters = new Dictionary<string, object>
             {
                 ["weeklyRolls"] = 1,

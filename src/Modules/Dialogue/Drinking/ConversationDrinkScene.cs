@@ -46,7 +46,7 @@ namespace ReignBetaServer
             double previous = ReadDouble(stored, "hour", double.NaN);
             if (scene.Scope.Length > 0 && scene.Scope == ReadString(stored, "scope", "") && FiniteDrinkNumber(hour)
                 && FiniteDrinkNumber(previous) && hour >= previous - .000001 && hour - previous <= 1d)
-                scene.Vessels = ReadDictionaryList(stored, "vessels").Take(16).Select(Program.CloneDictionary).ToList();
+                scene.Vessels = ReadDictionaryList(stored, "vessels").Take(16).Select(VerificationService.CloneDictionary).ToList();
             return scene;
         }
 

@@ -9,14 +9,14 @@ namespace ReignBetaServer
     {
         private static string ReplayCorpusDir(string campaignId)
         {
-            string path = Program.CampaignFile(campaignId, "audit", "test-data", "replay-corpus");
+            string path = CampaignFileService.CampaignFile(campaignId, "audit", "test-data", "replay-corpus");
             Directory.CreateDirectory(path);
             return path;
         }
 
         internal static string ReplayCorpusCasePath(string campaignId, string caseId)
         {
-            string safe = Program.SafePathSegment(caseId, "case");
+            string safe = CampaignFileService.SafePathSegment(caseId, "case");
             if (safe.Length > 72)
             {
                 safe = "replay_" + PromptHash(safe).Substring(0, 20).ToLowerInvariant();
@@ -27,10 +27,10 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> ReplayCorpusCaptureApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", Program.ResolveLogCampaignId(""));
+            string campaignId = ReadString(payload, "campaignId", CampaignFileService.ResolveLogCampaignId(""));
             string correlationId = ReadString(payload, "correlationId", "");
             if (string.IsNullOrWhiteSpace(correlationId)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "correlationId is required." };
-            List<Dictionary<string, object>> entries = Program.ReadJsonLinesFromPath(Program.CampaignFile(campaignId, "audit", "audit.jsonl"))
+            List<Dictionary<string, object>> entries = Program.ReadJsonLinesFromPath(CampaignFileService.CampaignFile(campaignId, "audit", "audit.jsonl"))
                 .Where(row => string.Equals(ReadString(row, "correlationId", ""), correlationId, StringComparison.OrdinalIgnoreCase)).ToList();
             if (entries.Count == 0) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "No audit evidence was found for the correlation." };
 
@@ -38,7 +38,7 @@ namespace ReignBetaServer
             Dictionary<string, object> llmEntry = entries.LastOrDefault(row => ReadString(row, "phase", "").Equals("llm.response", StringComparison.OrdinalIgnoreCase)) ?? new Dictionary<string, object>();
             Dictionary<string, object> promptEntry = entries.LastOrDefault(row => ReadString(row, "phase", "").Equals("prompt.built", StringComparison.OrdinalIgnoreCase)) ?? new Dictionary<string, object>();
             Dictionary<string, object> requestEntry = entries.FirstOrDefault(row => ReadString(row, "phase", "").EndsWith(".request", StringComparison.OrdinalIgnoreCase)) ?? entries.First();
-            string caseId = FirstNonEmpty(ReadString(payload, "caseId", ""), "replay_" + Program.SafePathSegment(correlationId, "case"));
+            string caseId = FirstNonEmpty(ReadString(payload, "caseId", ""), "replay_" + CampaignFileService.SafePathSegment(correlationId, "case"));
             Dictionary<string, object> evidenceBundle =
                 ReadDictionary(payload, "evidenceBundle");
             bool evidenceV3 = ReadLong(payload, "evidenceSchemaVersion", 1) == 3
@@ -64,18 +64,18 @@ namespace ReignBetaServer
             Dictionary<string, object> evaluation = EvaluateReplayCorpusCase(replayCase);
             replayCase["baselineEvaluation"] = evaluation;
             string path = ReplayCorpusCasePath(campaignId, caseId);
-            Program.WriteJsonObject(path, replayCase);
+            CampaignFileService.WriteJsonObject(path, replayCase);
             return new Dictionary<string, object> { ["ok"] = true, ["path"] = path, ["case"] = replayCase, ["evaluation"] = evaluation };
         }
 
         internal static Dictionary<string, object> ReplayCorpusListApi(Dictionary<string, string> query)
         {
             query = query ?? new Dictionary<string, string>();
-            string campaignId = query.TryGetValue("campaignId", out string campaign) ? campaign : Program.ResolveLogCampaignId("");
+            string campaignId = query.TryGetValue("campaignId", out string campaign) ? campaign : CampaignFileService.ResolveLogCampaignId("");
             List<Dictionary<string, object>> cases = Directory.GetFiles(ReplayCorpusDir(campaignId), "*.json")
                 .OrderByDescending(File.GetLastWriteTimeUtc).Take(500).Select(path =>
                 {
-                    Dictionary<string, object> item = Program.ReadJsonObject(path);
+                    Dictionary<string, object> item = CampaignFileService.ReadJsonObject(path);
                     return new Dictionary<string, object>
                     {
                         ["caseId"] = ReadString(item, "caseId", Path.GetFileNameWithoutExtension(path)), ["mode"] = ReadString(item, "mode", ""),
@@ -92,20 +92,20 @@ namespace ReignBetaServer
             Dictionary<string, object> replayCase = ReadDictionary(payload, "case");
             if (replayCase == null)
             {
-                string campaignId = ReadString(payload, "campaignId", Program.ResolveLogCampaignId(""));
-                replayCase = Program.ReadJsonObject(ReplayCorpusCasePath(campaignId, ReadString(payload, "caseId", "")));
+                string campaignId = ReadString(payload, "campaignId", CampaignFileService.ResolveLogCampaignId(""));
+                replayCase = CampaignFileService.ReadJsonObject(ReplayCorpusCasePath(campaignId, ReadString(payload, "caseId", "")));
             }
             if (replayCase == null || replayCase.Count == 0) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Replay case was not found." };
             Dictionary<string, object> evaluation = EvaluateReplayCorpusCase(replayCase);
-            string campaign = ReadString(replayCase, "campaignId", Program.ResolveLogCampaignId(""));
+            string campaign = ReadString(replayCase, "campaignId", CampaignFileService.ResolveLogCampaignId(""));
             string runId = "replay_eval_" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + "_" + Guid.NewGuid().ToString("N").Substring(0, 8);
             Dictionary<string, object> run = new Dictionary<string, object>
             {
                 ["runId"] = runId, ["caseId"] = ReadString(replayCase, "caseId", ""), ["campaignId"] = campaign,
                 ["evaluatedUtc"] = DateTime.UtcNow.ToString("o"), ["evaluation"] = evaluation, ["case"] = replayCase
             };
-            string runDir = Program.CampaignFile(campaign, "audit", "test-data", "replay-runs"); Directory.CreateDirectory(runDir);
-            string path = Path.Combine(runDir, runId + ".json"); Program.WriteJsonObject(path, run);
+            string runDir = CampaignFileService.CampaignFile(campaign, "audit", "test-data", "replay-runs"); Directory.CreateDirectory(runDir);
+            string path = Path.Combine(runDir, runId + ".json"); CampaignFileService.WriteJsonObject(path, run);
             return new Dictionary<string, object> { ["ok"] = true, ["runId"] = runId, ["path"] = path, ["evaluation"] = evaluation };
         }
 
@@ -224,7 +224,7 @@ namespace ReignBetaServer
                 || ReadBool(assertions, "replyMustBeVisibleDialogue", false))
             {
                 Dictionary<string, object> original = TryParseJsonObject(ReadString(model, "content", ""));
-                bool visible = Program.ConversationStructuredObjectHasUsableVisibleReply(original)
+                bool visible = ConversationResponseService.ConversationStructuredObjectHasUsableVisibleReply(original)
                     && (ReadDictionary(original, "actionGate") != null
                         || ReadDictionary(original, "action_gate") != null);
                 if (!visible)
@@ -249,9 +249,9 @@ namespace ReignBetaServer
 
         internal static void ScheduleReplayCorpusCapture(string campaignId, string correlationId)
         {
-            if (!ReadBool(Program.LoadSettings(), "autoCaptureReplayCorpus", true)) return;
+            if (!ReadBool(SettingsService.LoadSettings(), "autoCaptureReplayCorpus", true)) return;
             // Best-effort: a busy/stopping refusal skips the capture, counted only in scheduler status.
-            Program.EnqueuePriorityBackgroundWork("replay.capture", "maintenance", () => ReplayCorpusCaptureApi(new Dictionary<string, object>
+            OperationsService.EnqueuePriorityBackgroundWork("replay.capture", "maintenance", () => ReplayCorpusCaptureApi(new Dictionary<string, object>
             { ["campaignId"] = campaignId, ["correlationId"] = correlationId, ["label"] = "Automatic production capture" }));
         }
     }

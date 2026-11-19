@@ -155,7 +155,7 @@ namespace ReignBetaServer
             private static RouteHandler Wrap(Func<HttpRequest, object> handler) => (request, route) => handler(request);
         }
 
-        private static readonly Lazy<ReignRouteTable> ServerRoutes =
+        internal static readonly Lazy<ReignRouteTable> ServerRoutes =
             new Lazy<ReignRouteTable>(BuildServerRouteTable, LazyThreadSafetyMode.ExecutionAndPublication);
 
         private static ReignRouteTable BuildServerRouteTable()

@@ -27,7 +27,7 @@ namespace ReignBetaServer
             payload = payload ?? new Dictionary<string, object>();
             string mode = ReadString(payload, "mode", "dialogue");
             string campaignId = ReadString(payload, "campaignId", "default");
-            string correlationId = Program.EnsureCorrelationId(payload);
+            string correlationId = OperationsService.EnsureCorrelationId(payload);
             string heroId = ReadFirstString(payload, "heroStringId", "heroId", "speakerHeroStringId", "characterId");
             string playerText = ReadFirstString(payload, "playerText", "text", "message", "query");
             string sceneContext = ReadString(payload, "sceneContext", "");
@@ -37,7 +37,7 @@ namespace ReignBetaServer
                 available = Program.ContextPullIds.ToList();
             }
 
-            Dictionary<string, object> settings = Program.LoadSettings();
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
             List<string> minimeTopics = TryExtractMinimeTopics(settings, playerText + "\n" + sceneContext, ReadInt(settings, "minimeMaxTopics", 5));
             string selectorText = AppendMinimeTopics(playerText, minimeTopics);
             Dictionary<string, object> selector = new Dictionary<string, object>
@@ -70,7 +70,7 @@ namespace ReignBetaServer
                 }
             };
 
-            Program.LogOperational("context.select", new Dictionary<string, object>
+            OperationsService.LogOperational("context.select", new Dictionary<string, object>
             {
                 ["mode"] = mode,
                 ["campaignId"] = campaignId,
@@ -84,7 +84,7 @@ namespace ReignBetaServer
                 ["fallbackReason"] = fallbackUsed ? fallbackReason : "",
                 ["timing"] = response["timing"]
             });
-            Program.WriteAudit(campaignId, correlationId, "server", mode, "context.select", heroId, "", "", "completed", total.ElapsedMilliseconds, "Selected context pulls for " + mode + ".", new Dictionary<string, object>
+            OperationsService.WriteAudit(campaignId, correlationId, "server", mode, "context.select", heroId, "", "", "completed", total.ElapsedMilliseconds, "Selected context pulls for " + mode + ".", new Dictionary<string, object>
             {
                 ["playerText"] = playerText,
                 ["sceneContext"] = sceneContext,

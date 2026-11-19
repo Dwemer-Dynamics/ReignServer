@@ -13,7 +13,7 @@ using System.Xml;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class VerificationService
     {
         private static void RunPromptSizeContract(List<Dictionary<string, object>> checks)
         {
@@ -140,7 +140,7 @@ namespace ReignBetaServer
             Dictionary<string, object> snapshot = DefaultActionTestSnapshot();
             Dictionary<string, object> payload = ReadDictionary(snapshot, "payload") ?? new Dictionary<string, object>();
             Dictionary<string, object> hero = ReadDictionary(payload, "hero") ?? new Dictionary<string, object>();
-            Dictionary<string, object> settings = LoadSettings();
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
 
             Func<string, string, List<string>> choices = (playerText, intent) =>
             {
@@ -151,8 +151,8 @@ namespace ReignBetaServer
                     ["intent"] = intent,
                     ["confidence"] = 0.9d
                 };
-                return BuildAllowedActionPlannerChoices(settings, payload, hero, gate, playerText, "I accept and finalize those exact terms.", 10)
-                    .Select(x => CanonicalCommand(ReadString(x, "command", "")))
+                return ActionPipelineService.BuildAllowedActionPlannerChoices(settings, payload, hero, gate, playerText, "I accept and finalize those exact terms.", 10)
+                    .Select(x => ActionPipelineService.CanonicalCommand(ReadString(x, "command", "")))
                     .Where(x => !string.IsNullOrWhiteSpace(x))
                     .ToList();
             };
@@ -189,7 +189,7 @@ namespace ReignBetaServer
                     ?? new Dictionary<string, object>();
                 Dictionary<string, object> index = ReadDictionary(payload,
                     "actionResolutionIndex") ?? new Dictionary<string, object>();
-                Dictionary<string, object> speaker = FindIndexedRow(index, "heroes",
+                Dictionary<string, object> speaker = ActionPipelineService.FindIndexedRow(index, "heroes",
                     "heroStringId", speakerHeroId) ?? new Dictionary<string, object>();
                 payload["speakerHeroStringId"] = speakerHeroId;
                 payload["speakerKingdomId"] = ReadString(speaker, "kingdomId", "");
@@ -229,7 +229,7 @@ namespace ReignBetaServer
                     resolutionText = "You accept peace and surrender " + settlementId + ".";
                 }
 
-                Dictionary<string, object> record = NormalizeActionCommand(action,
+                Dictionary<string, object> record = ActionPipelineService.NormalizeActionCommand(action,
                     "test_campaign", out List<string> errors, payload, resolutionText);
                 return new Dictionary<string, object>
                 {
@@ -262,9 +262,9 @@ namespace ReignBetaServer
             string originalHash = ReadString(boundTrade, "termsHash", "");
             boundTerms["gold"] = 101;
             bool tamperDetected = !string.IsNullOrWhiteSpace(originalHash)
-                && !string.Equals(originalHash, ComputeActionTermsHash("trade_package",
+                && !string.Equals(originalHash, ActionPipelineService.ComputeActionTermsHash("trade_package",
                     boundTerms), StringComparison.OrdinalIgnoreCase);
-            bool canonicalEscaping = string.Equals(CanonicalActionTerms(TestDict(
+            bool canonicalEscaping = string.Equals(ActionPipelineService.CanonicalActionTerms(TestDict(
                     "packageText", "I'll take <Lycaron>.")),
                 "{\"packageText\":\"I'll take <Lycaron>.\"}",
                 StringComparison.Ordinal);
@@ -306,7 +306,7 @@ namespace ReignBetaServer
                 ["profiles"] = new object[] { TestDict("custom-api-key", "custom-fixture", "clientSecret", "client-fixture", "maxTokens", 1200) },
                 ["safe"] = "visible"
             };
-            Dictionary<string, object> redacted = RedactSensitive(secrets);
+            Dictionary<string, object> redacted = OperationsService.RedactSensitive(secrets);
             string safeText = Json.Serialize(redacted);
             var hidden = new[] { "secret-value", "portrait-secret", "atlas-secret", "nano-fixture", "router-fixture", "vector-fixture", "custom-fixture", "client-fixture" };
             bool secretsSafe = hidden.All(value => !safeText.Contains(value)) && ReadString(redacted, "safe", "") == "visible"
@@ -314,7 +314,7 @@ namespace ReignBetaServer
                 && ReadString(secrets, "nanoGptApiKey", "") == "nano-fixture";
             AddVerificationCheck(checks, "faults.secret_redaction", "provider_faults", secretsSafe, "API secrets are redacted from diagnostics.", redacted);
             string historical = Json.Serialize(TestDict("eventType", "settings.save", "data", secrets)) + "\n";
-            string exported = RedactDiagnosticLogContent(historical);
+            string exported = OperationsService.RedactDiagnosticLogContent(historical);
             AddVerificationCheck(checks, "faults.historical_log_redaction", "provider_faults",
                 hidden.All(value => !exported.Contains(value)) && exported.Contains("visible") && exported.Contains("1200")
                     && historical.Contains("nano-fixture"),
@@ -329,9 +329,9 @@ namespace ReignBetaServer
                 bool expected = fault == "timeout" || fault == "429" || fault == "500" || fault == "vector_unavailable" ? retryable : terminal;
                 AddVerificationCheck(checks, "faults." + fault, "provider_faults", expected, "Fault classified as " + ReadString(classified, "failureKind", "unknown") + ".", classified);
             }
-            bool transientClassifier = IsTransientLlmFailure("{\"error\":\"Billing reservation failed\",\"status\":503}")
-                && IsTransientLlmFailure("The remote server returned an error: (429) Too Many Requests.")
-                && !IsTransientLlmFailure("The remote server returned an error: (401) Unauthorized.");
+            bool transientClassifier = LlmProviderService.IsTransientLlmFailure("{\"error\":\"Billing reservation failed\",\"status\":503}")
+                && LlmProviderService.IsTransientLlmFailure("The remote server returned an error: (429) Too Many Requests.")
+                && !LlmProviderService.IsTransientLlmFailure("The remote server returned an error: (401) Unauthorized.");
             AddVerificationCheck(checks, "faults.llm_transient_retry_classifier", "provider_faults", transientClassifier,
                 "Transient billing, throttling, and provider failures retry while authentication failures remain terminal.", null);
         }
@@ -360,8 +360,8 @@ namespace ReignBetaServer
             }
 
             string persisted = Path.Combine(sandbox, "shadow-world.json");
-            WriteJsonObject(persisted, world.ToDictionary());
-            ReignShadowWorld reloaded = ReignShadowWorld.FromDictionary(ReadJsonObject(persisted));
+            CampaignFileService.WriteJsonObject(persisted, world.ToDictionary());
+            ReignShadowWorld reloaded = ReignShadowWorld.FromDictionary(CampaignFileService.ReadJsonObject(persisted));
             if (!world.StructuralEquals(reloaded)) failures.Add("shadow world did not survive save/reload");
             AddVerificationCheck(checks, "shadow_world.all_actions", "actions_trade", failures.Count == 0, "Shadow world executed, rejected, persisted, and replay-protected " + actions.Count + " actions.", new Dictionary<string, object> { ["actionCount"] = actions.Count, ["failures"] = failures });
 
@@ -383,8 +383,8 @@ namespace ReignBetaServer
 
             string path = Path.Combine(sandbox, "rebellion-checkpoint.json");
             Dictionary<string, object> snapshot = rebellion.ToDictionary();
-            WriteJsonObject(path, snapshot);
-            ReignShadowRebellion restored = ReignShadowRebellion.FromDictionary(ReadJsonObject(path));
+            CampaignFileService.WriteJsonObject(path, snapshot);
+            ReignShadowRebellion restored = ReignShadowRebellion.FromDictionary(CampaignFileService.ReadJsonObject(path));
             AddVerificationCheck(checks, "rebellion.save_reload", "rebellion", rebellion.Fingerprint() == restored.Fingerprint(), "Rebellion state is idempotent across save/reload.", new Dictionary<string, object> { ["path"] = path });
         }
 
@@ -404,8 +404,8 @@ namespace ReignBetaServer
                 {
                     Dictionary<string, object> checkpoint = new Dictionary<string, object> { ["day"] = day, ["world"] = world.ToDictionary(), ["rebellion"] = rebellion.ToDictionary() };
                     string path = Path.Combine(sandbox, "long-run-" + day + ".json");
-                    WriteJsonObject(path, checkpoint);
-                    Dictionary<string, object> restored = ReadJsonObject(path);
+                    CampaignFileService.WriteJsonObject(path, checkpoint);
+                    Dictionary<string, object> restored = CampaignFileService.ReadJsonObject(path);
                     ReignShadowWorld restoredWorld = ReignShadowWorld.FromDictionary(ReadDictionary(restored, "world"));
                     ReignShadowRebellion restoredRebellion = ReignShadowRebellion.FromDictionary(ReadDictionary(restored, "rebellion"));
                     if (!world.StructuralEquals(restoredWorld)) violations.Add("world checkpoint mismatch at day " + day);
@@ -422,7 +422,7 @@ namespace ReignBetaServer
         {
             if (string.Equals(requestedSuite, "codex_performance", StringComparison.OrdinalIgnoreCase))
             {
-                RunCodexPerformanceLiveVerification(checks, sandbox, options);
+                LlmProviderService.RunCodexPerformanceLiveVerification(checks, sandbox, options);
                 return;
             }
             if (string.Equals(requestedSuite, "codex_images", StringComparison.OrdinalIgnoreCase))
@@ -430,14 +430,14 @@ namespace ReignBetaServer
                 PortraitsService.RunCodexImageLiveVerification(checks, sandbox, options);
                 return;
             }
-            Dictionary<string, object> settings = LoadSettings();
-            if (!LlmProviderConfigured(settings))
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
+            if (!LlmProviderService.LlmProviderConfigured(settings))
             {
                 AddVerificationCheck(checks, "live_llm.configuration", "live_llm", false, "Live LLM verification requires a configured selected provider.", new Dictionary<string, object>
                 {
-                    ["provider"] = NormalizeLlmProvider(ReadString(settings, "llmProvider", OpenAiCompatibleProvider)),
-                    ["apiKeyPresent"] = ProviderKeyConfigured(settings, LlmApiKeySlot(settings)),
-                    ["apiUrlPresent"] = !string.IsNullOrWhiteSpace(LlmApiUrl(settings)),
+                    ["provider"] = LlmProviderService.NormalizeLlmProvider(ReadString(settings, "llmProvider", LlmProviderService.OpenAiCompatibleProvider)),
+                    ["apiKeyPresent"] = SettingsService.ProviderKeyConfigured(settings, SettingsService.LlmApiKeySlot(settings)),
+                    ["apiUrlPresent"] = !string.IsNullOrWhiteSpace(LlmProviderService.LlmApiUrl(settings)),
                     ["codexExecutablePresent"] = !string.IsNullOrWhiteSpace(ReadString(settings, "codexExecutable", ""))
                 }, "blocked");
                 return;
@@ -482,7 +482,7 @@ namespace ReignBetaServer
                 ["createdUtc"] = DateTime.UtcNow.ToString("o"),
                 ["sandboxPath"] = sandbox
             };
-            WriteJsonObject(VerificationGameCommandPath, command);
+            CampaignFileService.WriteJsonObject(VerificationGameCommandPath, command);
             int timeoutSeconds = Math.Max(30, ReadInt(options, "gameTimeoutSeconds", 900));
             Stopwatch wait = Stopwatch.StartNew();
             Dictionary<string, object> status = new Dictionary<string, object>();
@@ -490,7 +490,7 @@ namespace ReignBetaServer
             {
                 if (File.Exists(VerificationGameStatusPath))
                 {
-                    status = ReadJsonObject(VerificationGameStatusPath);
+                    status = CampaignFileService.ReadJsonObject(VerificationGameStatusPath);
                     if (ReadString(status, "commandId", "") == commandId)
                     {
                         string state = ReadString(status, "state", "");
@@ -508,7 +508,7 @@ namespace ReignBetaServer
         {
             EnsureVerificationDirectories();
             string commandId = "game-cancel-" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N").Substring(0, 8);
-            WriteJsonObject(VerificationGameCommandPath, new Dictionary<string, object>
+            CampaignFileService.WriteJsonObject(VerificationGameCommandPath, new Dictionary<string, object>
             {
                 ["commandId"] = commandId,
                 ["command"] = "cancel",
@@ -570,9 +570,9 @@ namespace ReignBetaServer
             if (subModuleText.Length > 0) behaviors = Regex.Matches(subModuleText, "new\\s+([A-Za-z0-9_]+CampaignBehavior)\\s*\\(").Cast<Match>().Select(x => x.Groups[1].Value).Where(x => !IsExcludedCourtVerificationArtifact(x)).Distinct().OrderBy(x => x).ToList();
             List<string> routes = new List<string>();
             // Exact routes come from the registered route table (RouteTable.cs), not from the router's source text.
-            routes = ServerRoutes.Value.Routes.Where(route => route.Match == RouteMatch.Exact).Select(route => route.Path).Where(x => !x.StartsWith("/court/", StringComparison.OrdinalIgnoreCase)).Distinct().OrderBy(x => x).ToList();
+            routes = Program.ServerRoutes.Value.Routes.Where(route => route.Match == Program.RouteMatch.Exact).Select(route => route.Path).Where(x => !x.StartsWith("/court/", StringComparison.OrdinalIgnoreCase)).Distinct().OrderBy(x => x).ToList();
             List<string> guiMovies = string.IsNullOrWhiteSpace(clientRoot) || !Directory.Exists(Path.Combine(clientRoot, "GUI", "Prefabs")) ? new List<string>() : Directory.GetFiles(Path.Combine(clientRoot, "GUI", "Prefabs"), "*.xml").Where(path => !IsExcludedCourtVerificationArtifact(path)).Select(Path.GetFileNameWithoutExtension).OrderBy(x => x).ToList();
-            List<string> prompts = PromptFileNames.Where(x => !IsExcludedCourtVerificationArtifact(x)).OrderBy(x => x).ToList();
+            List<string> prompts = Program.PromptFileNames.Where(x => !IsExcludedCourtVerificationArtifact(x)).OrderBy(x => x).ToList();
             List<string> uncovered = features.Where(row => ReadBool(row, "implemented", false) && ReadStringArray(row, "tests").Count == 0).Select(row => ReadString(row, "id", "")).ToList();
             return new Dictionary<string, object>
             {
@@ -812,7 +812,7 @@ namespace ReignBetaServer
         private static void SaveVerificationResult(Dictionary<string, object> result)
         {
             EnsureVerificationDirectories();
-            string runId = SafePathSegment(ReadString(result, "runId", "verification"), "verification");
+            string runId = CampaignFileService.SafePathSegment(ReadString(result, "runId", "verification"), "verification");
             bool passed = ReadBool(result, "passed", false);
             string directory = passed ? VerificationRunsDir : VerificationFailuresDir;
             string path = Path.Combine(directory, runId + ".json");
@@ -827,7 +827,7 @@ namespace ReignBetaServer
                     ["sandboxPath"] = ReadString(result, "sandboxPath", "")
                 };
             }
-            WriteJsonObject(path, result);
+            CampaignFileService.WriteJsonObject(path, result);
             PruneSuccessfulVerificationRuns();
         }
 
@@ -841,7 +841,7 @@ namespace ReignBetaServer
             retained.UnionWith(Directory.GetFiles(VerificationFailuresDir, "*.json").Select(Path.GetFileNameWithoutExtension));
             retained.UnionWith(VerificationReferencedSandboxNames(VerificationSandboxesDir,
                 Directory.GetFiles(VerificationRunsDir, "*.json").Concat(Directory.GetFiles(VerificationFailuresDir, "*.json"))
-                    .Select(ReadJsonObject)));
+                    .Select(CampaignFileService.ReadJsonObject)));
             foreach (string path in Directory.GetDirectories(VerificationSandboxesDir))
             {
                 if (!retained.Contains(Path.GetFileName(path))
@@ -877,7 +877,7 @@ namespace ReignBetaServer
         private static string FindVerificationRunPath(string runId)
         {
             if (string.IsNullOrWhiteSpace(runId)) return "";
-            string safe = SafePathSegment(runId, "");
+            string safe = CampaignFileService.SafePathSegment(runId, "");
             string success = Path.Combine(VerificationRunsDir, safe + ".json");
             if (File.Exists(success)) return success;
             string failure = Path.Combine(VerificationFailuresDir, safe + ".json");
@@ -892,7 +892,7 @@ namespace ReignBetaServer
             if (Directory.Exists(Path.Combine(packagedContracts, "ReignBeta")) && Directory.Exists(Path.Combine(packagedContracts, "ReignServer"))) return packagedContracts;
             string configured = Environment.GetEnvironmentVariable("REIGN_SOURCE_ROOT") ?? "";
             if (!string.IsNullOrWhiteSpace(configured) && Directory.Exists(Path.Combine(configured, "ReignBeta")) && Directory.Exists(Path.Combine(configured, "ReignServer"))) return Path.GetFullPath(configured);
-            Dictionary<string, object> settings = LoadSettings();
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
             configured = ReadString(settings, "verificationSourceRoot", "");
             if (!string.IsNullOrWhiteSpace(configured) && Directory.Exists(Path.Combine(configured, "ReignBeta")) && Directory.Exists(Path.Combine(configured, "ReignServer"))) return Path.GetFullPath(configured);
 
@@ -918,7 +918,7 @@ namespace ReignBetaServer
 
         private static List<string> ActionNamesFallback()
         {
-            return ActionPromptFileNames.Select(PromptFileToActionFallback).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
+            return Program.ActionPromptFileNames.Select(PromptFileToActionFallback).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
         }
 
         private static List<string> ParseActionNames(string enumText)

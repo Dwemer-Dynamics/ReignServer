@@ -96,7 +96,7 @@ The pending commitments below are your own private dispatch ledger. Mention a pa
                 && ReadString(b, "operation", "send") == ReadString(p, "operation", "send") && ReadString(b, "kind", "inform") == ReadString(p, "kind", "inform")
                 && ReadString(b, "destinationId", "") == ReadString(p, "destinationId", "") && ReadDouble(b, "stayDays", 0) == ReadDouble(p, "stayDays", 0)
                 && ReadDouble(b, "delayDays", 0) == ReadDouble(p, "delayDays", 0))))) return null;
-            var merged = Program.CloneDictionary(original);
+            var merged = VerificationService.CloneDictionary(original);
             merged["communicationPlans"] = plans;
             return merged;
         }
@@ -155,7 +155,7 @@ The pending commitments below are your own private dispatch ledger. Mention a pa
             {
                 if (Json.Serialize(pendingTerms).Length > 24000 || ReadDictionaryList(request, "messages").Sum(m => ReadString(m, "content", "").Length) > 48000)
                     answer = TestDict("ok", false, "error", "Complete revision evidence exceeds the bounded review.");
-                else { providerCalls++; answer = (respond ?? Program.ChatWithLlm)(request); }
+                else { providerCalls++; answer = (respond ?? LlmProviderService.ChatWithLlm)(request); }
             }
             catch (Exception ex) { answer = TestDict("ok", false, "error", ex.GetType().Name); }
             var repaired = ReadBool(answer, "ok", false) ? ApplyCommunicationPlanPatch(parsed, TryParseJsonObject(ReadString(answer, "content", "")), allowSemanticReview: true) : null;
@@ -178,11 +178,11 @@ The pending commitments below are your own private dispatch ledger. Mention a pa
                         semanticPlans++;
                     }
             }
-            var result = Program.CloneDictionary(llm);
+            var result = VerificationService.CloneDictionary(llm);
             var evidence = TestDict("attempted", true, "providerCalls", providerCalls, "completed", repaired != null, "replyUnchanged", true,
                 "draftRevision", drafts.Count > 0, "semanticPlans", semanticPlans);
             result["communicationMetadataRepair"] = evidence;
-            Program.WriteAudit(campaign, correlation, "server", mode, "communication.metadata_repair", hero, "", "", repaired == null ? "failed" : "completed",
+            OperationsService.WriteAudit(campaign, correlation, "server", mode, "communication.metadata_repair", hero, "", "", repaired == null ? "failed" : "completed",
                 ReadLong(answer, "durationMs", 0), "Bounded repair of omitted or unusable communication metadata; no dispatch is authorized by this review.", evidence);
             if (repaired != null) result["content"] = Json.Serialize(repaired);
             else

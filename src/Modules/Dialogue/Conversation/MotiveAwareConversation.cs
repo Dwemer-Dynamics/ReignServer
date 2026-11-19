@@ -193,7 +193,7 @@ namespace ReignBetaServer
                 ["scene"] = scene,
                 ["romance"] = romance,
                 ["requiredEvidenceKeys"] = evidenceKeys,
-                ["identityView"] = Program.CloneDictionary(
+                ["identityView"] = VerificationService.CloneDictionary(
                     identityView ?? new Dictionary<string, object>()),
                 ["latestPlayerText"] = playerText ?? "",
                 ["sanitizedState"] = sanitizedState,
@@ -201,7 +201,7 @@ namespace ReignBetaServer
                     payload, "mustAccountForPriorSpeaker", false),
                 ["groupTurnResponses"] = priorGroupTurns
                     .Skip(Math.Max(0, priorGroupTurns.Count - 5))
-                    .Select(Program.CloneDictionary)
+                    .Select(VerificationService.CloneDictionary)
                     .ToList()
             };
             result["conversationAgency"] = BuildConversationAgencyContext(campaignId, subjectId, targetId, payload, profile, characteristics, result);
@@ -276,7 +276,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> opportunity)
         {
             Dictionary<string, object> sanitized =
-                Program.CloneDictionary(
+                VerificationService.CloneDictionary(
                     state ?? new Dictionary<string, object>());
             identityView = identityView
                 ?? new Dictionary<string, object>();
@@ -354,10 +354,10 @@ namespace ReignBetaServer
             if (payload == null || string.IsNullOrWhiteSpace(targetId)
                 || ReadDictionary(payload, "opportunitySnapshot") != null
                 || ReadDictionary(payload, "playerOpportunitySnapshot") != null) return;
-            Dictionary<string, object> targetProfile = Program.ReadJsonObject(Program.CharacterFile(campaignId, targetId, "profile.json"));
+            Dictionary<string, object> targetProfile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, targetId, "profile.json"));
             if (targetProfile.Count == 0
                 && CharactersService.LoadCharacterProfileLibrary().TryGetValue(targetId, out Dictionary<string, object> shipped))
-                targetProfile = Program.CloneDictionary(ReadDictionary(shipped, "sourceFacts") ?? shipped);
+                targetProfile = VerificationService.CloneDictionary(ReadDictionary(shipped, "sourceFacts") ?? shipped);
             Dictionary<string, object> targetCharacteristics = CharactersService.LoadCharacterStack(campaignId, targetId);
             Dictionary<string, object> observer = OpportunityProfileSnapshot(subjectProfile, subjectCharacteristics);
             Dictionary<string, object> target = OpportunityProfileSnapshot(targetProfile, targetCharacteristics);
@@ -376,12 +376,12 @@ namespace ReignBetaServer
         private static Dictionary<string, object> OpportunityProfileSnapshot(
             Dictionary<string, object> profile, Dictionary<string, object> characteristics)
         {
-            Dictionary<string, object> result = Program.CloneDictionary(profile ?? new Dictionary<string, object>());
+            Dictionary<string, object> result = VerificationService.CloneDictionary(profile ?? new Dictionary<string, object>());
             characteristics = characteristics ?? new Dictionary<string, object>();
             Dictionary<string, object> wealth = ReadDictionary(characteristics, "wealth");
             Dictionary<string, object> appearance = ReadDictionary(characteristics, "appearance");
-            if (wealth != null && wealth.Count > 0) result["wealth"] = Program.CloneDictionary(wealth);
-            if (appearance != null && appearance.Count > 0) result["appearance"] = Program.CloneDictionary(appearance);
+            if (wealth != null && wealth.Count > 0) result["wealth"] = VerificationService.CloneDictionary(wealth);
+            if (appearance != null && appearance.Count > 0) result["appearance"] = VerificationService.CloneDictionary(appearance);
             return result;
         }
 
@@ -865,7 +865,7 @@ namespace ReignBetaServer
         {
             List<Dictionary<string, object>> domains = ReadDictionaryList(context, "activeDomains");
             Dictionary<string, object> scores = new Dictionary<string, object>(ReadDictionary(context, "highlightedScores") ?? new Dictionary<string, object>(), StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, object> opportunity = Program.CloneDictionary(ReadDictionary(context, "opportunity") ?? new Dictionary<string, object>());
+            Dictionary<string, object> opportunity = VerificationService.CloneDictionary(ReadDictionary(context, "opportunity") ?? new Dictionary<string, object>());
             Dictionary<string, object> relationship = ReadDictionary(context, "relationshipNpcToTarget") ?? new Dictionary<string, object>();
             Dictionary<string, object> spouseRelationship = ReadDictionary(context, "relationshipNpcToSpouse") ?? new Dictionary<string, object>();
             Dictionary<string, object> romance = ReadDictionary(context, "romance") ?? new Dictionary<string, object>();

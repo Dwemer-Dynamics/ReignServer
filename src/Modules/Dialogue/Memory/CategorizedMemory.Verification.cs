@@ -24,7 +24,7 @@ namespace ReignBetaServer
             DialogueService.InsertMemoryRow(connection, memoryId, eventId, ownerId, "episodic", ts, 10d, "", summary,
                 participants, witnesses, Json.Serialize(participants), new List<string> { ownerId }, heardAsRumorBy,
                 new List<string>(), "private", importance, 0.5d, confidence,
-                DialogueService.MergeStringLists(Program.SimpleTags(summary), new[] { "conversation" }), "active", "categorized_memory_test",
+                DialogueService.MergeStringLists(CampaignFileService.SimpleTags(summary), new[] { "conversation" }), "active", "categorized_memory_test",
                 Json.Serialize(payload), "", "not_indexed");
             DialogueStore.UpdateMemories(connection, new Dictionary<string, object> { ["domain"] = domain, ["id"] = memoryId });
         }
@@ -510,7 +510,7 @@ namespace ReignBetaServer
                 try
                 {
                     ReignPostgreSqlStorage.ClearAllPools();
-                    string path = Program.CampaignDirectory(campaignId);
+                    string path = CampaignFileService.CampaignDirectory(campaignId);
                     if (Directory.Exists(path)) Directory.Delete(path, true);
                 }
                 catch

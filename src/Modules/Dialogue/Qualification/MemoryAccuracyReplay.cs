@@ -62,7 +62,7 @@ namespace ReignBetaServer
             string path = MemoryReplayInputPath("input.json");
             if (!File.Exists(path) || new FileInfo(path).Length > 32 * 1024 * 1024)
                 throw new InvalidOperationException("A bounded memory-accuracy/input.json must be staged under the validated artifact's data/tests directory.");
-            var input = Program.ReadJsonObject(path);
+            var input = CampaignFileService.ReadJsonObject(path);
             var cases = ReadDictionaryList(input, "cases");
             if (ReadString(input, "schema", "") != "reign-memory-retrieval-replay-input-v1" || cases.Count < 1 || cases.Count > 1000
                 || cases.Select(c => ReadString(c, "caseId", "")).Distinct(StringComparer.Ordinal).Count() != cases.Count)
@@ -76,7 +76,7 @@ namespace ReignBetaServer
             string campaign = "memory_replay_" + Guid.NewGuid().ToString("N");
             try
             {
-                for (int index = 0; index < cases.Count && !Program.ShouldCancelVerification(); index++)
+                for (int index = 0; index < cases.Count && !VerificationService.ShouldCancelVerification(); index++)
                 {
                     var item = cases[index];
                     string npc = "replay_npc_" + index, player = "replay_player_" + index, session = "replay_session_" + index;
@@ -134,7 +134,7 @@ namespace ReignBetaServer
                     "Memory and common transcript token estimates are not full provider-input or generation measurements.",
                     "Retrieval outputs require independent source/answer coverage evaluation and later semantic/voice/native acceptance." });
             string resultPath = Path.Combine(Program.TestsDir, "memory-accuracy", "retrieval-result-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".json");
-            Program.WriteJsonObject(resultPath, report);
+            CampaignFileService.WriteJsonObject(resultPath, report);
             return TestDict("ok", results.Count == cases.Count, "resultPath", resultPath, "completedCases", results.Count,
                 "inputSha256", report["inputSha256"], "certificateEligible", false, "providerCalls", 0);
         }

@@ -46,7 +46,7 @@ namespace ReignBetaServer
             foreach (var exchange in receipt.Exchanges ?? new())
                 if (Enumerable.Range(exchange.FirstMessageIndex, exchange.MessageCount).All(historicalIndices.Contains))
                     completeExchanges.Add((exchange.SourceId, exchange.Text));
-            return window.Select(entry => Program.CloneDictionary(entry.Message)).ToList();
+            return window.Select(entry => VerificationService.CloneDictionary(entry.Message)).ToList();
         }
 
         internal static Dictionary<string, object> RetryRoleplayContinuityViolation(
@@ -114,7 +114,7 @@ namespace ReignBetaServer
                 && FindCriticalConversationContinuityViolations(sanitizedOriginal, payload, heroId).Count == 0)
             {
                 string sanitizedContent = Json.Serialize(sanitizedOriginal);
-                if (Program.StructuredResponseIsComplete(sanitizedContent, auditMode))
+                if (ConversationResponseService.StructuredResponseIsComplete(sanitizedContent, auditMode))
                 {
                     MarkRepairedVisibleResponse(
                         sanitizedOriginal, true);
@@ -135,7 +135,7 @@ namespace ReignBetaServer
                     };
                     llm["content"] = sanitizedContent;
                     llm["roleplayContinuityRepair"] = deterministicEvidence;
-                    Program.WriteAudit(campaignId, correlationId, "server", auditMode,
+                    OperationsService.WriteAudit(campaignId, correlationId, "server", auditMode,
                         "llm.roleplay_continuity_repair", heroId, "", eventId,
                         "completed", 0,
                         "Unsupported continuity writes and repeated stage directions were removed deterministically while preserving the substantive in-character answer.",
@@ -145,7 +145,7 @@ namespace ReignBetaServer
             }
 
             if (originalRemaining.All(IsConversationStyleWarning)
-                && Program.StructuredResponseIsComplete(Json.Serialize(originalForRepair), auditMode))
+                && ConversationResponseService.StructuredResponseIsComplete(Json.Serialize(originalForRepair), auditMode))
             {
                 if (removedUnsupportedWrites) MarkRepairedVisibleResponse(originalForRepair, true);
                 llm["content"] = Json.Serialize(originalForRepair);
@@ -157,7 +157,7 @@ namespace ReignBetaServer
                     ["repairRequestChars"] = 0, ["providerCalls"] = 0
                 };
                 llm["roleplayContinuityRepair"] = styleEvidence;
-                Program.WriteAudit(campaignId, correlationId, "server", auditMode, "llm.roleplay_continuity_style",
+                OperationsService.WriteAudit(campaignId, correlationId, "server", auditMode, "llm.roleplay_continuity_style",
                     heroId, "", eventId, "completed", 0,
                     "Repetitive phrasing was retained as a style warning without rewriting valid dialogue or its effects.", styleEvidence);
                 return llm;
@@ -248,23 +248,23 @@ namespace ReignBetaServer
             {
                 var repairEnvelope = ReadDictionary(repairRequest, "promptEnvelope") ?? TestDict();
                 ConversationStructureReceipts.Add(repairEnvelope, new ConversationStructureReceipt {
-                    Messages = ReadDictionaryList(repairRequest, "messages").Select(Program.CloneDictionary).ToList(),
+                    Messages = ReadDictionaryList(repairRequest, "messages").Select(VerificationService.CloneDictionary).ToList(),
                     CanonicalTranscript = carriedExchanges
                 });
                 repairRequest["promptEnvelope"] = repairEnvelope;
             }
 
-            Dictionary<string, object> repaired = responder == null ? Program.ChatWithLlm(repairRequest) : responder(repairRequest);
+            Dictionary<string, object> repaired = responder == null ? LlmProviderService.ChatWithLlm(repairRequest) : responder(repairRequest);
             Dictionary<string, object> repairedParsed = TryParseJsonObject(ReadString(repaired, "content", ""));
             bool recallContextReview = violations.Any(v => ReadString(v, "type", "") == "critical_continuity_recall_context");
             if (repairedParsed != null)
             {
                 if (!repairedParsed.ContainsKey("actionGate") && parsed.ContainsKey("actionGate"))
-                    repairedParsed["actionGate"] = Program.CloneDictionary(ReadDictionary(parsed, "actionGate"));
+                    repairedParsed["actionGate"] = VerificationService.CloneDictionary(ReadDictionary(parsed, "actionGate"));
                 repairedParsed = RemoveUnsupportedContinuityWrites(repairedParsed);
                 repaired["content"] = Json.Serialize(repairedParsed);
                 if (recallContextReview && ReadBool(repaired, "ok", false)
-                    && Program.StructuredResponseIsComplete(ReadString(repaired, "content", ""), auditMode))
+                    && ConversationResponseService.StructuredResponseIsComplete(ReadString(repaired, "content", ""), auditMode))
                     BindDeliveredRecallRewrite(payload, heroId, repairedParsed);
             }
             List<Dictionary<string, object>> remaining = repairedParsed == null
@@ -306,7 +306,7 @@ namespace ReignBetaServer
                 && StructuredActionContinuityDecisionPreserved(payload, parsed, repairedParsed)
                 && !remaining.Any(IsBlockingContinuityViolation)
                 && !remaining.Any(IsConversationExpressionViolation)
-                && Program.StructuredResponseIsComplete(
+                && ConversationResponseService.StructuredResponseIsComplete(
                     ReadString(repaired, "content", ""), auditMode);
             bool revalidationCleared = usableRepair
                 && remaining.All(IsConversationStyleWarning);
@@ -338,7 +338,7 @@ namespace ReignBetaServer
                 ["remaining"] = remaining,
                 ["warnings"] = remaining.Where(IsConversationStyleWarning).ToList(),
                 ["accepted"] = usableRepair,
-                ["structuredResponseComplete"] = repairedParsed != null && Program.StructuredResponseIsComplete(Json.Serialize(repairedParsed), auditMode),
+                ["structuredResponseComplete"] = repairedParsed != null && ConversationResponseService.StructuredResponseIsComplete(Json.Serialize(repairedParsed), auditMode),
                 ["structuredDecisionPreserved"] = repairedParsed != null && StructuredActionContinuityDecisionPreserved(payload, parsed, repairedParsed),
                 ["revalidationCleared"] = revalidationCleared,
                 ["secondAttemptReturned"] = usableRepair || markedFailure,
@@ -352,7 +352,7 @@ namespace ReignBetaServer
                 ["repairRequestChars"] = Json.Serialize(repairRequest).Length,
                 ["originalResponseChars"] = Json.Serialize(parsed).Length
             };
-            Program.WriteAudit(campaignId, correlationId, "server", auditMode,
+            OperationsService.WriteAudit(campaignId, correlationId, "server", auditMode,
                 "llm.roleplay_continuity_repair", heroId, "", eventId,
                 !usableRepair && !markedFailure ? "failed"
                     : revalidationCleared ? "completed"
@@ -390,7 +390,7 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> currentLines)
         {
             int limit = Math.Max(10, Math.Min(60,
-                ReadInt(Program.LoadSettings(), "recentRawConversationTurns", 30)));
+                ReadInt(SettingsService.LoadSettings(), "recentRawConversationTurns", 30)));
             List<Dictionary<string, object>> combined = new List<Dictionary<string, object>>();
             if (!string.IsNullOrWhiteSpace(campaignId) && !string.IsNullOrWhiteSpace(heroId))
             {
@@ -408,7 +408,7 @@ namespace ReignBetaServer
                 }
                 catch (Exception ex)
                 {
-                    Program.LogOperational("roleplay_continuity.history_lookup_failed",
+                    OperationsService.LogOperational("roleplay_continuity.history_lookup_failed",
                         new Dictionary<string, object>
                         {
                             ["campaignId"] = campaignId,

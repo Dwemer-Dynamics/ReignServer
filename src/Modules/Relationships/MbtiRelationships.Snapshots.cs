@@ -56,7 +56,7 @@ namespace ReignBetaServer
             Stopwatch payloadPreparationTimer = Stopwatch.StartNew();
             string campaignId = ReadString(payload, "campaignId", "default");
             string timelineId = ReadString(payload, "timelineId", "main");
-            string correlationId = Program.EnsureCorrelationId(payload);
+            string correlationId = OperationsService.EnsureCorrelationId(payload);
             int day = (int)Math.Floor(ReadDouble(payload, "worldDay", 0d) + 0.000001d);
             int cadenceShard = ReadInt(payload, "cadenceShard", -1);
             List<Dictionary<string, object>> cadenceInputs = ReadDictionaryList(payload, "cadenceInputs");

@@ -17,12 +17,12 @@ namespace ReignBetaServer
             string campaign = "npc_lives_test_" + Guid.NewGuid().ToString("N");
             try
             {
-                string fixture = Path.Combine(Program.VerificationDir, "npc-lives-options-fixture.json");
-                Program.WriteJsonObject(fixture, TestDict("markup", Program.ReignXpOptionsHtml(), "script", Program.ReignXpOptionsScript(),
-                    "diagnosticsMarkup", Program.NpcLivesDiagnosticsHtml(), "diagnosticsScript", NpcStoryEditorScript(),
+                string fixture = Path.Combine(VerificationService.VerificationDir, "npc-lives-options-fixture.json");
+                CampaignFileService.WriteJsonObject(fixture, TestDict("markup", SettingsService.ReignXpOptionsHtml(), "script", SettingsService.ReignXpOptionsScript(),
+                    "diagnosticsMarkup", SettingsService.NpcLivesDiagnosticsHtml(), "diagnosticsScript", NpcStoryEditorScript(),
                     "definitions", NpcStoryCatalog.All));
                 Check("production_options_browser_fixture", File.Exists(fixture), fixture);
-                string simpleOptions = Program.ReignXpOptionsHtml(), diagnostics = Program.NpcLivesDiagnosticsHtml();
+                string simpleOptions = SettingsService.ReignXpOptionsHtml(), diagnostics = SettingsService.NpcLivesDiagnosticsHtml();
                 Check("story_editor_and_advanced_controls_live_in_diagnostics", !simpleOptions.Contains("npcStoryJson")
                     && !simpleOptions.Contains("npcLivesApproachProvider") && !simpleOptions.Contains("npcLivesResumeHours")
                     && simpleOptions.Contains("npcLivesSummonsTravelTimePercent") && simpleOptions.Contains("npcLivesChance20")
@@ -44,9 +44,9 @@ namespace ReignBetaServer
                     && !diagnostics.Contains("id='" + NpcLivesOptions.InitialApproachKey + "'")
                     && !initialApproachOff.Allows("approach") && initialApproachOff.Allows("major")
                     && initialApproachOff.Allows("announcement") && initialApproachOff.Allows("reaction")
-                    && Program.ValidateNpcLivesOptions(TestDict(NpcLivesOptions.InitialApproachKey, false)).Length == 0
-                    && Program.ValidateNpcLivesOptions(TestDict(NpcLivesOptions.InitialApproachKey, "false")).Length > 0
-                    && !ReadBool(Program.NpcLivesOptionsForClient(TestDict(NpcLivesOptions.InitialApproachKey, false)), NpcLivesOptions.InitialApproachKey, true));
+                    && SettingsService.ValidateNpcLivesOptions(TestDict(NpcLivesOptions.InitialApproachKey, false)).Length == 0
+                    && SettingsService.ValidateNpcLivesOptions(TestDict(NpcLivesOptions.InitialApproachKey, "false")).Length > 0
+                    && !ReadBool(SettingsService.NpcLivesOptionsForClient(TestDict(NpcLivesOptions.InitialApproachKey, false)), NpcLivesOptions.InitialApproachKey, true));
                 Check("approach_has_no_short_timeout_control", !NpcLivesOptions.Numbers.Any(s => s.Key == "npcLivesApproachTimeoutMs")
                     && !simpleOptions.Contains("npcLivesApproachTimeoutMs") && !diagnostics.Contains("npcLivesApproachTimeoutMs"));
                 var fixtureState = new NpcLivesState { CampaignId = campaign, TimelineId = "test" };
@@ -421,9 +421,9 @@ namespace ReignBetaServer
                 bool allRejected = true;
                 foreach (var change in new[] { TestDict("leaseId", "forged"), TestDict("activeSaveName", "Baseline"), TestDict("timelineId", "foreign"),
                     TestDict("gameInstanceId", "old"), TestDict("nativeSaveInProgress", true), TestDict("timeMode", "FastForward") })
-                { var invalidFixture = Program.CloneDictionary(fixtureRequest); foreach (var field in change) invalidFixture[field.Key] = field.Value;
+                { var invalidFixture = VerificationService.CloneDictionary(fixtureRequest); foreach (var field in change) invalidFixture[field.Key] = field.Value;
                     allRejected &= !NpcLivesFixtureAuthorized(invalidFixture, fixtureRun, fixtureRuntime, fixtureArm); }
-                var altered = Program.CloneDictionary(fixtureRequest); var alteredCase = Program.CloneDictionary(caseFields); alteredCase["chapterId"] = "forged"; altered["testCase"] = alteredCase;
+                var altered = VerificationService.CloneDictionary(fixtureRequest); var alteredCase = VerificationService.CloneDictionary(caseFields); alteredCase["chapterId"] = "forged"; altered["testCase"] = alteredCase;
                 Check("operator_setup_rejects_forged_authority_changed_chapter_and_stale_runtime", allRejected
                     && !NpcLivesFixtureAuthorized(altered, fixtureRun, fixtureRuntime, fixtureArm)
                     && !NpcLivesFixtureAuthorized(fixtureRequest, fixtureRun, TestDict(), fixtureArm)
@@ -971,8 +971,8 @@ namespace ReignBetaServer
             }
             finally
             {
-                try { Program.WriteJsonObject(Path.Combine(Program.VerificationDir, "npc-lives-self-tests.json"), TestDict(
-                    "schema", "reign-npc-lives-offline-evidence-v1", "passed", results.All(Program.CheckPassed), "checks", results)); }
+                try { CampaignFileService.WriteJsonObject(Path.Combine(VerificationService.VerificationDir, "npc-lives-self-tests.json"), TestDict(
+                    "schema", "reign-npc-lives-offline-evidence-v1", "passed", results.All(VerificationService.CheckPassed), "checks", results)); }
                 finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             }
             return results;

@@ -42,7 +42,7 @@ namespace ReignBetaServer
                 });
             }
             // Sanitize bounded diagnostics as well, including strings with labeled secrets.
-            string metadata = Json.Serialize(RedactPromptEvidenceMetadata(Program.SanitizeAuditValue(diagnostics ?? new Dictionary<string, object>(), 0), apiKey));
+            string metadata = Json.Serialize(RedactPromptEvidenceMetadata(OperationsService.SanitizeAuditValue(diagnostics ?? new Dictionary<string, object>(), 0), apiKey));
             return new Dictionary<string, object> {
                 ["schema"] = "reign-prompt-evidence-v1", ["evidenceId"] = Guid.NewGuid().ToString("N"),
                 ["campaignId"] = campaignId, ["correlationId"] = correlationId,
@@ -79,13 +79,13 @@ namespace ReignBetaServer
             try
             {
                 var row = BuildPromptEvidenceRecord(campaignId, correlationId, requestType, model, request, diagnostics, apiKey, captureStage);
-                Program.AppendBoundedJsonLineToPath(Program.CampaignFile(campaignId, "audit", "prompt-evidence.jsonl"), row,
+                CampaignFileService.AppendBoundedJsonLineToPath(CampaignFileService.CampaignFile(campaignId, "audit", "prompt-evidence.jsonl"), row,
                     8L * 1024L * 1024L, 4L * 1024L * 1024L);
             }
             catch
             {
                 // Evidence failure must not disrupt an otherwise valid conversation.
-                Program.LogOperational("prompts.evidence_unavailable", new Dictionary<string, object> { ["correlationId"] = correlationId });
+                OperationsService.LogOperational("prompts.evidence_unavailable", new Dictionary<string, object> { ["correlationId"] = correlationId });
             }
         }
 
@@ -121,12 +121,12 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> ReadPromptEvidenceApi(Dictionary<string, string> query)
         {
             query = query ?? new Dictionary<string, string>();
-            string campaignId = Program.ResolveLogCampaignId(query.TryGetValue("campaignId", out string campaign) ? campaign : "");
+            string campaignId = CampaignFileService.ResolveLogCampaignId(query.TryGetValue("campaignId", out string campaign) ? campaign : "");
             string correlationId = query.TryGetValue("correlationId", out string correlation) ? correlation : "";
             if (string.IsNullOrWhiteSpace(correlationId) || correlationId.Length > 200)
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "An exact correlationId is required." };
             string evidenceId = query.TryGetValue("evidenceId", out string evidence) ? evidence : "";
-            var matches = Program.ReadJsonLinesFromPath(Program.CampaignFile(campaignId, "audit", "prompt-evidence.jsonl"))
+            var matches = Program.ReadJsonLinesFromPath(CampaignFileService.CampaignFile(campaignId, "audit", "prompt-evidence.jsonl"))
                 .Where(row => ReadString(row, "correlationId", "") == correlationId).ToList();
             var selected = string.IsNullOrEmpty(evidenceId) ? matches.LastOrDefault()
                 : matches.LastOrDefault(row => ReadString(row, "evidenceId", "") == evidenceId);

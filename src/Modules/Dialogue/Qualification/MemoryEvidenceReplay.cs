@@ -35,7 +35,7 @@ namespace ReignBetaServer
                 }
                 try
                 {
-                    var settings = Program.LoadSettings();
+                    var settings = SettingsService.LoadSettings();
                     Audit = TestDict("mode", ConversationReferenceMode(settings), "source", supplied ? "fixture"
                         : previous != null ? "inherited_fixture" : settings.ContainsKey("memoryReferenceGraphMode") ? "settings" : "default",
                         "historyBackfilled", false, "scope", "isolated_fixture_not_native_campaign");
@@ -129,7 +129,7 @@ namespace ReignBetaServer
                 if (characteristics?.ContainsKey("politicalProfile") == true
                     && CanonicalJson(ReadDictionary(characteristics, "politicalProfile")) != CanonicalJson(applied))
                     return "initial_native_political_snapshots_disagree";
-                var content = Program.CloneDictionary(applied);
+                var content = VerificationService.CloneDictionary(applied);
                 foreach (string key in new[] { "CampaignId", "HeroId", "TimelineId" }) content.Remove(key);
                 // Mature or nested cross-world history needs its own receipt; this
                 // initial characterization supports only an unchanged genesis.
@@ -162,23 +162,23 @@ namespace ReignBetaServer
             if (campaign == ReadString(source, "CampaignId", "") || observer == ReadString(source, "HeroId", "")
                 || timeline == ReadString(source, "TimelineId", ""))
                 throw new InvalidOperationException("The replay political namespace must differ from the source.");
-            var bound = Program.CloneDictionary(source);
+            var bound = VerificationService.CloneDictionary(source);
             bound["CampaignId"] = campaign; bound["HeroId"] = observer; bound["TimelineId"] = timeline;
             var value = System.Text.Json.JsonSerializer.Deserialize<GovernmentPoliticalProfile>(Json.Serialize(bound));
-            string path = Program.CharacterFile(campaign, observer, "politics", "revision-1-" + SafeMemoryKey(timeline) + ".json");
+            string path = CampaignFileService.CharacterFile(campaign, observer, "politics", "revision-1-" + SafeMemoryKey(timeline) + ".json");
             lock (CharactersService.PoliticalProfileLock)
             {
-                var existing = Program.ReadJsonObject(path);
+                var existing = CampaignFileService.ReadJsonObject(path);
                 if (existing.Count > 0 && CanonicalJson(existing) != CanonicalJson(bound))
                     throw new InvalidOperationException("The isolated political revision already has different content.");
                 CharactersService.WritePoliticalRevision(campaign, observer, value);
-                if (value.Revision != 1 || CanonicalJson(Program.ReadJsonObject(path)) != CanonicalJson(bound))
+                if (value.Revision != 1 || CanonicalJson(CampaignFileService.ReadJsonObject(path)) != CanonicalJson(bound))
                     throw new InvalidOperationException("The isolated political revision did not preserve its captured content.");
             }
-            profile["appliedPoliticalProfile"] = Program.CloneDictionary(bound);
-            characteristics["politicalProfile"] = Program.CloneDictionary(bound);
+            profile["appliedPoliticalProfile"] = VerificationService.CloneDictionary(bound);
+            characteristics["politicalProfile"] = VerificationService.CloneDictionary(bound);
             return TestDict("status", "fixture_rebound_not_native_issued", "sourceSha256", PromptHash(CanonicalJson(source)),
-                "boundSha256", PromptHash(CanonicalJson(bound)), "writtenSha256", PromptHash(CanonicalJson(Program.ReadJsonObject(path))),
+                "boundSha256", PromptHash(CanonicalJson(bound)), "writtenSha256", PromptHash(CanonicalJson(CampaignFileService.ReadJsonObject(path))),
                 "changedPaths", new[] { "CampaignId", "HeroId", "TimelineId" }, "revisionPreserved", true,
                 "limits", "Only revision1 with empty change/evidence/interval history is supported. Values are preserved; this is an isolated namespace clone, not native issuance or restore acceptance.");
         }
@@ -205,16 +205,16 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> CaptureMemoryReplayProviderRequest(Dictionary<string, object> request,
             Dictionary<string, object> fixtureSettings)
         {
-            var captured = Program.CloneDictionary(request);
-            var payload = Program.CloneDictionary(request);
-            var settings = Program.CloneDictionary(fixtureSettings);
+            var captured = VerificationService.CloneDictionary(request);
+            var payload = VerificationService.CloneDictionary(request);
+            var settings = VerificationService.CloneDictionary(fixtureSettings);
             string purpose = ReadString(payload, "requestType", "dialogue");
             string model = ReadString(payload, "model", "");
             string error = "";
-            if (Program.IsRetiredMemoryRequest(purpose)) error = "memory_llm_stage_retired";
+            if (LlmProviderService.IsRetiredMemoryRequest(purpose)) error = "memory_llm_stage_retired";
             if (model.Length == 0 && error.Length == 0) error = "missing_fixture_model";
             var wire = TestDict("schema", "reign-memory-provider-wire-capture-v1", "status", error.Length == 0 ? "captured" : "blocked",
-                "requestType", purpose, "model", model, "provider", Program.NanoGptProvider, "apiUrl", PortraitsService.NanoGptChatCompletionsUrl,
+                "requestType", purpose, "model", model, "provider", LlmProviderService.NanoGptProvider, "apiUrl", PortraitsService.NanoGptChatCompletionsUrl,
                 "providerCalls", 0, "certificateEligible", false, "scope", "initial_json_shared_builders_nano_fixture",
                 "excluded", new[] { "credentials_and_http_headers", "http_dispatch", "runtime_queue_and_cooldowns", "retries", "other_providers", "native_and_semantic_acceptance" });
             captured["providerWireCapture"] = wire;
@@ -227,7 +227,7 @@ namespace ReignBetaServer
                 messages.Add(TestDict("role", "user", "content", ReadString(payload, "prompt", ReadString(payload, "text", ""))));
             }
             if (EffectiveReasoningEffort(settings, payload, purpose) != "none") ApplyPrivateReasoningPolicyToMessages(messages);
-            var body = Program.BuildChatRequestBody(settings, payload, messages, model);
+            var body = LlmProviderService.BuildChatRequestBody(settings, payload, messages, model);
             ConfigurePromptCacheRouting(settings, payload, body, PortraitsService.NanoGptChatCompletionsUrl, model, purpose);
             wire["reasoningRouting"] = ConfigureReasoningRouting(settings, payload, body, PortraitsService.NanoGptChatCompletionsUrl, model, purpose);
             string json = Json.Serialize(body);
@@ -312,10 +312,10 @@ namespace ReignBetaServer
         private static Dictionary<string, object> EvidenceWriterContinuationFixture(Dictionary<string, object> fixture,
             Dictionary<string, object> continuation)
         {
-            var next = Program.CloneDictionary(fixture);
+            var next = VerificationService.CloneDictionary(fixture);
             foreach (string key in new[] { "response", "repairResponses", "nextContribution", "nextPlanResponse", "nextAssemblyResponse", "nextReviewResponse", "continuation" })
                 next.Remove(key);
-            foreach (var pair in Program.CloneDictionary(continuation)) next[pair.Key] = pair.Value;
+            foreach (var pair in VerificationService.CloneDictionary(continuation)) next[pair.Key] = pair.Value;
             return next;
         }
 
@@ -524,7 +524,7 @@ namespace ReignBetaServer
                         || continuation.Keys.Any(k => !new[] { "response", "repairResponses", "nextContribution", "nextPlanResponse", "nextAssemblyResponse",
                             "nextReviewResponse", "finalCheck", "continuation" }.Contains(k, StringComparer.Ordinal)))
                         return "invalid_writer_continuation";
-                    var continuedItem = Program.CloneDictionary(item);
+                    var continuedItem = VerificationService.CloneDictionary(item);
                     continuedItem["writerReplay"] = EvidenceWriterContinuationFixture(writer, continuation);
                     string continuationError = MemoryEvidenceReplayInputError(continuedItem, continuationDepth + 1);
                     if (continuationError.Length > 0) return continuationError;
@@ -569,11 +569,11 @@ namespace ReignBetaServer
             string heroName = ReadString(ReadDictionary(fixture, "profile"), "name",
                 ReadString(transcript.LastOrDefault(t => ReadString(t, "speakerId", "") == observer), "speaker", "Observer"));
             string playerName = EvidenceReplayPlayerName(item, transcript, peer);
-            var profile = Program.CloneDictionary(ReadDictionary(fixture, "profile"));
+            var profile = VerificationService.CloneDictionary(ReadDictionary(fixture, "profile"));
             profile["name"] = heroName; profile["heroStringId"] = observer;
             profile["campaignId"] = campaign;
             profile["politicalTimelineId"] = ReadString(context, "timelineId", "main");
-            var payload = Program.CloneDictionary(context);
+            var payload = VerificationService.CloneDictionary(context);
             payload["campaignId"] = campaign; payload["heroStringId"] = observer;
             payload["mainHeroStringId"] = peer; payload["playerHeroStringId"] = peer;
             payload["mainHeroName"] = playerName; payload["playerName"] = playerName;
@@ -590,20 +590,20 @@ namespace ReignBetaServer
             // writer model as the captured request, not the Lab's default model.
             // Captured capacity metadata is fixture evidence only: no network or
             // production settings write is allowed, and normal limits still apply.
-            var writerSettings = Program.CloneDictionary(settings);
-            writerSettings["llmProvider"] = Program.NanoGptProvider;
+            var writerSettings = VerificationService.CloneDictionary(settings);
+            writerSettings["llmProvider"] = LlmProviderService.NanoGptProvider;
             writerSettings["dialogueModel"] = model; writerSettings["eventsModel"] = model;
             writerSettings["apiKey"] = ""; writerSettings["nanoGptApiKey"] = "";
             ApplyReplayGenerationSettings(fixture, writerSettings);
             if (ReadDictionary(fixture, "contextCapacity") is { } capturedCapacity)
             {
-                var certificate = Program.CloneDictionary(capturedCapacity);
+                var certificate = VerificationService.CloneDictionary(capturedCapacity);
                 certificate["endpoint"] = PortraitsService.NanoGptChatCompletionsUrl;
-                string routeKey = Program.NanoGptProvider + ":" + model + ":" + PromptHash(PortraitsService.NanoGptChatCompletionsUrl + "|" + CanonicalJson(TestDict())).Substring(0, 20);
+                string routeKey = LlmProviderService.NanoGptProvider + ":" + model + ":" + PromptHash(PortraitsService.NanoGptChatCompletionsUrl + "|" + CanonicalJson(TestDict())).Substring(0, 20);
                 writerSettings["verifiedConversationContextWindows"] = TestDict(routeKey, certificate);
             }
             var empty = TestDict();
-            var characteristics = Program.CloneDictionary(ReadDictionary(fixture, "characteristics"));
+            var characteristics = VerificationService.CloneDictionary(ReadDictionary(fixture, "characteristics"));
             var initialNativeContext = MapReplayInitialNativeContext(fixture, ReadString(item, "observerId", ""),
                 ReadString(item, "peerId", ""), observer, peer);
             Dictionary<string, object> initialPoliticalBinding = null;
@@ -611,14 +611,14 @@ namespace ReignBetaServer
             {
                 if (preparedWriterRequest != null || continuationDepth != 0)
                     throw new InvalidOperationException("Initial native context cannot override a prepared or continued request.");
-                foreach (var pair in initialNativeContext) payload[pair.Key] = Program.CloneDictionary((Dictionary<string, object>)pair.Value);
+                foreach (var pair in initialNativeContext) payload[pair.Key] = VerificationService.CloneDictionary((Dictionary<string, object>)pair.Value);
                 initialPoliticalBinding = BindInitialReplayPoliticalProfile(item, fixture, profile, characteristics,
                     campaign, observer, ReadString(context, "timelineId", "main"));
             }
             var nativeIdentity = ReadDictionary(initialNativeContext, "identityView");
             var identity = nativeIdentity == null
                 ? TestDict("identityState", "verified", "canonicalNameAllowed", true, "usableName", playerName)
-                : Program.CloneDictionary(nativeIdentity);
+                : VerificationService.CloneDictionary(nativeIdentity);
             Dictionary<string, object> Request(Dictionary<string, object> turn, List<Dictionary<string, object>> prior,
                 Dictionary<string, object> memory, PublishedPartyReplayView initialView = null)
             {
@@ -630,22 +630,22 @@ namespace ReignBetaServer
                 // continuity adds the legacy history again and final preflight
                 // cannot verify the selected precision sources.
                 var memoryEvidence = ReadDictionary(memory, "precisionEvidence");
-                turn["memoryPrecisionEvidence"] = memoryEvidence == null ? null : Program.CloneDictionary(memoryEvidence);
+                turn["memoryPrecisionEvidence"] = memoryEvidence == null ? null : VerificationService.CloneDictionary(memoryEvidence);
                 string memoryText = ReadString(memory, "memoryPacket", "");
                 if (!string.IsNullOrWhiteSpace(memoryText)) memoryText = "REIGN KNOWLEDGE PACKET\n" + memoryText;
                 turn["continuityOutputReserve"] = socialEvent ? DialogueService.StructuredEventResponseMaxTokens(writerSettings) : DialogueService.StructuredDialogueResponseMaxTokens(writerSettings);
-                var priorSettings = Program.CodexPerformanceSettings.Value;
+                var priorSettings = LlmProviderService.CodexPerformanceSettings.Value;
                 try
                 {
-                    Program.CodexPerformanceSettings.Value = writerSettings;
+                    LlmProviderService.CodexPerformanceSettings.Value = writerSettings;
                     PromptEnvelope envelope = socialEvent
                     ? BuildEventPromptEnvelope(campaign, observer + ":event", observer, heroName, playerName, playerName,
-                        contribution, scene, turn, profile, characteristics, Program.CloneDictionary(ReadDictionary(fixture, "state")),
-                        Program.CloneDictionary(ReadDictionary(fixture, "relationships")), empty, prior, new(), new(), new(), identity,
+                        contribution, scene, turn, profile, characteristics, VerificationService.CloneDictionary(ReadDictionary(fixture, "state")),
+                        VerificationService.CloneDictionary(ReadDictionary(fixture, "relationships")), empty, prior, new(), new(), new(), identity,
                         precomputedMemoryPacket: memoryText, precomputedGroupConversationPrompt: "", publishedParty: initialView)
                     : BuildDialoguePromptEnvelope(campaign, observer, heroName, playerName, playerName,
-                        contribution, scene, profile, characteristics, Program.CloneDictionary(ReadDictionary(fixture, "state")),
-                        Program.CloneDictionary(ReadDictionary(fixture, "relationships")), empty, prior, new(), new(), new(), identity, turn,
+                        contribution, scene, profile, characteristics, VerificationService.CloneDictionary(ReadDictionary(fixture, "state")),
+                        VerificationService.CloneDictionary(ReadDictionary(fixture, "relationships")), empty, prior, new(), new(), new(), identity, turn,
                         precomputedMemoryPacket: memoryText, precomputedGroupConversationPrompt: "");
                     // Replay retains production's evidence gate. Estimated size
                     // remains advisory here just as at real provider dispatch.
@@ -656,18 +656,18 @@ namespace ReignBetaServer
                     // The non-listening fixture has no native profile file. Bind its
                     // mapped profile as the ordinary wire builder expects, retaining
                     // required political context inside this isolated replay world.
-                    prepared["hero"] = Program.CloneDictionary(profile);
+                    prepared["hero"] = VerificationService.CloneDictionary(profile);
                     prepared["model"] = model;
                     prepared["singleProviderAttempt"] = true;
                     return prepared;
                 }
-                finally { Program.CodexPerformanceSettings.Value = priorSettings; }
+                finally { LlmProviderService.CodexPerformanceSettings.Value = priorSettings; }
             }
             Dictionary<string, object> request;
             ReviewedReplayWriterPlan expectedWriterPlan;
             try
             {
-                request = preparedWriterRequest == null ? Request(payload, transcript, packet, publishedParty) : Program.CloneDictionary(preparedWriterRequest);
+                request = preparedWriterRequest == null ? Request(payload, transcript, packet, publishedParty) : VerificationService.CloneDictionary(preparedWriterRequest);
                 expectedWriterPlan = PrepareReplayReviewedWriterPlan(request, item, ReadDictionary(packet, "reviewedFactProjection"));
             }
             catch (InvalidOperationException ex)
@@ -792,7 +792,7 @@ namespace ReignBetaServer
                     if (index >= EvidenceWriterReplayMaxRepairs) throw new InvalidOperationException("Conversation repair capture exceeded its bound.");
                     // Repairs have their own request dictionary; retain the same
                     // isolated native profile through the ordinary political guard.
-                    repairRequest["hero"] = Program.CloneDictionary(profile);
+                    repairRequest["hero"] = VerificationService.CloneDictionary(profile);
                     var wire = ReadDictionary(CaptureMemoryReplayProviderRequest(repairRequest, writerSettings), "providerWireCapture");
                     repairRequests.Add(TestDict("index", index, "requestType", ReadString(repairRequest, "requestType", ""),
                         "request", repairRequest, "providerWireCapture", wire));
@@ -810,12 +810,12 @@ namespace ReignBetaServer
                     if (!string.Equals(ReadString(captures[index], "requestSha256", ""), ReadString(wire, "requestSha256", ""), StringComparison.OrdinalIgnoreCase))
                         throw new InvalidOperationException("Captured conversation repair does not match its exact production request.");
                     result["repairResponsesConsumed"] = index + 1;
-                    return Program.CloneDictionary(ReadDictionary(captures[index], "response"));
+                    return VerificationService.CloneDictionary(ReadDictionary(captures[index], "response"));
                 }
                 try
                 {
                     string auditMode = mode == "dialogue" ? "dialogue" : "party_chat";
-                    response = Program.RetryMalformedStructuredResponse(Program.CloneDictionary(response), request, campaign,
+                    response = ConversationResponseService.RetryMalformedStructuredResponse(VerificationService.CloneDictionary(response), request, campaign,
                         "captured-writer", auditMode, observer, "", CapturedRepair);
                     response = RetryRoleplayContinuityViolation(response, request, payload, identity, transcript, campaign,
                         "captured-writer", auditMode, observer, heroName, playerName, "", CapturedRepair);
@@ -853,7 +853,7 @@ namespace ReignBetaServer
                 }
             }
             bool quiet = mode != "dialogue" && parsed != null && WorldSimulationService.NormalizeSocialEventParticipation(parsed) == "quiet";
-            var checkedResponse = Program.RejectProviderReservedSpeech(response, parsed);
+            var checkedResponse = ConversationResponseService.RejectProviderReservedSpeech(response, parsed);
             if (!ReferenceEquals(checkedResponse, response))
             {
                 result["status"] = "writer_response_rejected";
@@ -887,7 +887,7 @@ namespace ReignBetaServer
             reply = RenderGroundedSceneHeading(payload, observer, parsed, reply);
             result["groundingAccepted"] = FinalizeConversationGrounding(payload, observer, parsed, ref reply);
             parsed["reply"] = reply;
-            result["grounding"] = Program.CloneDictionary(ReadDictionary(payload, "conversationGrounding"));
+            result["grounding"] = VerificationService.CloneDictionary(ReadDictionary(payload, "conversationGrounding"));
             long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             string generation;
             using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
@@ -895,9 +895,9 @@ namespace ReignBetaServer
             var rejections = new List<Dictionary<string, object>>();
             List<Dictionary<string, object>> Writes(string key, string kind)
             {
-                var values = kind == "memory" ? Program.NormalizeMemoryWrites(parsed.GetValueOrDefault(key), campaign, observer, timestamp)
+                var values = kind == "memory" ? ActionPipelineService.NormalizeMemoryWrites(parsed.GetValueOrDefault(key), campaign, observer, timestamp)
                     : ReadDictionaryList(parsed, key);
-                return FilterRoleplayFeedbackWrites(Program.FilterConversationRoleMisattributions(values, payload,
+                return FilterRoleplayFeedbackWrites(ActionPipelineService.FilterConversationRoleMisattributions(values, payload,
                     ReadString(payload, "playerText", ""), kind, rejections), kind, rejections, payload, observer, campaign);
             }
             var unit = new AcceptedConversationUnit {
@@ -973,7 +973,7 @@ namespace ReignBetaServer
                 result["status"] = pending.Count == 0 ? "captured_writer_stored_next_read_prepared" : "next_evidence_pending";
                 if (mapSourceId != null && publishedParty == null && item.ContainsKey("reviewedFactReplay")
                     && !item.ContainsKey("reviewedRecoveryReplay") && !item.ContainsKey("durableReadReplay"))
-                    result["reviewedFactFollowUp"] = CaptureReplayReviewedFollowUp(campaign, observer, peer, item, Program.CloneDictionary(next),
+                    result["reviewedFactFollowUp"] = CaptureReplayReviewedFollowUp(campaign, observer, peer, item, VerificationService.CloneDictionary(next),
                         nextTranscript, nextPacket, mapSourceId, writerSettings, (turn, lines, memory) => Request(turn, lines, memory));
                 if (item.ContainsKey("durableReadReplay"))
                     result["durableRead"] = ReplayLaterDurableRead(campaign, observer, peer, item, payload, writerSettings,
@@ -984,7 +984,7 @@ namespace ReignBetaServer
                         result["continuation"] = TestDict("status", "waiting_for_prior_evidence", "providerCalls", 0, "certificateEligible", false);
                     else
                     {
-                        var continuedItem = Program.CloneDictionary(item);
+                        var continuedItem = VerificationService.CloneDictionary(item);
                         continuedItem["caseId"] = ReadString(item, "caseId", "writer_turn") + ":continuation";
                         continuedItem["query"] = next["playerText"];
                         continuedItem["asOfSequence"] = next["memoryAsOfAcceptedSequence"];
@@ -1034,7 +1034,7 @@ namespace ReignBetaServer
             var captured = ReadDictionary(capture, "result");
             // Match the runtime's model gate, including failures without a model identity.
             if (ReadString(captured, "modelHash", "") != modelHash) return null;
-            var result = Program.CloneDictionary(captured);
+            var result = VerificationService.CloneDictionary(captured);
             result["sourceId"] = mappedSourceId;
             return result;
         }
@@ -1057,7 +1057,7 @@ namespace ReignBetaServer
             string path = MemoryReplayInputPath("evidence-input.json");
             if (!File.Exists(path) || new FileInfo(path).Length > 32 * 1024 * 1024)
                 throw new InvalidOperationException("Stage bounded memory-accuracy/evidence-input.json beside the validated artifact.");
-            var input = Program.ReadJsonObject(path);
+            var input = CampaignFileService.ReadJsonObject(path);
             if (ReadString(input, "schema", "") == DialogueAttributionReplaySchema)
                 return RunDialogueAttributionReplay(input, Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant());
             if (ReadString(input, "schema", "") == "reign-native-archive-contracts-v1")
@@ -1067,7 +1067,7 @@ namespace ReignBetaServer
                 ? ReadPublishedPartyReplayFile(path) : null;
             var report = ReplayMemoryEvidenceFixture(input, Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant(), publication);
             string resultPath = Path.Combine(Program.TestsDir, "memory-accuracy", "evidence-result-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".json");
-            Program.WriteJsonObject(resultPath, report);
+            CampaignFileService.WriteJsonObject(resultPath, report);
             return TestDict("ok", report["ok"], "resultPath", resultPath, "completedCases", report["completedCases"],
                 "fullyReplayedCases", report["fullyReplayedCases"], "inputSha256", report["inputSha256"], "providerCalls", 0, "certificateEligible", false);
         }
@@ -1140,7 +1140,7 @@ namespace ReignBetaServer
             var denseHistoryScopes = new Dictionary<string, int>();
             try
             {
-                for (int index = 0; index < cases.Count && !Program.ShouldCancelVerification(); index++)
+                for (int index = 0; index < cases.Count && !VerificationService.ShouldCancelVerification(); index++)
                 {
                     var item = cases[index];
                     using var referenceMode = new EvidenceReplayReferenceModeScope(ReadDictionary(item, "writerReplay"));

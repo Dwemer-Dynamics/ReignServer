@@ -470,7 +470,7 @@ namespace ReignBetaServer
             // Both blocks above catch everything, so the fixture is always removed. The suite also runs outside the
             // verification sandbox (--run-relationship-tests, /tests runs).
             try { ReignPostgreSqlStorage.DropCampaign(persistenceCampaign); } catch { }
-            PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(persistenceCampaign));
+            PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(persistenceCampaign));
             return rows;
         }
 

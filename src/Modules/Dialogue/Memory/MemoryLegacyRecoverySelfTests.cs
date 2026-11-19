@@ -87,7 +87,7 @@ namespace ReignBetaServer
                     Check("same_day_sequence_cutoff_survives_recovery", !PrecisionTurnVisible(original, "npc", early, connection));
                     var poisoned = TestDict("mood", "unsettled — a gap in memory where Stone is concerned", "currentPlan", "Continue training; recover the Tempest memory; keep the boundary",
                         "currentCrisis", "Protect political confidence; no memory of any Tempest conversation; preserve the boundary", "lastKnownSettlementId", "town");
-                    Program.WriteJsonObject(Program.CharacterFile(campaign, "npc", "state.json"), poisoned);
+                    CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "npc", "state.json"), poisoned);
                     var clean = WithoutRecallAbsenceState(poisoned);
                     Check("old_absence_state_quarantined_without_erasing_other_concerns", ReadString(clean, "mood", "") == "unsettled"
                         && ReadString(clean, "currentPlan", "") == "Continue training; keep the boundary"

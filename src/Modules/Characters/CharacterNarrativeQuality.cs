@@ -44,7 +44,7 @@ namespace ReignBetaServer
         {
             var prose = narratives.SelectMany(n => ReadDictionaryList(n, "items").SelectMany(item => new[] {
                 ReadString(item, "description", ""), ReadString(item, "personalMeaning", "") })).Where(x => x.Length > 0).ToList();
-            var repeated = prose.GroupBy(Program.NormalizeLookup).Where(g => g.Count() > 1).OrderByDescending(g => g.Count()).Take(20)
+            var repeated = prose.GroupBy(ActionPipelineService.NormalizeLookup).Where(g => g.Count() > 1).OrderByDescending(g => g.Count()).Take(20)
                 .Select(g => new Dictionary<string, object> { ["text"] = g.First(), ["count"] = g.Count() }).ToList();
             var lives = narratives.Select(n => new {
                 Hero = ReadString(n, "heroStringId", ""),
@@ -76,7 +76,7 @@ namespace ReignBetaServer
                     ? string.Join(" | ", ReadStringList(ReadDictionary(n, "voice"), "tells"))
                     : ReadString(ReadDictionary(n, field == "privateBackstory" ? "life" : "voice"), field, ""))
                     .Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
-                var groups = texts.GroupBy(Program.NormalizeLookup).OrderByDescending(g => g.Count()).ToList();
+                var groups = texts.GroupBy(ActionPipelineService.NormalizeLookup).OrderByDescending(g => g.Count()).ToList();
                 fieldDiversity.Add(new Dictionary<string, object> { ["field"] = field, ["populatedCount"] = texts.Count,
                     ["distinctCount"] = groups.Count, ["largestRepeatedCount"] = groups.Count == 0 ? 0 : groups[0].Count(),
                     ["mostRepeated"] = groups.Where(g => g.Count() > 1).Take(5)

@@ -110,7 +110,7 @@ with the exact words of this reply. Do not mark something raised merely because 
                         text.AppendLine("Known contact identity hints come from current native profile facts. Use those pronouns instead of guessing from a name or copying an earlier mistaken recollection; when none are supplied, use the person's name. This is identity context, not a newly discovered event.");
                         var nominations = new List<string>();
                         bool alreadyRaised = session.Length > 0 && DialogueStore.SelectPersonalGossipHistory4(c, GossipFields("timeline", timeline, "owner", hero, "session", session)).Count > 0;
-                        var traits = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "traits.json"));
+                        var traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "traits.json"));
                         int used = 0;
                         foreach (var row in history)
                         {
@@ -140,7 +140,7 @@ with the exact words of this reply. Do not mark something raised merely because 
                             int chance = GossipRaiseChance(GossipTrait(traits, "curiosity"), ReadInt(data, "personalStake", 25), uncertainty, ReadInt(data, "feeling", 0));
                             if (!data.ContainsKey("raiseChance"))
                             {
-                                data["raiseChance"] = Program.GossipAdjustedChance(chance, "raise", PersonalGossipSettings());
+                                data["raiseChance"] = SettingsService.GossipAdjustedChance(chance, "raise", PersonalGossipSettings());
                                 DialogueStore.UpdatePersonalGossipHistory(c, GossipFields("json", Json.Serialize(data), "id", id));
                             }
                             chance = ReadInt(data, "raiseChance", chance);
@@ -176,7 +176,7 @@ with the exact words of this reply. Do not mark something raised merely because 
             }
             catch (Exception ex)
             {
-                Program.LogOperational("gossip.prompt_failed", GossipFields("campaignId", campaign, "error", DialogueService.LimitText(ex.Message, 500)));
+                OperationsService.LogOperational("gossip.prompt_failed", GossipFields("campaignId", campaign, "error", DialogueService.LimitText(ex.Message, 500)));
                 return "";
             }
         }
@@ -192,7 +192,7 @@ with the exact words of this reply. Do not mark something raised merely because 
         private static string GossipKnownIdentityHint(string campaign, string hero, string label,
             Dictionary<string, Dictionary<string, object>> facts = null)
         {
-            var profile = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "profile.json"));
+            var profile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "profile.json"));
             if (facts != null && !string.IsNullOrWhiteSpace(hero) && !string.IsNullOrWhiteSpace(label) && label.Length <= 160
                 && profile != null && profile.TryGetValue("isFemale", out object sex) && sex is bool female)
                 facts[hero] = GossipFields("contactId", hero, "label", label, "isFemale", female, "pronouns", female ? "she/her" : "he/him");

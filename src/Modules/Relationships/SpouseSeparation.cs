@@ -65,7 +65,7 @@ namespace ReignBetaServer
             var results = new List<Dictionary<string, object>>();
             void Check(string id, bool pass) => results.Add(TestDict("caseId", "spouse_letter_" + id, "passed", pass, "summary", id));
             string campaign = "__spouse_letter_test_" + Guid.NewGuid().ToString("N");
-            Check("fixture_is_internal",Program.IsInternalCampaignId(campaign));
+            Check("fixture_is_internal",CampaignFileService.IsInternalCampaignId(campaign));
             try
             {
                 using var connection = ReignDatabase.OpenCampaignConnection(campaign);
@@ -120,7 +120,7 @@ namespace ReignBetaServer
                 }
                 Check("transaction_rollback_keeps_letter_and_affinities_together", CorrectRelations()
                     && RelationshipsStore.SelectLetters15(connection).Count == 1);
-                var invalid = Program.CloneDictionary(evt);
+                var invalid = VerificationService.CloneDictionary(evt);
                 invalid["phase"] = "proposed";
                 ProjectSpouseSeparation(connection, campaign, "alternate", invalid);
                 Check("proposal_is_not_native_fulfillment", CorrectRelations()

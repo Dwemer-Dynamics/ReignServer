@@ -50,8 +50,8 @@ namespace ReignBetaServer
             double day = ReadDouble(payload, "worldDay", 0d);
             if (string.IsNullOrWhiteSpace(playerId) || day <= 0d)
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Player and campaign day are required." };
-            settings ??= Program.LoadSettings();
-            double frequency = Program.CorrespondenceOption(settings, "correspondenceFrequencyMultiplier");
+            settings ??= SettingsService.LoadSettings();
+            double frequency = SettingsService.CorrespondenceOption(settings, "correspondenceFrequencyMultiplier");
             if (frequency == 0d) return TestDict("ok", true, "sent", 0, "introductions", 0);
             int slotDay = (int)Math.Floor(day / 3d) * 3;
             object gate = AutonomousMailLocks.GetOrAdd(campaignId, _ => new object());
@@ -84,7 +84,7 @@ namespace ReignBetaServer
                     {
                         string senderId = ReadString(candidate, "heroId", "");
                         int affinity = scores[senderId];
-                        int chance = Program.AutonomousLetterChance(affinity, frequency);
+                        int chance = SettingsService.AutonomousLetterChance(affinity, frequency);
                         var introductionsForSender = RelationshipsStore.SelectLetters2(connection, new Dictionary<string, object> { ["sender"] = senderId, ["player"] = playerId });
                         if (introductionsForSender.Any(row => ReadString(row, "status", "") == "in_transit")) continue;
                         bool known = ReadBool(candidate, "known", false) || introductionsForSender.Count > 0;
@@ -149,7 +149,7 @@ namespace ReignBetaServer
                             {
                                 RelationshipsStore.UpdateAutonomousCorrespondenceChecks(connection, new Dictionary<string, object> { ["timeline"] = timeline, ["slot"] = slotDay,
                                         ["sender"] = senderId, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
-                                Program.LogOperational("correspondence.autonomous_generation_failed",
+                                OperationsService.LogOperational("correspondence.autonomous_generation_failed",
                                     new Dictionary<string, object> { ["campaignId"] = campaignId,
                                         ["senderId"] = senderId, ["error"] = ex.Message });
                                 continue;
@@ -224,7 +224,7 @@ namespace ReignBetaServer
                         && RelationshipsStore.SelectAutonomousCorrespondenceCooldowns2(disabledInspection).Count == 0,
                         "Zero frequency returns before rolls, generation or cooldown writes; ordinary delivery has its independent path.");
                 }
-                var first = AutonomousCorrespondenceEvaluateApi(request, generate, Program.DefaultSettings());
+                var first = AutonomousCorrespondenceEvaluateApi(request, generate, SettingsService.DefaultSettings());
                 var second = AutonomousCorrespondenceEvaluateApi(request, generate, TestDict("correspondenceFrequencyMultiplier", .25d));
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
@@ -276,7 +276,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaignId));
             }
             return results;
         }

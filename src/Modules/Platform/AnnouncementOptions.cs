@@ -7,7 +7,7 @@ using Reign.Core.Contracts.World;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class SettingsService
     {
         internal static Dictionary<string, object> AnnouncementOptionsForClient(Dictionary<string, object> settings) =>
             ReignNewsCategories.Switches.Keys.ToDictionary(k => k, k => (object)ReadBool(settings, k, true), StringComparer.Ordinal);

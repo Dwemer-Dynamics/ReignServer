@@ -22,7 +22,7 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> BuildMemoryRetrievalRoute(Dictionary<string, object> settings, string topic, Dictionary<string, object> context)
         {
-            settings = settings ?? Program.LoadSettings();
+            settings = settings ?? SettingsService.LoadSettings();
             context = context ?? new Dictionary<string, object>();
             string normalized = (topic ?? "").ToLowerInvariant();
             bool explicitExactRecall = LooksLikeMostRecentConversationRecall(topic) || LooksLikeExactFactRestatement(topic) || DialogueService.ContainsAny(normalized,
@@ -269,7 +269,7 @@ namespace ReignBetaServer
                 }
                 catch (Exception ex)
                 {
-                    Program.LogOperational("memory.conversation_fts_failed", new Dictionary<string, object> { ["error"] = ex.Message, ["query"] = fts });
+                    OperationsService.LogOperational("memory.conversation_fts_failed", new Dictionary<string, object> { ["error"] = ex.Message, ["query"] = fts });
                 }
             }
 

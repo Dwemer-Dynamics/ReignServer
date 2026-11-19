@@ -54,8 +54,8 @@ namespace ReignBetaServer
                 + "\nNamed payment parties: " + Json.Serialize(ReadDictionaryList(payload, "paymentParties"))
                 + "\nExisting case context: " + Json.Serialize(sceneContext)
                 + "\nAvailable actions: " + Json.Serialize(options);
-            var llm = Program.ChatWithLlm(new Dictionary<string, object> {
-                ["requestType"] = "ruler_petition_reaction", ["campaignId"] = campaign, ["correlationId"] = Program.EnsureCorrelationId(payload),
+            var llm = LlmProviderService.ChatWithLlm(new Dictionary<string, object> {
+                ["requestType"] = "ruler_petition_reaction", ["campaignId"] = campaign, ["correlationId"] = OperationsService.EnsureCorrelationId(payload),
                 ["messages"] = DialogueService.BuildSimplePromptEnvelope("court_life_scene", "preparation", "Prepare one consistent disputed case without executing actions.", prompt).Messages,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" } });
             if (!ReadBool(llm, "ok", false)) return CourtLifeSceneError(DialogueService.LlmFailureForDisplay(llm));

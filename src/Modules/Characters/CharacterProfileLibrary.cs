@@ -40,7 +40,7 @@ namespace ReignBetaServer
                     if (!string.IsNullOrWhiteSpace(id) && !CharacterProfilesById.ContainsKey(id)) CharacterProfilesById[id] = profile;
                 }
 
-                Program.LogOperational("character_profile_library.loaded", new Dictionary<string, object>
+                OperationsService.LogOperational("character_profile_library.loaded", new Dictionary<string, object>
                 {
                     ["path"] = CharacterProfileCatalogPath,
                     ["exists"] = File.Exists(CharacterProfileCatalogPath),
@@ -74,7 +74,7 @@ namespace ReignBetaServer
                 lock (CharacterProfileLibraryLock)
                 {
                     if (LegacyCharacterProfilesById == null)
-                        LegacyCharacterProfilesById = ReadDictionaryList(Program.ReadJsonObject(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                        LegacyCharacterProfilesById = ReadDictionaryList(CampaignFileService.ReadJsonObject(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
                             "profiles", "profile_catalog_v4.json")), "profiles").ToDictionary(x => ReadString(x, "heroStringId", ""), StringComparer.OrdinalIgnoreCase);
                     library = LegacyCharacterProfilesById;
                 }
@@ -86,14 +86,14 @@ namespace ReignBetaServer
         {
             if (profile != null && profile.ContainsKey("narrativeVersion")) return profile;
             var result = new Dictionary<string, object>(profile ?? new Dictionary<string, object>());
-            result["narrativeVersion"] = ReadInt(Program.ReadJsonObject(Program.CampaignFile(campaignId, "campaign.json")), "narrativeVersion", 0);
+            result["narrativeVersion"] = ReadInt(CampaignFileService.ReadJsonObject(CampaignFileService.CampaignFile(campaignId, "campaign.json")), "narrativeVersion", 0);
             return result;
         }
 
         internal static Dictionary<string, object> MigrateCharacterProfilesToCurrentModels(string[] args)
         {
             string requestedCampaign = ProfileArg(args, "--campaign-id", "");
-            string campaignsRoot = Program.CampaignsRoot();
+            string campaignsRoot = CampaignFileService.CampaignsRoot();
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
             if (!Directory.Exists(campaignsRoot))
                 return new Dictionary<string, object>{{"ok",true},{"campaignCount",0},{"characterCount",0},{"migratedCount",0},{"skippedCount",0},{"failedCount",0},{"results",results}};
@@ -113,7 +113,7 @@ namespace ReignBetaServer
                 {
                     characterCount++;
                     string heroId = Path.GetFileName(characterDirectory);
-                    Dictionary<string, object> runtimeProfile = Program.ReadJsonObject(Path.Combine(characterDirectory, "profile.json"));
+                    Dictionary<string, object> runtimeProfile = CampaignFileService.ReadJsonObject(Path.Combine(characterDirectory, "profile.json"));
                     if(runtimeProfile.Count==0&&library.TryGetValue(heroId,out Dictionary<string,object> shippedProfile))
                         runtimeProfile=DeepCloneProfileDictionary(ReadDictionary(shippedProfile,"sourceFacts"));
                     if(runtimeProfile.Count==0)
@@ -129,7 +129,7 @@ namespace ReignBetaServer
                         Dictionary<string, object> result;
                         if (!library.ContainsKey(heroId))
                         {
-                            Dictionary<string, object> dynamicTraits = Program.ReadJsonObject(Path.Combine(characterDirectory, "traits.json"));
+                            Dictionary<string, object> dynamicTraits = CampaignFileService.ReadJsonObject(Path.Combine(characterDirectory, "traits.json"));
                             if ((ReadDictionary(dynamicTraits, "foundationTraits") ?? new Dictionary<string, object>()).Count == CoreTraitKeys.Length
                                 && FoundationTraitModelCurrent(dynamicTraits))
                             {
@@ -137,7 +137,7 @@ namespace ReignBetaServer
                                 RebuildPersonalityPortrait(dynamicTraits, ReadString(runtimeProfile, "name", heroId), "", "migrated_dynamic_profile");
                                 dynamicTraits["definitions"] = TraitDefinitions();
                                 dynamicTraits["assignmentSources"] = CoreTraitAssignmentSources();
-                                Program.WriteJsonObject(Path.Combine(characterDirectory, "traits.json"), dynamicTraits);
+                                CampaignFileService.WriteJsonObject(Path.Combine(characterDirectory, "traits.json"), dynamicTraits);
                                 result = new Dictionary<string, object>
                                 {
                                     ["ok"] = true, ["status"] = "dynamic_personality_regenerated", ["profileSource"] = "dynamic",
@@ -147,8 +147,8 @@ namespace ReignBetaServer
                             else result = MaterializeCharacterProfile(campaignId, heroId, runtimeProfile, false, false);
                         }
                         else result = MaterializeCharacterProfile(campaignId, heroId, runtimeProfile, false, false);
-                        Dictionary<string, object> migratedTraits = Program.ReadJsonObject(Path.Combine(characterDirectory, "traits.json"));
-                        Dictionary<string, object> migratedBackground = Program.ReadJsonObject(Path.Combine(characterDirectory, "background.json"));
+                        Dictionary<string, object> migratedTraits = CampaignFileService.ReadJsonObject(Path.Combine(characterDirectory, "traits.json"));
+                        Dictionary<string, object> migratedBackground = CampaignFileService.ReadJsonObject(Path.Combine(characterDirectory, "background.json"));
                         string nativeText = ReadString(runtimeProfile, "nativeEncyclopediaText", "").Trim();
                         bool nativePreserved = string.IsNullOrWhiteSpace(nativeText)
                             || (ReadString(migratedBackground, "summary", "").StartsWith(nativeText, StringComparison.Ordinal)
@@ -193,9 +193,9 @@ namespace ReignBetaServer
 
         private static Dictionary<string,object> BuildMigrationProfileFromCharacterDirectory(string characterDirectory,string heroId)
         {
-            Dictionary<string,object> schema=Program.ReadJsonObject(Path.Combine(characterDirectory,"schema_manifest.json"));
+            Dictionary<string,object> schema=CampaignFileService.ReadJsonObject(Path.Combine(characterDirectory,"schema_manifest.json"));
             Dictionary<string,object> summary=DeepCloneProfileDictionary(ReadDictionary(schema,"profileSummary"));
-            Dictionary<string,object> existingTraits=Program.ReadJsonObject(Path.Combine(characterDirectory,"traits.json"));
+            Dictionary<string,object> existingTraits=CampaignFileService.ReadJsonObject(Path.Combine(characterDirectory,"traits.json"));
             Dictionary<string,object> native=DeepCloneProfileDictionary(ReadDictionary(existingTraits,"visibleBannerlordTraits"));
             Dictionary<string,object> skills=DeepCloneProfileDictionary(ReadDictionary(existingTraits,"nativeSkills"));
             if(summary.Count==0&&native.Count==0&&skills.Count==0)return new Dictionary<string,object>();
@@ -206,7 +206,7 @@ namespace ReignBetaServer
             summary["skills"]=skills;
             string nativeDescription=ReadString(existingTraits,"nativeDescriptionEvidence","");
             if(!string.IsNullOrWhiteSpace(nativeDescription))summary["nativeEncyclopediaText"]=nativeDescription;
-            string archetype=ReadString(Program.ReadJsonObject(Path.Combine(characterDirectory,"template.json")),"archetype","");
+            string archetype=ReadString(CampaignFileService.ReadJsonObject(Path.Combine(characterDirectory,"template.json")),"archetype","");
             summary["isLord"]=archetype.Equals("lord",StringComparison.OrdinalIgnoreCase);
             summary["isNotable"]=archetype.Equals("notable",StringComparison.OrdinalIgnoreCase);
             summary["isWanderer"]=archetype.Equals("wanderer",StringComparison.OrdinalIgnoreCase);
@@ -220,17 +220,17 @@ namespace ReignBetaServer
             string packVersion = richNarrative ? NarrativePack : CharacterProfilePackVersion;
             if (richNarrative && rerollHooks)
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "This character's interests are stable. Edit an interest explicitly or let substantial personal development change it." };
-            string metadataPath = Program.CharacterFile(campaignId, heroId, "profile_library.json");
-            Dictionary<string, object> currentMetadata = Program.ReadJsonObject(metadataPath);
+            string metadataPath = CampaignFileService.CharacterFile(campaignId, heroId, "profile_library.json");
+            Dictionary<string, object> currentMetadata = CampaignFileService.ReadJsonObject(metadataPath);
             bool editorOwned = CharacterHasEditorCorrections(campaignId, heroId);
             bool current = string.Equals(ReadString(currentMetadata, "packVersion", ""), packVersion, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(ReadString(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json")), "status", ""), "canonical_ready", StringComparison.OrdinalIgnoreCase)
-                && CharactersService.TraitDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json")))
-                && (!richNarrative || NarrativeDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "narrative.json"))));
+                && string.Equals(ReadString(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "constructed.json")), "status", ""), "canonical_ready", StringComparison.OrdinalIgnoreCase)
+                && CharactersService.TraitDocumentReady(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json")))
+                && (!richNarrative || NarrativeDocumentReady(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "narrative.json"))));
 
             if (editorOwned && !forceCanonical)
             {
-                Dictionary<string, object> editorTraits = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"));
+                Dictionary<string, object> editorTraits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"));
                 if (editorTraits.Count > 0)
                 {
                     MarkEditorFoundationTraitsCurrent(editorTraits);
@@ -238,7 +238,7 @@ namespace ReignBetaServer
                     editorTraits["assignmentSources"] = CoreTraitAssignmentSources();
                     EnsureTraitPercentageData(editorTraits, heroId);
                     EnsurePersonalityPortraitData(editorTraits, ReadString(runtimeProfile, "name", heroId), false);
-                    Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"), editorTraits);
+                    CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"), editorTraits);
                 }
                 Dictionary<string, object> preserved = new Dictionary<string, object>
                 {
@@ -249,7 +249,7 @@ namespace ReignBetaServer
                     ["editorCorrectionsPreserved"] = true,
                     ["updatedUtc"] = DateTime.UtcNow.ToString("o")
                 };
-                Program.WriteJsonObject(metadataPath, preserved);
+                CampaignFileService.WriteJsonObject(metadataPath, preserved);
                 return preserved;
             }
 
@@ -320,19 +320,19 @@ namespace ReignBetaServer
                 stableHidden = ReadDictionary(projection, "hiddenHistory");
                 secrets = ReadDictionary(projection, "secrets");
                 overlay = new Dictionary<string, object> { ["source"] = "stable_canonical_narrative", ["rerolled"] = false };
-                Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "campaign_profile_overlay.json"), overlay);
-                Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "narrative.json"), narrative);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "campaign_profile_overlay.json"), overlay);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "narrative.json"), narrative);
             }
 
-            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"), traits);
-            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "background.json"), background);
-            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "voice.json"), voice);
-            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "motivations.json"), motivations);
-            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "template.json"), template);
-            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "save_quirks.json"), saveQuirks);
-            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "hidden_history.json"), stableHidden);
-            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "secrets.json"), secrets);
-            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "pressure.json"), pressure);
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"), traits);
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "background.json"), background);
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "voice.json"), voice);
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "motivations.json"), motivations);
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "template.json"), template);
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "save_quirks.json"), saveQuirks);
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "hidden_history.json"), stableHidden);
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "secrets.json"), secrets);
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "pressure.json"), pressure);
 
             Dictionary<string, object> constructed = new Dictionary<string, object>
             {
@@ -348,8 +348,8 @@ namespace ReignBetaServer
                 ["llmUsed"] = false,
                 ["constructedUtc"] = DateTime.UtcNow.ToString("o")
             };
-            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"), constructed);
-            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "enrichment.json"), new Dictionary<string, object>
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "constructed.json"), constructed);
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "enrichment.json"), new Dictionary<string, object>
             {
                 ["version"] = 1,
                 ["status"] = "not_required",
@@ -364,24 +364,24 @@ namespace ReignBetaServer
                 ["profileSource"] = ReadString(shipped, "source", "shipped"),
                 ["packVersion"] = packVersion,
                 ["catalogHeroId"] = heroId,
-                ["campaignOverlayPath"] = Program.CharacterFile(campaignId, heroId, "campaign_profile_overlay.json"),
+                ["campaignOverlayPath"] = CampaignFileService.CharacterFile(campaignId, heroId, "campaign_profile_overlay.json"),
                 ["selectedHooks"] = overlay,
                 ["editorCorrectionsPreserved"] = false,
                 ["updatedUtc"] = DateTime.UtcNow.ToString("o")
             };
-            Program.WriteJsonObject(metadataPath, metadata);
+            CampaignFileService.WriteJsonObject(metadataPath, metadata);
             return metadata;
         }
 
         private static Dictionary<string, object> EnsureDeterministicBaseline(string campaignId, string heroId, Dictionary<string, object> runtimeProfile)
         {
-            Dictionary<string, object> constructed = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"));
+            Dictionary<string, object> constructed = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "constructed.json"));
             string status = ReadString(constructed, "status", "");
             bool generatedByLlm = ReadBool(constructed, "llmUsed", false)
                 && (string.Equals(status, "ready", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(status, "enriched", StringComparison.OrdinalIgnoreCase));
             if ((!CharactersService.IsUsableCharacterStatus(status) && !string.Equals(status, "first_contact_pending", StringComparison.OrdinalIgnoreCase))
-                || !CharactersService.TraitDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"))))
+                || !CharactersService.TraitDocumentReady(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"))))
             {
                 constructed = CharactersService.ConstructCharacterFiles(campaignId, heroId, runtimeProfile, true, false, "deterministic_baseline");
                 constructed["ok"] = true;
@@ -390,17 +390,17 @@ namespace ReignBetaServer
                 constructed["requiresFirstContactConstruction"] = true;
                 constructed["usableForNonInteractiveSystems"] = true;
                 constructed["updatedUtc"] = DateTime.UtcNow.ToString("o");
-                Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"), constructed);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "constructed.json"), constructed);
             }
             else if (!generatedByLlm && (string.Equals(status, "baseline_ready", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(status, "fallback_ready", StringComparison.OrdinalIgnoreCase)))
             {
                 constructed["requiresFirstContactConstruction"] = true;
                 constructed["usableForNonInteractiveSystems"] = true;
-                Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"), constructed);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "constructed.json"), constructed);
             }
 
-            Dictionary<string, object> deferred = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "enrichment.json"));
+            Dictionary<string, object> deferred = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "enrichment.json"));
             if (!string.Equals(ReadString(deferred, "status", ""), "completed_on_first_contact", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(ReadString(deferred, "status", ""), "completed", StringComparison.OrdinalIgnoreCase))
             {
@@ -414,7 +414,7 @@ namespace ReignBetaServer
                     ["backgroundProcessingEnabled"] = false,
                     ["updatedUtc"] = DateTime.UtcNow.ToString("o")
                 };
-                Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "enrichment.json"), deferred);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "enrichment.json"), deferred);
             }
             Dictionary<string, object> metadata = new Dictionary<string, object>
             {
@@ -422,18 +422,18 @@ namespace ReignBetaServer
                 ["status"] = generatedByLlm ? status : "first_contact_pending",
                 ["profileSource"] = "deterministic_runtime_baseline",
                 ["packVersion"] = "",
-                ["enrichment"] = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "enrichment.json"))
+                ["enrichment"] = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "enrichment.json"))
             };
-            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "profile_library.json"), metadata);
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "profile_library.json"), metadata);
             return metadata;
         }
 
         private static Dictionary<string, object> LoadOrCreateCampaignProfileOverlay(string campaignId, string heroId, Dictionary<string, object> shipped, bool reroll)
         {
-            string path = Program.CharacterFile(campaignId, heroId, "campaign_profile_overlay.json");
+            string path = CampaignFileService.CharacterFile(campaignId, heroId, "campaign_profile_overlay.json");
             if (!reroll)
             {
-                Dictionary<string, object> existing = Program.ReadJsonObject(path);
+                Dictionary<string, object> existing = CampaignFileService.ReadJsonObject(path);
                 if (existing.Count > 0) return existing;
             }
 
@@ -460,7 +460,7 @@ namespace ReignBetaServer
             overlay["pressure"] = pressureProfiles.Count == 0
                 ? CharactersService.DefaultPressure(ReadDictionary(shipped, "sourceFacts"))
                 : DeepCloneProfileDictionary(pressureProfiles[StableIndex(campaignId + "|" + heroId + "|pressure|" + nonce, pressureProfiles.Count)]);
-            Program.WriteJsonObject(path, overlay);
+            CampaignFileService.WriteJsonObject(path, overlay);
             return overlay;
         }
 
@@ -492,10 +492,10 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> CharacterProfileLibraryActionApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
             string heroId = ReadFirstString(payload, "heroStringId", "heroId", "characterId");
             string action = ReadString(payload, "action", "").Trim().ToLowerInvariant();
-            Dictionary<string, object> profile = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json"));
+            Dictionary<string, object> profile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "profile.json"));
             if (string.IsNullOrWhiteSpace(heroId)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "heroStringId is required." };
             switch (action)
             {
@@ -511,7 +511,7 @@ namespace ReignBetaServer
 
         internal static bool CharacterHasEditorCorrections(string campaignId, string heroId)
         {
-            if (File.Exists(Program.CharacterFile(campaignId, heroId, "editor_authority.json"))) return true;
+            if (File.Exists(CampaignFileService.CharacterFile(campaignId, heroId, "editor_authority.json"))) return true;
             lock (CharacterEditorAuthorityCacheLock)
             {
                 if (!CharacterEditorAuthorityByCampaign.TryGetValue(campaignId, out HashSet<string> corrected))
@@ -532,7 +532,7 @@ namespace ReignBetaServer
 
         private static void DeferLegacyBackgroundEnrichmentQueues()
         {
-            string campaignsRoot = Program.CampaignsRoot();
+            string campaignsRoot = CampaignFileService.CampaignsRoot();
             if (!Directory.Exists(campaignsRoot)) return;
 
             int scanned = 0;
@@ -541,7 +541,7 @@ namespace ReignBetaServer
             foreach (string path in Directory.GetFiles(campaignsRoot, "enrichment.json", SearchOption.AllDirectories))
             {
                 scanned++;
-                Dictionary<string, object> item = Program.ReadJsonObject(path);
+                Dictionary<string, object> item = CampaignFileService.ReadJsonObject(path);
                 string status = ReadString(item, "status", "");
                 if (!string.Equals(status, "pending", StringComparison.OrdinalIgnoreCase)
                     && !string.Equals(status, "running", StringComparison.OrdinalIgnoreCase)
@@ -558,11 +558,11 @@ namespace ReignBetaServer
                 item["backgroundProcessingEnabled"] = false;
                 item["migratedUtc"] = DateTime.UtcNow.ToString("o");
                 item["updatedUtc"] = DateTime.UtcNow.ToString("o");
-                Program.WriteJsonObject(path, item);
+                CampaignFileService.WriteJsonObject(path, item);
                 deferred++;
             }
 
-            Program.LogOperational("character_enrichment.background_disabled", new Dictionary<string, object>
+            OperationsService.LogOperational("character_enrichment.background_disabled", new Dictionary<string, object>
             {
                 ["workerStarted"] = false,
                 ["scannedRecords"] = scanned,
@@ -577,8 +577,8 @@ namespace ReignBetaServer
             if (LoadCharacterProfileLibrary().ContainsKey(heroId)) return false;
             if (CharacterHasEditorCorrections(campaignId, heroId)) return false;
 
-            if (ReadInt(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json")), "narrativeVersion", 0) >= 5)
-                return !NarrativeDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "narrative.json")));
+            if (ReadInt(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "profile.json")), "narrativeVersion", 0) >= 5)
+                return !NarrativeDocumentReady(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "narrative.json")));
 
             string status = ReadString(constructed, "status", "");
             if (ReadBool(constructed, "llmUsed", false)
@@ -589,7 +589,7 @@ namespace ReignBetaServer
             }
 
             string source = ReadString(constructed, "source", "");
-            Dictionary<string, object> metadata = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile_library.json"));
+            Dictionary<string, object> metadata = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "profile_library.json"));
             return string.Equals(status, "first_contact_pending", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(status, "baseline_ready", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(status, "fallback_ready", StringComparison.OrdinalIgnoreCase)
@@ -600,10 +600,10 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> LoadPassiveCharacterStack(string campaignId, string heroId, Dictionary<string, object> runtimeProfile)
         {
             runtimeProfile = WithNarrativeCampaignVersion(campaignId, runtimeProfile);
-            string characterDir = Program.CharacterDirectory(campaignId, heroId);
+            string characterDir = CampaignFileService.CharacterDirectory(campaignId, heroId);
             if (Directory.Exists(characterDir)
-                && (File.Exists(Program.CharacterFile(campaignId, heroId, "constructed.json"))
-                    || File.Exists(Program.CharacterFile(campaignId, heroId, "profile.json"))))
+                && (File.Exists(CampaignFileService.CharacterFile(campaignId, heroId, "constructed.json"))
+                    || File.Exists(CampaignFileService.CharacterFile(campaignId, heroId, "profile.json"))))
             {
                 return CharactersService.LoadCharacterStack(campaignId, heroId);
             }
@@ -640,7 +640,7 @@ namespace ReignBetaServer
 
         internal static void MarkCharacterConstructionCompletedOnInteraction(string campaignId, string heroId, string source)
         {
-            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "enrichment.json"), new Dictionary<string, object>
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "enrichment.json"), new Dictionary<string, object>
             {
                 ["version"] = 2,
                 ["status"] = "completed_on_first_contact",
@@ -656,12 +656,12 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> CharacterConstructionPolicyStatus()
         {
             Dictionary<string, int> statuses = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            string campaignsRoot = Program.CampaignsRoot();
+            string campaignsRoot = CampaignFileService.CampaignsRoot();
             if (Directory.Exists(campaignsRoot))
             {
                 foreach (string path in Directory.GetFiles(campaignsRoot, "enrichment.json", SearchOption.AllDirectories))
                 {
-                    string status = ReadString(Program.ReadJsonObject(path), "status", "missing");
+                    string status = ReadString(CampaignFileService.ReadJsonObject(path), "status", "missing");
                     statuses[status] = statuses.TryGetValue(status, out int count) ? count + 1 : 1;
                 }
             }

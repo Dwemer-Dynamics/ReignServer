@@ -35,7 +35,7 @@ namespace ReignBetaServer
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", Program.ResolveLogCampaignId(""));
+            string campaignId = ReadString(payload, "campaignId", CampaignFileService.ResolveLogCampaignId(""));
             string runId = ReadString(payload, "runId", "");
             Dictionary<string, object> run = WorldSimulationService.LoadLiveTestRun(campaignId, runId);
             if (run.Count == 0)
@@ -683,12 +683,12 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> blinded,
             string correlationId = "")
         {
-            return Program.ChatWithLlm(new Dictionary<string, object>
+            return LlmProviderService.ChatWithLlm(new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,
                 ["correlationId"] = correlationId ?? string.Empty,
                 ["requestType"] = "readiness_evaluation",
-                ["model"] = ReadString(Program.LoadSettings(), "dialogueModel", ""),
+                ["model"] = ReadString(SettingsService.LoadSettings(), "dialogueModel", ""),
                 ["temperature"] = 0d,
                 ["maxTokens"] = ConversationReadinessJudgeMaxTokens(blinded.Count),
                 ["reasoningEffort"] = "none",
@@ -754,7 +754,7 @@ namespace ReignBetaServer
                 List<string> violations,
                 string correlationId = "")
         {
-            return Program.ChatWithLlm(
+            return LlmProviderService.ChatWithLlm(
                 BuildConversationReadinessJudgeSchemaRepairRequest(
                     campaignId, blindedCase, invalidOutput, violations,
                     correlationId));
@@ -774,7 +774,7 @@ namespace ReignBetaServer
                 ["correlationId"] = correlationId ?? string.Empty,
                 ["requestType"] = "readiness_evaluation",
                 ["model"] = ReadString(
-                    Program.LoadSettings(), "dialogueModel", ""),
+                    SettingsService.LoadSettings(), "dialogueModel", ""),
                 ["temperature"] = 0d,
                 ["maxTokens"] = 3200,
                 ["reasoningEffort"] = "none",
@@ -865,7 +865,7 @@ namespace ReignBetaServer
                 List<string> borderlineRubrics,
                 string correlationId = "")
         {
-            return Program.ChatWithLlm(
+            return LlmProviderService.ChatWithLlm(
                 BuildConversationReadinessJudgeCalibrationRequest(
                     campaignId,
                     blindedCase,
@@ -888,7 +888,7 @@ namespace ReignBetaServer
                 ["correlationId"] = correlationId ?? string.Empty,
                 ["requestType"] = "readiness_evaluation",
                 ["model"] = ReadString(
-                    Program.LoadSettings(), "dialogueModel", ""),
+                    SettingsService.LoadSettings(), "dialogueModel", ""),
                 ["temperature"] = 0d,
                 ["maxTokens"] = 3200,
                 ["reasoningEffort"] = "none",

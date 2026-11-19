@@ -46,18 +46,18 @@ namespace ReignBetaServer
                 && ReadString(normalizedShip, "partyId", "") == "real-npc-party"
                 && ReadString(normalizedShip, "settlementId", "") == "friendly-port"
                 && ReadString(normalizedShip, "campaignTestRunId", "") == "owned-run";
-            var wrongShipRun = Program.CloneDictionary(economyRun); wrongShipRun["mode"] = "individual_chat";
-            var wrongShipInput = Program.CloneDictionary(shipFunding); wrongShipInput["mode"] = "individual_chat";
+            var wrongShipRun = VerificationService.CloneDictionary(economyRun); wrongShipRun["mode"] = "individual_chat";
+            var wrongShipInput = VerificationService.CloneDictionary(shipFunding); wrongShipInput["mode"] = "individual_chat";
             bool shipRejectsMode = NormalizeLiveTestCommand(wrongShipRun, shipFunding) == null
                 && NormalizeLiveTestCommand(economyRun, wrongShipInput) == null;
             bool shipRejectsMissing = true;
             foreach (string required in new[] { "partyId", "settlementId", "campaignTestRunId", "expectedSaveName" })
             {
-                var incomplete = Program.CloneDictionary(shipFunding); incomplete.Remove(required);
+                var incomplete = VerificationService.CloneDictionary(shipFunding); incomplete.Remove(required);
                 shipRejectsMissing &= NormalizeLiveTestCommand(economyRun, incomplete) == null;
                 foreach (string blank in new[] { "", "   " })
                 {
-                    var empty = Program.CloneDictionary(shipFunding); empty[required] = blank;
+                    var empty = VerificationService.CloneDictionary(shipFunding); empty[required] = blank;
                     shipRejectsMissing &= NormalizeLiveTestCommand(economyRun, empty) == null;
                 }
             }
@@ -131,7 +131,7 @@ namespace ReignBetaServer
             var structuredRun = new Dictionary<string, object>(fakeRun) { ["mode"] = "structured_actions", ["enrollment"] = structuredEnrollment };
             var structuredInput = new Dictionary<string, object> { ["operation"] = "structured_action_test", ["enrollment"] = new Dictionary<string, object>() };
             var structuredCommand = NormalizeLiveTestCommand(structuredRun, structuredInput);
-            var lifeEnrollment = Program.CloneDictionary(structuredEnrollment);
+            var lifeEnrollment = VerificationService.CloneDictionary(structuredEnrollment);
             lifeEnrollment["source"] = "reign_mcp_npc_lives"; lifeEnrollment["recoveryCheckpointVerified"] = true;
             var lifeRun = new Dictionary<string, object>(fakeRun) { ["mode"] = "npc_lives", ["enrollment"] = lifeEnrollment };
             var lifeInput = TestDict("operation", "npc_lives_test", "enrollment", TestDict("source", "forged"));
@@ -140,7 +140,7 @@ namespace ReignBetaServer
                 && NormalizeLiveTestCommand(fakeRun, lifeInput) == null, "NPC native checks inherit enrollment from their isolated run.");
             lifeEnrollment["recoveryCheckpointVerified"] = false;
             add("npc_lives_checkpoint", NormalizeLiveTestCommand(lifeRun, lifeInput) == null, "Native combat controls require a retained recovery checkpoint.");
-            var gossipEnrollment = Program.CloneDictionary(structuredEnrollment);
+            var gossipEnrollment = VerificationService.CloneDictionary(structuredEnrollment);
             gossipEnrollment["source"] = "reign_mcp_personal_gossip"; gossipEnrollment["recoveryCheckpointVerified"] = true;
             var gossipRun = new Dictionary<string, object>(fakeRun) { ["mode"] = "personal_gossip", ["enrollment"] = gossipEnrollment };
             var gossipInput = TestDict("operation", "personal_gossip_test", "enrollment", TestDict("source", "forged"));
@@ -293,7 +293,7 @@ namespace ReignBetaServer
                     }
                 };
             Dictionary<string, object> sanitizedRelationshipAudit =
-                Program.SanitizeAuditValue(relationshipAuditFixture, 0)
+                OperationsService.SanitizeAuditValue(relationshipAuditFixture, 0)
                     as Dictionary<string, object>;
             Dictionary<string, object> sanitizedRelationshipEnvelope =
                 ReadDictionary(sanitizedRelationshipAudit, "promptEnvelope");
@@ -451,25 +451,25 @@ namespace ReignBetaServer
             add("clock_probe_enrolled", clockAccepted != null && ReferenceEquals(clockAccepted["enrollment"], clockEnrollment), "Clock diagnostic keeps the verified run enrollment.");
             foreach (string key in new[] { "source", "campaignId", "timelineId", "campaignTestRunId", "disposableSaveName", "protectedBaselineSaveName", "recoveryCheckpointVerified" })
             {
-                var invalidEnrollment = Program.CloneDictionary(clockEnrollment); invalidEnrollment.Remove(key);
-                var invalidRun = Program.CloneDictionary(clockRun); invalidRun["enrollment"] = invalidEnrollment;
+                var invalidEnrollment = VerificationService.CloneDictionary(clockEnrollment); invalidEnrollment.Remove(key);
+                var invalidRun = VerificationService.CloneDictionary(clockRun); invalidRun["enrollment"] = invalidEnrollment;
                 add("clock_probe_missing_" + key, NormalizeLiveTestCommand(invalidRun, clockStep) == null, "Missing clock enrollment evidence is rejected.");
             }
             foreach (string key in new[] { "minutes", "days", "ticks" })
             {
-                var invalidStep = Program.CloneDictionary(clockStep); invalidStep[key] = 1;
+                var invalidStep = VerificationService.CloneDictionary(clockStep); invalidStep[key] = 1;
                 add("clock_probe_duration_" + key, NormalizeLiveTestCommand(clockRun, invalidStep) == null, "The bounded clock probe cannot select an arbitrary time jump.");
             }
             foreach (string key in new[] { "confirmation", "probeId", "expectedSaveName", "profile" })
             {
-                var invalidStep = Program.CloneDictionary(clockStep); invalidStep[key] = "";
+                var invalidStep = VerificationService.CloneDictionary(clockStep); invalidStep[key] = "";
                 add("clock_probe_invalid_" + key, NormalizeLiveTestCommand(clockRun, invalidStep) == null, "Missing clock operation identity is rejected.");
             }
-            var baselineEnrollment = Program.CloneDictionary(clockEnrollment); baselineEnrollment["disposableSaveName"] = "Baseline";
-            var baselineRun = Program.CloneDictionary(clockRun); baselineRun["enrollment"] = baselineEnrollment;
-            var baselineStep = Program.CloneDictionary(clockStep); baselineStep["expectedSaveName"] = "Baseline";
+            var baselineEnrollment = VerificationService.CloneDictionary(clockEnrollment); baselineEnrollment["disposableSaveName"] = "Baseline";
+            var baselineRun = VerificationService.CloneDictionary(clockRun); baselineRun["enrollment"] = baselineEnrollment;
+            var baselineStep = VerificationService.CloneDictionary(clockStep); baselineStep["expectedSaveName"] = "Baseline";
             add("clock_probe_protected_baseline", NormalizeLiveTestCommand(baselineRun, baselineStep) == null, "The immutable baseline cannot become a clock fixture.");
-            var wrongClockMode = Program.CloneDictionary(clockRun); wrongClockMode["mode"] = "correspondence";
+            var wrongClockMode = VerificationService.CloneDictionary(clockRun); wrongClockMode["mode"] = "correspondence";
             add("clock_probe_letters_rejected", NormalizeLiveTestCommand(wrongClockMode, clockStep) == null, "The diagnostic never runs in correspondence.");
             add("checkpoint_contract", LiveTestOperations.Contains("checkpoint"), "Versioned scenarios can pause at an explicit reload-safe checkpoint.");
             Dictionary<string, object> legacy = NormalizeLiveTestCommand(fakeRun, new Dictionary<string, object>
@@ -1313,7 +1313,7 @@ namespace ReignBetaServer
                 giftValid && leverageValid && giftErrors.Count == 0 && leverageErrors.Count == 0,
                 "The named recipient owns the durable benefit, witnesses retain independent proportionate reactions, and a later coercive demand links and diminishes appreciation.");
 
-            string sourceRoot = Program.FindVerificationSourceRoot();
+            string sourceRoot = VerificationService.FindVerificationSourceRoot();
             string clientSourceRoot = string.IsNullOrWhiteSpace(sourceRoot) ? "" : Path.Combine(sourceRoot, "ReignBeta");
             Func<string, string> serverSourcePath = fileName => string.IsNullOrWhiteSpace(sourceRoot)
                 ? "" : VerificationSourceLocator.ResolveUnique(Path.Combine(sourceRoot, "ReignServer"), fileName, "src");

@@ -113,7 +113,7 @@ WHERE source='dialogue_llm'
                             }, transaction);
                         transaction.Commit();
                     }
-                    Program.LogOperational("campaign.schema_migration_applied", new Dictionary<string, object>
+                    OperationsService.LogOperational("campaign.schema_migration_applied", new Dictionary<string, object>
                     {
                         ["campaignId"] = ReignPostgreSqlStorage.CampaignIdForConnection(connection),
                         ["version"] = migration.Version,

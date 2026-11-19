@@ -69,7 +69,7 @@ namespace ReignBetaServer
             foreach (string mode in new[] { "party_chat", "castle_chat", "social_event" })
             {
                 string bytes = Json.Serialize(quietAnswer);
-                var structured = Program.RetryMalformedStructuredResponse(TestDict("ok", true, "content", bytes), TestDict(),
+                var structured = ConversationResponseService.RetryMalformedStructuredResponse(TestDict("ok", true, "content", bytes), TestDict(),
                     "", "quiet-contract", mode, "npc", "", _ => { formatRepairCalls++; throw new InvalidOperationException("Silence needs no provider repair."); });
                 var validated = ValidateSpokenEventResponse(structured, candidate => { spokenValidationCalls++; return candidate; });
                 Check(mode + "_silence_skips_format_and_spoken_repairs", formatRepairCalls == 0 && spokenValidationCalls == 0
@@ -145,7 +145,7 @@ namespace ReignBetaServer
                     }
                     if (route == "individual")
                     {
-                        input["retryOfCorrelationId"] = Program.EnsureCorrelationId(input);
+                        input["retryOfCorrelationId"] = OperationsService.EnsureCorrelationId(input);
                         int generated = 0;
                         input["playerText"] = "Changed words cannot replace an original.";
                         var changed = RunDialogueWithRetryGate(input, () => { generated++; return TestDict("ok", true); });

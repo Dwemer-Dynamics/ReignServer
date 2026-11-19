@@ -6,7 +6,7 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PromptService
     {
         // Caller owns FileLock. The directory parameter permits isolated behavioral proof.
         private static Dictionary<string, object> PersistPromptEditorFiles(string directory,
@@ -49,13 +49,13 @@ namespace ReignBetaServer
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static List<Dictionary<string, object>> RunPromptEditorPersistenceTests()
+        internal static List<Dictionary<string, object>> RunPromptEditorPersistenceTests()
         {
             var results = new List<Dictionary<string, object>>();
             void Check(string name, bool passed) => results.Add(new Dictionary<string, object>
                 { ["caseId"] = "prompt_editor_" + name, ["suite"] = "interaction_architecture", ["passed"] = passed,
                   ["summary"] = "Prompt editor isolated persistence: " + name });
-            string root = Path.Combine(VerificationDir, "prompt-editor-" + Guid.NewGuid().ToString("N"));
+            string root = Path.Combine(VerificationService.VerificationDir, "prompt-editor-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(root);
             const string name = "tavern_house_portrait_clothing.txt";
             var text = "  Exact user text.\r\nUnicode: é — test\n\n";

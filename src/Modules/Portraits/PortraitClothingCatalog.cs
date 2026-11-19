@@ -76,7 +76,7 @@ namespace ReignBetaServer
         {
             foreach (string name in PortraitClothingPromptFileNames)
             {
-                string path = Program.PromptPath(name);
+                string path = PromptService.PromptPath(name);
                 if (!File.Exists(path))
                 {
                     continue;
@@ -154,7 +154,7 @@ namespace ReignBetaServer
             foreach (string name in PortraitClothingPromptFileNames)
             {
                 string key = name.Replace("portrait_clothing_", "").Replace(".txt", "");
-                yield return Program.PromptMeta(
+                yield return PromptService.PromptMeta(
                     name,
                     "Portrait Clothing - " + DialogueService.HumanizeKey(key),
                     "image",

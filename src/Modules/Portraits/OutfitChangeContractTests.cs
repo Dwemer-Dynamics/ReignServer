@@ -88,7 +88,7 @@ namespace ReignBetaServer
                 AcceptOutfitPreview(op, new PortraitImageCallResult { Ok = true, ImageBytes = new byte[] { 7 } }, bytes => bytes);
                 return op.Status == "ready" && op.After.SequenceEqual(new byte[] { 7 });
             });
-            Check("prompt_catalog", () => Program.DefaultPromptTemplates().ContainsKey(OutfitPromptName) && Program.PromptMetadataByName().ContainsKey(OutfitPromptName));
+            Check("prompt_catalog", () => PromptService.DefaultPromptTemplates().ContainsKey(OutfitPromptName) && PromptService.PromptMetadataByName().ContainsKey(OutfitPromptName));
             var identity = new Dictionary<string, object> { ["campaignId"] = "outfit_contract", ["timelineId"] = "main", ["heroStringId"] = "npc", ["playerHeroId"] = "player", ["operationId"] = Guid.NewGuid().ToString("N") };
             Check("cancel_before_begin_prevents_provider", () => {
                 OutfitChangeApi(identity, "cancel");
@@ -130,9 +130,9 @@ namespace ReignBetaServer
                 try
                 {
                     CommitOutfitInDirectory(op, root);
-                    var profile = Program.ReadJsonObject(profilePath);
-                    var outfit = Program.ReadJsonObject(Path.Combine(root, "portraits", "outfit.json"));
-                    var formal = Program.ReadJsonObject(Path.Combine(root, "portraits", "formal_outfit.json"));
+                    var profile = CampaignFileService.ReadJsonObject(profilePath);
+                    var outfit = CampaignFileService.ReadJsonObject(Path.Combine(root, "portraits", "outfit.json"));
+                    var formal = CampaignFileService.ReadJsonObject(Path.Combine(root, "portraits", "formal_outfit.json"));
                     var nativeRefresh = new Dictionary<string, object> { ["name"] = "Retained identity" };
                     ApplyConfirmedOutfit(outfit, nativeRefresh);
                     bool staleRejected = false;

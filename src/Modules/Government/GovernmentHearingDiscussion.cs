@@ -37,11 +37,11 @@ namespace ReignBetaServer
                 { ["speakerName"] = DialogueService.LimitText(ReadString(x, "speakerName", ""), 120), ["text"] = DialogueService.LimitText(ReadString(x, "text", ""), 1200) }).ToList()));
             prompt.AppendLine("The attending " + ReadString(payload, "playerOffice", "member") + " says: " + message);
             var request = new Dictionary<string, object> { ["requestType"] = "government_hearing_discussion",
-                ["campaignId"] = ReadString(payload, "campaignId", "default"), ["correlationId"] = Program.EnsureCorrelationId(payload),
-                ["politicalAuthors"] = speakers.Select(x => ReadDictionary(x, "profile") ?? Program.ReadJsonObject(Program.CharacterFile(ReadString(payload, "campaignId", "default"), ReadString(x, "heroId", ""), "profile.json"))).ToList(),
+                ["campaignId"] = ReadString(payload, "campaignId", "default"), ["correlationId"] = OperationsService.EnsureCorrelationId(payload),
+                ["politicalAuthors"] = speakers.Select(x => ReadDictionary(x, "profile") ?? CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(ReadString(payload, "campaignId", "default"), ReadString(x, "heroId", ""), "profile.json"))).ToList(),
                 ["messages"] = DialogueService.BuildSimplePromptEnvelope("government_hearing_discussion", businessId, "Return bounded public hearing dialogue as JSON.", prompt.ToString()).Messages,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" } };
-            var llm = Program.ChatWithLlm(request);
+            var llm = LlmProviderService.ChatWithLlm(request);
             if (!ReadBool(llm, "ok", false)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = ReadString(llm, "error", "The hearing response could not be prepared."), ["providerCallCount"] = 1 };
             var parsed = TryParseJsonObject(ReadString(llm, "content", "")) ?? new Dictionary<string, object>();
             return NormalizeGovernmentHearingResponse(parsed, speakers.Select(x => ReadString(x, "heroId", "")).ToList());
@@ -53,7 +53,7 @@ namespace ReignBetaServer
             foreach (var row in ReadDictionaryList(parsed, "statements").Take(3))
             {
                 string id = ReadString(row, "speakerHeroId", "");
-                string text = DialogueService.LimitText(Program.SanitizeVisibleReply(ReadString(row, "text", "")), 1200);
+                string text = DialogueService.LimitText(ConversationResponseService.SanitizeVisibleReply(ReadString(row, "text", "")), 1200);
                 if (!speakerIds.Contains(id) || string.IsNullOrWhiteSpace(text) || GovernmentDialogueLeaksHiddenValue(text)) continue;
                 rows.Add(new Dictionary<string, object> { ["speakerHeroId"] = id, ["text"] = text });
             }

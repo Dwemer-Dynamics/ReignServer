@@ -137,7 +137,7 @@ namespace ReignBetaServer
             payload = payload ?? new Dictionary<string, object>();
             payload.Remove("resolvedPortraitPhysique");
             payload.Remove("resolvedPortraitVision");
-            Dictionary<string, object> settings = Program.LoadSettings();
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
             Stopwatch total = Stopwatch.StartNew();
 
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -211,7 +211,7 @@ namespace ReignBetaServer
                     var nativePhysique = ValidateNativePhysique(ReadDictionary(sourceProvenance, "physique"), sourceImage);
                     payload["resolvedPortraitPhysique"] = BuildPortraitPhysiqueEvidence(
                         nativePhysique,
-                        Program.LoadPromptTemplate(PortraitBodyPromptFile),
+                        PromptService.LoadPromptTemplate(PortraitBodyPromptFile),
                         IsFemalePortraitSubject(payload));
                     bool sharedRebuild = ReadString(sourceProvenance, "kind", "") == "shared_ai_portrait_reference";
                     if (PreserveResidentClothing(payload))
@@ -322,7 +322,7 @@ namespace ReignBetaServer
                             ReadInt(edit.Evidence, "promptChars", 0), call.ImageBytes.Length,
                             ReadString(edit.Evidence, "outcome", "") == "completed",
                             new Dictionary<string, object> { ["providerCallMs"] = edit.Evidence["durationMs"] });
-                    Program.LogOperational("portrait.clothing_edit", new Dictionary<string, object> {
+                    OperationsService.LogOperational("portrait.clothing_edit", new Dictionary<string, object> {
                         ["campaignId"] = campaignId, ["heroStringId"] = heroId,
                         ["generationOperationId"] = generationOperationId, ["stage"] = edit.Evidence });
                     if (ReadString(edit.Evidence, "outcome", "") == "completed")
@@ -572,10 +572,10 @@ namespace ReignBetaServer
                 };
             }
 
-            string portraitPath = Program.CharacterFile(campaignId, heroId, "portraits", "portrait.png");
-            string sourcePath = Program.CharacterFile(campaignId, heroId, "portraits", "source.png");
-            string promptPath = Program.CharacterFile(campaignId, heroId, "portraits", "prompt.txt");
-            string metadataPath = Program.CharacterFile(campaignId, heroId, "portraits", "portrait.json");
+            string portraitPath = CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "portrait.png");
+            string sourcePath = CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "source.png");
+            string promptPath = CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "prompt.txt");
+            string metadataPath = CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "portrait.json");
             return BuildStoredPortraitGenerationResponseFromPaths(
                 campaignId, heroId, operationId, portraitPath, sourcePath, promptPath, metadataPath);
         }
@@ -595,7 +595,7 @@ namespace ReignBetaServer
             string prompt;
             lock (Program.FileLock)
             {
-                metadata = Program.ReadJsonObject(metadataPath);
+                metadata = CampaignFileService.ReadJsonObject(metadataPath);
                 if (!string.Equals(ReadString(metadata, "generationOperationId", ""), operationId, StringComparison.OrdinalIgnoreCase)
                     || !File.Exists(portraitPath)
                     || !File.Exists(sourcePath)
@@ -728,7 +728,7 @@ namespace ReignBetaServer
             foreach (string layer in layers)
             {
                 string text = layer == "portrait_identity.txt" && ReadDictionary(payload, "resolvedPortraitVision") != null
-                    ? PortraitVisionIdentityPrompt(payload) : Program.LoadPromptTemplate(layer).Trim();
+                    ? PortraitVisionIdentityPrompt(payload) : PromptService.LoadPromptTemplate(layer).Trim();
                 if (!string.IsNullOrWhiteSpace(text))
                 {
                     parts.Add(text);
@@ -773,7 +773,7 @@ namespace ReignBetaServer
                 ["error"] = string.IsNullOrWhiteSpace(error) ? "Image generation failed." : error,
                 ["timing"] = timing ?? new Dictionary<string, object>()
             };
-            Program.LogOperational("portrait.generate_failed", row);
+            OperationsService.LogOperational("portrait.generate_failed", row);
             row["generationStages"] = new[] { new Dictionary<string, object> {
                 ["profile"] = imageProfile == null ? "portrait" : imageProfile.Name,
                 ["provider"] = imageProfile == null ? "" : imageProfile.Provider, ["model"] = model ?? "",

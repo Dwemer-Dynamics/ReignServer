@@ -112,7 +112,7 @@ namespace ReignBetaServer
                 catch (Exception ex)
                 {
                     ContinuousRelationshipLastError = DialogueService.LimitText(ex.ToString(), 2000);
-                    Program.LogOperational("relationships.continuous_worker_failed",
+                    OperationsService.LogOperational("relationships.continuous_worker_failed",
                         new Dictionary<string, object> { ["error"] = ContinuousRelationshipLastError });
                     ContinuousRelationshipSignal.WaitOne(1000);
                 }
@@ -144,7 +144,7 @@ namespace ReignBetaServer
         private static bool TryProcessNextRelationshipDay()
         {
             var selectionTimer = Stopwatch.StartNew();
-            string root = Program.CampaignsRoot();
+            string root = CampaignFileService.CampaignsRoot();
             if (!Directory.Exists(root)) return false;
             Dictionary<string, object> selected = null;
             string selectedCampaign = "";
@@ -188,7 +188,7 @@ namespace ReignBetaServer
                 }
                 catch (Exception ex)
                 {
-                    Program.LogOperational("relationships.pending_scan_failed",
+                    OperationsService.LogOperational("relationships.pending_scan_failed",
                         new Dictionary<string, object> { ["campaignId"] = campaignId, ["error"] = DialogueService.LimitText(ex.Message, 800) });
                     if (DatabaseAvailability.Shared.BackingOff) break;
                 }
@@ -381,7 +381,7 @@ namespace ReignBetaServer
                 performance["inputLoadMs"] = ContinuousRelationshipInputLoadMs;
                 performance["campaignLockWaitMs"] = ContinuousRelationshipLockWaitMs;
                 performance["serverModuleId"] = typeof(Program).Module.ModuleVersionId.ToString("D");
-                Program.LogOperational("relationships.day_completed", performance);
+                OperationsService.LogOperational("relationships.day_completed", performance);
             }
             catch (Exception ex)
             {

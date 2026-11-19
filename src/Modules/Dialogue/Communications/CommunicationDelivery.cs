@@ -104,7 +104,7 @@ namespace ReignBetaServer
                     { data["failure"] = "The recipient is no longer living or present in the native roster."; SetCommunicationStatus(c, row, "undeliverable", data); continue; }
                     double baseTransit = CommunicationBaseTransit(sender, recipient);
                     double transit = baseTransit == 0 ? 0 : CorrespondenceTransitPolicy.NewTransitDays(baseTransit, false,
-                        Program.CorrespondenceOption(Program.LoadSettings(), "correspondenceTravelTimeMultiplier"));
+                        SettingsService.CorrespondenceOption(SettingsService.LoadSettings(), "correspondenceTravelTimeMultiplier"));
                     data["baseTransitDays"] = baseTransit; data["transitDays"] = transit;
                     data["dispatchPresence"] = TestDict("speaker", sender, "recipient", recipient);
                     data["body"] = CommunicationBody(row, data, ReadString(row, "kind", "") == "summon_then_inform");
@@ -247,7 +247,7 @@ namespace ReignBetaServer
                     DialogueStore.UpdateCommunicationMessages8(c, TestDict("id", ReadString(row, "message_id", ""), "lease", lease, "until", now + 600));
                 }
                 Dictionary<string, object> result;
-                try { result = ComposeCommunicationReply(campaign, row, data, replyContext, respond ?? Program.ChatWithLlm); }
+                try { result = ComposeCommunicationReply(campaign, row, data, replyContext, respond ?? LlmProviderService.ChatWithLlm); }
                 catch (Exception ex) { result = TestDict("ok", false, "error", "Reply generation failed: " + ex.GetType().Name); }
                 using (new CommunicationDataReadLease())
                 using (PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign)))
@@ -293,7 +293,7 @@ namespace ReignBetaServer
         {
             PreparePersonalGossipReply(c, campaign, row, context);
             string owner = ReadString(context, "speakerId", ""), peer = ReadString(row, "speaker_id", "");
-            var scope = Program.CloneDictionary(context); scope["worldDay"] = ReadDouble(context, "currentDay", 0);
+            var scope = VerificationService.CloneDictionary(context); scope["worldDay"] = ReadDouble(context, "currentDay", 0);
             var access = DialogueService.BuildKnowledgeAccessContext(owner, ReadString(context, "playerId", ""), "", scope);
             // Only correspondence already exchanged with this addressee belongs
             // in this reply. Another NPC's private letters grant no disclosure.

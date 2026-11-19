@@ -19,7 +19,7 @@ namespace ReignBetaServer
             string courtManifestPath = ProfileArg(args, "--court-manifest", "");
             string naval = ProfileArg(args, "--naval-data", Path.GetFullPath(Path.Combine(sandbox, "..", "..", "NavalDLC", "ModuleData")));
             string output = ProfileArg(args, "--output", CharacterProfileCatalogPath);
-            if (ReadString(Program.ReadJsonObject(output), "packVersion", "") == NarrativePack)
+            if (ReadString(CampaignFileService.ReadJsonObject(output), "packVersion", "") == NarrativePack)
                 throw new InvalidOperationException("The legacy foundation generator cannot overwrite a complete narrative catalog. Generate foundations to a separate path and use the guarded narrative authoring workflow.");
             if (!Directory.Exists(sandbox)) throw new DirectoryNotFoundException("Sandbox ModuleData was not found: " + sandbox);
             if (!Directory.Exists(reign)) throw new DirectoryNotFoundException("Reign ModuleData was not found: " + reign);
@@ -47,7 +47,7 @@ namespace ReignBetaServer
                     .Where(node => !existingClanIds.Contains((string)node.Attribute("id"))).Select(node => new XElement(node)));
             }
             XDocument courtClans = XDocument.Load(Path.Combine(reign, "reign_court_clans.xml"), LoadOptions.PreserveWhitespace);
-            Dictionary<string, object> courtManifest = Program.ReadJsonObject(courtManifestPath);
+            Dictionary<string, object> courtManifest = CampaignFileService.ReadJsonObject(courtManifestPath);
             Dictionary<string, Dictionary<string, object>> courtRecords = ReadDictionaryList(courtManifest, "records").ToDictionary(x => ReadString(x, "id", ""), x => x, StringComparer.OrdinalIgnoreCase);
             Dictionary<string, XElement> skillSets = skills.Descendants("SkillSet").Where(x => x.Attribute("id") != null).ToDictionary(x => (string)x.Attribute("id"), x => x, StringComparer.OrdinalIgnoreCase);
             string coreSkillsPath = Path.GetFullPath(Path.Combine(sandbox, "..", "..", "SandBoxCore", "ModuleData", "sandboxcore_skill_sets.xml"));

@@ -123,7 +123,7 @@ namespace ReignBetaServer
             {
                 // This identifier is generated above, never supplied by a caller.
                 // The Verification Lab owns the surrounding isolated database.
-                PersistenceService.TryDeleteDirectory(Path.Combine(Program.CampaignsRoot(), Program.SafePathSegment(campaignId, "campaign")));
+                PersistenceService.TryDeleteDirectory(Path.Combine(CampaignFileService.CampaignsRoot(), CampaignFileService.SafePathSegment(campaignId, "campaign")));
                 ReignPostgreSqlStorage.DropCampaign(campaignId);
             }
             return tests;

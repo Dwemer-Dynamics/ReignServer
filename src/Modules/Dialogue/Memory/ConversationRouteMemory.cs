@@ -25,7 +25,7 @@ namespace ReignBetaServer
             string observer, string channel, string nativeSession, string nativeTurn, IEnumerable<string> audience,
             bool childhoodOnly = false, Dictionary<string, object> settingsOverride = null)
         {
-            var payload = Program.CloneDictionary(source ?? TestDict());
+            var payload = VerificationService.CloneDictionary(source ?? TestDict());
             CopyPlayerInputSource(source, payload);
             string campaign = ReadString(payload, "campaignId", "");
             string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
@@ -36,7 +36,7 @@ namespace ReignBetaServer
             var context = new RouteConversationMemory { Campaign = campaign, Observer = observer, Player = player, Channel = channel,
                 Session = "route_" + PromptHash(channel + "|" + ContinuityTimeline(payload) + "|" + nativeSession).Substring(0, 32),
                 Unit = "route_turn_" + PromptHash(channel + "|" + ContinuityTimeline(payload) + "|" + nativeSession + "|" + nativeTurn + "|" + observer).Substring(0, 32),
-                Payload = payload, ChildhoodOnly = childhoodOnly, Settings = settingsOverride ?? Program.LoadSettings(),
+                Payload = payload, ChildhoodOnly = childhoodOnly, Settings = settingsOverride ?? SettingsService.LoadSettings(),
                 Audience = (audience ?? Enumerable.Empty<string>()).Concat(new[] { player, observer })
                     .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase).ToList() };
             payload["conversationSessionId"] = context.Session;
@@ -89,9 +89,9 @@ namespace ReignBetaServer
             context.Request = request;
             request["heroStringId"] = context.Observer;
             var politicalActor = ReadDictionary(context.Payload, "hero") ?? ReadDictionary(context.Payload, "speaker")
-                ?? Program.ReadJsonObject(Program.CharacterFile(context.Campaign, context.Observer, "profile.json"));
+                ?? CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(context.Campaign, context.Observer, "profile.json"));
             if (politicalActor.Count > 0) request["politicalAuthors"] = new[] { politicalActor };
-            request["model"] = FirstNonEmpty(ReadString(request, "model", ""), Program.ModelForRequest(context.Settings, ReadString(request, "requestType", "dialogue")));
+            request["model"] = FirstNonEmpty(ReadString(request, "model", ""), ActionPipelineService.ModelForRequest(context.Settings, ReadString(request, "requestType", "dialogue")));
             request["routeMemoryContract"] = domainContract;
             using (var connection = ReignDatabase.OpenCampaignConnection(context.Campaign))
             {
@@ -158,7 +158,7 @@ namespace ReignBetaServer
                 string reply = ConversationSpeechForRecall(ReadString(draft, "reply", ""));
                 return !string.IsNullOrWhiteSpace(reply) && reply.Length <= maximumReplyCharacters;
             }
-            var call = responder ?? Program.ChatWithLlm;
+            var call = responder ?? LlmProviderService.ChatWithLlm;
             Dictionary<string, object> Counted(Dictionary<string, object> input)
             {
                 PrepareCountedRouteProviderRequest(input, request);
@@ -185,7 +185,7 @@ namespace ReignBetaServer
             var parsed = TryParseJsonObject(ReadString(result, "content", ""));
             if (!Valid(parsed))
                 return Failed(TestDict("ok", false, "error", "The speaker did not return a complete bounded dialogue response."));
-            parsed["reply"] = Program.SanitizeVisibleReply(ReadString(parsed, "reply", ""));
+            parsed["reply"] = ConversationResponseService.SanitizeVisibleReply(ReadString(parsed, "reply", ""));
             string finalReply = ReadString(parsed, "reply", "");
             finalReply = RenderGroundedSceneHeading(context.Payload, context.Observer, parsed, finalReply);
             FinalizeConversationGrounding(context.Payload, context.Observer, parsed, ref finalReply);

@@ -45,11 +45,11 @@ namespace ReignBetaServer
             bool resolved = !string.IsNullOrWhiteSpace(heroId);
             if (resolved)
             {
-                destination = Program.CharacterFile(campaignId, heroId, "portraits", safeFileName);
+                destination = CampaignFileService.CharacterFile(campaignId, heroId, "portraits", safeFileName);
             }
             else
             {
-                destination = Path.Combine(Program.CampaignDirectory(campaignId), "portraits", "unresolved", Program.SafePathSegment(cacheKey, "unknown"), safeFileName);
+                destination = Path.Combine(CampaignFileService.CampaignDirectory(campaignId), "portraits", "unresolved", CampaignFileService.SafePathSegment(cacheKey, "unknown"), safeFileName);
             }
 
             lock (Program.FileLock)
@@ -72,14 +72,14 @@ namespace ReignBetaServer
 
             if (resolved)
             {
-                Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "portraits", "portrait.json"), meta);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "portrait.json"), meta);
             }
             else
             {
-                Program.WriteJsonObject(Path.Combine(Path.GetDirectoryName(destination), "portrait.json"), meta);
+                CampaignFileService.WriteJsonObject(Path.Combine(Path.GetDirectoryName(destination), "portrait.json"), meta);
             }
 
-            Program.LogOperational("portrait.register", meta);
+            OperationsService.LogOperational("portrait.register", meta);
             return new Dictionary<string, object>
             {
                 ["ok"] = true,
@@ -106,8 +106,8 @@ namespace ReignBetaServer
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "heroStringId is required." };
             }
 
-            string portraitPath = Program.CharacterFile(campaignId, heroId, "portraits", "portrait.png");
-            string metaPath = Program.CharacterFile(campaignId, heroId, "portraits", "portrait.json");
+            string portraitPath = CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "portrait.png");
+            string metaPath = CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "portrait.json");
             return new Dictionary<string, object>
             {
                 ["ok"] = true,
@@ -115,14 +115,14 @@ namespace ReignBetaServer
                 ["heroStringId"] = heroId,
                 ["exists"] = File.Exists(portraitPath),
                 ["portraitPath"] = portraitPath,
-                ["metadata"] = Program.ReadJsonObject(metaPath)
+                ["metadata"] = CampaignFileService.ReadJsonObject(metaPath)
             };
         }
 
         internal static Dictionary<string, object> PortraitDiagnose(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
             string heroId = ReadFirstString(payload, "heroStringId", "heroId", "characterId");
             string characterObjectId = ReadString(payload, "characterObjectId", "");
             string cacheKey = ReadString(payload, "cacheKey", "");
@@ -131,7 +131,7 @@ namespace ReignBetaServer
                 heroId = DialogueService.ResolveHeroIdByCharacterObjectId(campaignId, characterObjectId);
             }
 
-            string characterDir = string.IsNullOrWhiteSpace(heroId) ? "" : Program.CharacterDirectory(campaignId, heroId);
+            string characterDir = string.IsNullOrWhiteSpace(heroId) ? "" : CampaignFileService.CharacterDirectory(campaignId, heroId);
             string portraitDir = string.IsNullOrWhiteSpace(characterDir) ? "" : Path.Combine(characterDir, "portraits");
             string customPath = string.IsNullOrWhiteSpace(portraitDir) ? "" : Path.Combine(portraitDir, "custom.png");
             string portraitPath = string.IsNullOrWhiteSpace(portraitDir) ? "" : Path.Combine(portraitDir, "portrait.png");
@@ -214,10 +214,10 @@ namespace ReignBetaServer
                 ["portraitExists"] = !string.IsNullOrWhiteSpace(portraitPath) && File.Exists(portraitPath),
                 ["sourcePath"] = sourcePath,
                 ["sourceExists"] = !string.IsNullOrWhiteSpace(sourcePath) && File.Exists(sourcePath),
-                ["profile"] = string.IsNullOrWhiteSpace(characterDir) ? new Dictionary<string, object>() : Program.ReadJsonObject(Path.Combine(characterDir, "profile.json")),
-                ["metadata"] = string.IsNullOrWhiteSpace(portraitDir) ? new Dictionary<string, object>() : Program.ReadJsonObject(Path.Combine(portraitDir, "portrait.json"))
+                ["profile"] = string.IsNullOrWhiteSpace(characterDir) ? new Dictionary<string, object>() : CampaignFileService.ReadJsonObject(Path.Combine(characterDir, "profile.json")),
+                ["metadata"] = string.IsNullOrWhiteSpace(portraitDir) ? new Dictionary<string, object>() : CampaignFileService.ReadJsonObject(Path.Combine(portraitDir, "portrait.json"))
             };
-            Program.LogOperational("portrait.diagnose", response);
+            OperationsService.LogOperational("portrait.diagnose", response);
             return response;
         }
 
@@ -236,8 +236,8 @@ namespace ReignBetaServer
                 ["cacheKey"] = cacheKey,
                 ["payload"] = payload
             };
-            Program.AppendJsonLineToPath(Path.Combine(Program.CampaignDirectory(campaignId), "portraits", "requests.jsonl"), row);
-            Program.LogOperational("portrait.request", row);
+            CampaignFileService.AppendJsonLineToPath(Path.Combine(CampaignFileService.CampaignDirectory(campaignId), "portraits", "requests.jsonl"), row);
+            OperationsService.LogOperational("portrait.request", row);
             return new Dictionary<string, object> { ["ok"] = true, ["request"] = row };
         }
     }

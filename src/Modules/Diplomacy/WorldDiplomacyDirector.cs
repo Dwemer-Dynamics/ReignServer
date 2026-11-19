@@ -75,15 +75,15 @@ namespace ReignBetaServer
             }
             AttachDirectorRulerAttitudes(campaignId, timelineId, kingdoms);
 
-            Dictionary<string, object> settings = Program.LoadSettings();
-            string diplomacyApiUrl = Program.LlmApiUrl(settings);
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
+            string diplomacyApiUrl = LlmProviderService.LlmApiUrl(settings);
             bool localDiplomacyEndpoint = diplomacyApiUrl.IndexOf("127.0.0.1", StringComparison.OrdinalIgnoreCase) >= 0
                 || diplomacyApiUrl.IndexOf("localhost", StringComparison.OrdinalIgnoreCase) >= 0;
-            if (string.IsNullOrWhiteSpace(diplomacyApiUrl) || string.IsNullOrWhiteSpace(Program.ModelForRequest(settings, "diplomacy")))
+            if (string.IsNullOrWhiteSpace(diplomacyApiUrl) || string.IsNullOrWhiteSpace(ActionPipelineService.ModelForRequest(settings, "diplomacy")))
             {
                 return DirectorError("The diplomacy AI route is not configured. Check the API URL and Diplomacy Model in the Reign server control center.");
             }
-            if (!Program.UsesCodexSubscription(settings) && !localDiplomacyEndpoint && !Program.ProviderKeyConfigured(settings, Program.LlmApiKeySlot(settings)))
+            if (!LlmProviderService.UsesCodexSubscription(settings) && !localDiplomacyEndpoint && !SettingsService.ProviderKeyConfigured(settings, SettingsService.LlmApiKeySlot(settings)))
             {
                 return DirectorError("The main LLM API key is not configured. Open the Reign Control Center, save the key under Server Diagnostics, then run Test LLM Key.");
             }
@@ -380,7 +380,7 @@ namespace ReignBetaServer
             if (!DirectorUnilateralCommands.Contains(command) && targetIsPlayer)
             {
                 Dictionary<string, object> normalizationPayload = BuildDirectorNormalizationPayload(payload, ruler);
-                Dictionary<string, object> pendingAction = Program.NormalizeActionCommand(candidate, campaignId, out errors, normalizationPayload, ReadString(candidate, "publicReason", ""));
+                Dictionary<string, object> pendingAction = ActionPipelineService.NormalizeActionCommand(candidate, campaignId, out errors, normalizationPayload, ReadString(candidate, "publicReason", ""));
                 if (pendingAction == null || errors.Count > 0)
                 {
                     WriteDirectorAudit(campaignId, "player_proposal_normalization_failed", ruler, candidate, errors);
@@ -482,7 +482,7 @@ namespace ReignBetaServer
             if (accepted)
             {
                 Dictionary<string, object> normalizationPayload = BuildDirectorNormalizationPayload(payload, ruler);
-                normalized = Program.NormalizeActionCommand(finalCandidate, campaignId, out errors, normalizationPayload, ReadString(finalCandidate, "publicReason", ""));
+                normalized = ActionPipelineService.NormalizeActionCommand(finalCandidate, campaignId, out errors, normalizationPayload, ReadString(finalCandidate, "publicReason", ""));
                 if (normalized == null || errors.Count > 0)
                 {
                     WriteDirectorAudit(campaignId, "normalization_failed", ruler, finalCandidate, errors);
@@ -493,7 +493,7 @@ namespace ReignBetaServer
                 normalized["reason"] = ReadString(finalCandidate, "publicReason", "A ruler-driven diplomatic decision.");
                 normalized["requiresAcceptance"] = false;
                 normalized["serverActionId"] = ReadString(normalized, "actionId", Guid.NewGuid().ToString("N"));
-                Dictionary<string, object> queued = Program.QueueAction(campaignId, normalized);
+                Dictionary<string, object> queued = ActionPipelineService.QueueAction(campaignId, normalized);
                 actionId = ReadString(queued, "id", ReadString(normalized, "actionId", ""));
             }
 
@@ -997,11 +997,11 @@ namespace ReignBetaServer
                 }
             };
             string rulerHeroId = ReadString(ruler, "leaderHeroId", "");
-            Dictionary<string, object> rulerProfile = Program.ReadJsonObject(Program.CharacterFile(campaignId, rulerHeroId, "profile.json"));
+            Dictionary<string, object> rulerProfile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, rulerHeroId, "profile.json"));
             string rulerMbti = RelationshipsService.BuildCharacterMbtiPromptBlock(campaignId, rulerHeroId, rulerProfile,
-                Program.ReadJsonObject(Program.CharacterFile(campaignId, rulerHeroId, "traits.json")));
+                CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, rulerHeroId, "traits.json")));
             List<Dictionary<string, object>> legalActionCatalog =
-                Program.CompactActionCatalog(Program.ActionCatalog()).Where(x =>
+                ActionPipelineService.CompactActionCatalog(ActionPipelineService.ActionCatalog()).Where(x =>
                         DirectorCommandAllowedForIntent(mode,
                             ReadString(x, "command", ""))
                         && !(fixedTargetIsCivilWar
@@ -1067,7 +1067,7 @@ namespace ReignBetaServer
                 ["seed"] = StableDirectorSeed(campaignId, (int)ReadDouble(world, "worldDay", 0d), ReadString(ruler, "leaderHeroId", "")),
                 ["promptSections"] = promptSections
             };
-            Program.LogOperational("diplomacy.prompt_sections", new Dictionary<string, object>
+            OperationsService.LogOperational("diplomacy.prompt_sections", new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,
                 ["rulerHeroId"] = rulerHeroId,
@@ -1076,18 +1076,18 @@ namespace ReignBetaServer
                 ["fixedTargetIsCivilWar"] = fixedTargetIsCivilWar,
                 ["sectionCharacters"] = promptSections
             });
-            Dictionary<string, object> llm = Program.ChatWithLlm(llmRequest);
+            Dictionary<string, object> llm = LlmProviderService.ChatWithLlm(llmRequest);
             if (!ReadBool(llm, "ok", false))
             {
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = ReadString(llm, "error", "Diplomacy model unavailable.") };
             }
 
-            llm = Program.RetryMalformedStructuredResponse(llm, llmRequest, campaignId,
-                Program.EnsureCorrelationId(llmRequest), "diplomacy_decision", rulerHeroId, "");
+            llm = ConversationResponseService.RetryMalformedStructuredResponse(llm, llmRequest, campaignId,
+                OperationsService.EnsureCorrelationId(llmRequest), "diplomacy_decision", rulerHeroId, "");
             Dictionary<string, object> parsed = TryParseJsonObject(ReadString(llm, "content", ""));
             if (parsed == null)
             {
-                Program.WriteAudit(campaignId, Program.EnsureCorrelationId(llmRequest), "server", "diplomacy",
+                OperationsService.WriteAudit(campaignId, OperationsService.EnsureCorrelationId(llmRequest), "server", "diplomacy",
                     "diplomacy.format_fallback", rulerHeroId, "", "", "completed", 0,
                     "Malformed ruler decision was converted to a safe no-initiative evaluation.",
                     new Dictionary<string, object> { ["fallback"] = "none" });
@@ -1112,9 +1112,9 @@ namespace ReignBetaServer
                 ? "You are the original proposing NPC ruler answering one counteroffer. Accept or refuse it immediately."
                 : "You are the target NPC ruler answering a diplomatic proposal. Accept, refuse, or make one counteroffer.";
             string responderHeroId = ReadString(responder, "leaderHeroId", "");
-            Dictionary<string, object> responderProfile = Program.ReadJsonObject(Program.CharacterFile(campaignId, responderHeroId, "profile.json"));
+            Dictionary<string, object> responderProfile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, responderHeroId, "profile.json"));
             string responderMbti = RelationshipsService.BuildCharacterMbtiPromptBlock(campaignId, responderHeroId, responderProfile,
-                Program.ReadJsonObject(Program.CharacterFile(campaignId, responderHeroId, "traits.json")));
+                CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, responderHeroId, "traits.json")));
             List<string> counterCommands = DirectorIntentCommands.TryGetValue(mode,
                     out HashSet<string> legalCommands)
                 ? legalCommands.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
@@ -1156,18 +1156,18 @@ namespace ReignBetaServer
                 ["maxTokens"] = 1200,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
             };
-            Dictionary<string, object> llm = Program.ChatWithLlm(llmRequest);
+            Dictionary<string, object> llm = LlmProviderService.ChatWithLlm(llmRequest);
             if (!ReadBool(llm, "ok", false))
             {
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = ReadString(llm, "error", "Diplomacy responder unavailable.") };
             }
 
-            llm = Program.RetryMalformedStructuredResponse(llm, llmRequest, campaignId,
-                Program.EnsureCorrelationId(llmRequest), "diplomacy_response", responderHeroId, "");
+            llm = ConversationResponseService.RetryMalformedStructuredResponse(llm, llmRequest, campaignId,
+                OperationsService.EnsureCorrelationId(llmRequest), "diplomacy_response", responderHeroId, "");
             Dictionary<string, object> parsed = TryParseJsonObject(ReadString(llm, "content", ""));
             if (parsed == null)
             {
-                Program.WriteAudit(campaignId, Program.EnsureCorrelationId(llmRequest), "server", "diplomacy",
+                OperationsService.WriteAudit(campaignId, OperationsService.EnsureCorrelationId(llmRequest), "server", "diplomacy",
                     "diplomacy.format_fallback", responderHeroId, "", "", "completed", 0,
                     "Malformed ruler response was converted to a safe refusal.",
                     new Dictionary<string, object> { ["fallback"] = "refuse" });

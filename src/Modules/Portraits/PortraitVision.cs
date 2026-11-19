@@ -63,8 +63,8 @@ namespace ReignBetaServer
                 catch (Exception ex) { return TestDict("ok", false, "provider", provider, "error", "NanoGPT subscription vision catalog unavailable: " + DialogueService.LimitText(ex.Message, 400)); }
             }
             if (provider != "Codex") return TestDict("ok", false, "error", "Unknown portrait vision provider.");
-            lock (Program.CodexStateLock) return new Dictionary<string, object> { ["ok"] = true, ["provider"] = "Codex",
-                ["models"] = Program.CodexModels.Where(PortraitVisionModelSupportsImages).Where(x => !ReadBool(x, "hidden", false))
+            lock (LlmProviderService.CodexStateLock) return new Dictionary<string, object> { ["ok"] = true, ["provider"] = "Codex",
+                ["models"] = LlmProviderService.CodexModels.Where(PortraitVisionModelSupportsImages).Where(x => !ReadBool(x, "hidden", false))
                     .Select(x => new Dictionary<string, object> { ["id"] = ReadString(x, "model", ReadString(x, "id", "")),
                         ["displayName"] = ReadString(x, "displayName", ReadString(x, "model", "")) }).ToArray() };
         }
@@ -117,7 +117,7 @@ namespace ReignBetaServer
             var thread = rpc("thread/start", new Dictionary<string, object> { ["model"] = model, ["cwd"] = job,
                 ["ephemeral"] = true, ["sandbox"] = "read-only", ["approvalPolicy"] = "never", ["config"] = overrides,
                 ["developerInstructions"] = PortraitVisionInstructions });
-            string threadId = Program.ReadNestedId(thread, "thread"), turnId = "";
+            string threadId = LlmProviderService.ReadNestedId(thread, "thread"), turnId = "";
             if (threadId.Length == 0) throw new InvalidDataException("Codex returned no vision thread.");
             try
             {
@@ -126,7 +126,7 @@ namespace ReignBetaServer
                     ["outputSchema"] = PortraitVisionSchema(), ["input"] = new[] {
                         new Dictionary<string, object> { ["type"] = "localImage", ["path"] = Path.Combine(job, "reference.png") },
                         new Dictionary<string, object> { ["type"] = "text", ["text"] = "Describe this character's visible individual facial identity, hair and outfit using the required JSON fields. Say unknown for details the source cannot establish." } } });
-                turnId = Program.ReadNestedId(turn, "turn");
+                turnId = LlmProviderService.ReadNestedId(turn, "turn");
                 if (turnId.Length == 0) throw new InvalidDataException("Codex returned no vision turn.");
                 return new Dictionary<string, object> { ["model"] = model, ["description"] = ParsePortraitVision(wait(threadId, turnId)) };
             }
@@ -144,7 +144,7 @@ namespace ReignBetaServer
             CodexImageSession session = null;
             try
             {
-                string root = Path.Combine(Program.CodexWorkingDirectory(), "image-jobs");
+                string root = Path.Combine(LlmProviderService.CodexWorkingDirectory(), "image-jobs");
                 AssertCodexImageLocalPath(root);
                 Directory.CreateDirectory(root);
                 job = Path.Combine(root, Guid.NewGuid().ToString("N"));
@@ -162,10 +162,10 @@ namespace ReignBetaServer
                 if (stopped)
                 {
                     try { if (job.Length > 0) DeleteCodexImageJob(job); }
-                    catch (Exception ex) { Program.LogOperational("portrait.vision_cleanup_failed", new Dictionary<string, object> { ["error"] = DialogueService.LimitText(ex.Message, 300) }); }
+                    catch (Exception ex) { OperationsService.LogOperational("portrait.vision_cleanup_failed", new Dictionary<string, object> { ["error"] = DialogueService.LimitText(ex.Message, 300) }); }
                     CodexImageGate.Release();
                 }
-                else Program.LogOperational("portrait.vision_stop_failed", new Dictionary<string, object> { ["error"] = "The owned helper could not stop; the portrait queue remains closed until a managed restart." });
+                else OperationsService.LogOperational("portrait.vision_stop_failed", new Dictionary<string, object> { ["error"] = "The owned helper could not stop; the portrait queue remains closed until a managed restart." });
             }
         }
 
@@ -241,8 +241,8 @@ namespace ReignBetaServer
             Func<List<Dictionary<string, object>>> catalog = null, Func<string, string, string, Dictionary<string, object>, string> send = null)
         {
             ValidateCodexPng(source);
-            string key = Program.ProviderSecret(settings, "nanoGptApiKey", NanoPortraitVisionChatUrl);
-            if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException(Program.ProviderKeyUnavailable(settings, "nanoGptApiKey", key) ? Program.GlobalKeyUnavailableError : "Save your NanoGPT text API key in API Settings before using NanoGPT portrait vision.");
+            string key = SettingsService.ProviderSecret(settings, "nanoGptApiKey", NanoPortraitVisionChatUrl);
+            if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException(SettingsService.ProviderKeyUnavailable(settings, "nanoGptApiKey", key) ? SettingsService.GlobalKeyUnavailableError : "Save your NanoGPT text API key in API Settings before using NanoGPT portrait vision.");
             string model = ReadString(settings, "portraitVisionNanoGptModel", DefaultNanoPortraitVisionModel);
             var selected = (catalog ?? GetNanoPortraitVisionModels)().FirstOrDefault(x => ReadString(x, "id", "") == model);
             if (selected == null || !ReadBool(ReadDictionary(selected, "capabilities"), "vision", false))
@@ -260,7 +260,7 @@ namespace ReignBetaServer
                     ? TestDict("type", "json_object")
                     : TestDict("type", "json_schema", "json_schema", TestDict("name", "portrait_identity", "strict", true, "schema", PortraitVisionSchema()));
             string response = send != null ? send(NanoPortraitVisionChatUrl, key, Json.Serialize(body), settings)
-                : Program.ProviderPostJson(NanoPortraitVisionChatUrl, key, Json.Serialize(body), settings, null, Guid.NewGuid().ToString("N"), "portrait_vision", model);
+                : LlmProviderService.ProviderPostJson(NanoPortraitVisionChatUrl, key, Json.Serialize(body), settings, null, Guid.NewGuid().ToString("N"), "portrait_vision", model);
             if (response.Length > 128000) throw new InvalidDataException("NanoGPT vision response exceeds its bounded size.");
             var raw = Json.Deserialize<Dictionary<string, object>>(response);
             var choices = ReadDictionaryList(raw, "choices");

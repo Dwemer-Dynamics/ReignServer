@@ -87,7 +87,7 @@ namespace ReignBetaServer
             var background = ReadDictionary(stack, "background");
             var brief = new Dictionary<string, object>
             {
-                ["id"] = DialogueService.LimitText(Program.CharacterIdFrom(participant), 160),
+                ["id"] = DialogueService.LimitText(CampaignFileService.CharacterIdFrom(participant), 160),
                 ["name"] = DialogueService.LimitText(ReadString(participant, "name", ""), 120),
                 ["role"] = DialogueService.LimitText(ReadString(participant, "generatedRole", "party_member"), 80),
                 ["culture"] = DialogueService.LimitText(ReadFirstString(participant, "cultureName", "culture"), 120),
@@ -166,7 +166,7 @@ namespace ReignBetaServer
             string opening = ReadString(response, "openingText", "");
             if (string.IsNullOrWhiteSpace(approach) || string.IsNullOrWhiteSpace(opening)
                 || string.IsNullOrWhiteSpace(ReadString(response, "playerHook", ""))) return "incomplete_opening";
-            string[] allowedIds = participants.Select(Program.CharacterIdFrom).ToArray();
+            string[] allowedIds = participants.Select(CampaignFileService.CharacterIdFrom).ToArray();
             if (!ReadStringList(response, "participantHeroIds").Any(id => allowedIds.Contains(id, StringComparer.Ordinal))) return "no_eligible_participants";
             if (WildernessOpeningIdentityConflict(response, participants)) return "participant_gender_conflict";
             foreach (var recent in WildernessRecentEvents(payload))

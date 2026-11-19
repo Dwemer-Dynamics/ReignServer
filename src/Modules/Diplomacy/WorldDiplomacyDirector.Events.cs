@@ -76,7 +76,7 @@ namespace ReignBetaServer
                 queue.Add(diplomaticEvent);
                 if (queue.Count > 500) queue = queue.Skip(queue.Count - 500).ToList();
                 WriteDiplomaticEventQueue(campaignId, queue);
-                Program.AppendJsonLineToPath(Program.CampaignFile(campaignId, "diplomacy", "events.jsonl"), diplomaticEvent);
+                CampaignFileService.AppendJsonLineToPath(CampaignFileService.CampaignFile(campaignId, "diplomacy", "events.jsonl"), diplomaticEvent);
                 if (!ReadBool(diplomaticEvent, "accepted", false)) AppendDiplomaticConsequence(campaignId, diplomaticEvent);
             }
             try
@@ -103,7 +103,7 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                Program.LogOperational("world_diplomacy.public_history_failed", new Dictionary<string, object>
+                OperationsService.LogOperational("world_diplomacy.public_history_failed", new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["eventId"] = ReadString(diplomaticEvent, "eventId", ""),
@@ -210,9 +210,9 @@ namespace ReignBetaServer
                     string currentStatus = ReadString(item, "executionStatus", "");
                     bool legacyRefusalCorrection = currentStatus == "failed" && status == "rejected"
                         && ReadString(report, "statusCorrection", "") == "legacy_government_refusal"
-                        && Program.IsRecordedGovernmentRefusalResult(ReadDictionary(report, "result")
+                        && ActionPipelineService.IsRecordedGovernmentRefusalResult(ReadDictionary(report, "result")
                             ?? new Dictionary<string, object>());
-                    if (!Program.ShouldAcceptActionStatusTransition(currentStatus, status) && !legacyRefusalCorrection)
+                    if (!ActionPipelineService.ShouldAcceptActionStatusTransition(currentStatus, status) && !legacyRefusalCorrection)
                         continue;
                     item["executionStatus"] = status;
                     if (status.Equals("completed", StringComparison.OrdinalIgnoreCase))
@@ -382,9 +382,9 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> LoadDirectorTraits(string campaignId, Dictionary<string, object> ruler)
         {
             string heroId = ReadString(ruler, "leaderHeroId", "");
-            Dictionary<string, object> document = string.IsNullOrWhiteSpace(heroId) ? new Dictionary<string, object>() : Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"));
+            Dictionary<string, object> document = string.IsNullOrWhiteSpace(heroId) ? new Dictionary<string, object>() : CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"));
             if (document.Count > 0 && CharactersService.EnsureTraitPercentageData(document, heroId))
-                Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"), document);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"), document);
             Dictionary<string, object> persisted = ReadDictionary(document, "courtVirtues");
             if (CharactersService.TraitPercentageDocumentReady(document) && HasCompleteDirectorVirtueProfile(persisted)) return NormalizeDirectorVirtues(persisted);
 

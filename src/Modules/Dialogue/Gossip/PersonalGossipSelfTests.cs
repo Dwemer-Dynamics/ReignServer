@@ -116,35 +116,35 @@ namespace ReignBetaServer
                 && GossipIdentityHint(null, "Known contact") == "Known contact", null);
             check("malformed_gossip_identity_does_not_guess_gender", GossipIdentityHint(GossipFields("isFemale", "false"), "Known contact") == "Known contact", null);
             check("gossip_identity_hint_preserves_communicated_label", !GossipIdentityHint(GossipFields("isFemale", false, "name", "HiddenCanonicalName"), "The contact").Contains("HiddenCanonicalName"), null);
-            foreach (string stage in Program.PersonalGossipChanceLabels.Keys)
+            foreach (string stage in SettingsService.PersonalGossipChanceLabels.Keys)
             {
-                string key = Program.GossipAdjustmentKey(stage);
-                check("options_" + stage + "_bounds", new object[] { -100, 0, 100 }.All(v => Program.ValidatePersonalGossipOptions(GossipFields(key, v)) == "")
-                    && new object[] { -101, 101, .5, "50", true, null, double.NaN, double.PositiveInfinity }.All(v => Program.ValidatePersonalGossipOptions(GossipFields(key, v)).Length > 0), null);
+                string key = SettingsService.GossipAdjustmentKey(stage);
+                check("options_" + stage + "_bounds", new object[] { -100, 0, 100 }.All(v => SettingsService.ValidatePersonalGossipOptions(GossipFields(key, v)) == "")
+                    && new object[] { -101, 101, .5, "50", true, null, double.NaN, double.PositiveInfinity }.All(v => SettingsService.ValidatePersonalGossipOptions(GossipFields(key, v)).Length > 0), null);
                 check("options_" + stage + "_chance_endpoints", Enumerable.Range(0, 101).All(basis =>
-                    Program.GossipAdjustedChance(basis, stage, PersonalGossipSettings(GossipFields(key, -100))) == 0
-                    && Program.GossipAdjustedChance(basis, stage, PersonalGossipSettings(GossipFields(key, 100))) == 100
-                    && Program.GossipAdjustedChance(basis, stage, policy) == basis), null);
+                    SettingsService.GossipAdjustedChance(basis, stage, PersonalGossipSettings(GossipFields(key, -100))) == 0
+                    && SettingsService.GossipAdjustedChance(basis, stage, PersonalGossipSettings(GossipFields(key, 100))) == 100
+                    && SettingsService.GossipAdjustedChance(basis, stage, policy) == basis), null);
             }
-            check("options_invalid_master_and_unknown_rejected", Program.ValidatePersonalGossipOptions(GossipFields("personalGossipEnabled", "false")).Length > 0
-                && Program.ValidatePersonalGossipOptions(GossipFields("personalGossipInvented", 20)).Length > 0, null);
-            var optionSettings = Program.DefaultSettings(); optionSettings["unrelated_gossip_fixture"] = "retain";
-            Program.MergeProviderSettings(optionSettings, GossipFields("personalGossipShareAdjustment", 100));
-            Program.MergeProviderSettings(optionSettings, GossipFields("personalGossipDisclosureAdjustment", -100, "personalGossipEnabled", false));
+            check("options_invalid_master_and_unknown_rejected", SettingsService.ValidatePersonalGossipOptions(GossipFields("personalGossipEnabled", "false")).Length > 0
+                && SettingsService.ValidatePersonalGossipOptions(GossipFields("personalGossipInvented", 20)).Length > 0, null);
+            var optionSettings = SettingsService.DefaultSettings(); optionSettings["unrelated_gossip_fixture"] = "retain";
+            LlmProviderService.MergeProviderSettings(optionSettings, GossipFields("personalGossipShareAdjustment", 100));
+            LlmProviderService.MergeProviderSettings(optionSettings, GossipFields("personalGossipDisclosureAdjustment", -100, "personalGossipEnabled", false));
             var optionRestored = TryParseJsonObject(Json.Serialize(optionSettings));
             var frozenOptions = PersonalGossipSettings(optionRestored);
-            Program.MergeProviderSettings(optionRestored, GossipFields("personalGossipShareAdjustment", -100));
+            LlmProviderService.MergeProviderSettings(optionRestored, GossipFields("personalGossipShareAdjustment", -100));
             check("options_partial_merge_persist_and_freeze", !ReadBool(frozenOptions, "enabled", true)
                 && ReadInt(ReadDictionary(frozenOptions, "chanceAdjustments"), "share", 0) == 100
                 && ReadInt(ReadDictionary(frozenOptions, "chanceAdjustments"), "disclosure", 0) == -100
-                && Program.GossipAdjustedChance(40, "share", PersonalGossipSettings(optionRestored)) == 0
+                && SettingsService.GossipAdjustedChance(40, "share", PersonalGossipSettings(optionRestored)) == 0
                 && ReadString(optionRestored, "unrelated_gossip_fixture", "") == "retain", null);
-            check("options_ui_default_and_registration", Program.PersonalGossipChanceLabels.Keys.All(stage => ReadInt(Program.SettingsForUi(Program.DefaultSettings()), Program.GossipAdjustmentKey(stage), 999) == 0)
-                && ReadBool(Program.SettingsForUi(Program.DefaultSettings()), "personalGossipEnabled", false)
-                && Program.ReignXpOptionsHtml().Contains("id='personalGossipOptions'") && Program.ReignXpOptionsScript().Contains("loadPersonalGossipOptions(settings)"), null);
-            Program.WriteJsonObject(System.IO.Path.Combine(Program.VerificationDir, "personal-gossip-options-fixture.json"),
-                GossipFields("markup", Program.PersonalGossipOptionsHtml(), "script", Program.PersonalGossipOptionsScript(),
-                    "defaults", Program.PersonalGossipChanceLabels.Keys.ToDictionary(Program.GossipAdjustmentKey, _ => (object)0)));
+            check("options_ui_default_and_registration", SettingsService.PersonalGossipChanceLabels.Keys.All(stage => ReadInt(SettingsService.SettingsForUi(SettingsService.DefaultSettings()), SettingsService.GossipAdjustmentKey(stage), 999) == 0)
+                && ReadBool(SettingsService.SettingsForUi(SettingsService.DefaultSettings()), "personalGossipEnabled", false)
+                && SettingsService.ReignXpOptionsHtml().Contains("id='personalGossipOptions'") && SettingsService.ReignXpOptionsScript().Contains("loadPersonalGossipOptions(settings)"), null);
+            CampaignFileService.WriteJsonObject(System.IO.Path.Combine(VerificationService.VerificationDir, "personal-gossip-options-fixture.json"),
+                GossipFields("markup", SettingsService.PersonalGossipOptionsHtml(), "script", SettingsService.PersonalGossipOptionsScript(),
+                    "defaults", SettingsService.PersonalGossipChanceLabels.Keys.ToDictionary(SettingsService.GossipAdjustmentKey, _ => (object)0)));
             var delayed = GossipFields("operatorTestControls", GossipFields("compositionMode", "delay_past_watch_once"), "operatorAttempt", 1);
             check("fixed_post_watch_delay_is_bounded_and_first_attempt_only", PersonalGossipCompositionDelaySeconds(delayed) == 135
                 && PersonalGossipCompositionDelaySeconds(GossipFields("operatorTestControls", GossipFields("compositionMode", "delay_once"), "operatorAttempt", 1)) == 15
@@ -411,7 +411,7 @@ namespace ReignBetaServer
             var people = new List<Dictionary<string, object>> { source, target, player };
             var policy = DefaultPersonalGossipSettings();
             var excitable = GossipTestTraits("sociability", 100, "impulsiveness", 100, "pride", 100, "curiosity", 100);
-            Program.WriteJsonObject(Program.CharacterFile(campaign, "source", "traits.json"), excitable);
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "source", "traits.json"), excitable);
             Func<double, Dictionary<string, object>> presence = day => GossipFields("campaignId", campaign, "timelineId", "main", "worldDay", day,
                 "gossipPresence", GossipFields("schema", "reign-gossip-presence-v1", "timelineId", "main", "worldDay", day, "rosterComplete", true, "people", people));
             Dictionary<string, object> NewTopic(ReignDbConnection c, string id, double day, bool named, bool malicious = false,
@@ -631,9 +631,9 @@ namespace ReignBetaServer
                     check("late_reply_acquisition_uses_fresh_native_day", DialogueSelfTestStore.SelectPersonalGossipHistory7(c, GossipFields("id", localId + "_out_reply")).All(r => ReadDouble(r, "acquired_day", 0) == 20 + 2d / 24), null);
                     var payload = presence(20 + 2d / 24); payload["playerHeroStringId"] = "player";
                     string receivedBodyBeforeIdentityHint = ReadString(GossipJson(DialogueSelfTestStore.SelectPersonalGossipHistory8(c, GossipFields("message", localId + "_out")).Single()), "body", "");
-                    var sourceIdentityProfile = Program.ReadJsonObject(Program.CharacterFile(campaign, "source", "profile.json")) ?? new Dictionary<string, object>();
+                    var sourceIdentityProfile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, "source", "profile.json")) ?? new Dictionary<string, object>();
                     sourceIdentityProfile["isFemale"] = false;
-                    Program.WriteJsonObject(Program.CharacterFile(campaign, "source", "profile.json"), sourceIdentityProfile);
+                    CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "source", "profile.json"), sourceIdentityProfile);
                     string own = BuildPersonalGossipPrompt(campaign, "target", payload, new List<string>());
                     string outsider = BuildPersonalGossipPrompt(campaign, "outsider", payload, new List<string>());
                     check("observer_private_recent_history", own.Contains("talked privately about the tournament") && !outsider.Contains("talked privately about the tournament"), null);
@@ -765,7 +765,7 @@ namespace ReignBetaServer
                 using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                     check("remote_reply_arrives_once", DialogueSelfTestStore.SelectPersonalGossipHistory10(c, GossipFields("id", remoteId + "_out_reply")).Count == 1, null);
 
-                Program.WriteJsonObject(Program.CharacterFile(campaign, "source", "traits.json"), spiteful);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "source", "traits.json"), spiteful);
                 source["settlementId"] = "town_a"; target["settlementId"] = "town_a";
                 string maliciousId = GossipTestSeed("malice_", id => GossipRoll(id, "share") <= 60 && GossipRoll(id, "negative") <= 57
                     && GossipRoll(id, "distortion") <= 71 && GossipRoll(id, "severity") >= 66);
@@ -800,7 +800,7 @@ namespace ReignBetaServer
                 using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                     check("invalidated_source_cancels_undelivered", ReadString(DialogueSelfTestStore.SelectPersonalGossipMessages6(c, GossipFields("id", maliciousId + "_out")).Single(), "status", "") == "cancelled_unavailable", null);
 
-                Program.WriteJsonObject(Program.CharacterFile(campaign, "source", "traits.json"), excitable);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "source", "traits.json"), excitable);
                 var availabilitySourceBefore = new Dictionary<string, object>(source);
                 var availabilityTargetBefore = new Dictionary<string, object>(target);
                 int availabilityIndex = 0;
@@ -893,7 +893,7 @@ namespace ReignBetaServer
                     EvaluatePersonalGossip(c, campaign, mixed, people);
                     check("capped_to_zero_not_positive_prose", DialogueSelfTestStore.SelectPersonalGossipMessages12(c).Count == 0, null);
                     var secretTraits = GossipTestTraits("sociability", 100, "curiosity", 100, "impulsiveness", 0, "tact", 100, "discipline", 100, "empathy", 100, "honesty", 100, "loyalty", 100);
-                    Program.WriteJsonObject(Program.CharacterFile(campaign, "source", "traits.json"), secretTraits);
+                    CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "source", "traits.json"), secretTraits);
                     GossipTestPair(c, "source", "player", 100, 0);
                     string secretId = GossipTestSeed("private_", id => GossipRoll(id, "share") <= 65);
                     var secret = NewTopic(c, secretId, 51, false);
@@ -1068,7 +1068,7 @@ namespace ReignBetaServer
                             && ReadInt(ReadDictionary(profileTraits, "foundationTraits"), "generosity", 0) == 2, null);
                         SavePersonalGossipTraitProfile(c, campaign, "profile_fixture", profileTraits);
                         var openedProfile = CharactersService.MaterializeCanonicalProfile(campaign, "profile_fixture", GossipFields("heroStringId", "profile_fixture", "name", "Profile Fixture"), GossipFields(), false, false);
-                        var afterOpen = Program.ReadJsonObject(Program.CharacterFile(campaign, "profile_fixture", "traits.json"));
+                        var afterOpen = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, "profile_fixture", "traits.json"));
                         check("fixed_profile_survives_canonical_open_" + profile, ReadString(openedProfile, "status", "") == "editor_authoritative"
                             && expected.All(p => ReadInt(ReadDictionary(afterOpen, "traitPercentages"), p.Key, -1) == Convert.ToInt32(p.Value))
                             && DialogueSelfTestStore.SelectCharacterEditorNativeCommands(c).Count == 0, openedProfile);
@@ -1080,8 +1080,8 @@ namespace ReignBetaServer
                     var editorRuntime = CharactersService.DeepCloneProfileDictionary(ReadDictionary(shippedEditorProfile, "sourceFacts"));
                     editorRuntime["heroStringId"] = editedHero;
                     editorRuntime["narrativeVersion"] = 5;
-                    Program.WriteJsonObject(Program.CharacterFile(campaign, editedHero, "profile.json"), editorRuntime);
-                    Program.WriteJsonObject(Program.CharacterFile(campaign, editedHero, "constructed.json"), GossipFields("ok", true, "status", "canonical_ready"));
+                    CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, editedHero, "profile.json"), editorRuntime);
+                    CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, editedHero, "constructed.json"), GossipFields("ok", true, "status", "canonical_ready"));
                     foreach (string profile in new[] { "excitable", "reserved", "honest_loyal", "vengeful" })
                     {
                         var editedTraits = GossipFields("foundationTraits", CharactersService.CoreTraitKeys.ToDictionary(k => k, _ => (object)0));
@@ -1090,9 +1090,9 @@ namespace ReignBetaServer
                         var expected = new Dictionary<string, object>(ReadDictionary(editedTraits, "traitPercentages"));
                         SavePersonalGossipTraitProfile(c, campaign, editedHero, editedTraits);
                         var ready = CharactersService.EnsureCharacterConstructed(campaign, editedHero, editorRuntime, "gossip_fixture_first_contact_test");
-                        var afterContact = Program.ReadJsonObject(Program.CharacterFile(campaign, editedHero, "traits.json"));
+                        var afterContact = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, editedHero, "traits.json"));
                         check("fixed_profile_full_first_contact_ready_" + profile, CharactersService.IsCharacterConstructionReady(ready)
-                            && CharactersService.NarrativeDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaign, editedHero, "narrative.json")))
+                            && CharactersService.NarrativeDocumentReady(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, editedHero, "narrative.json")))
                             && expected.All(p => ReadInt(ReadDictionary(afterContact, "traitPercentages"), p.Key, -1) == Convert.ToInt32(p.Value))
                             && DialogueSelfTestStore.SelectCharacterEditorNativeCommands2(c, GossipFields("hero", editedHero)).Count == 0, ready);
                     }
@@ -1101,7 +1101,7 @@ namespace ReignBetaServer
                     check("unsupported_reply_cannot_invent_answer", ValidatePersonalGossipComposition(c, GossipFields(), inventedReply, true)
                         && ReadString(inventedReply, "body", "") == "I will think about what you said.", null);
                 }
-                Program.WriteJsonObject(Program.CharacterFile(campaign, "source", "traits.json"), excitable);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "source", "traits.json"), excitable);
                 string retryId = GossipTestSeed("retry_", id => GossipRoll(id, "share") <= 85);
                 using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
@@ -1136,7 +1136,7 @@ namespace ReignBetaServer
                 }
 
                 var third = GossipTestHero("third"); people.Add(third);
-                Program.WriteJsonObject(Program.CharacterFile(campaign, "target", "traits.json"), excitable);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "target", "traits.json"), excitable);
                 string retellId = GossipTestSeed("retell_", id => GossipRoll(id, "share") <= 85
                     && GossipRoll(id + "_via_" + PromptHash("target").Substring(0, 12).ToLowerInvariant(), "share") <= 25);
                 using (var c = ReignDatabase.OpenCampaignConnection(campaign))
@@ -1251,7 +1251,7 @@ namespace ReignBetaServer
                     double privacyDay = receiptDay + 20;
                     var discreet = GossipTestTraits("sociability", 75, "curiosity", 75, "impulsiveness", 75, "pride", 75,
                         "honesty", 100, "loyalty", 100, "tact", 100, "discipline", 100, "empathy", 100);
-                    Program.WriteJsonObject(Program.CharacterFile(campaign, "source", "traits.json"), discreet);
+                    CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "source", "traits.json"), discreet);
                     GossipTestPair(c, "source", "target", 60, 60);
                     GossipTestPair(c, "source", "player", 100, 100);
                     while (GossipRoll(GossipTopicId("main", "source", "player", privacyDay, "impression", ""), "share") > 55
@@ -1296,7 +1296,7 @@ namespace ReignBetaServer
                     double ownerDay = privacyDay + 10;
                     var loyalConfidant = GossipTestTraits("honesty", 0, "loyalty", 100, "tact", 0, "discipline", 0,
                         "empathy", 0, "impulsiveness", 100, "sociability", 100, "pride", 100, "curiosity", 100);
-                    Program.WriteJsonObject(Program.CharacterFile(campaign, "source", "traits.json"), loyalConfidant);
+                    CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "source", "traits.json"), loyalConfidant);
                     string ownerId = GossipTopicId("main", "source", "player", ownerDay, "gift", "");
                     var ownerSeed = NewTopic(c, ownerId, ownerDay, false, sourceText: entrustedPlan, npcReply: promiseText);
                     var ownerMetadata = GossipFields("topic", "gift", "evidenceQuote", entrustedPlan, "confidence", 1d,
@@ -1348,13 +1348,13 @@ namespace ReignBetaServer
                         && ReadStringList(ownerReply, "confidenceOwnerIds").Contains("player"), ownerReply);
 
                     double optionsDay = privacyDay + 100;
-                    Program.WriteJsonObject(Program.CharacterFile(campaign, "source", "traits.json"), excitable);
+                    CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "source", "traits.json"), excitable);
                     GossipTestPair(c, "source", "target", 60, 60);
                     Dictionary<string, object> TunedTopic(string id, double day, int adjustment, bool malicious = false)
                     {
                         var value = NewTopic(c, id, day, false, malicious);
                         var tunedPolicy = DefaultPersonalGossipSettings();
-                        tunedPolicy["chanceAdjustments"] = Program.PersonalGossipChanceLabels.Keys.ToDictionary(k => k, _ => (object)adjustment);
+                        tunedPolicy["chanceAdjustments"] = SettingsService.PersonalGossipChanceLabels.Keys.ToDictionary(k => k, _ => (object)adjustment);
                         value["policy"] = tunedPolicy;
                         return value;
                     }
@@ -1374,13 +1374,13 @@ namespace ReignBetaServer
                     EvaluatePersonalGossip(c, campaign, noAudienceTuned, new List<Dictionary<string, object>> { source, player });
                     check("options_cannot_bypass_privacy_or_audience", DialogueSelfTestStore.SelectPersonalGossipMessages19(c).Count == 0, null);
                     GossipTestPair(c, "source", "target", -60, -60);
-                    Program.WriteJsonObject(Program.CharacterFile(campaign, "source", "traits.json"), GossipTestTraits("honesty", 0, "vengefulness", 100));
+                    CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "source", "traits.json"), GossipTestTraits("honesty", 0, "vengefulness", 100));
                     var tunedMalice = TunedTopic("options_malicious", optionsDay + 8, 100, true);
                     EvaluatePersonalGossip(c, campaign, tunedMalice, people);
                     check("options_guarantee_supported_malice_and_distortion", ReadString(tunedMalice, "type", "") == "negative"
                         && ReadInt(tunedMalice, "negativeChance", 0) == 100 && ReadInt(tunedMalice, "distortionChance", 0) == 100
                         && ReadString(tunedMalice, "distortion", "none") != "none", null);
-                    Program.WriteJsonObject(Program.CharacterFile(campaign, "source", "traits.json"), GossipTestTraits("honesty", 100));
+                    CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "source", "traits.json"), GossipTestTraits("honesty", 100));
                     var honestTuned = TunedTopic("options_honest", optionsDay + 10, 100, true);
                     EvaluatePersonalGossip(c, campaign, honestTuned, people);
                     check("options_cannot_make_completely_honest_npc_fabricate", ReadString(honestTuned, "type", "") == "negative"

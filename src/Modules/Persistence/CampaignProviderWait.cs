@@ -116,7 +116,7 @@ namespace ReignBetaServer
                 // Logging happens after releasing ownership, is bounded to slow
                 // scopes, and cannot change request success or monitor release.
                 if (!stillOwned && (heldMs >= 1000d || WaitMs >= 1000))
-                    try { Program.LogOperational("campaign.work_lock_slow", TestDict(
+                    try { OperationsService.LogOperational("campaign.work_lock_slow", TestDict(
                         "owner", Source, "lastStage", Volatile.Read(ref stage),
                         "heldMs", heldMs, "waitMs", WaitMs,
                         "ownerAtWaitStart", ownerAtWaitStart, "stageAtWaitStart", stageAtWaitStart,

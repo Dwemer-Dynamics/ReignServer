@@ -192,7 +192,7 @@ namespace ReignBetaServer
                     File.WriteAllText(Path.Combine(artifact, routeName + ".json"), Json.Serialize(routes.Last()));
                     PersistenceService.ClearSaveSyncCaches(campaign);
                     ReignPostgreSqlStorage.DropCampaign(campaign);
-                    PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaign));
+                    PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaign));
                 }
                 var original = ReadDictionaryList(routes[0], "samples");
                 var candidate = ReadDictionaryList(routes[1], "samples");
@@ -228,7 +228,7 @@ namespace ReignBetaServer
                 RelationshipReplayConceptions = null;
                 PersistenceService.ClearSaveSyncCaches(campaign);
                 ReignPostgreSqlStorage.DropCampaign(campaign);
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaign));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaign));
             }
         }
 

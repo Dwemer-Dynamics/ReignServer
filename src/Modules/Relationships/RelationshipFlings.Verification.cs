@@ -443,7 +443,7 @@ namespace ReignBetaServer
             {
                 try { ReignPostgreSqlStorage.DropCampaign(campaignId); }
                 catch { }
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaignId));
             }
             return results;
         }

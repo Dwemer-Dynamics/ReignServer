@@ -18,14 +18,14 @@ namespace ReignBetaServer
             Directory.CreateDirectory(Program.PromptsDir);
             RetireLegacyPromptTemplates(Program.PromptsDir);
 
-            Dictionary<string, string> defaults = Program.DefaultPromptTemplates();
+            Dictionary<string, string> defaults = PromptService.DefaultPromptTemplates();
             foreach (KeyValuePair<string, HashSet<string>> pair in VersionTwoReasoningPromptHashes)
             {
-                string path = Program.PromptPath(pair.Key);
+                string path = PromptService.PromptPath(pair.Key);
                 if (!File.Exists(path)) continue;
                 string current = File.ReadAllText(path, Encoding.UTF8);
                 string currentHash = PromptHash(current);
-                string updated = Program.DefaultPromptText(pair.Key, defaults);
+                string updated = PromptService.DefaultPromptText(pair.Key, defaults);
                 if (string.Equals(currentHash, PromptHash(updated), StringComparison.OrdinalIgnoreCase)) continue;
                 if (pair.Value.Contains(currentHash))
                 {
@@ -42,10 +42,10 @@ namespace ReignBetaServer
             List<string> custom = UnreviewedRetiredPromptFiles(Program.PromptsDir);
             List<string> customReasoning = VersionTwoReasoningPromptHashes.Keys.Where(name =>
             {
-                string path = Program.PromptPath(name);
+                string path = PromptService.PromptPath(name);
                 if (!File.Exists(path)) return false;
                 string currentHash = PromptHash(File.ReadAllText(path, Encoding.UTF8));
-                string defaultHash = PromptHash(Program.DefaultPromptText(name, Program.DefaultPromptTemplates()));
+                string defaultHash = PromptHash(PromptService.DefaultPromptText(name, PromptService.DefaultPromptTemplates()));
                 return !string.Equals(currentHash, defaultHash, StringComparison.OrdinalIgnoreCase) && !VersionTwoReasoningPromptHashes[name].Contains(currentHash);
             }).ToList();
             return new Dictionary<string, object>
@@ -112,8 +112,8 @@ namespace ReignBetaServer
             string key = ReasoningRouteKey(apiUrl, model);
             DateTime cooldownUntil = ReasoningFallbackCooldownUntil(key);
             bool coolingDown = cooldownUntil > DateTime.UtcNow;
-            bool openrouter = Program.IsOpenRouterApiUrl(apiUrl);
-            bool ollama = Program.IsOllamaCloudApiUrl(apiUrl);
+            bool openrouter = LlmProviderService.IsOpenRouterApiUrl(apiUrl);
+            bool ollama = LlmProviderService.IsOllamaCloudApiUrl(apiUrl);
             bool applied = (nano || openrouter || ollama) && (!coolingDown || mandatoryReasoning);
             if (mandatoryReasoning)
             {
@@ -156,7 +156,7 @@ namespace ReignBetaServer
                 ["modelRequiresReasoning"] = mandatoryReasoning,
                 ["effort"] = effort,
                 ["nanoGpt"] = nano,
-                ["openRouter"] = Program.IsOpenRouterApiUrl(apiUrl),
+                ["openRouter"] = LlmProviderService.IsOpenRouterApiUrl(apiUrl),
                 ["ollamaCloud"] = ollama,
                 ["providerControlsApplied"] = applied,
                 ["reasoningExcluded"] = true,
@@ -218,7 +218,7 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> ReasoningPolicyStatus(Dictionary<string, object> settings = null)
         {
-            settings = settings ?? Program.LoadSettings();
+            settings = settings ?? SettingsService.LoadSettings();
             NormalizeReasoningSettings(settings);
             return new Dictionary<string, object>
             {
@@ -353,7 +353,7 @@ namespace ReignBetaServer
                 ["mode"] = mode,
                 ["eligible"] = eligible,
                 ["nanoGpt"] = nano,
-                ["openRouter"] = Program.IsOpenRouterApiUrl(apiUrl),
+                ["openRouter"] = LlmProviderService.IsOpenRouterApiUrl(apiUrl),
                 ["cacheCapableRouteRequested"] = routed,
                 ["subscriptionSafeImplicit"] = nano,
                 ["cooldownActive"] = coolingDown,
@@ -506,7 +506,7 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> PromptCacheStatusApi()
         {
-            Dictionary<string, object> settings = Program.LoadSettings();
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
             List<Dictionary<string, object>> stats;
             List<Dictionary<string, object>> cooldowns;
             long calls;
@@ -550,7 +550,7 @@ namespace ReignBetaServer
                 ["ok"] = true,
                 ["mode"] = ReadString(settings, "promptCacheMode", "implicit"),
                 ["fallbackCooldownSeconds"] = ReadInt(settings, "promptCacheFallbackCooldownSeconds", 300),
-                ["apiProvider"] = Program.UsesCodexSubscription(settings) ? Program.CodexSubscriptionProvider : Program.IsOpenRouterApiUrl(Program.LlmApiUrl(settings)) ? Program.OpenRouterProvider : IsNanoGptApiUrl(Program.LlmApiUrl(settings)) ? Program.NanoGptProvider : Program.OpenAiCompatibleProvider,
+                ["apiProvider"] = LlmProviderService.UsesCodexSubscription(settings) ? LlmProviderService.CodexSubscriptionProvider : LlmProviderService.IsOpenRouterApiUrl(LlmProviderService.LlmApiUrl(settings)) ? LlmProviderService.OpenRouterProvider : IsNanoGptApiUrl(LlmProviderService.LlmApiUrl(settings)) ? LlmProviderService.NanoGptProvider : LlmProviderService.OpenAiCompatibleProvider,
                 ["routingHealth"] = cooldowns.Count > 0 ? "degraded" : "healthy",
                 ["cooldownState"] = cooldowns.Count > 0 ? "active" : "none",
                 ["totals"] = new Dictionary<string, object>
@@ -573,14 +573,14 @@ namespace ReignBetaServer
         }
 
         internal static bool SupportsPromptCacheProbe(Dictionary<string, object> settings)
-            => !Program.UsesCodexSubscription(settings) && IsNanoGptApiUrl(Program.LlmApiUrl(settings));
+            => !LlmProviderService.UsesCodexSubscription(settings) && IsNanoGptApiUrl(LlmProviderService.LlmApiUrl(settings));
 
         internal static Dictionary<string, object> PromptCacheProbeApi(Dictionary<string, object> payload)
         {
-            Dictionary<string, object> settings = Program.LoadSettings();
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
             if (!SupportsPromptCacheProbe(settings)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The GLM cache diagnostic requires NanoGPT. Select and save NanoGPT before running it." };
-            if (!Program.ProviderKeyConfigured(settings, Program.LlmApiKeySlot(settings))) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The main LLM API key is not configured." };
-            string staticPrefix = BuildDialogueGlobalPrefix(false, false, Program.CompactActionCatalog(Program.ActionCatalog()));
+            if (!SettingsService.ProviderKeyConfigured(settings, SettingsService.LlmApiKeySlot(settings))) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The main LLM API key is not configured." };
+            string staticPrefix = BuildDialogueGlobalPrefix(false, false, ActionPipelineService.CompactActionCatalog(ActionPipelineService.ActionCatalog()));
             string characterPrefix = "CACHE PROBE CHARACTER\nThis synthetic diagnostic character contains no campaign or player data.";
             Dictionary<string, object> first = RunPromptCacheProbeCall(staticPrefix, characterPrefix, "Probe suffix one. Return {\"ok\":true}.");
             if (!ReadBool(first, "ok", false)) return new Dictionary<string, object> { ["ok"] = false, ["first"] = first, ["error"] = ReadString(first, "error", "The first cache probe call failed.") };
@@ -602,7 +602,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> RunPromptCacheProbeCall(string staticPrefix, string characterPrefix, string suffix)
         {
             PromptEnvelope envelope = CreatePromptEnvelope("prompt_cache_probe", "synthetic", staticPrefix, characterPrefix, suffix);
-            return Program.ChatWithLlm(new Dictionary<string, object>
+            return LlmProviderService.ChatWithLlm(new Dictionary<string, object>
             {
                 ["requestType"] = "prompt_cache_probe",
                 ["model"] = "zai-org/glm-5.2",

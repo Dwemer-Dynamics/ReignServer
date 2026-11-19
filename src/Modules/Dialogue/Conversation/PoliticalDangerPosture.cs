@@ -391,7 +391,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> identityView,
                 Dictionary<string, object> payload)
         {
-            Dictionary<string, object> stored = Program.CloneDictionary(
+            Dictionary<string, object> stored = VerificationService.CloneDictionary(
                 ReadDictionary(state, "politicalAddressConvention")
                 ?? new Dictionary<string, object>());
             if (stored.Count == 0)
@@ -425,8 +425,8 @@ namespace ReignBetaServer
                     ? "explicit_player_revocation"
                     : "explicit_player_permission"
             };
-            stored = Program.CloneDictionary(update);
-            stored["pendingUpdate"] = Program.CloneDictionary(update);
+            stored = VerificationService.CloneDictionary(update);
+            stored["pendingUpdate"] = VerificationService.CloneDictionary(update);
             return stored;
         }
 
@@ -594,7 +594,7 @@ namespace ReignBetaServer
                 originalRequest, "model", "");
             if (!string.IsNullOrWhiteSpace(requestedModel))
                 repairRequest["model"] = requestedModel;
-            Dictionary<string, object> repairedLlm = Program.ChatWithLlm(repairRequest);
+            Dictionary<string, object> repairedLlm = LlmProviderService.ChatWithLlm(repairRequest);
             Dictionary<string, object> repairedJson = TryParseJsonObject(
                 ReadString(repairedLlm, "content", ""));
             string repairedReply = ReadFirstString(
@@ -659,7 +659,7 @@ namespace ReignBetaServer
                 llm["content"] = Json.Serialize(parsed);
             llm["politicalConductEnforcement"] = evidence;
             if (writeRepairAudit)
-                Program.WriteAudit(campaignId, correlationId, "server", auditMode,
+                OperationsService.WriteAudit(campaignId, correlationId, "server", auditMode,
                     "llm.political_conduct_repair", heroId, "", eventId,
                     !usableRepair && !markedFailure ? "failed"
                         : revalidationCleared ? "completed"
@@ -1172,7 +1172,7 @@ namespace ReignBetaServer
                 new Dictionary<string, object>
                 {
                     ["politicalAddressConvention"] =
-                        Program.CloneDictionary(ReadDictionary(grant,
+                        VerificationService.CloneDictionary(ReadDictionary(grant,
                             "pendingAddressConvention"))
                 };
             Dictionary<string, object> revoke = BuildPoliticalRiskPosture(

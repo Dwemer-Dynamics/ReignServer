@@ -59,17 +59,17 @@ namespace ReignBetaServer
                     &&ReadBool(proceededAgain,"idempotent",false)&&Math.Abs(ReadDouble(proceeded,"roll",-1d)-ReadDouble(proceededAgain,"roll",-2d))<double.Epsilon,
                     "Proceed performs one deterministic roll and retries return the same stored outcome.");
 
-                Dictionary<string, object> gate=Program.NormalizeConceptionGate(new Dictionary<string, object>{{"needed",true},{"completed",true},{"confidence",0.95d}},"",false);
-                Dictionary<string, object> suppressed=Program.NormalizeConceptionGate(new Dictionary<string, object>{{"needed",true},{"completed",true},{"confidence",0.95d}},"*She inseminates him.*",true);
+                Dictionary<string, object> gate=ActionPipelineService.NormalizeConceptionGate(new Dictionary<string, object>{{"needed",true},{"completed",true},{"confidence",0.95d}},"",false);
+                Dictionary<string, object> suppressed=ActionPipelineService.NormalizeConceptionGate(new Dictionary<string, object>{{"needed",true},{"completed",true},{"confidence",0.95d}},"*She inseminates him.*",true);
                 add("llm_gate_and_pull_out_suppression",
                     ReadBool(gate,"needed",false)&&!ReadBool(suppressed,"needed",true),
                     "Completed LLM insemination actions open the choice, while the pull_out follow-up cannot recursively trigger another roll.");
 
-                Dictionary<string, Dictionary<string, object>> metadata=Program.PromptMetadataByName();
+                Dictionary<string, Dictionary<string, object>> metadata=PromptService.PromptMetadataByName();
                 add("pull_out_prompt_is_editable",
                     Program.PromptFileNames.Contains("pull_out.txt",StringComparer.OrdinalIgnoreCase)
                     &&metadata.ContainsKey("pull_out.txt")&&ReadBool(metadata["pull_out.txt"],"visible",false)
-                    &&!string.IsNullOrWhiteSpace(Program.LoadPromptTemplate("pull_out.txt")),
+                    &&!string.IsNullOrWhiteSpace(PromptService.LoadPromptTemplate("pull_out.txt")),
                     "The pull_out prompt is registered, visible in the Control Center editor, and has a non-empty default.");
             }
             finally

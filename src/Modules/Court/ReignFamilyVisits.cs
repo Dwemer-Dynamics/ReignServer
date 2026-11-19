@@ -38,7 +38,7 @@ namespace ReignBetaServer
                     if (action == "register")
                     {
                         var profile = ReadDictionary(payload, "hero");
-                        string hero = Program.CharacterIdFrom(profile);
+                        string hero = CampaignFileService.CharacterIdFrom(profile);
                         var existing = CourtStore.SelectCourtFamilyVisits(c, p).FirstOrDefault();
                         if (existing != null)
                         {
@@ -100,18 +100,18 @@ namespace ReignBetaServer
         }
 
         private static int FamilyPatiencePercent(string campaign, string hero) => (int)Math.Ceiling(
-            RelationshipsService.RelationshipTraitPercent(Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "traits.json")), "patience"));
+            RelationshipsService.RelationshipTraitPercent(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "traits.json")), "patience"));
 
         private static bool FamilyVisitProfileEligible(Dictionary<string, object> profile, string player)
         {
-            if (profile == null || string.IsNullOrWhiteSpace(Program.CharacterIdFrom(profile)) || !ReadBool(profile, "isAlive", false)
+            if (profile == null || string.IsNullOrWhiteSpace(CampaignFileService.CharacterIdFrom(profile)) || !ReadBool(profile, "isAlive", false)
                 || ReadBool(profile, "isPrisoner", false) || !ReadBool(profile, "isLocal", false) || ReadDouble(profile, "age", 0d) < ReignFamilyVisitRules.MinimumVisitorAge) return false;
             return ReadString(profile, "spouseId", "") == player || ReadString(profile, "fatherId", "") == player || ReadString(profile, "motherId", "") == player;
         }
 
         private static void UpsertFamilyAttention(ReignDbConnection c, string campaign, string timeline, string player, Dictionary<string, object> profile)
         {
-            string hero = Program.CharacterIdFrom(profile);
+            string hero = CampaignFileService.CharacterIdFrom(profile);
             if (string.IsNullOrWhiteSpace(hero) || !(ReadString(profile, "spouseId", "") == player
                 || ReadString(profile, "fatherId", "") == player || ReadString(profile, "motherId", "") == player)) return;
             CourtStore.UpsertCourtFamilyAttention(c, new Dictionary<string, object> { ["campaign"] = campaign, ["timeline"] = timeline,
@@ -219,7 +219,7 @@ namespace ReignBetaServer
                 var target = CourtStore.SelectIdentityRoster2(c, new Dictionary<string, object> { ["id"] = rival }).FirstOrDefault();
                 if (target == null || ReadInt(target, "is_alive", 0) == 0 || ReadInt(target, "is_adult", 0) == 0) continue;
                 if (spouse && (ruler == null || ReadString(target, "sex", "") == ReadString(ruler, "sex", ""))) continue;
-                double temperament = child ? 0.5d : RelationshipsService.RelationshipTraitPercent(Program.ReadJsonObject(Program.CharacterFile(campaign, observer, "traits.json")), "jealousy") / 100d;
+                double temperament = child ? 0.5d : RelationshipsService.RelationshipTraitPercent(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, observer, "traits.json")), "jealousy") / 100d;
                 double weight = temperament * ReignFamilyVisitRules.FavorJealousyWeight(favorites.Contains(observer), true);
                 string name = ReadString(target, "canonical_name", "the courtier");
                 result["eligible"] = weight > 0d; result["weight"] = weight; result["rivalId"] = rival; result["rivalName"] = name;
@@ -242,7 +242,7 @@ namespace ReignBetaServer
                 if (ReadInt(ReadFamilyAttention(c, campaign, timeline, player, id), "neglected", 0) != 0) continue;
                 string rival = favorites.FirstOrDefault(target => target != id && CharactersService.IdentityStateVerified(CharactersService.ReadAcquaintance(c, id, target)));
                 if (rival == null) continue;
-                double weight = RelationshipsService.RelationshipTraitPercent(Program.ReadJsonObject(Program.CharacterFile(campaign, id, "traits.json")), "jealousy") / 100d
+                double weight = RelationshipsService.RelationshipTraitPercent(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, id, "traits.json")), "jealousy") / 100d
                     * ReignFamilyVisitRules.FavorJealousyWeight(favorites.Contains(id), true);
                 if (weight <= 0d) continue;
                 result.Add(new Dictionary<string, object> { ["heroId"] = id, ["rivalId"] = rival, ["weight"] = weight,
@@ -257,7 +257,7 @@ namespace ReignBetaServer
             if (!ReadBool(payload, "familyChambers", false) || ReadBool(payload, "familyVisitDocket", false)
                 || !ReadBool(response, "ok", false) || ReadBool(response, "fallback", false)) return;
             string campaign = ReadString(payload, "campaignId", "default"), timeline = ReadString(payload, "timelineId", "main");
-            string player = ReadFirstString(payload, "playerHeroStringId", "playerId"), hero = Program.CharacterIdFrom(ReadDictionary(payload, "speaker"));
+            string player = ReadFirstString(payload, "playerHeroStringId", "playerId"), hero = CampaignFileService.CharacterIdFrom(ReadDictionary(payload, "speaker"));
             string playerText = ReadString(payload, "playerText", ""), reply = ReadString(response, "reply", "");
             string exchange = ReadString(payload, "turnId", "");
             if (string.IsNullOrWhiteSpace(exchange) || string.IsNullOrWhiteSpace(playerText) || string.IsNullOrWhiteSpace(reply)) return;
@@ -265,7 +265,7 @@ namespace ReignBetaServer
             {
                 var member = ReadFamilyAttention(c, campaign, timeline, player, hero);
                 if (ReadInt(member, "neglected", 0) == 0) return;
-                var llm = Program.ChatWithLlm(new Dictionary<string, object> { ["campaignId"] = campaign, ["requestType"] = "family_reconciliation",
+                var llm = LlmProviderService.ChatWithLlm(new Dictionary<string, object> { ["campaignId"] = campaign, ["requestType"] = "family_reconciliation",
                     ["temperature"] = 0d, ["maxTokens"] = 500,
                     ["messages"] = DialogueService.BuildSimplePromptEnvelope("family_reconciliation", "classify",
                         "Classify an actual completed family exchange. Never decide or invent consent. Return JSON only.",

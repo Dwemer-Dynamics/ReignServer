@@ -101,10 +101,10 @@ namespace ReignBetaServer
                 // large prompt. This bounded RPC never starts an inference turn.
                 try
                 {
-                    Program.EnsureCodexAppServer(settings);
-                    Program.CodexRpc("model/list", TestDict("includeHidden", true), Math.Min(15000, Program.CodexRpcTimeout(settings)));
+                    LlmProviderService.EnsureCodexAppServer(settings);
+                    LlmProviderService.CodexRpc("model/list", TestDict("includeHidden", true), Math.Min(15000, LlmProviderService.CodexRpcTimeout(settings)));
                 }
-                catch (Exception ex) { Program.LogOperational("codex.capacity_discovery_unavailable", TestDict("error", DialogueService.LimitText(ex.Message, 300))); }
+                catch (Exception ex) { OperationsService.LogOperational("codex.capacity_discovery_unavailable", TestDict("error", DialogueService.LimitText(ex.Message, 300))); }
                 return ParseCodexCapacityCertificate(ReadMetadata(), model, DateTimeOffset.UtcNow);
             }
         }
@@ -209,15 +209,15 @@ namespace ReignBetaServer
             Dictionary<string, object> body, string endpoint, string model, ConversationCapacityCatalog catalog = null)
         {
             var routing = ConversationCapacityRouting(body);
-            string provider = Program.NormalizeLlmProvider(ReadString(settings, "llmProvider", ""));
+            string provider = LlmProviderService.NormalizeLlmProvider(ReadString(settings, "llmProvider", ""));
             string routeKey = provider + ":" + model + ":" + PromptHash(endpoint + "|" + CanonicalJson(routing)).Substring(0, 20);
             var certificate = ReadDictionary(ReadDictionary(settings, "verifiedConversationContextWindows"), routeKey);
             // An explicit certificate remains authoritative, including expiry. Public
             // model metadata describes only this provider's default exact model route.
-            if (certificate == null && provider == Program.NanoGptProvider && endpoint == PortraitsService.NanoGptChatCompletionsUrl
+            if (certificate == null && provider == LlmProviderService.NanoGptProvider && endpoint == PortraitsService.NanoGptChatCompletionsUrl
                 && routing.Count == 0 && !string.IsNullOrWhiteSpace(model) && !model.Contains(':'))
                 certificate = (catalog ?? ConversationModelCapacities).Read(model);
-            if (certificate == null && provider == Program.CodexSubscriptionProvider && endpoint == "codex-app-server://local"
+            if (certificate == null && provider == LlmProviderService.CodexSubscriptionProvider && endpoint == "codex-app-server://local"
                 && routing.Count == 0 && !string.IsNullOrWhiteSpace(model)) certificate = ReadCodexCapacityCertificate(settings, model);
             bool verified = certificate != null && ReadString(certificate, "endpoint", "") == endpoint
                 && ReadString(certificate, "model", "") == model && !string.IsNullOrWhiteSpace(ReadString(certificate, "source", ""))
@@ -226,7 +226,7 @@ namespace ReignBetaServer
             int context = verified ? PositiveCapacityInteger(certificate, "contextTokens") : 0;
             verified = verified && context > 0;
             int output = PositiveCapacityInteger(body, "max_tokens");
-            bool runtimeManaged = verified && provider == Program.CodexSubscriptionProvider && endpoint == "codex-app-server://local";
+            bool runtimeManaged = verified && provider == LlmProviderService.CodexSubscriptionProvider && endpoint == "codex-app-server://local";
             int runtimeReserve = runtimeManaged ? CodexConversationRuntimeReserve : 0;
             int maxOutput = verified ? PositiveCapacityInteger(certificate, "maxOutputTokens") : 0;
             int allowance = verified
@@ -262,13 +262,13 @@ namespace ReignBetaServer
         private static Dictionary<string, object> ResolveConversationPromptCapacity(Dictionary<string, object> payload,
             string requestType, Dictionary<string, object> settings = null, ConversationCapacityCatalog catalog = null)
         {
-            settings = settings ?? Program.LoadSettings();
-            string model = Program.ModelForRequest(settings, requestType);
-            string endpoint = Program.UsesCodexSubscription(settings) ? "codex-app-server://local" : Program.LlmApiUrl(settings);
+            settings = settings ?? SettingsService.LoadSettings();
+            string model = ActionPipelineService.ModelForRequest(settings, requestType);
+            string endpoint = LlmProviderService.UsesCodexSubscription(settings) ? "codex-app-server://local" : LlmProviderService.LlmApiUrl(settings);
             int output = ReadInt(payload, "continuityOutputReserve", requestType == "social_event"
                 ? DialogueService.StructuredEventResponseMaxTokens(settings) : DialogueService.StructuredDialogueResponseMaxTokens(settings));
             var request = new Dictionary<string, object> { ["maxTokens"] = output, ["requestType"] = requestType };
-            var body = Program.BuildChatRequestBody(settings, request, new List<Dictionary<string, object>>(), model);
+            var body = LlmProviderService.BuildChatRequestBody(settings, request, new List<Dictionary<string, object>>(), model);
             ConfigurePromptCacheRouting(settings, request, body, endpoint, model, requestType);
             ConfigureReasoningRouting(settings, request, body, endpoint, model, requestType);
             return ResolveConversationCapacity(settings, body, endpoint, ReadString(body, "model", model), catalog);

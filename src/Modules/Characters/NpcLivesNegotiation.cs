@@ -66,7 +66,7 @@ namespace ReignBetaServer
                 && !leave.AcceptedArgumentIds.Contains(reason);
             string sentence = valid ? NpcLeaveNegotiation.Response(NpcLeaveNegotiation.Persuaded(leave, reason,
                 ReadBool(assessment, "compelling", false), state.CampaignId + "|" + state.TimelineId),
-                NpcLivesPolicy.ReaskDelay(Program.ReadNpcLivesOptions()))
+                NpcLivesPolicy.ReaskDelay(SettingsService.ReadNpcLivesOptions()))
                 : "My personal request is still unresolved. We can discuss it or review the current terms; nothing has been agreed by changing the subject.";
             // A fixed result is deliberately rendered as a complete reply. Keeping
             // arbitrary adjacent prose could retain a contradictory promise.

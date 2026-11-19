@@ -79,7 +79,7 @@ namespace ReignBetaServer
             {
                 Dictionary<string, object> Reply(string text) { var p = AgencyTestReply(null); p["reply"] = text; p["body"] = text;
                     p["actionGate"] = TestDict("needed", false, "commitment", "roleplay_only", "intent", "", "confidence", 1d);
-                    return Program.CompleteConversationStructuredResponse(p, "dialogue", out _); }
+                    return ConversationResponseService.CompleteConversationStructuredResponse(p, "dialogue", out _); }
                 int calls = 0;
                 var corrected = Reply(ReadString(good, "reply", "")); corrected["stateUpdates"] = ReadDictionary(good, "stateUpdates");
                 var input = Reply(bad);

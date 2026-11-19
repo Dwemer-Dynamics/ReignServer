@@ -594,7 +594,7 @@ namespace ReignBetaServer
         private static string ExpectedAgreementKindForDiplomacyCommand(
             string command)
         {
-            switch (Program.NormalizeLookup(command))
+            switch (ActionPipelineService.NormalizeLookup(command))
             {
                 case "sign_trade_agreement": return "trade_agreement";
                 case "sign_non_aggression_pact": return "non_aggression_pact";

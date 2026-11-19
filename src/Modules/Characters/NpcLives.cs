@@ -61,7 +61,7 @@ namespace ReignBetaServer
             }
             if (ReadString(p, "generation", "") != generation)
                 return TestDict("ok", false, "status", "stale_generation", "error", "The campaign was restored. Refresh NPC Lives before continuing.");
-            var options = Program.ReadNpcLivesOptions();
+            var options = SettingsService.ReadNpcLivesOptions();
             using var transaction = c.BeginTransaction();
             string invitation = ""; Dictionary<string, object> inputReceipt = null;
             try
@@ -80,7 +80,7 @@ namespace ReignBetaServer
                     var candidates = roster.Where(h => ReadString(h, "heroId", "").Length > 0 && ReadString(h, "heroId", "") != player).Select(h =>
                     {
                         string hero = ReadString(h, "heroId", "");
-                        var traits = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "traits.json"));
+                        var traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "traits.json"));
                         return new NpcLifeCandidate { HeroId = hero, Affinity = NpcLivesAffinity(c, hero, player, ReadInt(h, "nativeRelation", 0)),
                             Honor = NarrativePersonalityScore(traits, h, "honor"), Compassion = NarrativePersonalityScore(traits, h, "compassion"),
                             DutyPressure = ReadBool(h, "isGovernor", false) || ReadBool(h, "isPartyLeader", false) ? 1 : 0,

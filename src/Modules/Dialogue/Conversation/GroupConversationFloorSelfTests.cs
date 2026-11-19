@@ -81,9 +81,9 @@ namespace ReignBetaServer
                         && ReadString(current, "eventId", "") == GroupPlayerInputEventId(payload) && ReadLong(current, "sequence", 0) > 0, current);
                 }
                 Check("accepted_contribution_keeps_floor_cache", ReadBool(GroupConversationFloorApi(payload), "replayed", false));
-                var changed = Program.CloneDictionary(payload); changed["playerText"] = "A different request with the same turn id.";
+                var changed = VerificationService.CloneDictionary(payload); changed["playerText"] = "A different request with the same turn id.";
                 Check("changed_retry_input_rejected", !ReadBool(GroupConversationFloorApi(changed), "ok", true));
-                payload = Program.CloneDictionary(payload);
+                payload = VerificationService.CloneDictionary(payload);
                 payload["sceneTurnId"] = "floor-2"; payload["turnId"] = "floor-2"; payload["contributionId"] = "floor-2";
                 payload["playerText"] = "Only Arven, tell me your view.";
                 payload["conversationRelationshipChangesEnabled"] = false;
@@ -104,7 +104,7 @@ namespace ReignBetaServer
                     && ReadInt(ReadDictionary(result, "nextIdleCounters"), "taren", -1) == 0);
                 Check("event_retry_no_additional_writer", ReadBool(WorldSimulationService.SocialEventTurnWithResponder(payload, _ => throw new InvalidOperationException("Unexpected retry call")), "idempotent", false));
 
-                var quiet = Program.CloneDictionary(payload);
+                var quiet = VerificationService.CloneDictionary(payload);
                 quiet["sceneTurnId"] = "floor-quiet"; quiet["turnId"] = "floor-quiet"; quiet["contributionId"] = "floor-quiet";
                 quiet["playerText"] = "Nobody needs to answer. The ferry leaves at dawn. *I silently remember SECRET-901.*";
                 quiet["speakerHeroStringId"] = "taren";
@@ -112,7 +112,7 @@ namespace ReignBetaServer
                 string quietPrompt = BuildSharedGroupConversationPrompt(campaign, quiet, "taren", new List<Dictionary<string, object>>(), ReadString(quiet, "playerText", ""));
                 Check("writer_prompt_owns_contextual_participation", quietPrompt.Contains(GroupConversationParticipationGuidance)
                     && quietPrompt.Contains("Queue position, an empty reply or a pending request never establishes an answer."));
-                var outsider = Program.CloneDictionary(quiet); outsider["speakerHeroStringId"] = "outsider";
+                var outsider = VerificationService.CloneDictionary(quiet); outsider["speakerHeroStringId"] = "outsider";
                 Check("party_route_rejects_absent_speaker", !ReadBool(ApplyGroupConversationFloorToSpeaker(outsider), "ok", true));
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
@@ -125,7 +125,7 @@ namespace ReignBetaServer
                     GroupConversationFloorApi(quiet);
                     Check("quiet_retry_has_one_source", DialogueSelfTestStore.SelectConversationTurns29(connection).Count == 1);
                 }
-                var whisper = Program.CloneDictionary(payload);
+                var whisper = VerificationService.CloneDictionary(payload);
                 whisper["sceneTurnId"] = "floor-whisper"; whisper["turnId"] = "floor-whisper"; whisper["contributionId"] = "floor-whisper";
                 whisper["playerText"] = "*I whisper to Taren* Meet me at the silver willow.";
                 var whispered = GroupConversationFloorApi(whisper);
@@ -133,13 +133,13 @@ namespace ReignBetaServer
                     && ReadStringList(whispered, "responseOrder").First() == "taren"
                     && ReadStringList(whispered, "responseOrder").Count == 3
                     && !ProjectPlayerInputForAudience(ReadString(whisper, "playerText", ""), "arven", profiles, out _, out _).Contains("silver willow"));
-                var handover = Program.CloneDictionary(payload);
+                var handover = VerificationService.CloneDictionary(payload);
                 handover["sceneTurnId"] = "floor-handover"; handover["turnId"] = "floor-handover"; handover["contributionId"] = "floor-handover";
                 handover["playerText"] = "*I hand Taren 20 denars.*";
                 var handoverPlan = GroupConversationFloorApi(handover);
                 Check("actual_handover_recipient_can_respond", ReadStringList(handoverPlan, "addressedHeroStringIds").Contains("taren")
                     && ReadInt(handoverPlan, "providerCalls", -1) == 0 && !handoverPlan.ContainsKey("queuedDialogueActions"));
-                var explicitAction = Program.CloneDictionary(payload);
+                var explicitAction = VerificationService.CloneDictionary(payload);
                 explicitAction["sceneTurnId"] = "floor-structured"; explicitAction["turnId"] = "floor-structured"; explicitAction["contributionId"] = "floor-structured";
                 explicitAction["playerText"] = "Nobody else needs to answer. I would like you to give me 100 denars.";
                 explicitAction["structuredActionProtocolVersion"] = 1; explicitAction["structuredActionRecipientId"] = "taren";
@@ -148,7 +148,7 @@ namespace ReignBetaServer
                     && ReadStringList(explicitPlan, "addressedHeroStringIds").Contains("taren") && !explicitPlan.ContainsKey("queuedDialogueActions"));
                 explicitAction["structuredActionRecipientId"] = "outsider";
                 Check("typed_action_cannot_address_outside_audience", !ReadBool(GroupConversationFloorApi(explicitAction), "ok", true));
-                var eventQuiet = Program.CloneDictionary(payload);
+                var eventQuiet = VerificationService.CloneDictionary(payload);
                 eventQuiet["sceneTurnId"] = "floor-event-quiet"; eventQuiet["turnId"] = "floor-event-quiet"; eventQuiet["contributionId"] = "floor-event-quiet";
                 eventQuiet["playerText"] = "Nobody needs to answer. The ferry leaves at dawn.";
                 int quietCalls = 0; bool noInventedPriorSpeech = true;
@@ -165,11 +165,11 @@ namespace ReignBetaServer
                 Check("all_quiet_replay_makes_no_new_calls", ReadBool(WorldSimulationService.SocialEventTurnWithResponder(eventQuiet,
                     _ => throw new InvalidOperationException("Quiet replay called a writer")), "idempotent", false));
 
-                var arrival = Program.CloneDictionary(payload);
+                var arrival = VerificationService.CloneDictionary(payload);
                 arrival["sceneTurnId"] = "floor-arrival"; arrival["turnId"] = "floor-arrival"; arrival["contributionId"] = "floor-arrival";
                 arrival["playerText"] = "*Arven and I enter the keep hall together*";
                 arrival["participantRequests"] = roster.Select(p => {
-                    var request = Program.CloneDictionary(arrival); request["speakerHeroStringId"] = p.Id; return request; }).ToList();
+                    var request = VerificationService.CloneDictionary(arrival); request["speakerHeroStringId"] = p.Id; return request; }).ToList();
                 int arrivalCalls = 0; bool arrivalPreserved = true;
                 var arrivalResult = WorldSimulationService.SocialEventTurnWithResponder(arrival, request => {
                     arrivalCalls++;
@@ -181,7 +181,7 @@ namespace ReignBetaServer
                     && ReadBool(arrivalResult, "completedExchange", false)
                     && ReadDictionaryList(arrivalResult, "participantResults").Any(r => ReadString(r, "reply", "").StartsWith("Welcome home.")));
 
-                var wilderness = Program.CloneDictionary(payload);
+                var wilderness = VerificationService.CloneDictionary(payload);
                 wilderness["mode"] = "social_event"; wilderness["templateId"] = "generated_wilderness";
                 wilderness["conversationSessionId"] = "floor-wilderness";
                 wilderness["wildernessInitiatorHeroStringId"] = "taren";
@@ -194,8 +194,8 @@ namespace ReignBetaServer
                     && ReadString(eventPlan, "replyFocusHeroStringId", "") == "taren", eventPlan);
                 int writers = 0;
                 wilderness["participantRequests"] = ReadStringList(eventPlan, "responseOrder").Select(id => {
-                    var request = Program.CloneDictionary(wilderness); request["speakerHeroStringId"] = id;
-                    request["speaker"] = profiles.First(p => Program.CharacterIdFrom(p) == id); return request; }).ToList();
+                    var request = VerificationService.CloneDictionary(wilderness); request["speakerHeroStringId"] = id;
+                    request["speaker"] = profiles.First(p => CampaignFileService.CharacterIdFrom(p) == id); return request; }).ToList();
                 var completed = WorldSimulationService.SocialEventTurnWithResponder(wilderness, request => {
                     writers++; return TestDict("ok", true, "reply", "There is much to discover.", "participation", "speak"); });
                 Check("wilderness_selected_writer_delivers_and_retry_does_not_call", writers == ReadStringList(eventPlan, "responseOrder").Count
@@ -204,10 +204,10 @@ namespace ReignBetaServer
                 int beforeRetry = writers;
                 var eventReplay = WorldSimulationService.SocialEventTurnWithResponder(wilderness, _ => { writers++; throw new InvalidOperationException("Repeated writer"); });
                 Check("wilderness_retry_keeps_exact_reply", writers == beforeRetry && ReadBool(eventReplay, "idempotent", false));
-                var wait = Program.CloneDictionary(wilderness); wait["sceneTurnId"] = "floor-wilderness-wait"; wait["turnId"] = "floor-wilderness-wait"; wait["contributionId"] = "floor-wilderness-wait";
+                var wait = VerificationService.CloneDictionary(wilderness); wait["sceneTurnId"] = "floor-wilderness-wait"; wait["turnId"] = "floor-wilderness-wait"; wait["contributionId"] = "floor-wilderness-wait";
                 wait["playerText"] = "*I wait for Taren to respond to that.*";
                 Check("wilderness_named_wait_survives_observer_projection", ReadStringList(WorldSimulationService.SocialEventTurnPlanApi(wait), "addressedHeroStringIds").Contains("taren"));
-                var legacy = Program.CloneDictionary(wilderness); legacy["wildernessInitiatorHeroStringId"] = "";
+                var legacy = VerificationService.CloneDictionary(wilderness); legacy["wildernessInitiatorHeroStringId"] = "";
                 legacy["wildernessApproachText"] = "Morning light falls across the road. Taren studies the grass.";
                 Check("legacy_visible_approach_recovers_focus", WildernessConversationReplyFocus(legacy, profiles,
                     roster.Select(p => p.Id).ToList(), new List<GroupTurnLine>()) == "taren");
@@ -223,7 +223,7 @@ namespace ReignBetaServer
                     roster.Select(p => p.Id).ToList(), new List<GroupTurnLine>()) == "");
 
                 var tavernRoster = profiles.Select((profile, index) => {
-                    var copy = Program.CloneDictionary(profile); copy["age"] = 30; copy["isAvailable"] = true;
+                    var copy = VerificationService.CloneDictionary(profile); copy["age"] = 30; copy["isAvailable"] = true;
                     copy["isMadam"] = index == 0; return copy; }).ToList();
                 var playerProfile = TestDict("heroStringId", "player", "name", "Player", "age", 30, "isPlayer", true);
                 var tavern = TestDict("campaignId", campaign, "timelineId", "floor-timeline", "worldDay", 1d,
@@ -245,14 +245,14 @@ namespace ReignBetaServer
                 var tavernReplay = CharactersService.TavernHouseTurnPlanApi(tavern);
                 Check("tavern_order_retry_keeps_both_opportunities", ReadBool(tavernReplay, "replayed", false)
                     && ReadStringList(tavernReplay, "responseOrder").SequenceEqual(new[] { "lysa", "taren" }));
-                var absentVisit = Program.CloneDictionary(tavern); absentVisit["speakerHeroStringId"] = "arven";
+                var absentVisit = VerificationService.CloneDictionary(tavern); absentVisit["speakerHeroStringId"] = "arven";
                 Check("tavern_roster_card_cannot_create_attendance", !ReadBool(CharactersService.TavernHouseTurnPlanApi(absentVisit), "ok", true));
             }
             catch (Exception ex) { Check("exception", false, DialogueService.LimitText(ex.ToString(), 2200)); }
             finally
             {
                 ReignPostgreSqlStorage.DropCampaign(campaign);
-                PersistenceService.TryDeleteDirectory(Path.Combine(Program.CampaignsRoot(), Program.SafePathSegment(campaign, "campaign")));
+                PersistenceService.TryDeleteDirectory(Path.Combine(CampaignFileService.CampaignsRoot(), CampaignFileService.SafePathSegment(campaign, "campaign")));
             }
             return tests;
         }

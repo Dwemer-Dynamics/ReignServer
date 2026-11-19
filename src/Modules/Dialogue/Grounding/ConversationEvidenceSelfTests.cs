@@ -178,7 +178,7 @@ namespace ReignBetaServer
                     "sessionId", "session-a", "worldDay", 5d, "ts", 1L);
                 var first = ConversationStartApi(start);
                 Check("explicit_start_has_logical_id", ReadBool(first, "ok", false) && ReadString(first, "logicalConversationId", "").Length > 0, first);
-                var replay = ConversationStartApi(Program.CloneDictionary(start));
+                var replay = ConversationStartApi(VerificationService.CloneDictionary(start));
                 Check("session_start_retry_idempotent", ReadBool(replay, "idempotent", false), replay);
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
@@ -369,9 +369,9 @@ namespace ReignBetaServer
                     SetMemoryTranscriptContext(supplied, ReadCurrentSessionDialogueLines(campaign, "session-a", 30));
                     var suppliedPlan = PlanMemoryQuery("npc", "player", "quiet orchard", supplied);
                     Check("transcript_dedup_requires_same_source_speaker_and_content", MemorySourceAlreadySupplied(anchor, suppliedPlan.SuppliedSources));
-                    var alteredSource = Program.CloneDictionary(anchor); alteredSource["speaker_id"] = "another-npc";
+                    var alteredSource = VerificationService.CloneDictionary(anchor); alteredSource["speaker_id"] = "another-npc";
                     Check("changed_speaker_cannot_suppress_memory", !MemorySourceAlreadySupplied(alteredSource, suppliedPlan.SuppliedSources));
-                    alteredSource = Program.CloneDictionary(anchor); alteredSource["text"] = "A clipped or rewritten question.";
+                    alteredSource = VerificationService.CloneDictionary(anchor); alteredSource["text"] = "A clipped or rewritten question.";
                     Check("clipped_transcript_cannot_suppress_memory", !MemorySourceAlreadySupplied(alteredSource, suppliedPlan.SuppliedSources));
                     var beforeAnswer = new DialogueService.KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "fixture", WorldDay = 5d, AsOfTimestamp = 1L };
                     Check("lexical_recall_filters_future_answers_before_limit", FindPrecisionExchanges(connection, sameSessionPlan, beforeAnswer, 1)
@@ -384,16 +384,16 @@ namespace ReignBetaServer
                         && ReadString(eventLink, "relatedTurnId", "") == "answer" && ReadString(eventLink, "relatedSourceAlias", "") == "event-a");
                     var inaccessibleAlias = TestDict("relatedTurnId", "event-a", "relationKind", "activity_completion", "relatedQuote", "I would choose the old orchard.");
                     Check("related_event_alias_respects_observer_branch_and_day",
-                        ConversationContinuityLinkError(connection, Program.CloneDictionary(inaccessibleAlias), "outsider", "fixture", 5d) == "related_source_unavailable"
-                        && ConversationContinuityLinkError(connection, Program.CloneDictionary(inaccessibleAlias), "npc", "other_branch", 5d) == "related_source_unavailable"
-                        && ConversationContinuityLinkError(connection, Program.CloneDictionary(inaccessibleAlias), "npc", "fixture", 4d) == "related_source_unavailable");
-                    var notQuestion = Program.CloneDictionary(inaccessibleAlias); notQuestion["relationKind"] = "answer";
+                        ConversationContinuityLinkError(connection, VerificationService.CloneDictionary(inaccessibleAlias), "outsider", "fixture", 5d) == "related_source_unavailable"
+                        && ConversationContinuityLinkError(connection, VerificationService.CloneDictionary(inaccessibleAlias), "npc", "other_branch", 5d) == "related_source_unavailable"
+                        && ConversationContinuityLinkError(connection, VerificationService.CloneDictionary(inaccessibleAlias), "npc", "fixture", 4d) == "related_source_unavailable");
+                    var notQuestion = VerificationService.CloneDictionary(inaccessibleAlias); notQuestion["relationKind"] = "answer";
                     Check("event_alias_does_not_weaken_question_form_guard", ConversationContinuityLinkError(connection, notQuestion, "npc", "fixture", 5d) == "related_source_not_question");
                     using (var aliasFixture = connection.BeginTransaction())
                     {
                         InsertConversationTurn(connection, "duplicate-alias", "session-a", "event-a", 999, "duplicate-alias", "player", "player", "Player",
                             "I would choose the old orchard.", "in_person", 5d, 3L, "", new List<string> { "npc", "player" }, context);
-                        Check("ambiguous_related_event_alias_is_rejected", ConversationContinuityLinkError(connection, Program.CloneDictionary(inaccessibleAlias), "npc", "fixture", 5d) == "related_source_unavailable");
+                        Check("ambiguous_related_event_alias_is_rejected", ConversationContinuityLinkError(connection, VerificationService.CloneDictionary(inaccessibleAlias), "npc", "fixture", 5d) == "related_source_unavailable");
                         aliasFixture.Rollback();
                     }
                     link["relatedQuote"] = "An invented question about another topic?";
@@ -405,7 +405,7 @@ namespace ReignBetaServer
                     AddLink("old_orchard_answer", oldLink, 3L);
                     for (int i = 0; i < 80; i++)
                     {
-                        var unrelated = Program.CloneDictionary(oldLink); unrelated["subject"] = "Caravan accounts";
+                        var unrelated = VerificationService.CloneDictionary(oldLink); unrelated["subject"] = "Caravan accounts";
                         unrelated["relatedQuote"] = "How many caravans are expected?";
                         AddLink("newer_unrelated_" + i, unrelated, 10L + i);
                     }
@@ -413,14 +413,14 @@ namespace ReignBetaServer
                         new DialogueService.KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "fixture", WorldDay = 5d });
                     Check("lifetime_link_survives_newer_unrelated_records", linkedHistory.Any(e => e.SourceId == "old_orchard_answer"
                         && e.Text.Contains("What quiet place would you choose?") && e.Text.Contains("I would choose the old orchard.")));
-                    var futureLink = Program.CloneDictionary(oldLink); futureLink["worldDay"] = 6d;
+                    var futureLink = VerificationService.CloneDictionary(oldLink); futureLink["worldDay"] = 6d;
                     for (int i = 0; i < 80; i++) AddLink("future_orchard_" + i, futureLink, 100L + i);
                     Check("future_links_cannot_displace_eligible_answer", LinkedConversationEvidence(connection, "npc", "player", "fixture", "quiet orchard",
                         new DialogueService.KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "fixture", WorldDay = 5d })
                         .All(e => !e.SourceId.StartsWith("future_", StringComparison.Ordinal)));
                     Check("later_link_not_available_to_earlier_request", LinkedConversationEvidence(connection, "npc", "player", "fixture", "quiet orchard",
                         new DialogueService.KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "fixture", WorldDay = 5d, AsOfTimestamp = 2L }).Count == 0);
-                    var changedLink = Program.CloneDictionary(oldLink); changedLink["relatedSpeakerId"] = "player";
+                    var changedLink = VerificationService.CloneDictionary(oldLink); changedLink["relatedSpeakerId"] = "player";
                     AddLink("wrong_question_actor", changedLink, 4L);
                     Check("linked_recall_revalidates_original_actor", LinkedConversationEvidence(connection, "npc", "player", "fixture", "quiet orchard",
                         new DialogueService.KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "fixture", WorldDay = 5d })
@@ -430,7 +430,7 @@ namespace ReignBetaServer
                         "evidenceQuote", "I understand your answer about the orchard.");
                     StoreAcceptedConversationContinuity(connection, context, "npc", "player", "closed-event",
                         ReadString(closed, "evidenceQuote", ""), new List<Dictionary<string, object>> { closed }, 4L);
-                    var reopen = Program.CloneDictionary(closed);
+                    var reopen = VerificationService.CloneDictionary(closed);
                     reopen["status"] = "open"; reopen["expectedRevision"] = 1; reopen["transitionReason"] = "There was another question.";
                     reopen["evidenceQuote"] = "What shall we discuss next?";
                     var blocked = StoreAcceptedConversationContinuity(connection, context, "npc", "player", "unrelated-question",
@@ -539,7 +539,7 @@ namespace ReignBetaServer
                     var legacy = TestDict("text", "Mira acknowledged two escorts.", "replyQuote", reply);
                     var aliasWrite = TestDict("text", "Mira acknowledged two escorts.", "sourceEvidence",
                         TestDict("turnId", route == "dialogue_turn" ? "current" : "beat_" + route, "speakerId", "npc", "quote", reply));
-                    var normalized = Program.NormalizeMemoryWrites(new object[] { valid, invalid, legacy, aliasWrite }, campaign, "npc", 2L);
+                    var normalized = ActionPipelineService.NormalizeMemoryWrites(new object[] { valid, invalid, legacy, aliasWrite }, campaign, "npc", 2L);
                     Check(route + "_normalization_preserves_only_proposed_citation", normalized.Count == 4
                         && ReadString(ReadDictionary(normalized[0], "sourceEvidence"), "quote", "") == playerText
                         && !ReadDictionary(normalized[0], "sourceEvidence").ContainsKey("status")

@@ -116,16 +116,16 @@ namespace ReignBetaServer
             string heroName,
             Dictionary<string, object> promptState)
         {
-            profile = Program.CloneDictionary(profile);
-            characteristics = Program.CloneDictionary(characteristics);
-            relationships = Program.CloneDictionary(relationships);
-            summary = Program.CloneDictionary(summary);
-            promptState = Program.CloneDictionary(promptState);
-            interactionContext = Program.CloneDictionary(interactionContext);
+            profile = VerificationService.CloneDictionary(profile);
+            characteristics = VerificationService.CloneDictionary(characteristics);
+            relationships = VerificationService.CloneDictionary(relationships);
+            summary = VerificationService.CloneDictionary(summary);
+            promptState = VerificationService.CloneDictionary(promptState);
+            interactionContext = VerificationService.CloneDictionary(interactionContext);
             List<Dictionary<string, object>> prior = CloneCodexRows(priorLines);
             List<Dictionary<string, object>> pulls = CloneCodexRows(selectedContextPulls);
             List<Dictionary<string, object>> bundles = CloneCodexRows(contextBundles);
-            Dictionary<string, object> identity = Program.CloneDictionary(ReadDictionary(interactionContext, "identityView"));
+            Dictionary<string, object> identity = VerificationService.CloneDictionary(ReadDictionary(interactionContext, "identityView"));
             var tasks = new List<CodexContextPreparationTask>
             {
                 new CodexContextPreparationTask
@@ -178,13 +178,13 @@ namespace ReignBetaServer
             Dictionary<string, object> promptState,
             Dictionary<string, object> identityView)
         {
-            eventPayload = Program.CloneDictionary(eventPayload);
-            profile = Program.CloneDictionary(profile);
-            characteristics = Program.CloneDictionary(characteristics);
-            relationships = Program.CloneDictionary(relationships);
-            summary = Program.CloneDictionary(summary);
-            promptState = Program.CloneDictionary(promptState);
-            Dictionary<string, object> identity = Program.CloneDictionary(identityView);
+            eventPayload = VerificationService.CloneDictionary(eventPayload);
+            profile = VerificationService.CloneDictionary(profile);
+            characteristics = VerificationService.CloneDictionary(characteristics);
+            relationships = VerificationService.CloneDictionary(relationships);
+            summary = VerificationService.CloneDictionary(summary);
+            promptState = VerificationService.CloneDictionary(promptState);
+            Dictionary<string, object> identity = VerificationService.CloneDictionary(identityView);
             List<Dictionary<string, object>> lines = CloneCodexRows(eventLines);
             List<Dictionary<string, object>> pulls = CloneCodexRows(selectedContextPulls);
             List<Dictionary<string, object>> bundles = CloneCodexRows(contextBundles);
@@ -235,7 +235,7 @@ namespace ReignBetaServer
         {
             return (rows ?? Enumerable.Empty<Dictionary<string, object>>())
                 .Where(row => row != null)
-                .Select(Program.CloneDictionary)
+                .Select(VerificationService.CloneDictionary)
                 .ToList();
         }
 
@@ -250,8 +250,8 @@ namespace ReignBetaServer
             consistentSnapshot = false;
             characterInitialized = false;
             requiredStateUpdatesComplete = false;
-            Dictionary<string, object> settings = Program.LoadSettings();
-            if (!Program.UsesCodexSubscription(settings)) return false;
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
+            if (!LlmProviderService.UsesCodexSubscription(settings)) return false;
             Dictionary<string, object> options = ReadDictionary(settings, "codexOptions");
             requested = ReadBool(options, "parallelContextPreparation", false);
             Dictionary<string, object> marker = ReadDictionary(payload, "codexParallelPreparation")
@@ -282,7 +282,7 @@ namespace ReignBetaServer
             List<string> keys = lines.Select(PromptTranscriptIdentity).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
             // Unidentified lines cannot be proven duplicates; each remains a separate statement.
             int unique = keys.Distinct(StringComparer.OrdinalIgnoreCase).Count() + lines.Count - keys.Count;
-            Dictionary<string, object> settings = Program.LoadSettings();
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
             int warning = ReadInt(settings, "promptWarningCharacterLimit", 100000);
             int hard = ReadInt(settings, "promptHardCharacterLimit", 240000);
             envelope.Diagnostics["sectionSizes"] = sizes;
@@ -333,21 +333,21 @@ namespace ReignBetaServer
         {
             var builder = new PromptRuleComposer();
             if (structuredActions) builder.Add("EXPLICIT GAMEPLAY ACTIONS", StructuredActionFixedPrompt());
-            builder.Add(eventMode ? "SOCIAL EVENT ENGINE" : "INDIVIDUAL DIALOGUE ENGINE", Program.LoadPromptTemplate(eventMode ? "event_system.txt" : "dialogue_system.txt"));
-            builder.Add("WORLD TONE", ScopeConversationTone(Program.LoadPromptTemplate("world_tone.txt")));
+            builder.Add(eventMode ? "SOCIAL EVENT ENGINE" : "INDIVIDUAL DIALOGUE ENGINE", PromptService.LoadPromptTemplate(eventMode ? "event_system.txt" : "dialogue_system.txt"));
+            builder.Add("WORLD TONE", ScopeConversationTone(PromptService.LoadPromptTemplate("world_tone.txt")));
             AddPromptFactBoundary(builder);
-            string globalOverride = Program.LoadPromptTemplate("global_response_override.txt");
+            string globalOverride = PromptService.LoadPromptTemplate("global_response_override.txt");
             if (!string.IsNullOrWhiteSpace(globalOverride)) builder.Add("GLOBAL RESPONSE OVERRIDE", globalOverride);
             builder.Add("ACTION ROUTING BOUNDARY",
                 structuredActions ? "Covered gameplay uses structuredActionDecision and the complete registered catalog above. Always include that decision, including kind none. Legacy actionGate remains needed=false; suggestedActions stays empty for covered actions. Other subsystems retain their own contracts."
                 : "Do not choose command names or invent action IDs in this response. Decide only whether the visible reply contains a real finalized commitment, and describe that commitment in plain language through actionGate. The hidden action planner and resolver receive the authoritative command catalog separately after this response.");
-            if (!structuredActions) builder.Add("ACTION GATE RULES", Program.LoadPromptTemplate("action_suggestion_rules.txt"));
+            if (!structuredActions) builder.Add("ACTION GATE RULES", PromptService.LoadPromptTemplate("action_suggestion_rules.txt"));
             builder.Add("ACTION MEANING", "An accepted invitation to join the player's traveling group is a temporary companion commitment. A shared itinerary, destination discussion, disguise, or description of someone else's duties is not an order to move a party. Distinguish present action from a promise to start after a future return. Employment does not grant permanent clan membership, faction-combat consent, banishment or property ownership. Preserve exact gift, equipment, payment, recipient and duration terms. Do not narrate a native effect as completed before the game confirms it.");
             builder.Add("MARRIAGE COMPLETION", WorldSimulationService.MarriageDialogueCompletionContract);
             builder.Add("IDENTITY INTRODUCTION RULES", "identityIntroductions stays empty unless the current speaker audibly introduces a present person by name. Include supportingQuote from that speaker's exact words and use supplied IDs. Only listeners may learn the name; the server verifies presence and introducer knowledge. Player self-introductions are detected separately.");
-            if (!eventMode) builder.Add("PRIVATE DECISION POLICY", Program.LoadPromptTemplate("dialogue_internal_posture.txt"));
+            if (!eventMode) builder.Add("PRIVATE DECISION POLICY", PromptService.LoadPromptTemplate("dialogue_internal_posture.txt"));
             else builder.Add("PRIVATE DECISION POLICY", "Deliberate privately before answering. Verify supplied facts, then decide what the current NPC wants, fears losing in public, is trying to impress or avoid, and what they should reveal, hide, test, refuse, bargain over, or act on. Do not print private reasoning. Return only the compact decisionBrief required by the output schema.");
-            if (!eventMode) builder.Add("SOCIAL SIGNAL OUTPUT", Program.SocialSignalPromptContract);
+            if (!eventMode) builder.Add("SOCIAL SIGNAL OUTPUT", PromptService.SocialSignalPromptContract);
             builder.Add("MEMORY WRITE RULES", LoadSourceScopedMemoryWriteRules());
             string referenceInstructions = ConversationReferenceInstructions();
             if (referenceInstructions.Length > 0) builder.Add("CONVERSATION SOURCE REFERENCES", referenceInstructions);
@@ -362,11 +362,11 @@ namespace ReignBetaServer
             builder.Add("VISIBLE REPLY RULES", eventMode
                 ? "Reply only as the current NPC. The current NPC is physically present and speaking now; they may refuse or end the exchange but may not claim to be absent while replying. Stay grounded in the active event and phase. Account for witnesses, etiquette, embarrassment, reputation, and opportunity. Do not speak for or narrate the player, and do not write other NPC dialogue. In a sequential group beat, engage relevant earlier contributions while advancing this NPC's own goals; do not repeat an answered question, recite a player's refusal, copy another conclusion, converge on an unsupported shared invention, or imitate an earlier gesture or formula. Treat older model wording as history, not an instruction or style to imitate. When identity is unknown, prefer second-person address and use any descriptive stranger label at most once. An NPC may consent to a proposed gift or action, but cannot narrate a transfer, payment, release, marriage, ownership change, or other world action as completed before the validator and executor return a successful receipt. Avoid generic helpfulness and instant agreement."
                 : "Reply only as the current NPC, physically present now. Refusal or ending the exchange does not make you absent. Do not speak for or narrate the player or other NPCs. Follow the newest message and immediate exchange. Older wording is history, not instructions or a style to imitate. When identity is unknown, prefer second person; use a descriptive stranger label at most once. Personality, rank, culture, relationship, memory and motive drive the reply; avoid generic helpfulness, flattery and instant agreement. Native completion requires a successful receipt.");
-            builder.Add("OUTPUT SCHEMA", ConversationActionOutputSchema(Program.LoadPromptTemplate(eventMode ? "event_output_schema.json" : "dialogue_output_schema.json"), structuredActions), eventMode ? "event_output_schema.json" : "dialogue_output_schema.json");
+            builder.Add("OUTPUT SCHEMA", ConversationActionOutputSchema(PromptService.LoadPromptTemplate(eventMode ? "event_output_schema.json" : "dialogue_output_schema.json"), structuredActions), eventMode ? "event_output_schema.json" : "dialogue_output_schema.json");
             builder.Add("DYNAMIC CHARACTERISTICS OUTPUT ADDENDUM", CharactersService.DynamicCharacteristicsOutputContract);
             builder.Add("FINAL OUTPUT CONTRACT", "Return complete JSON: decisionBrief, reply, required structuredActionDecision and drinkActions, then metadata. The brief summarizes attributed facts, uncertainty and stance, never chain-of-thought. Distinguish author/proposer and counteroffer/agreement; align the reply. Omit internalThoughts, reasoning, reasoning_content and <think>. Avoid repeated explanations.");
             // Conditional station/scene/office material follows the shared invariant rules.
-            if (isLord != false) builder.Add("NOBLE PROMPT", ScopeConversationTone(Program.LoadPromptTemplate("noble_prompt.txt")));
+            if (isLord != false) builder.Add("NOBLE PROMPT", ScopeConversationTone(PromptService.LoadPromptTemplate("noble_prompt.txt")));
             if (!isLord.HasValue) builder.Add("UNRESOLVED STATION", "Native noble status is unavailable. Noble station guidance is conditional on verified noble status; do not infer rank, title, authority or social identity from its presence. Preserve supplied identity evidence.");
             builder.Add("SCENE STATE OUTPUT", roomAttireContext
                 ? "Return sceneStateUpdates only for explicit present location changes, using supplied heroStringId, location, and locationClass. Do not emit hourly clothing overrides in this castle/keep room session. The room's cultural scene prompt and explicit transcript actions determine attire; portrait outfits, travel equipment, and general hourly outfits do not. Preserve established actions on reopening; the arriving player's attire follows their own actions. Return an empty array when nothing changes."
@@ -546,7 +546,7 @@ namespace ReignBetaServer
         internal static PromptEnvelope BuildCorrespondencePromptEnvelope(string campaignId, string senderId, string senderName, string recipientId, string recipientName, double worldDay, string receivedLetter, Dictionary<string, object> profile, Dictionary<string, object> characteristics, Dictionary<string, object> relationship, string memoryContext, Dictionary<string, object> continuityContext = null, bool autonomousInitiation = false, bool firstIntroduction = false)
         {
             var rules = new PromptRuleComposer();
-            rules.Add("CORRESPONDENCE ENGINE", Program.LoadPromptTemplate("correspondence_system.txt"));
+            rules.Add("CORRESPONDENCE ENGINE", PromptService.LoadPromptTemplate("correspondence_system.txt"));
             if (UsesStructuredActions(continuityContext)) rules.Add("EXPLICIT GAMEPLAY ACTIONS", StructuredActionFixedPrompt());
             if (autonomousInitiation)
                 rules.Add("UNSOLICITED LETTER", firstIntroduction
@@ -554,7 +554,7 @@ namespace ReignBetaServer
                     : "Write a complete unsolicited letter initiated by this character. The composition brief is not a received letter. Ground the reason for writing in current relationship and known history. Do not imply the recipient wrote first. Set shouldReply=true only if you have written a substantive letter.");
             AddPromptFactBoundary(rules);
             rules.Add("MEMORY RECALL AUTHORITY", MemoryRecallAuthorityContract);
-            if (CharactersService.UsesCommonerRolePrompt(profile)) rules.Add("WORLD TONE", Program.LoadPromptTemplate("world_tone.txt"));
+            if (CharactersService.UsesCommonerRolePrompt(profile)) rules.Add("WORLD TONE", PromptService.LoadPromptTemplate("world_tone.txt"));
             else rules.Omit("world_tone", "Correspondence uses its written-voice contract; the commoner world-tone supplement is not selected by the resident resolver.");
             var composition = new Dictionary<string, object>();
             string character = BuildStableCharacterPrompt(senderId, senderName, profile, characteristics);
@@ -581,7 +581,7 @@ namespace ReignBetaServer
                 ["receivedLetter"] = receivedLetter ?? "",
                 ["characterFoundation"] = character
             };
-            string live = DialogueService.ApplyTemplate(Program.LoadPromptTemplate("correspondence_live_turn_template.txt"), values) + "\n\n" + ReadString(motiveDecision, "prompt", "");
+            string live = DialogueService.ApplyTemplate(PromptService.LoadPromptTemplate("correspondence_live_turn_template.txt"), values) + "\n\n" + ReadString(motiveDecision, "prompt", "");
             live = RelationshipsService.BuildCurrentPregnancyPrompt(campaignId, ContinuityTimeline(continuityContext), senderId, worldDay, profile) + "\n\n" + live;
             if (UsesStructuredActions(continuityContext)) live = StructuredActionTurnPrompt(continuityContext) + "\n" + live;
             if (!string.IsNullOrWhiteSpace(relevantDynamicCharacteristics))
@@ -604,7 +604,7 @@ namespace ReignBetaServer
                 + "commitment=final_private_report, and a private report intent while the visible body remains only a refusal or guarded neutrality.");
             string global = rules.Render(composition);
             live = BuildProtectedConversationContinuity(campaignId, senderId, turnPayload,
-                Program.ReadJsonObject(Program.CharacterFile(campaignId, senderId, "state.json")))
+                CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, senderId, "state.json")))
                 + "\nWRITTEN EXCHANGE: the sender and recipient are not assumed to share a physical scene. No local roster or present touch is implied.\n\n" + live;
             string culturalVoiceReminder = CulturalVoiceTurnReminder(profile, true);
             if (!string.IsNullOrWhiteSpace(culturalVoiceReminder)) live += "\n\n" + culturalVoiceReminder;
@@ -628,10 +628,10 @@ namespace ReignBetaServer
         internal static PromptEnvelope BuildActionPlannerPromptEnvelope(Dictionary<string, string> values, List<Dictionary<string, object>> allowedActions)
         {
             var global = new PromptRuleComposer();
-            global.Add("HIDDEN ACTION PLANNER", Program.LoadPromptTemplate("action_planner_system.txt"));
+            global.Add("HIDDEN ACTION PLANNER", PromptService.LoadPromptTemplate("action_planner_system.txt"));
             global.Add("PLANNING RULES", "Return only JSON. Return {\"actions\":[]} unless the action gate is a final accepted or commanded commitment. Choose only from ALLOWED ACTIONS. Preserve transfer direction. Never invent IDs or declare success.");
             global.Add("NATIVE ACTION MEANING", DialogueActionExecutionRules);
-            global.Add("OUTPUT SCHEMA", CompactPrecisionSchema(Program.LoadPromptTemplate("action_planner_output_schema.json")), "action_planner_output_schema.json");
+            global.Add("OUTPUT SCHEMA", CompactPrecisionSchema(PromptService.LoadPromptTemplate("action_planner_output_schema.json")), "action_planner_output_schema.json");
             string candidates = "ALLOWED ACTIONS AND RESOLVER HINTS\n" + CanonicalActionCatalogJson(allowedActions) + "\n\nRESOLVER HINTS\n" + (values.TryGetValue("resolverHintsJson", out string hints) ? hints : "{}");
             if (values.TryGetValue("nativeSceneMovementJson", out string sceneMovement))
                 candidates += "\n\nNATIVE SCENE DESTINATIONS\n" + sceneMovement;
@@ -641,7 +641,7 @@ namespace ReignBetaServer
                 candidates += "\n\nCURRENT SPEAKER'S SAVED GUEST AGREEMENT\n" + guest;
             if (values.TryGetValue("characterMbti", out string mbti) && !string.IsNullOrWhiteSpace(mbti))
                 candidates += "\n\nDECIDING CHARACTER\n" + mbti;
-            string live = DialogueService.ApplyTemplate(Program.LoadPromptTemplate("action_planner_live_turn_template.txt"), values);
+            string live = DialogueService.ApplyTemplate(PromptService.LoadPromptTemplate("action_planner_live_turn_template.txt"), values);
             var composition = new Dictionary<string, object>();
             var envelope = CreatePromptEnvelope("action_planner", "candidate-set", global.Render(composition), candidates, live);
             envelope.Diagnostics["composition"] = composition;

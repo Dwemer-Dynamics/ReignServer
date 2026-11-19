@@ -27,7 +27,7 @@ namespace ReignBetaServer
             payload = payload ?? new Dictionary<string, object>();
             Stopwatch timer = Stopwatch.StartNew();
             string campaignId = ReadString(payload, "campaignId", "default");
-            string correlationId = Program.EnsureCorrelationId(payload);
+            string correlationId = OperationsService.EnsureCorrelationId(payload);
             int day = (int)Math.Floor(ReadDouble(payload, "worldDay", 0d) + 0.000001d);
             List<Dictionary<string, object>> groups = ReadDictionaryList(payload, "presenceGroups");
             List<Dictionary<string, object>> heroRows = ReadDictionaryList(payload, "heroes");
@@ -155,7 +155,7 @@ namespace ReignBetaServer
                             ["duration"] = timer.ElapsedMilliseconds, ["summary"] = Json.Serialize(summary), ["ts"] = ts
                         });
                     RelationshipsStore.Commit(connection);
-                    Program.WriteAudit(campaignId, correlationId, "server", "relationships", "relationships.ambient_daily", "", "", "", "completed",
+                    OperationsService.WriteAudit(campaignId, correlationId, "server", "relationships", "relationships.ambient_daily", "", "", "", "completed",
                         timer.ElapsedMilliseconds, "Deterministic ambient NPC relationship chemistry processed without an LLM call.", summary);
                     return summary;
                 }
@@ -460,9 +460,9 @@ namespace ReignBetaServer
         {
             string heroId = ReadFirstString(snapshot, "heroStringId", "heroId", "id");
             Dictionary<string, object> profile = new Dictionary<string, object>(snapshot ?? new Dictionary<string, object>(), StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, object> storedProfile = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json"));
+            Dictionary<string, object> storedProfile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "profile.json"));
             foreach (KeyValuePair<string, object> item in storedProfile) profile[item.Key] = item.Value;
-            Dictionary<string, object> traitDocument = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"));
+            Dictionary<string, object> traitDocument = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"));
             Dictionary<string, object> storedTraits = ReadDictionary(traitDocument, "foundationTraits")
                 ?? ReadDictionary(snapshot,"foundationTraits");
             if (storedTraits == null || storedTraits.Count == 0)
@@ -730,7 +730,7 @@ namespace ReignBetaServer
                     trustAfterBlock = ReadDouble(RelationshipsStore.SelectRelationships2(connection, new Dictionary<string, object> { ["a"] = heroA, ["b"] = heroB }).FirstOrDefault(), "trust", 0d);
                 add("persistence_major_history_blocks_healing", Math.Abs(trustAfterBlock - trustBeforeBlock) < 0.000001d,
                     "Active betrayal evidence prevents ordinary proximity from increasing trust.");
-                add("persistence_unconstructed_heroes_stay_transient", !Directory.Exists(Program.CharacterDirectory(campaignId, heroA)) && !Directory.Exists(Program.CharacterDirectory(campaignId, heroB)),
+                add("persistence_unconstructed_heroes_stay_transient", !Directory.Exists(CampaignFileService.CharacterDirectory(campaignId, heroA)) && !Directory.Exists(CampaignFileService.CharacterDirectory(campaignId, heroB)),
                     "Ambient processing used transient deterministic traits without constructing profiles or backstories.");
             }
             catch (Exception ex)
@@ -739,7 +739,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaignId));
             }
             return results;
         }

@@ -509,7 +509,7 @@ namespace ReignBetaServer
 
         private static void AppendDiplomaticConsequence(string campaignId, Dictionary<string, object> diplomaticEvent)
         {
-            Program.AppendJsonLineToPath(Program.CampaignFile(campaignId, "diplomacy", "consequences.jsonl"), new Dictionary<string, object>
+            CampaignFileService.AppendJsonLineToPath(CampaignFileService.CampaignFile(campaignId, "diplomacy", "consequences.jsonl"), new Dictionary<string, object>
             {
                 ["eventId"] = ReadString(diplomaticEvent, "eventId", ""),
                 ["worldDay"] = ReadDouble(diplomaticEvent, "worldDay", 0d),
@@ -567,7 +567,7 @@ namespace ReignBetaServer
             Dictionary<string, object> candidate,
             Dictionary<string, object> world)
         {
-            string command = Program.CanonicalCommand(ReadString(candidate, "command", ""));
+            string command = ActionPipelineService.CanonicalCommand(ReadString(candidate, "command", ""));
             if (IsDirectorPeaceCommand(command)) return "peace";
             if (IsDirectorAllianceProposal(candidate)
                 || DirectorIntentCommands["security"].Contains(command))
@@ -742,7 +742,7 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> ReadDirectorState(string campaignId)
         {
-            Dictionary<string, object> state = Program.ReadJsonObject(Program.CampaignFile(campaignId, "diplomacy", "director-state.json"));
+            Dictionary<string, object> state = CampaignFileService.ReadJsonObject(CampaignFileService.CampaignFile(campaignId, "diplomacy", "director-state.json"));
             if (!state.ContainsKey("version")) state["version"] = 1;
             return state;
         }
@@ -754,12 +754,12 @@ namespace ReignBetaServer
 
         private static void WriteDirectorState(string campaignId, Dictionary<string, object> state)
         {
-            Program.WriteJsonObject(Program.CampaignFile(campaignId, "diplomacy", "director-state.json"), state ?? new Dictionary<string, object>());
+            CampaignFileService.WriteJsonObject(CampaignFileService.CampaignFile(campaignId, "diplomacy", "director-state.json"), state ?? new Dictionary<string, object>());
         }
 
         internal static List<Dictionary<string, object>> ReadDiplomaticEventQueue(string campaignId, bool requireValid = false)
         {
-            string path = Program.CampaignFile(campaignId, "diplomacy", "event-queue.json");
+            string path = CampaignFileService.CampaignFile(campaignId, "diplomacy", "event-queue.json");
             if (!File.Exists(path)) return new List<Dictionary<string, object>>();
             try
             {
@@ -775,14 +775,14 @@ namespace ReignBetaServer
 
         internal static void WriteDiplomaticEventQueue(string campaignId, List<Dictionary<string, object>> queue)
         {
-            string path = Program.CampaignFile(campaignId, "diplomacy", "event-queue.json");
+            string path = CampaignFileService.CampaignFile(campaignId, "diplomacy", "event-queue.json");
             Directory.CreateDirectory(Path.GetDirectoryName(path));
             File.WriteAllText(path, Json.Serialize(queue ?? new List<Dictionary<string, object>>()));
         }
 
         private static void WriteDirectorAudit(string campaignId, string phase, Dictionary<string, object> ruler, Dictionary<string, object> candidate, List<string> errors)
         {
-            Program.WriteAudit(campaignId, ReadString(candidate, "correlationId", ""), "server", "diplomacy", "diplomacy." + phase,
+            OperationsService.WriteAudit(campaignId, ReadString(candidate, "correlationId", ""), "server", "diplomacy", "diplomacy." + phase,
                 ReadString(ruler, "leaderHeroId", ""), "", "", "failed", 0, "World diplomacy candidate failed validation.", new Dictionary<string, object>
                 {
                     ["candidate"] = candidate,

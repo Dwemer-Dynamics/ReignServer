@@ -57,16 +57,16 @@ namespace ReignBetaServer
             ImageGenerationProfile profile, string prompt, byte[] source, string size,
             Func<string, string, string, Dictionary<string, object>, string> send = null)
         {
-            string key = Program.ProviderSecret(settings, "openRouterApiKey", OpenRouterImagesUrl);
+            string key = SettingsService.ProviderSecret(settings, "openRouterApiKey", OpenRouterImagesUrl);
             if (string.IsNullOrWhiteSpace(key)) return PortraitImageCallResult.Fail("OpenRouter", profile.OpenRouterModel,
-                Program.ProviderKeyUnavailable(settings, "openRouterApiKey", key) ? Program.GlobalKeyUnavailableError : "No OpenRouter key is saved. Add it in API Settings; chat and images share that key.");
+                SettingsService.ProviderKeyUnavailable(settings, "openRouterApiKey", key) ? SettingsService.GlobalKeyUnavailableError : "No OpenRouter key is saved. Add it in API Settings; chat and images share that key.");
             var timer = Stopwatch.StartNew();
             int requestChars = 0;
             try
             {
                 string json = Json.Serialize(BuildOpenRouterImagePayload(profile.OpenRouterModel, prompt, source, size, profile.ChatView));
                 requestChars = json.Length;
-                string response = (send ?? Program.PostJsonToLlm)(OpenRouterImagesUrl, key, json, settings);
+                string response = (send ?? LlmProviderService.PostJsonToLlm)(OpenRouterImagesUrl, key, json, settings);
                 var raw = Json.Deserialize<Dictionary<string, object>>(response);
                 var data = ReadDictionaryList(raw, "data");
                 byte[] bytes = data.Count == 0 ? null : DecodeImageBase64(ReadString(data[0], "b64_json", ""));

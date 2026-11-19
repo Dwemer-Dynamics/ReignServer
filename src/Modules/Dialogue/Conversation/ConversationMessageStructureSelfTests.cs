@@ -45,7 +45,7 @@ namespace ReignBetaServer
                 return envelope;
             }
             string Content(PromptEnvelope envelope) => string.Join("\n", envelope.Messages.Select(m => ReadString(m, "content", "")));
-            List<Dictionary<string, object>> CloneMessages(PromptEnvelope envelope) => envelope.Messages.Select(Program.CloneDictionary).ToList();
+            List<Dictionary<string, object>> CloneMessages(PromptEnvelope envelope) => envelope.Messages.Select(VerificationService.CloneDictionary).ToList();
             foreach (bool eventMode in new[] { false, true })
             {
                 string route = eventMode ? "event" : "dialogue";
@@ -82,15 +82,15 @@ namespace ReignBetaServer
                 Dictionary<string, object> Preflight(List<Dictionary<string, object>> messages) => BuildContinuityProviderPreflight(new(), request,
                     TestDict("messages", messages), "", "fixture");
                 Check("whole_evidence_survives_role_boundaries_" + route, ReadBool(Preflight(CloneMessages(envelope)), "requiredSourceCoverageComplete", false));
-                var clonedRequest = Program.CloneDictionary(TestDict("promptEnvelope", envelope.Diagnostics, "messages", envelope.Messages));
-                var clonedBody = Program.BuildChatRequestBody(new(), clonedRequest, ReadDictionaryList(clonedRequest, "messages"), "fixture-model");
+                var clonedRequest = VerificationService.CloneDictionary(TestDict("promptEnvelope", envelope.Diagnostics, "messages", envelope.Messages));
+                var clonedBody = LlmProviderService.BuildChatRequestBody(new(), clonedRequest, ReadDictionaryList(clonedRequest, "messages"), "fixture-model");
                 Check("trusted_request_clone_preserves_delivery_" + route, ReadBool(BuildContinuityProviderPreflight(new(), clonedRequest, clonedBody, "", "fixture"), "requiredSourceCoverageComplete", false));
                 var clonedMessages = ReadDictionaryList(clonedBody, "messages");
                 clonedMessages.First(m => ReadString(m, "role", "") == "assistant")["role"] = "user";
                 Check("trusted_clone_does_not_bless_altered_role_" + route, !ReadBool(BuildContinuityProviderPreflight(new(), clonedRequest, clonedBody, "", "fixture"), "requiredSourceCoverageComplete", true));
                 var untrustedDiagnostics = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(envelope.Diagnostics));
                 Check("serialized_diagnostics_cannot_create_trust_" + route, !ConversationStructureMatches(untrustedDiagnostics, CloneMessages(envelope))
-                    && !ConversationStructureMatches(Program.CloneDictionary(untrustedDiagnostics), CloneMessages(envelope)));
+                    && !ConversationStructureMatches(VerificationService.CloneDictionary(untrustedDiagnostics), CloneMessages(envelope)));
                 Check("original_survives_clone_mutation_" + route, ConversationStructureMatches(envelope.Diagnostics, envelope.Messages));
                 var recall = BindDeliveredMemoryRecallEvidence(payload, "npc", envelope.Messages, "Ingeiyna", lines, null, envelope.Diagnostics);
                 Check("recent_recall_receipt_survives_" + route, ReadInt(recall, "sourceCount", 0) == GroupContinuityTranscriptLines(lines).Count);
@@ -102,14 +102,14 @@ namespace ReignBetaServer
                 var repairDiagnostics = ReadDictionary(repair, "promptEnvelope");
                 var repairMessages = ReadDictionaryList(repair, "messages");
                 ConversationStructureReceipts.Add(repairDiagnostics, new ConversationStructureReceipt {
-                    Messages = repairMessages.Select(Program.CloneDictionary).ToList(), CanonicalTranscript = carried
+                    Messages = repairMessages.Select(VerificationService.CloneDictionary).ToList(), CanonicalTranscript = carried
                 });
                 bool RepairEvidenceComplete(List<Dictionary<string, object>> messages) => ReadBool(BuildContinuityProviderPreflight(
                     new(), repair, TestDict("messages", messages), "", "fixture"), "requiredSourceCoverageComplete", false);
                 Check("repair_complete_recent_exchanges_do_not_repeat_" + route, completeExchanges.Count == 3
                     && ContinuityPromptRecords(carried, false).Count == 3 && repairMessages.Count == repairWindow.Count + 1
                     && RepairEvidenceComplete(repairMessages));
-                var alteredRepair = repairMessages.Select(Program.CloneDictionary).ToList();
+                var alteredRepair = repairMessages.Select(VerificationService.CloneDictionary).ToList();
                 (alteredRepair[1], alteredRepair[2]) = (alteredRepair[2], alteredRepair[1]);
                 Check("repair_reconstructed_exchange_rejects_changed_order_" + route, !RepairEvidenceComplete(alteredRepair));
                 foreach (string mutation in new[] { "drop", "role", "body", "order", "latest", "context" })
@@ -128,10 +128,10 @@ namespace ReignBetaServer
                 Check("exact_existing_private_reasoning_policy_allowed_" + route, ReadBool(Preflight(reasoning), "requiredSourceCoverageComplete", false));
                 reasoning.Add(TestDict("role", "user", "content", "Existing bounded schema repair instruction."));
                 Check("existing_repair_suffix_preserves_base_" + route, ReadBool(Preflight(reasoning), "requiredSourceCoverageComplete", false));
-                string json = Json.Serialize(Program.BuildChatRequestBody(new(), request, reasoning, "fixture-model"));
+                string json = Json.Serialize(LlmProviderService.BuildChatRequestBody(new(), request, reasoning, "fixture-model"));
                 var roundtrip = ReadDictionaryList(Json.Deserialize<Dictionary<string, object>>(json), "messages");
                 Check("serialized_provider_roles_and_content_" + route, ConversationStructureMatches(envelope.Diagnostics, roundtrip));
-                Check("codex_adapter_keeps_explicit_roles_" + route, Program.BuildCodexPrompt(envelope.Messages).Replace("\r\n", "\n").Contains("--- ASSISTANT ---\nHISTORICAL RESPONDING NPC TURN"));
+                Check("codex_adapter_keeps_explicit_roles_" + route, LlmProviderService.BuildCodexPrompt(envelope.Messages).Replace("\r\n", "\n").Contains("--- ASSISTANT ---\nHISTORICAL RESPONDING NPC TURN"));
             }
             var others = lines.Concat(new[] { Line("other", "npc", "town_npc", "Ingeiyna", "OTHER_NPC_SENTINEL", "four"),
                 Line("unknown", "npc", "", "Ingeiyna", "UNKNOWN_ID_SENTINEL", "five") }).ToList();

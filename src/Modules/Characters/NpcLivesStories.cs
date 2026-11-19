@@ -120,7 +120,7 @@ namespace ReignBetaServer
                     foreach (bool compelling in new[] { false, true })
                         b.AppendLine(reason + ", compelling=" + compelling + ": " + NpcLeaveNegotiation.Response(
                             NpcLeaveNegotiation.Persuaded(leave, reason, compelling, state.CampaignId + "|" + state.TimelineId),
-                            NpcLivesPolicy.ReaskDelay(Program.ReadNpcLivesOptions())));
+                            NpcLivesPolicy.ReaskDelay(SettingsService.ReadNpcLivesOptions())));
                 b.AppendLine("Your reason for wanting to leave remains the subject. Do not replace it with a different errand or agree to unrelated terms. Ordinary friendly speech cannot authorize departure or remove the request. Only the explicit current proposal can set a wait or departure. Waiting before departure is separate from time away.");
                 b.AppendLine("Listen to a concrete reason to stay. Return npcLeaveAssessment:{leaveId,revision,reasonKind,evidenceQuote,compelling}, where reasonKind is medical_need,imminent_danger,prior_commitment,alternative_arrangement,emotional_appeal or authority_demand. Quote the player's exact new argument. Tangents and repeated arguments do not change your decision. The engine fixes the result for each reason; never contradict its saved decision.");
                 b.AppendLine("When responding to a new request to wait or stay, include that assessment with this exact saved leave identity and revision. Omitting it or naming another request cannot agree to a wait: the engine will replace the complete draft with an unresolved-request clarification and discard its memories, plans and other effects. Do not claim that scheduling words alone have changed the agreed dates.");
@@ -204,7 +204,7 @@ namespace ReignBetaServer
                     SourceId = ReadString(source, "turn_id", ""), Quote = quote, LocationId = current,
                     Outcome = resolved ? outcome : "", ResolutionQuote = resolved ? resolution : "" },
                     ReadInt(row, "revision", -1), accepted, false, resolved);
-                state.Advance(story, ReadDouble(unit.Payload, "worldDay", 0), Program.ReadNpcLivesOptions());
+                state.Advance(story, ReadDouble(unit.Payload, "worldDay", 0), SettingsService.ReadNpcLivesOptions());
             }
             var assessment = ReadDictionary(unit.Parsed, "npcLeaveAssessment");
             if (assessment != null)
@@ -221,7 +221,7 @@ namespace ReignBetaServer
                     bool persuaded = NpcLeaveNegotiation.Persuaded(leave, kind, ReadBool(assessment, "compelling", false), state.CampaignId + "|" + state.TimelineId);
                     if (ReadBool(assessment, "compelling", false)) leave.RefusalMitigation = 4;
                     leave.LastArgumentResult = kind + ": " + (persuaded ? "agreed to stay for now" : "still intends to leave");
-                    if (persuaded) leave.StayForNow(leave.Revision, ReadDouble(unit.Payload, "worldDay", 0), NpcLivesPolicy.ReaskDelay(Program.ReadNpcLivesOptions()));
+                    if (persuaded) leave.StayForNow(leave.Revision, ReadDouble(unit.Payload, "worldDay", 0), NpcLivesPolicy.ReaskDelay(SettingsService.ReadNpcLivesOptions()));
                 }
             }
             ApplyNpcLifeAffinity(c, state, unit.Player, ReadDouble(unit.Payload, "worldDay", 0));
@@ -287,7 +287,7 @@ namespace ReignBetaServer
         {
             if (!state.Effects.Any(e => e.Id == id)) state.Effects.Add(new NpcLifeEffect { Id = id, StoryId = id.Split(':')[0],
                 HeroId = hero, Kind = "affinity", Amount = (int)Math.Round(Math.Min(0, NpcLivesPolicy.RefusalLoss(category) + mitigation)
-                    * Program.ReadNpcLivesOptions().Scale("RefusalLoss"), MidpointRounding.AwayFromZero) });
+                    * SettingsService.ReadNpcLivesOptions().Scale("RefusalLoss"), MidpointRounding.AwayFromZero) });
         }
         private static void ApplyNpcLifeAffinity(ReignDbConnection c, NpcLivesState state, string player, double day)
         {
@@ -385,7 +385,7 @@ namespace ReignBetaServer
                             HeroId = story.HeroId, LocationId = ReadString(p, "locationId", ""), EncounterId = ReadString(p, "encounterId", ""), Outcome = outcome },
                             story.Revision, new HashSet<string>(), true);
                         if (!accepted) throw new InvalidOperationException("The native evidence did not match the saved objective, location or encounter.");
-                        state.Advance(story, day, Program.ReadNpcLivesOptions());
+                        state.Advance(story, day, SettingsService.ReadNpcLivesOptions());
                     }
                 }
             }

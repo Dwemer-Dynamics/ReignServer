@@ -68,7 +68,7 @@ namespace ReignBetaServer
             };
             var bindErrors = new List<string>();
             BindAndValidateClanAccord(action, terms, bindPayload,
-                Program.BuildRouterResolutionText(ReadString(bindPayload, "playerText", ""), "I agree to trade."), "create_clan_accord", bindErrors);
+                ActionPipelineService.BuildRouterResolutionText(ReadString(bindPayload, "playerText", ""), "I agree to trade."), "create_clan_accord", bindErrors);
             add("multiline_actual_player_turn_preserved", bindErrors.Contains("clan_accord_conditional_or_refused"));
             terms.Remove("playerConfirmed");
             add("no_inferred_player_consent", validate("Agreed to trade.", "I agree to trade.") != "");
@@ -109,7 +109,7 @@ namespace ReignBetaServer
                 };
                 var evt = new Dictionary<string, object> {
                     ["eventId"] = "formed:test", ["kind"] = "formed", ["worldDay"] = 1d,
-                    ["playerHeroId"] = "player", ["record"] = Program.CloneDictionary(record),
+                    ["playerHeroId"] = "player", ["record"] = VerificationService.CloneDictionary(record),
                     ["knownHeroIds"] = new[] { "player", "npc", "clan_leader" }, ["partnerMemberIds"] = new[] { "npc" }
                 };
                 var payload = new Dictionary<string, object> {
@@ -169,7 +169,7 @@ namespace ReignBetaServer
                 record["EndActionId"] = "cancel:test"; record["EndActorId"] = "player"; record["EndActorName"] = "Player";
                 evt = new Dictionary<string, object> {
                     ["eventId"] = "cancel:test", ["kind"] = "ended", ["worldDay"] = 22d, ["playerHeroId"] = "player",
-                    ["record"] = Program.CloneDictionary(record), ["endReason"] = "Cancelled", ["partnerMemberIds"] = new[] { "npc" },
+                    ["record"] = VerificationService.CloneDictionary(record), ["endReason"] = "Cancelled", ["partnerMemberIds"] = new[] { "npc" },
                     ["knownHeroIds"] = new[] { "player", "npc", "clan_leader" }
                 };
                 payload["events"] = new[] { evt };
@@ -184,10 +184,10 @@ namespace ReignBetaServer
                     "A fresh database connection reloads the persisted ledger.");
                 add("timeline_isolation", !ReadBool(ClanAccordsSnapshot(campaign, "other"), "available", true), "A different timeline cannot read this snapshot.");
                 var history = Enumerable.Range(0, 105).Select(i => {
-                    var ended = Program.CloneDictionary(record); ended["Id"] = "history:" + i; ended["ActionId"] = "history-action:" + i;
+                    var ended = VerificationService.CloneDictionary(record); ended["Id"] = "history:" + i; ended["ActionId"] = "history-action:" + i;
                     ended["StartDay"] = 30d + i; ended["EndDay"] = 31d + i; return ended;
                 }).ToList();
-                var oldActive = Program.CloneDictionary(record);
+                var oldActive = VerificationService.CloneDictionary(record);
                 oldActive["Id"] = "accord:old-active"; oldActive["ActionId"] = "old-active-action";
                 oldActive["IsActive"] = true; oldActive["EndReason"] = 0; oldActive["EndDay"] = null;
                 oldActive["EndActionId"] = ""; oldActive["EndActorId"] = ""; oldActive["EndActorName"] = "";
@@ -205,8 +205,8 @@ namespace ReignBetaServer
                 // Drop only this freshly generated internal fixture, never a caller-supplied ID.
                 try { ReignPostgreSqlStorage.DropCampaign(campaign); }
                 catch (Exception ex) { add("fixture_cleanup", false, "Could not remove isolated fixture storage: " + ex.Message); }
-                string root = Path.GetFullPath(Program.CampaignsRoot()) + Path.DirectorySeparatorChar;
-                string path = Path.GetFullPath(Program.CampaignDirectory(campaign));
+                string root = Path.GetFullPath(CampaignFileService.CampaignsRoot()) + Path.DirectorySeparatorChar;
+                string path = Path.GetFullPath(CampaignFileService.CampaignDirectory(campaign));
                 if (path.StartsWith(root, StringComparison.OrdinalIgnoreCase) && Path.GetFileName(path) == campaign)
                     PersistenceService.TryDeleteDirectory(path);
             }

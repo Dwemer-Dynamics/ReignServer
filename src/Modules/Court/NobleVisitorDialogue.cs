@@ -26,7 +26,7 @@ namespace ReignBetaServer
             foreach (Dictionary<string, object> initiator in initiators)
             {
                 string id = ReadString(initiator, "heroId", "");
-                Dictionary<string, object> document = Program.ReadJsonObject(Program.CharacterFile(campaignId, id, "traits.json"));
+                Dictionary<string, object> document = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, id, "traits.json"));
                 Dictionary<string, object> virtues = ReadDictionary(document, "courtVirtues");
                 Dictionary<string, object> percentages = ReadDictionary(document, "traitPercentages");
                 if (virtues == null && percentages != null) virtues = CharactersService.CalculateCourtVirtues(percentages);

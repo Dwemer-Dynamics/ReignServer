@@ -143,7 +143,7 @@ namespace ReignBetaServer
                         Path.Combine(migrationTarget, "campaigns", "existing.json"),
                         "current-existing",
                         Encoding.UTF8);
-                    Program.CopyDirectoryMissingOnly(migrationSource, migrationTarget);
+                    SettingsService.CopyDirectoryMissingOnly(migrationSource, migrationTarget);
                     add("runtime_migration_preserves_current_files",
                         File.ReadAllText(Path.Combine(
                             migrationTarget, "campaigns", "existing.json"))
@@ -187,7 +187,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> preexistingPayload = SaveSyncTestPointPayload(preexistingId, "pre_" + token, 1d, "Preexisting World History");
                 preexistingPayload["campaignLabel"] = "Preexisting World History";
                 Dictionary<string, object> preexistingRegistered = SaveSyncRegisterApi(preexistingPayload);
-                Dictionary<string, object> preexistingMetadata = Program.ReadJsonObject(Path.Combine(preexistingCampaign, "campaign.json"));
+                Dictionary<string, object> preexistingMetadata = CampaignFileService.ReadJsonObject(Path.Combine(preexistingCampaign, "campaign.json"));
                 add("preexisting_campaign_directory_gets_metadata", ReadBool(preexistingRegistered, "ok", false)
                     && ReadString(preexistingMetadata, "campaignId", "") == preexistingId
                     && ReadString(preexistingMetadata, "campaignLabel", "") == "Preexisting World History",
@@ -398,7 +398,7 @@ namespace ReignBetaServer
                 byte[] portrait = File.ReadAllBytes(Path.Combine(StrictCampaignDirectory(campaignId), "characters", "hero_a", "portraits", "portrait.png"));
                 string audit = File.ReadAllText(Path.Combine(StrictCampaignDirectory(campaignId), "audit", "audit.jsonl"));
                 string liveTestEvidence = File.ReadAllText(Path.Combine(StrictCampaignDirectory(campaignId), "tests", "live-interaction", "runs", "future.json"));
-                Dictionary<string, object> retainedPortraitRoster = Program.ReadJsonObject(
+                Dictionary<string, object> retainedPortraitRoster = CampaignFileService.ReadJsonObject(
                     Path.Combine(StrictCampaignDirectory(campaignId), "portrait_roster.json"));
                 add("static_assets_and_technical_audit_retained", background.Contains("later static definition") && portrait.SequenceEqual(new byte[] { 9, 8, 7, 6 }) && audit.Contains("future technical audit"), "Reusable existing-character definitions, portrait assets, and technical audit history survive temporal rollback.");
                 add("portrait_roster_retained_across_rollback",
@@ -488,7 +488,7 @@ namespace ReignBetaServer
                 TryDeleteFile(oldNativeSavePath);
                 TryDeleteFile(newestNativeSavePath);
 
-                bool defaultEnabled = ReadBool(Program.DefaultSettings(), "saveSyncEnabled", false);
+                bool defaultEnabled = ReadBool(SettingsService.DefaultSettings(), "saveSyncEnabled", false);
                 string html = Program.ControlCenterHtml();
                 add("default_enabled_ui_and_preview_contract", defaultEnabled && html.Contains("id='saveSyncEnabled'") && html.Contains("previewSaveSync") && html.Contains("Last loaded point"), "The Campaign Backups UI exposes the default-on toggle, last result/backup status, and manual dry-run preview.");
 
@@ -736,8 +736,8 @@ namespace ReignBetaServer
                 bool traversalRejected = false;
                 bool sharedRejected = false;
                 try { ValidateCampaignOwnedDirectory(
-                    Path.Combine(Program.CampaignsRoot(), "..", "escape"),
-                    Program.CampaignsRoot(), false); }
+                    Path.Combine(CampaignFileService.CampaignsRoot(), "..", "escape"),
+                    CampaignFileService.CampaignsRoot(), false); }
                 catch (InvalidDataException) { traversalRejected = true; }
                 try { ValidateCampaignOwnedDirectory(
                     Path.Combine(CampaignPortraitCacheRoot(), "_shared"),
@@ -767,7 +767,7 @@ namespace ReignBetaServer
                         ["fileCount"] = 1,
                         ["bytes"] = 6
                     }
-                }, Program.CampaignsRoot(), false, orphanCleanupResults);
+                }, CampaignFileService.CampaignsRoot(), false, orphanCleanupResults);
                 DeleteAuditedOrphanRoots(new[]
                 {
                     new Dictionary<string, object>
@@ -984,17 +984,17 @@ namespace ReignBetaServer
         {
             string campaign = StrictCampaignDirectory(campaignId);
             Directory.CreateDirectory(Path.Combine(campaign, "characters", "hero_a", "portraits"));
-            Program.WriteJsonObject(Path.Combine(campaign, "campaign.json"), new Dictionary<string, object> { ["campaignId"] = campaignId, ["campaignLabel"] = "Save Sync Test" });
-            Program.WriteJsonObject(Path.Combine(campaign, "portrait_roster.json"), new Dictionary<string, object>
+            CampaignFileService.WriteJsonObject(Path.Combine(campaign, "campaign.json"), new Dictionary<string, object> { ["campaignId"] = campaignId, ["campaignLabel"] = "Save Sync Test" });
+            CampaignFileService.WriteJsonObject(Path.Combine(campaign, "portrait_roster.json"), new Dictionary<string, object>
             {
                 ["version"] = 2,
                 ["campaignId"] = campaignId,
                 ["rosterFingerprint"] = marker,
                 ["characters"] = new List<object>()
             });
-            Program.WriteJsonObject(Path.Combine(campaign, "characters", "hero_a", "background.json"), new Dictionary<string, object> { ["text"] = "old static definition" });
+            CampaignFileService.WriteJsonObject(Path.Combine(campaign, "characters", "hero_a", "background.json"), new Dictionary<string, object> { ["text"] = "old static definition" });
             File.WriteAllBytes(Path.Combine(campaign, "characters", "hero_a", "portraits", "portrait.png"), new byte[] { 1, 2, 3, 4 });
-            Program.WriteJsonObject(Path.Combine(campaign, "characters", "hero_a", "state.json"), new Dictionary<string, object> { ["knowledge"] = marker });
+            CampaignFileService.WriteJsonObject(Path.Combine(campaign, "characters", "hero_a", "state.json"), new Dictionary<string, object> { ["knowledge"] = marker });
             AppendSaveSyncTestLine(campaignId, "conversations", marker);
             AppendSaveSyncTestLine(campaignId, "events", marker);
             AppendSaveSyncTestLine(campaignId, "memories", marker);
@@ -1009,8 +1009,8 @@ namespace ReignBetaServer
             AppendSaveSyncTestPath(campaignId, Path.Combine("actions", "results.jsonl"), marker);
             AppendSaveSyncTestPath(campaignId, Path.Combine("diplomacy", "consequences.jsonl"), marker);
             AppendSaveSyncTestPath(campaignId, Path.Combine("negotiations", "events.jsonl"), marker);
-            Program.WriteJsonObject(Path.Combine(campaign, "actions", "action-queue.json"), new Dictionary<string, object> { ["marker"] = marker, ["items"] = new List<object> { marker + "_queued_action" } });
-            Program.WriteJsonObject(Path.Combine(campaign, "world", "calendar.json"), new Dictionary<string, object> { ["marker"] = marker, ["nativeDayAnchor"] = marker == "old" ? 10d : 20d });
+            CampaignFileService.WriteJsonObject(Path.Combine(campaign, "actions", "action-queue.json"), new Dictionary<string, object> { ["marker"] = marker, ["items"] = new List<object> { marker + "_queued_action" } });
+            CampaignFileService.WriteJsonObject(Path.Combine(campaign, "world", "calendar.json"), new Dictionary<string, object> { ["marker"] = marker, ["nativeDayAnchor"] = marker == "old" ? 10d : 20d });
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 RebellionService.EnsureRebellionSchema(connection);
@@ -1062,7 +1062,7 @@ namespace ReignBetaServer
             {
                 PersistenceStore.UpdateCharacterReputations(connection, new Dictionary<string, object> { ["campaign"] = campaignId });
             }
-            Program.WriteJsonObject(Path.Combine(StrictCampaignDirectory(campaignId), "characters", "hero_a", "background.json"), new Dictionary<string, object> { ["text"] = "later static definition" });
+            CampaignFileService.WriteJsonObject(Path.Combine(StrictCampaignDirectory(campaignId), "characters", "hero_a", "background.json"), new Dictionary<string, object> { ["text"] = "later static definition" });
             File.WriteAllBytes(Path.Combine(StrictCampaignDirectory(campaignId), "characters", "hero_a", "portraits", "portrait.png"), new byte[] { 9, 8, 7, 6 });
             string audit = Path.Combine(StrictCampaignDirectory(campaignId), "audit", "audit.jsonl");
             Directory.CreateDirectory(Path.GetDirectoryName(audit));

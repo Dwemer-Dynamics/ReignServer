@@ -18,10 +18,10 @@ namespace ReignBetaServer
 
             foreach (string key in new[] { "source", "reason", "confidence", "requiresAcceptance", "actorHeroStringId",
                 "actorClanId", "actorKingdomId", "targetHeroStringId", "targetClanId", "terms.marriageHero1StringId" })
-                check("router_preserves_" + key, Program.RouterArgumentTargetKey(Program.NormalizeLookup(key), "marriage_alliance") == "");
+                check("router_preserves_" + key, ActionPipelineService.RouterArgumentTargetKey(ActionPipelineService.NormalizeLookup(key), "marriage_alliance") == "");
             check("router_preserves_natural_transfer_direction",
-                Program.RouterArgumentTargetKey("from", "transfer_gold") == "FromHero"
-                && Program.RouterArgumentTargetKey("recipient", "transfer_gold") == "ToHero");
+                ActionPipelineService.RouterArgumentTargetKey("from", "transfer_gold") == "FromHero"
+                && ActionPipelineService.RouterArgumentTargetKey("recipient", "transfer_gold") == "ToHero");
 
             // Reproduce the failed repair shape: source and actor clan/kingdom inside
             // arguments must not become FromHero, TargetClan or TargetKingdom aliases.
@@ -29,7 +29,7 @@ namespace ReignBetaServer
                 "source", "hidden_action_planner", "actorClanId", "player_faction", "actorKingdomId", "new_kingdom",
                 "targetClanId", "istranentis", "terms", TestDict(
                     "marriageHero1StringId", "main_hero", "marriageHero2StringId", "zotyra")));
-            var normalized = Program.NormalizeRouterActions(repairedInput, new HashSet<string> { "marriage_alliance" },
+            var normalized = ActionPipelineService.NormalizeRouterActions(repairedInput, new HashSet<string> { "marriage_alliance" },
                 payload, hero, "Will you marry me? I accept.", "hidden_action_planner", "Marriage regression").Single();
             check("repair_source_is_not_a_hero", !normalized.ContainsKey("FromHero"));
             check("repair_actor_does_not_become_target", !normalized.ContainsKey("TargetClan") && !normalized.ContainsKey("TargetKingdom"));
@@ -104,8 +104,8 @@ namespace ReignBetaServer
                 emptyQueue, new List<string>()) == claim);
             indexed[0]["spouseId"] = "";
             check("one_sided_spouse_data_does_not_claim_completion", !NativePlayerMarriageConfirmed(payload, hero));
-            check("marriage_catalog_is_mechanical_and_exact", Program.ActionCapabilityForCommand("marriage_alliance") == "mechanical"
-                && ReadStringList(ReadDictionaryList(Program.ActionCatalog(), "commands").Single(x => ReadString(x, "command", "") == "marriage_alliance"), "required")
+            check("marriage_catalog_is_mechanical_and_exact", ActionPipelineService.ActionCapabilityForCommand("marriage_alliance") == "mechanical"
+                && ReadStringList(ReadDictionaryList(ActionPipelineService.ActionCatalog(), "commands").Single(x => ReadString(x, "command", "") == "marriage_alliance"), "required")
                     .Contains("terms.marriageHero2StringId"));
             check("marriage_prompt_distinguishes_vows_from_native_state", MarriageDialogueCompletionContract.Contains("not roleplay_only")
                 && MarriageDialogueCompletionContract.Contains("Native spouse identity is authoritative"));
@@ -127,10 +127,10 @@ namespace ReignBetaServer
                     "marriageHero1StringId", "main_hero", "marriageHero2StringId",
                     scenario == "third_party" ? "other_npc" : "zotyra");
                 if (scenario == "conflicting_actor") arguments["actorHeroStringId"] = "hidden_action_planner";
-                var candidate = Program.NormalizeRouterActions(TestDict("command", "marriage_alliance", "arguments", arguments),
+                var candidate = ActionPipelineService.NormalizeRouterActions(TestDict("command", "marriage_alliance", "arguments", arguments),
                     new HashSet<string> { "marriage_alliance" }, payload, ReadDictionary(payload, "hero"),
                     "Michael asks Zotyra to marry him now. Zotyra accepts.", "hidden_action_planner", "Marriage regression").Single();
-                var record = Program.NormalizeActionCommand(candidate, "test_campaign", out List<string> errors, payload,
+                var record = ActionPipelineService.NormalizeActionCommand(candidate, "test_campaign", out List<string> errors, payload,
                     "Michael asks Zotyra to marry him now. Zotyra accepts.");
                 bool accepted = record != null && errors.Count == 0;
                 bool passed = scenario == "exact_couple"

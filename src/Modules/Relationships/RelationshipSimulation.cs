@@ -249,7 +249,7 @@ namespace ReignBetaServer
 
         private static string RelationshipSimulationRunDirectory(string runId)
         {
-            return Path.Combine(RelationshipSimulationRoot(), Program.SafePathSegment(runId, "run"));
+            return Path.Combine(RelationshipSimulationRoot(), CampaignFileService.SafePathSegment(runId, "run"));
         }
 
         private static Dictionary<string, object> RelationshipSimulationCensusStatusApi(Dictionary<string, object> payload)
@@ -382,9 +382,9 @@ namespace ReignBetaServer
                     Dictionary<string, object> facts = ReadDictionary(shipped, "sourceFacts") ?? new Dictionary<string, object>();
                     foreach (KeyValuePair<string, object> item in facts) if (!data.ContainsKey(item.Key)) data[item.Key] = item.Value;
                 }
-                Dictionary<string, object> storedProfile = Program.ReadJsonObject(Program.CharacterFile(campaignId, id, "profile.json"));
+                Dictionary<string, object> storedProfile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, id, "profile.json"));
                 foreach (KeyValuePair<string, object> item in storedProfile) if (!data.ContainsKey(item.Key)) data[item.Key] = item.Value;
-                Dictionary<string, object> traits = Program.ReadJsonObject(Program.CharacterFile(campaignId, id, "traits.json"));
+                Dictionary<string, object> traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, id, "traits.json"));
                 if (traits.Count == 0 && library.TryGetValue(id, out shipped)) traits = ReadDictionary(shipped, "traits") ?? new Dictionary<string, object>();
                 if (traits.Count == 0) traits = CharactersService.BuildTraitDocument(data);
                 Dictionary<string, object> foundations = ReadDictionary(traits, "foundationTraits") ?? new Dictionary<string, object>();
@@ -1057,8 +1057,8 @@ namespace ReignBetaServer
             string directory = RelationshipSimulationRunDirectory(run.RunId);
             Directory.CreateDirectory(directory);
             Dictionary<string, object> status = RelationshipSimulationStatusDictionary(run, "trust", "");
-            Program.WriteJsonObject(Path.Combine(directory, "status.json"), status);
-            Program.WriteJsonObject(Path.Combine(RelationshipSimulationRoot(), "latest.json"), new Dictionary<string, object>
+            CampaignFileService.WriteJsonObject(Path.Combine(directory, "status.json"), status);
+            CampaignFileService.WriteJsonObject(Path.Combine(RelationshipSimulationRoot(), "latest.json"), new Dictionary<string, object>
             {
                 ["runId"] = run.RunId, ["campaignId"] = run.CampaignId, ["state"] = run.State,
                 ["statusPath"] = Path.Combine(directory, "status.json"), ["updatedUtc"] = DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture)

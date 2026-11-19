@@ -20,7 +20,7 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
             Action<string, bool, string> add = (id, passed, summary) => results.Add(new Dictionary<string, object> { ["ok"] = true, ["passed"] = passed, ["suite"] = "campaign_backups", ["caseId"] = id, ["name"] = id, ["summary"] = summary, ["durationMs"] = 0 });
             string campaignId = "cbt_" + Guid.NewGuid().ToString("N");
-            string campaignDir = Program.CampaignDirectory(campaignId), portraitDir = CampaignPortraitCacheDirectory(campaignId), archivePath = "";
+            string campaignDir = CampaignFileService.CampaignDirectory(campaignId), portraitDir = CampaignPortraitCacheDirectory(campaignId), archivePath = "";
             string purgeFixture = Path.Combine(Program.TestsDir, "campaign_delete_all_" + Guid.NewGuid().ToString("N"));
             string priorNativeSaveRootOverride =
                 CampaignNativeSaveRootOverrideForTests;
@@ -96,7 +96,7 @@ namespace ReignBetaServer
 
                 Directory.CreateDirectory(Path.Combine(campaignDir, "characters", "hero_test", "memory"));
                 File.WriteAllText(Path.Combine(campaignDir, "characters", "hero_test", "memory", "memories.jsonl"), "{\"memory\":\"kept\"}\n", Encoding.UTF8);
-                Program.WriteJsonObject(Path.Combine(campaignDir, "campaign.json"), new Dictionary<string, object> { ["campaignId"] = campaignId, ["campaignLabel"] = "Backup Test", ["mainHeroName"] = "Tester" });
+                CampaignFileService.WriteJsonObject(Path.Combine(campaignDir, "campaign.json"), new Dictionary<string, object> { ["campaignId"] = campaignId, ["campaignLabel"] = "Backup Test", ["mainHeroName"] = "Tester" });
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId)) PersistenceStore.UpsertSchemaMeta(connection);
                 Directory.CreateDirectory(Path.Combine(portraitDir, "hero_test"));
                 File.WriteAllBytes(Path.Combine(portraitDir, "hero_test", "custom.png"), new byte[] { 1, 2, 3, 4, 5 });

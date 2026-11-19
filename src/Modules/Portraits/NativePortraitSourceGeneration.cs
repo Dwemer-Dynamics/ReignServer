@@ -130,7 +130,7 @@ namespace ReignBetaServer
                         || string.IsNullOrWhiteSpace(ReadString(snapshot, "bodyKey", "")))
                         throw new InvalidDataException("Native portrait snapshot identity or facial appearance is invalid.");
                     string snapshotPath = Path.Combine(jobRoot, "character.json");
-                    Program.WriteJsonObject(snapshotPath, snapshot);
+                    CampaignFileService.WriteJsonObject(snapshotPath, snapshot);
                     AppendProcessArgument(arguments, "--character-snapshot", NativeGeneratorPath(snapshotPath));
                 }
                 AppendProcessArgument(arguments, "--reign-render-portrait-source");
@@ -172,7 +172,7 @@ namespace ReignBetaServer
 
                 source = File.ReadAllBytes(outputPath);
                 RequirePortraitSourceContract(source, "Native portrait source");
-                var generatorResult = Program.ReadJsonObject(resultPath);
+                var generatorResult = CampaignFileService.ReadJsonObject(resultPath);
                 string expectedRenderContract = PreserveResidentClothing(payload) ? ResidentOutfitRenderContract : NativePortraitRenderContract;
                 if (ReadString(generatorResult, "renderContract", "") != expectedRenderContract)
                     throw new InvalidDataException("The native source did not use the required framing contract: " + expectedRenderContract);
@@ -209,7 +209,7 @@ namespace ReignBetaServer
                 ?? ReadString(settings, "portraitNativeSourceGeneratorPath", "");
             string bridgeRecord = Path.Combine(Program.DataDir, "windows-bridge.json");
             if (string.IsNullOrWhiteSpace(bridge) && File.Exists(bridgeRecord))
-                bridge = ReadString(Program.ReadJsonObject(bridgeRecord), "nativeGenerator", "");
+                bridge = ReadString(CampaignFileService.ReadJsonObject(bridgeRecord), "nativeGenerator", "");
             if (!bridge.StartsWith("/mnt/", StringComparison.Ordinal)
                 || !string.Equals(Path.GetFileName(bridge), NativePortraitGeneratorExecutable, StringComparison.Ordinal)
                 || !File.Exists(bridge)) return "";

@@ -31,7 +31,7 @@ namespace ReignBetaServer
                 try
                 {
                     SemanticPumpLastCycleUtc = DateTime.UtcNow;
-                    Dictionary<string, object> settings = Program.LoadSettings();
+                    Dictionary<string, object> settings = SettingsService.LoadSettings();
                     if (ReadBool(settings, "enableSemanticMemory", true) && !stopRequested())
                     {
                         StartManagedSemanticWorker(settings, stopRequested);
@@ -50,7 +50,7 @@ namespace ReignBetaServer
                             if (SemanticIndexShouldYield()) break;
                             string campaignId =
                                 ReadString(campaign, "campaignId", "");
-                            if (Program.HasLocalCampaignMetadata(campaignId))
+                            if (CampaignFileService.HasLocalCampaignMetadata(campaignId))
                             {
                                 Program.CampaignDataGate.EnterReadLock();
                                 try
@@ -81,7 +81,7 @@ namespace ReignBetaServer
                 }
                 if (token.WaitHandle.WaitOne(processed > 0 ? 150 : 3000)) break;
             }
-            Program.LogOperational("semantic.index_pump_stopped", new Dictionary<string, object>
+            OperationsService.LogOperational("semantic.index_pump_stopped", new Dictionary<string, object>
             {
                 ["generation"] = generation,
                 ["cancelled"] = token.IsCancellationRequested,
@@ -97,7 +97,7 @@ namespace ReignBetaServer
             // quiet period was short enough for an embedding batch to start in the
             // middle and make the next foreground semantic search wait several seconds.
             return Program.InteractiveRequestActiveOrRecent(10000)
-                || Program.PriorityBackgroundWorkShouldYield();
+                || OperationsService.PriorityBackgroundWorkShouldYield();
         }
 
         private static int ProcessSemanticJobs(string campaignId, Dictionary<string, object> settings)

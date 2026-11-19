@@ -603,7 +603,7 @@ namespace ReignBetaServer
 
         internal static string ClassifyRulerDiplomacyPolarity(Dictionary<string, object> candidate)
         {
-            string command = Program.CanonicalCommand(ReadString(candidate, "command", ""));
+            string command = ActionPipelineService.CanonicalCommand(ReadString(candidate, "command", ""));
             HashSet<string> positive = new HashSet<string>(new[]
             {
                 "make_peace","offer_tribute_peace","demand_reparations_peace",

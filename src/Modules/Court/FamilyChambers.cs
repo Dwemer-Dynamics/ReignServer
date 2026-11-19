@@ -84,7 +84,7 @@ namespace ReignBetaServer
             string campaignId = ReadString(payload, "campaignId", "default");
             string timelineId = ReadString(payload, "timelineId", "main");
             Dictionary<string, object> speaker = ReadDictionary(payload, "speaker");
-            string heroId = Program.CharacterIdFrom(speaker);
+            string heroId = CampaignFileService.CharacterIdFrom(speaker);
             DialogueService.ApplyPlayerInputAudienceToPayload(payload, heroId);
             string name = ReadString(speaker, "name", heroId);
             double age = ReadDouble(speaker, "age", 0d);
@@ -120,7 +120,7 @@ namespace ReignBetaServer
             Dictionary<string, object> request = new Dictionary<string, object>
             {
                 ["requestType"] = "family_chambers_child", ["campaignId"] = campaignId,
-                ["correlationId"] = Program.EnsureCorrelationId(payload),
+                ["correlationId"] = OperationsService.EnsureCorrelationId(payload),
                 ["messages"] = DialogueService.BuildSimplePromptEnvelope("family_chambers_child", "respond",
                     "You portray a child safely and return only valid JSON.", prompt.ToString()).Messages,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
@@ -174,7 +174,7 @@ namespace ReignBetaServer
             string campaignId = ReadString(payload, "campaignId", "default");
             string timelineId = ReadString(payload, "timelineId", "main");
             Dictionary<string, object> hero = ReadDictionary(payload, "hero");
-            string heroId = Program.CharacterIdFrom(hero);
+            string heroId = CampaignFileService.CharacterIdFrom(hero);
             if (string.IsNullOrWhiteSpace(heroId) || ReadBool(hero, "isChild", true))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "An adult hero profile is required." };
             CharactersService.UpsertCharacterProfile(campaignId, hero);
@@ -214,13 +214,13 @@ namespace ReignBetaServer
             string cacheKey = ReadString(payload, "cacheKey", "");
             List<Dictionary<string, object>> profiles = ReadDictionaryList(payload, "participantProfiles").Take(4).ToList();
             if (string.IsNullOrWhiteSpace(cacheKey) || !FamilySceneParticipantCountValid(profiles.Count)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "A cache key and one to four participants are required." };
-            string folder = Path.Combine(Program.CampaignDirectory(campaignId), "family_chambers", Program.SafePathSegment(timelineId, "main"));
+            string folder = Path.Combine(CampaignFileService.CampaignDirectory(campaignId), "family_chambers", CampaignFileService.SafePathSegment(timelineId, "main"));
             string refsFolder = Path.Combine(folder, "child_references"); Directory.CreateDirectory(refsFolder);
-            string imagePath = Path.Combine(folder, Program.SafePathSegment(cacheKey, "scene") + ".png");
+            string imagePath = Path.Combine(folder, CampaignFileService.SafePathSegment(cacheKey, "scene") + ".png");
             if (File.Exists(imagePath)) return new Dictionary<string, object> { ["ok"] = true, ["cached"] = true, ["imageBase64"] = Convert.ToBase64String(File.ReadAllBytes(imagePath)) };
             Dictionary<string, string> suppliedReferences = ReadDictionaryList(payload, "participantReferences")
-                .Where(item => !string.IsNullOrWhiteSpace(Program.CharacterIdFrom(item)) && !string.IsNullOrWhiteSpace(ReadString(item, "imageBase64", "")))
-                .GroupBy(Program.CharacterIdFrom, StringComparer.OrdinalIgnoreCase)
+                .Where(item => !string.IsNullOrWhiteSpace(CampaignFileService.CharacterIdFrom(item)) && !string.IsNullOrWhiteSpace(ReadString(item, "imageBase64", "")))
+                .GroupBy(CampaignFileService.CharacterIdFrom, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => ReadString(group.First(), "imageBase64", ""), StringComparer.OrdinalIgnoreCase);
             List<byte[]> references = new List<byte[]>();
             List<string> referenceMappings = new List<string>();
@@ -229,7 +229,7 @@ namespace ReignBetaServer
             var prompt = new StringBuilder(FamilyImageSafetyContract(profiles.Count, timeBlock));
             for (int i = 0; i < profiles.Count; i++)
             {
-                Dictionary<string, object> profile = profiles[i]; string id = Program.CharacterIdFrom(profile); double age = ReadDouble(profile, "age", 0d);
+                Dictionary<string, object> profile = profiles[i]; string id = CampaignFileService.CharacterIdFrom(profile); double age = ReadDouble(profile, "age", 0d);
                 bool isChild = ReadBool(profile, "isChild", false);
                 prompt.AppendLine("In the " + FamilyPositionWords(i, profiles.Count) + " zone, show a "
                     + FamilyAgeWords(age) + " " + (ReadBool(profile, "isFemale", false) ? (isChild ? "girl" : "woman") : (isChild ? "boy" : "man"))
@@ -244,14 +244,14 @@ namespace ReignBetaServer
                 }
                 if (isChild)
                 {
-                    string refPath = Path.Combine(refsFolder, Program.SafePathSegment(id, "child") + ".png");
+                    string refPath = Path.Combine(refsFolder, CampaignFileService.SafePathSegment(id, "child") + ".png");
                     string manifestPath = refPath + ".json";
                     if (File.Exists(refPath))
                     {
                         references.Add(File.ReadAllBytes(refPath));
                         referenceMappings.Add("the " + FamilyOrdinalWords(references.Count - 1) + " reference cell depicts the person in the " + FamilyPositionWords(i, profiles.Count) + " zone");
                     }
-                    Dictionary<string, object> manifest = Program.ReadJsonObject(manifestPath) ?? new Dictionary<string, object>();
+                    Dictionary<string, object> manifest = CampaignFileService.ReadJsonObject(manifestPath) ?? new Dictionary<string, object>();
                     double oldAge = ReadDouble(manifest, "age", age);
                     if (age - oldAge >= 2d) prompt.AppendLine("Advance the person in the " + FamilyPositionWords(i, profiles.Count) + " zone from " + FamilyAgeWords(oldAge) + " to " + FamilyAgeWords(age) + " in this single image-to-image pass while preserving identity.");
                 }
@@ -263,7 +263,7 @@ namespace ReignBetaServer
             Dictionary<string, object> imagePayload = new Dictionary<string, object>(payload, StringComparer.OrdinalIgnoreCase)
             {
                 ["promptPurpose"] = "family_chambers_scene", ["prompt"] = prompt.ToString(), ["outputSize"] = "1536x864",
-                ["sharedCacheOutput"] = false, ["cacheKey"] = "family_chambers_" + Program.SafePathSegment(cacheKey, "scene"), ["heroStringId"] = "family_chambers"
+                ["sharedCacheOutput"] = false, ["cacheKey"] = "family_chambers_" + CampaignFileService.SafePathSegment(cacheKey, "scene"), ["heroStringId"] = "family_chambers"
             };
             if (sheet != null) imagePayload["sourceImageBase64"] = Convert.ToBase64String(sheet);
             Dictionary<string, object> generated = PortraitsService.PortraitGenerate(imagePayload);
@@ -311,12 +311,12 @@ namespace ReignBetaServer
                     int sx = Math.Max(0, Math.Min(actualWidth - crop, cx - crop / 2)); int sy = Math.Max(0, Math.Min(height - crop, cy - crop / 2));
                     byte[] cut = new byte[crop * crop * 4]; for (int y = 0; y < crop; y++) Buffer.BlockCopy(slot, ((sy + y) * actualWidth + sx) * 4, cut, y * crop * 4, crop * 4);
                     byte[] resized = PortraitDerivativeCore.ResizeBilinear(cut, crop, crop, 512, 512);
-                    string id = Program.CharacterIdFrom(profile); string path = Path.Combine(folder, Program.SafePathSegment(id, "child") + ".png");
+                    string id = CampaignFileService.CharacterIdFrom(profile); string path = Path.Combine(folder, CampaignFileService.SafePathSegment(id, "child") + ".png");
                     PortraitsService.WriteSharedPortraitAtomic(path, PngEncoder.EncodeRgba(resized, 512, 512));
                     PortraitsService.WriteSharedPortraitAtomic(path + ".json", Encoding.UTF8.GetBytes(Json.Serialize(new Dictionary<string, object>
                     { ["heroId"] = id, ["age"] = ReadDouble(profile, "age", 0d), ["worldDay"] = worldDay, ["confidence"] = face.Confidence, ["method"] = "ultraface_fixed_participant_slot", ["updatedUtc"] = DateTime.UtcNow.ToString("O") })));
                 }
-                catch (Exception ex) { Program.LogOperational("family_chambers.child_reference_skipped", new Dictionary<string, object> { ["heroId"] = Program.CharacterIdFrom(profile), ["error"] = DialogueService.LimitText(ex.Message, 300) }); }
+                catch (Exception ex) { OperationsService.LogOperational("family_chambers.child_reference_skipped", new Dictionary<string, object> { ["heroId"] = CampaignFileService.CharacterIdFrom(profile), ["error"] = DialogueService.LimitText(ex.Message, 300) }); }
             }
         }
     }

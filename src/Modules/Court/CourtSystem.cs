@@ -702,14 +702,14 @@ namespace ReignBetaServer
             if(string.IsNullOrWhiteSpace(playerKingdomId)||!SameCourtText(actorKingdomId,playerKingdomId)||proposer==null||responder==null||ReadBool(responder,"isPlayerKingdom",false))return CourtError("Only the player's current royal court may propose to a current foreign NPC realm.");
             string actorHeroId=ReadFirstString(action,"actorHeroStringId","actorHeroId"),targetHeroId=ReadFirstString(action,"targetHeroStringId","targetHeroId");
             if(!SameCourtText(actorHeroId,ReadString(proposer,"leaderHeroId",""))||!SameCourtText(targetHeroId,ReadString(responder,"leaderHeroId","")))return CourtError("One of the named current rulers changed after this package was prepared.");
-            string command=Program.CanonicalCommand(ReadFirstString(action,"command","type"));Dictionary<string,object> terms=ReadDictionary(action,"terms")??TryParseJsonObject(ReadString(action,"termsJson","{}"))??new Dictionary<string,object>();
+            string command=ActionPipelineService.CanonicalCommand(ReadFirstString(action,"command","type"));Dictionary<string,object> terms=ReadDictionary(action,"terms")??TryParseJsonObject(ReadString(action,"termsJson","{}"))??new Dictionary<string,object>();
             Dictionary<string,object> candidate=new Dictionary<string,object>(StringComparer.OrdinalIgnoreCase)
             {
                 {"command",command},{"actorHeroStringId",actorHeroId},{"actorKingdomStringId",actorKingdomId},{"actorClanStringId",ReadFirstString(action,"actorClanStringId","actorClanId")},
                 {"targetHeroStringId",targetHeroId},{"targetKingdomId",targetKingdomId},{"targetKingdomStringId",targetKingdomId},{"targetSettlementStringId",ReadFirstString(action,"targetSettlementStringId","targetSettlementId")},
                 {"terms",terms},{"publicReason",ReadString(action,"reason","A package submitted from the player's royal court.")},{"reason",ReadString(action,"reason","A royal court proposal.")},{"source","court_player_diplomacy"}
             };
-            Dictionary<string,object> normalizedPreview=Program.NormalizeActionCommand(candidate,ctx.CampaignId,out List<string> normalizationErrors,world,ReadString(candidate,"publicReason",""));
+            Dictionary<string,object> normalizedPreview=ActionPipelineService.NormalizeActionCommand(candidate,ctx.CampaignId,out List<string> normalizationErrors,world,ReadString(candidate,"publicReason",""));
             if(normalizedPreview==null||normalizationErrors.Count>0)return CourtError("The diplomatic package is not executable: "+string.Join("; ",normalizationErrors));
             using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
@@ -727,7 +727,7 @@ namespace ReignBetaServer
                 }
                 else if(answerKind=="counter")
                 {
-                    Dictionary<string,object> counter=DiplomacyService.ApplyCounteroffer(candidate,answer);List<string> counterErrors=new List<string>();string counterCommand=Program.CanonicalCommand(ReadString(counter,"command",""));if(!DiplomacyService.DirectorSupportedCommands.Contains(counterCommand))counterErrors.Add("unsupported command "+counterCommand);if(!DiplomacyService.DirectorCommandAllowedForIntent(diplomacyIntent,counterCommand))counterErrors.Add("counteroffer command does not belong to the proposal intent family");DiplomacyService.ValidateDirectorTerms(counter,world,proposer,responder,counterErrors);if(counterErrors.Count>0)return CourtError("The foreign counteroffer was not executable: "+string.Join("; ",counterErrors));Dictionary<string,object> normalizedCounter=Program.NormalizeActionCommand(counter,ctx.CampaignId,out normalizationErrors,world,publicReason);
+                    Dictionary<string,object> counter=DiplomacyService.ApplyCounteroffer(candidate,answer);List<string> counterErrors=new List<string>();string counterCommand=ActionPipelineService.CanonicalCommand(ReadString(counter,"command",""));if(!DiplomacyService.DirectorSupportedCommands.Contains(counterCommand))counterErrors.Add("unsupported command "+counterCommand);if(!DiplomacyService.DirectorCommandAllowedForIntent(diplomacyIntent,counterCommand))counterErrors.Add("counteroffer command does not belong to the proposal intent family");DiplomacyService.ValidateDirectorTerms(counter,world,proposer,responder,counterErrors);if(counterErrors.Count>0)return CourtError("The foreign counteroffer was not executable: "+string.Join("; ",counterErrors));Dictionary<string,object> normalizedCounter=ActionPipelineService.NormalizeActionCommand(counter,ctx.CampaignId,out normalizationErrors,world,publicReason);
                     if(normalizedCounter==null||normalizationErrors.Count>0)return CourtError("The foreign counteroffer was not executable: "+string.Join("; ",normalizationErrors));
                     normalizedCounter["source"]="court_negotiated_diplomacy";normalizedCounter["reason"]=publicReason;normalizedCounter["requiresAcceptance"]=false;
                     Dictionary<string,object> counterConsequences=new Dictionary<string,object>{{"nativeActions",new ArrayList{new Dictionary<string,object>{{"type","world_action"},{"action",normalizedCounter}}}}};
@@ -916,7 +916,7 @@ namespace ReignBetaServer
         internal static List<Dictionary<string, object>> RunCourtSelfTests()
         {
             List<Dictionary<string,object>> results=new List<Dictionary<string,object>>();Action<string,bool,string,object> add=(id,passed,summary,data)=>results.Add(new Dictionary<string,object>{{"ok",true},{"passed",passed},{"suite","court_system"},{"caseId",id},{"name",id},{"summary",summary},{"data",data??new Dictionary<string,object>()},{"durationMs",0}});
-            string campaign="__court_self_test_"+Guid.NewGuid().ToString("N"),timeline="timeline_a",session="session_test";string path=Program.CampaignDirectory(campaign);
+            string campaign="__court_self_test_"+Guid.NewGuid().ToString("N"),timeline="timeline_a",session="session_test";string path=CampaignFileService.CampaignDirectory(campaign);
             try
             {
                 Dictionary<string,object> denied=CourtSessionOpenApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId",timeline},{"commandId","denied"},{"expectedRevision",0},{"sessionId","clan_session"},{"authority","clan"},{"playerIsKingdomRuler",false},{"hostSettlementStringId","town_test"},{"worldDay",10d},{"playerHeroStringId","player"}});add("non_royal_session_rejected",!ReadBool(denied,"ok",true),"Clan leadership and settlement ownership cannot open Court.",denied);

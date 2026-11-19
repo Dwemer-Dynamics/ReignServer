@@ -1035,7 +1035,7 @@ namespace ReignBetaServer
             EnsureSocialReputationSchema(connection);
             ExpireSocialRumors(connection, campaignId, timelineId, worldDay);
             List<Dictionary<string, object>> candidates = new List<Dictionary<string, object>>();
-            List<string> topicTokens = Program.NormalizeLookup(topic).Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)
+            List<string> topicTokens = ActionPipelineService.NormalizeLookup(topic).Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)
                 .Where(token => token.Length >= 3).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             List<Dictionary<string, object>> rows = ReputationStore.SelectRumorSubjectTags16(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = worldDay });
             foreach (Dictionary<string, object> row in rows)

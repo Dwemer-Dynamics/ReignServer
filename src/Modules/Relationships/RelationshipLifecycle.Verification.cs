@@ -95,7 +95,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(correspondenceCampaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(correspondenceCampaignId));
             }
             return results;
         }
@@ -871,7 +871,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaignId));
             }
             return results;
         }

@@ -40,7 +40,7 @@ namespace ReignBetaServer
                 return TestDict("status", "no_player_contribution", "persisted", false);
             string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
             if (player.Length == 0) throw new InvalidOperationException("The original message requires a player identity before generation.");
-            string contribution = FirstNonEmpty(ReadFirstString(payload, "contributionId", "sceneTurnId", "turnId", "requestId"), Program.EnsureCorrelationId(payload));
+            string contribution = FirstNonEmpty(ReadFirstString(payload, "contributionId", "sceneTurnId", "turnId", "requestId"), OperationsService.EnsureCorrelationId(payload));
             string session = ReadFirstString(payload, "conversationSessionId", "sessionId", "conversationId");
             if (session.Length == 0)
             {
@@ -117,7 +117,7 @@ namespace ReignBetaServer
             var responses = TryParseJsonObject(ReadString(row, "response_json", "{}"));
             var response = ReadDictionary(responses, observer);
             if (response == null || !ReadBool(response, "ok", false)) return null;
-            response = Program.CloneDictionary(response);
+            response = VerificationService.CloneDictionary(response);
             response["idempotentReplay"] = true;
             response["inputReceipt"] = source.Receipt;
             if (payload.TryGetValue("conversationGrounding", out var grounding)) response["conversationGrounding"] = grounding;
@@ -141,7 +141,7 @@ namespace ReignBetaServer
             var responses = TryParseJsonObject(ReadString(row, "response_json", "{}"));
             if (ReadBool(response, "ok", false) && observer.Length > 0)
             {
-                var replay = Program.CloneDictionary(response);
+                var replay = VerificationService.CloneDictionary(response);
                 // Full provider drafts/prompts have their own private diagnostics store.
                 foreach (string key in new[] { "llm", "prompt", "messages", "promptEnvelope" }) replay.Remove(key);
                 responses[observer] = replay;

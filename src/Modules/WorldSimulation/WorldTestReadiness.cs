@@ -13,7 +13,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> BuildWorldTestReadiness(string campaignId, string timelineId)
         {
             var timer = Stopwatch.StartNew();
-            var metadata = Program.ReadJsonObject(Program.CampaignFile(campaignId, "campaign.json"));
+            var metadata = CampaignFileService.ReadJsonObject(CampaignFileService.CampaignFile(campaignId, "campaign.json"));
             string player = ReadFirstString(metadata, "mainHeroStringId", "mainHeroId");
             // Read other stores before retaining any PostgreSQL table locks.
             var events = ReadWorldTestDiplomacyEvents(campaignId);

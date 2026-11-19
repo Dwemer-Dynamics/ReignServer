@@ -19,7 +19,7 @@ namespace ReignBetaServer
                 string timeline = ReadString(profile, "politicalTimelineId", "main");
                 // Absence of a client revision means first synchronization, not permission
                 // to read an evolved future snapshot after an older save was restored.
-                var stored = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "politics", "revision-1-" + DialogueService.SafeMemoryKey(timeline) + ".json"));
+                var stored = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "politics", "revision-1-" + DialogueService.SafeMemoryKey(timeline) + ".json"));
                 GovernmentPoliticalProfile beliefs = stored.Count == 0 ? null : JsonSerializer.Deserialize<GovernmentPoliticalProfile>(Json.Serialize(stored));
                 if (beliefs != null && !GovernmentPoliticalBeliefs.Valid(beliefs)) throw new InvalidOperationException("Invalid persisted political profile: " + heroId);
                 // An applied campaign snapshot is accepted only if it is one of this character's
@@ -28,7 +28,7 @@ namespace ReignBetaServer
                 if (applied != null)
                 {
                     var requested = JsonSerializer.Deserialize<GovernmentPoliticalProfile>(Json.Serialize(applied));
-                    var revision = requested == null ? null : Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "politics", "revision-" + requested.Revision + "-" + DialogueService.SafeMemoryKey(requested.TimelineId) + ".json"));
+                    var revision = requested == null ? null : CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "politics", "revision-" + requested.Revision + "-" + DialogueService.SafeMemoryKey(requested.TimelineId) + ".json"));
                     if (requested == null || !GovernmentPoliticalBeliefs.Valid(requested) || requested.CampaignId != campaignId || requested.HeroId != heroId
                         || revision == null || CanonicalJson(revision) != CanonicalJson(applied))
                         throw new InvalidOperationException("The applied political revision has not been issued for this character.");
@@ -60,13 +60,13 @@ namespace ReignBetaServer
                 // A divergent branch receives a new identity and cannot overwrite one.
                 while (true)
                 {
-                    string path = Program.CharacterFile(campaignId, heroId, "politics", "revision-" + beliefs.Revision + "-" + DialogueService.SafeMemoryKey(beliefs.TimelineId) + ".json");
+                    string path = CampaignFileService.CharacterFile(campaignId, heroId, "politics", "revision-" + beliefs.Revision + "-" + DialogueService.SafeMemoryKey(beliefs.TimelineId) + ".json");
                     var document = TryParseJsonObject(JsonSerializer.Serialize(beliefs));
-                    var existing = Program.ReadJsonObject(path);
+                    var existing = CampaignFileService.ReadJsonObject(path);
                     if (existing.Count == 0)
                     {
-                        Program.WriteJsonObject(path, document);
-                        Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "politics", DialogueService.SafeMemoryKey(beliefs.TimelineId) + ".json"), document);
+                        CampaignFileService.WriteJsonObject(path, document);
+                        CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "politics", DialogueService.SafeMemoryKey(beliefs.TimelineId) + ".json"), document);
                         return;
                     }
                     if (CanonicalJson(existing) == CanonicalJson(document)) return;
@@ -141,10 +141,10 @@ namespace ReignBetaServer
             {
                 string id = ReadString(hero, "heroStringId", "");
                 if (id.Length == 0 || ReadBool(hero, "isPlayer", false)) continue;
-                var native = Program.ReadJsonObject(Program.CharacterFile(campaign, id, "profile.json"));
+                var native = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, id, "profile.json"));
                 foreach (var pair in hero) native[pair.Key] = pair.Value;
                 native["politicalTimelineId"] = timeline;
-                var traits = Program.ReadJsonObject(Program.CharacterFile(campaign, id, "traits.json"));
+                var traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, id, "traits.json"));
                 var political = EnsurePoliticalProfile(campaign, id, native, traits);
                 lock (PoliticalProfileLock)
                 {
@@ -161,7 +161,7 @@ namespace ReignBetaServer
                 // Publish only the snapshot acknowledged in the inbound campaign state.
                 // The newly seeded response is applied by the client before its next turn.
                 native.Remove("politicalEvents");
-                Program.WriteJsonObject(Program.CharacterFile(campaign, id, "profile.json"), native);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, id, "profile.json"), native);
             }
             return TestDict("ok", true, "campaignId", campaign, "timelineId", timeline, "profiles", profiles);
         }
@@ -174,18 +174,18 @@ namespace ReignBetaServer
             if (campaign.Length == 0) return source;
             var authors = ReadDictionaryList(request, "politicalAuthors").ToList();
             string single = ReadFirstString(request, "heroStringId", "speakerHeroStringId", "heroId", "characterId");
-            if (single.Length > 0 && !authors.Any(x => Program.CharacterIdFrom(x) == single))
+            if (single.Length > 0 && !authors.Any(x => CampaignFileService.CharacterIdFrom(x) == single))
             {
-                var profile = ReadDictionary(request, "hero") ?? Program.ReadJsonObject(Program.CharacterFile(campaign, single, "profile.json"));
+                var profile = ReadDictionary(request, "hero") ?? CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, single, "profile.json"));
                 if (profile.Count == 0) throw new InvalidOperationException("Political context is awaiting the named character's native profile: " + single);
                 authors.Add(profile);
             }
-            var messages = source.Select(Program.CloneDictionary).ToList();
-            foreach (var author in authors.GroupBy(Program.CharacterIdFrom).Select(x => x.First()))
+            var messages = source.Select(VerificationService.CloneDictionary).ToList();
+            foreach (var author in authors.GroupBy(CampaignFileService.CharacterIdFrom).Select(x => x.First()))
             {
-                string id = Program.CharacterIdFrom(author); if (id.Length == 0 || ReadBool(author, "isPlayer", false)) continue;
-                var profile = Program.CloneDictionary(author); profile["campaignId"] = campaign;
-                var traits = Program.ReadJsonObject(Program.CharacterFile(campaign, id, "traits.json"));
+                string id = CampaignFileService.CharacterIdFrom(author); if (id.Length == 0 || ReadBool(author, "isPlayer", false)) continue;
+                var profile = VerificationService.CloneDictionary(author); profile["campaignId"] = campaign;
+                var traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, id, "traits.json"));
                 var beliefs = EnsurePoliticalProfile(campaign, id, profile, traits);
                 string block = RequiredPoliticalPrompt(id, profile, TestDict("politicalProfile", TryParseJsonObject(JsonSerializer.Serialize(beliefs))));
                 // Use the same framing normalization as foundation assembly. Match

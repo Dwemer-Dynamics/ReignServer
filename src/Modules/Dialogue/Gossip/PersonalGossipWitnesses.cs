@@ -122,7 +122,7 @@ namespace ReignBetaServer
             var nativeSceneIds = ReadStringList(ConversationSceneSnapshot(mode, payload), "witnessIds");
             var current = ReadDictionaryList(ReadDictionary(payload, "conversationSceneState"), "current");
             if (ReadDictionary(payload, "conversationSceneState")?.ContainsKey("current") == true && current.Count == 0) return;
-            var scenePeople = (current.Count > 0 ? current : MergedInteractionParticipantProfiles(payload)).Select(Program.CharacterIdFrom)
+            var scenePeople = (current.Count > 0 ? current : MergedInteractionParticipantProfiles(payload)).Select(CampaignFileService.CharacterIdFrom)
                 .Where(id => id.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var witnesses = people.Where(person => nativeSceneIds.Contains(GossipHeroId(person), StringComparer.OrdinalIgnoreCase)
                     && scenePeople.Contains(GossipHeroId(person)) && GossipCommunicationAvailable(person)

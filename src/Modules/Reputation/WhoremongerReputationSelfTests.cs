@@ -44,9 +44,9 @@ namespace ReignBetaServer
                     ["isPlayer"] = id == "wm_player" || id == "wm_refresh" || id == "wm_late", ["clanTier"] = 1,
                     ["currentCharm"] = id == "wm_player" ? 100 : 0
                 }, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-            Program.WriteJsonObject(Program.CharacterFile(campaignId, "wm_player", "profile.json"),
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, "wm_player", "profile.json"),
                 new Dictionary<string, object> { ["spouseId"] = "wm_spouse" });
-            Program.WriteJsonObject(Program.CharacterFile(campaignId, "wm_spouse", "profile.json"),
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, "wm_spouse", "profile.json"),
                 new Dictionary<string, object> { ["spouseId"] = "wm_player" });
             string timeline = "whoremonger_test";
             for (int n = 1; n <= 3; n++)
@@ -80,8 +80,8 @@ namespace ReignBetaServer
                     .Count(IsWhoremongerStandingSource) == 1,
                 "Second successful exposure can promote at 30%; reputation replaces rumor and spouse base remains -20.", fifth);
 
-            Program.WriteJsonObject(Program.CharacterFile(campaignId, "wm_player", "profile.json"), new Dictionary<string, object>());
-            Program.WriteJsonObject(Program.CharacterFile(campaignId, "wm_spouse", "profile.json"), new Dictionary<string, object>());
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, "wm_player", "profile.json"), new Dictionary<string, object>());
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, "wm_spouse", "profile.json"), new Dictionary<string, object>());
             add("whoremonger_current_spouse_recalculation",
                 ReadInt(RelationshipsService.ResolveObserverPublicStanding(connection, campaignId, timeline, "wm_spouse", "wm_player", standing), "value", 0) == -8,
                 "Ending the marriage immediately removes the spouse substitution without mutating the personal relation.", null);
@@ -125,7 +125,7 @@ namespace ReignBetaServer
                 && ReadInt(RelationshipsService.ReadPublicStandingRow(connection, campaignId, timeline, "wm_refresh"), "standing_value", -1) == 0,
                 "A failed exposure refreshes the rumor and retains promotion progress even when successful exposures are more than 30 days apart.", refresh);
 
-            Program.WriteJsonObject(Program.CharacterFile(campaignId, "wm_npc", "traits.json"), new Dictionary<string, object>
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, "wm_npc", "traits.json"), new Dictionary<string, object>
             { ["courtVirtues"] = new Dictionary<string, object> { ["honor"] = 0d, ["judgment"] = 0d } });
             var npcPayload = new Dictionary<string, object> { ["genuineTownEntry"] = true, ["isTown"] = true,
                 ["isPlayer"] = false, ["isPrisoner"] = false, ["isAlive"] = true, ["isAdult"] = true,

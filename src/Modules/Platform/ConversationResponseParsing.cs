@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class ConversationResponseService
     {
         private const int ConversationResponseRecoveryCharacterLimit = 1024 * 1024;
         internal const string DialogueActionQueuedNoticePrefix = "[Bannerlord Reign action queued:";
@@ -33,7 +33,7 @@ namespace ReignBetaServer
             bool outcomeNotice = ContainsProviderDialogueOutcomeNotice(reply);
             if (!outcomeNotice && !EmbeddedProviderDialogueMetadata.IsMatch(reply))
                 return response;
-            var rejected = CloneDictionary(response);
+            var rejected = VerificationService.CloneDictionary(response);
             rejected["ok"] = false;
             rejected["content"] = "";
             rejected["errorCode"] = outcomeNotice ? "provider_dialogue_outcome_notice" : "provider_dialogue_embedded_metadata";
@@ -142,7 +142,7 @@ namespace ReignBetaServer
             Dictionary<string, object> llm, Dictionary<string, object> request, string auditMode,
             string campaignId, string correlationId, string heroId, string eventId)
         {
-            if (!ReadBool(llm, "ok", false) || !IsConversationStructuredMode(NormalizeLookup(auditMode).Replace(' ', '_')))
+            if (!ReadBool(llm, "ok", false) || !IsConversationStructuredMode(ActionPipelineService.NormalizeLookup(auditMode).Replace(' ', '_')))
                 return llm;
             string original = ReadString(llm, "content", "");
             var parsed = TryParseStrictJsonObject(original);
@@ -173,7 +173,7 @@ namespace ReignBetaServer
                 llm["content"] = Json.Serialize(envelope.Fields);
             }
             else llm["responseRecoveryRequiresRegeneration"] = true;
-            WriteAudit(campaignId, correlationId, "server", auditMode, "llm.response_recovery", heroId, "", eventId,
+            OperationsService.WriteAudit(campaignId, correlationId, "server", auditMode, "llm.response_recovery", heroId, "", eventId,
                 recovered ? "completed" : "rejected", 0,
                 recovered ? "Recovered complete outer response fields without promoting private nested data."
                     : "The response envelope is incomplete or ambiguous; no partial effects may be accepted.", evidence);

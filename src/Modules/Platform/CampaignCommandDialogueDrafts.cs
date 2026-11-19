@@ -8,7 +8,7 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class ActionPipelineService
     {
         private static readonly object CampaignCommandDraftLock = new object();
         private const double CampaignCommandDraftLifetimeDays = 1d;
@@ -420,12 +420,12 @@ namespace ReignBetaServer
 
         private static string CampaignCommandDraftFile(string campaignId)
         {
-            return CampaignFile(campaignId, "actions", "campaign-command-dialogue-drafts.json");
+            return CampaignFileService.CampaignFile(campaignId, "actions", "campaign-command-dialogue-drafts.json");
         }
 
         private static Dictionary<string, object> ReadCampaignCommandDraftState(string campaignId)
         {
-            Dictionary<string, object> state = ReadJsonObject(CampaignCommandDraftFile(campaignId));
+            Dictionary<string, object> state = CampaignFileService.ReadJsonObject(CampaignCommandDraftFile(campaignId));
             if (!state.ContainsKey("schema")) state["schema"] = "reign-campaign-command-dialogue-drafts-v1";
             if (!state.ContainsKey("drafts")) state["drafts"] = new List<Dictionary<string, object>>();
             return state;
@@ -439,7 +439,7 @@ namespace ReignBetaServer
             state["updatedUtc"] = DateTime.UtcNow.ToString("o");
             string path = CampaignCommandDraftFile(campaignId);
             Directory.CreateDirectory(Path.GetDirectoryName(path));
-            WriteJsonObject(path, state);
+            CampaignFileService.WriteJsonObject(path, state);
         }
     }
 }

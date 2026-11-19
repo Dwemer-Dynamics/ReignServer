@@ -51,15 +51,15 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> WorldTestHeartbeatApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
             string timelineId = ReadString(payload, "timelineId", "main");
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             int dayKey = (int)Math.Floor(worldDay);
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             Dictionary<string, object> population = ReadDictionary(payload, "population") ?? new Dictionary<string, object>();
-            if (!Program.IsInternalCampaignId(campaignId))
+            if (!CampaignFileService.IsInternalCampaignId(campaignId))
             {
-                Program.WriteCampaignMetadata(campaignId, payload);
+                CampaignFileService.WriteCampaignMetadata(campaignId, payload);
             }
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
@@ -158,11 +158,11 @@ namespace ReignBetaServer
                 {
                     string actionId = ReadString(row, "actionId", "");
                     if (string.IsNullOrWhiteSpace(actionId)) continue;
-                    string actionStatus = Program.NormalizeLookup(ReadString(row, "status", "unknown"));
+                    string actionStatus = ActionPipelineService.NormalizeLookup(ReadString(row, "status", "unknown"));
                     Dictionary<string, object> actionCounters = new Dictionary<string, object>
                     {
                         ["actionStatus:" + FirstNonEmpty(actionStatus, "unknown")] = 1,
-                        ["actionType:" + FirstNonEmpty(Program.NormalizeLookup(ReadString(row, "type", "")), "unknown")] = 1,
+                        ["actionType:" + FirstNonEmpty(ActionPipelineService.NormalizeLookup(ReadString(row, "type", "")), "unknown")] = 1,
                         ["actorKingdom:" + FirstNonEmpty(ReadString(row, "actorKingdomId", ""), "unknown")] = 1,
                         ["targetKingdom:" + FirstNonEmpty(ReadString(row, "targetKingdomId", ""), "unknown")] = 1,
                         ["actionQueued"] = actionStatus == "proposed" || actionStatus == "accepted"
@@ -356,11 +356,11 @@ namespace ReignBetaServer
             {
                 string campaignId = ReadString(
                     registered, "campaignId", "");
-                string directoryPath = Program.CampaignDirectory(campaignId);
+                string directoryPath = CampaignFileService.CampaignDirectory(campaignId);
                 if (!Directory.Exists(directoryPath)) continue;
                 DirectoryInfo directory = new DirectoryInfo(directoryPath);
-                if (!Program.IsRealCampaignDirectory(directory)) continue;
-                Dictionary<string, object> metadata = Program.ReadJsonObject(
+                if (!CampaignFileService.IsRealCampaignDirectory(directory)) continue;
+                Dictionary<string, object> metadata = CampaignFileService.ReadJsonObject(
                     Path.Combine(directoryPath, "campaign.json"));
                 List<Dictionary<string, object>> timelines =
                     new List<Dictionary<string, object>>();
@@ -416,8 +416,8 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> WorldTestOverviewApi(Dictionary<string, string> query)
         {
             query = query ?? new Dictionary<string, string>();
-            string campaignId = query.TryGetValue("campaignId", out string campaign) ? campaign : Program.LatestCampaignId();
-            if (!Program.HasRealCampaignStorage(campaignId))
+            string campaignId = query.TryGetValue("campaignId", out string campaign) ? campaign : SettingsService.LatestCampaignId();
+            if (!CampaignFileService.HasRealCampaignStorage(campaignId))
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false, ["campaignId"] = campaignId,
@@ -435,20 +435,20 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> WorldTestDetailsApi(Dictionary<string, string> query)
         {
             query = query ?? new Dictionary<string, string>();
-            string campaignId = query.TryGetValue("campaignId", out string campaign) ? campaign : Program.LatestCampaignId();
-            if (!Program.HasRealCampaignStorage(campaignId))
+            string campaignId = query.TryGetValue("campaignId", out string campaign) ? campaign : SettingsService.LatestCampaignId();
+            if (!CampaignFileService.HasRealCampaignStorage(campaignId))
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false, ["campaignId"] = campaignId, ["rows"] = new List<Dictionary<string, object>>(), ["total"] = 0,
                     ["error"] = "No observed real campaign matches this World Test selection."
                 };
             string timelineId = query.TryGetValue("timelineId", out string timeline) ? timeline : "main";
-            string subsystem = query.TryGetValue("subsystem", out string system) ? Program.NormalizeLookup(system) : "relationships";
+            string subsystem = query.TryGetValue("subsystem", out string system) ? ActionPipelineService.NormalizeLookup(system) : "relationships";
             string search = query.TryGetValue("search", out string searchValue) ? searchValue : "";
             string status = query.TryGetValue("status", out string statusValue) ? statusValue : "";
             string type = query.TryGetValue("type", out string typeValue) ? typeValue : "";
             string mainHeroId = ReadFirstString(
-                Program.ReadJsonObject(Program.CampaignFile(campaignId, "campaign.json")),
+                CampaignFileService.ReadJsonObject(CampaignFileService.CampaignFile(campaignId, "campaign.json")),
                 "mainHeroStringId", "mainHeroId");
             int page = query.TryGetValue("page", out string pageText) && int.TryParse(pageText, out int parsedPage) ? Math.Max(1, parsedPage) : 1;
             int pageSize = query.TryGetValue("pageSize", out string sizeText) && int.TryParse(sizeText, out int parsedSize) ? Math.Max(10, Math.Min(200, parsedSize)) : 50;
@@ -628,7 +628,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> BuildWorldTestOverviewUncached(string campaignId, string timelineId, double fromDay, double toDay, int limit)
         {
-            Dictionary<string, object> metadata = Program.ReadJsonObject(Program.CampaignFile(campaignId, "campaign.json"));
+            Dictionary<string, object> metadata = CampaignFileService.ReadJsonObject(CampaignFileService.CampaignFile(campaignId, "campaign.json"));
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureWorldTestSchema(connection);

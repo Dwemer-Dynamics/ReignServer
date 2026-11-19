@@ -119,7 +119,7 @@ namespace ReignBetaServer
             object payload)
         {
             string normalizedType = (eventType ?? string.Empty).Trim().ToLowerInvariant();
-            string context = Program.NormalizeLookup(string.Join(" ", new[]
+            string context = ActionPipelineService.NormalizeLookup(string.Join(" ", new[]
             {
                 normalizedType, phase ?? "", summary ?? "", source ?? "",
                 payload == null ? "" : Json.Serialize(payload)
@@ -747,7 +747,7 @@ namespace ReignBetaServer
             {
                 bool cleanupSucceeded = false;
                 string cleanupError = string.Empty;
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaignId));
                 int consecutiveAbsentChecks = 0;
                 DateTime cleanupDeadline = DateTime.UtcNow.AddSeconds(15);
                 while (DateTime.UtcNow < cleanupDeadline
@@ -761,11 +761,11 @@ namespace ReignBetaServer
                         // making a test-only campaign reappear throughout the
                         // quiescence window.
                         ReignPostgreSqlStorage.DropCampaign(campaignId);
-                        PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
+                        PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaignId));
                         System.Threading.Thread.Sleep(250);
                         bool reappeared =
                             ReignPostgreSqlStorage.CampaignExists(campaignId)
-                            || Directory.Exists(Program.CampaignDirectory(campaignId));
+                            || Directory.Exists(CampaignFileService.CampaignDirectory(campaignId));
                         consecutiveAbsentChecks = reappeared
                             ? 0 : consecutiveAbsentChecks + 1;
                     }

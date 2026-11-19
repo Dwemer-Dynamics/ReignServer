@@ -34,7 +34,7 @@ namespace ReignBetaServer
                 + "lighting, background, camera position, full-body framing and image dimensions. "
                 + "Do not redraw, beautify, replace or reinterpret the person. Do not add text, borders or other objects. "
                 + "Clothing guidance below applies only to garments; body size is governed exclusively by the native body layer, never by revealingness.\n\n"
-                + ExpandPortraitIdentityTokens(payload, Program.LoadPromptTemplate(layer).Trim())
+                + ExpandPortraitIdentityTokens(payload, PromptService.LoadPromptTemplate(layer).Trim())
                     .Replace("[TAVERN ROLE]", TavernHousePortraitRole(payload)), payload);
         }
 

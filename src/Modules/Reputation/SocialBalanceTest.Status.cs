@@ -77,7 +77,7 @@ namespace ReignBetaServer
         private static string SocialBalancePersistencePath(string runId)
         {
             return Path.Combine(SocialBalanceRoot, "persistence",
-                Program.SafePathSegment(runId, "run") + ".json");
+                CampaignFileService.SafePathSegment(runId, "run") + ".json");
         }
 
         internal static Dictionary<string, object> SocialBalanceSnapshotApi(Dictionary<string, object> payload)
@@ -142,10 +142,10 @@ namespace ReignBetaServer
 
                 Dictionary<string, object> runtimeProfile =
                     DialogueService.QualificationRuntimeProfileFromTarget(targetId, snapshot);
-                Dictionary<string, object> profile = Program.ReadJsonObject(
-                    Program.CharacterFile(campaignId, targetId, "profile.json"));
-                Dictionary<string, object> traits = Program.ReadJsonObject(
-                    Program.CharacterFile(campaignId, targetId, "traits.json"));
+                Dictionary<string, object> profile = CampaignFileService.ReadJsonObject(
+                    CampaignFileService.CharacterFile(campaignId, targetId, "profile.json"));
+                Dictionary<string, object> traits = CampaignFileService.ReadJsonObject(
+                    CampaignFileService.CharacterFile(campaignId, targetId, "traits.json"));
                 string traitSource = "campaign_traits";
                 if (profile.Count == 0) profile = runtimeProfile;
                 if (traits.Count == 0)

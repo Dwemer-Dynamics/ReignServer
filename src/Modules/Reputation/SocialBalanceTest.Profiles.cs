@@ -755,8 +755,8 @@ namespace ReignBetaServer
                 {
                     string id = ReadString(row, "hero_id", "");
                     Dictionary<string, object> copy = new Dictionary<string, object>(row);
-                    copy["jealousy"] = RelationshipsService.RelationshipTraitPercent(Program.ReadJsonObject(
-                        Program.CharacterFile(campaignId, id, "traits.json")), "jealousy");
+                    copy["jealousy"] = RelationshipsService.RelationshipTraitPercent(CampaignFileService.ReadJsonObject(
+                        CampaignFileService.CharacterFile(campaignId, id, "traits.json")), "jealousy");
                     return copy;
                 }).OrderBy(row => ReadDouble(row, "jealousy", 50d))
                     .ThenBy(row => ReadString(row, "hero_id", ""), StringComparer.OrdinalIgnoreCase)
@@ -1073,7 +1073,7 @@ namespace ReignBetaServer
                     ["legacyFavoredByMigrationSafe"] = migrationSafe
                 }
             };
-            Program.WriteJsonObject(SocialBalancePersistencePath(runId), prepared);
+            CampaignFileService.WriteJsonObject(SocialBalancePersistencePath(runId), prepared);
             liveRun["socialBalanceProfileEvaluation"] = new Dictionary<string, object>
             {
                 ["profile"] = "save_prepare", ["staged"] = exactMarker && requiredEvidence && migrationSafe,
@@ -1096,7 +1096,7 @@ namespace ReignBetaServer
                 ?? new Dictionary<string, object>();
             Dictionary<string, object> clientVerification = ReadDictionary(result, "persistenceVerification")
                 ?? new Dictionary<string, object>();
-            Dictionary<string, object> prepared = Program.ReadJsonObject(SocialBalancePersistencePath(runId));
+            Dictionary<string, object> prepared = CampaignFileService.ReadJsonObject(SocialBalancePersistencePath(runId));
             Dictionary<string, object> preparedMarker = ReadDictionary(prepared, "marker")
                 ?? new Dictionary<string, object>();
             Dictionary<string, object> reloadedMarker = ReadDictionary(clientVerification, "marker")

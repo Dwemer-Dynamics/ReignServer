@@ -22,7 +22,7 @@ namespace ReignBetaServer
                 RouteHandler handler = (request, route) =>
                 {
                     WriteHtml(route.Stream, ControlCenterHtml());
-                    LogRequest(request, 200);
+                    OperationsService.LogRequest(request, 200);
                     return RouteResponseWritten;
                 };
                 routes.Get("/", handler).WithoutCampaignGate();
@@ -31,13 +31,13 @@ namespace ReignBetaServer
             routes.Get("/assets/reign-icon.webp", (request, route) =>
             {
                 WriteFile(route.Stream, Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui", "assets", "reign-icon.webp"), "image/webp");
-                LogRequest(request, 200);
+                OperationsService.LogRequest(request, 200);
                 return RouteResponseWritten;
             }).WithoutCampaignGate();
             routes.Get("/assets/ReignLogo.png", (request, route) =>
             {
                 WriteFile(route.Stream, Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui", "assets", "ReignLogo.png"), "image/png");
-                LogRequest(request, 200);
+                OperationsService.LogRequest(request, 200);
                 return RouteResponseWritten;
             }).WithoutCampaignGate();
             routes.Get("/health", request =>
@@ -66,75 +66,75 @@ namespace ReignBetaServer
                 };
             }).WithoutCampaignGate();
             routes.Post("/api/activate", request => ActivateRunningServer(request.JsonBody));
-            routes.Get("/api/settings", request => SettingsForUi(LoadSettings()));
-            routes.Get("/api/gameplay-options", request => ReignXpOptionsForClient());
-            routes.Get("/api/global-keys", request => GlobalKeysStatus(request.Query.TryGetValue("slot", out string onlySlot) && GlobalKeySlots.Contains(onlySlot) ? onlySlot : null));
+            routes.Get("/api/settings", request => SettingsService.SettingsForUi(SettingsService.LoadSettings()));
+            routes.Get("/api/gameplay-options", request => SettingsService.ReignXpOptionsForClient());
+            routes.Get("/api/global-keys", request => SettingsService.GlobalKeysStatus(request.Query.TryGetValue("slot", out string onlySlot) && SettingsService.GlobalKeySlots.Contains(onlySlot) ? onlySlot : null));
             {
-                Func<HttpRequest, object> handler = request => !GlobalKeyRequestAllowed(request) ? GlobalKeyFail("forbidden")
-                    : request.Path.EndsWith("/save", StringComparison.Ordinal) ? SaveGlobalKey(request.JsonBody) : UnbindGlobalKey(request.JsonBody);
+                Func<HttpRequest, object> handler = request => !SettingsService.GlobalKeyRequestAllowed(request) ? SettingsService.GlobalKeyFail("forbidden")
+                    : request.Path.EndsWith("/save", StringComparison.Ordinal) ? SettingsService.SaveGlobalKey(request.JsonBody) : SettingsService.UnbindGlobalKey(request.JsonBody);
                 routes.Post("/api/global-keys/save", handler);
                 routes.Post("/api/global-keys/unbind", handler);
             }
-            routes.Post("/api/settings", request => SaveSettings(request.JsonBody));
+            routes.Post("/api/settings", request => SettingsService.SaveSettings(request.JsonBody));
             // Stop reads no campaign state and may synchronously settle never-started background releases, so it
             // must run without campaign ownership.
             routes.Post("/api/shutdown", request => RequestServerShutdown()).WithoutCampaignGate();
-            routes.Post("/api/settings/clear-key", request => ClearSettingsKey(request.JsonBody, request));
-            routes.Get("/api/diagnostics", request => ServerDiagnostics());
-            routes.Post("/api/diagnostics/test-llm", request => TestLlmKey(request.JsonBody));
-            routes.Get("/api/codex/status", request => CodexStatusApi());
-            routes.Post("/api/codex/start", request => StartCodexAppServerApi());
-            routes.Post("/api/codex/stop", request => StopCodexAppServerApi());
-            routes.Post("/api/codex/login/start", request => StartCodexLoginApi(request.JsonBody));
-            routes.Post("/api/codex/logout", request => CodexLogoutApi());
-            routes.Post("/api/codex/models/refresh", request => RefreshCodexModelsApi());
-            routes.Post("/api/codex/models/verify", request => CodexVerifyModelApi(request.JsonBody));
-            routes.Get("/api/telemetry/status", request => ReignTelemetryStatus());
-            routes.Get("/api/provider/status", request => ProviderMiddlewareStatus());
-            routes.Get("/api/background/status", request => PriorityBackgroundStatus());
-            routes.Get("/api/prompts", request => ReadPromptTemplatesApi());
-            routes.Post("/api/prompts", request => SavePromptTemplatesApi(request.JsonBody));
+            routes.Post("/api/settings/clear-key", request => SettingsService.ClearSettingsKey(request.JsonBody, request));
+            routes.Get("/api/diagnostics", request => SettingsService.ServerDiagnostics());
+            routes.Post("/api/diagnostics/test-llm", request => SettingsService.TestLlmKey(request.JsonBody));
+            routes.Get("/api/codex/status", request => LlmProviderService.CodexStatusApi());
+            routes.Post("/api/codex/start", request => LlmProviderService.StartCodexAppServerApi());
+            routes.Post("/api/codex/stop", request => LlmProviderService.StopCodexAppServerApi());
+            routes.Post("/api/codex/login/start", request => LlmProviderService.StartCodexLoginApi(request.JsonBody));
+            routes.Post("/api/codex/logout", request => LlmProviderService.CodexLogoutApi());
+            routes.Post("/api/codex/models/refresh", request => LlmProviderService.RefreshCodexModelsApi());
+            routes.Post("/api/codex/models/verify", request => LlmProviderService.CodexVerifyModelApi(request.JsonBody));
+            routes.Get("/api/telemetry/status", request => OperationsService.ReignTelemetryStatus());
+            routes.Get("/api/provider/status", request => LlmProviderService.ProviderMiddlewareStatus());
+            routes.Get("/api/background/status", request => OperationsService.PriorityBackgroundStatus());
+            routes.Get("/api/prompts", request => PromptService.ReadPromptTemplatesApi());
+            routes.Post("/api/prompts", request => PromptService.SavePromptTemplatesApi(request.JsonBody));
             routes.Post("/api/castle-chat/prompts", request => CourtService.CastleChatPromptsApi(request.JsonBody));
-            routes.Get("/api/logs", request => ReadLogApi(request.Query));
-            routes.Get("/api/diagnostics/conversations", request => ConversationDiagnosticsListApi(request.Query));
-            routes.Get("/api/diagnostics/conversations/trace", request => ConversationDiagnosticsTraceApi(request.Query));
-            routes.Get("/api/diagnostics/conversations/payload", request => ConversationDiagnosticsPayloadApi(request.Query));
-            routes.Get("/api/diagnostics/conversations/capture", request => ConversationDiagnosticsCaptureApi());
-            routes.Post("/api/diagnostics/conversations/capture", request => ConversationDiagnosticsCaptureApi(request.JsonBody));
-            routes.Post("/api/diagnostics/conversations/clear", request => ConversationDiagnosticsClearApi(request.JsonBody));
+            routes.Get("/api/logs", request => OperationsService.ReadLogApi(request.Query));
+            routes.Get("/api/diagnostics/conversations", request => ConversationResponseService.ConversationDiagnosticsListApi(request.Query));
+            routes.Get("/api/diagnostics/conversations/trace", request => ConversationResponseService.ConversationDiagnosticsTraceApi(request.Query));
+            routes.Get("/api/diagnostics/conversations/payload", request => ConversationResponseService.ConversationDiagnosticsPayloadApi(request.Query));
+            routes.Get("/api/diagnostics/conversations/capture", request => ConversationResponseService.ConversationDiagnosticsCaptureApi());
+            routes.Post("/api/diagnostics/conversations/capture", request => ConversationResponseService.ConversationDiagnosticsCaptureApi(request.JsonBody));
+            routes.Post("/api/diagnostics/conversations/clear", request => ConversationResponseService.ConversationDiagnosticsClearApi(request.JsonBody));
             routes.Get("/api/diagnostics/conversations/export", (request, route) =>
             {
-                WriteConversationDiagnosticsExport(route.Stream, request.Query);
-                LogRequest(request, 200);
+                ConversationResponseService.WriteConversationDiagnosticsExport(route.Stream, request.Query);
+                OperationsService.LogRequest(request, 200);
                 return RouteResponseWritten;
             });
-            routes.Post("/api/logs/clear", request => ClearLogs(request.JsonBody));
+            routes.Post("/api/logs/clear", request => OperationsService.ClearLogs(request.JsonBody));
             routes.Get("/api/logs/export", (request, route) =>
             {
-                WriteLogExport(route.Stream, request.Query);
-                LogRequest(request, 200);
+                OperationsService.WriteLogExport(route.Stream, request.Query);
+                OperationsService.LogRequest(request, 200);
                 return RouteResponseWritten;
             });
             routes.Post("/api/support-bundle", (request, route) =>
             {
-                WriteSupportBundle(route.Stream, request.JsonBody);
-                LogRequest(request, 200);
+                OperationsService.WriteSupportBundle(route.Stream, request.JsonBody);
+                OperationsService.LogRequest(request, 200);
                 return RouteResponseWritten;
             });
-            routes.Post("/audit/ingest", request => AuditIngest(request.JsonBody));
-            routes.Get("/audit/query", request => AuditQuery(request.Query));
+            routes.Post("/audit/ingest", request => OperationsService.AuditIngest(request.JsonBody));
+            routes.Get("/audit/query", request => OperationsService.AuditQuery(request.Query));
 #if !REIGN_EXCLUDE_VERIFICATION
-            routes.Get("/tests/cases", request => TestCasesApi(request.Query));
-            routes.Post("/tests/cases/save", request => SaveTestCaseApi(request.JsonBody));
-            routes.Post("/tests/run", request => RunTestApi(request.JsonBody));
-            routes.Post("/tests/run-suite", request => RunTestSuiteApi(request.JsonBody));
-            routes.Post("/tests/capture-from-correlation", request => CaptureTestFromCorrelationApi(request.JsonBody));
-            routes.Get("/tests/runs", request => TestRunsApi(request.Query));
-            routes.Post("/verification/run", request => StartVerificationApi(request.JsonBody));
-            routes.Get("/verification/status", request => VerificationStatusApi());
-            routes.Post("/verification/cancel", request => CancelVerificationApi());
-            routes.Get("/verification/results", request => VerificationResultsApi(request.Query));
-            routes.Post("/verification/replay", request => ReplayVerificationApi(request.JsonBody));
+            routes.Get("/tests/cases", request => VerificationService.TestCasesApi(request.Query));
+            routes.Post("/tests/cases/save", request => VerificationService.SaveTestCaseApi(request.JsonBody));
+            routes.Post("/tests/run", request => VerificationService.RunTestApi(request.JsonBody));
+            routes.Post("/tests/run-suite", request => VerificationService.RunTestSuiteApi(request.JsonBody));
+            routes.Post("/tests/capture-from-correlation", request => VerificationService.CaptureTestFromCorrelationApi(request.JsonBody));
+            routes.Get("/tests/runs", request => VerificationService.TestRunsApi(request.Query));
+            routes.Post("/verification/run", request => VerificationService.StartVerificationApi(request.JsonBody));
+            routes.Get("/verification/status", request => VerificationService.VerificationStatusApi());
+            routes.Post("/verification/cancel", request => VerificationService.CancelVerificationApi());
+            routes.Get("/verification/results", request => VerificationService.VerificationResultsApi(request.Query));
+            routes.Post("/verification/replay", request => VerificationService.ReplayVerificationApi(request.JsonBody));
 #endif
             routes.Post("/events/ingest", request => DialogueService.IngestEvent(request.JsonBody));
             routes.Post("/initialization/readiness/seal", request => InitializationReadinessSealApi(request.JsonBody));
@@ -150,8 +150,8 @@ namespace ReignBetaServer
             routes.Post("/identity/synchronize", request => CharactersService.IdentitySynchronizeWithPortraitRosterUpgradeApi(request.JsonBody));
             routes.Post("/context/build", request => DialogueService.BuildContext(request.JsonBody));
             routes.Post("/context/select", request => DialogueService.SelectContextPulls(request.JsonBody));
-            routes.Post("/actions/route", request => RouteActionsApi(request.JsonBody));
-            routes.Post("/actions/plan", request => PlanActionsApi(request.JsonBody));
+            routes.Post("/actions/route", request => ActionPipelineService.RouteActionsApi(request.JsonBody));
+            routes.Post("/actions/plan", request => ActionPipelineService.PlanActionsApi(request.JsonBody));
             routes.Post("/characters/upsert", request => CharactersService.UpsertCharacter(request.JsonBody));
             routes.Post("/characters/upsert-batch", request => CharactersService.UpsertCharacterBatch(request.JsonBody));
             routes.Post("/portrait-roster/upsert-batch", request => CharactersService.UpsertPortraitRoster(request.JsonBody));
@@ -177,14 +177,14 @@ namespace ReignBetaServer
             routes.Post("/family-chambers/scene/generate", request => RunInteractiveRequest(() => CourtService.FamilyChambersSceneGenerate(request.JsonBody)));
             routes.Post("/family-chambers/childhood/mature", request => CourtService.FamilyChambersMatureChildhood(request.JsonBody));
             routes.Post("/portraits/diagnose", request => PortraitsService.PortraitDiagnose(request.JsonBody));
-            routes.Get("/actions/catalog", request => ActionCatalog());
-            routes.Get("/actions/failures", request => ActionFailures(request.JsonBody, request.Query));
-            routes.Get("/actions/next", request => NextActions(request.JsonBody, request.Query));
-            routes.Post("/actions/next", request => NextActions(request.JsonBody, request.Query));
-            routes.Post("/actions/propose", request => ProposeAction(request.JsonBody));
-            routes.Post("/actions/decide", request => DecideActions(request.JsonBody));
-            routes.Post("/actions/report", request => ReportAction(request.JsonBody));
-            routes.Post("/llm/chat", request => ChatWithLlm(request.JsonBody));
+            routes.Get("/actions/catalog", request => ActionPipelineService.ActionCatalog());
+            routes.Get("/actions/failures", request => ActionPipelineService.ActionFailures(request.JsonBody, request.Query));
+            routes.Get("/actions/next", request => ActionPipelineService.NextActions(request.JsonBody, request.Query));
+            routes.Post("/actions/next", request => ActionPipelineService.NextActions(request.JsonBody, request.Query));
+            routes.Post("/actions/propose", request => ActionPipelineService.ProposeAction(request.JsonBody));
+            routes.Post("/actions/decide", request => ActionPipelineService.DecideActions(request.JsonBody));
+            routes.Post("/actions/report", request => ActionPipelineService.ReportAction(request.JsonBody));
+            routes.Post("/llm/chat", request => LlmProviderService.ChatWithLlm(request.JsonBody));
         }
     }
 }

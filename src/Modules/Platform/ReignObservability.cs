@@ -9,7 +9,7 @@ using OpenTelemetry.Trace;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class OperationsService
     {
         private const string ReignTelemetrySourceName = "Bannerlord.Reign";
         private static readonly ActivitySource ReignActivitySource = new ActivitySource(ReignTelemetrySourceName, "1.0.0");
@@ -67,7 +67,7 @@ namespace ReignBetaServer
                 _activity?.Dispose();
                 try
                 {
-                    AppendJsonLineToPath(Path.Combine(LogsDir, "otel-traces.ndjson"), _fields);
+                    CampaignFileService.AppendJsonLineToPath(Path.Combine(Program.LogsDir, "otel-traces.ndjson"), _fields);
                 }
                 catch
                 {
@@ -75,7 +75,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static void InitializeReignTelemetry(Dictionary<string, object> settings)
+        internal static void InitializeReignTelemetry(Dictionary<string, object> settings)
         {
             lock (ReignTelemetryLock)
             {
@@ -93,14 +93,14 @@ namespace ReignBetaServer
 
         internal static ReignTraceScope BeginReignSpan(string name, Dictionary<string, object> fields = null)
         {
-            if (!ReignTelemetryInitialized) InitializeReignTelemetry(LoadSettings());
+            if (!ReignTelemetryInitialized) InitializeReignTelemetry(SettingsService.LoadSettings());
             return new ReignTraceScope(name, fields);
         }
 
-        private static Dictionary<string, object> ReignTelemetryStatus()
+        internal static Dictionary<string, object> ReignTelemetryStatus()
         {
-            Dictionary<string, object> settings = LoadSettings();
-            string path = Path.Combine(LogsDir, "otel-traces.ndjson");
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
+            string path = Path.Combine(Program.LogsDir, "otel-traces.ndjson");
             return new Dictionary<string, object>
             {
                 ["ok"] = true,

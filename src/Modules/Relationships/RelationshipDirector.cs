@@ -866,9 +866,9 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> LoadDirectorHeroProfile(string campaignId,string heroId,Dictionary<string, object> snapshot)
         {
             Dictionary<string, object> result = snapshot == null ? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase) : new Dictionary<string, object>(snapshot,StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, object> stored = Program.ReadJsonObject(Program.CharacterFile(campaignId,heroId,"profile.json"));
+            Dictionary<string, object> stored = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId,heroId,"profile.json"));
             foreach(var pair in stored) if(!result.ContainsKey(pair.Key) || string.IsNullOrWhiteSpace(Convert.ToString(result[pair.Key],CultureInfo.InvariantCulture))) result[pair.Key]=pair.Value;
-            Dictionary<string, object> traits = Program.ReadJsonObject(Program.CharacterFile(campaignId,heroId,"traits.json"));
+            Dictionary<string, object> traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId,heroId,"traits.json"));
             Dictionary<string, object> foundation=ReadDictionary(traits,"foundationTraits")??ReadDictionary(result,"foundationTraits");
             if(foundation==null||foundation.Count==0)foundation=ReadDictionary(CharactersService.BuildTraitDocument(result),"foundationTraits")??new Dictionary<string, object>();
             result["foundationTraits"] = foundation;

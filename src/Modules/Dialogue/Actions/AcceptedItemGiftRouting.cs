@@ -13,8 +13,8 @@ namespace ReignBetaServer
             // An item within a priced/compound exchange must stay inside its atomic package.
             if (DialogueService.ContainsAny(existingCommand ?? "", "trade_package", "ransom_package", "diplomatic_package")) return false;
             string intent = ReadString(gate, "intent", "");
-            if (Program.LooksLikeGiveGoldDirective(playerText + " " + intent)
-                && !Program.LooksLikeGiveItemDirective(playerText + " " + intent)) return false;
+            if (ActionPipelineService.LooksLikeGiveGoldDirective(playerText + " " + intent)
+                && !ActionPipelineService.LooksLikeGiveItemDirective(playerText + " " + intent)) return false;
             bool acceptedObject = Regex.IsMatch(intent, @"\b(?:accepts?|receives?|takes?|keeps?)\b[^.!?\r\n]{0,220}\b(?:gift|token|present|prize|item|weapon|equipment|armor|armour|jewelry|jewel|ring|necklace|brooch)\b", RegexOptions.IgnoreCase);
             bool physicalOffer = Regex.IsMatch(playerText ?? "", @"\b(?:here (?:is|are)|would you like|(?:give|giving|offer|offering|hand|handing|take|keep) (?:you|her|him|them|this|that|it|the|my))\b", RegexOptions.IgnoreCase);
             return acceptedObject && physicalOffer;

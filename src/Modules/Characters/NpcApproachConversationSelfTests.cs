@@ -121,7 +121,7 @@ namespace ReignBetaServer
                 && ReadString(request, "requestType", "") == "npc_approach"
                 && !ReadBool(request, "singleProviderAttempt", false) && !ReadBool(request, "reasoningDisabled", false)
                 && ReadString(request, "heroStringId", "") == encounter.HeroId && ReadString(request, "heroName", "") == "Ingunde");
-            var wireSettings = TestDict("llmProvider", Program.NanoGptProvider, "reasoningMode", "always", "reasoningEffort", "medium");
+            var wireSettings = TestDict("llmProvider", LlmProviderService.NanoGptProvider, "reasoningMode", "always", "reasoningEffort", "medium");
             request["model"] = "approach_fixture_model";
             var wire = ReadDictionary(DialogueService.CaptureMemoryReplayProviderRequest(request, wireSettings), "providerWireCapture");
             var wireBody = TryParseJsonObject(ReadString(wire, "requestJson", ""));
@@ -135,10 +135,10 @@ namespace ReignBetaServer
                 && Enum.GetValues(typeof(Reign.Core.Contracts.Government.ReignGovernmentPlank))
                     .Cast<Reign.Core.Contracts.Government.ReignGovernmentPlank>().All(value => wireText.Contains(value + ":")),
                 "An opening carries its actual native speaker into political construction even before a stored profile exists.");
-            var provider = Program.BanterProviderSettings(TestDict("requestType", "npc_approach"), TestDict("reasoningMode", "always"));
+            var provider = SettingsService.BanterProviderSettings(TestDict("requestType", "npc_approach"), TestDict("reasoningMode", "always"));
             Check("approach_preserves_reasoning_preference", ReadString(provider, "reasoningMode", "") == "always"
-                && ReadString(Program.BanterProviderSettings(TestDict("requestType", "party_banter"), TestDict("reasoningMode", "always")), "reasoningMode", "") == "off");
-            var repairProvider = Program.BanterProviderSettings(TestDict("requestType", "npc_approach_continuity_repair"),
+                && ReadString(SettingsService.BanterProviderSettings(TestDict("requestType", "party_banter"), TestDict("reasoningMode", "always")), "reasoningMode", "") == "off");
+            var repairProvider = SettingsService.BanterProviderSettings(TestDict("requestType", "npc_approach_continuity_repair"),
                 TestDict("npcLivesApproachModel", "approach_fixture_model", "reasoningMode", "always"));
             Check("repairs_retain_configured_approach_model", ReadString(repairProvider, "dialogueModel", "") == "approach_fixture_model");
 
@@ -179,7 +179,7 @@ namespace ReignBetaServer
             var motive = TestDict();
             var accepted = BuildNpcApproachDraft(p, TestDict("ok", true), parsed, ReadString(parsed, "reply", ""), motive, identity, prior, encounter.HeroId, "Ingunde", "Michael");
             Check("grounded_draft_passes_shared_validation", ReadBool(accepted, "ok", false));
-            var attemptedAction = Program.CloneDictionary(parsed);
+            var attemptedAction = VerificationService.CloneDictionary(parsed);
             attemptedAction["structuredActionDecision"] = TestDict("kind", "accept", "proposalId", "unreviewed_offer",
                 "revision", 1, "termsHash", new string('a', 64), "reason", "unsupported", "clauses", new object[0]);
             string stateBeforeAttemptedAction = Json.Serialize(state);

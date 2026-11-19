@@ -150,7 +150,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                string directory = Program.CampaignDirectory(campaignId);
+                string directory = CampaignFileService.CampaignDirectory(campaignId);
                 try
                 {
                     ReignPostgreSqlStorage.ClearAllPools();

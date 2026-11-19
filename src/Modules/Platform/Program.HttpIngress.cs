@@ -33,7 +33,7 @@ namespace ReignBetaServer
         private const long IngressMaxSupportBundleBytes = 8L * 1024L * 1024L;
         // The view-insertion acknowledgment carries exactly 11 bounded strings.
         private const long IngressMaxViewInsertionAckBytes = 16L * 1024L;
-        private const long IngressMaxCampaignUploadBytes = PersistenceService.CampaignBackupMaxExpandedBytes;
+        internal const long IngressMaxCampaignUploadBytes = PersistenceService.CampaignBackupMaxExpandedBytes;
         private const int IngressIdleTimeoutMs = 30000;
         private const int IngressHeaderBudgetMs = 30000;
         private const long IngressBodyBudgetBaseMs = 60000;
@@ -42,10 +42,10 @@ namespace ReignBetaServer
         // Shared across all connections: buffered JSON/support bodies reserve their declared length here before the buffer
         // is allocated and hold it until the route exits, so concurrent maximum-size bodies cannot multiply the per-request
         // cap. Campaign backups stream to disk instead and are staged one at a time.
-        private const long IngressMaxActiveJsonBytes = 128L * 1024L * 1024L;
+        internal const long IngressMaxActiveJsonBytes = 128L * 1024L * 1024L;
         private static int ActiveIngressConnections;
-        private static long ActiveIngressJsonBytes;
-        private static int ActiveCampaignUploads;
+        internal static long ActiveIngressJsonBytes;
+        internal static int ActiveCampaignUploads;
 
         // Framing- or trust-relevant fields: a repeated field is ambiguous and the request is refused.
         private static readonly HashSet<string> IngressSingletonHeaders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -62,7 +62,7 @@ namespace ReignBetaServer
             "/health", "/", "/index.html", "/assets/reign-icon.webp", "/assets/ReignLogo.png"
         };
 
-        private sealed class HttpIngressException : Exception
+        internal sealed class HttpIngressException : Exception
         {
             internal readonly int Status;
             internal readonly string RequestPath, Reason;
@@ -172,10 +172,10 @@ namespace ReignBetaServer
         // are browser CSRF/DNS-rebinding checks only; their absence never grants access by itself, and no protocol header
         // is a credential. Public routes never reach this check (ReadRequest decides them from the raw request line).
         // Returns null when allowed, otherwise a short reason for the operational log.
-        private static string IngressAccessRefusal(HttpRequest request, Func<string, bool> localPeer = null, int? directPort = null)
+        internal static string IngressAccessRefusal(HttpRequest request, Func<string, bool> localPeer = null, int? directPort = null)
         {
             if (request == null) return "request";
-            localPeer = localPeer ?? GlobalKeyLocalPeer;
+            localPeer = localPeer ?? SettingsService.GlobalKeyLocalPeer;
             if (!TryParseIngressAddress(request.RemoteAddress, out IPAddress socketPeer) || !IPAddress.IsLoopback(socketPeer)) return "socket_peer";
             int port = directPort ?? (ActiveServerPort > 0 ? ActiveServerPort : 5101);
             if (!IsLoopbackAuthority(request.Host, port)) return "host";
@@ -190,7 +190,7 @@ namespace ReignBetaServer
                 if (request.ProxyPeer == null || request.ProxyHost == null) return "proxy_incomplete";
                 if (!TryParseIngressAddress(request.ProxyPeer, out IPAddress clientPeer) || !localPeer(clientPeer.ToString())) return "proxy_peer";
                 authority = request.ProxyHost.ToLowerInvariant();
-                if (!GlobalKeyApacheHosts.Contains(authority)) return "proxy_host";
+                if (!SettingsService.GlobalKeyApacheHosts.Contains(authority)) return "proxy_host";
             }
             if (request.Origin != null) return request.Origin == "http://" + authority ? null : "origin";
             if (request.FetchSite != null && request.FetchSite != "same-origin" && !(request.FetchSite == "none" && request.Method == "GET"))
@@ -199,7 +199,7 @@ namespace ReignBetaServer
         }
 
         // Exact under concurrency: the compare-exchange commits a reservation only against the total it checked.
-        private static bool TryReserveIngressBytes(ref long active, long amount, long budget)
+        internal static bool TryReserveIngressBytes(ref long active, long amount, long budget)
         {
             while (true)
             {
@@ -210,7 +210,7 @@ namespace ReignBetaServer
         }
 
         // Idempotent; HandleClient's finally calls it at route exit, ReadRequest on any failure before it returns.
-        private static void ReleaseIngressReservations(HttpRequest request)
+        internal static void ReleaseIngressReservations(HttpRequest request)
         {
             if (request == null) return;
             long bytes = Interlocked.Exchange(ref request.ReservedJsonBytes, 0);
@@ -218,7 +218,7 @@ namespace ReignBetaServer
             if (Interlocked.Exchange(ref request.HoldsUploadSlot, 0) == 1) Interlocked.Exchange(ref ActiveCampaignUploads, 0);
         }
 
-        private static HttpRequest ReadRequest(Stream stream, string remoteAddress = "", Func<string, bool> localPeer = null, int? directPort = null)
+        internal static HttpRequest ReadRequest(Stream stream, string remoteAddress = "", Func<string, bool> localPeer = null, int? directPort = null)
         {
             var reader = new IngressReader(stream);
             reader.Budget(IngressHeaderBudgetMs);

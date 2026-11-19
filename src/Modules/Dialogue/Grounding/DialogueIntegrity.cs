@@ -35,7 +35,7 @@ namespace ReignBetaServer
             List<string> facts = new List<string>();
             foreach (Dictionary<string, object> profile in MergedInteractionParticipantProfiles(payload))
             {
-                string id = Program.CharacterIdFrom(profile);
+                string id = CampaignFileService.CharacterIdFrom(profile);
                 string spouseId = ReadString(profile, "spouseId", "");
                 string sovereignId = ReadString(profile, "sovereignHeroStringId", "");
                 if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(spouseId)
@@ -101,7 +101,7 @@ namespace ReignBetaServer
                 localCorrection["dialogueClaimValidation"] = claimReceipt;
                 llm["dialogueClaimValidation"] = claimReceipt;
                 llm["content"] = Json.Serialize(localCorrection);
-                if (persist) Program.WriteAudit(campaignId, correlationId, "server", auditMode, "llm.dialogue_claim_validation",
+                if (persist) OperationsService.WriteAudit(campaignId, correlationId, "server", auditMode, "llm.dialogue_claim_validation",
                     heroId, "", eventId, "completed", 0, "Recalled speaker corrected from the exclusive exact original clause.", claimReceipt);
                 return llm;
             }
@@ -142,13 +142,13 @@ namespace ReignBetaServer
             };
             string requestedModel = ReadString(request, "model", "");
             if (!string.IsNullOrWhiteSpace(requestedModel)) repairRequest["model"] = requestedModel;
-            Dictionary<string, object> repaired = (responder ?? Program.ChatWithLlm)(repairRequest);
+            Dictionary<string, object> repaired = (responder ?? LlmProviderService.ChatWithLlm)(repairRequest);
             Dictionary<string, object> repairedParsed = MergeDialogueIntegrityProse(parsed,
                 TryParseJsonObject(ReadString(repaired, "content", "")), violations);
             List<Dictionary<string, object>> remaining = repairedParsed == null
                 ? violations : FindDialogueIntegrityViolations(repairedParsed, payload, priorLines, heroId);
             bool usable = ReadBool(repaired, "ok", false) && repairedParsed != null
-                && Program.StructuredResponseIsComplete(Json.Serialize(repairedParsed), auditMode);
+                && ConversationResponseService.StructuredResponseIsComplete(Json.Serialize(repairedParsed), auditMode);
             bool cleared = usable && remaining.Count == 0;
             bool markedFailure = false;
             if (cleared)
@@ -187,7 +187,7 @@ namespace ReignBetaServer
                         recovered["dialogueClaimValidation"] = claimReceipt;
                         llm["content"] = Json.Serialize(recovered);
                         llm["dialogueClaimValidation"] = claimReceipt;
-                        if (persist) Program.WriteAudit(campaignId, correlationId, "server", auditMode, "llm.dialogue_claim_validation",
+                        if (persist) OperationsService.WriteAudit(campaignId, correlationId, "server", auditMode, "llm.dialogue_claim_validation",
                             heroId, "", eventId, "partial", 0, "Useful dialogue retained; source-proven false attribution withheld after writer repair failure.", claimReceipt);
                         return llm;
                     }
@@ -203,7 +203,7 @@ namespace ReignBetaServer
                     repaired["error"] = "The integrity repair returned no usable visible reply.";
                 }
             }
-            if (persist) Program.WriteAudit(campaignId, correlationId, "server", auditMode, "llm.dialogue_integrity_repair",
+            if (persist) OperationsService.WriteAudit(campaignId, correlationId, "server", auditMode, "llm.dialogue_integrity_repair",
                 heroId, "", eventId, cleared ? "completed" : "failed",
                 ReadLong(repaired, "durationMs", 0), cleared ? "Dialogue agency and role identity were repaired from pinned source clauses."
                     : markedFailure ? "The integrity repair remained rejected; marked dialogue was returned without structured effects."
@@ -218,7 +218,7 @@ namespace ReignBetaServer
         {
             string hash = MemorySelectionTextHash(ReadFirstString(corrected, "reply", "body", "response", "text")).ToLowerInvariant();
             bool unchanged = ReadString(original, "draftReplyHash", "") == hash;
-            var receipt = unchanged ? Program.CloneDictionary(original) : CompareDialogueRecallClaims(corrected, payload, prior, speaker);
+            var receipt = unchanged ? VerificationService.CloneDictionary(original) : CompareDialogueRecallClaims(corrected, payload, prior, speaker);
             receipt["proposedDraftReplyHash"] = ReadString(original, "draftReplyHash", "");
             receipt["coverageStage"] = "accepted_response_after_prose_correction";
             receipt["acceptedSemanticCoverage"] = unchanged ? "unchanged_reply_comparison_reused" : "rechecked_comparison_hints_only";
@@ -244,7 +244,7 @@ namespace ReignBetaServer
             CollectConversationStringValues(parsed, texts);
             List<Dictionary<string, object>> result = new List<Dictionary<string, object>>();
             Dictionary<string, object> speaker = MergedInteractionParticipantProfiles(payload)
-                .FirstOrDefault(x => Program.CharacterIdFrom(x).Equals(speakerId ?? "", StringComparison.OrdinalIgnoreCase));
+                .FirstOrDefault(x => CampaignFileService.CharacterIdFrom(x).Equals(speakerId ?? "", StringComparison.OrdinalIgnoreCase));
             if (speaker != null && !string.IsNullOrWhiteSpace(ReadString(speaker, "spouseId", ""))
                 && ReadString(speaker, "spouseId", "").Equals(ReadString(speaker, "sovereignHeroStringId", ""), StringComparison.OrdinalIgnoreCase))
             {

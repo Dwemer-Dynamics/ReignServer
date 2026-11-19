@@ -20,7 +20,7 @@ namespace ReignBetaServer
                 ?? new Dictionary<string, object>();
             List<Dictionary<string, object>> resolutions = ReadDictionaryList(payload, "resolutions")
                 .Take(3).ToList();
-            string speakerId = Program.CharacterIdFrom(speaker);
+            string speakerId = CampaignFileService.CharacterIdFrom(speaker);
             string partyId = ReadString(party, "partyId", "");
             if (string.IsNullOrWhiteSpace(speakerId) || string.IsNullOrWhiteSpace(partyId))
                 return new Dictionary<string, object>
@@ -75,7 +75,7 @@ namespace ReignBetaServer
                 ["requestType"] = "government_party_speaker_statement",
                 ["politicalAuthors"] = new[] { speaker },
                 ["campaignId"] = ReadString(payload, "campaignId", "default"),
-                ["correlationId"] = Program.EnsureCorrelationId(payload),
+                ["correlationId"] = OperationsService.EnsureCorrelationId(payload),
                 ["messages"] = DialogueService.BuildSimplePromptEnvelope(
                     "government_party_speaker_statement",
                     partyId,
@@ -83,7 +83,7 @@ namespace ReignBetaServer
                     prompt.ToString()).Messages,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
             };
-            Dictionary<string, object> llm = Program.ChatWithLlm(request);
+            Dictionary<string, object> llm = LlmProviderService.ChatWithLlm(request);
             if (!ReadBool(llm, "ok", false))
                 return new Dictionary<string, object>
                 {
@@ -95,7 +95,7 @@ namespace ReignBetaServer
                 };
             Dictionary<string, object> parsed = TryParseJsonObject(ReadString(llm, "content", ""))
                 ?? new Dictionary<string, object>();
-            string reply = DialogueService.LimitText(Program.SanitizeVisibleReply(FirstNonEmpty(
+            string reply = DialogueService.LimitText(ConversationResponseService.SanitizeVisibleReply(FirstNonEmpty(
                 ReadString(parsed, "reply", ""), ReadString(llm, "content", ""))), 1600);
             return new Dictionary<string, object>
             {

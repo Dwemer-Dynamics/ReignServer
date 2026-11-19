@@ -525,7 +525,7 @@ namespace ReignBetaServer
                     ["target"] = CompactPoliticalPressureRulerContext(target, origin, targetLords)
                 })
             };
-            Dictionary<string, object> llm = Program.ChatWithLlm(request);
+            Dictionary<string, object> llm = LlmProviderService.ChatWithLlm(request);
             Dictionary<string, object> parsed = ReadBool(llm, "ok", false)
                 ? TryParseJsonObject(ReadString(llm, "content", "")) : null;
             if (ValidatePoliticalPressureTraitRoutes(parsed))
@@ -746,7 +746,7 @@ namespace ReignBetaServer
                     ["originDecision"] = originStance, ["targetDecision"] = targetStance
                 })
             };
-            Dictionary<string, object> llm = Program.ChatWithLlm(request);
+            Dictionary<string, object> llm = LlmProviderService.ChatWithLlm(request);
             Dictionary<string, object> parsed = ReadBool(llm, "ok", false)
                 ? TryParseJsonObject(ReadString(llm, "content", "")) : null;
             string narrative = DialogueService.LimitText(ReadString(parsed, "narrative", ""), 900);
@@ -1266,7 +1266,7 @@ namespace ReignBetaServer
             {
                 ReignPostgreSqlStorage.ClearAllPools();
                 try { ReignPostgreSqlStorage.DropCampaign(campaignId); } catch { }
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaignId));
             }
             return rows;
         }

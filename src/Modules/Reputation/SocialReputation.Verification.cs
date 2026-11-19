@@ -150,7 +150,7 @@ namespace ReignBetaServer
                 "The revisioned catalog contains every combat, ruler-governance, and court-personality producer.", null);
 
             string campaignId = "__social_reputation_test_" + Guid.NewGuid().ToString("N");
-            string campaignPath = Program.CampaignDirectory(campaignId);
+            string campaignPath = CampaignFileService.CampaignDirectory(campaignId);
             try
             {
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))

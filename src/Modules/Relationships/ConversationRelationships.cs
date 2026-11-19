@@ -276,7 +276,7 @@ namespace ReignBetaServer
         {
             if (parsed == null) return false;
             Dictionary<string, object> gate = ReadDictionary(parsed, "actionGate") ?? ReadDictionary(parsed, "action_gate") ?? new Dictionary<string, object>();
-            string combined = Program.NormalizeLookup(string.Join(" ", new[]
+            string combined = ActionPipelineService.NormalizeLookup(string.Join(" ", new[]
             {
                 ReadFirstString(parsed, "reply", "response", "text", "content"),
                 ReadString(parsed, "intent", ""),
@@ -314,7 +314,7 @@ namespace ReignBetaServer
             Dictionary<string, object> payload,
             string exchangeId)
         {
-            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
             string sessionId = ReadFirstString(payload, "conversationSessionId", "sessionId");
             if (string.IsNullOrWhiteSpace(sessionId))
             {
@@ -366,8 +366,8 @@ namespace ReignBetaServer
                 .Select(x => new Dictionary<string, object>(x))
                 .ToList();
             Dictionary<string, string> participantNames = ReadDictionaryList(payload, "participantProfiles")
-                .Where(row => !string.IsNullOrWhiteSpace(Program.CharacterIdFrom(row)))
-                .GroupBy(Program.CharacterIdFrom, StringComparer.OrdinalIgnoreCase)
+                .Where(row => !string.IsNullOrWhiteSpace(CampaignFileService.CharacterIdFrom(row)))
+                .GroupBy(CampaignFileService.CharacterIdFrom, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => ReadString(group.First(), "name", ""), StringComparer.OrdinalIgnoreCase);
             HashSet<string> eligibleParticipants = new HashSet<string>(ReadStringList(payload, "participants"), StringComparer.OrdinalIgnoreCase);
             eligibleParticipants.UnionWith(participantNames.Keys);
@@ -478,7 +478,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> ConversationRelationshipEvaluateApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
             lock (CampaignRelationshipWriteLock(campaignId))
                 return ConversationRelationshipEvaluateApiLocked(payload);
         }
@@ -486,7 +486,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> ConversationRelationshipEvaluateApiLocked(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
             string exchangeId = FirstNonEmpty(ReadFirstString(payload, "exchangeId", "turnId", "sceneTurnId"), "conversation_" + Guid.NewGuid().ToString("N"));
             string timelineId = ReadString(payload, "timelineId", "");
             string mode = ReadString(payload, "mode", "conversation");
@@ -762,7 +762,7 @@ namespace ReignBetaServer
                 ["appliedCount"] = receipts.Count(x => !ReadBool(x, "idempotent", false) && ReadInt(x, "finalDelta", 0) != 0),
                 ["idempotentCount"] = receipts.Count(x => ReadBool(x, "idempotent", false))
             };
-            Program.WriteAudit(campaignId, ReadString(payload, "correlationId", ""), "server", mode,
+            OperationsService.WriteAudit(campaignId, ReadString(payload, "correlationId", ""), "server", mode,
                 "relationship.conversation", "", "", exchangeId, "completed", 0,
                 "Conversation relationship consequences adjudicated.", response);
             DialogueService.PersonalGossipRelationshipApplied(campaignId, payload);
@@ -822,7 +822,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> ConversationRelationshipNativeReceiptApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
             List<string> receiptIds = ReadStringList(payload, "receiptIds").Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (receiptIds.Count == 0 || receiptIds.Count > 64) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Between one and 64 relationship receipt ids are required." };
             Dictionary<string, object> nativeReceipt = ReadDictionary(payload, "nativeReceipt")

@@ -16,7 +16,7 @@ namespace ReignBetaServer
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsureCourtLifeSceneStore(connection);
-                foreach (string actor in Program.ObjectsFromValue(payload.TryGetValue("witnessHeroIds", out object witnesses) ? witnesses : null)
+                foreach (string actor in ActionPipelineService.ObjectsFromValue(payload.TryGetValue("witnessHeroIds", out object witnesses) ? witnesses : null)
                     .OfType<string>().Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().Take(4))
                 {
                     string id = "court_resolution:" + CourtHash(timeline + "|" + matter + "|" + actor);

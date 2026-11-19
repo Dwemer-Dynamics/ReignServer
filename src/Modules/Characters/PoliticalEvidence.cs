@@ -67,12 +67,12 @@ namespace ReignBetaServer
                     || !evidence.Applied || string.IsNullOrEmpty(evidence.TimelineId)) continue;
                 var changes = GovernmentPoliticalBeliefs.WorldEventChanges(evidence, hero);
                 if (changes.Count == 0) continue;
-                string path = Program.CharacterFile(campaign, hero, "politics", "event-" + DialogueService.SafeMemoryKey(profile.TimelineId)
+                string path = CampaignFileService.CharacterFile(campaign, hero, "politics", "event-" + DialogueService.SafeMemoryKey(profile.TimelineId)
                     + "-" + DialogueService.PromptHash(evidence.Id) + ".json");
-                var prior = Program.ReadJsonObject(path);
+                var prior = CampaignFileService.ReadJsonObject(path);
                 if (prior.Count > 0 && CanonicalJson(prior) != CanonicalJson(record))
                     throw new InvalidOperationException("A completed political event cannot change its facts.");
-                if (prior.Count == 0) Program.WriteJsonObject(path, record);
+                if (prior.Count == 0) CampaignFileService.WriteJsonObject(path, record);
                 GovernmentPoliticalBeliefs.Evolve(revised, evidence.Id, evidence.Kind + ":" + evidence.TargetId,
                     evidence.Interval, true, false, changes);
             }

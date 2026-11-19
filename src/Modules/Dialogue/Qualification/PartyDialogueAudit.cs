@@ -196,7 +196,7 @@ namespace ReignBetaServer
                     Dictionary<string, object> reply = replies[replyIndex];
                     string heroId = ReadFirstString(reply, "heroId", "heroStringId");
                     string correlationId = ReadString(reply, "correlationId", "");
-                    List<Dictionary<string, object>> auditRows = Program.ReadJsonLinesFromPath(Program.CampaignFile(campaignId, "audit", "audit.jsonl"))
+                    List<Dictionary<string, object>> auditRows = Program.ReadJsonLinesFromPath(CampaignFileService.CampaignFile(campaignId, "audit", "audit.jsonl"))
                         .Where(row => string.Equals(ReadString(row, "correlationId", ""), correlationId, StringComparison.OrdinalIgnoreCase)).ToList();
                     AddNpcDialogueAssertion(assertions, "party_audit_context_" + SafeMemoryKey(heroId), auditRows.Any(row => ReadString(row, "phase", "") == "context.loaded"), "Speaker context was loaded.", correlationId);
                     AddNpcDialogueAssertion(assertions, "party_audit_prompt_" + SafeMemoryKey(heroId), auditRows.Any(row => ReadString(row, "phase", "") == "prompt.built"), "Speaker prompt was audited.", correlationId);
@@ -305,7 +305,7 @@ namespace ReignBetaServer
                 AddNpcDialogueAssertion(assertions, "party_scene_participants", heroIds.Concat(new[] { playerId }).All(id => participants.Contains(id, StringComparer.OrdinalIgnoreCase)), "Party scene summary retains the full participant set.", Json.Serialize(participants));
                 AddNpcDialogueAssertion(assertions, "party_scene_sources", links >= turnCount + 1, "Party scene summary links every raw turn and its session.", links.ToString());
                 AddNpcDialogueAssertion(assertions, "party_scene_fts", fts == 1, "Party scene summary has one FTS row.", fts.ToString());
-                Dictionary<string, object> settings = Program.LoadSettings();
+                Dictionary<string, object> settings = SettingsService.LoadSettings();
                 if (ReadBool(settings, "enableSemanticMemory", true))
                     AddNpcDialogueAssertion(assertions, "party_scene_embedding", embeddingJobs >= 1 || ReadString(summary, "embedding_status", "") == "indexed", "Party scene summary is queued or indexed for semantic memory.", embeddingJobs.ToString());
 
@@ -427,31 +427,31 @@ namespace ReignBetaServer
 
         private static string PartyDialogueAuditDirectory(string campaignId)
         {
-            return Program.CampaignFile(campaignId, "tests", "party-dialogue-audits");
+            return CampaignFileService.CampaignFile(campaignId, "tests", "party-dialogue-audits");
         }
 
         private static string PartyDialogueAuditPath(string campaignId, string runId)
         {
-            return Path.Combine(PartyDialogueAuditDirectory(campaignId), Program.SafePathSegment(runId, "latest") + ".json");
+            return Path.Combine(PartyDialogueAuditDirectory(campaignId), CampaignFileService.SafePathSegment(runId, "latest") + ".json");
         }
 
         private static string PartyDialogueAuditRequestPath(string campaignId)
         {
-            return Program.CampaignFile(campaignId, "tests", "party-dialogue-audits", "requests", "current.json");
+            return CampaignFileService.CampaignFile(campaignId, "tests", "party-dialogue-audits", "requests", "current.json");
         }
 
         private static void SavePartyDialogueAudit(Dictionary<string, object> report)
         {
             string path = PartyDialogueAuditPath(ReadString(report, "campaignId", "default"), ReadString(report, "runId", "latest"));
             Directory.CreateDirectory(Path.GetDirectoryName(path));
-            Program.WriteJsonObject(path, report);
+            CampaignFileService.WriteJsonObject(path, report);
         }
 
         private static Dictionary<string, object> LoadPartyDialogueAudit(string campaignId, string runId)
         {
             if (string.IsNullOrWhiteSpace(runId)) return FindLatestPartyDialogueAudit(campaignId);
             string path = PartyDialogueAuditPath(campaignId, runId);
-            return File.Exists(path) ? Program.ReadJsonObject(path) : null;
+            return File.Exists(path) ? CampaignFileService.ReadJsonObject(path) : null;
         }
 
         private static Dictionary<string, object> FindActivePartyDialogueAudit(string campaignId)
@@ -468,14 +468,14 @@ namespace ReignBetaServer
         {
             string directory = PartyDialogueAuditDirectory(campaignId);
             if (!Directory.Exists(directory)) return Enumerable.Empty<Dictionary<string, object>>();
-            return Directory.GetFiles(directory, "*.json", SearchOption.TopDirectoryOnly).Select(Program.ReadJsonObject).Where(report => report != null && report.Count > 0).ToList();
+            return Directory.GetFiles(directory, "*.json", SearchOption.TopDirectoryOnly).Select(CampaignFileService.ReadJsonObject).Where(report => report != null && report.Count > 0).ToList();
         }
 
         private static Dictionary<string, object> LoadPartyDialogueAuditRequest(string campaignId)
         {
             string path = PartyDialogueAuditRequestPath(campaignId);
             if (!File.Exists(path)) return null;
-            Dictionary<string, object> request = Program.ReadJsonObject(path);
+            Dictionary<string, object> request = CampaignFileService.ReadJsonObject(path);
             return request.Count == 0 ? null : request;
         }
 
@@ -483,7 +483,7 @@ namespace ReignBetaServer
         {
             string path = PartyDialogueAuditRequestPath(ReadString(request, "campaignId", "default"));
             Directory.CreateDirectory(Path.GetDirectoryName(path));
-            Program.WriteJsonObject(path, request);
+            CampaignFileService.WriteJsonObject(path, request);
         }
 
         private static Dictionary<string, object> PartyDialogueAuditRequestSummary(Dictionary<string, object> request)
@@ -617,7 +617,7 @@ namespace ReignBetaServer
                 try
                 {
                     ReignPostgreSqlStorage.ClearAllPools();
-                    string path = Program.CampaignDirectory(campaignId);
+                    string path = CampaignFileService.CampaignDirectory(campaignId);
                     if (Directory.Exists(path)) Directory.Delete(path, true);
                 }
                 catch { }

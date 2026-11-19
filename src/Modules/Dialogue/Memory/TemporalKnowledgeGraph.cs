@@ -24,7 +24,7 @@ namespace ReignBetaServer
             item = item ?? new Dictionary<string, object>();
             string claim = ReadFirstString(item, "claim", "text", "belief", "summary", "description", "interpretation");
             string subject = ReadFirstString(item, "subjectId", "subject_id", "subject", "aboutHeroId", "heroStringId");
-            string predicate = Program.NormalizeLookup(ReadFirstString(item, "predicate", "relation", "property", "factType", "type"));
+            string predicate = ActionPipelineService.NormalizeLookup(ReadFirstString(item, "predicate", "relation", "property", "factType", "type"));
             string objectId = ReadFirstString(item, "objectId", "object_id", "object", "targetId", "target_id");
             string owner = ReadFirstString(item, "believer", "believerId", "believer_id", "ownerId", "owner_id", "heroStringId");
             if (IsPrivateMentalLayer(kind) && IsUnsupportedRecallAbsenceState(claim)
@@ -53,7 +53,7 @@ namespace ReignBetaServer
             string evidenceQuote = ReadString(item, "evidenceQuote", "");
             if (evidenceQuote.Length > 0 && (acceptedText.Length == 0 || !acceptedText.Contains(evidenceQuote, StringComparison.Ordinal)))
                 throw new InvalidOperationException("Memory assertion quote is not present in its accepted source.");
-            if (previous != null && string.Equals(Program.NormalizeLookup(ReadString(previous, "claim", "")), Program.NormalizeLookup(claim), StringComparison.Ordinal)
+            if (previous != null && string.Equals(ActionPipelineService.NormalizeLookup(ReadString(previous, "claim", "")), ActionPipelineService.NormalizeLookup(claim), StringComparison.Ordinal)
                 && Math.Abs(ReadDouble(previous, "confidence", 0d) - confidence) < 0.02d)
             {
                 // Repeating a recalled claim does not move its original learning

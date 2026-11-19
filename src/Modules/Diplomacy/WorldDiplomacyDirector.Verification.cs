@@ -65,7 +65,7 @@ namespace ReignBetaServer
                     == "The main LLM API key is missing or rejected. Open the Reign Control Center, save the key under Server Diagnostics, then run Test LLM Key.",
                 "provider JSON is replaced with an actionable local diagnostic");
             add("provider_gateway_error_is_retryable",
-                Program.IsTransientLlmFailure("{\"error\":{\"message\":\"Invalid request parameters. Please check your input and try again.\",\"type\":\"invalid_request_error\",\"code\":\"provider_error\"}}"),
+                LlmProviderService.IsTransientLlmFailure("{\"error\":{\"message\":\"Invalid request parameters. Please check your input and try again.\",\"type\":\"invalid_request_error\",\"code\":\"provider_error\"}}"),
                 "The provider's generic gateway rejection is retried before diplomacy is paused.");
             Dictionary<string, object> validationRejection = DirectorValidationRejected("accepted_action_normalization_failed", new List<string> { "missing clan" });
             add("validation_failure_does_not_pause_ai",
@@ -189,7 +189,7 @@ namespace ReignBetaServer
             add("war_fatigue_remains_strategic", Math.Abs(EffectiveWarFatigue(50d) - 50d) < 0.00001d, "personality is applied through the Peace score, not folded into objective fatigue");
             add("retired_actions_excluded", !DirectorSupportedCommands.Contains("sign_temporary_truce") && !DirectorSupportedCommands.Contains("trade_embargo") && DirectorSupportedCommands.Contains("caravan_protection_agreement"), "Only temporary truce and trade embargo remain retired; caravan protection is supported.");
             add("stable_roll", Math.Abs(StableDirectorRoll("campaign", 10, "ruler") - StableDirectorRoll("campaign", 10, "ruler")) < double.Epsilon, "seeded result repeats");
-            add("supported_commands_map_to_actions", DirectorSupportedCommands.All(x => !string.IsNullOrWhiteSpace(Program.MapCommandToActionType(x))), "all " + DirectorSupportedCommands.Count + " supported commands map to action types");
+            add("supported_commands_map_to_actions", DirectorSupportedCommands.All(x => !string.IsNullOrWhiteSpace(ActionPipelineService.MapCommandToActionType(x))), "all " + DirectorSupportedCommands.Count + " supported commands map to action types");
             add("harsh_peace_terms_remain_positive",
                 ClassifyRulerDiplomacyPolarity(new Dictionary<string, object>
                     { ["command"] = "demand_reparations_peace" }) == "positive"
@@ -300,7 +300,7 @@ namespace ReignBetaServer
                         }
                     }
                 };
-            Dictionary<string, object> normalizedRansom = Program.NormalizeActionCommand(
+            Dictionary<string, object> normalizedRansom = ActionPipelineService.NormalizeActionCommand(
                 ransomCandidate, "director_ransom_selftest",
                 out List<string> ransomErrors,
                 BuildDirectorNormalizationPayload(ransomNormalizationWorld,

@@ -94,7 +94,7 @@ namespace ReignBetaServer
             var result = new List<Dictionary<string, object>>();
             if (!WorldSimulationService.TableExists(connection, "world_history_events") || !WorldSimulationService.TableExists(connection, "world_history_entities")
                 || !WorldSimulationService.TableExists(connection, "world_history_knowledge_rules")) return result;
-            var family = Program.CharacterIdFrom(profile) == owner ? ReadStringList(profile, "childrenIds").Concat(new[] {
+            var family = CampaignFileService.CharacterIdFrom(profile) == owner ? ReadStringList(profile, "childrenIds").Concat(new[] {
                 ReadString(profile, "fatherId", ""), ReadString(profile, "motherId", ""), ReadString(profile, "spouseId", "") })
                 .Where(id => id.Length > 0 && id != owner).Distinct().ToList() : new List<string>();
             var rows = CharactersStore.SelectWorldHistoryEvents(connection, TestDict("timeline", access.TimelineId, "day", access.WorldDay, "owner", owner, "kingdom", access.KingdomId, "family", Json.Serialize(family)));
@@ -202,7 +202,7 @@ namespace ReignBetaServer
             catch (Exception ex)
             {
                 payload["characterLifeState"] = TestDict("schema", CharacterLifeStateSchema, "status", "unavailable", "remoteCalls", 0);
-                Program.LogOperational("character.life_read_unavailable", TestDict("ownerId", owner, "errorType", ex.GetType().Name));
+                OperationsService.LogOperational("character.life_read_unavailable", TestDict("ownerId", owner, "errorType", ex.GetType().Name));
                 return "";
             }
         }
@@ -225,7 +225,7 @@ namespace ReignBetaServer
                 }
                 transaction.Commit();
             }
-            catch (Exception ex) { Program.LogOperational("character.life_projection_deferred", TestDict("ownerId", owner, "errorType", ex.GetType().Name)); }
+            catch (Exception ex) { OperationsService.LogOperational("character.life_projection_deferred", TestDict("ownerId", owner, "errorType", ex.GetType().Name)); }
         }
     }
 }

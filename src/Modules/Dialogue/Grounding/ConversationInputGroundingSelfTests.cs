@@ -16,7 +16,7 @@ namespace ReignBetaServer
             Dictionary<string, object> Payload(string text, string turn = "one") => TestDict("campaignId", "", "timelineId", "grounding_branch",
                 "conversationSessionId", "grounding_session", "playerHeroStringId", "player", "heroStringId", "npc", "playerName", "Player",
                 "playerText", text, "worldDay", 20d, "sceneTurnId", turn, "contributionId", turn,
-                "sceneParticipants", people.Select(Program.CloneDictionary).ToList(), "attendees", people.Select(Program.CloneDictionary).ToList(), "participants", new[] { "player", "npc", "bystander" });
+                "sceneParticipants", people.Select(VerificationService.CloneDictionary).ToList(), "attendees", people.Select(VerificationService.CloneDictionary).ToList(), "participants", new[] { "player", "npc", "bystander" });
             Dictionary<string, object> InterpretAll(string text) => TestDict("narration", InputNarrationBlocks(text).Select(block =>
                 TestDict("index", ReadInt(block, "index", -1), "spans", new[] { TestDict("quote", ReadString(block, "text", ""),
                     "kind", "observable", "actorId", "player", "targetIds", new[] { "npc" }, "requiresResponse", true) })).ToList(), "sceneChanges", new object[0]);
@@ -74,13 +74,13 @@ namespace ReignBetaServer
             {
                 var story = Payload(text); CapturePlayerInput(story).Interpretation = TestDict("status", "unresolved");
                 ApplyPlayerInputAudienceToPayload(story, "npc");
-                var clone = Program.CloneDictionary(story); CopyPlayerInputSource(story, clone);
+                var clone = VerificationService.CloneDictionary(story); CopyPlayerInputSource(story, clone);
                 Check("complete_story_survives_projection_" + results.Count,
                     ReadString(story, "playerText", "") == text && ProjectCurrentPlayerPromptText(text, "npc", clone) == text
                     && FindConversationGroundingViolations(TestDict("reply", "She answers naturally."), story, "npc").Count == 0);
             }
             const string whisperStory = "*I climb through the window to her bedchamber, whispering quietly as I enter* Dont yell.";
-            var solo = people.Where(p => Program.CharacterIdFrom(p) != "bystander").ToList();
+            var solo = people.Where(p => CampaignFileService.CharacterIdFrom(p) != "bystander").ToList();
             Check("mixed_whisper_preserves_actions_for_recipient", ProjectPlayerInputForAudience(whisperStory, "npc", solo, out _, out _) == whisperStory);
             const string namedWhisper = "*I take her hand and whisper to Mira* Wait here.";
             const string quietAside = "*I smile and chuckle quietly as we continue to dance and speak quietly just for her.* Im not sure I would enjoy what they are likely thinking.";
@@ -88,7 +88,7 @@ namespace ReignBetaServer
             var asideSource = CapturePlayerInput(aside);
             asideSource.Interpretation = ValidateNarrationInterpretation(quietAside, InterpretAll(quietAside), aside);
             ApplyPlayerInputAudienceToPayload(aside, "npc");
-            var otherListener = Program.CloneDictionary(aside); CopyPlayerInputSource(aside, otherListener);
+            var otherListener = VerificationService.CloneDictionary(aside); CopyPlayerInputSource(aside, otherListener);
             otherListener["activeHeroIds"] = new[] { "bystander" };
             ApplyPlayerInputAudienceToPayload(otherListener, "bystander");
             Check("exclusive_quiet_aside_uses_original_focus_across_listeners",
@@ -196,7 +196,7 @@ namespace ReignBetaServer
                 string venue = ResolveSharedConversationVenue(tavernChat, exactPeople, new());
                 tavernChat["conversationSceneState"] = TestDict("conversationVenue", venue);
                 Check("tavern_" + phase + "_heading_has_only_exact_attendees_and_native_venue",
-                    exactPeople.Select(Program.CharacterIdFrom).SequenceEqual(new[] { expectedNpc, "player" })
+                    exactPeople.Select(CampaignFileService.CharacterIdFrom).SequenceEqual(new[] { expectedNpc, "player" })
                     && exactPeople.All(p => ReadString(p, "nativeLocationDescription", "") == "the tavern house at Lycaron")
                     && RenderGroundedSceneHeading(tavernChat, expectedNpc, TestDict(), cleanBody) == "the tavern house at Lycaron\n\n" + cleanBody
                     && ReadString(tavernChat, "sceneContext", "") == internalScene
@@ -271,11 +271,11 @@ namespace ReignBetaServer
                 && exactFacts.Contains("Prisoners (not party members): 0") && exactFacts.Contains("Only the named members")
                 && exactFacts.Contains("do not prove global privacy"));
             Check("nonmember_cannot_read_tactical_counts", !BuildCurrentPartyFacts(exactParty, "visitor", "player").Contains("Members: 3"));
-            var missingWounded = Program.CloneDictionary(exactParty); missingWounded.Remove("woundedMemberCount");
+            var missingWounded = VerificationService.CloneDictionary(exactParty); missingWounded.Remove("woundedMemberCount");
             Check("missing_wounded_count_is_unknown_not_zero", BuildCurrentPartyFacts(missingWounded, "npc", "player").Contains("totals: unknown"));
             foreach (string schema in new[] { "reign-party-context-v1", "reign-party-context-v2" })
             {
-                var incompleteParty = Program.CloneDictionary(exactParty); incompleteParty["schema"] = schema;
+                var incompleteParty = VerificationService.CloneDictionary(exactParty); incompleteParty["schema"] = schema;
                 if (schema.EndsWith("v2")) incompleteParty["memberCount"] = 4;
                 string unknown = BuildCurrentPartyFacts(incompleteParty, "npc", "player");
                 Check("missing_or_inconsistent_totals_never_infer_zero_" + schema, unknown.Contains("totals: unknown") && !unknown.Contains("Only the named members"));
@@ -613,7 +613,7 @@ namespace ReignBetaServer
                     var capture = TestDict("turnId", "past_player", "campaignId", campaign, "timelineId", "parent", "sessionId", "past",
                         "playerId", "player", "originalText", originalText, "sourceHash", ConversationExactTextHash(originalText),
                         "traceId", "fixture-original", "captureFileSha256", new string('b', 64));
-                    var secondCapture = Program.CloneDictionary(capture); secondCapture["turnId"] = "past_player_next";
+                    var secondCapture = VerificationService.CloneDictionary(capture); secondCapture["turnId"] = "past_player_next";
                     secondCapture["originalText"] = secondOriginalText; secondCapture["sourceHash"] = ConversationExactTextHash(secondOriginalText);
                     var request = TestDict("campaignId", campaign, "timelineId", "child", "reviewedCaptures", new[] { capture, secondCapture });
                     var audit = BuildConversationOriginalAudit(connection, request);

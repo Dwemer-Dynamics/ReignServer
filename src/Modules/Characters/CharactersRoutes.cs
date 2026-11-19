@@ -12,11 +12,11 @@ namespace ReignBetaServer
         {
             routes.Get("/character-editor/portrait", (request, route) =>
             {
-                string campaignId = request.Query.ContainsKey("campaignId") ? request.Query["campaignId"] : Program.LatestCampaignId();
+                string campaignId = request.Query.ContainsKey("campaignId") ? request.Query["campaignId"] : SettingsService.LatestCampaignId();
                 string heroId = request.Query.ContainsKey("heroStringId") ? request.Query["heroStringId"] : "";
-                string variant = request.Query.ContainsKey("variant") ? Program.SafePathSegment(request.Query["variant"], "active") : "active";
+                string variant = request.Query.ContainsKey("variant") ? CampaignFileService.SafePathSegment(request.Query["variant"], "active") : "active";
                 Program.WriteFile(route.Stream, CharactersService.ResolveCharacterEditorPortraitPath(campaignId, heroId, variant), "image/png");
-                Program.LogRequest(request, 200);
+                OperationsService.LogRequest(request, 200);
                 return Program.RouteResponseWritten;
             });
 #if !REIGN_EXCLUDE_COURT

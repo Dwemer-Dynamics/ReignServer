@@ -25,7 +25,7 @@ namespace ReignBetaServer
             lock (CampaignRetirementLedgerLock)
             {
                 Dictionary<string, object> ledger =
-                    Program.ReadJsonObject(CampaignRetirementLedgerPath());
+                    CampaignFileService.ReadJsonObject(CampaignRetirementLedgerPath());
                 ledger["version"] = CampaignRetirementVersion;
                 if (!ledger.ContainsKey("pending"))
                     ledger["pending"] = new List<Dictionary<string, object>>();
@@ -44,7 +44,7 @@ namespace ReignBetaServer
                     "o", CultureInfo.InvariantCulture);
                 if (!ledger.ContainsKey("pending"))
                     ledger["pending"] = new List<Dictionary<string, object>>();
-                Program.WriteJsonObject(CampaignRetirementLedgerPath(), ledger);
+                CampaignFileService.WriteJsonObject(CampaignRetirementLedgerPath(), ledger);
             }
         }
 
@@ -76,7 +76,7 @@ namespace ReignBetaServer
                 entry["reason"] = "confirmed_final_native_save_deleted";
                 ledger["pending"] = pending;
                 WriteCampaignRetirementLedger(ledger);
-                Program.LogOperational("campaign.retirement_pending", entry);
+                OperationsService.LogOperational("campaign.retirement_pending", entry);
                 return entry;
             }
         }
@@ -97,7 +97,7 @@ namespace ReignBetaServer
                 if (removed == 0) return false;
                 ledger["pending"] = pending;
                 WriteCampaignRetirementLedger(ledger);
-                Program.LogOperational("campaign.retirement_cancelled", new Dictionary<string, object>
+                OperationsService.LogOperational("campaign.retirement_cancelled", new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["reason"] = reason ?? ""
@@ -148,7 +148,7 @@ namespace ReignBetaServer
                         ["campaignDeletionPending"] = false
                     };
                 }
-                Dictionary<string, object> metadata = Program.ReadJsonObject(
+                Dictionary<string, object> metadata = CampaignFileService.ReadJsonObject(
                     Path.Combine(StrictCampaignDirectory(campaignId), "campaign.json"));
                 return DeleteCampaignOwnedDataCore(
                     campaignId,
@@ -210,7 +210,7 @@ namespace ReignBetaServer
                                 campaignId, "confirmed_save_created_before_retirement");
                             continue;
                         }
-                        Dictionary<string, object> metadata = Program.ReadJsonObject(
+                        Dictionary<string, object> metadata = CampaignFileService.ReadJsonObject(
                             Path.Combine(StrictCampaignDirectory(campaignId), "campaign.json"));
                         DeleteCampaignOwnedDataCore(
                             campaignId,
@@ -221,7 +221,7 @@ namespace ReignBetaServer
                     }
                     catch (Exception ex)
                     {
-                        Program.LogOperational("campaign.retirement_retry_failed", new Dictionary<string, object>
+                        OperationsService.LogOperational("campaign.retirement_retry_failed", new Dictionary<string, object>
                         {
                             ["campaignId"] = campaignId,
                             ["error"] = ex.Message
@@ -239,13 +239,13 @@ namespace ReignBetaServer
         {
             string directory = StrictCampaignDirectory(campaignId);
             string path = Path.Combine(directory, "campaign.json");
-            Dictionary<string, object> metadata = Program.ReadJsonObject(path);
+            Dictionary<string, object> metadata = CampaignFileService.ReadJsonObject(path);
             metadata["campaignId"] = campaignId;
             metadata["saveSyncLifecycle"] = lifecycle ?? "";
             metadata["everRegisteredSaveSyncPoint"] = everRegistered;
             metadata["updatedUtc"] = DateTime.UtcNow.ToString(
                 "o", CultureInfo.InvariantCulture);
-            Program.WriteJsonObject(path, metadata);
+            CampaignFileService.WriteJsonObject(path, metadata);
         }
 
         private static Dictionary<string, object> EmptyCampaignDeletionCounts()
@@ -292,7 +292,7 @@ namespace ReignBetaServer
                     : new List<string>();
             }
             if (ids.Count == 0) return 0;
-            Dictionary<string, object> settings = Program.LoadSettings();
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
             DialogueService.StartManagedSemanticWorker(settings);
             for (int offset = 0; offset < ids.Count;
                 offset += CampaignSemanticDeleteBatchSize)
@@ -386,7 +386,7 @@ namespace ReignBetaServer
             string campaignId,
             string state)
         {
-            Program.WriteJsonObject(Path.Combine(stagingRoot, "transaction.json"),
+            CampaignFileService.WriteJsonObject(Path.Combine(stagingRoot, "transaction.json"),
                 new Dictionary<string, object>
                 {
                     ["version"] = CampaignRetirementVersion,
@@ -440,7 +440,7 @@ namespace ReignBetaServer
                     try
                     {
                         ValidateCampaignRetirementStagingRoot(child);
-                        Dictionary<string, object> transaction = Program.ReadJsonObject(
+                        Dictionary<string, object> transaction = CampaignFileService.ReadJsonObject(
                             Path.Combine(child, "transaction.json"));
                         string campaignId = ReadString(
                             transaction, "campaignId", "");
@@ -461,7 +461,7 @@ namespace ReignBetaServer
                     }
                     catch (Exception ex)
                     {
-                        Program.LogOperational("campaign.retirement_staging_cleanup_failed",
+                        OperationsService.LogOperational("campaign.retirement_staging_cleanup_failed",
                             new Dictionary<string, object>
                             {
                                 ["path"] = child,
@@ -531,11 +531,11 @@ namespace ReignBetaServer
                         SaveSyncRoot(), false);
                 else
                     ValidateCampaignOwnedDirectory(candidate.Value,
-                        Program.CampaignsRoot(), false);
+                        CampaignFileService.CampaignsRoot(), false);
                 MoveDirectoryWithRetries(candidate.Key, candidate.Value);
             }
             DeleteDirectoryCompletely(stagingRoot);
-            Program.LogOperational("campaign.retirement_staging_recovered",
+            OperationsService.LogOperational("campaign.retirement_staging_recovered",
                 new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
@@ -560,7 +560,7 @@ namespace ReignBetaServer
         private static List<Dictionary<string, object>> EnumerateOrphanCampaignRoots(
             HashSet<string> campaignIds)
         {
-            string root = Program.CampaignsRoot();
+            string root = CampaignFileService.CampaignsRoot();
             if (!Directory.Exists(root))
                 return new List<Dictionary<string, object>>();
             return Directory.GetDirectories(root, "*", SearchOption.TopDirectoryOnly)
@@ -568,7 +568,7 @@ namespace ReignBetaServer
                 .Select(path => new
                 {
                     Path = path,
-                    Id = ReadString(Program.ReadJsonObject(Path.Combine(path, "campaign.json")),
+                    Id = ReadString(CampaignFileService.ReadJsonObject(Path.Combine(path, "campaign.json")),
                         "campaignId", Path.GetFileName(path))
                 })
                 .Where(item => !campaignIds.Contains(item.Id))
@@ -588,7 +588,7 @@ namespace ReignBetaServer
                 .Select(path => new
                 {
                     Path = path,
-                    Id = ReadString(Program.ReadJsonObject(Path.Combine(path, "ledger.json")),
+                    Id = ReadString(CampaignFileService.ReadJsonObject(Path.Combine(path, "ledger.json")),
                         "campaignId", "")
                 })
                 .Where(item => string.IsNullOrWhiteSpace(item.Id)

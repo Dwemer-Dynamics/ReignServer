@@ -81,7 +81,7 @@ namespace ReignBetaServer
             // Traits are read from the authoritative character document, never inferred
             // from native trait levels or treated as low when the document is missing.
             Dictionary<string, object> virtues = ReadDictionary(
-                Program.ReadJsonObject(Program.CharacterFile(campaignId, subjectId, "traits.json")), "courtVirtues")
+                CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, subjectId, "traits.json")), "courtVirtues")
                 ?? new Dictionary<string, object>();
             double? honor = virtues.ContainsKey("honor") ? ReadDouble(virtues, "honor", double.NaN) : (double?)null;
             double? judgment = virtues.ContainsKey("judgment") ? ReadDouble(virtues, "judgment", double.NaN) : (double?)null;
@@ -283,9 +283,9 @@ namespace ReignBetaServer
             var entry = sources.FirstOrDefault(IsWhoremongerStandingSource);
             if (entry == null || string.IsNullOrWhiteSpace(observerId) || observerId == subjectId) return 0d;
             var profile = files != null ? files.Document(subjectId, "profile.json")
-                : Program.ReadJsonObject(Program.CharacterFile(campaignId, subjectId, "profile.json"));
+                : CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, subjectId, "profile.json"));
             var observerProfile = files != null ? files.Document(observerId, "profile.json")
-                : Program.ReadJsonObject(Program.CharacterFile(campaignId, observerId, "profile.json"));
+                : CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, observerId, "profile.json"));
             bool spouses = ReadString(profile, "spouseId", "").Equals(observerId, StringComparison.OrdinalIgnoreCase)
                 || ReadString(observerProfile, "spouseId", "").Equals(subjectId, StringComparison.OrdinalIgnoreCase);
             if (!spouses) return 0d;

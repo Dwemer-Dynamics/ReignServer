@@ -37,7 +37,7 @@ namespace ReignBetaServer
             bool calculated = romanceRelevant && ReadString(romance, "presentation", "") == "calculated";
             if (actedRomantically && calculated)
             {
-                Program.AppendJsonLineToPath(Program.CharacterFile(campaignId, subjectId, "memory", "memories.jsonl"), new Dictionary<string, object> { ["id"] = "mem_" + Guid.NewGuid().ToString("N"), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["type"] = "private_intention", ["visibility"] = "private", ["subjectId"] = subjectId, ["targetId"] = targetId, ["summary"] = "A calculated romantic approach was considered or acted upon for strategic benefit.", ["sourceDecisionId"] = decisionId ?? "" });
+                CampaignFileService.AppendJsonLineToPath(CampaignFileService.CharacterFile(campaignId, subjectId, "memory", "memories.jsonl"), new Dictionary<string, object> { ["id"] = "mem_" + Guid.NewGuid().ToString("N"), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["type"] = "private_intention", ["visibility"] = "private", ["subjectId"] = subjectId, ["targetId"] = targetId, ["summary"] = "A calculated romantic approach was considered or acted upon for strategic benefit.", ["sourceDecisionId"] = decisionId ?? "" });
             }
             Dictionary<string, object> scene = ReadDictionary(context, "scene") ?? new Dictionary<string, object>();
             List<string> witnesses = ReadStringList(scene, "witnessIds");
@@ -801,7 +801,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> context)
         {
             Dictionary<string, object> safe =
-                Program.CloneDictionary(parsed ?? new Dictionary<string, object>());
+                VerificationService.CloneDictionary(parsed ?? new Dictionary<string, object>());
             Dictionary<string, object> opportunity =
                 ReadDictionary(context, "opportunity")
                 ?? new Dictionary<string, object>();
@@ -1012,7 +1012,7 @@ namespace ReignBetaServer
                 .Concat(ReadDictionaryList(
                     parsed, "relationship_assessments"))
                 .Take(8)
-                .Select(Program.CloneDictionary)
+                .Select(VerificationService.CloneDictionary)
                 .ToList();
             foreach (Dictionary<string, object> assessment in assessments)
             {
@@ -1051,7 +1051,7 @@ namespace ReignBetaServer
             safe["stateUpdates"] = new Dictionary<string, object>();
 
             Dictionary<string, object> result =
-                Program.CloneDictionary(llm ?? new Dictionary<string, object>());
+                VerificationService.CloneDictionary(llm ?? new Dictionary<string, object>());
             result["ok"] = true;
             result["content"] = Json.Serialize(safe);
             result["deterministicIdentityFallback"] = true;

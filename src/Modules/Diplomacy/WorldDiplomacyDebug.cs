@@ -15,7 +15,7 @@ namespace ReignBetaServer
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The MCM debug gate is not enabled." };
             }
 
-            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
             string commandId = ReadFirstString(payload, "commandId", "debugCommandId");
             if (string.IsNullOrWhiteSpace(commandId))
             {
@@ -29,7 +29,7 @@ namespace ReignBetaServer
                 existingEvent = ReadDiplomaticEventQueue(campaignId).FirstOrDefault(x =>
                     string.Equals(ReadString(x, "debugCommandId", ""), commandId, StringComparison.OrdinalIgnoreCase));
                 string existingActionId = ReadString(existingEvent, "actionId", "");
-                Dictionary<string, object> actionRow = Program.ReadActionQueueUnlocked(campaignId).FirstOrDefault(x =>
+                Dictionary<string, object> actionRow = ActionPipelineService.ReadActionQueueUnlocked(campaignId).FirstOrDefault(x =>
                     string.Equals(ReadString(x, "id", ""), existingActionId, StringComparison.OrdinalIgnoreCase));
                 existingRecord = ReadDictionary(actionRow, "record");
             }

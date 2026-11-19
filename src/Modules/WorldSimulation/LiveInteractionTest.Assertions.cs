@@ -1149,7 +1149,7 @@ namespace ReignBetaServer
                     .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 List<string> knownBy = DialogueService.TextListFromJson(ReadString(summary, "known_by_json", "[]"));
                 string summaryId = ReadString(summary, "summary_id", "");
-                bool semanticEnabled = ReadBool(Program.LoadSettings(), "enableSemanticMemory", true);
+                bool semanticEnabled = ReadBool(SettingsService.LoadSettings(), "enableSemanticMemory", true);
                 Dictionary<string, object> memoryResult = ReadDictionary(result, "memory")
                     ?? new Dictionary<string, object>();
                 Dictionary<string, object> arcResult = ReadDictionary(memoryResult, "arc")
@@ -1269,7 +1269,7 @@ namespace ReignBetaServer
                     return false;
                 }
 
-                Dictionary<string, object> settings = Program.LoadSettings();
+                Dictionary<string, object> settings = SettingsService.LoadSettings();
                 bool semanticEnabled = ReadBool(settings, "enableSemanticMemory", true);
                 int minimumItems = Math.Max(2, Math.Min(20,
                     ReadInt(settings, "memoryConsolidationMinItems", 4)));

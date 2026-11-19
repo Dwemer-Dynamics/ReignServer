@@ -149,9 +149,9 @@ namespace ReignBetaServer
 
             Dictionary<string, object> profile = NotableMbtiRowToProfile(row);
             if (materialize && (created
-                || !File.Exists(Program.CharacterFile(campaignId, heroId, "profile.json"))
-                || !File.Exists(Program.CharacterFile(campaignId, heroId, "traits.json"))
-                || !File.Exists(Program.CharacterFile(campaignId, heroId, "constructed.json"))))
+                || !File.Exists(CampaignFileService.CharacterFile(campaignId, heroId, "profile.json"))
+                || !File.Exists(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"))
+                || !File.Exists(CampaignFileService.CharacterFile(campaignId, heroId, "constructed.json"))))
             {
                 MaterializeNotableMbtiProfile(campaignId, hero, profile);
             }
@@ -261,11 +261,11 @@ namespace ReignBetaServer
                 });
             List<Dictionary<string, object>> indexProfiles =
                 materializedProfiles.ToList();
-            Program.UpdateCharacterIndexBatch(campaignId, indexProfiles);
+            CampaignFileService.UpdateCharacterIndexBatch(campaignId, indexProfiles);
             materializationTimer.Stop();
             materializationMs = materializationTimer.ElapsedMilliseconds;
             totalTimer.Stop();
-            Program.LogOperational("notable_mbti.initialize.performance", new Dictionary<string, object>
+            OperationsService.LogOperational("notable_mbti.initialize.performance", new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,
                 ["requestedCount"] = heroes.Count,
@@ -316,7 +316,7 @@ namespace ReignBetaServer
                             TryParseJsonObject(ReadString(row, "native_traits_json", "{}")) ?? new Dictionary<string, object>();
                         Dictionary<string, object> observed =
                             ReadDictionary(observation, "traits") ?? new Dictionary<string, object>();
-                        string observationStatus = Program.NormalizeLookup(
+                        string observationStatus = ActionPipelineService.NormalizeLookup(
                             ReadString(observation, "status", "observed")).Replace(' ', '_');
                         bool obsolete = observationStatus == "obsolete";
                         bool hasCompleteObservation = expected.Count == 5
@@ -394,7 +394,7 @@ namespace ReignBetaServer
                 }
             }
             timer.Stop();
-            Program.LogOperational("notable_mbti.confirm.performance", new Dictionary<string, object>
+            OperationsService.LogOperational("notable_mbti.confirm.performance", new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,
                 ["observationCount"] = observations.Count,
@@ -559,10 +559,10 @@ namespace ReignBetaServer
         {
             string heroId = ReadFirstString(hero, "heroStringId", "heroId", "id");
             if (string.IsNullOrWhiteSpace(heroId)) return new Dictionary<string, object>();
-            string directory = Program.CharacterDirectory(campaignId, heroId);
+            string directory = CampaignFileService.CharacterDirectory(campaignId, heroId);
             Directory.CreateDirectory(directory);
             string profilePath = Path.Combine(directory, "profile.json");
-            Dictionary<string, object> existingProfile = Program.ReadJsonObject(profilePath);
+            Dictionary<string, object> existingProfile = CampaignFileService.ReadJsonObject(profilePath);
             bool created = existingProfile.Count == 0;
             Dictionary<string, object> profile = new Dictionary<string, object>(existingProfile, StringComparer.OrdinalIgnoreCase);
             foreach (KeyValuePair<string, object> pair in hero) profile[pair.Key] = pair.Value;
@@ -570,11 +570,11 @@ namespace ReignBetaServer
             profile["heroStringId"] = heroId;
             profile["updatedUtc"] = DateTime.UtcNow.ToString("o");
             if (created) profile["createdUtc"] = DateTime.UtcNow.ToString("o");
-            Program.WriteJsonObject(profilePath, profile);
-            if (created && updateIndex) Program.UpdateCharacterIndex(campaignId, profile);
+            CampaignFileService.WriteJsonObject(profilePath, profile);
+            if (created && updateIndex) CampaignFileService.UpdateCharacterIndex(campaignId, profile);
 
-            string traitsPath = Program.CharacterFile(campaignId, heroId, "traits.json");
-            Dictionary<string, object> existing = Program.ReadJsonObject(traitsPath);
+            string traitsPath = CampaignFileService.CharacterFile(campaignId, heroId, "traits.json");
+            Dictionary<string, object> existing = CampaignFileService.ReadJsonObject(traitsPath);
             Dictionary<string, object> existingMbti = ReadDictionary(existing, "mbtiProfile") ?? new Dictionary<string, object>();
             bool editorOwned = CharactersService.CharacterHasEditorCorrections(campaignId, heroId);
             if (!editorOwned && (!ReadString(existingMbti, "source", "").Equals("notable_mbti_template", StringComparison.OrdinalIgnoreCase)
@@ -582,14 +582,14 @@ namespace ReignBetaServer
             {
                 Dictionary<string, object> traits = BuildNotableMbtiTraitDocument(
                     campaignId, heroId, ReadString(hero, "name", heroId), ReadString(mbtiProfile, "type", "INTJ"));
-                Program.WriteJsonObject(traitsPath, traits);
+                CampaignFileService.WriteJsonObject(traitsPath, traits);
             }
             else if (!editorOwned && RepairNotableMbtiTraitDocument(existing, mbtiProfile, hero, heroId))
             {
                 existing["updatedUtc"] = DateTime.UtcNow.ToString("o");
-                Program.WriteJsonObject(traitsPath, existing);
+                CampaignFileService.WriteJsonObject(traitsPath, existing);
             }
-            Dictionary<string, object> constructed = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"));
+            Dictionary<string, object> constructed = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "constructed.json"));
             if (!CharactersService.IsUsableCharacterStatus(ReadString(constructed, "status", "")) || ReadBool(constructed, "llmUsed", false) == false)
             {
                 constructed["ok"] = true;
@@ -599,7 +599,7 @@ namespace ReignBetaServer
                 constructed["usableForNonInteractiveSystems"] = true;
                 constructed["schemaVersion"] = Program.CharacterSchemaVersion;
                 constructed["updatedUtc"] = DateTime.UtcNow.ToString("o");
-                Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"), constructed);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "constructed.json"), constructed);
             }
             return profile;
         }
@@ -720,7 +720,7 @@ namespace ReignBetaServer
             Dictionary<string, object> traitDocument)
         {
             profile = profile ?? new Dictionary<string, object>();
-            traitDocument = traitDocument ?? Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"));
+            traitDocument = traitDocument ?? CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"));
             Dictionary<string, object> embedded = ReadDictionary(traitDocument, "mbtiProfile") ?? new Dictionary<string, object>();
             if (ReadBool(profile, "isNotable", false))
             {
@@ -909,10 +909,10 @@ namespace ReignBetaServer
                     };
                     Dictionary<string, object> assigned =
                         EnsureNotableMbtiProfile(connection, materializeCampaign, 1d, notable, true);
-                    Dictionary<string, object> storedProfile = Program.ReadJsonObject(
-                        Program.CharacterFile(materializeCampaign, "notable_materialize_test", "profile.json"));
-                    Dictionary<string, object> storedTraits = Program.ReadJsonObject(
-                        Program.CharacterFile(materializeCampaign, "notable_materialize_test", "traits.json"));
+                    Dictionary<string, object> storedProfile = CampaignFileService.ReadJsonObject(
+                        CampaignFileService.CharacterFile(materializeCampaign, "notable_materialize_test", "profile.json"));
+                    Dictionary<string, object> storedTraits = CampaignFileService.ReadJsonObject(
+                        CampaignFileService.CharacterFile(materializeCampaign, "notable_materialize_test", "traits.json"));
                     add("passive_materialization_no_recursion",
                         ReadString(assigned, "type", "XXXX") != "XXXX"
                             && ReadString(storedProfile, "heroStringId", "") == "notable_materialize_test"
@@ -922,7 +922,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                string generatedDirectory = Program.CampaignDirectory(materializeCampaign);
+                string generatedDirectory = CampaignFileService.CampaignDirectory(materializeCampaign);
                 ReignPostgreSqlStorage.ClearAllPools();
                 try { ReignPostgreSqlStorage.DropCampaign(materializeCampaign); }
                 catch { }
@@ -1023,7 +1023,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                string generatedDirectory = Program.CampaignDirectory(batchCampaign);
+                string generatedDirectory = CampaignFileService.CampaignDirectory(batchCampaign);
                 ReignPostgreSqlStorage.ClearAllPools();
                 if (Directory.Exists(generatedDirectory)) Directory.Delete(generatedDirectory, true);
             }
@@ -1070,8 +1070,8 @@ namespace ReignBetaServer
                             }).ToList()
                     });
                 bulkTimer.Stop();
-                int indexed = Program.ReadJsonArray(
-                    Path.Combine(Program.CampaignDirectory(bulkCampaign), "characters", "index.json")).Count;
+                int indexed = CampaignFileService.ReadJsonArray(
+                    Path.Combine(CampaignFileService.CampaignDirectory(bulkCampaign), "characters", "index.json")).Count;
                 add("bulk_initialization_performance",
                     ReadBool(bulkInitialized, "ok", false)
                     && bulkAssignments.Count == bulkCount
@@ -1086,7 +1086,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                string generatedDirectory = Program.CampaignDirectory(bulkCampaign);
+                string generatedDirectory = CampaignFileService.CampaignDirectory(bulkCampaign);
                 ReignPostgreSqlStorage.ClearAllPools();
                 if (Directory.Exists(generatedDirectory)) Directory.Delete(generatedDirectory, true);
             }

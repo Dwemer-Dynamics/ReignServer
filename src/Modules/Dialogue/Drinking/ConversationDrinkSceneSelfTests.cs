@@ -238,7 +238,7 @@ namespace ReignBetaServer
                 catch (InvalidOperationException) { staleScene = true; }
                 Check("concurrent_participant_cas_rejects_stale_scene", staleScene && ReadDictionaryList(Scene(a), "vessels").Count == 1);
 
-                var defaults = Program.DefaultPromptTemplates();
+                var defaults = PromptService.DefaultPromptTemplates();
                 foreach (var kind in new[] { CodexConversationContractKind.Individual, CodexConversationContractKind.Group,
                     CodexConversationContractKind.Castle, CodexConversationContractKind.Social })
                     Check("schema_" + kind, ReadDictionary(CodexConversationSchemas.Select(kind, defaults, defaults, TestDict()).Schema, "properties").ContainsKey("drinkSceneUpdates"));

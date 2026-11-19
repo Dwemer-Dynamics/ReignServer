@@ -119,7 +119,7 @@ namespace ReignBetaServer
                 "durationMs",stageTimer.ElapsedMilliseconds,"maxLeaderMs",maxLeaderMs,
                 "candidatePairs",candidatePairs,"eligiblePairs",eligiblePairs,"leaderRolls",rolls);
             // Log measured work, without copying snapshots or candidate details.
-            try { Program.LogOperational("relationships.arranged_marriage_performance",performance); } catch { }
+            try { OperationsService.LogOperational("relationships.arranged_marriage_performance",performance); } catch { }
             return new Dictionary<string,object>{{"arrangedCreated",proposals},{"leaderRolls",rolls},{"periodIndex",period},{"refused",refused},{"policyVersion",ArrangedMarriagePolicy.Version}};
         }
 
@@ -186,7 +186,7 @@ namespace ReignBetaServer
             var results=new List<Dictionary<string,object>>();
             void Check(string id,bool pass)=>results.Add(TestDict("caseId","arranged_"+id,"passed",pass,"summary",id));
             string campaign="__arranged_test_"+Guid.NewGuid().ToString("N");
-            Check("fixture_is_internal",Program.IsInternalCampaignId(campaign));
+            Check("fixture_is_internal",CampaignFileService.IsInternalCampaignId(campaign));
             try
             {
                 using var c=ReignDatabase.OpenCampaignConnection(campaign);

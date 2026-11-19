@@ -285,8 +285,8 @@ namespace ReignBetaServer
                 modestPrompt.Diagnostics);
             // Compare the runtime tone segments, including scoped language and LF normalization.
             // Raw templates may use CRLF in a Windows checkout of the Linux server source.
-            string worldTone = NormalizePromptSegment(ScopeConversationTone(Program.LoadPromptTemplate("world_tone.txt")));
-            string noblePrompt = NormalizePromptSegment(ScopeConversationTone(Program.LoadPromptTemplate("noble_prompt.txt")));
+            string worldTone = NormalizePromptSegment(ScopeConversationTone(PromptService.LoadPromptTemplate("world_tone.txt")));
+            string noblePrompt = NormalizePromptSegment(ScopeConversationTone(PromptService.LoadPromptTemplate("noble_prompt.txt")));
             string nobleEventPrefix = BuildDialogueGlobalPrefix(true, true, new List<Dictionary<string, object>>());
             string commonerEventPrefix = BuildDialogueGlobalPrefix(true, false, new List<Dictionary<string, object>>());
             bool layeredPromptEnvelope = !string.IsNullOrWhiteSpace(worldTone)
@@ -298,7 +298,7 @@ namespace ReignBetaServer
                 && !commonerEventPrefix.Contains("NOBLE PROMPT")
                 && !commonerEventPrefix.Contains(noblePrompt);
             add("prompt_world_tone_noble_layering", layeredPromptEnvelope, "Social-event prompts always carry World Tone and add Noble Prompt only for noble characters.", null);
-            List<Dictionary<string, object>> fullCatalog = Program.CompactActionCatalog(Program.ActionCatalog());
+            List<Dictionary<string, object>> fullCatalog = ActionPipelineService.CompactActionCatalog(ActionPipelineService.ActionCatalog());
             string routedEventPrefix = BuildDialogueGlobalPrefix(true, true, fullCatalog);
             bool actionCatalogIsOutOfBand = routedEventPrefix.Contains("ACTION ROUTING BOUNDARY")
                 && routedEventPrefix.IndexOf("AVAILABLE ACTION COMMANDS", StringComparison.OrdinalIgnoreCase) < 0

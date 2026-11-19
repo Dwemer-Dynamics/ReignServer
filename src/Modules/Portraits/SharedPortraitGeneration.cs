@@ -254,7 +254,7 @@ namespace ReignBetaServer
                         ["deleted"] = deleted
                     };
                 }
-                Program.LogOperational("portrait.shared_generation.deleted", new Dictionary<string, object>
+                OperationsService.LogOperational("portrait.shared_generation.deleted", new Dictionary<string, object>
                 {
                     ["cacheKey"] = entry.CacheKey,
                     ["characterName"] = entry.CharacterName,
@@ -416,7 +416,7 @@ namespace ReignBetaServer
                     job.Remaining = 0;
                     job.CompletedUtc = DateTime.UtcNow.ToString("o");
                 }
-                Program.LogOperational("portrait.shared_generation.completed", SharedPortraitGenerationJobSnapshot(job));
+                OperationsService.LogOperational("portrait.shared_generation.completed", SharedPortraitGenerationJobSnapshot(job));
             }
             catch (Exception ex)
             {
@@ -428,7 +428,7 @@ namespace ReignBetaServer
                     job.CompletedUtc = DateTime.UtcNow.ToString("o");
                     AddSharedPortraitGenerationError(job, job.CurrentCacheKey, job.CurrentCharacterName, ex.Message);
                 }
-                Program.LogOperational("portrait.shared_generation.failed", SharedPortraitGenerationJobSnapshot(job));
+                OperationsService.LogOperational("portrait.shared_generation.failed", SharedPortraitGenerationJobSnapshot(job));
             }
         }
 
@@ -823,7 +823,7 @@ namespace ReignBetaServer
             out string model,
             out string error)
         {
-            Dictionary<string, object> settings = Program.LoadSettings();
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
             provider = NormalizeImageProvider(ReadString(settings, "portraitProvider", "NanoGPT"));
             if (IsCodexImageProvider(provider))
             {
@@ -835,7 +835,7 @@ namespace ReignBetaServer
             if (provider == "OpenRouter")
             {
                 model = ReadString(settings, "portraitOpenRouterImageModel", DefaultOpenRouterImageModel);
-                error = !Program.ProviderKeyConfigured(settings, "openRouterApiKey")
+                error = !SettingsService.ProviderKeyConfigured(settings, "openRouterApiKey")
                     ? "Save your OpenRouter key in API Settings." : "";
                 return string.IsNullOrWhiteSpace(error);
             }
@@ -843,7 +843,7 @@ namespace ReignBetaServer
             model = atlas
                 ? ReadString(settings, "portraitAtlasImageModel", DefaultAtlasImageModel)
                 : ReadString(settings, "portraitNanoGptImageModel", "gpt-image-1.5");
-            error = !Program.ProviderKeyConfigured(settings, atlas ? "portraitAtlasApiKey" : "portraitNanoGptApiKey")
+            error = !SettingsService.ProviderKeyConfigured(settings, atlas ? "portraitAtlasApiKey" : "portraitNanoGptApiKey")
                 ? "No " + provider + " image API key is configured in AI Image Generation."
                 : "";
             return string.IsNullOrWhiteSpace(error);
@@ -1185,7 +1185,7 @@ namespace ReignBetaServer
                 ["portraitInferenceSteps"] = 31,
                 ["portraitGuidanceScale"] = 4.2d
             };
-            bool migrated = Program.NormalizePortraitImageSettings(legacySettings);
+            bool migrated = SettingsService.NormalizePortraitImageSettings(legacySettings);
             AddSharedPortraitSelfTest(
                 rows,
                 "image_profile_migration_clones_portrait_once",
@@ -1202,7 +1202,7 @@ namespace ReignBetaServer
 
             legacySettings["portraitProvider"] = "NanoGPT";
             legacySettings["portraitAtlasImageModel"] = AtlasModelWan25ImageEdit;
-            bool normalizedAgain = Program.NormalizePortraitImageSettings(legacySettings);
+            bool normalizedAgain = SettingsService.NormalizePortraitImageSettings(legacySettings);
             AddSharedPortraitSelfTest(
                 rows,
                 "image_profile_migration_does_not_overwrite_scenery",
@@ -1255,7 +1255,7 @@ namespace ReignBetaServer
                 "Every portrait provider receives the same measurable full-body, face-scale, centering, and scenery-exclusion contract.");
 
             Dictionary<string, object> nativeSettings = new Dictionary<string, object>();
-            bool nativeSettingsInitialized = Program.NormalizePortraitImageSettings(nativeSettings);
+            bool nativeSettingsInitialized = SettingsService.NormalizePortraitImageSettings(nativeSettings);
             AddSharedPortraitSelfTest(
                 rows,
                 "native_portrait_source_required_by_default",

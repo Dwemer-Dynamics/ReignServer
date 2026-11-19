@@ -7,9 +7,9 @@ using System.Threading.Tasks;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class ConversationResponseService
     {
-        private static List<Dictionary<string, object>> RunConversationDiagnosticsSelfTests()
+        internal static List<Dictionary<string, object>> RunConversationDiagnosticsSelfTests()
         {
             var results = new List<Dictionary<string, object>>();
             Action<string, bool, object> check = (id, pass, data) => results.Add(TestDict("caseId", "diagnostic_" + id,
@@ -18,7 +18,7 @@ namespace ReignBetaServer
             var previousTrace = DiagnosticTrace.Value;
             var previousRequest = DiagnosticRequest.Value;
             var previousStep = DiagnosticStep.Value;
-            string root = Path.Combine(VerificationDir, "conversation-diagnostics", Guid.NewGuid().ToString("N"));
+            string root = Path.Combine(VerificationService.VerificationDir, "conversation-diagnostics", Guid.NewGuid().ToString("N"));
             DiagnosticRootOverride.Value = root;
             string campaign = "diagnostic_test_" + Guid.NewGuid().ToString("N");
             try

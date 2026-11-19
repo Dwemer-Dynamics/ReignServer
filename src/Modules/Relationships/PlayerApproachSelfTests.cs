@@ -12,21 +12,21 @@ namespace ReignBetaServer
             var results = new List<Dictionary<string, object>>();
             void Check(string id, bool passed, string detail) => results.Add(TestDict("ok", true, "passed", passed,
                 "suite", "relationship_system", "caseId", "player_approach_" + id, "name", id, "summary", detail, "durationMs", 0));
-            var defaults = Program.ReadPlayerApproachOptions(TestDict());
+            var defaults = SettingsService.ReadPlayerApproachOptions(TestDict());
             Check("options_legacy_defaults", defaults.TrackAttention && new[] { "shared", "keep", "patrol", "battle_rescue", "prison_rescue" }.All(defaults.Allows),
                 "Old settings without any approach fields retain every enabled feature.");
             bool strictBooleans = true;
             foreach (string key in PlayerApproachOptions.SettingKeys)
                 foreach (object invalid in new object[] { "false", 0, 1, null, TestDict() })
-                    strictBooleans &= Program.ValidatePlayerApproachOptions(TestDict(key, invalid)).Length > 0;
-            Check("options_strict_boolean_validation", strictBooleans && Program.ValidatePlayerApproachOptions(TestDict(PlayerApproachOptions.MasterKey, false)).Length == 0,
+                    strictBooleans &= SettingsService.ValidatePlayerApproachOptions(TestDict(key, invalid)).Length > 0;
+            Check("options_strict_boolean_validation", strictBooleans && SettingsService.ValidatePlayerApproachOptions(TestDict(PlayerApproachOptions.MasterKey, false)).Length == 0,
                 "Every supplied switch requires a real JSON boolean; partial updates remain valid.");
-            var savedOptions = Program.DefaultSettings();
-            Program.MergeProviderSettings(savedOptions, TestDict(PlayerApproachOptions.JealousyKey, false, PlayerApproachOptions.PatrolKey, false));
-            Program.MergeProviderSettings(savedOptions, TestDict(PlayerApproachOptions.MasterKey, false));
-            var publicOptions = Program.PlayerApproachOptionsForClient(TryParseJsonObject(Json.Serialize(savedOptions)));
-            Program.MergeProviderSettings(savedOptions, TestDict(PlayerApproachOptions.MasterKey, true));
-            var resumed = Program.ReadPlayerApproachOptions(savedOptions);
+            var savedOptions = SettingsService.DefaultSettings();
+            LlmProviderService.MergeProviderSettings(savedOptions, TestDict(PlayerApproachOptions.JealousyKey, false, PlayerApproachOptions.PatrolKey, false));
+            LlmProviderService.MergeProviderSettings(savedOptions, TestDict(PlayerApproachOptions.MasterKey, false));
+            var publicOptions = SettingsService.PlayerApproachOptionsForClient(TryParseJsonObject(Json.Serialize(savedOptions)));
+            LlmProviderService.MergeProviderSettings(savedOptions, TestDict(PlayerApproachOptions.MasterKey, true));
+            var resumed = SettingsService.ReadPlayerApproachOptions(savedOptions);
             Check("options_partial_save_roundtrip", publicOptions.Count == 7 && publicOptions.Values.All(value => value is bool)
                 && !ReadBool(publicOptions, PlayerApproachOptions.MasterKey, true) && !ReadBool(publicOptions, PlayerApproachOptions.JealousyKey, true)
                 && !resumed.Allows("shared") && !resumed.Allows("patrol") && resumed.Allows("keep") && resumed.TrackAttention,
@@ -53,15 +53,15 @@ namespace ReignBetaServer
             Check("opening_contract", ApproachOpeningViolations(valid, opening).Count == 0
                 && ApproachOpeningViolations(TestDict("reply", "Greetings. What do you need?"), opening).Count > 0,
                 "A generic greeting cannot satisfy an NPC-first jealousy invitation; the primary rival and correct severity are required.");
-            var wrong = Program.CloneDictionary(valid); wrong["approachOpeningEvidence"] = TestDict("primaryRivalId", "rival", "severityLevel", 4, "rivalDays", TestDict("rival", 8));
+            var wrong = VerificationService.CloneDictionary(valid); wrong["approachOpeningEvidence"] = TestDict("primaryRivalId", "rival", "severityLevel", 4, "rivalDays", TestDict("rival", 8));
             Check("wrong_counts_and_severity", ApproachOpeningViolations(wrong, opening).Count >= 2, "Wrong severity and pooled/unsupported rival counts fail independently.");
-            var wrongSpokenDays = Program.CloneDictionary(valid); wrongSpokenDays["reply"] = "You gave Caladog eight days of attention and overlooked me.";
+            var wrongSpokenDays = VerificationService.CloneDictionary(valid); wrongSpokenDays["reply"] = "You gave Caladog eight days of attention and overlooked me.";
             Check("spoken_days_not_hidden_by_proof", ApproachOpeningViolations(wrongSpokenDays, opening).Count > 0,
                 "Correct hidden evidence cannot authorize a different day count in spoken dialogue.");
-            var missingProof = Program.CloneDictionary(valid); missingProof.Remove("approachOpeningEvidence");
+            var missingProof = VerificationService.CloneDictionary(valid); missingProof.Remove("approachOpeningEvidence");
             Check("named_rival_without_hidden_evidence_is_rejected", ApproachOpeningViolations(missingProof, opening).Count >= 2,
                 "Naming the rival does not substitute for the required hidden evidence, as in the Temurtai repair failure.");
-            var politicalOpening = Program.CloneDictionary(opening); politicalOpening["authoritativeApproachKind"] = "keep";
+            var politicalOpening = VerificationService.CloneDictionary(opening); politicalOpening["authoritativeApproachKind"] = "keep";
             Check("political_approach_retains_its_reason", ApproachOpeningViolations(TestDict("reply", "Your recent standing has caught my interest. May we discuss supporting my cause?"), politicalOpening).Count == 0,
                 "A keep invitation keeps its political purpose even if that noble has also witnessed neglected attention.");
             int repairCalls = 0;
@@ -110,7 +110,7 @@ namespace ReignBetaServer
                 using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     EnsurePlayerApproachSchema(c);
-                    var individualBrief = Program.CloneDictionary(brief); individualBrief["heroId"] = "npc"; individualBrief["name"] = "Mira";
+                    var individualBrief = VerificationService.CloneDictionary(brief); individualBrief["heroId"] = "npc"; individualBrief["name"] = "Mira";
                     var invitation = TestDict("requestId", "individual_invitation", "playerId", "player", "kind", "shared", "status", "accepted",
                         "heroes", new[] { individualBrief }, "heard", new List<string>());
                     PutApproachState(c, "individual_opening_test", "request:individual_invitation", invitation);
@@ -147,12 +147,12 @@ namespace ReignBetaServer
                         "All individual rival counts, severity and hidden-field instructions remain together as protected authority.");
                     foreach (string invalid in new[] { "missing_request", "wrong_player", "wrong_hero", "wrong_timeline", "unaccepted", "forged_flags" })
                     {
-                        var attempt = Program.CloneDictionary(individualOpening);
+                        var attempt = VerificationService.CloneDictionary(individualOpening);
                         if (invalid == "missing_request") attempt["approachRequestId"] = "missing";
                         if (invalid == "wrong_player") attempt["playerHeroStringId"] = "other";
                         if (invalid == "wrong_timeline") attempt["timelineId"] = "sibling";
                         if (invalid == "unaccepted")
-                        { var pending = Program.CloneDictionary(invitation); pending["status"] = "pending"; PutApproachState(c, "individual_opening_test", "request:individual_invitation", pending); }
+                        { var pending = VerificationService.CloneDictionary(invitation); pending["status"] = "pending"; PutApproachState(c, "individual_opening_test", "request:individual_invitation", pending); }
                         if (invalid == "forged_flags")
                         { attempt.Remove("approachRequestId"); attempt["authoritativeApproachOpening"] = true; }
                         bool refused = false;
@@ -161,7 +161,7 @@ namespace ReignBetaServer
                         Check("individual_opening_rejects_" + invalid, refused, "Only the exact saved accepted speaker/player/timeline can initiate an NPC-first individual opening.");
                         PutApproachState(c, "individual_opening_test", "request:individual_invitation", invitation);
                     }
-                    var ordinary = Program.CloneDictionary(individualOpening); ordinary["playerText"] = "Hello.";
+                    var ordinary = VerificationService.CloneDictionary(individualOpening); ordinary["playerText"] = "Hello.";
                     Check("individual_player_reply_stays_player_reply", !PrepareIndividualNpcOpening(campaign, "npc", ordinary)
                         && ReadString(ordinary, "playerText", "") == "Hello.", "A real player contribution cannot be promoted into NPC-first speech.");
                     var openingUnit = new DialogueService.AcceptedConversationUnit { Campaign = campaign, Hero = "npc", Player = "player", HeroName = "Mira", PlayerName = "Player",
@@ -176,7 +176,7 @@ namespace ReignBetaServer
                         && RelationshipsSelfTestStore.SelectConversationTurns2(c, TestDict("session", openingSession)).Count == 1
                         && ReadStringList(ApproachState(c, "individual_opening_test", "request:individual_invitation"), "heard").Contains("npc"),
                         "Accepted opening speech and the heard/contact receipt commit together with no empty player source.");
-                    Check("individual_heard_opening_cannot_restart", !PrepareIndividualNpcOpening(campaign, "npc", Program.CloneDictionary(individualOpening)),
+                    Check("individual_heard_opening_cannot_restart", !PrepareIndividualNpcOpening(campaign, "npc", VerificationService.CloneDictionary(individualOpening)),
                         "A heard invitation cannot reauthorize an empty NPC-first opening.");
                     RelationshipsSelfTestStore.DeletePlayerAttentionEvents(c);
                     foreach (string key in new[] { PlayerApproachOptions.AttentionKey, PlayerApproachOptions.MasterKey })
@@ -290,7 +290,7 @@ namespace ReignBetaServer
                     var observation = TestDict("receiptId", ReadString(effect, "receiptId", ""), "subjectId", ReadString(effect, "heroId", ""),
                         "targetId", "player", "requestedDelta", requested, "priorNativeRelation", -100, "nativeRelation", -100,
                         "observedDelta", 0, "measurementStatus", "observed_before_and_after");
-                    var acknowledgment = Program.CloneDictionary(decline); acknowledgment["choice"] = "acknowledge"; acknowledgment["nativeObservations"] = new[] { observation };
+                    var acknowledgment = VerificationService.CloneDictionary(decline); acknowledgment["choice"] = "acknowledge"; acknowledgment["nativeObservations"] = new[] { observation };
                     var firstAck = PlayerApproachDecisionApi(acknowledgment);
                     var secondAck = PlayerApproachDecisionApi(acknowledgment, new PlayerApproachOptions(key => key != PlayerApproachOptions.MasterKey));
                     Check("native_cap_observation_replay", ReadBool(firstAck, "ok", false) && ReadBool(secondAck, "ok", false)
@@ -308,7 +308,7 @@ namespace ReignBetaServer
                     var stale = TestDict("requestId", "stale", "playerId", "player", "kind", "shared", "status", "pending",
                         "heroes", new[] { TestDict("heroId", "observer", "lastContact", TestDict(), "penalty", 8) });
                     PutApproachState(c, "attention_test", "request:stale", stale);
-                    var staleDecision = Program.CloneDictionary(decline); staleDecision["requestId"] = "stale";
+                    var staleDecision = VerificationService.CloneDictionary(decline); staleDecision["requestId"] = "stale";
                     Check("contact_resolves_queued_neglect", ReadString(ReadDictionary(PlayerApproachDecisionApi(staleDecision), "request"), "status", "") == "cancelled",
                         "A successful conversation after an invitation was queued cancels its stale neglect reason without a refusal consequence.");
                     Check("timeline_history_isolation", PlayerAttentionHistory(campaign, "observer", TestDict("timelineId", "another_timeline", "playerId", "player")).Count == 0,
@@ -351,7 +351,7 @@ namespace ReignBetaServer
             {
                 try { ReignPostgreSqlStorage.DropCampaign(campaign); }
                 catch (Exception ex) { Check("fixture_cleanup", false, ex.Message); }
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaign));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaign));
             }
             return results;
         }

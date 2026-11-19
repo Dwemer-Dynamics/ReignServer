@@ -123,7 +123,7 @@ namespace ReignBetaServer
                 catch (InvalidOperationException) { stale = true; }
                 Check("pre_restore_route_cannot_publish", stale && SourceCount("route_atomic") == 0);
                 Check("ordinary_routes_use_expected_writer_calls", calls == 5);
-                var enabled = Program.CloneDictionary(settings);
+                var enabled = VerificationService.CloneDictionary(settings);
                 enabled["highMemoryMode"] = true; enabled["memoryCheckerModel"] = "obsolete-checker";
                 enabled["memoryEvidenceModel"] = "obsolete-analyst"; enabled["memoryFinalCheckEnabled"] = true;
                 var checkedPetition = Payload("retired_settings_petition");
@@ -154,7 +154,7 @@ namespace ReignBetaServer
                 // Live providers return authored speech. Historical engine notices
                 // are covered by the immutable-source recovery tests, and must not
                 // be injected as provider output through the retired repair path.
-                var recovered = GenerateRouteConversation(recoveryContext, Program.CloneDictionary(request), "No native effects.", 800,
+                var recovered = GenerateRouteConversation(recoveryContext, VerificationService.CloneDictionary(request), "No native effects.", 800,
                     _ => TestDict("ok", true, "content", Json.Serialize(TestDict("reply", safeQuestion))));
                 string recoveredReply = ReadString(TryParseJsonObject(ReadString(recovered, "content", "")), "reply", "");
                 Check("single_pass_keeps_usable_route_dialogue", ReadBool(recovered, "ok", false)
@@ -165,7 +165,7 @@ namespace ReignBetaServer
                 var nextContext = PrepareRouteConversationMemory(nextPayload, "npc", "recovery_route",
                     "recovery_session", "recovery_2", new[] { "npc" }, settingsOverride: settings);
                 string nextPrompt = "";
-                var next = GenerateRouteConversation(nextContext, Program.CloneDictionary(request), "No native effects.", 800, input =>
+                var next = GenerateRouteConversation(nextContext, VerificationService.CloneDictionary(request), "No native effects.", 800, input =>
                 {
                     nextPrompt = string.Join("\n", ReadDictionaryList(input, "messages").Select(m => ReadString(m, "content", "")));
                     return TestDict("ok", true, "content", Json.Serialize(TestDict("reply", "The east gate, then.")));
@@ -176,7 +176,7 @@ namespace ReignBetaServer
                     && SourceCount("recovery_route") == 4);
                 var emptyContext = PrepareRouteConversationMemory(Payload("empty_retry"), "npc", "empty_recovery",
                     "empty_session", "empty_retry", new[] { "npc" }, settingsOverride: settings);
-                var empty = GenerateRouteConversation(emptyContext, Program.CloneDictionary(request), "No native effects.", 800,
+                var empty = GenerateRouteConversation(emptyContext, VerificationService.CloneDictionary(request), "No native effects.", 800,
                     _ => TestDict("ok", true, "content", "{}"));
                 Check("empty_generation_retains_only_player_input", !ReadBool(empty, "ok", true)
                     && ReadBool(ReadDictionary(empty, "conversationRecovery"), "canContinue", false)
@@ -185,7 +185,7 @@ namespace ReignBetaServer
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                     Check("failed_generation_has_no_npc_or_acceptance", !DialogueSelfTestStore.SelectConversationTurns51(connection).Any()
                         && !DialogueSelfTestStore.SelectConversationRouteAcceptance(connection, TestDict("id", emptyContext.Unit)).Any());
-                var retried = GenerateRouteConversation(emptyContext, Program.CloneDictionary(request), "No native effects.", 800,
+                var retried = GenerateRouteConversation(emptyContext, VerificationService.CloneDictionary(request), "No native effects.", 800,
                     _ => TestDict("ok", true, "content", Json.Serialize(TestDict("reply", "We can discuss the gate."))));
                 if (ReadBool(retried, "ok", false)) PublishRouteConversation(emptyContext, "We can discuss the gate.", "Mira", _ => { });
                 Check("same_route_can_retry_after_empty_generation", ReadBool(retried, "ok", false)

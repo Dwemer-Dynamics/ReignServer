@@ -472,7 +472,7 @@ namespace ReignBetaServer
                 "I hand the rope to her.", "I hand a mystery drink to her.", "I hand it to him.", "I hand it to the waitress.", "I offer her two full cups of wine." })
                 check("drink_record_invalid_offer_" + PromptHash(rejected).Substring(0, 8),
                     CurrentPlayerDrinkOffer(TestDict("playerText", rejected), held, true)?.Vessel.Id != held.Id, null, null);
-            var defaults = Program.DefaultPromptTemplates();
+            var defaults = PromptService.DefaultPromptTemplates();
             foreach (var mode in new[] { CodexConversationContractKind.Individual, CodexConversationContractKind.Group, CodexConversationContractKind.Castle, CodexConversationContractKind.Social })
             {
                 var schema = CodexConversationSchemas.Select(mode, defaults, defaults, TestDict()).Schema;

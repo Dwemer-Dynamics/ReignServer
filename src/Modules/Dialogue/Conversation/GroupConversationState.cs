@@ -57,7 +57,7 @@ namespace ReignBetaServer
 
         private static bool IsSharedGroupConversation(Dictionary<string, object> payload)
         {
-            string mode = Program.NormalizeLookup(ReadString(payload, "mode", ReadString(payload, "requestType", "")));
+            string mode = ActionPipelineService.NormalizeLookup(ReadString(payload, "mode", ReadString(payload, "requestType", "")));
             return mode.Contains("party chat")
                 || mode.Contains("social event")
                 || mode.Contains("wilderness event")
@@ -167,7 +167,7 @@ namespace ReignBetaServer
         {
             // Default-off until current-profile budget, native-header parity and
             // independent accuracy evidence qualify this optional prompt change.
-            return ReadBool(settings ?? Program.LoadSettings(), "enableObservedGroupTurnStageFrame", false)
+            return ReadBool(settings ?? SettingsService.LoadSettings(), "enableObservedGroupTurnStageFrame", false)
                 ? BuildObservedGroupTurnStage(campaign, payload, observer, playerText) : null;
         }
 

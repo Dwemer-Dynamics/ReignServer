@@ -70,7 +70,7 @@ namespace ReignBetaServer
                 string root = PersistenceService.SaveSyncSnapshotRoot(campaign, savedPoint);
                 string manifestPath = Path.Combine(root, "manifest.json");
                 if (!File.Exists(manifestPath) || !Directory.Exists(Path.Combine(root, "campaign"))) continue;
-                var manifest = Program.ReadJsonObject(manifestPath);
+                var manifest = CampaignFileService.ReadJsonObject(manifestPath);
                 string fingerprint = ReadString(savedPoint, "snapshotFingerprint", "");
                 if (fingerprint.Length == 0 || ReadString(manifest, "campaignId", "") != campaign
                     || ReadString(manifest, "fingerprint", "") != fingerprint
@@ -107,7 +107,7 @@ namespace ReignBetaServer
                 RecoverLegacyPerformanceSources(connection, proof, generation);
             }
             DialogueStore.UpdateMemoryRestoredSourceContext(connection, TestDict("version", LegacyMemoryRecoveryVersion, "generation", generation));
-            Program.LogOperational("memory.legacy_source_recovery", TestDict("campaignId", campaign, "savePointId", ReadString(point, "savePointId", ""),
+            OperationsService.LogOperational("memory.legacy_source_recovery", TestDict("campaignId", campaign, "savePointId", ReadString(point, "savePointId", ""),
                 "restoreGeneration", generation, "verifiedSnapshots", proofs.Select(p => TestDict("savePointId", p["savePointId"],
                     "timeline", p["timeline"], "boundarySequence", p["boundarySequence"], "forkEventId", p["forkEventId"])).ToList()));
         }

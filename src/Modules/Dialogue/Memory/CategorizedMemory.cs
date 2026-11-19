@@ -264,8 +264,8 @@ namespace ReignBetaServer
             // Names only bind an explicit whisper recipient on later exact reads;
             // full character profiles and private persona fields are not copied.
             var attendees = ReadDictionaryList(source, "attendees").Take(16)
-                .Where(p => !string.IsNullOrWhiteSpace(Program.CharacterIdFrom(p)))
-                .Select(p => TestDict("heroStringId", DialogueService.LimitText(Program.CharacterIdFrom(p), 160),
+                .Where(p => !string.IsNullOrWhiteSpace(CampaignFileService.CharacterIdFrom(p)))
+                .Select(p => TestDict("heroStringId", DialogueService.LimitText(CampaignFileService.CharacterIdFrom(p), 160),
                     "name", DialogueService.LimitText(ReadString(p, "name", ""), 160))).ToList();
             if (attendees.Count > 0) compact["attendees"] = attendees;
             if (ReadDictionary(source, "conversationGrounding") is { } grounding)
@@ -343,7 +343,7 @@ namespace ReignBetaServer
             };
             foreach (string key in new[] { "inputSourceId", "contributionId", "conversationGrounding", "playerNarrationProjectionVersion" })
                 if (compact.ContainsKey(key)) fallback[key] = compact[key];
-            Program.LogOperational("storage.conversation_turn_payload_guard", new Dictionary<string, object>
+            OperationsService.LogOperational("storage.conversation_turn_payload_guard", new Dictionary<string, object>
             {
                 ["characters"] = json.Length, ["hardLimitCharacters"] = hardLimitCharacters,
                 ["correlationId"] = ReadString(compact, "correlationId", "")
@@ -411,7 +411,7 @@ namespace ReignBetaServer
 
         private static void ImportLegacyConversationHistory(ReignDbConnection connection, string campaignId)
         {
-            string charactersDir = Path.Combine(Program.CampaignDirectory(campaignId), "characters");
+            string charactersDir = Path.Combine(CampaignFileService.CampaignDirectory(campaignId), "characters");
             if (!Directory.Exists(charactersDir))
             {
                 return;
@@ -689,7 +689,7 @@ namespace ReignBetaServer
                     ["processed"] = false,
                     ["error"] = DialogueService.LimitText(ex.Message, 1000)
                 };
-                Program.LogOperational("court_social.conversation_finish_failed",
+                OperationsService.LogOperational("court_social.conversation_finish_failed",
                     new Dictionary<string, object>
                     {
                         ["campaignId"] = campaignId, ["sessionId"] = sessionId,
@@ -704,7 +704,7 @@ namespace ReignBetaServer
             catch (Exception ex)
             {
                 ambassadorReport = new Dictionary<string, object> { ["processed"] = false, ["error"] = DialogueService.LimitText(ex.Message, 1000) };
-                Program.LogOperational("ambassador.scene_finalize_failed", new Dictionary<string, object>
+                OperationsService.LogOperational("ambassador.scene_finalize_failed", new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId, ["sessionId"] = sessionId, ["error"] = DialogueService.LimitText(ex.ToString(), 4000)
                 });

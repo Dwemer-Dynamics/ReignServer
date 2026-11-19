@@ -60,7 +60,7 @@ namespace ReignBetaServer
 
             Dictionary<string, object> hookProfile = profiles.Values.FirstOrDefault(x => ReadString(x, "source", "") == "native_sandbox") ?? new Dictionary<string, object>();
             if (ReadString(CharacterProfileLibraryRoot, "packVersion", "") == NarrativePack)
-                hookProfile = ReadDictionaryList(Program.ReadJsonObject(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "profiles", "profile_catalog_v4.json")), "profiles")
+                hookProfile = ReadDictionaryList(CampaignFileService.ReadJsonObject(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "profiles", "profile_catalog_v4.json")), "profiles")
                     .FirstOrDefault(x => ReadString(x, "source", "") == "native_sandbox") ?? hookProfile;
             Dictionary<string, object> pools = ReadDictionary(hookProfile, "hookPools") ?? new Dictionary<string, object>();
             string heroId = FirstNonEmpty(ReadString(hookProfile, "heroStringId", ""), "missing");
@@ -93,15 +93,15 @@ namespace ReignBetaServer
                 string dynamicHeroId = "profile_self_test_dynamic";
                 unknown["heroStringId"] = dynamicHeroId;
                 Dictionary<string, object> passiveStack = LoadPassiveCharacterStack(policyCampaign, dynamicHeroId, unknown);
-                bool passiveDidNotMaterialize = !Directory.Exists(Program.CharacterDirectory(policyCampaign, dynamicHeroId))
+                bool passiveDidNotMaterialize = !Directory.Exists(CampaignFileService.CharacterDirectory(policyCampaign, dynamicHeroId))
                     && string.Equals(ReadString(passiveStack, "profileSource", ""), "live_runtime_unconstructed", StringComparison.OrdinalIgnoreCase)
                     && ReadBool(passiveStack, "constructionDeferredUntilFirstInteraction", false);
                 results.Add(ProfileSelfTest("passive_event_does_not_create_dynamic_profile", passiveDidNotMaterialize,
                     "Passive event planning uses live baseline facts without creating or constructing a dynamic character profile.", null));
 
                 MaterializeCharacterProfile(policyCampaign, dynamicHeroId, unknown, false, false);
-                Dictionary<string, object> dynamicConstructed = Program.ReadJsonObject(Program.CharacterFile(policyCampaign, dynamicHeroId, "constructed.json"));
-                Dictionary<string, object> dynamicEnrichment = Program.ReadJsonObject(Program.CharacterFile(policyCampaign, dynamicHeroId, "enrichment.json"));
+                Dictionary<string, object> dynamicConstructed = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(policyCampaign, dynamicHeroId, "constructed.json"));
+                Dictionary<string, object> dynamicEnrichment = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(policyCampaign, dynamicHeroId, "enrichment.json"));
                 bool dynamicDeferred = string.Equals(ReadString(dynamicConstructed, "status", ""), "first_contact_pending", StringComparison.OrdinalIgnoreCase)
                     && string.Equals(ReadString(dynamicEnrichment, "status", ""), "deferred_until_interaction", StringComparison.OrdinalIgnoreCase)
                     && RequiresFirstContactConstruction(policyCampaign, dynamicHeroId, dynamicConstructed);
@@ -121,8 +121,8 @@ namespace ReignBetaServer
                     ["isLord"] = true
                 };
                 MaterializeCharacterProfile(policyCampaign, canonicalHeroId, canonicalRuntime, false, false);
-                Dictionary<string, object> canonicalConstructed = Program.ReadJsonObject(Program.CharacterFile(policyCampaign, canonicalHeroId, "constructed.json"));
-                Dictionary<string, object> canonicalEnrichment = Program.ReadJsonObject(Program.CharacterFile(policyCampaign, canonicalHeroId, "enrichment.json"));
+                Dictionary<string, object> canonicalConstructed = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(policyCampaign, canonicalHeroId, "constructed.json"));
+                Dictionary<string, object> canonicalEnrichment = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(policyCampaign, canonicalHeroId, "enrichment.json"));
                 bool canonicalReady = string.Equals(ReadString(canonicalConstructed, "status", ""), "canonical_ready", StringComparison.OrdinalIgnoreCase)
                     && string.Equals(ReadString(canonicalEnrichment, "status", ""), "not_required", StringComparison.OrdinalIgnoreCase)
                     && !RequiresFirstContactConstruction(policyCampaign, canonicalHeroId, canonicalConstructed);
@@ -143,7 +143,7 @@ namespace ReignBetaServer
             {
                 try
                 {
-                    string policyCampaignDir = Program.CampaignDirectory(policyCampaign);
+                    string policyCampaignDir = CampaignFileService.CampaignDirectory(policyCampaign);
                     if (Directory.Exists(policyCampaignDir))
                     {
                         ReignPostgreSqlStorage.ClearAllPools();
@@ -160,16 +160,16 @@ namespace ReignBetaServer
             results.Add(ProfileSelfTest("sparse_native_traits_readiness", CharactersService.TraitDocumentReady(sparseNativeTraits),
                 "Characters whose native trait payload is unavailable still become stable after their complete 43-trait foundation is built.", null));
 
-            Dictionary<string, object> settings = Program.DefaultSettings();
+            Dictionary<string, object> settings = SettingsService.DefaultSettings();
             settings["dialogueModel"] = "dialogue-test-model";
             settings["characterConstructionModel"] = "construction-test-model";
-            results.Add(ProfileSelfTest("dedicated_construction_model", Program.ModelForRequest(settings, "character_construction") == "construction-test-model", "First-contact character construction routes through the dedicated construction model setting.", null));
+            results.Add(ProfileSelfTest("dedicated_construction_model", ActionPipelineService.ModelForRequest(settings, "character_construction") == "construction-test-model", "First-contact character construction routes through the dedicated construction model setting.", null));
             bool adaptiveRetryBudget = CharactersService.CharacterConstructionMaxTokensForAttempt(3600, 1) == 3600
                 && CharactersService.CharacterConstructionMaxTokensForAttempt(3600, 2) == 7200
                 && CharactersService.CharacterConstructionMaxTokensForAttempt(30000, 2) == 50000
                 && CharactersService.CharacterConstructionMaxTokensForAttempt(50000, 1) == 50000
                 && CharactersService.CharacterConstructionMaxTokensForAttempt(int.MaxValue, 2) == 50000
-                && ReadInt(Program.DefaultSettings(), "characterConstructionMaxTokens", 0) == 50000;
+                && ReadInt(SettingsService.DefaultSettings(), "characterConstructionMaxTokens", 0) == 50000;
             results.Add(ProfileSelfTest("adaptive_construction_token_retry", adaptiveRetryBudget,
                 "Construction defaults to a 50,000-token ceiling; a deliberately smaller setting can grow on retry but never exceeds 50,000.",
                 new Dictionary<string, object>
@@ -217,7 +217,7 @@ namespace ReignBetaServer
                 ["failureKind"] = "parse",
                 ["constructionEngineVersion"] = Program.CharacterConstructionEngineVersion - 1,
                 ["settingsRevision"] = ReadString(settings, "settingsRevision", ""),
-                ["settingsFingerprint"] = Program.SettingsFingerprint(settings),
+                ["settingsFingerprint"] = SettingsService.SettingsFingerprint(settings),
                 ["failedUtc"] = DateTime.UtcNow.AddMinutes(5).ToString("o")
             };
             results.Add(ProfileSelfTest("legacy_truncation_auto_retry",

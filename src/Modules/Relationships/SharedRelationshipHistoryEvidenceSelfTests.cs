@@ -59,7 +59,7 @@ namespace ReignBetaServer
                     "npc_initiated", "visit", "", "", "", 3d, 5d, TestDict("timelineId", "main"));
                 string letterId = ReadString(sent, "letterId", "");
                 RelationshipsSelfTestStore.UpdateLetters4(connection, TestDict("id", letterId));
-                var bounded = Program.CloneDictionary(context);
+                var bounded = VerificationService.CloneDictionary(context);
                 bounded["memoryAsOfAcceptedSequence"] = DialogueService.ReadAcceptedMemorySourceWatermark(connection);
                 var withLetter = RelationshipHistorySourceEvidence(connection, "a", "b", bounded, true);
                 Check("post_conversation_letter_included_by_shared_watermark", withLetter.Any(r => ReadString(r, "sourceId", "") == letterId)
@@ -77,7 +77,7 @@ namespace ReignBetaServer
                 var growing = TestDict("pairKey", "a|b", "objectiveSummary", "They have recently made room for more ordinary conversation.",
                     "aInterpretation", "A feels growing warmth without erasing earlier feelings.", "bInterpretation", "B enjoys their shared interests.");
                 Check("independent_growth_is_allowed", NormalizeSharedRelationshipHistoryCandidate(growing, basis, out _) != null);
-                var oversized = Program.CloneDictionary(growing); oversized["objectiveSummary"] = new string('a', 1201);
+                var oversized = VerificationService.CloneDictionary(growing); oversized["objectiveSummary"] = new string('a', 1201);
                 Check("overlong_history_not_clipped_into_canon", NormalizeSharedRelationshipHistoryCandidate(oversized, basis, out string reason) == null
                     && reason == "overlong_complete_field");
                 Check("fallback_does_not_invent_past_activities", ReadString(DeterministicSharedRelationshipHistory(basis, "fixture"), "objectiveSummary", "")

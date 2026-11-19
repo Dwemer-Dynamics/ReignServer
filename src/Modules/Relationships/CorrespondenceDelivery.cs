@@ -90,7 +90,7 @@ namespace ReignBetaServer
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                     RelationshipsStore.UpdateCorrespondenceDeliveryJobs(connection, TestDict("id", id, "token", token, "generation", generation, "until", DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 120));
             }
-            catch (Exception ex) { Program.LogOperational("correspondence.lease_renew_failed", TestDict("letterId", id, "error", DialogueService.LimitText(ex.Message, 300))); }
+            catch (Exception ex) { OperationsService.LogOperational("correspondence.lease_renew_failed", TestDict("letterId", id, "error", DialogueService.LimitText(ex.Message, 300))); }
         }
 
         private static void ProcessPendingCorrespondence(string campaign, string player, double day, string timeline,
@@ -149,7 +149,7 @@ namespace ReignBetaServer
                         RelationshipsStore.UpdateCorrespondenceDeliveryJobs6(connection, TestDict("id", id, "token", token, "status", ReadInt(job, "attempt_count", 0) >= 2 ? "incomplete" : "failed",
                                 "error", DialogueService.LimitText(ex.Message, 500), "next", DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 30,
                                 "now", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
-                    Program.LogOperational("correspondence.reply_incomplete", TestDict("campaignId", campaign, "letterId", id,
+                    OperationsService.LogOperational("correspondence.reply_incomplete", TestDict("campaignId", campaign, "letterId", id,
                         "attempt", ReadInt(job, "attempt_count", 0), "error", DialogueService.LimitText(ex.Message, 500)));
                 }
             }

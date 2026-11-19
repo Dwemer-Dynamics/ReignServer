@@ -201,7 +201,7 @@ namespace ReignBetaServer
             });
             Check("client_saved_history_and_failed_generation_contract", () =>
             {
-                string client = Path.Combine(Program.FindVerificationSourceRoot(), "ReignBeta");
+                string client = Path.Combine(VerificationService.FindVerificationSourceRoot(), "ReignBeta");
                 // Located by type name (absence and save-id uniqueness are scoped to the owning type) or across all
                 // client source (presence-only markers), never by file path.
                 string behaviorScoped = VerificationSourceLocator.ReadClientTypeSourceText(client, "ReignSocialEventsCampaignBehavior");

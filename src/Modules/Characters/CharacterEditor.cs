@@ -29,7 +29,7 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> CharacterEditorListApi(Dictionary<string, object> payload)
         {
-            payload=payload??new Dictionary<string, object>();string campaign=ReadString(payload,"campaignId",Program.LatestCampaignId());if(string.IsNullOrWhiteSpace(campaign))campaign=Program.LatestCampaignId();string root=Path.Combine(Program.CampaignDirectory(campaign),"characters");List<Dictionary<string, object>> characters=new List<Dictionary<string, object>>();
+            payload=payload??new Dictionary<string, object>();string campaign=ReadString(payload,"campaignId",SettingsService.LatestCampaignId());if(string.IsNullOrWhiteSpace(campaign))campaign=SettingsService.LatestCampaignId();string root=Path.Combine(CampaignFileService.CampaignDirectory(campaign),"characters");List<Dictionary<string, object>> characters=new List<Dictionary<string, object>>();
             Dictionary<string,Dictionary<string,object>> shippedProfiles=LoadCharacterProfileLibrary();
             HashSet<string> characterIds=new HashSet<string>(shippedProfiles.Keys,StringComparer.OrdinalIgnoreCase);
             if(Directory.Exists(root))foreach(string dir in Directory.GetDirectories(root))characterIds.Add(Path.GetFileName(dir));
@@ -40,11 +40,11 @@ namespace ReignBetaServer
                 .ToDictionary(row=>ReadString(row,"hero_id",""),row=>ReadInt(row,"count",0),StringComparer.OrdinalIgnoreCase);
             foreach(string id in characterIds)
             {
-                string dir=Path.Combine(root,id);Dictionary<string, object> profile=Program.ReadJsonObject(Path.Combine(dir,"profile.json"));Dictionary<string, object> constructed=Program.ReadJsonObject(Path.Combine(dir,"constructed.json"));int pending=pendingByHero.TryGetValue(id,out int pendingCount)?pendingCount:0;
+                string dir=Path.Combine(root,id);Dictionary<string, object> profile=CampaignFileService.ReadJsonObject(Path.Combine(dir,"profile.json"));Dictionary<string, object> constructed=CampaignFileService.ReadJsonObject(Path.Combine(dir,"constructed.json"));int pending=pendingByHero.TryGetValue(id,out int pendingCount)?pendingCount:0;
                 profile=WithNarrativeCampaignVersion(campaign,profile);
                 Dictionary<string,object> shipped=null;CharacterProfileLibraryFor(profile).TryGetValue(id,out shipped);
                 Dictionary<string,object> displayProfile=BuildCharacterEditorCanonicalProfile(shipped,profile,id);
-                Dictionary<string, object> library=Program.ReadJsonObject(Path.Combine(dir,"profile_library.json"));Dictionary<string, object> enrichment=Program.ReadJsonObject(Path.Combine(dir,"enrichment.json"));
+                Dictionary<string, object> library=CampaignFileService.ReadJsonObject(Path.Combine(dir,"profile_library.json"));Dictionary<string, object> enrichment=CampaignFileService.ReadJsonObject(Path.Combine(dir,"enrichment.json"));
                 string shippedSource=ReadString(shipped,"source","");
                 string shippedPack=shipped==null?"":ReadString(shipped,"packVersion",CharacterProfilePackVersion);
                 characters.Add(new Dictionary<string, object>{{"heroStringId",id},{"name",ReadString(displayProfile,"name",id)},{"title",ReadFirstString(displayProfile,"title","occupation")},{"occupation",ReadString(displayProfile,"occupation","")},{"clanId",ReadString(displayProfile,"clanId","")},{"kingdomId",ReadString(displayProfile,"kingdomId","")},{"isLord",ReadBool(displayProfile,"isLord",false)},{"isNotable",ReadBool(displayProfile,"isNotable",false)},{"isWanderer",ReadBool(displayProfile,"isWanderer",false)},{"isAlive",ReadBool(displayProfile,"isAlive",true)},{"constructionStatus",ReadString(constructed,"status",shipped==null?"not_constructed":"canonical_ready")},{"profileSource",ReadString(library,"profileSource",shippedSource)},{"profilePackVersion",ReadString(library,"packVersion",shippedPack)},{"enrichmentStatus",ReadString(enrichment,"status",shipped==null?"":"not_required")},{"pendingNativeChanges",pending}});
@@ -55,8 +55,8 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> CharacterEditorLoadApi(Dictionary<string, object> payload)
         {
-            payload=payload??new Dictionary<string, object>();string campaign=ReadString(payload,"campaignId",Program.LatestCampaignId()),hero=ReadFirstString(payload,"heroStringId","heroId");if(string.IsNullOrWhiteSpace(campaign))campaign=Program.LatestCampaignId();if(string.IsNullOrWhiteSpace(hero))return new Dictionary<string, object>{{"ok",false},{"error","heroStringId is required."}};
-            Dictionary<string,object> runtimeProfile=Program.ReadJsonObject(Program.CharacterFile(campaign,hero,"profile.json"));
+            payload=payload??new Dictionary<string, object>();string campaign=ReadString(payload,"campaignId",SettingsService.LatestCampaignId()),hero=ReadFirstString(payload,"heroStringId","heroId");if(string.IsNullOrWhiteSpace(campaign))campaign=SettingsService.LatestCampaignId();if(string.IsNullOrWhiteSpace(hero))return new Dictionary<string, object>{{"ok",false},{"error","heroStringId is required."}};
+            Dictionary<string,object> runtimeProfile=CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign,hero,"profile.json"));
             Dictionary<string,Dictionary<string,object>> shippedProfiles=LoadCharacterProfileLibrary();
             if(shippedProfiles.TryGetValue(hero,out Dictionary<string,object> shipped))
             {
@@ -84,12 +84,12 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> CharacterEditorConstructApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaign = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            string campaign = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
             string hero = ReadFirstString(payload, "heroStringId", "heroId");
-            if (string.IsNullOrWhiteSpace(campaign)) campaign = Program.LatestCampaignId();
+            if (string.IsNullOrWhiteSpace(campaign)) campaign = SettingsService.LatestCampaignId();
             if (string.IsNullOrWhiteSpace(hero)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "heroStringId is required." };
 
-            Dictionary<string, object> profile = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "profile.json"));
+            Dictionary<string, object> profile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "profile.json"));
             if (profile.Count == 0) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The game profile has not been captured for this character." };
 
             Dictionary<string, object> result = CharactersService.ConstructCharacterFiles(
@@ -108,9 +108,9 @@ namespace ReignBetaServer
         {
             RelationshipsService.EnsureConversationRelationshipSchema(c);
             ReputationService.EnsureSocialReputationSchema(c);
-            string dir=Program.CharacterDirectory(campaign,hero);Dictionary<string, object> profileDocument=Program.ReadJsonObject(Path.Combine(dir,"profile.json"));Dictionary<string, object> traitDocument=Program.ReadJsonObject(Path.Combine(dir,"traits.json"));if(traitDocument.Count>0){bool changed=EnsureTraitPercentageData(traitDocument,hero);changed=CourtService.EnsureCourtCharacterData(traitDocument,profileDocument,hero)||changed;changed=EnsurePersonalityPortraitData(traitDocument,ReadString(profileDocument,"name",hero),false)||changed;if(changed)Program.WriteJsonObject(Path.Combine(dir,"traits.json"),traitDocument);}Dictionary<string, object> documents=new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);foreach(string name in EditorDocumentNames)documents[name]=name=="traits"?traitDocument:name=="profile"?profileDocument:name=="wealth"?ResolveWealthDocument(campaign,hero,profileDocument):Program.ReadJsonObject(Path.Combine(dir,name+".json"));
+            string dir=CampaignFileService.CharacterDirectory(campaign,hero);Dictionary<string, object> profileDocument=CampaignFileService.ReadJsonObject(Path.Combine(dir,"profile.json"));Dictionary<string, object> traitDocument=CampaignFileService.ReadJsonObject(Path.Combine(dir,"traits.json"));if(traitDocument.Count>0){bool changed=EnsureTraitPercentageData(traitDocument,hero);changed=CourtService.EnsureCourtCharacterData(traitDocument,profileDocument,hero)||changed;changed=EnsurePersonalityPortraitData(traitDocument,ReadString(profileDocument,"name",hero),false)||changed;if(changed)CampaignFileService.WriteJsonObject(Path.Combine(dir,"traits.json"),traitDocument);}Dictionary<string, object> documents=new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);foreach(string name in EditorDocumentNames)documents[name]=name=="traits"?traitDocument:name=="profile"?profileDocument:name=="wealth"?ResolveWealthDocument(campaign,hero,profileDocument):CampaignFileService.ReadJsonObject(Path.Combine(dir,name+".json"));
             Dictionary<string, object> history=new Dictionary<string, object>{{"dialogue",Program.ReadJsonLinesFromPath(Path.Combine(dir,"history","dialogue.jsonl"))},{"events",Program.ReadJsonLinesFromPath(Path.Combine(dir,"history","events.jsonl"))},{"decisions",Program.ReadJsonLinesFromPath(Path.Combine(dir,"history","decisions.jsonl"))}};
-            Dictionary<string, object> memoryFiles=new Dictionary<string, object>{{"summary",Program.ReadJsonObject(Path.Combine(dir,"memory","summary.json"))},{"relationships",Program.ReadJsonObject(Path.Combine(dir,"memory","relationships.json"))},{"memories",Program.ReadJsonLinesFromPath(Path.Combine(dir,"memory","memories.jsonl"))}};
+            Dictionary<string, object> memoryFiles=new Dictionary<string, object>{{"summary",CampaignFileService.ReadJsonObject(Path.Combine(dir,"memory","summary.json"))},{"relationships",CampaignFileService.ReadJsonObject(Path.Combine(dir,"memory","relationships.json"))},{"memories",Program.ReadJsonLinesFromPath(Path.Combine(dir,"memory","memories.jsonl"))}};
             Dictionary<string, object> profile=ReadDictionary(documents,"profile")??new Dictionary<string, object>();DialogueService.KnowledgeAccessContext knowledge=DialogueService.BuildKnowledgeAccessContext(hero,ReadFirstString(profile,"mainHeroStringId","playerHeroStringId"),ReadFirstString(profile,"currentSettlementId","settlementId"),profile);
             List<Dictionary<string, object>> relationshipNetwork=BuildCharacterEditorRelationshipNetwork(campaign,hero,c,profile);
             Dictionary<string, object> records=new Dictionary<string, object>
@@ -142,11 +142,11 @@ namespace ReignBetaServer
             var narrative = ReadDictionary(documents, "narrative");
             if (NarrativeDocumentReady(narrative))
                 documents["narrative"] = ResolveEffectiveNarrative(new Dictionary<string, object> {
-                    ["narrative"] = narrative, ["dynamicCharacteristics"] = Program.ReadJsonObject(Path.Combine(dir, "dynamic_characteristics.json")) });
+                    ["narrative"] = narrative, ["dynamicCharacteristics"] = CampaignFileService.ReadJsonObject(Path.Combine(dir, "dynamic_characteristics.json")) });
             List<Dictionary<string, object>> revisions=CharactersStore.SelectCharacterEditorRevisions(c, new Dictionary<string, object>{{"id",hero}});
             List<Dictionary<string, object>> commands=CharactersStore.SelectCharacterEditorNativeCommands2(c, new Dictionary<string, object>{{"id",hero}});
             Dictionary<string, object> mbtiProfile=RelationshipsService.ResolveCharacterMbtiProfile(campaign,hero,profileDocument,traitDocument);
-            return new Dictionary<string, object>{{"campaignId",campaign},{"heroStringId",hero},{"documents",documents},{"profileLibrary",Program.ReadJsonObject(Path.Combine(dir,"profile_library.json"))},{"campaignProfileOverlay",Program.ReadJsonObject(Path.Combine(dir,"campaign_profile_overlay.json"))},{"enrichment",Program.ReadJsonObject(Path.Combine(dir,"enrichment.json"))},{"memoryFiles",memoryFiles},{"history",history},{"records",records},{"socialStanding",ReputationService.CharacterSocialStandingProjection(c,campaign,hero)},{"portraits",CharacterEditorPortraitInventory(campaign,hero)},{"revisions",revisions},{"nativeCommands",commands},{"traitDefinitions",TraitDefinitions()},{"traitKeys",CoreTraitKeys.ToList()},{"courtVirtueKeys",CourtVirtueKeys.ToList()},{"mbtiProfile",mbtiProfile},{"mbtiType",ReadString(mbtiProfile,"type","XXXX")},{"storageBytes",DirectorySize(dir)}};
+            return new Dictionary<string, object>{{"campaignId",campaign},{"heroStringId",hero},{"documents",documents},{"profileLibrary",CampaignFileService.ReadJsonObject(Path.Combine(dir,"profile_library.json"))},{"campaignProfileOverlay",CampaignFileService.ReadJsonObject(Path.Combine(dir,"campaign_profile_overlay.json"))},{"enrichment",CampaignFileService.ReadJsonObject(Path.Combine(dir,"enrichment.json"))},{"memoryFiles",memoryFiles},{"history",history},{"records",records},{"socialStanding",ReputationService.CharacterSocialStandingProjection(c,campaign,hero)},{"portraits",CharacterEditorPortraitInventory(campaign,hero)},{"revisions",revisions},{"nativeCommands",commands},{"traitDefinitions",TraitDefinitions()},{"traitKeys",CoreTraitKeys.ToList()},{"courtVirtueKeys",CourtVirtueKeys.ToList()},{"mbtiProfile",mbtiProfile},{"mbtiType",ReadString(mbtiProfile,"type","XXXX")},{"storageBytes",DirectorySize(dir)}};
         }
 
         private static List<Dictionary<string, object>> BuildCharacterEditorRelationshipNetwork(
@@ -158,7 +158,7 @@ namespace ReignBetaServer
             bool hasPlayerChemistry = !string.IsNullOrWhiteSpace(playerId) && CharactersStore.SelectRelationshipPairChemistry(connection, new Dictionary<string, object> { ["pair"] = RelationshipsService.AmbientPairKey(hero, playerId) }).Count > 0;
             if (!string.IsNullOrWhiteSpace(playerId) && !playerId.Equals(hero, StringComparison.OrdinalIgnoreCase) && !hasPlayerChemistry)
             {
-                Dictionary<string, object> playerProfile = Program.ReadJsonObject(Program.CharacterFile(campaign, playerId, "profile.json"));
+                Dictionary<string, object> playerProfile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, playerId, "profile.json"));
                 result.Add(new Dictionary<string, object>
                 {
                     ["otherHeroId"] = playerId,
@@ -168,7 +168,7 @@ namespace ReignBetaServer
                     ["reverseAffinity"] = "",
                     ["nativeRelation"] = ReadInt(profile, "relationToPlayer", 0),
                     ["observerMbti"] = ReadString(RelationshipsService.ResolveCharacterMbtiProfile(
-                        campaign, hero, profile, Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "traits.json"))),
+                        campaign, hero, profile, CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "traits.json"))),
                         "type", "XXXX"),
                     ["otherMbti"] = "",
                     ["compatibilityChance"] = "",
@@ -180,7 +180,7 @@ namespace ReignBetaServer
                 bool observerIsA = ReadString(row, "hero_a_id", "").Equals(hero, StringComparison.OrdinalIgnoreCase);
                 string otherId = ReadString(row, observerIsA ? "hero_b_id" : "hero_a_id", "");
                 if (string.IsNullOrWhiteSpace(otherId)) continue;
-                Dictionary<string, object> otherProfile = Program.ReadJsonObject(Program.CharacterFile(campaign, otherId, "profile.json"));
+                Dictionary<string, object> otherProfile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, otherId, "profile.json"));
                 Dictionary<string, object> lifecycle = RelationshipsService.RelationshipLifecycleView(connection, hero, otherId);
                 result.Add(new Dictionary<string, object>
                 {
@@ -213,7 +213,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> CharacterEditorSaveApiLocked(Dictionary<string, object> payload)
         {
-            payload=payload??new Dictionary<string, object>();string campaign=ReadString(payload,"campaignId",Program.LatestCampaignId()),hero=ReadFirstString(payload,"heroStringId","heroId"),section=ReadString(payload,"section","all"),token=ReadString(payload,"revisionToken","");if(string.IsNullOrWhiteSpace(campaign))campaign=Program.LatestCampaignId();if(string.IsNullOrWhiteSpace(hero))return new Dictionary<string, object>{{"ok",false},{"error","heroStringId is required."}};
+            payload=payload??new Dictionary<string, object>();string campaign=ReadString(payload,"campaignId",SettingsService.LatestCampaignId()),hero=ReadFirstString(payload,"heroStringId","heroId"),section=ReadString(payload,"section","all"),token=ReadString(payload,"revisionToken","");if(string.IsNullOrWhiteSpace(campaign))campaign=SettingsService.LatestCampaignId();if(string.IsNullOrWhiteSpace(hero))return new Dictionary<string, object>{{"ok",false},{"error","heroStringId is required."}};
             using(ReignDbConnection c=ReignDatabase.OpenCampaignConnection(campaign))
             {
                 Dictionary<string, object> head=CharactersStore.SelectCharacterEditorHeads(c, new Dictionary<string, object>{{"id",hero}}).FirstOrDefault();string current=ReadString(head,"revision_token","");if(!string.IsNullOrWhiteSpace(current)&&!string.Equals(token,current,StringComparison.Ordinal))return new Dictionary<string, object>{{"ok",false},{"conflict",true},{"error","This character changed after it was loaded. Reload to compare before saving."},{"currentRevisionToken",current}};
@@ -222,8 +222,8 @@ namespace ReignBetaServer
                 string revision="editor_revision_"+Guid.NewGuid().ToString("N");long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();string job="editor_reconcile_"+Guid.NewGuid().ToString("N");ReconcileCharacterEditor(campaign,hero,c,section,job,revision);
                 Dictionary<string, object> after=BuildCharacterEditorSnapshot(campaign,hero,c);string next=ComputeEditorToken(after);CharactersStore.InsertCharacterEditorRevisions(c, new Dictionary<string, object>{{"revision",revision},{"hero",hero},{"section",section},{"description",ReadString(payload,"description","Character Editor save")},{"before",Json.Serialize(before)},{"after",Json.Serialize(after)},{"native",Json.Serialize(native)},{"reconcile",Json.Serialize(new Dictionary<string, object>{{"jobId",job},{"status","completed"}})},{"ts",ts}});
                 if(native.Count>0)CharactersStore.InsertCharacterEditorNativeCommands(c, new Dictionary<string, object>{{"id","editor_command_"+Guid.NewGuid().ToString("N")},{"revision",revision},{"hero",hero},{"changes",Json.Serialize(native)},{"inverse",Json.Serialize(inverse)},{"dangerous",ReadBool(payload,"dangerous",false)?1:0},{"confirmation",ReadString(payload,"confirmation","")},{"ts",ts}});
-                CharactersStore.UpsertCharacterEditorHeads2(c, new Dictionary<string, object>{{"hero",hero},{"token",next},{"revision",revision},{"ts",ts}});Program.LogOperational("character_editor.save",new Dictionary<string, object>{{"campaignId",campaign},{"heroStringId",hero},{"section",section},{"revisionId",revision},{"nativeChangeCount",native.Count}});
-                Program.WriteJsonObject(Program.CharacterFile(campaign,hero,"editor_authority.json"),new Dictionary<string, object>{{"version",1},{"authoritative",true},{"latestRevisionId",revision},{"updatedUtc",DateTime.UtcNow.ToString("o")}});
+                CharactersStore.UpsertCharacterEditorHeads2(c, new Dictionary<string, object>{{"hero",hero},{"token",next},{"revision",revision},{"ts",ts}});OperationsService.LogOperational("character_editor.save",new Dictionary<string, object>{{"campaignId",campaign},{"heroStringId",hero},{"section",section},{"revisionId",revision},{"nativeChangeCount",native.Count}});
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign,hero,"editor_authority.json"),new Dictionary<string, object>{{"version",1},{"authoritative",true},{"latestRevisionId",revision},{"updatedUtc",DateTime.UtcNow.ToString("o")}});
                 return new Dictionary<string, object>{{"ok",true},{"revisionId",revision},{"revisionToken",next},{"reconciliationJobId",job},{"nativeQueued",native.Count>0},{"message","Server changes were saved. Native Bannerlord changes will be applied the next time this savegame is loaded."}};
             }
         }
@@ -235,7 +235,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> CharacterEditorRollbackApiLocked(Dictionary<string, object> payload)
         {
-            string campaign=ReadString(payload,"campaignId",Program.LatestCampaignId()),hero=ReadFirstString(payload,"heroStringId","heroId"),revision=ReadFirstString(payload,"revisionId","revision_id");using(ReignDbConnection c=ReignDatabase.OpenCampaignConnection(campaign)){Dictionary<string, object> row=CharactersStore.SelectCharacterEditorRevisions2(c, new Dictionary<string, object>{{"revision",revision},{"hero",hero}}).FirstOrDefault();if(row==null)return new Dictionary<string, object>{{"ok",false},{"error","Revision was not found."}};Dictionary<string, object> snapshot=TryParseJsonObject(ReadString(row,"before_json","{}"))??new Dictionary<string, object>();ApplyEditorSnapshot(campaign,hero,c,snapshot);string newRevision="editor_revision_"+Guid.NewGuid().ToString("N");long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();Dictionary<string, object> inverse=TryParseJsonObject(ReadString(CharactersStore.SelectCharacterEditorNativeCommands3(c, new Dictionary<string, object>{{"id",revision}}).FirstOrDefault(),"inverse_json","{}"))??new Dictionary<string, object>();if(inverse.Count>0)CharactersStore.InsertCharacterEditorNativeCommands2(c, new Dictionary<string, object>{{"id","editor_command_"+Guid.NewGuid().ToString("N")},{"revision",newRevision},{"hero",hero},{"changes",Json.Serialize(inverse)},{"ts",ts}});Dictionary<string, object> after=BuildCharacterEditorSnapshot(campaign,hero,c);string token=ComputeEditorToken(after);CharactersStore.InsertCharacterEditorRevisions2(c, new Dictionary<string, object>{{"id",newRevision},{"hero",hero},{"description","Rollback of "+revision},{"before",ReadString(row,"after_json","{}")},{"after",Json.Serialize(after)},{"native",Json.Serialize(inverse)},{"rollback",revision},{"ts",ts}});CharactersStore.UpsertCharacterEditorHeads2(c, new Dictionary<string, object>{{"hero",hero},{"token",token},{"revision",newRevision},{"ts",ts}});ReconcileCharacterEditor(campaign,hero,c,"rollback","editor_reconcile_"+Guid.NewGuid().ToString("N"),newRevision);return new Dictionary<string, object>{{"ok",true},{"revisionId",newRevision},{"revisionToken",token},{"message","Revision restored. Any native rollback changes will be applied the next time this savegame is loaded."}};}}
+            string campaign=ReadString(payload,"campaignId",SettingsService.LatestCampaignId()),hero=ReadFirstString(payload,"heroStringId","heroId"),revision=ReadFirstString(payload,"revisionId","revision_id");using(ReignDbConnection c=ReignDatabase.OpenCampaignConnection(campaign)){Dictionary<string, object> row=CharactersStore.SelectCharacterEditorRevisions2(c, new Dictionary<string, object>{{"revision",revision},{"hero",hero}}).FirstOrDefault();if(row==null)return new Dictionary<string, object>{{"ok",false},{"error","Revision was not found."}};Dictionary<string, object> snapshot=TryParseJsonObject(ReadString(row,"before_json","{}"))??new Dictionary<string, object>();ApplyEditorSnapshot(campaign,hero,c,snapshot);string newRevision="editor_revision_"+Guid.NewGuid().ToString("N");long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();Dictionary<string, object> inverse=TryParseJsonObject(ReadString(CharactersStore.SelectCharacterEditorNativeCommands3(c, new Dictionary<string, object>{{"id",revision}}).FirstOrDefault(),"inverse_json","{}"))??new Dictionary<string, object>();if(inverse.Count>0)CharactersStore.InsertCharacterEditorNativeCommands2(c, new Dictionary<string, object>{{"id","editor_command_"+Guid.NewGuid().ToString("N")},{"revision",newRevision},{"hero",hero},{"changes",Json.Serialize(inverse)},{"ts",ts}});Dictionary<string, object> after=BuildCharacterEditorSnapshot(campaign,hero,c);string token=ComputeEditorToken(after);CharactersStore.InsertCharacterEditorRevisions2(c, new Dictionary<string, object>{{"id",newRevision},{"hero",hero},{"description","Rollback of "+revision},{"before",ReadString(row,"after_json","{}")},{"after",Json.Serialize(after)},{"native",Json.Serialize(inverse)},{"rollback",revision},{"ts",ts}});CharactersStore.UpsertCharacterEditorHeads2(c, new Dictionary<string, object>{{"hero",hero},{"token",token},{"revision",newRevision},{"ts",ts}});ReconcileCharacterEditor(campaign,hero,c,"rollback","editor_reconcile_"+Guid.NewGuid().ToString("N"),newRevision);return new Dictionary<string, object>{{"ok",true},{"revisionId",newRevision},{"revisionToken",token},{"message","Revision restored. Any native rollback changes will be applied the next time this savegame is loaded."}};}}
 
         internal static Dictionary<string, object> CharacterEditorNativePollApi(Dictionary<string, object> payload){string campaign=ReadString(payload,"campaignId","default");using(ReignDbConnection c=ReignDatabase.OpenCampaignConnection(campaign)){long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();List<Dictionary<string, object>> rows=CharactersStore.SelectCharacterEditorNativeCommands4(c, new Dictionary<string, object>{{"stale",ts-300}});foreach(Dictionary<string, object> row in rows){CharactersStore.UpdateCharacterEditorNativeCommands(c, new Dictionary<string, object>{{"ts",ts},{"id",ReadString(row,"command_id","")}});row["changes"]=TryParseJsonObject(ReadString(row,"changes_json","{}"))??new Dictionary<string, object>();}return new Dictionary<string, object>{{"ok",true},{"commands",rows}};}}
         internal static Dictionary<string, object> CharacterEditorNativeReportApi(
@@ -258,8 +258,8 @@ namespace ReignBetaServer
                     || status == "partially_applied"))
                 {
                     string hero = ReadString(command, "hero_id", "");
-                    Dictionary<string, object> profile = Program.ReadJsonObject(
-                        Program.CharacterFile(campaign, hero, "profile.json"));
+                    Dictionary<string, object> profile = CampaignFileService.ReadJsonObject(
+                        CampaignFileService.CharacterFile(campaign, hero, "profile.json"));
                     Dictionary<string, object> changes = TryParseJsonObject(
                         ReadString(command, "changes_json", "{}"))
                         ?? new Dictionary<string, object>();
@@ -270,9 +270,9 @@ namespace ReignBetaServer
                                 StringComparison.OrdinalIgnoreCase))
                             profile[key] = changes[key];
                     profile["updatedUtc"] = DateTime.UtcNow.ToString("o");
-                    Program.WriteJsonObject(Program.CharacterFile(campaign, hero,
+                    CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, hero,
                         "profile.json"), profile);
-                    Program.UpdateCharacterIndex(campaign, profile);
+                    CampaignFileService.UpdateCharacterIndex(campaign, profile);
 
                     if (ReadString(command, "confirmation", "")
                             .Equals("automatic_notable_mbti_sync",
@@ -301,8 +301,8 @@ namespace ReignBetaServer
         private static string ComputeEditorToken(Dictionary<string, object> snapshot){using(SHA256 sha=SHA256.Create()){byte[] hash=sha.ComputeHash(Encoding.UTF8.GetBytes(Json.Serialize(snapshot??new Dictionary<string, object>())));return BitConverter.ToString(hash).Replace("-","").ToLowerInvariant();}}
         private static long DirectorySize(string path){try{return Directory.Exists(path)?Directory.GetFiles(path,"*",SearchOption.AllDirectories).Sum(x=>new FileInfo(x).Length):0;}catch{return 0;}}
 
-        private static void ApplyEditorDocuments(string campaign,string hero,Dictionary<string, object> documents){if(documents==null)return;PrepareEditorNarrative(campaign,hero,documents);Dictionary<string,object> incomingProfile=ReadDictionary(documents,"profile")??Program.ReadJsonObject(Program.CharacterFile(campaign,hero,"profile.json"));foreach(string name in EditorDocumentNames){Dictionary<string, object> value=ReadDictionary(documents,name);if(value==null)continue;if(name=="profile"){string id=ReadFirstString(value,"heroStringId","heroId");if(!string.IsNullOrWhiteSpace(id)&&!id.Equals(hero,StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("Canonical heroStringId cannot be changed.");value["heroStringId"]=hero;}if(name=="traits"){MarkEditorFoundationTraitsCurrent(value);EnsureTraitPercentageData(value,hero);CourtService.EnsureCourtCharacterData(value,incomingProfile,hero);EnsurePersonalityPortraitData(value,ReadString(incomingProfile,"name",hero),false);}Program.WriteJsonObject(Program.CharacterFile(campaign,hero,name+".json"),value);}Dictionary<string, object> profile=Program.ReadJsonObject(Program.CharacterFile(campaign,hero,"profile.json"));if(profile.Count>0)Program.UpdateCharacterIndex(campaign,profile);ReconcileEditedNarrative(campaign,hero);DialogueService.InvalidatePromptRuntimeCache();}
-        private static void ApplyEditorHistory(string campaign,string hero,Dictionary<string, object> history){if(history==null)return;foreach(string name in new[]{"dialogue","events","decisions"}){List<Dictionary<string, object>> rows=ReadDictionaryList(history,name);if(!history.ContainsKey(name))continue;WriteEditorJsonLines(Program.CharacterFile(campaign,hero,"history",name+".jsonl"),rows);}if(history.ContainsKey("dialogue")){using(ReignDbConnection c=ReignDatabase.OpenCampaignConnection(campaign))SyncEditorConversationTurns(c,hero,ReadDictionaryList(history,"dialogue"));}}
+        private static void ApplyEditorDocuments(string campaign,string hero,Dictionary<string, object> documents){if(documents==null)return;PrepareEditorNarrative(campaign,hero,documents);Dictionary<string,object> incomingProfile=ReadDictionary(documents,"profile")??CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign,hero,"profile.json"));foreach(string name in EditorDocumentNames){Dictionary<string, object> value=ReadDictionary(documents,name);if(value==null)continue;if(name=="profile"){string id=ReadFirstString(value,"heroStringId","heroId");if(!string.IsNullOrWhiteSpace(id)&&!id.Equals(hero,StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("Canonical heroStringId cannot be changed.");value["heroStringId"]=hero;}if(name=="traits"){MarkEditorFoundationTraitsCurrent(value);EnsureTraitPercentageData(value,hero);CourtService.EnsureCourtCharacterData(value,incomingProfile,hero);EnsurePersonalityPortraitData(value,ReadString(incomingProfile,"name",hero),false);}CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign,hero,name+".json"),value);}Dictionary<string, object> profile=CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign,hero,"profile.json"));if(profile.Count>0)CampaignFileService.UpdateCharacterIndex(campaign,profile);ReconcileEditedNarrative(campaign,hero);DialogueService.InvalidatePromptRuntimeCache();}
+        private static void ApplyEditorHistory(string campaign,string hero,Dictionary<string, object> history){if(history==null)return;foreach(string name in new[]{"dialogue","events","decisions"}){List<Dictionary<string, object>> rows=ReadDictionaryList(history,name);if(!history.ContainsKey(name))continue;WriteEditorJsonLines(CampaignFileService.CharacterFile(campaign,hero,"history",name+".jsonl"),rows);}if(history.ContainsKey("dialogue")){using(ReignDbConnection c=ReignDatabase.OpenCampaignConnection(campaign))SyncEditorConversationTurns(c,hero,ReadDictionaryList(history,"dialogue"));}}
         private static void WriteEditorJsonLines(string path,List<Dictionary<string, object>> rows){lock(Program.FileLock){Directory.CreateDirectory(Path.GetDirectoryName(path));File.WriteAllLines(path,(rows??new List<Dictionary<string, object>>()).Select(Json.Serialize),Encoding.UTF8);}}
         private static void ApplyEditorRecords(ReignDbConnection c,string hero,Dictionary<string, object> records){if(records==null)return;foreach(Tuple<string,string,string> spec in new[]{Tuple.Create("worldEvents","events","event_id"),Tuple.Create("knowledgeReceipts","knowledge_receipts","receipt_id"),Tuple.Create("conversationSessions","conversation_sessions","session_id"),Tuple.Create("conversationTurns","conversation_turns","turn_id"),Tuple.Create("beliefs","beliefs","belief_id"),Tuple.Create("comprehension","comprehension","comprehension_id"),Tuple.Create("obligations","obligations","obligation_id"),Tuple.Create("summaries","summaries","summary_id"),Tuple.Create("memories","memories","memory_id"),Tuple.Create("letters","letters","letter_id"),Tuple.Create("conceptions","conceptions","conception_id"),Tuple.Create("parentage","parentage","child_id")})ApplyEditableRecordRows(c,spec.Item1,spec.Item2,spec.Item3,records);}
 
@@ -344,7 +344,7 @@ namespace ReignBetaServer
             foreach(long ts in timestamps)
             {
                 List<string> eventIds=CharactersStore.SelectEvents(c, new Dictionary<string, object>{{"ts",ts}}).Select(x=>ReadString(x,"event_id","")).Where(x=>!string.IsNullOrWhiteSpace(x)).ToList();foreach(string eventId in eventIds)CharactersStore.UpdateMemories(c, new Dictionary<string, object>{{"event",eventId}});
-                List<Dictionary<string, object>> lines=ReadDictionaryList(history,"dialogue").Concat(ReadDictionaryList(history,"events")).Where(x=>ReadLong(x,"ts",0)==ts).ToList();if(lines.Count==0)continue;string summary=string.Join("\n",lines.Select(x=>ReadString(x,"speaker",ReadString(x,"role",""))+": "+ReadString(x,"text","")));Dictionary<string, object> profile=Program.ReadJsonObject(Program.CharacterFile(campaign,hero,"profile.json"));DialogueService.StoreWorldMemoryEvent(new Dictionary<string, object>{{"campaignId",campaign},{"eventId","editor_history_"+hero+"_"+ts},{"ts",ts},{"eventType","edited_conversation"},{"summary",summary},{"participants",new[]{hero,ReadFirstString(profile,"mainHeroStringId","playerHeroStringId") }},{"known_by",new[]{hero,ReadFirstString(profile,"mainHeroStringId","playerHeroStringId") }},{"visibility","private"},{"importance",0.6d},{"source","character_editor_rebuild"}},"character_editor_rebuild");
+                List<Dictionary<string, object>> lines=ReadDictionaryList(history,"dialogue").Concat(ReadDictionaryList(history,"events")).Where(x=>ReadLong(x,"ts",0)==ts).ToList();if(lines.Count==0)continue;string summary=string.Join("\n",lines.Select(x=>ReadString(x,"speaker",ReadString(x,"role",""))+": "+ReadString(x,"text","")));Dictionary<string, object> profile=CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign,hero,"profile.json"));DialogueService.StoreWorldMemoryEvent(new Dictionary<string, object>{{"campaignId",campaign},{"eventId","editor_history_"+hero+"_"+ts},{"ts",ts},{"eventType","edited_conversation"},{"summary",summary},{"participants",new[]{hero,ReadFirstString(profile,"mainHeroStringId","playerHeroStringId") }},{"known_by",new[]{hero,ReadFirstString(profile,"mainHeroStringId","playerHeroStringId") }},{"visibility","private"},{"importance",0.6d},{"source","character_editor_rebuild"}},"character_editor_rebuild");
             }
         }
 
@@ -354,7 +354,7 @@ namespace ReignBetaServer
             if(string.IsNullOrWhiteSpace(hero))return folders;string root=CharacterEditorPortraitCacheRoot();
             if(!string.IsNullOrWhiteSpace(root)) foreach(string scope in new[]{"_shared",campaign}.Where(x=>!string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                string dir=Path.Combine(root,Program.SafePathSegment(scope,"default"));if(!Directory.Exists(dir))continue;try{string suffix="("+hero+")";string match=Directory.GetDirectories(dir).FirstOrDefault(x=>Path.GetFileName(x).EndsWith(suffix,StringComparison.OrdinalIgnoreCase));if(!string.IsNullOrWhiteSpace(match))folders.Add(new KeyValuePair<string,string>(scope=="_shared"?"shared":"campaign",match));}catch{}
+                string dir=Path.Combine(root,CampaignFileService.SafePathSegment(scope,"default"));if(!Directory.Exists(dir))continue;try{string suffix="("+hero+")";string match=Directory.GetDirectories(dir).FirstOrDefault(x=>Path.GetFileName(x).EndsWith(suffix,StringComparison.OrdinalIgnoreCase));if(!string.IsNullOrWhiteSpace(match))folders.Add(new KeyValuePair<string,string>(scope=="_shared"?"shared":"campaign",match));}catch{}
             }
             // Generated campaign portraits live with private server data; the installed module owns shared portraits.
             string campaignCache=PersistenceService.CampaignPortraitCacheDirectory(campaign);
@@ -375,7 +375,7 @@ namespace ReignBetaServer
 
         internal static string ResolveCharacterEditorPortraitPath(string campaign,string hero,string variant)
         {
-            string serverDir=Program.CharacterFile(campaign,hero,"portraits");variant=Program.SafePathSegment(variant,"active").ToLowerInvariant();List<KeyValuePair<string,string>> locations=CharacterEditorGameCacheFolders(campaign,hero);locations.Add(new KeyValuePair<string,string>("server",serverDir));
+            string serverDir=CampaignFileService.CharacterFile(campaign,hero,"portraits");variant=CampaignFileService.SafePathSegment(variant,"active").ToLowerInvariant();List<KeyValuePair<string,string>> locations=CharacterEditorGameCacheFolders(campaign,hero);locations.Add(new KeyValuePair<string,string>("server",serverDir));
             if(variant=="active")
             {
                 foreach(string preferred in new[]{"portrait","custom","source"})
@@ -406,7 +406,7 @@ namespace ReignBetaServer
 
         private static List<Dictionary<string, object>> CharacterEditorPortraitInventory(string campaign,string hero)
         {
-            List<KeyValuePair<string,string>> locations=CharacterEditorGameCacheFolders(campaign,hero);locations.Add(new KeyValuePair<string,string>("server",Program.CharacterFile(campaign,hero,"portraits")));return CharacterEditorPortraitInventoryFromLocations(campaign,hero,locations);
+            List<KeyValuePair<string,string>> locations=CharacterEditorGameCacheFolders(campaign,hero);locations.Add(new KeyValuePair<string,string>("server",CampaignFileService.CharacterFile(campaign,hero,"portraits")));return CharacterEditorPortraitInventoryFromLocations(campaign,hero,locations);
         }
 
         private static List<Dictionary<string, object>> CharacterEditorPortraitInventoryFromLocations(string campaign,string hero,List<KeyValuePair<string,string>> locations)
@@ -423,12 +423,12 @@ namespace ReignBetaServer
             return variants.Values.OrderBy(x=>ReadString(x,"variant","").Equals("portrait",StringComparison.OrdinalIgnoreCase)?0:ReadString(x,"variant","").Equals("custom",StringComparison.OrdinalIgnoreCase)?1:ReadString(x,"variant","").Equals("source",StringComparison.OrdinalIgnoreCase)?3:2).ThenBy(x=>ReadString(x,"variant",""),StringComparer.OrdinalIgnoreCase).ToList();
         }
 
-        internal static Dictionary<string, object> CharacterEditorPortraitUploadApi(Dictionary<string, object> payload){string campaign=ReadString(payload,"campaignId",Program.LatestCampaignId()),hero=ReadFirstString(payload,"heroStringId","heroId"),data=ReadString(payload,"dataUrl",""),name=Program.SafePathSegment(ReadString(payload,"fileName","custom.png"),"custom.png");int comma=data.IndexOf(',');if(comma>=0)data=data.Substring(comma+1);byte[] bytes;try{bytes=Convert.FromBase64String(data);}catch{return new Dictionary<string, object>{{"ok",false},{"error","The uploaded image was not valid."}};}if(bytes.Length>15*1024*1024)return new Dictionary<string, object>{{"ok",false},{"error","Portrait must be 15 MB or smaller."}};string version="custom_"+DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture)+".png",path=Program.CharacterFile(campaign,hero,"portraits",version);lock(Program.FileLock){Directory.CreateDirectory(Path.GetDirectoryName(path));File.WriteAllBytes(path,bytes);}return new Dictionary<string, object>{{"ok",true},{"variant",Path.GetFileNameWithoutExtension(version)},{"portraits",CharacterEditorPortraitInventory(campaign,hero)}};}
-        internal static Dictionary<string, object> CharacterEditorPortraitSelectApi(Dictionary<string, object> payload){string campaign=ReadString(payload,"campaignId",Program.LatestCampaignId()),hero=ReadFirstString(payload,"heroStringId","heroId"),variant=Program.SafePathSegment(ReadString(payload,"variant",""),"");string source=ResolveCharacterEditorPortraitPath(campaign,hero,variant),active=Program.CharacterFile(campaign,hero,"portraits","portrait.png");if(!File.Exists(source))return new Dictionary<string, object>{{"ok",false},{"error","Portrait variant was not found."}};lock(Program.FileLock){if(File.Exists(active)&&!string.Equals(Path.GetFullPath(active),Path.GetFullPath(source),StringComparison.OrdinalIgnoreCase))File.Copy(active,Program.CharacterFile(campaign,hero,"portraits","active_"+DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()+".png"),true);if(!string.Equals(Path.GetFullPath(active),Path.GetFullPath(source),StringComparison.OrdinalIgnoreCase)){Directory.CreateDirectory(Path.GetDirectoryName(active));File.Copy(source,active,true);}}Program.WriteJsonObject(Program.CharacterFile(campaign,hero,"portraits","portrait.json"),new Dictionary<string, object>{{"campaignId",campaign},{"heroStringId",hero},{"activeVariant",variant},{"source",source.IndexOf("PortraitCache",StringComparison.OrdinalIgnoreCase)>=0?"game_cache":"server"},{"updatedUtc",DateTime.UtcNow.ToString("o")}});return new Dictionary<string, object>{{"ok",true},{"activeUrl","/character-editor/portrait?campaignId="+Uri.EscapeDataString(campaign)+"&heroStringId="+Uri.EscapeDataString(hero)+"&variant=active"}};}
+        internal static Dictionary<string, object> CharacterEditorPortraitUploadApi(Dictionary<string, object> payload){string campaign=ReadString(payload,"campaignId",SettingsService.LatestCampaignId()),hero=ReadFirstString(payload,"heroStringId","heroId"),data=ReadString(payload,"dataUrl",""),name=CampaignFileService.SafePathSegment(ReadString(payload,"fileName","custom.png"),"custom.png");int comma=data.IndexOf(',');if(comma>=0)data=data.Substring(comma+1);byte[] bytes;try{bytes=Convert.FromBase64String(data);}catch{return new Dictionary<string, object>{{"ok",false},{"error","The uploaded image was not valid."}};}if(bytes.Length>15*1024*1024)return new Dictionary<string, object>{{"ok",false},{"error","Portrait must be 15 MB or smaller."}};string version="custom_"+DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture)+".png",path=CampaignFileService.CharacterFile(campaign,hero,"portraits",version);lock(Program.FileLock){Directory.CreateDirectory(Path.GetDirectoryName(path));File.WriteAllBytes(path,bytes);}return new Dictionary<string, object>{{"ok",true},{"variant",Path.GetFileNameWithoutExtension(version)},{"portraits",CharacterEditorPortraitInventory(campaign,hero)}};}
+        internal static Dictionary<string, object> CharacterEditorPortraitSelectApi(Dictionary<string, object> payload){string campaign=ReadString(payload,"campaignId",SettingsService.LatestCampaignId()),hero=ReadFirstString(payload,"heroStringId","heroId"),variant=CampaignFileService.SafePathSegment(ReadString(payload,"variant",""),"");string source=ResolveCharacterEditorPortraitPath(campaign,hero,variant),active=CampaignFileService.CharacterFile(campaign,hero,"portraits","portrait.png");if(!File.Exists(source))return new Dictionary<string, object>{{"ok",false},{"error","Portrait variant was not found."}};lock(Program.FileLock){if(File.Exists(active)&&!string.Equals(Path.GetFullPath(active),Path.GetFullPath(source),StringComparison.OrdinalIgnoreCase))File.Copy(active,CampaignFileService.CharacterFile(campaign,hero,"portraits","active_"+DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()+".png"),true);if(!string.Equals(Path.GetFullPath(active),Path.GetFullPath(source),StringComparison.OrdinalIgnoreCase)){Directory.CreateDirectory(Path.GetDirectoryName(active));File.Copy(source,active,true);}}CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign,hero,"portraits","portrait.json"),new Dictionary<string, object>{{"campaignId",campaign},{"heroStringId",hero},{"activeVariant",variant},{"source",source.IndexOf("PortraitCache",StringComparison.OrdinalIgnoreCase)>=0?"game_cache":"server"},{"updatedUtc",DateTime.UtcNow.ToString("o")}});return new Dictionary<string, object>{{"ok",true},{"activeUrl","/character-editor/portrait?campaignId="+Uri.EscapeDataString(campaign)+"&heroStringId="+Uri.EscapeDataString(hero)+"&variant=active"}};}
 
         private static string FinanceSnapshotIndexPath(string campaignId)
         {
-            return Path.Combine(Program.CampaignDirectory(campaignId), "finance", "character-finance-index.json");
+            return Path.Combine(CampaignFileService.CampaignDirectory(campaignId), "finance", "character-finance-index.json");
         }
 
         private static Dictionary<string, object> PersistFinanceSnapshotIndex(
@@ -483,7 +483,7 @@ namespace ReignBetaServer
                 ["clanCount"] = clans.Count,
                 ["characters"] = characters
             };
-            Program.WriteJsonObject(FinanceSnapshotIndexPath(campaignId), index);
+            CampaignFileService.WriteJsonObject(FinanceSnapshotIndexPath(campaignId), index);
             return new Dictionary<string, object>
             {
                 ["captured"] = true,
@@ -528,7 +528,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> FinanceSnapshotForHero(string campaignId, string heroId)
         {
-            Dictionary<string, object> index = Program.ReadJsonObject(FinanceSnapshotIndexPath(campaignId));
+            Dictionary<string, object> index = CampaignFileService.ReadJsonObject(FinanceSnapshotIndexPath(campaignId));
             Dictionary<string, object> characters = ReadDictionary(index, "characters");
             if (characters == null || !characters.TryGetValue(heroId ?? "", out object value))
                 return new Dictionary<string, object>();
@@ -543,7 +543,7 @@ namespace ReignBetaServer
             string heroId,
             Dictionary<string, object> profile)
         {
-            Dictionary<string, object> stored = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "wealth.json"));
+            Dictionary<string, object> stored = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "wealth.json"));
             Dictionary<string, object> indexed = FinanceSnapshotForHero(campaignId, heroId);
             bool storedObserved = IsObservedWealth(stored);
             bool indexedObserved = IsObservedWealth(indexed);
@@ -634,8 +634,8 @@ namespace ReignBetaServer
                 string shippedHeroId=shippedEntry.Key??"";
                 if(!string.IsNullOrWhiteSpace(shippedHeroId))
                 {
-                    Directory.CreateDirectory(Program.CharacterFile(campaign,shippedHeroId,"memory"));
-                    Program.EnsureFile(Program.CharacterFile(campaign,shippedHeroId,"memory","memories.jsonl"));
+                    Directory.CreateDirectory(CampaignFileService.CharacterFile(campaign,shippedHeroId,"memory"));
+                    CampaignFileService.EnsureFile(CampaignFileService.CharacterFile(campaign,shippedHeroId,"memory","memories.jsonl"));
                     Dictionary<string,object> shippedFacts=ReadDictionary(shippedEntry.Value,"sourceFacts")??new Dictionary<string,object>();
                     Dictionary<string,object> listResult=CharacterEditorListApi(new Dictionary<string,object>{{"campaignId",campaign}});
                     Dictionary<string,object> listRow=ReadDictionaryList(listResult,"characters").FirstOrDefault(item=>ReadString(item,"heroStringId","").Equals(shippedHeroId,StringComparison.OrdinalIgnoreCase));
@@ -666,9 +666,9 @@ namespace ReignBetaServer
 
                 Dictionary<string,object> heroA=new Dictionary<string,object>{{"heroStringId","editor_a"},{"name","Editor A"},{"mainHeroStringId","main_hero"},{"relationToPlayer",12}};
                 Dictionary<string,object> heroB=new Dictionary<string,object>{{"heroStringId","editor_b"},{"name","Editor B"}};
-                Program.WriteJsonObject(Program.CharacterFile(campaign,"editor_a","profile.json"),heroA);
-                Program.WriteJsonObject(Program.CharacterFile(campaign,"editor_b","profile.json"),heroB);
-                Program.WriteJsonObject(Program.CharacterFile(campaign,"editor_a","wealth.json"),UnknownWealth(heroA));
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign,"editor_a","profile.json"),heroA);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign,"editor_b","profile.json"),heroB);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign,"editor_a","wealth.json"),UnknownWealth(heroA));
                 Dictionary<string,object> financeResult=PersistFinanceSnapshotIndex(campaign,new List<Dictionary<string,object>>
                 {
                     new Dictionary<string,object>
@@ -689,9 +689,9 @@ namespace ReignBetaServer
                     &&ReadString(resolvedFinance,"dataState","")=="observed"
                     &&ReadBool(resolvedFinance,"economicCapacityKnown",false),
                     "One atomic native finance census supplies authoritative wealth without per-character daily writes.");
-                Program.WriteJsonObject(Program.CharacterFile(campaign,"main_hero","profile.json"),new Dictionary<string,object>{{"heroStringId","main_hero"},{"name","Player"}});
-                Program.WriteJsonObject(Program.CharacterFile(campaign,"editor_a","traits.json"),new Dictionary<string,object>{{"foundationTraits",new Dictionary<string,object>{{"assertiveness",2},{"sociability",1},{"pragmatism",1}}}});
-                Program.WriteJsonObject(Program.CharacterFile(campaign,"editor_b","traits.json"),new Dictionary<string,object>{{"foundationTraits",new Dictionary<string,object>{{"empathy",1},{"patience",1},{"loyalty",2}}}});
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign,"main_hero","profile.json"),new Dictionary<string,object>{{"heroStringId","main_hero"},{"name","Player"}});
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign,"editor_a","traits.json"),new Dictionary<string,object>{{"foundationTraits",new Dictionary<string,object>{{"assertiveness",2},{"sociability",1},{"pragmatism",1}}}});
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign,"editor_b","traits.json"),new Dictionary<string,object>{{"foundationTraits",new Dictionary<string,object>{{"empathy",1},{"patience",1},{"loyalty",2}}}});
                 using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     RelationshipsService.EnsureMbtiRelationshipSchema(connection);
@@ -721,7 +721,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaign));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaign));
             }
             return rows;
         }

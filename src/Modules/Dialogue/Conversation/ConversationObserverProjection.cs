@@ -173,7 +173,7 @@ namespace ReignBetaServer
                 {
                     string name = ReadFirstString(line, "speaker", "speakerName", "speaker_name", "name");
                     var matching = profiles.Where(p => ReadString(p, "name", "") == name).ToList();
-                    if (matching.Count == 1) speaker = Program.CharacterIdFrom(matching[0]);
+                    if (matching.Count == 1) speaker = CampaignFileService.CharacterIdFrom(matching[0]);
                 }
                 string text = ReadString(copy, "text", "");
                 string audience = ReadString(copy, "audienceHeroStringId", "");

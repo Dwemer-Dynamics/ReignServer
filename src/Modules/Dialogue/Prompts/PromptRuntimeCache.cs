@@ -20,11 +20,11 @@ namespace ReignBetaServer
 
         internal static string LoadPromptTemplateFromRuntimeCache(string name)
         {
-            string path = Program.PromptPath(name);
+            string path = PromptService.PromptPath(name);
             if (!File.Exists(path))
             {
-                Dictionary<string, string> defaults = Program.DefaultPromptTemplates();
-                return Program.DefaultPromptText(name, defaults);
+                Dictionary<string, string> defaults = PromptService.DefaultPromptTemplates();
+                return PromptService.DefaultPromptText(name, defaults);
             }
 
             FileInfo info = new FileInfo(path);
@@ -56,7 +56,7 @@ namespace ReignBetaServer
                     PromptRuntimeCache.Clear();
                     return;
                 }
-                PromptRuntimeCache.Remove(Program.PromptPath(name));
+                PromptRuntimeCache.Remove(PromptService.PromptPath(name));
             }
         }
     }

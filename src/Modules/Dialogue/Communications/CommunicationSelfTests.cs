@@ -103,7 +103,7 @@ namespace ReignBetaServer
             Check("metadata_patch_rejects_rewritten_or_unsupported_promise", ApplyCommunicationPlanPatch(untouched, TestDict("reply", "I agree to pay.", "communicationPlans", new[] { repairPlan })) == null
                 && ApplyCommunicationPlanPatch(untouched, TestDict("communicationPlans", new[] { TestDict("evidenceQuote", "I will pay for it.") })) == null
                 && ApplyCommunicationPlanPatch(untouched, TestDict("communicationPlans", new object[0])) == null);
-            var formatOriginal = Program.CloneDictionary(untouched); formatOriginal["communicationPlans"] = new[] { repairPlan };
+            var formatOriginal = VerificationService.CloneDictionary(untouched); formatOriginal["communicationPlans"] = new[] { repairPlan };
             var formatRepaired = TestDict("reply", omittedSummon); PreserveFormatRepairMetadata(formatOriginal, formatRepaired);
             Check("format_repair_retains_existing_communication_metadata", ReadDictionaryList(formatRepaired, "communicationPlans").Count == 1);
             string campaign = "communication_test_" + Guid.NewGuid().ToString("N");
@@ -134,13 +134,13 @@ namespace ReignBetaServer
                     campaign, "test_player_direct_speech", "dialogue", "lord_1_14", _ => { metadataCalls++; return TestDict(); });
                 Check("ordinary_speech_to_player_does_not_schedule_or_request_review", metadataCalls == 2);
                 const string headerReply = "The invitation, exactly as agreed: tomorrow I send Pharon a fresh summons. It goes out tomorrow.";
-                var headerPlan = Program.CloneDictionary(repairPlan); headerPlan["evidenceQuote"] = headerReply;
+                var headerPlan = VerificationService.CloneDictionary(repairPlan); headerPlan["evidenceQuote"] = headerReply;
                 var headerEnvelope = TestDict("ok", true, "content", Json.Serialize(TestDict("reply", headerReply, "communicationPlans", new[] { headerPlan })));
                 int quoteRepairCalls = 0;
                 var quoteRepaired = RepairMissingCommunicationPlans(headerEnvelope, repairPayload, campaign, "test_unusable_quote", "dialogue", "lord_1_14", request => {
                     quoteRepairCalls++;
                     Check("quote_review_sees_only_exact_executable_candidates", Json.Serialize(request).Contains("It goes out tomorrow.", StringComparison.Ordinal));
-                    var selected = Program.CloneDictionary(headerPlan); selected["evidenceQuote"] = "It goes out tomorrow.";
+                    var selected = VerificationService.CloneDictionary(headerPlan); selected["evidenceQuote"] = "It goes out tomorrow.";
                     return TestDict("ok", true, "content", Json.Serialize(TestDict("communicationPlans", new[] { selected })));
                 });
                 Check("existing_unusable_quote_gets_one_metadata_only_repair", quoteRepairCalls == 1 && ReadBool(quoteRepaired, "ok", false)
@@ -150,12 +150,12 @@ namespace ReignBetaServer
                     _ => TestDict("ok", true, "content", Json.Serialize(TestDict("communicationPlans", new[] { headerPlan }))));
                 Check("failed_quote_repair_cannot_publish_unschedulable_promise", !ReadBool(EnsureConversationDelivery(uncorrected), "ok", true));
                 const string compoundReply = "Pharon is summoned to meet me here. The summons goes out tomorrow, and it asks for his own word.";
-                var compoundPlan = Program.CloneDictionary(repairPlan); compoundPlan["evidenceQuote"] = "Pharon is summoned to meet me here. The summons goes out tomorrow";
+                var compoundPlan = VerificationService.CloneDictionary(repairPlan); compoundPlan["evidenceQuote"] = "Pharon is summoned to meet me here. The summons goes out tomorrow";
                 int knownPlanReviewCalls = 0;
                 var compoundFixed = RepairMissingCommunicationPlans(TestDict("ok", true, "content", Json.Serialize(TestDict("reply", compoundReply,
                     "communicationPlans", new[] { compoundPlan }))), repairPayload, campaign, "test_known_recipient_compound_quote", "dialogue", "lord_1_14", _ => {
                         knownPlanReviewCalls++;
-                        var selected = Program.CloneDictionary(compoundPlan); selected["evidenceQuote"] = "The summons goes out tomorrow";
+                        var selected = VerificationService.CloneDictionary(compoundPlan); selected["evidenceQuote"] = "The summons goes out tomorrow";
                         return TestDict("ok", true, "content", Json.Serialize(TestDict("communicationPlans", new[] { selected })));
                     });
                 Check("known_recipient_quote_repair_does_not_require_recipient_in_same_clause", knownPlanReviewCalls == 1 && ReadBool(compoundFixed, "ok", false)
@@ -197,9 +197,9 @@ namespace ReignBetaServer
                 AcceptCommunicationCommitments(c, unit, exchange, current);
                 Check("accepted_retry_does_not_duplicate", DialogueSelfTestStore.SelectCommunicationMessages(c).Count == 1);
                 string originalId = ReadString(row, "message_id", "");
-                var reviewPayload = Program.CloneDictionary(payload); reviewPayload["playerText"] = "Change 2000 to 2400 before sending; keep the other conditions.";
+                var reviewPayload = VerificationService.CloneDictionary(payload); reviewPayload["playerText"] = "Change 2000 to 2400 before sending; keep the other conditions.";
                 const string completeRevision = "I will tell target these revised terms: the offer is 2400 denars for the school, provided the teachers are paid first.";
-                var deltaPlan = Program.CloneDictionary(plan); deltaPlan["evidenceQuote"] = "I will tell target these revised terms";
+                var deltaPlan = VerificationService.CloneDictionary(plan); deltaPlan["evidenceQuote"] = "I will tell target these revised terms";
                 deltaPlan["contentEvidence"] = new[] { TestDict("turnId", "current_player", "quote", ReadString(reviewPayload, "playerText", "")) };
                 var reviewEnvelope = TestDict("ok", true, "content", Json.Serialize(TestDict("reply", completeRevision, "communicationPlans", new[] { deltaPlan })));
                 int revisionReviews = 0;
@@ -208,7 +208,7 @@ namespace ReignBetaServer
                     revisionReviews++;
                     Check("revision_review_contains_old_conditions_and_current_complete_terms", Json.Serialize(candidate).Contains("teachers are paid first", StringComparison.Ordinal)
                         && Json.Serialize(candidate).Contains("pendingDraftTerms", StringComparison.Ordinal));
-                    var completePlan = Program.CloneDictionary(deltaPlan); completePlan["contentEvidence"] = new[] { TestDict("turnId", "current_npc", "quote", completeRevision) };
+                    var completePlan = VerificationService.CloneDictionary(deltaPlan); completePlan["contentEvidence"] = new[] { TestDict("turnId", "current_npc", "quote", completeRevision) };
                     return TestDict("ok", true, "content", Json.Serialize(TestDict("communicationPlans", new[] { completePlan })));
                 });
                 Check("draft_revision_is_reconciled_once_without_changing_its_identity", revisionReviews == 1 && ReadBool(reconciled, "ok", false)
@@ -223,7 +223,7 @@ namespace ReignBetaServer
                     && ReadString(DialogueSelfTestStore.SelectCommunicationMessages2(c, TestDict("id", originalId)).Single(), "status", "") == "needs_clarification");
                 request = "Tell target that I now offer 2400 denars for the school, provided the teachers are paid first.";
                 reply = "I will tell target about your revised offer.";
-                payload = Program.CloneDictionary(payload); payload["playerText"] = request;
+                payload = VerificationService.CloneDictionary(payload); payload["playerText"] = request;
                 var revisedExchange = StoreConversationExchange(campaign, payload, "source", "player", "Player", "Source", request, reply, "comm_revision", 101);
                 current = ReadStringList(revisedExchange, "turnIds").SelectMany(id => DialogueSelfTestStore.SelectConversationTurns(c, TestDict("id", id))).ToList();
                 plan["evidenceQuote"] = reply; plan["contentEvidence"] = new[] { TestDict("turnId", "current_player", "quote", request) };
@@ -323,7 +323,7 @@ namespace ReignBetaServer
                 Check("invitation_does_not_reveal_later_briefing", !CommunicationBody(staged, data, true).Contains(request, StringComparison.Ordinal)
                     && CommunicationBody(staged, data).Contains(request, StringComparison.Ordinal));
                 string libraryPromise = "I will tell target that the library opens tomorrow.";
-                var libraryPayload = Program.CloneDictionary(payload); libraryPayload["playerText"] = "Tell target when the library opens.";
+                var libraryPayload = VerificationService.CloneDictionary(payload); libraryPayload["playerText"] = "Tell target when the library opens.";
                 var libraryExchange = StoreConversationExchange(campaign, libraryPayload, "source", "player", "Player", "Source",
                     ReadString(libraryPayload, "playerText", ""), libraryPromise, "comm_library", 102);
                 var librarySources = ReadStringList(libraryExchange, "turnIds").SelectMany(id => DialogueSelfTestStore.SelectConversationTurns(c, TestDict("id", id))).ToList();
@@ -333,7 +333,7 @@ namespace ReignBetaServer
                 unit.Reply = libraryPromise; unit.EventId = "comm_library";
                 AcceptCommunicationCommitments(c, unit, libraryExchange, librarySources);
                 string withdrawal = "I will not tell target the library hours.";
-                var withdrawalPayload = Program.CloneDictionary(libraryPayload); withdrawalPayload["playerText"] = "Do not send the library details.";
+                var withdrawalPayload = VerificationService.CloneDictionary(libraryPayload); withdrawalPayload["playerText"] = "Do not send the library details.";
                 var withdrawalExchange = StoreConversationExchange(campaign, withdrawalPayload, "source", "player", "Player", "Source",
                     ReadString(withdrawalPayload, "playerText", ""), withdrawal, "comm_cancel", 103);
                 var withdrawalSources = ReadStringList(withdrawalExchange, "turnIds").SelectMany(id => DialogueSelfTestStore.SelectConversationTurns(c, TestDict("id", id))).ToList();
@@ -397,14 +397,14 @@ namespace ReignBetaServer
                     "native_reaffirm_session", Array.Empty<Dictionary<string, object>>(), earlierTerms).Count == 1);
                 Check("earlier_other_owners_terms_remain_private", CommunicationContent(c, "unrelated_observer", reopenPayload,
                     "native_reaffirm_session", Array.Empty<Dictionary<string, object>>(), earlierTerms).Count == 0);
-                var pastCutoff = Program.CloneDictionary(reopenPayload); pastCutoff["memoryAsOfTimestamp"] = 199L;
+                var pastCutoff = VerificationService.CloneDictionary(reopenPayload); pastCutoff["memoryAsOfTimestamp"] = 199L;
                 Check("earlier_terms_respect_time_cutoff", CommunicationContent(c, "lord_1_14", pastCutoff,
                     "native_reaffirm_session", Array.Empty<Dictionary<string, object>>(), earlierTerms).Count == 0);
-                var sequenceCutoff = Program.CloneDictionary(reopenPayload);
+                var sequenceCutoff = VerificationService.CloneDictionary(reopenPayload);
                 sequenceCutoff["memoryAsOfAcceptedSequence"] = ReadLong(DialogueSelfTestStore.SelectConversationTurns2(c, TestDict("id", originalNativeTurn)).Single(), "accepted_sequence", 0) - 1;
                 Check("earlier_terms_respect_sequence_cutoff", CommunicationContent(c, "lord_1_14", sequenceCutoff,
                     "native_reaffirm_session", Array.Empty<Dictionary<string, object>>(), earlierTerms).Count == 0);
-                var wrongTimeline = Program.CloneDictionary(reopenPayload); wrongTimeline["timelineId"] = "unrelated_branch";
+                var wrongTimeline = VerificationService.CloneDictionary(reopenPayload); wrongTimeline["timelineId"] = "unrelated_branch";
                 Check("earlier_terms_respect_timeline", CommunicationContent(c, "lord_1_14", wrongTimeline,
                     "native_reaffirm_session", Array.Empty<Dictionary<string, object>>(), earlierTerms).Count == 0);
                 string reaffirmation = "The letter goes to Ira when you have gone your way — not before, and not with one word added or withheld.";
@@ -457,7 +457,7 @@ namespace ReignBetaServer
                 Check("unacquired_letters_cannot_support_factual_answer", !ReadBool(ComposeCommunicationReply(campaign, acquiredQuestion,
                     TestDict("body", "What was offered?"), acquiredContext, _ => TestDict("ok", true, "content", Json.Serialize(TestDict("body", "Invented terms.",
                         "answerKind", "answered", "sourceQuote", "FUTURE_DAY_CONFIDENCE", "privacy", "personal")))), "ok", true));
-                var regressionPresence = Program.CloneDictionary(ReadDictionary(reopenPayload, "gossipPresence"));
+                var regressionPresence = VerificationService.CloneDictionary(ReadDictionary(reopenPayload, "gossipPresence"));
                 var regressionPeople = ReadDictionaryList(regressionPresence, "people");
                 regressionPeople.Single(p => GossipHeroId(p) == "lord_1_14")["settlementId"] = "town_ES5";
                 var pharon = GossipTestHero("lord_1_15", "pharon_origin"); pharon["name"] = "Pharon"; regressionPeople.Add(pharon);
@@ -467,7 +467,7 @@ namespace ReignBetaServer
                     "channel", "in_person", "gossipPresence", regressionPresence);
                 Dictionary<string, object> PublishRegression(string eventName, string playerText, string npcText, Dictionary<string, object> proposed, long timestamp)
                 {
-                    var p = Program.CloneDictionary(regressionPayload); p["sceneTurnId"] = eventName; p["playerText"] = playerText;
+                    var p = VerificationService.CloneDictionary(regressionPayload); p["sceneTurnId"] = eventName; p["playerText"] = playerText;
                     ConversationStartApi(p);
                     var u = new AcceptedConversationUnit { Campaign = campaign, Hero = "lord_1_14", Player = "main_hero", Location = "town_ES5",
                         HeroName = "Rhagaea", PlayerName = "Player", PlayerText = playerText, Reply = npcText,
@@ -528,7 +528,7 @@ namespace ReignBetaServer
                 var hostReceipt = TestDict("communicationId", summonId, "kind", "host_reserved", "hostId", "lord_1_14", "destinationId", "town_ES5",
                     "reservationHash", ReadString(holdData, "hostReservationHash", ""));
                 bool mismatchRejected = false;
-                var forgedHost = Program.CloneDictionary(hostReceipt); forgedHost["hostId"] = "main_hero";
+                var forgedHost = VerificationService.CloneDictionary(hostReceipt); forgedHost["hostId"] = "main_hero";
                 try { AcceptCommunicationNativeReceipt(c, new NpcLivesState { TimelineId = "main" }, forgedHost, hostDay); }
                 catch (InvalidOperationException) { mismatchRejected = true; }
                 Check("host_receipt_cannot_reserve_a_different_actor", mismatchRejected);
@@ -560,7 +560,7 @@ namespace ReignBetaServer
                 });
                 Check("first_received_question_is_addressed_to_recipient_for_actual_return_letter", directReplyFraming && ReadBool(directAnswer, "ok", false));
                 regressionPayload["conversationSessionId"] = "pharon_pronoun_regression";
-                var pronounPlan = Program.CloneDictionary(summonPlan); pronounPlan["key"] = "pharon_pronoun_regression";
+                var pronounPlan = VerificationService.CloneDictionary(summonPlan); pronounPlan["key"] = "pharon_pronoun_regression";
                 pronounPlan["evidenceQuote"] = "It goes out tomorrow, and I will be at Onira, waiting.";
                 pronounPlan["delayDays"] = 1d;
                 var pronounAccepted = PublishRegression("pharon_pronoun", "Send for Pharon to come alone for one full day. Tell him at arrival that daughters of working families may enter on the same terms as sons.",
@@ -584,11 +584,11 @@ namespace ReignBetaServer
                     && ReadString(DialogueSelfTestStore.SelectCommunicationMessages2(c, TestDict("id", birchId)).Single(), "status", "") == "cancelled"
                     && DialogueSelfTestStore.SelectCommunicationHistory4(c, TestDict("id", birchId)).Count == 0);
                 regressionPayload["conversationSessionId"] = "ambiguous_withdrawal_regression";
-                var northPlan = Program.CloneDictionary(birchPlan); northPlan["key"] = "north_note";
-                var southPlan = Program.CloneDictionary(birchPlan); southPlan["key"] = "south_note";
+                var northPlan = VerificationService.CloneDictionary(birchPlan); northPlan["key"] = "north_note";
+                var southPlan = VerificationService.CloneDictionary(birchPlan); southPlan["key"] = "south_note";
                 PublishRegression("north_note", "Please write to your daughter Ira: " + birchContent + ".", "I will write to Ira.", northPlan, 311);
                 PublishRegression("south_note", "Please write a separate note to your daughter Ira: " + birchContent + ".", "I will write to Ira.", southPlan, 312);
-                var unclearCancel = Program.CloneDictionary(birchCancel); unclearCancel["key"] = "unknown_note";
+                var unclearCancel = VerificationService.CloneDictionary(birchCancel); unclearCancel["key"] = "unknown_note";
                 var unclear = PublishRegression("unclear_withdrawal", "Cancel that note to your daughter Ira.", "Cancelled, and cleanly — nothing has left my hand.", unclearCancel, 313);
                 ConversationFinishApi(TestDict("campaignId", campaign, "sessionId", ReadString(unclear, "sessionId", ""), "reason", "closed_by_player", "worldDay", hostDay, "ts", 314L));
                 var ambiguousDrafts = DialogueSelfTestStore.SelectCommunicationMessages11(c);
@@ -600,9 +600,9 @@ namespace ReignBetaServer
                 const string semanticReply = semanticQuote + " He is to meet me here and remain for one full day after arrival.";
                 const string semanticRequest = "Please send for Pharon. Tell him after arrival that the proposed register is Lantern Nine; no spending is authorized.";
                 regressionPayload["conversationSessionId"] = "semantic_commitment_regression";
-                var semanticPayload = Program.CloneDictionary(regressionPayload); semanticPayload["sceneTurnId"] = "semantic_commitment";
+                var semanticPayload = VerificationService.CloneDictionary(regressionPayload); semanticPayload["sceneTurnId"] = "semantic_commitment";
                 semanticPayload["playerText"] = semanticRequest;
-                var semanticPlan = Program.CloneDictionary(summonPlan); semanticPlan["key"] = "semantic_commitment";
+                var semanticPlan = VerificationService.CloneDictionary(summonPlan); semanticPlan["key"] = "semantic_commitment";
                 semanticPlan["evidenceQuote"] = semanticQuote; semanticPlan["delayDays"] = 1d;
                 semanticPlan["contentEvidence"] = new[] { TestDict("turnId", "current_player", "quote", semanticRequest) };
                 semanticPlan["unconditionalSpeakerCommitment"] = true;
@@ -622,7 +622,7 @@ namespace ReignBetaServer
                     && ReadFirstString(TryParseJsonObject(ReadString(semanticEnvelope, "content", "")), "reply") == semanticReply);
                 foreach (string field in new[] { "key", "recipientId", "kind", "operation", "destinationId", "evidenceQuote", "stayDays", "delayDays", "contentEvidence" })
                 {
-                    var changed = Program.CloneDictionary(semanticReviewed);
+                    var changed = VerificationService.CloneDictionary(semanticReviewed);
                     changed[field] = field == "stayDays" || field == "delayDays" ? 2d : field == "contentEvidence"
                         ? new[] { TestDict("turnId", "current_player", "quote", "Altered terms") } : "altered";
                     Check("semantic_seal_rejects_changed_" + field, !CommunicationSemanticAccepted(changed, semanticUnit));
@@ -636,12 +636,12 @@ namespace ReignBetaServer
                 semanticUnit.Hero = "lord_1_14"; semanticUnit.Reply += " Altered speech.";
                 Check("semantic_seal_rejects_changed_reply", !CommunicationSemanticAccepted(semanticReviewed, semanticUnit));
                 semanticUnit.Reply = semanticReply;
-                var forgedSemantic = Program.CloneDictionary(semanticReviewed); forgedSemantic["semanticCommitmentReceipt"] = new string('0', 64);
+                var forgedSemantic = VerificationService.CloneDictionary(semanticReviewed); forgedSemantic["semanticCommitmentReceipt"] = new string('0', 64);
                 Check("semantic_seal_rejects_forged_receipt", !CommunicationSemanticAccepted(forgedSemantic, semanticUnit));
                 foreach (string rejected in new[] { "I will not send for Pharon.", "If you pay, a summons rides to Pharon.",
                     "She said a summons rides to Pharon.", "Perhaps a summons rides to Pharon.", "A summons might ride to Pharon." })
                 {
-                    var semanticNegative = Program.CloneDictionary(semanticPlan); semanticNegative["evidenceQuote"] = rejected;
+                    var semanticNegative = VerificationService.CloneDictionary(semanticPlan); semanticNegative["evidenceQuote"] = rejected;
                     Check("semantic_review_rejects_clear_noncommitment_" + PromptHash(rejected).Substring(0, 8),
                         ApplyCommunicationPlanPatch(TestDict("reply", rejected), TestDict("communicationPlans", new[] { semanticNegative }), allowSemanticReview: true) == null);
                 }

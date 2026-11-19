@@ -48,7 +48,7 @@ Use only supplied heroStringId values.";
             Dictionary<string, object> scene = ReadDictionary(payload, "conversationSceneState") ?? new Dictionary<string, object>();
             List<Dictionary<string, object>> rawProfiles = new[] { ReadDictionary(payload, "hero") }
                 .Where(x => x != null)
-                .Concat(string.IsNullOrWhiteSpace(Program.CharacterIdFrom(payload))
+                .Concat(string.IsNullOrWhiteSpace(CampaignFileService.CharacterIdFrom(payload))
                     ? Enumerable.Empty<Dictionary<string, object>>()
                     : new[] { payload })
                 .Concat(ReadDictionaryList(scene, "participants"))
@@ -61,7 +61,7 @@ Use only supplied heroStringId values.";
                 new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
             foreach (Dictionary<string, object> candidate in rawProfiles)
             {
-                string id = Program.CharacterIdFrom(candidate);
+                string id = CampaignFileService.CharacterIdFrom(candidate);
                 if (string.IsNullOrWhiteSpace(id)) continue;
                 if (!merged.TryGetValue(id, out Dictionary<string, object> profile))
                 {
@@ -103,7 +103,7 @@ Use only supplied heroStringId values.";
         {
             List<Dictionary<string, object>> profiles = MergedInteractionParticipantProfiles(payload);
             Dictionary<string, object> speaker = profiles.FirstOrDefault(x =>
-                Program.CharacterIdFrom(x).Equals(speakerId ?? "", StringComparison.OrdinalIgnoreCase));
+                CampaignFileService.CharacterIdFrom(x).Equals(speakerId ?? "", StringComparison.OrdinalIgnoreCase));
             if (speaker == null || parsed == null) return new List<Dictionary<string, object>>();
             List<string> texts = new List<string>();
             CollectConversationStringValues(parsed, texts);
@@ -116,7 +116,7 @@ Use only supplied heroStringId values.";
                 new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
             foreach (Dictionary<string, object> target in profiles)
             {
-                string targetId = Program.CharacterIdFrom(target);
+                string targetId = CampaignFileService.CharacterIdFrom(target);
                 if (string.IsNullOrWhiteSpace(targetId) || targetId.Equals(speakerId, StringComparison.OrdinalIgnoreCase)) continue;
                 string targetName = FirstNonEmpty(ReadString(target, "name", ""), targetId);
                 List<string> aliases = new List<string> { targetName, targetId };
@@ -209,7 +209,7 @@ Use only supplied heroStringId values.";
             List<Dictionary<string, object>> profiles = MergedInteractionParticipantProfiles(payload);
             return string.Join("\n", profiles.Select(profile =>
             {
-                string id = Program.CharacterIdFrom(profile);
+                string id = CampaignFileService.CharacterIdFrom(profile);
                 string name = FirstNonEmpty(ReadString(profile, "name", ""), id);
                 List<string> children = ReadStringList(profile, "childrenIds");
                 Func<string, string> relative = relativeId => string.IsNullOrWhiteSpace(relativeId) ? "none"
@@ -525,10 +525,10 @@ Use only supplied heroStringId values.";
                 if (ReadString(participant, "role", "npc").Equals("player", StringComparison.OrdinalIgnoreCase)) continue;
                 string heroId = ReadString(participant, "heroStringId", "");
                 if (string.IsNullOrWhiteSpace(heroId) || detailedParticipantIds == null || !detailedParticipantIds.Contains(heroId)) continue;
-                Dictionary<string, object> profile = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json"));
+                Dictionary<string, object> profile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "profile.json"));
                 if (profile.Count == 0) profile = participant;
                 Dictionary<string, object> mbti = RelationshipsService.ResolveCharacterMbtiProfile(
-                    campaignId, heroId, profile, Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json")));
+                    campaignId, heroId, profile, CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json")));
                 if (ReadString(mbti, "type", "XXXX") != "XXXX") participant["mbtiProfile"] = mbti;
             }
         }
@@ -602,8 +602,8 @@ Use only supplied heroStringId values.";
         {
             List<string> cachePaths = new List<string>
             {
-                Program.CharacterFile(campaignId, heroId, "portraits", "formal_outfit.json"),
-                Program.CharacterFile("_shared", heroId, "portraits", "formal_outfit.json")
+                CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "formal_outfit.json"),
+                CampaignFileService.CharacterFile("_shared", heroId, "portraits", "formal_outfit.json")
             };
             // The shared cache contains more than a thousand portrait folders. Loading every
             // portrait's metadata here used to add about ten seconds to every NPC response.
@@ -614,7 +614,7 @@ Use only supplied heroStringId values.";
                 cachePaths.Add(Path.Combine(sharedPortraitFolder, "formal_outfit.json"));
             foreach (string path in cachePaths.Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                Dictionary<string, object> cached = Program.ReadJsonObject(path);
+                Dictionary<string, object> cached = CampaignFileService.ReadJsonObject(path);
                 string description = ReadString(cached, "description", "");
                 string status = ReadString(cached, "status", "");
                 string source = ReadString(cached, "descriptionSource", "");
@@ -630,7 +630,7 @@ Use only supplied heroStringId values.";
                     return description;
                 }
             }
-            Dictionary<string, object> profile = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json"));
+            Dictionary<string, object> profile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "profile.json"));
             if (profile.Count == 0) profile = participant;
             return ResolveFormalOutfitFallback(participant, profile);
         }
@@ -923,7 +923,7 @@ Use only supplied heroStringId values.";
 
         internal static Dictionary<string, object> ScanFormalOutfitsApi(Dictionary<string, object> payload)
         {
-            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
             bool includeShared = ReadBool(payload, "includeShared", true);
             int limit = Math.Max(1, Math.Min(5000, ReadInt(payload, "limit", 5000)));
             List<Dictionary<string, object>> candidates = new List<Dictionary<string, object>>();
@@ -940,14 +940,14 @@ Use only supplied heroStringId values.";
                     });
                 }
             }
-            string characters = Path.Combine(Program.CampaignDirectory(campaignId), "characters");
+            string characters = Path.Combine(CampaignFileService.CampaignDirectory(campaignId), "characters");
             if (Directory.Exists(characters))
             {
                 foreach (string dir in Directory.GetDirectories(characters))
                 {
                     string portraits = Path.Combine(dir, "portraits");
                     string active = File.Exists(Path.Combine(portraits, "custom.png")) ? Path.Combine(portraits, "custom.png") : Path.Combine(portraits, "portrait.png");
-                    Dictionary<string, object> profile = Program.ReadJsonObject(Path.Combine(dir, "profile.json"));
+                    Dictionary<string, object> profile = CampaignFileService.ReadJsonObject(Path.Combine(dir, "profile.json"));
                     candidates.Add(new Dictionary<string, object>
                     {
                         ["heroId"] = Path.GetFileName(dir), ["name"] = ReadString(profile, "name", Path.GetFileName(dir)),
@@ -991,7 +991,7 @@ Use only supplied heroStringId values.";
             byte[] bytes = File.ReadAllBytes(imagePath);
             string hash;
             using (SHA256 sha = SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "");
-            Dictionary<string, object> cached = Program.ReadJsonObject(outputPath);
+            Dictionary<string, object> cached = CampaignFileService.ReadJsonObject(outputPath);
             if (string.Equals(ReadString(cached, "imageSha256", ""), hash, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(ReadString(cached, "status", ""), "completed", StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrWhiteSpace(ReadString(cached, "description", "")))
@@ -1003,7 +1003,7 @@ Use only supplied heroStringId values.";
                 new Dictionary<string, object> { ["type"] = "text", ["text"] = "Describe only the visible formal clothing in this portrait. Return JSON {\"description\":\"...\"}. Mention garments, layers, apparent materials, dominant colors, ornament, coverage, and headwear. Be concise. Do not describe the body, face, pose, weapons, personality, or background." },
                 new Dictionary<string, object> { ["type"] = "image_url", ["image_url"] = new Dictionary<string, object> { ["url"] = "data:" + mime + ";base64," + Convert.ToBase64String(bytes) } }
             };
-            Dictionary<string, object> llm = Program.ChatWithLlm(new Dictionary<string, object>
+            Dictionary<string, object> llm = LlmProviderService.ChatWithLlm(new Dictionary<string, object>
             {
                 ["requestType"] = "formal_outfit_vision", ["campaignId"] = campaignId,
                 ["heroStringId"] = ReadString(candidate, "heroId", ""), ["temperature"] = 0d, ["maxTokens"] = 350,
@@ -1028,7 +1028,7 @@ Use only supplied heroStringId values.";
                 ["updatedUtc"] = DateTime.UtcNow.ToString("o")
             };
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath));
-            Program.WriteJsonObject(outputPath, record);
+            CampaignFileService.WriteJsonObject(outputPath, record);
             return record;
         }
 
@@ -1038,7 +1038,7 @@ Use only supplied heroStringId values.";
             string outputPath = ReadString(candidate, "output", "");
             string hash;
             using (SHA256 sha = SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(File.ReadAllBytes(imagePath))).Replace("-", "");
-            Dictionary<string, object> cached = Program.ReadJsonObject(outputPath);
+            Dictionary<string, object> cached = CampaignFileService.ReadJsonObject(outputPath);
             if (string.Equals(ReadString(cached, "imageSha256", ""), hash, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(ReadString(cached, "status", ""), "completed", StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrWhiteSpace(ReadString(cached, "description", "")))
@@ -1052,7 +1052,7 @@ Use only supplied heroStringId values.";
                 ["updatedUtc"] = DateTime.UtcNow.ToString("o")
             };
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath));
-            Program.WriteJsonObject(outputPath, record);
+            CampaignFileService.WriteJsonObject(outputPath, record);
             return record;
         }
 
@@ -1060,7 +1060,7 @@ Use only supplied heroStringId values.";
         {
             Dictionary<string, object> metadata = ReadDictionary(candidate, "metadata") ?? new Dictionary<string, object>();
             string promptFile = PortraitsService.SelectPortraitClothingPromptFile(metadata);
-            string guidance = string.IsNullOrWhiteSpace(promptFile) ? "" : Program.LoadPromptTemplate(promptFile);
+            string guidance = string.IsNullOrWhiteSpace(promptFile) ? "" : PromptService.LoadPromptTemplate(promptFile);
             if (string.IsNullOrWhiteSpace(guidance))
             {
                 string generationPrompt = Path.Combine(ReadString(candidate, "folder", ""), "prompt.txt");

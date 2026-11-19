@@ -54,7 +54,7 @@ namespace ReignBetaServer
         {
             if (Monitor.IsEntered(Program.CampaignSchemaLock) && !Monitor.IsEntered(Program.FileLock))
                 throw new InvalidOperationException("Semantic schema settings require FileLock before CampaignSchemaLock.");
-            string generation = ReadString(Program.LoadSettings(), "vectorProvider", "local")
+            string generation = ReadString(SettingsService.LoadSettings(), "vectorProvider", "local")
                 .ToLowerInvariant() + "|" + SemanticModelVersion;
             EnsureSemanticMemorySchema(connection, generation);
         }
@@ -522,7 +522,7 @@ namespace ReignBetaServer
                 try
                 {
                     SemanticWorkerProcess = Process.Start(start);
-                    Program.LogOperational("semantic.worker_started", new Dictionary<string, object> { ["file"] = start.FileName, ["dataDir"] = Program.DataDir });
+                    OperationsService.LogOperational("semantic.worker_started", new Dictionary<string, object> { ["file"] = start.FileName, ["dataDir"] = Program.DataDir });
                 }
                 catch (Exception ex)
                 {
@@ -725,7 +725,7 @@ namespace ReignBetaServer
                     byId[candidateId] = candidate;
                 }
             }
-            List<string> terms = Program.SimpleTags(claim).Concat(WorldSimulationService.FamilyTerms(family)).Distinct(StringComparer.OrdinalIgnoreCase).Take(18).ToList();
+            List<string> terms = CampaignFileService.SimpleTags(claim).Concat(WorldSimulationService.FamilyTerms(family)).Distinct(StringComparer.OrdinalIgnoreCase).Take(18).ToList();
             foreach (Dictionary<string, object> hit in SemanticHits(semanticSearch, "world_history_event"))
             {
                 Dictionary<string, object> payload = ReadDictionary(hit, "payload") ?? new Dictionary<string, object>();
@@ -761,9 +761,9 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> SemanticMemoryStatusApi(Dictionary<string, string> query)
         {
-            string campaignId = query != null && query.ContainsKey("campaignId") ? query["campaignId"] : Program.LatestCampaignId();
-            if (string.IsNullOrWhiteSpace(campaignId)) campaignId = Program.LatestCampaignId();
-            Dictionary<string, object> settings = Program.LoadSettings();
+            string campaignId = query != null && query.ContainsKey("campaignId") ? query["campaignId"] : SettingsService.LatestCampaignId();
+            if (string.IsNullOrWhiteSpace(campaignId)) campaignId = SettingsService.LatestCampaignId();
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
             Dictionary<string, object> worker = new Dictionary<string, object>();
             try { worker = TryParseJsonObject(DialogueService.GetTextFromUrl(SemanticWorkerUrl(settings, "/vectors/status"), 750)) ?? new Dictionary<string, object>(); }
             catch (Exception ex) { worker = new Dictionary<string, object> { ["ok"] = false, ["error"] = ex.Message }; }
@@ -810,8 +810,8 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> SemanticMemoryReindexApi(Dictionary<string, object> payload)
         {
-            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
-            if (string.IsNullOrWhiteSpace(campaignId)) campaignId = Program.LatestCampaignId();
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
+            if (string.IsNullOrWhiteSpace(campaignId)) campaignId = SettingsService.LatestCampaignId();
             if (!DialogueService.HasCampaignPostgreSqlStorage(campaignId))
                 return new Dictionary<string, object>
                 {
@@ -830,8 +830,8 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> SemanticMemoryRetryFailedApi(Dictionary<string, object> payload)
         {
-            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
-            if (string.IsNullOrWhiteSpace(campaignId)) campaignId = Program.LatestCampaignId();
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
+            if (string.IsNullOrWhiteSpace(campaignId)) campaignId = SettingsService.LatestCampaignId();
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 DialogueStore.UpdateEmbeddingJobs2(connection, new Dictionary<string, object> { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
@@ -847,7 +847,7 @@ namespace ReignBetaServer
                 if (DateTime.UtcNow < SemanticDiagnosticCooldownUntilUtc) return;
                 SemanticDiagnosticCooldownUntilUtc = DateTime.UtcNow.AddSeconds(30);
             }
-            Program.LogOperational(eventName, new Dictionary<string, object> { ["error"] = DialogueService.LimitText(error, 500), ["fallback"] = "sqlite_fts5" });
+            OperationsService.LogOperational(eventName, new Dictionary<string, object> { ["error"] = DialogueService.LimitText(error, 500), ["fallback"] = "sqlite_fts5" });
         }
 
         private sealed class EmbeddingSourceDocument

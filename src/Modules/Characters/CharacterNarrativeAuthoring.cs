@@ -22,11 +22,11 @@ namespace ReignBetaServer
             if (offset < 0 || count < 1 || count > 25) throw new InvalidOperationException("Narrative batches contain 1-25 profiles.");
             string settingsPath = Environment.GetEnvironmentVariable("REIGN_NARRATIVE_AUTHORING_SETTINGS");
             if (string.IsNullOrWhiteSpace(settingsPath) || !File.Exists(settingsPath)) throw new InvalidOperationException("Installed provider settings are unavailable.");
-            NarrativeAuthoringSettings = Program.DefaultSettings();
-            foreach (var value in Program.ReadJsonObject(settingsPath)) NarrativeAuthoringSettings[value.Key] = value.Value;
-            Program.NormalizeLlmProviderSettings(NarrativeAuthoringSettings);
+            NarrativeAuthoringSettings = SettingsService.DefaultSettings();
+            foreach (var value in CampaignFileService.ReadJsonObject(settingsPath)) NarrativeAuthoringSettings[value.Key] = value.Value;
+            LlmProviderService.NormalizeLlmProviderSettings(NarrativeAuthoringSettings);
             NormalizeCharacterConstructionBudget(NarrativeAuthoringSettings);
-            var library = Program.ReadJsonObject(CharacterProfileCatalogPath);
+            var library = CampaignFileService.ReadJsonObject(CharacterProfileCatalogPath);
             var profiles = ReadDictionaryList(library, "profiles");
             string operation = ProfileArg(args, "--operation", "author");
 #if !REIGN_EXCLUDE_VERIFICATION
@@ -51,10 +51,10 @@ namespace ReignBetaServer
                     var narrative = AuthorCharacterNarrative(facts, personality, "premade/" + heroId, request => {
                         providerCalls++;
                         request["campaignId"] = "narrative_authoring"; request["heroStringId"] = heroId;
-                        return Program.ChatWithLlm(request);
-                    }, Program.ReadJsonObject(file), value => Program.WriteJsonObject(file, value),
-                        ReadInt(Program.LoadSettings(), "characterConstructionMaxTokens", Program.CharacterConstructionTokenCeiling));
-                    Program.WriteJsonObject(file, narrative);
+                        return LlmProviderService.ChatWithLlm(request);
+                    }, CampaignFileService.ReadJsonObject(file), value => CampaignFileService.WriteJsonObject(file, value),
+                        ReadInt(SettingsService.LoadSettings(), "characterConstructionMaxTokens", Program.CharacterConstructionTokenCeiling));
+                    CampaignFileService.WriteJsonObject(file, narrative);
                     lock (resultLock) results.Add(new Dictionary<string, object> { ["heroStringId"] = heroId, ["ok"] = true,
                         ["itemCount"] = ReadDictionaryList(narrative, "items").Count, ["path"] = file,
                         ["providerCalls"] = providerCalls, ["elapsedMs"] = timer.ElapsedMilliseconds, ["reused"] = providerCalls == 0 });
@@ -64,7 +64,7 @@ namespace ReignBetaServer
                     lock (resultLock) results.Add(new Dictionary<string, object> { ["heroStringId"] = heroId, ["ok"] = false, ["error"] = ex.Message,
                         ["providerCalls"] = providerCalls, ["elapsedMs"] = timer.ElapsedMilliseconds });
                 }
-                lock (resultLock) Program.WriteJsonObject(Path.Combine(root, "batch-" + offset + ".json"), new Dictionary<string, object> {
+                lock (resultLock) CampaignFileService.WriteJsonObject(Path.Combine(root, "batch-" + offset + ".json"), new Dictionary<string, object> {
                     ["schema"] = "reign-narrative-authoring-batch-v1", ["offset"] = offset, ["count"] = count,
                     ["results"] = results, ["completedUtc"] = DateTime.UtcNow.ToString("o") });
             });
@@ -73,12 +73,12 @@ namespace ReignBetaServer
             foreach (var profile in profiles)
             {
                 string id = ReadString(profile, "heroStringId", "");
-                var narrative = Program.ReadJsonObject(Path.Combine(root, DialogueService.PromptHash(id).Substring(0, 24) + ".json"));
+                var narrative = CampaignFileService.ReadJsonObject(Path.Combine(root, DialogueService.PromptHash(id).Substring(0, 24) + ".json"));
                 var facts = NarrativePremadeFacts(profile, profiles);
                 if (!NarrativeDocumentReady(narrative) || ReadString(narrative, "heroStringId", "") != id
                     || ReadString(narrative, "inputFingerprint", "") != NarrativeAuthoringFingerprint(facts, NarrativeAuthoringPersonality(profile), "premade/" + id)) continue;
                 string narrativeFile = DialogueService.PromptHash(id).Substring(0, 24) + ".json";
-                Program.WriteJsonObject(Path.Combine(root, "narrative", "profiles", narrativeFile), narrative);
+                CampaignFileService.WriteJsonObject(Path.Combine(root, "narrative", "profiles", narrativeFile), narrative);
                 foreach (string part in new[] { "narrative", "background", "voice", "motivations", "saveQuirks", "hiddenHistory", "secrets", "hookPools" }) profile.Remove(part);
                 profile["narrativeFile"] = narrativeFile;
                 profile["packVersion"] = NarrativePack;
@@ -90,13 +90,13 @@ namespace ReignBetaServer
                 library["profiles"] = profiles;
                 library["narrativeSchema"] = NarrativeSchema;
                 library["generatedUtc"] = DateTime.UtcNow.ToString("o");
-                Program.WriteJsonObject(Path.Combine(root, "profile_catalog.json"), library);
+                CampaignFileService.WriteJsonObject(Path.Combine(root, "profile_catalog.json"), library);
             }
             return new Dictionary<string, object> { ["ok"] = results.Count > 0 && results.All(x => ReadBool(x, "ok", false)),
                 ["schema"] = "reign-narrative-authoring-batch-v1", ["results"] = results, ["readyCount"] = ready,
                 ["rosterCount"] = profiles.Count, ["assembled"] = ready == profiles.Count && ready > 0,
                 ["outputRoot"] = root, ["provider"] = ReadString(NarrativeAuthoringSettings, "llmProvider", ""),
-                ["model"] = Program.ModelForRequest(NarrativeAuthoringSettings, "character_construction") };
+                ["model"] = ActionPipelineService.ModelForRequest(NarrativeAuthoringSettings, "character_construction") };
         }
 
         private static Dictionary<string, object> NarrativeAuthoringPersonality(Dictionary<string, object> profile)
@@ -150,7 +150,7 @@ namespace ReignBetaServer
         }
 
         private static readonly Lazy<Dictionary<string, object>> NarrativeNativeContext = new Lazy<Dictionary<string, object>>(() => {
-            var value = Program.ReadJsonObject(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "profiles", "narrative", "native-context.json"));
+            var value = CampaignFileService.ReadJsonObject(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "profiles", "narrative", "native-context.json"));
             if (ReadString(value, "schema", "") != "reign-narrative-native-context-v1")
                 throw new InvalidDataException("Verified native display-name context is missing from the authoring artifact.");
             return value;

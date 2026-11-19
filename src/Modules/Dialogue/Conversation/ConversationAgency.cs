@@ -335,7 +335,7 @@ namespace ReignBetaServer
             if (proposals.Count > 4) issues.Add("Split this compound negotiation into at most four clear outcomes.");
             var gate = ReadDictionary(parsed, "actionGate");
             string gateTopic = AgencyTopicForAction(ReadString(gate, "intent", ""));
-            if (gateTopic.Length > 0 && Program.ActionGateShouldPlan(gate)
+            if (gateTopic.Length > 0 && ActionPipelineService.ActionGateShouldPlan(gate)
                 && !proposals.Any(p => ReadString(p, "topic", "") == gateTopic && AgencyAccepted(ReadString(p, "disposition", ""))))
                 issues.Add("This voluntary action requires an explicit matching accepted proposalDecision.");
             var conception = ReadDictionary(parsed, "conceptionGate");
@@ -389,7 +389,7 @@ namespace ReignBetaServer
                 {
                     double number = ReadDouble(terms, term, 0d);
                     if (number > 0d && number != ReadDouble(ReadDictionary(previous, "terms"), term, -1d)
-                        && !(term == "gold" ? Program.ExtractMoneyAmount(quote, -1) == number
+                        && !(term == "gold" ? ActionPipelineService.ExtractMoneyAmount(quote, -1) == number
                             : AgencyQuotedDuration(quote, number, ReadDictionary(context, "campaignCalendar"))))
                         issues.Add("New numeric " + term + " terms must be grounded in the exact current player offer; ask for an explicit amount if unclear.");
                 }
@@ -511,7 +511,7 @@ namespace ReignBetaServer
                 evaluation["commitState"] = "committed";
                 evaluation["acceptedReplyHash"] = PromptHash(ReadFirstString(parsed, "reply", "body"));
                 evaluation["reply"] = ReadFirstString(parsed, "reply", "body");
-                var acceptedResponse = Program.CloneDictionary(parsed);
+                var acceptedResponse = VerificationService.CloneDictionary(parsed);
                 RemovePrivateReasoningFields(acceptedResponse);
                 acceptedResponse.Remove("conversationAgencyReceipt");
                 acceptedResponse.Remove("motiveDecision");
@@ -547,7 +547,7 @@ namespace ReignBetaServer
         {
             if (parsed.ContainsKey("proposalDecisions") || ReadDictionaryList(context, "records").Count == 0) return false;
             var gate = ReadDictionary(parsed, "actionGate");
-            if (Program.ActionGateShouldPlan(gate) || ReadDictionaryList(parsed, "suggestedActions").Count > 0
+            if (ActionPipelineService.ActionGateShouldPlan(gate) || ReadDictionaryList(parsed, "suggestedActions").Count > 0
                 || ReadDictionaryList(parsed, "obligationWrites").Count > 0
                 || ReadDictionaryList(parsed, "continuityWrites").Count > 0
                 || ReadBool(ReadDictionary(parsed, "conceptionGate"), "needed", false)) return false;
@@ -598,7 +598,7 @@ namespace ReignBetaServer
             var supported = ReadStringList(decision, "evidenceKeys").Select(k => AgencyEvidenceKey(k, facts))
                 .Where(facts.ContainsKey).Distinct(StringComparer.Ordinal).ToList();
             if (supported.Count == 0) return false;
-            var terms = Program.CloneDictionary(ReadDictionary(previous, "terms"));
+            var terms = VerificationService.CloneDictionary(ReadDictionary(previous, "terms"));
             terms["conditions"] = "";
             decision["disposition"] = "undecided";
             decision["subject"] = "Workshop partnership terms";
@@ -618,7 +618,7 @@ namespace ReignBetaServer
             Dictionary<string, object> context)
         {
             var proposals = ReadDictionaryList(parsed, "proposalDecisions");
-            if (proposals.Count != 1 || Program.ActionGateShouldPlan(ReadDictionary(parsed, "actionGate"))
+            if (proposals.Count != 1 || ActionPipelineService.ActionGateShouldPlan(ReadDictionary(parsed, "actionGate"))
                 || ReadDictionaryList(parsed, "suggestedActions").Count > 0
                 || ReadDictionaryList(parsed, "memoryWrites").Count > 0
                 || ReadDictionaryList(parsed, "relationshipAssessments").Count > 0) return false;
@@ -640,11 +640,11 @@ namespace ReignBetaServer
             var supported = ReadStringList(proposal, "evidenceKeys").Select(k => AgencyEvidenceKey(k, facts))
                 .Where(facts.ContainsKey).Distinct(StringComparer.Ordinal).ToList();
             if (supported.Count == 0) return false;
-            var pending = Program.CloneDictionary(proposal);
+            var pending = VerificationService.CloneDictionary(proposal);
             pending["disposition"] = "conditional";
             pending["engagement"] = "clarify";
             pending["subject"] = ReadString(previous, "subject", "");
-            pending["terms"] = Program.CloneDictionary(ReadDictionary(previous, "terms"));
+            pending["terms"] = VerificationService.CloneDictionary(ReadDictionary(previous, "terms"));
             pending["objections"] = ReadStringList(previous, "objections");
             pending["reason"] = DialogueService.LimitText(ReadString(previous, "reason", "")
                 + " The latest statement was acknowledged; the other recorded conditions remain pending.", 500);
@@ -657,7 +657,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> VisibleFailedRepairWithoutEffects(Dictionary<string, object> parsed,
             string failureClass = "action_verification")
         {
-            var visible = Program.CloneDictionary(parsed);
+            var visible = VerificationService.CloneDictionary(parsed);
             string notice = failureClass switch
             {
                 "continuity_evidence" => "[Dialogue continuity evidence could not be verified. No new memory or world change is confirmed.]",
@@ -740,8 +740,8 @@ namespace ReignBetaServer
         {
             foreach (var source in new[] { repair, original })
             {
-                if (source == null || !Program.ConversationStructuredObjectHasUsableVisibleReply(source)) continue;
-                var safeSource = Program.CloneDictionary(source);
+                if (source == null || !ConversationResponseService.ConversationStructuredObjectHasUsableVisibleReply(source)) continue;
+                var safeSource = VerificationService.CloneDictionary(source);
                 if (unsafeVisibleClaims != null && unsafeVisibleClaims.Count > 0)
                 {
                     string reply = ReadFirstString(safeSource, "reply", "body", "response");
@@ -751,11 +751,11 @@ namespace ReignBetaServer
                     else if (safeSource.ContainsKey("body")) safeSource["body"] = reply;
                     else safeSource["response"] = reply;
                 }
-                var complete = Program.CompleteConversationStructuredResponse(safeSource,
-                    Program.NormalizeLookup(mode).Replace(' ', '_'), out _);
+                var complete = ConversationResponseService.CompleteConversationStructuredResponse(safeSource,
+                    ActionPipelineService.NormalizeLookup(mode).Replace(' ', '_'), out _);
                 string content = Json.Serialize(complete);
-                if (!Program.StructuredResponseIsComplete(content, mode)
-                    || !Program.ConversationVisibleReplyPassesRequestQualityGate(content, request, mode)) continue;
+                if (!ConversationResponseService.StructuredResponseIsComplete(content, mode)
+                    || !ConversationResponseService.ConversationVisibleReplyPassesRequestQualityGate(content, request, mode)) continue;
                 llm["ok"] = true;
                 llm["content"] = Json.Serialize(VisibleFailedRepairWithoutEffects(complete,
                     ReadString(llm, "technicalFailureClass", "dialogue_validation")));
@@ -786,7 +786,7 @@ namespace ReignBetaServer
             TryKeepPendingAgencyCondition(parsed, context);
             var evaluation = EvaluateConversationAgency(parsed, context);
             var diagnosticAgencyIssues = ReadStringList(evaluation, "issues").ToList();
-            Program.DiagnosticValidation("Check negotiation metadata", ReadBool(evaluation, "ok", false), diagnosticAgencyIssues, parsed);
+            ConversationResponseService.DiagnosticValidation("Check negotiation metadata", ReadBool(evaluation, "ok", false), diagnosticAgencyIssues, parsed);
             bool repaired = false;
             bool metadataOnly = diagnosticAgencyIssues.Count > 0 && diagnosticAgencyIssues.All(i =>
                 i.StartsWith("Negotiation requires exact", StringComparison.Ordinal) || i.StartsWith("Decision evidence", StringComparison.Ordinal)
@@ -812,18 +812,18 @@ namespace ReignBetaServer
                     }
                 };
                 string model = ReadString(request, "model", ""); if (model.Length > 0) repairRequest["model"] = model;
-                var response = responder == null ? Program.ChatWithLlm(repairRequest) : responder(repairRequest);
+                var response = responder == null ? LlmProviderService.ChatWithLlm(repairRequest) : responder(repairRequest);
                 var candidate = ReadBool(response, "ok", false) ? TryParseJsonObject(ReadString(response, "content", "")) : null;
                 if (metadataOnly) candidate = ApplyAgencyMetadataPatch(parsed, candidate);
-                if (candidate != null && Program.ConversationStructuredObjectHasUsableVisibleReply(candidate))
-                    candidate = Program.CompleteConversationStructuredResponse(candidate,
-                        Program.NormalizeLookup(mode).Replace(' ', '_'), out _);
+                if (candidate != null && ConversationResponseService.ConversationStructuredObjectHasUsableVisibleReply(candidate))
+                    candidate = ConversationResponseService.CompleteConversationStructuredResponse(candidate,
+                        ActionPipelineService.NormalizeLookup(mode).Replace(' ', '_'), out _);
                 var checkedCandidate = candidate == null ? null : EvaluateConversationAgency(candidate, context);
-                Program.DiagnosticValidation("Recheck negotiation repair", checkedCandidate != null && ReadBool(checkedCandidate, "ok", false),
+                ConversationResponseService.DiagnosticValidation("Recheck negotiation repair", checkedCandidate != null && ReadBool(checkedCandidate, "ok", false),
                     checkedCandidate == null ? new List<string> { "The repair did not return a usable JSON candidate." } : ReadStringList(checkedCandidate, "issues"), candidate);
                 if (checkedCandidate != null && ReadBool(checkedCandidate, "ok", false)
                     && (!metadataOnly || ReadFirstString(candidate, "reply", "body") == ReadFirstString(parsed, "reply", "body"))
-                    && Program.StructuredResponseIsComplete(Json.Serialize(candidate), mode)
+                    && ConversationResponseService.StructuredResponseIsComplete(Json.Serialize(candidate), mode)
                     && (validateRepair == null || validateRepair(candidate)))
                 {
                     CarryConversationRepairState(parsed, candidate);
@@ -834,8 +834,8 @@ namespace ReignBetaServer
                 {
                     // The original reply passed the earlier visible/continuity gates. Return its
                     // dialogue with the failed-repair marker, but discard every proposed effect.
-                    if (!Program.StructuredResponseIsComplete(Json.Serialize(parsed), mode)
-                        || !Program.ConversationStructuredObjectHasUsableVisibleReply(parsed))
+                    if (!ConversationResponseService.StructuredResponseIsComplete(Json.Serialize(parsed), mode)
+                        || !ConversationResponseService.ConversationStructuredObjectHasUsableVisibleReply(parsed))
                     {
                         llm["ok"] = false; llm["errorCode"] = "conversation_agency_repair_unusable";
                         llm["error"] = "The NPC decision could not be reconciled with the current negotiation. No usable reply was available.";
@@ -847,7 +847,7 @@ namespace ReignBetaServer
                     llm["content"] = Json.Serialize(visible);
                     llm["conversationAgency"] = new Dictionary<string, object> { ["accepted"] = false,
                         ["visibleFailure"] = true, ["visibleRepairMarker"] = ".,", ["issues"] = ReadStringList(evaluation, "issues") };
-                    Program.WriteAudit(campaignId, correlationId, "server", mode, "llm.agency_repair", heroId, "", "",
+                    OperationsService.WriteAudit(campaignId, correlationId, "server", mode, "llm.agency_repair", heroId, "", "",
                         "completed_with_revalidation_override", 0,
                         "The agency repair failed; the marked original reply was returned without negotiation or authorized action effects.",
                         ReadDictionary(llm, "conversationAgency"));
@@ -855,7 +855,7 @@ namespace ReignBetaServer
                 }
             }
             if (repaired)
-                Program.WriteAudit(campaignId, correlationId, "server", mode, "llm.agency_repair", heroId, "", "", "completed", 0,
+                OperationsService.WriteAudit(campaignId, correlationId, "server", mode, "llm.agency_repair", heroId, "", "", "completed", 0,
                     "The negotiation metadata repair passed revalidation.", new Dictionary<string, object> {
                         ["issues"] = diagnosticAgencyIssues, ["accepted"] = true, ["remaining"] = ReadStringList(evaluation, "issues") });
             if (!persist)
@@ -886,7 +886,7 @@ namespace ReignBetaServer
                     return llm;
                 }
             }
-            if (ReadBool(evaluation, "replayed", false)) parsed = Program.CloneDictionary(ReadDictionary(evaluation, "response"));
+            if (ReadBool(evaluation, "replayed", false)) parsed = VerificationService.CloneDictionary(ReadDictionary(evaluation, "response"));
             parsed["conversationAgencyReceipt"] = evaluation;
             payload["conversationAgencyReceipt"] = evaluation;
             llm["conversationAgency"] = new Dictionary<string, object>
@@ -929,7 +929,7 @@ namespace ReignBetaServer
             if (posture != null && ReadStringList(ClassifyPoliticalConduct(ReadString(view, "reply", ""), posture, motive), "violations").Count > 0) return false;
             var hard = ReadDictionary(ReadDictionary(motive, "romance"), "hardConstraints");
             var gate = ReadDictionary(view, "actionGate");
-            if (hard != null && Program.ActionGateShouldPlan(gate) && ContainsRomanticAuthorizationLanguage(ReadString(gate, "intent", ""))
+            if (hard != null && ActionPipelineService.ActionGateShouldPlan(gate) && ContainsRomanticAuthorizationLanguage(ReadString(gate, "intent", ""))
                 && (ReadBool(hard, "coercive", false) || !ReadBool(hard, "adults", true) || !ReadBool(hard, "nativeSuitable", true) || ReadBool(hard, "closeKin", false))) return false;
             return true;
         }

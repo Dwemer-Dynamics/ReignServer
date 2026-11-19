@@ -22,7 +22,7 @@ namespace ReignBetaServer
         {
             string id = ReadFirstString(payload, "directorActionId", "director_action_id");
             string pairKey = id.Substring("native_target:".Length);
-            string status = Program.NormalizeLookup(ReadString(payload, "status", "completed"));
+            string status = ActionPipelineService.NormalizeLookup(ReadString(payload, "status", "completed"));
             string error = ReadString(payload, "error", "");
             double day = ReadDouble(payload, "worldDay", 0d);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();

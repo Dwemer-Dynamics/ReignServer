@@ -51,7 +51,7 @@ namespace ReignBetaServer
             string campaign = ReadString(p, "campaignId", ""), timeline = DialogueService.ContinuityTimeline(p),
                 player = ReadFirstString(p, "playerId", "playerHeroStringId"), hero = ReadFirstString(p, "heroId", "heroStringId");
             if (hero.Length == 0 || hero == player) return TestDict("ok", false, "error", "Approach needs a living NPC identity.");
-            double day = ReadDouble(p, "worldDay", -1); options ??= Program.ReadNpcLivesOptions();
+            double day = ReadDouble(p, "worldDay", -1); options ??= SettingsService.ReadNpcLivesOptions();
             using var ownership = PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign));
             using var c = ReignDatabase.OpenCampaignConnection(campaign); var state = ReadNpcLives(c, campaign, timeline);
             var encounter = NpcEncounter(state, player, hero, p);
@@ -186,7 +186,7 @@ namespace ReignBetaServer
         {
             if (!encounter.OpeningPending || encounter.OpeningGeneration != generation) return;
             var p = TryParseJsonObject(encounter.OpeningPayload) ?? TestDict();
-            options ??= Program.ReadNpcLivesOptions();
+            options ??= SettingsService.ReadNpcLivesOptions();
             var invitation = ResolveNpcLifeInvitationOpening(state, p, encounter.HeroId, options);
             // Recheck the exact invitation and its feature preference at publication;
             // an accepted/declined/revised offer cannot publish its obsolete intro.
@@ -232,7 +232,7 @@ namespace ReignBetaServer
             using var c = ReignDatabase.OpenCampaignConnection(campaign);
             var state = ReadNpcLives(c, campaign, DialogueService.ContinuityTimeline(p));
             string player = ReadFirstString(p, "playerHeroStringId", "playerId", "mainHeroStringId");
-            string body = NpcLivesPromptBody(state, hero, player, p, Program.ReadNpcLivesOptions(), c);
+            string body = NpcLivesPromptBody(state, hero, player, p, SettingsService.ReadNpcLivesOptions(), c);
             // Context compaction retains complete typed records. Unmarked text next
             // to memory records was silently lost before the actual provider request.
             // Owner facts, current story rules and the entire review window are a
@@ -287,7 +287,7 @@ namespace ReignBetaServer
             NpcAnnouncementReviewWindow window = null)
         {
             if (string.IsNullOrWhiteSpace(reply) || string.IsNullOrWhiteSpace(source) || DialogueService.IsTechnicalConversationNotice(reply)
-                || !Program.ReadNpcLivesOptions().Allows("reaction")) return;
+                || !SettingsService.ReadNpcLivesOptions().Allows("reaction")) return;
             var review = ReadDictionary(parsed, "announcementReview");
             string through = ReadString(review, "throughId", ""), disposition = ReadString(review, "disposition", ""),
                 quote = ReadString(review, "evidenceQuote", "");

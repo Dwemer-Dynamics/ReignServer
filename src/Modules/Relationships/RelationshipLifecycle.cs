@@ -305,8 +305,8 @@ namespace ReignBetaServer
                 document = nested;
             if (document == null)
             {
-                Dictionary<string, object> stored = Program.ReadJsonObject(
-                    Program.CharacterFile(campaignId, heroId, "traits.json"));
+                Dictionary<string, object> stored = CampaignFileService.ReadJsonObject(
+                    CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"));
                 if (stored.Count > 0) document = stored;
             }
             if (document == null) return 50;

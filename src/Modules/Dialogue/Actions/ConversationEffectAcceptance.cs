@@ -38,7 +38,7 @@ namespace ReignBetaServer
                 payload["conversationEffectAcceptance"] = silent;
                 return silent;
             }
-            var candidate = Program.CloneDictionary(parsed);
+            var candidate = VerificationService.CloneDictionary(parsed);
             candidate["reply"] = reply;
             if (candidate.ContainsKey("body")) candidate["body"] = reply;
             var drink = ReadDictionary(payload, "intoxicationReceipt");
@@ -120,7 +120,7 @@ namespace ReignBetaServer
                                 "updates", new List<Dictionary<string, object>>(), "acceptedReplyHash", acceptedHash);
                         else if (ReadDictionaryList(evaluation, "updates").Count > 0)
                         {
-                            string turn = FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), Program.EnsureCorrelationId(payload));
+                            string turn = FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), OperationsService.EnsureCorrelationId(payload));
                             agency = CommitConversationAgency(connection, candidate, context, turn, ownsTransaction: false);
                             if (!ReadBool(agency, "ok", false) || PromptHash(ReadString(agency, "reply", "")) != acceptedHash)
                                 throw new InvalidOperationException("The negotiation changed or this turn already has a different accepted response.");
@@ -157,7 +157,7 @@ namespace ReignBetaServer
                             string currentState = PromptHash(CanonicalJson(TryParseJsonObject(ReadString(stateRow, "state_json", "{}"))));
                             if (ReadString(drink, "baseStateHash", "") != currentState)
                                 throw new InvalidOperationException("The drink state changed while the response was being prepared.");
-                            acceptedDrink = Program.CloneDictionary(drink);
+                            acceptedDrink = VerificationService.CloneDictionary(drink);
                             acceptedDrink["commitState"] = "committed";
                             acceptedDrink["acceptedReplyHash"] = acceptedHash;
                             acceptedDrink["reply"] = reply;

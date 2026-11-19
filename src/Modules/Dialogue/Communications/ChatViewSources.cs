@@ -21,7 +21,7 @@ namespace ReignBetaServer
         {
             var people = ReadDictionaryList(request, "sceneParticipants");
             if (people.Count == 0) return; // Historical rows without a reliable snapshot cannot invent one.
-            var actors = people.Select(p => TestDict("id", Program.CharacterIdFrom(p), "name", ReadString(p, "name", ""),
+            var actors = people.Select(p => TestDict("id", CampaignFileService.CharacterIdFrom(p), "name", ReadString(p, "name", ""),
                 "age", p.ContainsKey("age") ? (object)ReadDouble(p, "age", 0) : null,
                 "isChild", p.ContainsKey("isChild") ? (object)ReadBool(p, "isChild", false) : null,
                 "appearance", ReadDictionary(p, "appearance"),
@@ -32,7 +32,7 @@ namespace ReignBetaServer
             if (expected.Count == 0)
             {
                 string npc = ReadFirstString(request, "speakerHeroStringId", "heroStringId", "npcId");
-                if (npc.Length == 0) npc = Program.CharacterIdFrom(ReadDictionary(request, "hero") ?? new Dictionary<string, object>());
+                if (npc.Length == 0) npc = CampaignFileService.CharacterIdFrom(ReadDictionary(request, "hero") ?? new Dictionary<string, object>());
                 if (npc.Length > 0) expected.Add(npc);
             }
             var frame = TestDict("actors", actors, "expectedNpcIds", expected,

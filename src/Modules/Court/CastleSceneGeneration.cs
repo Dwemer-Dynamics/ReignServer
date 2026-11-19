@@ -34,9 +34,9 @@ namespace ReignBetaServer
             if (string.IsNullOrWhiteSpace(cacheKey) || string.IsNullOrWhiteSpace(prompt) || string.IsNullOrWhiteSpace(contactSheet))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "cacheKey, prompt, and contactSheetBase64 are required." };
 
-            string folder = Path.Combine(Program.CampaignDirectory(campaignId), "castle_chat", Program.SafePathSegment(timelineId, "main"));
+            string folder = Path.Combine(CampaignFileService.CampaignDirectory(campaignId), "castle_chat", CampaignFileService.SafePathSegment(timelineId, "main"));
             Directory.CreateDirectory(folder);
-            string safeKey = Program.SafePathSegment(cacheKey, "scene");
+            string safeKey = CampaignFileService.SafePathSegment(cacheKey, "scene");
             string imagePath = Path.Combine(folder, safeKey + ".png");
             string manifestPath = Path.Combine(folder, safeKey + ".json");
             if (File.Exists(imagePath) && File.Exists(manifestPath))
@@ -48,7 +48,7 @@ namespace ReignBetaServer
                 bool cacheRequiredNormalization = cachedSourceWidth != CastleSceneOutputWidth || cachedSourceHeight != CastleSceneOutputHeight;
                 if (cacheRequiredNormalization)
                     PortraitsService.WriteSharedPortraitAtomic(imagePath, normalizedCached);
-                Dictionary<string, object> cachedManifest = Program.ReadJsonObject(manifestPath) ?? new Dictionary<string, object>();
+                Dictionary<string, object> cachedManifest = CampaignFileService.ReadJsonObject(manifestPath) ?? new Dictionary<string, object>();
                 cachedManifest["renderContract"] = renderContract;
                 cachedManifest["sourceWidth"] = cachedSourceWidth;
                 cachedManifest["sourceHeight"] = cachedSourceHeight;
@@ -83,7 +83,7 @@ namespace ReignBetaServer
             Dictionary<string, object> generated = PortraitsService.PortraitGenerate(imagePayload);
             if (!ReadBool(generated, "ok", false))
             {
-                Program.LogOperational("castle_scene.generate_failed", new Dictionary<string, object>
+                OperationsService.LogOperational("castle_scene.generate_failed", new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["timelineId"] = timelineId,
@@ -112,7 +112,7 @@ namespace ReignBetaServer
             PortraitsService.WriteSharedPortraitAtomic(manifestPath, Encoding.UTF8.GetBytes(Json.Serialize(manifest)));
             generated["cacheKey"] = cacheKey; generated["manifestPath"] = manifestPath; generated["cached"] = false;
             generated["imageBase64"] = Convert.ToBase64String(bytes);
-            Program.LogOperational("castle_scene.generated", new Dictionary<string, object>
+            OperationsService.LogOperational("castle_scene.generated", new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,
                 ["timelineId"] = timelineId,

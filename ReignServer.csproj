@@ -63,7 +63,7 @@
     <Compile Remove="src\Modules\Platform\VerificationLab.Suites.cs" />
     <Compile Remove="src\Modules\Platform\VerificationLab.Support.cs" />
     <Compile Remove="src\Modules\Platform\VerificationSourceLocator.cs" />
-    <Compile Remove="src\Modules\Platform\CodexPerformanceVerification.cs" />
+    <Compile Remove="src\Modules\Platform\Providers\CodexPerformanceVerification.cs" />
     <Compile Remove="src\Modules\Court\CapitalAmbassadorTestSystem.cs" />
     <Compile Remove="src\Modules\Portraits\BackgroundPortraitContracts.cs" />
     <Compile Remove="src\Modules\Dialogue\Gossip\PersonalGossipCompositionProbe.cs" />

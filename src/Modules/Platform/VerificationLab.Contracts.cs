@@ -13,13 +13,13 @@ using System.Xml;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class VerificationService
     {
         private static void RunBuildAndContractChecks(
             List<Dictionary<string, object>> checks,
             bool includeExpensiveSubsystems)
         {
-            if (HasArg(Environment.GetCommandLineArgs(), "--run-verification") && ActiveServerPort <= 0)
+            if (Program.HasArg(Environment.GetCommandLineArgs(), "--run-verification") && Program.ActiveServerPort <= 0)
                 AddSubsystemListSummary(checks, "contracts.campaign_provider_wait", "save_load", PersistenceService.RunCampaignProviderWaitSelfTests(), caseResultLimit:64);
             AddSubsystemListSummary(checks, "contracts.wanderer_population", "characters", CharactersService.RunWandererPopulationTests());
             AddSubsystemListSummary(checks, "contracts.encountered_residents", "characters", CharactersService.RunEncounteredResidentTests());
@@ -111,20 +111,20 @@ namespace ReignBetaServer
             List<string> actionNames = DiscoverClientActionNames(clientRoot);
             AddVerificationCheck(checks, "contracts.action_catalog", "contracts", actionNames.Count >= 70, "Discovered " + actionNames.Count + " action enum members.", new Dictionary<string, object> { ["actions"] = actionNames });
 
-            List<string> missingPrompts = PromptFileNames.Where(name => !File.Exists(Path.Combine(PromptsDir, name))).ToList();
-            AddVerificationCheck(checks, "contracts.prompts", "contracts", missingPrompts.Count == 0, missingPrompts.Count == 0 ? "All registered prompt files exist." : "Missing registered prompt files.", new Dictionary<string, object> { ["registered"] = PromptFileNames.Length, ["missing"] = missingPrompts });
+            List<string> missingPrompts = Program.PromptFileNames.Where(name => !File.Exists(Path.Combine(Program.PromptsDir, name))).ToList();
+            AddVerificationCheck(checks, "contracts.prompts", "contracts", missingPrompts.Count == 0, missingPrompts.Count == 0 ? "All registered prompt files exist." : "Missing registered prompt files.", new Dictionary<string, object> { ["registered"] = Program.PromptFileNames.Length, ["missing"] = missingPrompts });
 
             string[] portraitPromptLayers = { "portrait_identity.txt", "portrait_composition.txt", PortraitsService.PortraitBodyPromptFile, "portrait_prompt_style.txt", "portrait_output_rules.txt" };
-            bool portraitPromptCatalogValid = portraitPromptLayers.All(name => PromptFileNames.Contains(name, StringComparer.OrdinalIgnoreCase));
-			bool redundantGenericClothingRemoved = !PromptFileNames.Contains("portrait_clothing.txt", StringComparer.OrdinalIgnoreCase)
-				&& !File.Exists(Path.Combine(PromptsDir, "portrait_clothing.txt"));
+            bool portraitPromptCatalogValid = portraitPromptLayers.All(name => Program.PromptFileNames.Contains(name, StringComparer.OrdinalIgnoreCase));
+			bool redundantGenericClothingRemoved = !Program.PromptFileNames.Contains("portrait_clothing.txt", StringComparer.OrdinalIgnoreCase)
+				&& !File.Exists(Path.Combine(Program.PromptsDir, "portrait_clothing.txt"));
 			bool portraitClothingCatalogValid = PortraitsService.PortraitClothingPromptFileNames.Length == 56
-				&& PortraitsService.PortraitClothingPromptFileNames.All(name => PromptFileNames.Contains(name, StringComparer.OrdinalIgnoreCase))
-				&& PortraitsService.PortraitClothingPromptFileNames.All(name => File.Exists(Path.Combine(PromptsDir, name)));
+				&& PortraitsService.PortraitClothingPromptFileNames.All(name => Program.PromptFileNames.Contains(name, StringComparer.OrdinalIgnoreCase))
+				&& PortraitsService.PortraitClothingPromptFileNames.All(name => File.Exists(Path.Combine(Program.PromptsDir, name)));
 			bool portraitPhysicalConfidenceCatalogValid = PortraitsService.PortraitPhysicalConfidencePromptFileNames.Length == 5
-				&& PortraitsService.PortraitPhysicalConfidencePromptFileNames.All(name => PromptFileNames.Contains(name, StringComparer.OrdinalIgnoreCase))
-				&& PortraitsService.PortraitPhysicalConfidencePromptFileNames.All(name => File.Exists(Path.Combine(PromptsDir, name)));
-            string portraitExclusions = DefaultPromptText("portrait_output_rules.txt", DefaultPromptTemplates());
+				&& PortraitsService.PortraitPhysicalConfidencePromptFileNames.All(name => Program.PromptFileNames.Contains(name, StringComparer.OrdinalIgnoreCase))
+				&& PortraitsService.PortraitPhysicalConfidencePromptFileNames.All(name => File.Exists(Path.Combine(Program.PromptsDir, name)));
+            string portraitExclusions = PromptService.DefaultPromptText("portrait_output_rules.txt", PromptService.DefaultPromptTemplates());
             bool portraitOutputSafetyValid = portraitExclusions.IndexOf("white footer", StringComparison.OrdinalIgnoreCase) >= 0
                 && portraitExclusions.IndexOf("captions", StringComparison.OrdinalIgnoreCase) >= 0
                 && portraitExclusions.IndexOf("ages", StringComparison.OrdinalIgnoreCase) >= 0;
@@ -192,7 +192,7 @@ namespace ReignBetaServer
 					});
 					notableClothingSelectionValid &= !string.IsNullOrWhiteSpace(selected)
 						&& PortraitsService.PortraitClothingPromptFileNames.Contains(selected, StringComparer.OrdinalIgnoreCase)
-						&& !string.IsNullOrWhiteSpace(DefaultPromptText(selected, DefaultPromptTemplates()));
+						&& !string.IsNullOrWhiteSpace(PromptService.DefaultPromptText(selected, PromptService.DefaultPromptTemplates()));
 				}
 			}
 			AddVerificationCheck(checks, "contracts.portrait_notable_clothing", "portraits_images", notableClothingSelectionValid
@@ -1154,7 +1154,7 @@ namespace ReignBetaServer
             AddVerificationCheck(checks, "contracts.social_event_persistent_group", "conversation_modes", persistentGroupValid,
                 persistentGroupValid ? "Five-person conversations persist across phases, track ignored participants, and advance after seven completed exchanges." : "Persistent social-event group contract is incomplete.", null);
 
-            bool groupTurnServerValid = ServerRoutes.Value.Resolve("POST", "/events/social/turn")?.Handler != null
+            bool groupTurnServerValid = Program.ServerRoutes.Value.Resolve("POST", "/events/social/turn")?.Handler != null
                 && socialEventTurnServerText.Contains("ResolveSocialEventAddressedHeroes")
                 && socialEventTurnServerText.Contains("EnsureSocialTurnPlayerTranscript")
                 && socialEventTurnServerText.Contains("EvaluateSocialEventJoin")
@@ -1187,7 +1187,7 @@ namespace ReignBetaServer
             string diplomacyClientText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             string worldTestClientText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             string settingsText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
-            bool randomDiplomacyDebugValid = ServerRoutes.Value.Resolve("POST", "/diplomacy/debug/random-event")?.Handler != null
+            bool randomDiplomacyDebugValid = Program.ServerRoutes.Value.Resolve("POST", "/diplomacy/debug/random-event")?.Handler != null
                 && diplomacyDebugServerText.Contains("payload[\"debugInitiativeTest\"] = true")
                 && diplomacyDebugServerText.Contains("EvaluateWorldDiplomacy(payload)")
                 && diplomacyDirectorText.Contains("DirectorInitiativeAttempt")
@@ -1454,8 +1454,8 @@ namespace ReignBetaServer
                 && faceDetectionText.Contains("PortraitFocusModelSha256")
                 && controlCenterSource.Contains("/portraits/derivatives/build-missing")
 				// The routes are registered in the route table (Program.PortraitsRoutes.cs), not in Program.cs text.
-				&& ServerRoutes.Value.Resolve("POST", "/portraits/derivatives/build-missing")?.Handler != null
-				&& ServerRoutes.Value.Resolve("POST", "/portraits/derivatives/rebuild-fallback")?.Handler != null
+				&& Program.ServerRoutes.Value.Resolve("POST", "/portraits/derivatives/build-missing")?.Handler != null
+				&& Program.ServerRoutes.Value.Resolve("POST", "/portraits/derivatives/rebuild-fallback")?.Handler != null
                 && controlCenterSource.Contains("Portrait Cache Derivatives");
             AddVerificationCheck(checks, "contracts.portrait_derivative_pipeline", "portraits_images", derivativeContractValid,
                 derivativeContractValid ? "Full-body portrait masters feed atomic face-focused vertical and party-wide thumbnails, high-resolution portraits, and on-demand zoom derivatives; the Control Center exposes the cache builder." : "Portrait derivative pipeline, routing, or Control Center contract is incomplete.", null);
@@ -2282,7 +2282,7 @@ namespace ReignBetaServer
 				&& portraitServerText.Contains("[\"negative_prompt\"] = wanNegativePrompt ?? \"\"")
 				&& portraitServerText.Contains("[\"enable_prompt_expansion\"] = true")
 				&& portraitServerText.Contains("MapToAtlasWan25Size(outputSize)")
-				&& ControlCenterHtml().Contains("<option value='alibaba/wan-2.5/image-edit'>");
+				&& Program.ControlCenterHtml().Contains("<option value='alibaba/wan-2.5/image-edit'>");
 			AddVerificationCheck(checks, "contracts.atlas_wan25_image_edit", "portraits_images", wan25AdapterValid,
 				wan25AdapterValid ? "AtlasCloud Wan 2.5 image edit remains available and uses its protected images/prompt/negative-prompt/seed/size/prompt-expansion payload." : "AtlasCloud Wan 2.5 request adapter is incomplete.", null);
 
@@ -2389,8 +2389,8 @@ namespace ReignBetaServer
             string programSource = VerificationSourceLocator.ResolveUnique(serverRoot, "Program.cs", "src");
             string programText = VerificationSourceLocator.ReadServerTypeSourceText(serverRoot, "Program");
             // Exact routes come from the registered route table (RouteTable.cs), not from the router's source text.
-            int routeCount = ServerRoutes.Value.Routes
-                .Count(route => route.Match == RouteMatch.Exact && route.Path.Length > 1
+            int routeCount = Program.ServerRoutes.Value.Routes
+                .Count(route => route.Match == Program.RouteMatch.Exact && route.Path.Length > 1
                     && !route.Path.StartsWith("/court/", StringComparison.OrdinalIgnoreCase));
             AddVerificationCheck(checks, "contracts.http_routes", "server_lifecycle", routeCount >= 60, "Discovered " + routeCount + " exact HTTP route handlers.", new Dictionary<string, object> { ["routeCount"] = routeCount });
 

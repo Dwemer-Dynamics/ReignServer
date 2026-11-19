@@ -44,7 +44,7 @@ namespace ReignBetaServer
             routes.Post("/relationships/ambient/native_sync/pull", request => RelationshipsService.RelationshipNativeTargetPullApi(request.JsonBody));
             routes.Post("/relationships/ambient/native_sync/receipts", request => RelationshipsService.RelationshipNativeTargetReceiptsApi(request.JsonBody));
             {
-                Func<Program.HttpRequest, object> handler = request => RelationshipsService.MbtiRelationshipStatusApi(Program.RelationshipStatusPayload(request));
+                Func<Program.HttpRequest, object> handler = request => RelationshipsService.MbtiRelationshipStatusApi(CampaignFileService.RelationshipStatusPayload(request));
                 routes.Get("/relationships/ambient/status", handler);
                 routes.Post("/relationships/ambient/status", handler);
             }

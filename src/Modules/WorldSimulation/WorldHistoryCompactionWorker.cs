@@ -119,7 +119,7 @@ namespace ReignBetaServer
                     lane.LastCompletedUtc = DateTime.UtcNow.ToString("o");
                     lane.Running = false;
                 }
-                Program.LogOperational("world_history.compaction_failed",
+                OperationsService.LogOperational("world_history.compaction_failed",
                     new Dictionary<string, object>
                     {
                         ["campaignId"] = lane.CampaignId,

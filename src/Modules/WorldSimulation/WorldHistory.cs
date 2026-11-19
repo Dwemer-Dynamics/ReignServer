@@ -110,7 +110,7 @@ namespace ReignBetaServer
             DialogueService.EnsurePlayerPerformanceSchema(connection);
             string storedCampaignId = ReadString(WorldSimulationStore.SelectWorldHistoryEvents2(connection).FirstOrDefault(), "campaign_id", "");
             if (!string.IsNullOrWhiteSpace(storedCampaignId))
-                PersistenceService.TryDeleteFile(Program.CampaignFile(storedCampaignId, "world", "history.jsonl"));
+                PersistenceService.TryDeleteFile(CampaignFileService.CampaignFile(storedCampaignId, "world", "history.jsonl"));
             if (postgres)
             {
                 WorldSimulationStore.UpsertSchemaMeta4(connection, new Dictionary<string, object>
@@ -575,7 +575,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> WorldHistoryQueryApi(Dictionary<string, string> query)
         {
             query = query ?? new Dictionary<string, string>();
-            string campaignId = query.ContainsKey("campaignId") ? query["campaignId"] : Program.LatestCampaignId();
+            string campaignId = query.ContainsKey("campaignId") ? query["campaignId"] : SettingsService.LatestCampaignId();
             string timelineId = query.ContainsKey("timelineId") ? query["timelineId"] : string.Empty;
             string entityId = query.ContainsKey("entityId") ? query["entityId"] : string.Empty;
             string type = query.ContainsKey("eventType") ? query["eventType"] : string.Empty;
@@ -600,7 +600,7 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> WorldHistoryEventApi(Dictionary<string, string> query, string eventId)
         {
-            string campaignId = query != null && query.ContainsKey("campaignId") ? query["campaignId"] : Program.LatestCampaignId();
+            string campaignId = query != null && query.ContainsKey("campaignId") ? query["campaignId"] : SettingsService.LatestCampaignId();
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureWorldHistorySchema(connection);
@@ -614,7 +614,7 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> WorldHistoryCorrelationApi(Dictionary<string, string> query, string correlationId)
         {
-            string campaignId = query != null && query.ContainsKey("campaignId") ? query["campaignId"] : Program.LatestCampaignId();
+            string campaignId = query != null && query.ContainsKey("campaignId") ? query["campaignId"] : SettingsService.LatestCampaignId();
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureWorldHistorySchema(connection);
@@ -645,7 +645,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> timeline = WorldSimulationStore.SelectWorldHistoryTimelines(connection, new Dictionary<string, object> { ["id"] = timelineId }).FirstOrDefault()
                     ?? new Dictionary<string, object>();
                 long head = ReadLong(timeline, "head_sequence", 0);
-                string cacheKey = "source_claim_v3|" + campaignId + "|" + Program.NormalizeLookup(claim) + "|" + claimantId + "|" + speakerId + "|" + speakerKingdomId + "|" + timelineId + "|" + head
+                string cacheKey = "source_claim_v3|" + campaignId + "|" + ActionPipelineService.NormalizeLookup(claim) + "|" + claimantId + "|" + speakerId + "|" + speakerKingdomId + "|" + timelineId + "|" + head
                     + "|" + worldDay.ToString("R", CultureInfo.InvariantCulture) + "|lookup=" + lookupOnly
                     + "|" + ReadDouble(payload, "fromDay", -1d).ToString("R", CultureInfo.InvariantCulture)
                     + "|" + ReadDouble(payload, "toDay", worldDay > 0 ? worldDay : double.MaxValue).ToString("R", CultureInfo.InvariantCulture)
@@ -685,9 +685,9 @@ namespace ReignBetaServer
                 string candidateClaimantId = lookupOnly ? "" : claimantId;
                 List<Dictionary<string, object>> candidates = QueryWorldHistoryCandidates(connection, timelineId, claim, family, candidateClaimantId, entityHints, locationId, fromDay, toDay, 256);
                 Dictionary<string, object> semanticHistory = DialogueService.TrySemanticMemorySearch(campaignId, claim,
-                    new Dictionary<string, object>(), Program.LoadSettings(), new[] { "world_history_event" }, timelineId);
+                    new Dictionary<string, object>(), SettingsService.LoadSettings(), new[] { "world_history_event" }, timelineId);
                 candidates = DialogueService.MergeSemanticWorldHistoryCandidates(connection, campaignId, timelineId, claim, family, claimantId,
-                    entityHints, locationId, fromDay, toDay, candidates, semanticHistory, Program.LoadSettings());
+                    entityHints, locationId, fromDay, toDay, candidates, semanticHistory, SettingsService.LoadSettings());
                 Dictionary<string, object> minimeRerank = TryMinimeHistoryRerank(claim, purpose, family, candidates.Take(64).ToList());
                 ApplyWorldHistoryMinimeScores(candidates, minimeRerank);
                 candidates = candidates.OrderByDescending(x => ReadDouble(x, "combinedScore", ReadDouble(x, "deterministicScore", 0d))).Take(12).ToList();
@@ -864,7 +864,7 @@ namespace ReignBetaServer
                 bool direct = claimantMatches.Any(x => HasHistoryRole(x, claimantId, "direct_rescuer", "rescuer", "releaser"));
                 bool assisted = claimantMatches.Any(x => HasHistoryRole(x, claimantId, "assisting_rescuer", "rescuing_side_participant", "participant"));
                 int beneficiaries = claimantMatches.SelectMany(x => ReadDictionaryList(x, "entities")).Where(x => RoleContains(ReadString(x, "role", ""), "beneficiary", "rescued_prisoner", "released_prisoner")).Select(x => ReadString(x, "entity_id", "")).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Count();
-                bool severalClaim = DialogueService.ContainsAny(Program.NormalizeLookup(claim), "several", "many", "multiple", "three", "four", "five");
+                bool severalClaim = DialogueService.ContainsAny(ActionPipelineService.NormalizeLookup(claim), "several", "many", "multiple", "three", "four", "five");
                 verdict = direct && (!severalClaim || beneficiaries >= 3) ? "verified" : direct || assisted ? "partially_verified" : familyMatches.All(HistoryEventRosterComplete) ? "contradicted" : "insufficient_evidence";
                 explanation = direct ? "The claimant is connected to a direct release; beneficiary quantity was checked." : assisted ? "The claimant assisted the rescuing side but is not the direct recorded rescuer." : "No complete matching event credits the claimant with the rescue.";
                 if (direct || assisted) matched.Add("rescue participation");
@@ -884,7 +884,7 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> ClassifyWorldHistoryClaim(string claim)
         {
-            string q = Program.NormalizeLookup(claim);
+            string q = ActionPipelineService.NormalizeLookup(claim);
             string purpose = HistoryClaimContainsTerm(q, "i did", "i was", "i fought", "i rescued", "i captured", "i killed") ? "self_claim"
                 : HistoryClaimContainsTerm(q, "because of me", "my victory", "my doing", "credit", "hero") ? "credit_or_boast"
                 : HistoryClaimContainsTerm(q, "was not there", "wasnt there", "elsewhere", "alibi") ? "alibi"
@@ -917,7 +917,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> TryMinimeHistoryRoute(string claim, string fallbackPurpose, string fallbackFamily)
         {
             Dictionary<string, object> status = new Dictionary<string, object> { ["applied"] = false, ["purpose"] = fallbackPurpose, ["claimFamily"] = fallbackFamily, ["method"] = "deterministic_fallback" };
-            Dictionary<string, object> settings = Program.LoadSettings();
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
             if (!ReadBool(settings, "enableMinimeMemoryWorker", true) || !ReadBool(settings, "enableMinimeMemoryReranking", true)) return status;
             try
             {
@@ -966,7 +966,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> TryMinimeHistoryRerank(string claim, string purpose, string family, List<Dictionary<string, object>> candidates)
         {
             Dictionary<string, object> status = new Dictionary<string, object> { ["applied"] = false, ["scores"] = new Dictionary<string, object>(), ["candidateCount"] = candidates.Count };
-            Dictionary<string, object> settings = Program.LoadSettings();
+            Dictionary<string, object> settings = SettingsService.LoadSettings();
             if (candidates.Count < 2 || !ReadBool(settings, "enableMinimeMemoryWorker", true) || !ReadBool(settings, "enableMinimeMemoryReranking", true)) return status;
             try
             {
@@ -1002,7 +1002,7 @@ namespace ReignBetaServer
                 double semantic = scores.ContainsKey(id) ? Convert.ToDouble(scores[id], CultureInfo.InvariantCulture) : 0d;
                 candidate["minimeScore"] = semantic;
                 candidate["combinedScore"] = ReadDouble(candidate, "deterministicScore", 0d)
-                    + Math.Max(0d, ReadDouble(candidate, "vectorSemanticScore", 0d)) * ReadDouble(Program.LoadSettings(), "vectorScoreWeight", 30d)
+                    + Math.Max(0d, ReadDouble(candidate, "vectorSemanticScore", 0d)) * ReadDouble(SettingsService.LoadSettings(), "vectorScoreWeight", 30d)
                     + Math.Max(0d, semantic) * 5d;
             }
         }
@@ -1047,7 +1047,7 @@ namespace ReignBetaServer
 
         internal static string ClassifyWorldHistoryCategory(string eventType)
         {
-            string q = Program.NormalizeLookup(eventType);
+            string q = ActionPipelineService.NormalizeLookup(eventType);
             if (DialogueService.ContainsAny(q, "battle", "raid", "siege", "war", "army", "prisoner", "wounded", "killed")) return "warfare";
             if (DialogueService.ContainsAny(q, "marriage", "birth", "child", "relation", "clan")) return "personal_and_clan";
             if (DialogueService.ContainsAny(q, "trade", "item", "gold", "workshop", "caravan")) return "economy";
@@ -1057,12 +1057,12 @@ namespace ReignBetaServer
 
         internal static bool IsMajorWorldHistoryEvent(string eventType)
         {
-            return DialogueService.ContainsAny(Program.NormalizeLookup(eventType), "war declared", "make peace", "alliance", "kingdom created", "kingdom destroyed", "ruling clan", "settlement owner", "marriage", "given birth", "hero killed", "rebellion");
+            return DialogueService.ContainsAny(ActionPipelineService.NormalizeLookup(eventType), "war declared", "make peace", "alliance", "kingdom created", "kingdom destroyed", "ruling clan", "settlement owner", "marriage", "given birth", "hero killed", "rebellion");
         }
 
         internal static bool EventMatchesFamily(string eventType, List<Dictionary<string, object>> entities, string family)
         {
-            string q = Program.NormalizeLookup(eventType + " " + string.Join(" ", (entities ?? new List<Dictionary<string, object>>()).Select(x => ReadString(x, "role", ""))));
+            string q = ActionPipelineService.NormalizeLookup(eventType + " " + string.Join(" ", (entities ?? new List<Dictionary<string, object>>()).Select(x => ReadString(x, "role", ""))));
             switch (family)
             {
                 case "presence": case "leadership": case "victory": case "defeat": return DialogueService.ContainsAny(q, "battle", "raid", "siege", "hideout", "blockade");
@@ -1106,19 +1106,19 @@ namespace ReignBetaServer
 
         internal static bool RoleContains(string role, params string[] values)
         {
-            string q = Program.NormalizeLookup(role);
-            return values.Any(x => q.Contains(Program.NormalizeLookup(x)));
+            string q = ActionPipelineService.NormalizeLookup(role);
+            return values.Any(x => q.Contains(ActionPipelineService.NormalizeLookup(x)));
         }
 
         internal static double HistoryTermScore(Dictionary<string, object> row, List<string> terms)
         {
-            string text = Program.NormalizeLookup(ReadString(row, "semantic_text", "") + " " + ReadString(row, "summary", "") + " " + ReadString(row, "event_type", "") + " " + ReadString(row, "location_name", ""));
-            return (terms ?? new List<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Sum(x => text.Contains(Program.NormalizeLookup(x)) ? 1d : 0d);
+            string text = ActionPipelineService.NormalizeLookup(ReadString(row, "semantic_text", "") + " " + ReadString(row, "summary", "") + " " + ReadString(row, "event_type", "") + " " + ReadString(row, "location_name", ""));
+            return (terms ?? new List<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Sum(x => text.Contains(ActionPipelineService.NormalizeLookup(x)) ? 1d : 0d);
         }
 
         internal static List<string> FamilyTerms(string family)
         {
-            return FamilyDescription(family).Split(new[] { ' ', ',', '.', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(Program.NormalizeLookup).Where(x => x.Length > 3).Distinct().ToList();
+            return FamilyDescription(family).Split(new[] { ' ', ',', '.', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(ActionPipelineService.NormalizeLookup).Where(x => x.Length > 3).Distinct().ToList();
         }
 
         private static string PurposeDescription(string purpose)
@@ -1187,7 +1187,7 @@ namespace ReignBetaServer
             assertions.AddRange(RunWorldHistoryRetentionAssertions());
             assertions.AddRange(DialogueService.RunWorldHistoryDialogueAssertions(campaignId, timelineId));
             try { ReignPostgreSqlStorage.DropCampaign(campaignId); } catch { }
-            try { Directory.Delete(Program.CampaignDirectory(campaignId), true); } catch { }
+            try { Directory.Delete(CampaignFileService.CampaignDirectory(campaignId), true); } catch { }
             return new Dictionary<string, object> { ["ok"] = assertions.All(x => ReadBool(x, "passed", false)), ["passed"] = assertions.All(x => ReadBool(x, "passed", false)), ["assertions"] = assertions };
         }
 #endif
@@ -1252,7 +1252,7 @@ namespace ReignBetaServer
             {
                 total.Stop();
                 try { ReignPostgreSqlStorage.DropCampaign(campaignId); } catch { }
-                try { Directory.Delete(Program.CampaignDirectory(campaignId), true); } catch { }
+                try { Directory.Delete(CampaignFileService.CampaignDirectory(campaignId), true); } catch { }
             }
             bool passed = queryCount > 0 && queryMs < 250;
             return new Dictionary<string, object>

@@ -51,7 +51,7 @@ namespace ReignBetaServer
             // would exclude every later individual conversation after contact.
             exchange = FirstNonEmpty(exchange, unit.EventId, source);
             var scopes = ReadStringList(speaker, "scopes");
-            options ??= Program.ReadPlayerApproachOptions();
+            options ??= SettingsService.ReadPlayerApproachOptions();
             int observed = 0;
             foreach (var observer in presence.Take(512).Where(p => options.TrackAttention && ReadBool(p, "alive", false)))
             {
@@ -88,7 +88,7 @@ namespace ReignBetaServer
             double worldDay = ReadDouble(p, "worldDay", -1);
             if (player.Length == 0 || worldDay < 0 || double.IsNaN(worldDay) || double.IsInfinity(worldDay)
                 || !new[] { "shared", "keep", "patrol" }.Contains(kind)) return TestDict("ok", false, "error", "Invalid approach scope.");
-            options ??= Program.ReadPlayerApproachOptions();
+            options ??= SettingsService.ReadPlayerApproachOptions();
             if (!options.Allows(kind)) return TestDict("ok", true, "status", "disabled", "requests", new List<Dictionary<string, object>>());
             int day = (int)Math.Floor(worldDay);
             lock (CampaignRelationshipWriteLock(campaign))
@@ -117,7 +117,7 @@ namespace ReignBetaServer
                             || ReadBool(candidate, "protected", true))) continue;
                         string check = "check:" + kind + ":" + player + ":" + hero + ":" + day;
                         if (ApproachState(c, timeline, check).Count > 0) continue;
-                        var traits = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "traits.json"));
+                        var traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "traits.json"));
                         if (traits == null || traits.Count == 0) traits = CharactersService.BuildTraitDocument(ReadDictionary(candidate, "profile"));
                         double jealousy = RelationshipTraitPercent(traits, "jealousy"), patience = RelationshipTraitPercent(traits, "patience");
                         double boldness = RelationshipTraitPercent(traits, "boldness"), pride = RelationshipTraitPercent(traits, "pride"), irritability = RelationshipTraitPercent(traits, "irritability");
@@ -232,7 +232,7 @@ namespace ReignBetaServer
                             var prior = observations.SingleOrDefault(r => ReadString(r, "receiptId", "") == receiptId);
                             if (prior != null && new[] { "priorNativeRelation", "nativeRelation", "requestedDelta" }.Any(key => ReadInt(prior, key, 0) != ReadInt(observation, key, 0)))
                                 return FinishApproachEvaluation(c, TestDict("ok", false, "error", "An acknowledged native observation cannot change."));
-                            if (prior == null) observations.Add(Program.CloneDictionary(observation));
+                            if (prior == null) observations.Add(VerificationService.CloneDictionary(observation));
                         }
                         request["nativeObservations"] = observations;
                         PutApproachState(c, timeline, "request:" + id, request);
@@ -242,7 +242,7 @@ namespace ReignBetaServer
                         return FinishApproachEvaluation(c, TestDict("ok", true, "idempotent", true, "request", request));
                     // Only unanswered invitations are cancelled. Committed decisions
                     // and native receipt acknowledgments retain their exact-once route.
-                    options ??= Program.ReadPlayerApproachOptions();
+                    options ??= SettingsService.ReadPlayerApproachOptions();
                     if (!options.Allows(ReadString(request, "kind", ""))) choice = "cancel";
                     if (ReadString(request, "kind", "") == "shared" && ReadDictionaryList(request, "heroes").Any(h =>
                         CanonicalJson(ApproachState(c, timeline, "contact:" + ReadString(request, "playerId", "") + ":" + ReadString(h, "heroId", "")))
@@ -315,7 +315,7 @@ namespace ReignBetaServer
                         || !new[] { "battle_rescue", "prison_rescue" }.Contains(ReadString(rescue, "kind", "")))
                         throw new InvalidOperationException("The rescue evidence does not match this conversation.");
                     string rescuePrompt = "NATIVE RESCUE EVIDENCE\n" + Json.Serialize(rescue) + "\n"
-                        + (ReadBool(payload, "rescueOpening", false) ? Program.LoadPromptTemplate("rescue_opening.txt")
+                        + (ReadBool(payload, "rescueOpening", false) ? PromptService.LoadPromptTemplate("rescue_opening.txt")
                             : "The rescue opening has already been heard. Respond to the player's current contribution; do not restart your thanks or invent further rescue facts.");
                     if (ReadBool(payload, "rescueOpening", false)) rescuePrompt += "\n" + IndividualNpcOpeningCue;
                     context += "\n\n" + DialogueService.RenderContinuityRecord("rescue_" + DialogueService.PromptHash(Json.Serialize(rescue)).Substring(0, 24),
@@ -328,7 +328,7 @@ namespace ReignBetaServer
                 if (brief == null || ReadString(request, "status", "") != "accepted" || ReadString(request, "playerId", "") != player)
                     throw new InvalidOperationException("This accepted approach does not authorize the current speaker.");
                 bool opening = ReadBool(payload, "approachOpening", false) && !ReadStringList(request, "heard").Contains(hero);
-                payload["authoritativeApproachBrief"] = Program.CloneDictionary(brief);
+                payload["authoritativeApproachBrief"] = VerificationService.CloneDictionary(brief);
                 payload["authoritativeApproachOpening"] = opening;
                 string kind = ReadString(request, "kind", "");
                 payload["authoritativeApproachKind"] = kind;
@@ -353,7 +353,7 @@ namespace ReignBetaServer
             string primaryId = ReadString(primary, "heroId", "");
             int days = ReadInt(primary, "days", ReadInt(ReadDictionaryList(brief, "rivals")
                 .FirstOrDefault(r => ReadString(r, "heroId", "") == primaryId), "days", 0));
-            return Program.LoadPromptTemplate("jealousy_approach.txt")
+            return PromptService.LoadPromptTemplate("jealousy_approach.txt")
                 + "\nEvery named rival in spoken dialogue must have an exact rivalDays entry. If mentioning a number of days, use one separate sentence per rival. Never pool their days or infer consecutive days from the count."
                 + "\nREQUIRED ADDITIONAL TOP-LEVEL JSON FIELD (alongside the ordinary output schema, never inside reply or decisionBrief): "
                 + Json.Serialize(TestDict("approachOpeningEvidence", TestDict("primaryRivalId", primaryId,
@@ -416,24 +416,24 @@ namespace ReignBetaServer
             if (!ReadBool(llm, "ok", false)) return llm;
             var parsed = TryParseJsonObject(ReadString(llm, "content", ""));
             var errors = ApproachOpeningViolations(parsed, payload);
-            Program.DiagnosticValidation("Check approach opening", errors.Count == 0, errors, parsed);
+            ConversationResponseService.DiagnosticValidation("Check approach opening", errors.Count == 0, errors, parsed);
             if (errors.Count == 0) return llm;
-            var repair = Program.CloneDictionary(request);
-            var messages = ReadDictionaryList(request, "messages").Select(Program.CloneDictionary).ToList();
+            var repair = VerificationService.CloneDictionary(request);
+            var messages = ReadDictionaryList(request, "messages").Select(VerificationService.CloneDictionary).ToList();
             messages.Add(TestDict("role", "user", "content", "Repair this opening using the authoritative approach brief. Preserve the complete output schema. "
                 + Json.Serialize(errors) + "\nBRIEF: " + Json.Serialize(ReadDictionary(payload, "authoritativeApproachBrief"))
                 + (ReadBool(payload, "authoritativeApproachOpening", false) && ReadString(payload, "authoritativeApproachKind", "shared") == "shared"
                     ? "\n" + JealousyOpeningInstructions(ReadDictionary(payload, "authoritativeApproachBrief")) : "")
                 + "\n" + IndividualNpcOpeningCue + "\nINVALID RESPONSE: " + ReadString(llm, "content", "")));
             repair["messages"] = messages; repair["temperature"] = 0d;
-            var result = (responder ?? Program.ChatWithLlm)(repair);
+            var result = (responder ?? LlmProviderService.ChatWithLlm)(repair);
             var repaired = TryParseJsonObject(ReadString(result, "content", ""));
             var repairErrors = ApproachOpeningViolations(repaired, payload);
             if (!ReadBool(result, "ok", false)) repairErrors.Add(ReadString(result, "error", "The opening repair failed to generate a response."));
             if (repaired == null) repairErrors.Add("The opening repair did not return a JSON object.");
             if (repairErrors.Count == 0 && validateRepair != null && !validateRepair(repaired))
                 repairErrors.Add("The repaired opening failed the ordinary conversation checks.");
-            Program.DiagnosticValidation("Recheck approach opening", repairErrors.Count == 0, repairErrors, repaired);
+            ConversationResponseService.DiagnosticValidation("Recheck approach opening", repairErrors.Count == 0, repairErrors, repaired);
             if (repairErrors.Count == 0) return result;
             return TestDict("ok", false, "error", "The approach opening did not match its witnessed attention history. You may retry.",
                 "approachOpeningFailed", true, "approachOpeningViolations", repairErrors);

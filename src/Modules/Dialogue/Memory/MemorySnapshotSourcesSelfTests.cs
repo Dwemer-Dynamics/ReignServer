@@ -90,7 +90,7 @@ namespace ReignBetaServer
                     // Existing snapshots contain the old shadow mode and original
                     // turns, not a newly prepared scene. The default reader must
                     // work immediately without rewriting that snapshot or its rows.
-                    var defaultReader = Program.DefaultSettings();
+                    var defaultReader = SettingsService.DefaultSettings();
                     defaultReader["enableSemanticMemory"] = false;
                     defaultReader["minimeEnabled"] = false;
                     defaultReader["useMemoryLlmForConsolidation"] = false;

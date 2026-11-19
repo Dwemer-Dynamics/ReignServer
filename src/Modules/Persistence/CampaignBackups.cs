@@ -38,10 +38,10 @@ namespace ReignBetaServer
             {
                 string campaignId =
                     ReadString(databaseCampaign, "campaignId", "");
-                string directory = Program.CampaignDirectory(campaignId);
+                string directory = CampaignFileService.CampaignDirectory(campaignId);
                 if (!Directory.Exists(directory)) continue;
                 DirectoryInfo directoryInfo = new DirectoryInfo(directory);
-                if (!Program.IsRealCampaignDirectory(directoryInfo)) continue;
+                if (!CampaignFileService.IsRealCampaignDirectory(directoryInfo)) continue;
                 campaigns.Add(BuildCampaignBackupSummary(
                     campaignId,
                     directoryInfo,
@@ -278,7 +278,7 @@ namespace ReignBetaServer
                 saveSync["matchingNativeSavePoints"] = matching;
                 saveSync["staleNativeSavePoints"] = stale;
 
-                Dictionary<string, object> metadata = Program.ReadJsonObject(Path.Combine(
+                Dictionary<string, object> metadata = CampaignFileService.ReadJsonObject(Path.Combine(
                     StrictCampaignDirectory(campaignId), "campaign.json"));
                 string lifecycle = ReadString(metadata, "saveSyncLifecycle", "");
                 bool pendingRetirement = pending.ContainsKey(campaignId);
@@ -358,7 +358,7 @@ namespace ReignBetaServer
                 return Path.GetFullPath(
                     CampaignNativeSaveRootOverrideForTests);
             // Local deployment records the selected Windows user's save folder in WSL notation.
-            string saveRoot = ReadString(Program.ReadJsonObject(Path.Combine(Program.DataDir, "windows-bridge.json")), "nativeSaveRoot", "");
+            string saveRoot = ReadString(CampaignFileService.ReadJsonObject(Path.Combine(Program.DataDir, "windows-bridge.json")), "nativeSaveRoot", "");
             if (!saveRoot.StartsWith("/mnt/", StringComparison.Ordinal)
                 || !saveRoot.EndsWith("/Mount and Blade II Bannerlord/Game Saves", StringComparison.Ordinal)
                 || Path.GetFullPath(saveRoot) != saveRoot)
@@ -417,7 +417,7 @@ namespace ReignBetaServer
         {
             directory = "";
             if (string.IsNullOrWhiteSpace(campaignId)
-                || Program.IsInternalCampaignId(campaignId)) return false;
+                || CampaignFileService.IsInternalCampaignId(campaignId)) return false;
             try
             {
                 directory = StrictCampaignDirectory(campaignId);
@@ -503,7 +503,7 @@ namespace ReignBetaServer
                 List<Dictionary<string, object>> orphanResults =
                     new List<Dictionary<string, object>>();
                 DeleteAuditedOrphanRoots(ReadDictionaryList(
-                        audit, "orphanCampaignRoots"), Program.CampaignsRoot(), false,
+                        audit, "orphanCampaignRoots"), CampaignFileService.CampaignsRoot(), false,
                     orphanResults);
                 DeleteAuditedOrphanRoots(ReadDictionaryList(
                         audit, "orphanSaveSyncRoots"), SaveSyncRoot(), false,
@@ -546,7 +546,7 @@ namespace ReignBetaServer
                             " stale Save Sync registration(s) were removed. The _shared portrait library was preserved."
                         : "Some campaigns were deleted, but residual cleanup requires attention. Review the per-campaign results."
                 };
-                Program.LogOperational("campaign.zero_save_cleanup", response);
+                OperationsService.LogOperational("campaign.zero_save_cleanup", response);
                 return response;
             }
             finally { Program.CampaignDataGate.ExitWriteLock(); }
@@ -603,7 +603,7 @@ namespace ReignBetaServer
         {
             Dictionary<string, object> meta = dir == null
                 ? new Dictionary<string, object>()
-                : Program.ReadJsonObject(Path.Combine(dir.FullName, "campaign.json"));
+                : CampaignFileService.ReadJsonObject(Path.Combine(dir.FullName, "campaign.json"));
             string cacheDir = CampaignPortraitCacheDirectory(campaignId);
             long campaignFileBytes =
                 dir == null ? 0 : SafeDirectorySize(dir.FullName);
@@ -685,7 +685,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> CreateCampaignBackupArchive(string campaignId)
         {
-            string campaignDir = Program.CampaignDirectory(campaignId);
+            string campaignDir = CampaignFileService.CampaignDirectory(campaignId);
             bool databaseExists = ReignPostgreSqlStorage.ListCampaignMetadata().Any(
                 row => ReadString(row, "campaignId", "")
                     .Equals(campaignId, StringComparison.OrdinalIgnoreCase));
@@ -755,7 +755,7 @@ namespace ReignBetaServer
                         Path.Combine(stagedNativeSaves, nativeFileName), false);
                 }
 
-                Dictionary<string, object> meta = Program.ReadJsonObject(Path.Combine(campaignDir, "campaign.json"));
+                Dictionary<string, object> meta = CampaignFileService.ReadJsonObject(Path.Combine(campaignDir, "campaign.json"));
                 List<Dictionary<string, object>> files = BackupFileManifest(stagingRoot);
                 Dictionary<string, object> manifest = new Dictionary<string, object>
                 {
@@ -789,8 +789,8 @@ namespace ReignBetaServer
                     ["expandedBytes"] = files.Sum(x => ReadLong(x, "bytes", 0)),
                     ["files"] = files
                 };
-                Program.WriteJsonObject(Path.Combine(stagingRoot, "manifest.json"), manifest);
-                string safeLabel = Program.SafePathSegment(ReadString(manifest, "campaignLabel", campaignId), campaignId);
+                CampaignFileService.WriteJsonObject(Path.Combine(stagingRoot, "manifest.json"), manifest);
+                string safeLabel = CampaignFileService.SafePathSegment(ReadString(manifest, "campaignLabel", campaignId), campaignId);
                 if (safeLabel.Length > 70) safeLabel = safeLabel.Substring(0, 70);
                 string fileName = "Bannerlord-Reign-" + safeLabel + "-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".reignbackup";
                 string archivePath = Path.Combine(generatedRoot, operationId + ".reignbackup");
@@ -806,7 +806,7 @@ namespace ReignBetaServer
                     ["fileCount"] = files.Count,
                     ["nativeSaveCount"] = matchingNativeSaves.Count
                 };
-                Program.LogOperational("campaign.backup_exported", result);
+                OperationsService.LogOperational("campaign.backup_exported", result);
                 return result;
             }
             catch (Exception ex)
@@ -841,7 +841,7 @@ namespace ReignBetaServer
             try
             {
                 ExtractCampaignBackupSecurely(uploadPath, extractRoot);
-                Dictionary<string, object> manifest = Program.ReadJsonObject(Path.Combine(extractRoot, "manifest.json"));
+                Dictionary<string, object> manifest = CampaignFileService.ReadJsonObject(Path.Combine(extractRoot, "manifest.json"));
                 ValidateCampaignBackupManifest(extractRoot, manifest);
                 string campaignId = ReadString(manifest, "campaignId", "");
                 ValidateSaveSyncId(campaignId, "campaignId");
@@ -999,12 +999,12 @@ namespace ReignBetaServer
                         ? "Campaign and native Bannerlord save files restored. Load the imported save to continue with its fully paired Reign history."
                         : "Legacy Reign campaign restored. Supply its matching native Bannerlord save before loading it."
                 };
-                Program.LogOperational("campaign.backup_imported", result);
+                OperationsService.LogOperational("campaign.backup_imported", result);
                 return result;
             }
             catch (Exception ex)
             {
-                Program.LogOperational("campaign.backup_import_failed", new Dictionary<string, object> { ["error"] = ex.Message });
+                OperationsService.LogOperational("campaign.backup_import_failed", new Dictionary<string, object> { ["error"] = ex.Message });
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = ex.Message };
             }
             finally
@@ -1281,7 +1281,7 @@ namespace ReignBetaServer
         internal static string CampaignPortraitCacheDirectory(string campaignId)
         {
             string root = CampaignPortraitCacheRoot();
-            return string.IsNullOrWhiteSpace(root) ? "" : Path.Combine(root, Program.SafePathSegment(campaignId, "unknown"));
+            return string.IsNullOrWhiteSpace(root) ? "" : Path.Combine(root, CampaignFileService.SafePathSegment(campaignId, "unknown"));
         }
 
         private static string CampaignPortraitCacheRoot()

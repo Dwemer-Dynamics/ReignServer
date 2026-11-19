@@ -52,7 +52,7 @@ namespace ReignBetaServer
                 string duplicate = queue.Enqueue(new TownProfileWork { Key = "one", SettingsHash = "v1" }, 1, run, _ => { });
                 queue.Promote("one");
                 CurrentTownProfileWork = work;
-                try { Check("foreground_promotion", work.Foreground && Program.ProviderRequestIsInteractive("character_construction"),
+                try { Check("foreground_promotion", work.Foreground && LlmProviderService.ProviderRequestIsInteractive("character_construction"),
                     "A joined foreground request promotes remaining construction calls through the real provider priority policy."); }
                 finally { CurrentTownProfileWork = null; }
                 queue.Enqueue(new TownProfileWork { Key = "two", SettingsHash = "v1" }, 1, run, _ => { });
@@ -91,14 +91,14 @@ namespace ReignBetaServer
             string campaign = "town_prewarm_contract_" + Guid.NewGuid().ToString("N");
             try
             {
-                string hero = "notable_fixture", path = Program.CharacterFile(campaign, hero, "constructed.json");
-                Program.WriteJsonObject(path, TestDict("ok", true, "status", "first_contact_pending"));
+                string hero = "notable_fixture", path = CampaignFileService.CharacterFile(campaign, hero, "constructed.json");
+                CampaignFileService.WriteJsonObject(path, TestDict("ok", true, "status", "first_contact_pending"));
                 byte[] original = File.ReadAllBytes(path);
-                bool ok = RunSpeculativeTownProfile(campaign, hero, () => { Program.WriteJsonObject(path, TestDict("status", "failed")); return TestDict("ok", false, "status", "failed"); });
+                bool ok = RunSpeculativeTownProfile(campaign, hero, () => { CampaignFileService.WriteJsonObject(path, TestDict("status", "failed")); return TestDict("ok", false, "status", "failed"); });
                 Check("failure_preserves_first_contact", !ok && File.ReadAllBytes(path).SequenceEqual(original),
                     "A speculative provider failure restores exact original status bytes, so normal construction can retry.");
                 bool threw = false;
-                try { RunSpeculativeTownProfile(campaign, hero, () => { Program.WriteJsonObject(path, TestDict("status", "constructing")); throw new IOException("fixture"); }); }
+                try { RunSpeculativeTownProfile(campaign, hero, () => { CampaignFileService.WriteJsonObject(path, TestDict("status", "constructing")); throw new IOException("fixture"); }); }
                 catch (IOException) { threw = true; }
                 Check("exception_preserves_first_contact", threw && File.ReadAllBytes(path).SequenceEqual(original), "Thrown speculative failures also restore first-contact state.");
                 bool replaced = false;
@@ -108,14 +108,14 @@ namespace ReignBetaServer
                     {
                         // Simulate the already-restored bytes and the existing
                         // provider-wait contract's invalid-lease notification.
-                        Program.WriteJsonObject(path, TestDict("status", "restored_marker"));
+                        CampaignFileService.WriteJsonObject(path, TestDict("status", "restored_marker"));
                         PersistenceService.CurrentCampaignRequestLease.Invalid = true;
                         throw new PersistenceService.CampaignRequestReplacedException();
                     });
                 }
                 catch (PersistenceService.CampaignRequestReplacedException) { replaced = true; }
                 Check("replacement_never_rolls_back_new_bytes", replaced
-                    && ReadString(Program.ReadJsonObject(path), "status", "") == "restored_marker" && PersistenceService.CurrentCampaignRequestLease == null,
+                    && ReadString(CampaignFileService.ReadJsonObject(path), "status", "") == "restored_marker" && PersistenceService.CurrentCampaignRequestLease == null,
                     "Replacement notification skips old status restoration and releases the temporary lease.");
                 int generations = 0;
                 using var firstIn = new ManualResetEventSlim();
@@ -139,15 +139,15 @@ namespace ReignBetaServer
                 using (var failedOut = new ManualResetEventSlim())
                 using (var foregroundWait = new ManualResetEventSlim())
                 {
-                    string failedPath = Program.CharacterFile(campaign, "failed_race", "constructed.json");
-                    Program.WriteJsonObject(failedPath, TestDict("ok", true, "status", "first_contact_pending"));
+                    string failedPath = CampaignFileService.CharacterFile(campaign, "failed_race", "constructed.json");
+                    CampaignFileService.WriteJsonObject(failedPath, TestDict("ok", true, "status", "first_contact_pending"));
                     bool fallbackSawOriginal = false;
                     var speculative = Task.Run(() => WithCharacterConstructionGate(campaign, "failed_race", TownNotableProfileSource, () =>
                     {
                         RunSpeculativeTownProfile(campaign, "failed_race", () =>
                         {
                             failedIn.Set(); if (!failedOut.Wait(10000)) throw new TimeoutException();
-                            Program.WriteJsonObject(failedPath, TestDict("ok", false, "status", "failed"));
+                            CampaignFileService.WriteJsonObject(failedPath, TestDict("ok", false, "status", "failed"));
                             return TestDict("ok", false, "status", "failed");
                         });
                         return TestDict();
@@ -160,15 +160,15 @@ namespace ReignBetaServer
                         {
                             return WithCharacterConstructionGate(campaign, "failed_race", "social_event", () =>
                             {
-                                fallbackSawOriginal = ReadString(Program.ReadJsonObject(failedPath), "status", "") == "first_contact_pending";
-                                var result = TestDict("ok", true, "status", "ready"); Program.WriteJsonObject(failedPath, result); return result;
+                                fallbackSawOriginal = ReadString(CampaignFileService.ReadJsonObject(failedPath), "status", "") == "first_contact_pending";
+                                var result = TestDict("ok", true, "status", "ready"); CampaignFileService.WriteJsonObject(failedPath, result); return result;
                             });
                         }
                         finally { PersistenceService.CampaignWorkLockWaitObserverForTests = null; }
                     });
                     bool waited = foregroundWait.Wait(5000); failedOut.Set();
                     Check("failed_job_foreground_fallback", started && waited && Task.WaitAll(new Task[] { speculative, fallback }, 5000)
-                        && fallbackSawOriginal && ReadString(Program.ReadJsonObject(failedPath), "status", "") == "ready",
+                        && fallbackSawOriginal && ReadString(CampaignFileService.ReadJsonObject(failedPath), "status", "") == "ready",
                         "A foreground request blocked behind a failed speculative job sees the restored original state and can create normally.");
                 }
                 var profile = TestDict("heroStringId", "prepared", "name", "Prepared notable", "age", 35,
@@ -180,34 +180,34 @@ namespace ReignBetaServer
                 {
                     Interlocked.Increment(ref authored);
                     var result = TestDict("ok", true, "status", "ready", "llmUsed", true);
-                    Program.WriteJsonObject(Program.CharacterFile(c, h, "constructed.json"), result); return result;
+                    CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(c, h, "constructed.json"), result); return result;
                 };
                 bool prepared = RunTownProfileWorkCore(job, author);
-                byte[] readyBytes = File.ReadAllBytes(Program.CharacterFile(campaign, "prepared", "constructed.json"));
+                byte[] readyBytes = File.ReadAllBytes(CampaignFileService.CharacterFile(campaign, "prepared", "constructed.json"));
                 bool reused = RunTownProfileWorkCore(job, author);
                 Check("revisit_preserves_ready_profile", prepared && reused && authored == 1
-                    && readyBytes.SequenceEqual(File.ReadAllBytes(Program.CharacterFile(campaign, "prepared", "constructed.json")))
-                    && ReadString(Program.ReadJsonObject(Program.CharacterFile(campaign, "prepared", "enrichment.json")), "status", "") == "completed_on_town_entry",
+                    && readyBytes.SequenceEqual(File.ReadAllBytes(CampaignFileService.CharacterFile(campaign, "prepared", "constructed.json")))
+                    && ReadString(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, "prepared", "enrichment.json")), "status", "") == "completed_on_town_entry",
                     "Production job publication is reused on later visits and records pre-generation rather than a first encounter.");
                 job.HeroId = "editor_owned";
-                Program.WriteJsonObject(Program.CharacterFile(campaign, job.HeroId, "editor_authority.json"), TestDict("authoritative", true));
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, job.HeroId, "editor_authority.json"), TestDict("authoritative", true));
                 bool editorSkipped = RunTownProfileWorkCore(job, author);
                 job.HeroId = "dead_notable";
-                Program.WriteJsonObject(Program.CharacterFile(campaign, job.HeroId, "profile.json"), TestDict("isAlive", false));
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, job.HeroId, "profile.json"), TestDict("isAlive", false));
                 bool deadSkipped = RunTownProfileWorkCore(job, author);
                 Check("queued_editor_and_death_updates", editorSkipped && deadSkipped && authored == 1,
                     "Editor authority or death observed after capture prevents speculative generation.");
                 long epoch = Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration);
                 var stale = new TownProfileWork { Campaign = campaign, HeroId = "stale", Generation = epoch - 1, Hero = TestDict() };
                 bool skipped = RunTownProfileWork(stale);
-                Check("old_generation_and_lease_cleanup", skipped && !Directory.Exists(Program.CharacterDirectory(campaign, "stale"))
+                Check("old_generation_and_lease_cleanup", skipped && !Directory.Exists(CampaignFileService.CharacterDirectory(campaign, "stale"))
                     && PersistenceService.CurrentCampaignRequestLease == null && CurrentTownProfileWork == null && !Program.CampaignDataGate.IsReadLockHeld,
                     "Old-generation jobs make no files and clear worker lease and priority state.");
             }
             finally
             {
                 ReignPostgreSqlStorage.DropCampaign(campaign);
-                string directory = Program.CampaignDirectory(campaign);
+                string directory = CampaignFileService.CampaignDirectory(campaign);
                 if (Directory.Exists(directory)) Directory.Delete(directory, true);
             }
             var candidate = TestDict("heroStringId", "n", "isNotable", true, "isAlive", true, "homeSettlementId", "town");
@@ -225,27 +225,27 @@ namespace ReignBetaServer
             {
                 var hero = TestDict("heroStringId", heroId, "name", "Ready notable", "isNotable", true,
                     "isAlive", true, "age", 40, "homeSettlementId", "town", "narrativeVersion", 5);
-                Program.WriteJsonObject(Program.CharacterFile(campaign, heroId, "profile.json"), hero);
-                Program.WriteJsonObject(Program.CharacterFile(campaign, heroId, "narrative.json"), narrative);
-                Program.WriteJsonObject(Program.CharacterFile(campaign, heroId, "traits.json"), BuildTraitDocument(hero));
-                Program.WriteJsonObject(Program.CharacterFile(campaign, heroId, "constructed.json"), TestDict("ok", true,
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, heroId, "profile.json"), hero);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, heroId, "narrative.json"), narrative);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, heroId, "traits.json"), BuildTraitDocument(hero));
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, heroId, "constructed.json"), TestDict("ok", true,
                     "status", "ready", "llmUsed", true, "narrativeSchema", NarrativeSchema));
                 int calls = 0;
                 bool reused = RunTownProfileWorkCore(new TownProfileWork { Campaign = campaign, HeroId = heroId,
                     Hero = hero, Generation = Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration) }, (c, h, p) => { calls++; throw new InvalidOperationException("Ready profile must never regenerate."); });
                 check("town_complete_v5_profile_reused", reused && calls == 0, "A fully authored v5 notable is never regenerated on town entry.");
-                Program.WriteJsonObject(Program.CharacterFile(campaign, heroId, "editor_authority.json"), TestDict("authoritative", true));
-                Program.WriteJsonObject(Program.CharacterFile(campaign, heroId, "voice.json"), TestDict("editor", "preserve this exact voice"));
-                byte[] before = File.ReadAllBytes(Program.CharacterFile(campaign, heroId, "voice.json"));
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, heroId, "editor_authority.json"), TestDict("authoritative", true));
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, heroId, "voice.json"), TestDict("editor", "preserve this exact voice"));
+                byte[] before = File.ReadAllBytes(CampaignFileService.CharacterFile(campaign, heroId, "voice.json"));
                 var blocked = ConstructNarrativeCharacter(campaign, heroId, hero, false, TownNotableProfileSource);
                 check("town_narrative_publication_preserves_editor", !ReadBool(blocked, "ok", true)
-                    && File.ReadAllBytes(Program.CharacterFile(campaign, heroId, "voice.json")).SequenceEqual(before),
+                    && File.ReadAllBytes(CampaignFileService.CharacterFile(campaign, heroId, "voice.json")).SequenceEqual(before),
                     "The production narrative publisher refuses speculative publication after editor authority appears.");
             }
             finally
             {
                 ReignPostgreSqlStorage.DropCampaign(campaign);
-                string directory = Program.CampaignDirectory(campaign);
+                string directory = CampaignFileService.CampaignDirectory(campaign);
                 if (Directory.Exists(directory)) Directory.Delete(directory, true);
             }
         }

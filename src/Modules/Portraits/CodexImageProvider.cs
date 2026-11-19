@@ -63,7 +63,7 @@ namespace ReignBetaServer
             {
                 if (source != null) ValidateCodexPng(source);
                 if (cancelled != null && cancelled()) throw new OperationCanceledException("Codex image request was cancelled.");
-                string root = Path.Combine(Program.CodexWorkingDirectory(), "image-jobs");
+                string root = Path.Combine(LlmProviderService.CodexWorkingDirectory(), "image-jobs");
                 AssertCodexImageLocalPath(root);
                 Directory.CreateDirectory(root);
                 job = Path.Combine(root, Guid.NewGuid().ToString("N"));
@@ -89,10 +89,10 @@ namespace ReignBetaServer
                 if (stopped && !string.IsNullOrEmpty(job))
                 {
                     try { DeleteCodexImageJob(job); }
-                    catch (Exception ex) { Program.LogOperational("portrait.codex_cleanup_failed", new Dictionary<string, object> { ["job"] = job, ["error"] = DialogueService.LimitText(ex.Message, 300) }); }
+                    catch (Exception ex) { OperationsService.LogOperational("portrait.codex_cleanup_failed", new Dictionary<string, object> { ["job"] = job, ["error"] = DialogueService.LimitText(ex.Message, 300) }); }
                 }
                 if (stopped) CodexImageGate.Release();
-                else Program.LogOperational("portrait.codex_stop_failed", new Dictionary<string, object> { ["job"] = job,
+                else OperationsService.LogOperational("portrait.codex_stop_failed", new Dictionary<string, object> { ["job"] = job,
                     ["error"] = "Image queue remains closed because its owned helper could not be stopped. Restart Reign visibly before retrying." });
             }
         }
@@ -126,7 +126,7 @@ namespace ReignBetaServer
                     + "Do not use an API key, API client, shell, MCP tools, websites, or additional agents. "
                     + "Write generated art only inside the working directory. Return the native image result; never fabricate a successful image."
             });
-            string threadId = Program.ReadNestedId(thread, "thread");
+            string threadId = LlmProviderService.ReadNestedId(thread, "thread");
             if (string.IsNullOrWhiteSpace(threadId)) throw new InvalidDataException("Codex returned no image thread.");
             string turnId = "";
             try
@@ -145,7 +145,7 @@ namespace ReignBetaServer
                         ["networkAccess"] = false, ["excludeTmpdirEnvVar"] = true, ["excludeSlashTmp"] = true },
                     ["input"] = input.ToArray()
                 });
-                turnId = Program.ReadNestedId(turn, "turn");
+                turnId = LlmProviderService.ReadNestedId(turn, "turn");
                 if (string.IsNullOrWhiteSpace(turnId)) throw new InvalidDataException("Codex returned no image turn.");
                 return wait(threadId, turnId);
             }
@@ -291,7 +291,7 @@ namespace ReignBetaServer
             {
                 timeout = timeoutMs;
                 cancelled = cancel;
-                var start = Program.CreateCodexAppServerStartInfo(ReadString(settings, "codexExecutable", "codex"), job);
+                var start = LlmProviderService.CreateCodexAppServerStartInfo(ReadString(settings, "codexExecutable", "codex"), job);
                 string home = ReadString(settings, "codexHome", "");
                 if (!string.IsNullOrWhiteSpace(home)) start.EnvironmentVariables["CODEX_HOME"] = home;
                 process = new Process { StartInfo = start };
@@ -312,7 +312,7 @@ namespace ReignBetaServer
 
             private void Send(Dictionary<string, object> value)
             {
-                process.StandardInput.WriteLine(Program.SerializeCodexTransportFrame(value));
+                process.StandardInput.WriteLine(LlmProviderService.SerializeCodexTransportFrame(value));
             }
 
             public Dictionary<string, object> Rpc(string method, Dictionary<string, object> parameters)

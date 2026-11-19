@@ -300,7 +300,7 @@ namespace ReignBetaServer
         private static List<Dictionary<string, object>> ReadWorldTestDiplomacyEvents(string campaignId)
         {
             Dictionary<string, Dictionary<string, object>> byId = new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
-            foreach (Dictionary<string, object> row in Program.ReadJsonLinesFromPath(Program.CampaignFile(campaignId, "diplomacy", "events.jsonl")))
+            foreach (Dictionary<string, object> row in Program.ReadJsonLinesFromPath(CampaignFileService.CampaignFile(campaignId, "diplomacy", "events.jsonl")))
             {
                 string id = ReadString(row, "eventId", "");
                 if (!string.IsNullOrWhiteSpace(id)) byId[id] = row;
@@ -319,7 +319,7 @@ namespace ReignBetaServer
         private static List<Dictionary<string, object>> ReadWorldTestActions(string campaignId)
         {
             Dictionary<string, Dictionary<string, object>> byId = new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
-            foreach (Dictionary<string, object> row in Program.ReadJsonLinesFromPath(Program.CampaignFile(campaignId, "actions", "actions.jsonl")))
+            foreach (Dictionary<string, object> row in Program.ReadJsonLinesFromPath(CampaignFileService.CampaignFile(campaignId, "actions", "actions.jsonl")))
             {
                 string id = ReadString(row, "id", ReadFirstString(ReadDictionary(row, "report"), "serverActionId", "actionId"));
                 if (string.IsNullOrWhiteSpace(id)) continue;
@@ -337,7 +337,7 @@ namespace ReignBetaServer
                 }
             }
             List<Dictionary<string, object>> queue;
-            lock (Program.FileLock) queue = Program.ReadActionQueueUnlocked(campaignId);
+            lock (Program.FileLock) queue = ActionPipelineService.ReadActionQueueUnlocked(campaignId);
             foreach (Dictionary<string, object> row in queue)
             {
                 string id = ReadString(row, "id", "");
@@ -533,7 +533,7 @@ namespace ReignBetaServer
 
         internal static bool IsTerminalFailureStatus(string status)
         {
-            string value = Program.NormalizeLookup(status);
+            string value = ActionPipelineService.NormalizeLookup(status);
             return DialogueService.ContainsAny(value, "failed", "blocked", "expired", "validation_failed");
         }
 
@@ -560,7 +560,7 @@ namespace ReignBetaServer
 
         private static bool IsPendingStatus(string status)
         {
-            string value = Program.NormalizeLookup(status);
+            string value = ActionPipelineService.NormalizeLookup(status);
             return DialogueService.ContainsAny(value, "queued", "pending", "delivered", "executing", "retry", "proposed");
         }
 
@@ -765,7 +765,7 @@ namespace ReignBetaServer
                 {
                     ["campaignId"] = "default", ["timelineId"] = "main"
                 });
-                add("empty_selection_is_read_only", !ReadBool(missingOverview, "ok", true) && !Directory.Exists(Program.CampaignDirectory("default")),
+                add("empty_selection_is_read_only", !ReadBool(missingOverview, "ok", true) && !Directory.Exists(CampaignFileService.CampaignDirectory("default")),
                     "An empty or stale World Test selection never creates a synthetic default campaign database.");
 
                 Dictionary<string, object> heartbeat = new Dictionary<string, object>
@@ -837,7 +837,7 @@ namespace ReignBetaServer
                         publicFixture.Add(TestDict("eventId", "pending_private_proposal", "announcementReady", false));
                         publicFixture.Add(TestDict("eventId", "private_ready", "announcementReady", true, "visibility", "private"));
                         DiplomacyService.WriteDiplomaticEventQueue(campaign, publicFixture);
-                        string publicationQueuePath = Program.CampaignFile(campaign, "diplomacy", "event-queue.json");
+                        string publicationQueuePath = CampaignFileService.CampaignFile(campaign, "diplomacy", "event-queue.json");
                         string beforeRead = File.ReadAllText(publicationQueuePath);
                         var publicAnnouncements = DiplomacyService.NextDiplomaticEvents(TestDict("campaignId", campaign),
                             new Dictionary<string, string> { ["publicHistory"] = "true", ["limit"] = "500" });
@@ -1121,17 +1121,17 @@ namespace ReignBetaServer
                 string legacyObservedCampaign = "wl_" + Guid.NewGuid().ToString("N").Substring(0, 8);
                 string internalCampaign = "__wv_" + Guid.NewGuid().ToString("N").Substring(0, 8);
                 string incompleteCampaign = "wi_" + Guid.NewGuid().ToString("N").Substring(0, 8);
-                Directory.CreateDirectory(Program.CampaignDirectory(realCampaign));
-                Directory.CreateDirectory(Program.CampaignDirectory(internalCampaign));
-                Directory.CreateDirectory(Program.CampaignDirectory(incompleteCampaign));
-                Program.WriteJsonObject(Path.Combine(Program.CampaignDirectory(realCampaign), "campaign.json"),
+                Directory.CreateDirectory(CampaignFileService.CampaignDirectory(realCampaign));
+                Directory.CreateDirectory(CampaignFileService.CampaignDirectory(internalCampaign));
+                Directory.CreateDirectory(CampaignFileService.CampaignDirectory(incompleteCampaign));
+                CampaignFileService.WriteJsonObject(Path.Combine(CampaignFileService.CampaignDirectory(realCampaign), "campaign.json"),
                     new Dictionary<string, object> { ["campaignId"] = realCampaign, ["campaignLabel"] = "Real fixture" });
                 using (ReignDbConnection realConnection =
                     ReignDatabase.OpenCampaignConnection(realCampaign))
                 {
                     EnsureWorldTestSchema(realConnection);
                 }
-                Program.WriteJsonObject(Path.Combine(Program.CampaignDirectory(internalCampaign), "campaign.json"),
+                CampaignFileService.WriteJsonObject(Path.Combine(CampaignFileService.CampaignDirectory(internalCampaign), "campaign.json"),
                     new Dictionary<string, object> { ["campaignId"] = internalCampaign, ["campaignLabel"] = "Verification fixture" });
                 Dictionary<string, object> observedHeartbeat = new Dictionary<string, object>(heartbeat, StringComparer.OrdinalIgnoreCase)
                 {
@@ -1140,8 +1140,8 @@ namespace ReignBetaServer
                     ["mainHeroName"] = "Observed Hero"
                 };
                 WorldTestHeartbeatApi(observedHeartbeat);
-                bool heartbeatCreatedMetadata = File.Exists(Path.Combine(Program.CampaignDirectory(observedCampaign), "campaign.json"))
-                    && ReadString(Program.ReadJsonObject(Path.Combine(Program.CampaignDirectory(observedCampaign), "campaign.json")), "mainHeroName", "") == "Observed Hero";
+                bool heartbeatCreatedMetadata = File.Exists(Path.Combine(CampaignFileService.CampaignDirectory(observedCampaign), "campaign.json"))
+                    && ReadString(CampaignFileService.ReadJsonObject(Path.Combine(CampaignFileService.CampaignDirectory(observedCampaign), "campaign.json")), "mainHeroName", "") == "Observed Hero";
                 add("heartbeat_establishes_real_campaign", heartbeatCreatedMetadata,
                     "A native World Test heartbeat makes a fresh campaign selectable before its first Save Sync registration.");
                 using (ReignDbConnection observedConnection = ReignDatabase.OpenCampaignConnection(observedCampaign))
@@ -1162,14 +1162,14 @@ namespace ReignBetaServer
                 observedHeartbeat["campaignId"] = legacyObservedCampaign;
                 observedHeartbeat["campaignLabel"] = "Legacy observed fixture";
                 WorldTestHeartbeatApi(observedHeartbeat);
-                File.Delete(Path.Combine(Program.CampaignDirectory(legacyObservedCampaign), "campaign.json"));
+                File.Delete(Path.Combine(CampaignFileService.CampaignDirectory(legacyObservedCampaign), "campaign.json"));
                 using (ReignDbConnection observedConnection = ReignDatabase.OpenCampaignConnection(observedCampaign))
                     WorldSimulationStore.UpdateWorldTestNativeHeartbeats(observedConnection);
                 Dictionary<string, object> worldTestCampaigns = WorldTestCampaignsApi(new Dictionary<string, string>());
                 Dictionary<string, object> backupCampaigns = PersistenceService.CampaignListApi();
                 List<object> worldTestRows = CharactersService.ReadObjectList(worldTestCampaigns, "campaigns");
                 List<object> backupRows = CharactersService.ReadObjectList(backupCampaigns, "campaigns");
-                bool legacyPromoted = File.Exists(Path.Combine(Program.CampaignDirectory(legacyObservedCampaign), "campaign.json"));
+                bool legacyPromoted = File.Exists(Path.Combine(CampaignFileService.CampaignDirectory(legacyObservedCampaign), "campaign.json"));
                 add("registry_campaign_without_local_metadata_is_isolated", !legacyPromoted,
                     "Campaign discovery never imports a PostgreSQL registry entry from another local Reign data root.");
                 HashSet<string> expectedRealCampaigns = new HashSet<string>(
@@ -1183,7 +1183,7 @@ namespace ReignBetaServer
                         ? "World Test and Campaign Backups expose only authoritative real campaigns, and latest selection follows the newest native heartbeat rather than directory writes."
                         : "Campaign filtering disagreed: " + Json.Serialize(new Dictionary<string, object>
                         {
-                            ["worldTest"] = worldTestRows, ["backups"] = backupRows, ["latest"] = Program.LatestCampaignId()
+                            ["worldTest"] = worldTestRows, ["backups"] = backupRows, ["latest"] = SettingsService.LatestCampaignId()
                         }));
             }
             finally
@@ -1196,7 +1196,7 @@ namespace ReignBetaServer
                         string registeredId = ReadString(
                             registered, "campaignId", "");
                         string registeredDirectory =
-                            Program.CampaignDirectory(registeredId);
+                            CampaignFileService.CampaignDirectory(registeredId);
                         if (Directory.Exists(registeredDirectory)
                             && Path.GetFullPath(registeredDirectory)
                                 .StartsWith(
