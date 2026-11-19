@@ -26,44 +26,12 @@ namespace ReignBetaServer
                 ["timeline"] = timelineId,
                 ["player"] = mainHeroId ?? string.Empty
             };
-            Dictionary<string, object> pairSummary = ReignDatabase.QuerySql(connection, @"
-SELECT COUNT(*) AS pair_count,
-SUM(CASE WHEN p.last_delta_a_to_b>0 THEN 1 ELSE 0 END)
- +SUM(CASE WHEN p.last_delta_b_to_a>0 THEN 1 ELSE 0 END) AS positive_rolls,
-SUM(CASE WHEN p.last_delta_a_to_b<0 THEN 1 ELSE 0 END)
- +SUM(CASE WHEN p.last_delta_b_to_a<0 THEN 1 ELSE 0 END) AS negative_rolls,
-SUM(CASE WHEN p.last_context_kind='party' THEN 1 ELSE 0 END) AS party_pairs,
-SUM(CASE WHEN p.last_context_kind='settlement' THEN 1 ELSE 0 END) AS settlement_pairs,
-SUM(CASE WHEN
-  CASE
-    WHEN p.affinity_a_to_b<=-70 THEN 'nemesis' WHEN p.affinity_a_to_b<=-50 THEN 'enemy'
-    WHEN p.affinity_a_to_b<=-30 THEN 'rival' WHEN p.affinity_a_to_b<=-10 THEN 'irritant'
-    WHEN p.affinity_a_to_b<=9 THEN 'neutral' WHEN p.affinity_a_to_b<=29 THEN 'acquaintance'
-    WHEN p.affinity_a_to_b<=49 THEN 'friend' WHEN p.affinity_a_to_b<=69 THEN 'close_friend'
-    WHEN p.affinity_a_to_b<=84 THEN 'devoted' ELSE 'bonded' END
-  =
-  CASE
-    WHEN p.affinity_b_to_a<=-70 THEN 'nemesis' WHEN p.affinity_b_to_a<=-50 THEN 'enemy'
-    WHEN p.affinity_b_to_a<=-30 THEN 'rival' WHEN p.affinity_b_to_a<=-10 THEN 'irritant'
-    WHEN p.affinity_b_to_a<=9 THEN 'neutral' WHEN p.affinity_b_to_a<=29 THEN 'acquaintance'
-    WHEN p.affinity_b_to_a<=49 THEN 'friend' WHEN p.affinity_b_to_a<=69 THEN 'close_friend'
-    WHEN p.affinity_b_to_a<=84 THEN 'devoted' ELSE 'bonded' END
-  THEN 1 ELSE 0 END) AS symmetric_pairs,
-SUM(CASE WHEN p.first_day=$latestDay THEN 1 ELSE 0 END) AS new_pairs,
-SUM(CASE WHEN (na.hero_id IS NULL)<>(nb.hero_id IS NULL) THEN 1 ELSE 0 END)
- AS noble_notable_pairs,
-SUM(CASE WHEN p.mbti_a='' OR p.mbti_a='XXXX' OR p.mbti_b='' OR p.mbti_b='XXXX'
-  THEN 1 ELSE 0 END) AS missing_mbti
-FROM relationship_pair_chemistry p
-LEFT JOIN notable_mbti_profiles na ON na.hero_id=p.hero_a_id
-LEFT JOIN notable_mbti_profiles nb ON nb.hero_id=p.hero_b_id
-WHERE $player='' OR (p.hero_a_id<>$player AND p.hero_b_id<>$player);",
-                new Dictionary<string, object>(pairParameters)
+            Dictionary<string, object> pairSummary = WorldSimulationStore.CountRelationshipPairChemistry(connection, new Dictionary<string, object>(pairParameters)
                 {
                     ["latestDay"] = (int)Math.Floor(latestDay)
                 }).FirstOrDefault() ?? new Dictionary<string, object>();
             int pairCount = ReadInt(pairSummary, "pair_count", 0);
-            List<Dictionary<string, object>> notableProfiles = ReignDatabase.QuerySql(connection, "SELECT * FROM notable_mbti_profiles;");
+            List<Dictionary<string, object>> notableProfiles = WorldSimulationStore.SelectNotableMbtiProfiles(connection);
             Dictionary<string, int> notableTypes = notableProfiles
                 .GroupBy(x => ReadString(x, "mbti_type", "XXXX"), StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(x => x.Key, x => x.Count(), StringComparer.OrdinalIgnoreCase);
@@ -72,14 +40,7 @@ WHERE $player='' OR (p.hero_a_id<>$player AND p.hero_b_id<>$player);",
                 .ToDictionary(x => x.Key, x => x.Count(), StringComparer.OrdinalIgnoreCase);
             int nobleNotablePairs = ReadInt(pairSummary, "noble_notable_pairs", 0);
             int missingMbti = ReadInt(pairSummary, "missing_mbti", 0);
-            int typeMismatches = ReadInt(ReignDatabase.QuerySql(connection, @"
-SELECT COUNT(*) AS count FROM relationship_pair_chemistry p
-LEFT JOIN notable_mbti_profiles a ON p.hero_a_id=a.hero_id
-LEFT JOIN notable_mbti_profiles b ON p.hero_b_id=b.hero_id
-WHERE ($player='' OR (p.hero_a_id<>$player AND p.hero_b_id<>$player))
-AND ((a.hero_id IS NOT NULL AND p.mbti_a<>a.mbti_type)
-  OR (b.hero_id IS NOT NULL AND p.mbti_b<>b.mbti_type));",
-                pairParameters).FirstOrDefault(), "count", 0);
+            int typeMismatches = ReadInt(WorldSimulationStore.CountRelationshipPairChemistry2(connection, pairParameters).FirstOrDefault(), "count", 0);
             int notableSyncErrors = notableProfiles.Count(x => Program.ContainsAny(ReadString(x, "native_sync_status", ""), "failed", "contradicted"));
             int notableSyncOverdue = notableProfiles.Count(x =>
                 Program.ContainsAny(ReadString(x, "native_sync_status", ""), "pending", "claimed")
@@ -87,51 +48,7 @@ AND ((a.hero_id IS NOT NULL AND p.mbti_a<>a.mbti_type)
             Dictionary<string, Dictionary<string, int>> bands = WorldTestRelationshipBands.ToDictionary(
                 x => x, x => new Dictionary<string, int> { ["uniqueNpcCount"] = 0, ["directionalEdgeCount"] = 0, ["pairCount"] = 0 },
                 StringComparer.OrdinalIgnoreCase);
-            List<Dictionary<string, object>> materializedCategories = ReignDatabase.QuerySql(connection, @"
-WITH directions AS (
- SELECT p.pair_key,p.hero_a_id AS hero_id,p.affinity_a_to_b AS affinity,
-        p.tag_a_to_b AS directional_tag
- FROM relationship_pair_chemistry p
- WHERE $player='' OR (p.hero_a_id<>$player AND p.hero_b_id<>$player)
- UNION ALL
- SELECT p.pair_key,p.hero_b_id,p.affinity_b_to_a,p.tag_b_to_a
- FROM relationship_pair_chemistry p
- WHERE $player='' OR (p.hero_a_id<>$player AND p.hero_b_id<>$player)
-), category_edges AS (
- SELECT 'band' AS category_type,
-   CASE WHEN affinity<=-70 THEN 'nemesis' WHEN affinity<=-50 THEN 'enemy'
-        WHEN affinity<=-30 THEN 'rival' WHEN affinity<=-10 THEN 'irritant'
-        WHEN affinity<=9 THEN 'neutral' WHEN affinity<=29 THEN 'acquaintance'
-        WHEN affinity<=49 THEN 'friend' WHEN affinity<=69 THEN 'close_friend'
-        WHEN affinity<=84 THEN 'devoted' ELSE 'bonded' END AS category_key,
-   hero_id,pair_key,1 AS directional
- FROM directions
- UNION ALL
- SELECT 'tag',directional_tag,hero_id,pair_key,1 FROM directions
- WHERE directional_tag<>''
- UNION ALL
- SELECT 'tag',p.shared_tag,p.hero_a_id,p.pair_key,0
- FROM relationship_pair_chemistry p
- WHERE p.shared_tag<>'' AND ($player='' OR
-   (p.hero_a_id<>$player AND p.hero_b_id<>$player))
- UNION ALL
- SELECT 'tag',p.shared_tag,p.hero_b_id,p.pair_key,0
- FROM relationship_pair_chemistry p
- WHERE p.shared_tag<>'' AND ($player='' OR
-   (p.hero_a_id<>$player AND p.hero_b_id<>$player))
-), hero_counts AS (
- SELECT category_type,category_key,hero_id,SUM(directional) AS directional_count
- FROM category_edges GROUP BY category_type,category_key,hero_id
-), pair_counts AS (
- SELECT category_type,category_key,COUNT(DISTINCT pair_key) AS pair_count
- FROM category_edges GROUP BY category_type,category_key
-)
-SELECT h.category_type,h.category_key,COUNT(*) AS unique_npc_count,
-SUM(h.directional_count) AS directional_edge_count,p.pair_count
-FROM hero_counts h JOIN pair_counts p
- ON p.category_type=h.category_type AND p.category_key=h.category_key
-GROUP BY h.category_type,h.category_key,p.pair_count;",
-                pairParameters);
+            List<Dictionary<string, object>> materializedCategories = WorldSimulationStore.SelectHeroCounts(connection, pairParameters);
             Dictionary<string, Dictionary<string, object>> tags =
                 new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
             Dictionary<int, int> affinityHistogram = new Dictionary<int, int>();
@@ -156,34 +73,14 @@ GROUP BY h.category_type,h.category_key,p.pair_count;",
                         ["pairCount"] = counts["pairCount"]
                     };
             }
-            foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection, @"
-WITH directions AS (
- SELECT p.affinity_a_to_b AS affinity FROM relationship_pair_chemistry p
- WHERE $player='' OR (p.hero_a_id<>$player AND p.hero_b_id<>$player)
- UNION ALL
- SELECT p.affinity_b_to_a FROM relationship_pair_chemistry p
- WHERE $player='' OR (p.hero_a_id<>$player AND p.hero_b_id<>$player)
-)
-SELECT affinity,COUNT(*) AS directional_edge_count
-FROM directions GROUP BY affinity;", pairParameters))
+            foreach (Dictionary<string, object> row in WorldSimulationStore.SelectDirections(connection, pairParameters))
             {
                 affinityHistogram[ReadInt(row, "affinity", 0)] =
                     ReadInt(row, "directional_edge_count", 0);
             }
-            int uniqueNpcCount = ReadInt(ReignDatabase.QuerySql(connection, @"
-WITH heroes AS (
- SELECT p.hero_a_id AS hero_id FROM relationship_pair_chemistry p
- WHERE $player='' OR (p.hero_a_id<>$player AND p.hero_b_id<>$player)
- UNION
- SELECT p.hero_b_id FROM relationship_pair_chemistry p
- WHERE $player='' OR (p.hero_a_id<>$player AND p.hero_b_id<>$player)
-)
-SELECT COUNT(*) AS count FROM heroes;",
-                pairParameters).FirstOrDefault(), "count", 0);
-            List<Dictionary<string, object>> lifecycle = ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_pair_lifecycle;");
-            List<Dictionary<string, object>> lifecycleMarriageActions = ReignDatabase.QuerySql(connection,
-                    @"SELECT director_action_id,status,world_day,actor_id,target_id,payload_json,result_json
-FROM relationship_director_actions WHERE action_type='marriage';")
+            int uniqueNpcCount = ReadInt(WorldSimulationStore.SelectHeroes(connection, pairParameters).FirstOrDefault(), "count", 0);
+            List<Dictionary<string, object>> lifecycle = WorldSimulationStore.SelectRelationshipPairLifecycle(connection);
+            List<Dictionary<string, object>> lifecycleMarriageActions = WorldSimulationStore.SelectRelationshipDirectorActions(connection)
                 .Where(row =>
                 {
                     if (!string.IsNullOrWhiteSpace(mainHeroId)
@@ -209,8 +106,7 @@ FROM relationship_director_actions WHERE action_type='marriage';")
                     .Equals("pregnancy_commitment",
                         StringComparison.OrdinalIgnoreCase)).ToList();
             Dictionary<string, Dictionary<string, object>> observedMarriageRows =
-                ReignDatabase.QuerySql(connection, @"SELECT hero_id,profile_json,last_observed_day
-FROM relationship_observed_heroes;")
+                WorldSimulationStore.SelectRelationshipObservedHeroes(connection)
                     .ToDictionary(row => ReadString(row, "hero_id", ""), row => row,
                         StringComparer.OrdinalIgnoreCase);
             Dictionary<string, Dictionary<string, object>> observedMarriageProfiles =
@@ -290,121 +186,29 @@ FROM relationship_observed_heroes;")
                 - completedPregnancyCommitmentMarriageReports
                     .Select(organicPairKey)
                     .Distinct(StringComparer.OrdinalIgnoreCase).Count());
-            int arrangedMarriages = ReignDatabase.QuerySql(connection,
-                    "SELECT evaluation_id,hero_a_id,hero_b_id FROM marriage_evaluations WHERE route='arranged' AND status='executed';")
+            int arrangedMarriages = WorldSimulationStore.SelectMarriageEvaluations(connection)
                 .Count(row => string.IsNullOrWhiteSpace(mainHeroId)
                     || (!ReadString(row, "hero_a_id", "").Equals(mainHeroId, StringComparison.OrdinalIgnoreCase)
                         && !ReadString(row, "hero_b_id", "").Equals(mainHeroId, StringComparison.OrdinalIgnoreCase)));
-            int affairEligibleLovers = ReadInt(ReignDatabase.QuerySql(connection, @"
-SELECT COUNT(*) AS count
-FROM relationship_pair_lifecycle lifecycle
-JOIN relationship_observed_heroes observed_a
-  ON observed_a.hero_id=lifecycle.hero_a_id
-JOIN relationship_observed_heroes observed_b
-  ON observed_b.hero_id=lifecycle.hero_b_id
-WHERE lifecycle.lover_active=1 AND (
-    (COALESCE(json_extract(observed_a.profile_json,'$.spouseId'),'')<>''
-     AND COALESCE(json_extract(observed_a.profile_json,'$.spouseId'),'')<>lifecycle.hero_b_id)
- OR (COALESCE(json_extract(observed_b.profile_json,'$.spouseId'),'')<>''
-     AND COALESCE(json_extract(observed_b.profile_json,'$.spouseId'),'')<>lifecycle.hero_a_id)
-);", new Dictionary<string, object>()).FirstOrDefault(), "count", 0);
+            int affairEligibleLovers = ReadInt(WorldSimulationStore.CountRelationshipPairLifecycle(connection, new Dictionary<string, object>()).FirstOrDefault(), "count", 0);
             Dictionary<string, object> flingParameters =
                 new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId
                 };
-            Dictionary<string, object> flingRollTotals = ReignDatabase.QuerySql(connection, @"
-SELECT COUNT(*) AS rolls,SUM(passed) AS passes,
-SUM(CASE WHEN status='passed_unmatched' THEN 1 ELSE 0 END) AS unmatched,
-COUNT(DISTINCT world_day) AS observed_days
-FROM relationship_fling_rolls WHERE campaign_id=$campaign
-AND timeline_id=$timeline;", flingParameters).FirstOrDefault()
+            Dictionary<string, object> flingRollTotals = WorldSimulationStore.CountRelationshipFlingRolls(connection, flingParameters).FirstOrDefault()
                 ?? new Dictionary<string, object>();
-            Dictionary<string, object> flingSparkTotals = ReignDatabase.QuerySql(connection, @"
-SELECT COUNT(*) AS attempts,SUM(passed) AS passes
-FROM relationship_fling_sparks WHERE campaign_id=$campaign
-AND timeline_id=$timeline;", flingParameters).FirstOrDefault()
+            Dictionary<string, object> flingSparkTotals = WorldSimulationStore.CountRelationshipFlingSparks(connection, flingParameters).FirstOrDefault()
                 ?? new Dictionary<string, object>();
-            Dictionary<string, object> flingEncounterTotals = ReignDatabase.QuerySql(connection, @"
-SELECT COUNT(*) AS pairings,SUM(same_sex) AS same_sex,
-SUM(CASE WHEN same_sex=0 THEN 1 ELSE 0 END) AS opposite_sex,
-SUM(short_affair) AS short_affairs,SUM(fixed_discovered) AS fixed_discoveries,
-SUM(pregnancy_discovered) AS pregnancy_discoveries,
-SUM(CASE WHEN conception_attempt_id<>'' THEN 1 ELSE 0 END) AS conception_attempts,
-SUM(conceived) AS conceptions,SUM(discovery_applied) AS discovered_encounters
-FROM relationship_fling_encounters WHERE campaign_id=$campaign
-AND timeline_id=$timeline AND status='completed';", flingParameters)
+            Dictionary<string, object> flingEncounterTotals = WorldSimulationStore.CountRelationshipFlingEncounters(connection, flingParameters)
                 .FirstOrDefault() ?? new Dictionary<string, object>();
-            int flingChanceViolations = ReadInt(ReignDatabase.QuerySql(connection, @"
-SELECT COUNT(*) AS count FROM relationship_fling_rolls
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND (judgment<0 OR judgment>40 OR chance_percent<>50-judgment
- OR roll<1 OR roll>100 OR passed<>CASE WHEN roll<=chance_percent THEN 1 ELSE 0 END);",
-                flingParameters).FirstOrDefault(), "count", 0);
-            int flingSparkChanceViolations = ReadInt(ReignDatabase.QuerySql(connection, @"
-SELECT COUNT(*) AS count FROM relationship_fling_sparks
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND (chance_percent<>25 OR roll<1 OR roll>100
- OR passed<>CASE WHEN roll<=chance_percent THEN 1 ELSE 0 END);",
-                flingParameters).FirstOrDefault(), "count", 0);
-            int flingReceiptViolations = ReadInt(ReignDatabase.QuerySql(connection, @"
-SELECT COUNT(*) AS count FROM relationship_fling_encounters encounter
-WHERE encounter.campaign_id=$campaign AND encounter.timeline_id=$timeline
-AND (NOT EXISTS (SELECT 1 FROM relationship_fling_rolls roll
-  WHERE roll.campaign_id=encounter.campaign_id
-    AND roll.timeline_id=encounter.timeline_id
-    AND roll.world_day=encounter.world_day AND roll.hero_id=encounter.hero_a_id
-    AND roll.passed=1 AND roll.location_kind=encounter.location_kind
-    AND roll.location_id=encounter.location_id)
- OR NOT EXISTS (SELECT 1 FROM relationship_fling_rolls roll
-  WHERE roll.campaign_id=encounter.campaign_id
-    AND roll.timeline_id=encounter.timeline_id
-    AND roll.world_day=encounter.world_day AND roll.hero_id=encounter.hero_b_id
-    AND roll.passed=1 AND roll.location_kind=encounter.location_kind
-    AND roll.location_id=encounter.location_id)
- OR (EXISTS (SELECT 1 FROM relationship_fling_sparks spark_day
-      WHERE spark_day.campaign_id=encounter.campaign_id
-        AND spark_day.timeline_id=encounter.timeline_id
-        AND spark_day.world_day=encounter.world_day)
-     AND NOT EXISTS (SELECT 1 FROM relationship_fling_sparks spark
-      WHERE spark.campaign_id=encounter.campaign_id
-        AND spark.timeline_id=encounter.timeline_id
-        AND spark.world_day=encounter.world_day
-        AND spark.pair_key=encounter.pair_key AND spark.passed=1
-        AND spark.location_kind=encounter.location_kind
-        AND spark.location_id=encounter.location_id)));", flingParameters)
+            int flingChanceViolations = ReadInt(WorldSimulationStore.CountRelationshipFlingRolls2(connection, flingParameters).FirstOrDefault(), "count", 0);
+            int flingSparkChanceViolations = ReadInt(WorldSimulationStore.CountRelationshipFlingSparks2(connection, flingParameters).FirstOrDefault(), "count", 0);
+            int flingReceiptViolations = ReadInt(WorldSimulationStore.CountRelationshipFlingEncounters2(connection, flingParameters)
                 .FirstOrDefault(), "count", 0);
-            int flingCooldownViolations = ReadInt(ReignDatabase.QuerySql(connection, @"
-WITH participation AS (
- SELECT hero_a_id AS hero_id,world_day FROM relationship_fling_encounters
- WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='completed'
- UNION ALL
- SELECT hero_b_id AS hero_id,world_day FROM relationship_fling_encounters
- WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='completed'
-), ordered AS (
- SELECT hero_id,world_day,LAG(world_day) OVER(PARTITION BY hero_id ORDER BY world_day) AS prior_day
- FROM participation
-)
-SELECT COUNT(*) AS count FROM ordered
-WHERE prior_day IS NOT NULL AND world_day-prior_day<7;",
-                flingParameters).FirstOrDefault(), "count", 0);
-            int flingSameSexConceptionViolations = ReadInt(ReignDatabase.QuerySql(connection, @"
-SELECT COUNT(*) AS count FROM relationship_fling_encounters
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND same_sex=1
-AND (conception_attempt_id<>'' OR conception_id<>'' OR conceived=1);",
-                flingParameters).FirstOrDefault(), "count", 0);
-            int flingDuplicatePersonDayViolations = ReadInt(ReignDatabase.QuerySql(connection, @"
-WITH participation AS (
- SELECT hero_a_id AS hero_id,world_day FROM relationship_fling_encounters
- WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='completed'
- UNION ALL
- SELECT hero_b_id AS hero_id,world_day FROM relationship_fling_encounters
- WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='completed'
-)
-SELECT COUNT(*) AS count FROM (
- SELECT hero_id,world_day,COUNT(*) AS uses FROM participation
- GROUP BY hero_id,world_day HAVING COUNT(*)>1
-) duplicates;", flingParameters).FirstOrDefault(), "count", 0);
+            int flingCooldownViolations = ReadInt(WorldSimulationStore.SelectOrdered(connection, flingParameters).FirstOrDefault(), "count", 0);
+            int flingSameSexConceptionViolations = ReadInt(WorldSimulationStore.CountRelationshipFlingEncounters3(connection, flingParameters).FirstOrDefault(), "count", 0);
+            int flingDuplicatePersonDayViolations = ReadInt(WorldSimulationStore.SelectParticipation(connection, flingParameters).FirstOrDefault(), "count", 0);
             Dictionary<string, object> flingTelemetry =
                 new Dictionary<string, object>
                 {
@@ -450,18 +254,9 @@ SELECT COUNT(*) AS count FROM (
                         flingSameSexConceptionViolations,
                     ["duplicatePersonDayViolations"] =
                         flingDuplicatePersonDayViolations,
-                    ["recentEncounters"] = ReignDatabase.QuerySql(connection, @"
-SELECT * FROM relationship_fling_encounters
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-ORDER BY world_day DESC,encounter_id DESC LIMIT 20;", flingParameters),
-                    ["recentSparks"] = ReignDatabase.QuerySql(connection, @"
-SELECT * FROM relationship_fling_sparks
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-ORDER BY world_day DESC,pair_key LIMIT 40;", flingParameters),
-                    ["recentRolls"] = ReignDatabase.QuerySql(connection, @"
-SELECT * FROM relationship_fling_rolls
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-ORDER BY world_day DESC,hero_id LIMIT 40;", flingParameters)
+                    ["recentEncounters"] = WorldSimulationStore.SelectRelationshipFlingEncounters(connection, flingParameters),
+                    ["recentSparks"] = WorldSimulationStore.SelectRelationshipFlingSparks(connection, flingParameters),
+                    ["recentRolls"] = WorldSimulationStore.SelectRelationshipFlingRolls(connection, flingParameters)
                 };
             Dictionary<string, object> lifecycleCounts = new Dictionary<string, object>
             {
@@ -516,70 +311,44 @@ ORDER BY world_day DESC,hero_id LIMIT 40;", flingParameters)
                 ["romanticMarriageBlockedPairs"] = lifecycle.Count(x =>
                     ReadInt(x, "marriage_blocked", 0) == 1),
                 ["arrangedMarriages"] = arrangedMarriages,
-                ["affairDiscoveries"] = ReadInt(ReignDatabase.QuerySql(connection, @"
-SELECT COUNT(*) AS count FROM rumor_occurrences
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND archetype_id='affair';", flingParameters).FirstOrDefault(), "count", 0),
+                ["affairDiscoveries"] = ReadInt(WorldSimulationStore.CountRumorOccurrences(connection, flingParameters).FirstOrDefault(), "count", 0),
                 ["flings"] = flingTelemetry,
                 ["pregnancyCommitments"] = TableCount(connection,
                     "relationship_conception_commitments"),
-                ["pregnancyCommitmentMarriages"] = ReadInt(ReignDatabase.QuerySql(connection,
-                    "SELECT COUNT(*) AS count FROM relationship_conception_commitments WHERE status='married';")
+                ["pregnancyCommitmentMarriages"] = ReadInt(WorldSimulationStore.CountRelationshipConceptionCommitments(connection)
                     .FirstOrDefault(), "count", 0),
-                ["pregnancyCommitmentBreakups"] = ReadInt(ReignDatabase.QuerySql(connection,
-                    "SELECT COUNT(*) AS count FROM relationship_conception_commitments WHERE status='broke_up';")
+                ["pregnancyCommitmentBreakups"] = ReadInt(WorldSimulationStore.CountRelationshipConceptionCommitments2(connection)
                     .FirstOrDefault(), "count", 0),
-                ["pregnancyCommitmentChanceViolations"] = ReadInt(ReignDatabase.QuerySql(connection,
-                    "SELECT COUNT(*) AS count FROM relationship_conception_commitments WHERE chance_a>90 OR chance_b>90 OR chance_a<>MIN(90,honor_a+10) OR chance_b<>MIN(90,honor_b+10);")
+                ["pregnancyCommitmentChanceViolations"] = ReadInt(WorldSimulationStore.CountRelationshipConceptionCommitments3(connection)
                     .FirstOrDefault(), "count", 0),
                 ["affairMarriageCommitments"] = TableCount(connection,
                     "relationship_affair_commitments"),
-                ["affairMarriageCommitmentMarriages"] = ReadInt(ReignDatabase.QuerySql(connection,
-                    "SELECT COUNT(*) AS count FROM relationship_affair_commitments WHERE status='married';")
+                ["affairMarriageCommitmentMarriages"] = ReadInt(WorldSimulationStore.CountRelationshipAffairCommitments(connection)
                     .FirstOrDefault(), "count", 0),
-                ["affairMarriageChanceCapViolations"] = ReadInt(ReignDatabase.QuerySql(connection,
-                    "SELECT COUNT(*) AS count FROM relationship_affair_commitments WHERE chance_a>30 AND spouse_a_id<>'' OR chance_b>30 AND spouse_b_id<>'';")
+                ["affairMarriageChanceCapViolations"] = ReadInt(WorldSimulationStore.CountRelationshipAffairCommitments2(connection)
                     .FirstOrDefault(), "count", 0),
                 ["incidents"] = TableCount(connection, "relationship_incidents"),
                 ["conceptions"] = StatusCounts(connection, "conceptions", "status"),
-                ["concealedParentage"] = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS count FROM parentage WHERE revealed=0 AND is_illegitimate=1;").FirstOrDefault(), "count", 0)
+                ["concealedParentage"] = ReadInt(WorldSimulationStore.CountParentage(connection).FirstOrDefault(), "count", 0)
             };
             Dictionary<string, object> playerParameter = new Dictionary<string, object>
             {
                 ["player"] = mainHeroId ?? string.Empty,
                 ["latest"] = latestDay
             };
-            int pending = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
-FROM relationship_native_targets
-WHERE status IN ('pending','claimed')
-AND ($player='' OR (hero_a_id<>$player AND hero_b_id<>$player));", playerParameter).FirstOrDefault(), "count", 0);
-            int overdue = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
-FROM relationship_native_targets
-WHERE status IN ('pending','claimed','failed') AND $latest-world_day>1
-AND ($player='' OR (hero_a_id<>$player AND hero_b_id<>$player));",
-                playerParameter).FirstOrDefault(), "count", 0);
+            int pending = ReadInt(WorldSimulationStore.CountRelationshipNativeTargets(connection, playerParameter).FirstOrDefault(), "count", 0);
+            int overdue = ReadInt(WorldSimulationStore.CountRelationshipNativeTargets2(connection, playerParameter).FirstOrDefault(), "count", 0);
             int unrepresentedNativeFlags = RelationshipsService.CountUnrepresentedNativeFlags(connection, mainHeroId);
             pending += unrepresentedNativeFlags;
-            Dictionary<string, object> latestNativeBatch = ReignDatabase.QuerySql(connection, @"
-SELECT * FROM relationship_native_sync_batches
-WHERE timeline_id=$timeline ORDER BY world_day DESC,issued_ts DESC LIMIT 1;",
-                new Dictionary<string, object> { ["timeline"] = timelineId })
+            Dictionary<string, object> latestNativeBatch = WorldSimulationStore.SelectRelationshipNativeSyncBatches(connection, new Dictionary<string, object> { ["timeline"] = timelineId })
                 .FirstOrDefault() ?? new Dictionary<string, object>();
             int clientRemaining = ReadInt(latestNativeBatch, "client_remaining", 0);
-            int persistedTargetFailures = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
-FROM relationship_native_targets WHERE status='failed'
-AND ($player='' OR (hero_a_id<>$player AND hero_b_id<>$player));", playerParameter).FirstOrDefault(), "count", 0);
+            int persistedTargetFailures = ReadInt(WorldSimulationStore.CountRelationshipNativeTargets3(connection, playerParameter).FirstOrDefault(), "count", 0);
             int latestClientFailures = ReadInt(latestNativeBatch, "client_failed", 0);
             int nativeFailures = Math.Max(persistedTargetFailures, latestClientFailures);
-            int directorFailures = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
-FROM relationship_director_actions
-WHERE action_type<>'native_relation' AND status='failed'
-AND ($player='' OR (actor_id<>$player AND target_id<>$player));", playerParameter).FirstOrDefault(), "count", 0);
+            int directorFailures = ReadInt(WorldSimulationStore.CountRelationshipDirectorActions(connection, playerParameter).FirstOrDefault(), "count", 0);
             int failed = nativeFailures + directorFailures;
-            Dictionary<string, object> openingSeed = ReignDatabase.QuerySql(connection, @"
-SELECT * FROM relationship_opening_seed_runs
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-ORDER BY seed_version DESC LIMIT 1;", pairParameters).FirstOrDefault()
+            Dictionary<string, object> openingSeed = WorldSimulationStore.SelectRelationshipOpeningSeedRuns(connection, pairParameters).FirstOrDefault()
                 ?? new Dictionary<string, object>();
             openingSeed["directionalCount"] =
                 ReadInt(openingSeed, "completed_pairs", 0) * 2;
@@ -711,8 +480,8 @@ ORDER BY seed_version DESC LIMIT 1;", pairParameters).FirstOrDefault()
                     ["arrangedMarriages"] = arrangedMarriages,
                     ["statuses"] = StatusCounts(connection, "marriage_evaluations", "status"),
                     ["proposalPolicy"] = Reign.Relationships.ArrangedMarriagePolicy.Version,
-                    ["completedPeriods"] = ReignDatabase.QuerySql(connection,"SELECT name FROM sqlite_master WHERE type='table' AND name='arranged_marriage_periods';").Any()
-                        ? ReignDatabase.QuerySql(connection,"SELECT period_index,world_day,status FROM arranged_marriage_periods WHERE timeline_id=$t ORDER BY period_index DESC LIMIT 16;",new Dictionary<string,object>{{"t",timelineId}})
+                    ["completedPeriods"] = WorldSimulationStore.SelectSqliteMaster2(connection).Any()
+                        ? WorldSimulationStore.SelectArrangedMarriagePeriods(connection, new Dictionary<string,object>{{"t",timelineId}})
                         : new List<Dictionary<string,object>>()
                 },
                 ["publicStanding"] = ReadDictionary(standingAndPolitical,
@@ -805,12 +574,7 @@ ORDER BY seed_version DESC LIMIT 1;", pairParameters).FirstOrDefault()
             ReignDbConnection connection, string campaignId, string timelineId)
         {
             if (connection == null) return -1d;
-            foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection, @"SELECT day_key,counters_json
-FROM world_test_chunk_counters
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND subsystem='diplomacy' AND chunk_key LIKE 'evaluation_%'
-ORDER BY day_key DESC;",
-                new Dictionary<string, object>
+            foreach (Dictionary<string, object> row in WorldSimulationStore.SelectWorldTestChunkCounters(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId ?? string.Empty,
                     ["timeline"] = string.IsNullOrWhiteSpace(timelineId)
@@ -864,32 +628,13 @@ ORDER BY day_key DESC;",
             string timelineId,
             double latestDay)
         {
-            Dictionary<string, object> rumorSummary = ReignDatabase.QuerySql(connection, @"
-SELECT COUNT(*) AS rumor_count,
-COUNT(*) FILTER (WHERE status='active' AND expires_day<=$day) AS expired_active,
-COALESCE(MAX(world_day),-1) AS last_occurrence_day
-FROM rumor_occurrences
-WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                new Dictionary<string, object>
+            Dictionary<string, object> rumorSummary = WorldSimulationStore.CountRumorOccurrences2(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId,
                     ["timeline"] = timelineId,
                     ["day"] = latestDay
                 }).FirstOrDefault() ?? new Dictionary<string, object>();
-            Dictionary<string, object> outcomeSummary = ReignDatabase.QuerySql(connection, @"
-SELECT COUNT(*) AS source_count,
-COUNT(*) FILTER (WHERE r.completed=1) AS processed_count,
-COUNT(*) FILTER (WHERE r.completed<0 OR
- (COALESCE(r.completed,0)=0 AND COALESCE(r.attempt_count,0)>=3)) AS failed_count,
-COUNT(*) FILTER (WHERE r.event_id IS NULL OR
- (r.completed=0 AND r.attempt_count<3)) AS pending_count,
-COALESCE(MIN(e.world_day) FILTER (WHERE r.event_id IS NULL OR
- (r.completed=0 AND r.attempt_count<3)),-1) AS oldest_pending_day,
-COALESCE(MAX(e.world_day) FILTER (WHERE r.completed=1),-1) AS last_processed_day
-FROM world_history_events e
-LEFT JOIN social_outcome_receipts r ON r.event_id=e.event_id
-WHERE e.timeline_id=$timeline AND e.event_type='social_outcome';",
-                new Dictionary<string, object>
+            Dictionary<string, object> outcomeSummary = WorldSimulationStore.CountWorldHistoryEvents8(connection, new Dictionary<string, object>
                 {
                     ["timeline"] = timelineId
                 }).FirstOrDefault() ?? new Dictionary<string, object>();
@@ -924,52 +669,20 @@ WHERE e.timeline_id=$timeline AND e.event_type='social_outcome';",
             if (failedSourceOutcomes > 0)
                 anomalies.Add(failedSourceOutcomes + " social outcomes exhausted their processing retries.");
             Dictionary<string, int> statuses = WorldTestGroupedCounts(connection,
-                "SELECT status AS key,COUNT(*) AS count FROM rumor_occurrences "
-                + "WHERE campaign_id=$campaign AND timeline_id=$timeline GROUP BY status;",
+                WorldSimulationStore.SelectRumorOccurrencesSql,
                 campaignId, timelineId);
             Dictionary<string, int> sources = WorldTestGroupedCounts(connection,
-                "SELECT COALESCE(NULLIF(archetype_id,''),'other') AS key,COUNT(*) AS count "
-                + "FROM rumor_occurrences WHERE campaign_id=$campaign AND timeline_id=$timeline "
-                + "GROUP BY COALESCE(NULLIF(archetype_id,''),'other');",
+                WorldSimulationStore.SelectRumorOccurrencesSql2,
                 campaignId, timelineId);
             Dictionary<string, int> tagStatuses = WorldTestGroupedCounts(connection,
-                "SELECT rst.status AS key,COUNT(*) AS count FROM rumor_subject_tags rst "
-                + "JOIN rumor_occurrences ro ON ro.occurrence_id=rst.occurrence_id "
-                + "WHERE ro.campaign_id=$campaign AND ro.timeline_id=$timeline GROUP BY rst.status;",
+                WorldSimulationStore.SelectRumorSubjectTagsSql,
                 campaignId, timelineId);
-            Dictionary<string, object> supportingCounts = ReignDatabase.QuerySql(connection, @"
-SELECT
-(SELECT COUNT(*) FROM rumor_subject_tags rst JOIN rumor_occurrences ro
- ON ro.occurrence_id=rst.occurrence_id WHERE ro.campaign_id=$campaign
- AND ro.timeline_id=$timeline) AS tag_count,
-(SELECT COUNT(*) FROM rumor_promotion_results rpr
- JOIN rumor_occurrences ro ON ro.occurrence_id=rpr.occurrence_id
- WHERE ro.campaign_id=$campaign AND ro.timeline_id=$timeline) AS promotion_count,
-(SELECT COUNT(*) FROM rumor_promotion_results rpr
- JOIN rumor_occurrences ro ON ro.occurrence_id=rpr.occurrence_id
- WHERE ro.campaign_id=$campaign AND ro.timeline_id=$timeline
- AND rpr.promoted=1) AS promoted_count,
-(SELECT COUNT(*) FROM character_reputations
- WHERE campaign_id=$campaign AND timeline_id=$timeline) AS reputation_count;",
-                new Dictionary<string, object>
+            Dictionary<string, object> supportingCounts = WorldSimulationStore.SelectRumorSubjectTags(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId,
                     ["timeline"] = timelineId
                 }).FirstOrDefault() ?? new Dictionary<string, object>();
-            List<Dictionary<string, object>> reach = ReignDatabase.QuerySql(connection, @"
-SELECT ro.occurrence_id AS rumor_id,ro.provenance_summary AS claim,
-ro.status,ro.archetype_id AS archetype,
-COUNT(DISTINCT rst.subject_id) AS subject_count,
-COUNT(rst.occurrence_id) AS tag_count,
-COALESCE(MAX(rpr.promoted),0) AS promoted,
-COALESCE(MAX(rpr.streak_count),0) AS streak_count
-FROM rumor_occurrences ro
-LEFT JOIN rumor_subject_tags rst ON rst.occurrence_id=ro.occurrence_id
-LEFT JOIN rumor_promotion_results rpr ON rpr.occurrence_id=ro.occurrence_id
-WHERE ro.campaign_id=$campaign AND ro.timeline_id=$timeline
-GROUP BY ro.occurrence_id,ro.provenance_summary,ro.status,ro.archetype_id
-ORDER BY COUNT(DISTINCT rst.subject_id) DESC,ro.world_day DESC
-LIMIT 50;", new Dictionary<string, object>
+            List<Dictionary<string, object>> reach = WorldSimulationStore.SelectRumorOccurrences(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId,
                     ["timeline"] = timelineId
@@ -1022,7 +735,7 @@ LIMIT 50;", new Dictionary<string, object>
             ReignDbConnection connection, string sql, string campaignId,
             string timelineId)
         {
-            return ReignDatabase.QuerySql(connection, sql, new Dictionary<string, object>
+            return WorldSimulationStore.QuerySql(connection, sql, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId,
                     ["timeline"] = timelineId
@@ -1038,11 +751,7 @@ LIMIT 50;", new Dictionary<string, object>
             List<Dictionary<string, object>> rolls = LatestNativeArray(connection, campaignId, timelineId, "rebellions", "weeklyRolls");
             List<Dictionary<string, object>> movements = LatestNativeArray(connection, campaignId, timelineId, "rebellions", "movements");
             List<Dictionary<string, object>> memberships = LatestNativeArray(connection, campaignId, timelineId, "rebellions", "memberships");
-            List<Dictionary<string, object>> recognitionAttempts = ReignDatabase.QuerySql(connection,
-                @"SELECT * FROM rebellion_recognition_attempts
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-ORDER BY world_day DESC, attempt_index DESC LIMIT 100;",
-                new Dictionary<string, object>
+            List<Dictionary<string, object>> recognitionAttempts = WorldSimulationStore.SelectRebellionRecognitionAttempts(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId
                 });

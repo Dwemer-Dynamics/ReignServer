@@ -43,23 +43,14 @@ namespace ReignBetaServer
                 List<string> evidenceIds = new List<string>();
                 if (TableExists(connection, "foreign_agent_assignments"))
                 {
-                    evidenceIds.AddRange(ReignDatabase.QuerySql(connection, @"SELECT agent_hero_id,sponsor_kingdom_id
-FROM foreign_agent_assignments
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND agent_hero_id=$accused AND status='exposed';",
-                        new Dictionary<string, object>
+                    evidenceIds.AddRange(WorldSimulationStore.SelectForeignAgentAssignments(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId,
                             ["accused"] = accusedId
                         }).Select(row => "foreign_agent:" + accusedId + ":"
                             + ReadString(row, "sponsor_kingdom_id", "unknown")));
                 }
-                List<Dictionary<string, object>> rows = ReignDatabase.QuerySql(connection, @"SELECT DISTINCT e.*
-FROM world_history_events e
-JOIN world_history_entities entity ON entity.event_id=e.event_id
-WHERE e.timeline_id=$timeline AND entity.entity_id=$accused
-AND e.phase IN ('completed','exposed','established')
-ORDER BY e.sequence DESC LIMIT 200;", new Dictionary<string, object>
+                List<Dictionary<string, object>> rows = WorldSimulationStore.SelectWorldHistoryEvents(connection, new Dictionary<string, object>
                 {
                     ["timeline"] = timelineId, ["accused"] = accusedId
                 });
@@ -122,14 +113,10 @@ ORDER BY e.sequence DESC LIMIT 200;", new Dictionary<string, object>
                 ReputationService.EnsureSocialReputationSchema(connection);
                 RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                 RelationshipsService.EnsureRelationshipDirectorSchema(connection);
-                ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                WorldSimulationStore.Begin(connection);
                 try
                 {
-                    Dictionary<string, object> existing = ReignDatabase.QuerySql(connection, @"
-SELECT * FROM character_reputations
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND subject_id=$subject AND tag_id=$tag LIMIT 1;",
-                        new Dictionary<string, object>
+                    Dictionary<string, object> existing = WorldSimulationStore.SelectCharacterReputations(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId,
                             ["subject"] = accusedId, ["tag"] = tagId
@@ -177,16 +164,7 @@ AND subject_id=$subject AND tag_id=$tag LIMIT 1;",
                             ["arrestAppliedRelationshipDelta"] = appliedDelta,
                             ["playerOriginated"] = true
                         };
-                        ReignDatabase.ExecuteSql(connection, @"
-INSERT INTO character_reputations(campaign_id,timeline_id,subject_id,tag_id,
-source_occurrence_id,archetype_id,subject_role,description,reputation_value,
-acquired_day,catalog_revision,snapshot_json,status,updated_ts)
-VALUES($campaign,$timeline,$subject,$tag,'',$archetype,'accused',$description,
-$value,$day,0,$snapshot,'active',$ts)
-ON CONFLICT(campaign_id,timeline_id,subject_id,tag_id) DO UPDATE SET
-description=$description,reputation_value=$value,acquired_day=$day,
-snapshot_json=$snapshot,status='active',updated_ts=$ts;",
-                            new Dictionary<string, object>
+                        WorldSimulationStore.UpsertCharacterReputations(connection, new Dictionary<string, object>
                             {
                                 ["campaign"] = campaignId, ["timeline"] = timelineId,
                                 ["subject"] = accusedId, ["tag"] = tagId,
@@ -218,17 +196,13 @@ snapshot_json=$snapshot,status='active',updated_ts=$ts;",
                                     "The rescinded arrest relationship effect could not be removed.");
                             appliedDelta = 0;
                         }
-                        ReignDatabase.ExecuteSql(connection, @"
-UPDATE character_reputations SET status='rescinded_by_accuser',updated_ts=$ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND subject_id=$subject AND tag_id=$tag;",
-                            new Dictionary<string, object>
+                        WorldSimulationStore.UpdateCharacterReputations(connection, new Dictionary<string, object>
                             {
                                 ["campaign"] = campaignId, ["timeline"] = timelineId,
                                 ["subject"] = accusedId, ["tag"] = tagId, ["ts"] = ts
                             });
                     }
-                    ReignDatabase.ExecuteSql(connection, "COMMIT;");
+                    WorldSimulationStore.Commit(connection);
                     RelationshipsService.InvalidateRelationshipPairStateCache(campaignId);
                     return new Dictionary<string, object>
                     {
@@ -240,7 +214,7 @@ AND subject_id=$subject AND tag_id=$tag;",
                 }
                 catch (Exception ex)
                 {
-                    try { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { WorldSimulationStore.Rollback(connection); } catch { }
                     return new Dictionary<string, object>
                     {
                         ["ok"] = false, ["caseId"] = caseId, ["error"] = ex.Message

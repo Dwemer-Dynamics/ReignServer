@@ -258,9 +258,7 @@ namespace ReignBetaServer
                         DialogueService.EnsureWorldHistoryLieDetectionSchema(connection);
                         foreach (KeyValuePair<string, List<Dictionary<string, object>>> occurrence in auditByReceipt)
                         {
-                            Dictionary<string, object> stored = ReignDatabase.QuerySql(connection,
-                                "SELECT * FROM conversation_relationship_receipts WHERE receipt_id=$id LIMIT 1;",
-                                new Dictionary<string, object> { ["id"] = occurrence.Key }).FirstOrDefault();
+                            Dictionary<string, object> stored = WorldSimulationStore.SelectConversationRelationshipReceipts(connection, new Dictionary<string, object> { ["id"] = occurrence.Key }).FirstOrDefault();
                             if (stored == null)
                             {
                                 errors.Add("Receipt " + occurrence.Key + " was absent from authoritative campaign storage.");
@@ -274,9 +272,7 @@ namespace ReignBetaServer
                             string lieCheckId = ReadString(receipt, "lieCheckId", "");
                             if (!string.IsNullOrWhiteSpace(lieCheckId))
                             {
-                                Dictionary<string, object> lie = ReignDatabase.QuerySql(connection,
-                                    "SELECT * FROM world_history_lie_checks WHERE lie_check_id=$id LIMIT 1;",
-                                    new Dictionary<string, object> { ["id"] = lieCheckId }).FirstOrDefault();
+                                Dictionary<string, object> lie = WorldSimulationStore.SelectWorldHistoryLieChecks(connection, new Dictionary<string, object> { ["id"] = lieCheckId }).FirstOrDefault();
                                 string outcome = ReadString(lie, "outcome", "").ToLowerInvariant();
                                 string verdict = ReadString(lie, "objective_verdict", "").ToLowerInvariant();
                                 bool verified = lie != null
@@ -304,9 +300,7 @@ namespace ReignBetaServer
                             string benefitId = ReadString(receipt, "benefitEventId", "");
                             if (!string.IsNullOrWhiteSpace(benefitId))
                             {
-                                Dictionary<string, object> benefit = ReignDatabase.QuerySql(connection,
-                                    "SELECT * FROM conversation_relationship_benefits WHERE benefit_id=$id LIMIT 1;",
-                                    new Dictionary<string, object> { ["id"] = benefitId }).FirstOrDefault();
+                                Dictionary<string, object> benefit = WorldSimulationStore.SelectConversationRelationshipBenefits(connection, new Dictionary<string, object> { ["id"] = benefitId }).FirstOrDefault();
                                 receipt["benefitLedger"] = benefit == null
                                     ? new Dictionary<string, object>()
                                     : new Dictionary<string, object>
@@ -908,9 +902,7 @@ namespace ReignBetaServer
                                 target, "sharedRelationshipHistoryIds"))
                             {
                                 historyIds.Add(historyId);
-                                Dictionary<string, object> row = ReignDatabase.QuerySql(connection,
-                                    "SELECT * FROM shared_relationship_history_chapters WHERE history_id=$id LIMIT 1;",
-                                    new Dictionary<string, object> { ["id"] = historyId })
+                                Dictionary<string, object> row = WorldSimulationStore.SelectSharedRelationshipHistoryChapters(connection, new Dictionary<string, object> { ["id"] = historyId })
                                     .FirstOrDefault();
                                 if (row == null)
                                 {
@@ -933,10 +925,8 @@ namespace ReignBetaServer
                                         promptedChapterOrdinals[pairKey] = ordinals;
                                     }
                                     ordinals.Add(chapterOrdinal);
-                                    Dictionary<string, object> chemistry = ReignDatabase.QuerySql(
-                                        connection,
-                                        "SELECT affinity_a_to_b,affinity_b_to_a FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                                        new Dictionary<string, object>
+                                    Dictionary<string, object> chemistry = WorldSimulationStore.SelectRelationshipPairChemistry(
+                                        connection, new Dictionary<string, object>
                                         {
                                             ["pair"] = pairKey
                                         }).FirstOrDefault();
