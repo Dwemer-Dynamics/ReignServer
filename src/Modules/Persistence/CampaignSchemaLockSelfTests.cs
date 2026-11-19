@@ -20,7 +20,7 @@ namespace ReignBetaServer
                 RunCampaignColdSchemaOrderCase(campaign, false, add, ref workersJoined);
                 if (!workersJoined) return;
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
-                    ReignDatabase.ExecuteSql(connection, "UPDATE schema_meta SET value='4' WHERE key='version';");
+                    PersistenceSelfTestStore.UpdateSchemaMeta(connection);
                 RunCampaignColdSchemaOrderCase(campaign, true, add, ref workersJoined);
                 if (!workersJoined) return;
 
@@ -167,8 +167,7 @@ namespace ReignBetaServer
                         {
                             Monitor.Exit(Program.CampaignSchemaLock);
                             using var connection = ReignDatabase.OpenCampaignConnection(campaign);
-                            string generation = ReadString(ReignDatabase.QuerySql(connection,
-                                "SELECT value FROM schema_meta WHERE key='semantic_memory_provider_generation';").FirstOrDefault(), "value", "");
+                            string generation = ReadString(PersistenceSelfTestStore.SelectSchemaMeta(connection).FirstOrDefault(), "value", "");
                             mainOpened = connection.State == ConnectionState.Open && generation ==
                                 ReadString(Program.LoadSettings(), "vectorProvider", "local").ToLowerInvariant() + "|" + DialogueService.SemanticModelVersion;
                         }

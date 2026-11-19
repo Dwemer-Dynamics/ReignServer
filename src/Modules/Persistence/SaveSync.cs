@@ -1181,10 +1181,9 @@ namespace ReignBetaServer
                 if (!hasDocuments) return rows;
                 bool hasWorldHistory = tables.Contains("world_history_events");
                 string sql = hasWorldHistory
-                    ? @"SELECT d.*,w.event_type,w.dissemination_class FROM embedding_documents d
-LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.event_id=d.source_id;"
-                    : "SELECT d.*,'' event_type,'' dissemination_class FROM embedding_documents d;";
-                foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection, sql))
+                    ? PersistenceStore.SelectEmbeddingDocumentsSql
+                    : PersistenceStore.SelectEmbeddingDocumentsSql2;
+                foreach (Dictionary<string, object> row in PersistenceStore.QuerySql(connection, sql))
                 {
                     rows[SaveSyncEmbeddingDocumentKey(row)] = row;
                 }

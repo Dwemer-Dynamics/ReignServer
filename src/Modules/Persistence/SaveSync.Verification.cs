@@ -182,8 +182,7 @@ namespace ReignBetaServer
                 using (ReignDbConnection preexistingConnection =
                     ReignDatabase.OpenCampaignConnection(preexistingId))
                 {
-                    ReignDatabase.ExecuteSql(preexistingConnection,
-                        "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('preexisting_test','ready');");
+                    PersistenceStore.UpsertSchemaMeta2(preexistingConnection);
                 }
                 Dictionary<string, object> preexistingPayload = SaveSyncTestPointPayload(preexistingId, "pre_" + token, 1d, "Preexisting World History");
                 preexistingPayload["campaignLabel"] = "Preexisting World History";
@@ -349,16 +348,15 @@ namespace ReignBetaServer
                 // context can only record the snapshot's value if the real restore brings back
                 // memory_precision_state before the context captures it.
                 string oldSnapshotGeneration = SaveSyncTestSqlValue(campaignId,
-                    "SELECT restore_generation FROM " + ReignPostgreSqlStorage.SnapshotSchemaName(campaignId, SaveSyncPostgreSqlSnapshotPointId(oldStoredPoint))
-                    + ".memory_precision_state WHERE state_id='current';", "restore_generation");
+                    PersistenceStore.SelectMemoryPrecisionStateSql(ReignPostgreSqlStorage.SnapshotSchemaName(campaignId, SaveSyncPostgreSqlSnapshotPointId(oldStoredPoint))), "restore_generation");
                 DialogueService.AdvanceMemoryRestoreGeneration(campaignId);
                 string preRollbackGeneration = SaveSyncTestSqlValue(campaignId,
-                    "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';", "restore_generation");
+                    PersistenceStore.SelectMemoryPrecisionStateSql2, "restore_generation");
                 Dictionary<string, object> rolledBack = SaveSyncLoadApi(loadSessionPayload, false);
                 string rollbackSourceGeneration = SaveSyncTestSqlValue(campaignId,
-                    "SELECT source_generation FROM memory_restored_source_context WHERE state_id='current';", "source_generation");
+                    PersistenceStore.SelectMemoryRestoredSourceContextSql, "source_generation");
                 string rollbackLoadSession = SaveSyncTestSqlValue(campaignId,
-                    "SELECT load_session_id FROM memory_restored_source_context WHERE state_id='current';", "load_session_id");
+                    PersistenceStore.SelectMemoryRestoredSourceContextSql2, "load_session_id");
                 add("rollback_context_records_snapshot_generation",
                     ReadString(rolledBack, "result", "") == "rolled_back"
                     && oldSnapshotGeneration.Length > 0 && preRollbackGeneration.Length > 0
@@ -372,13 +370,13 @@ namespace ReignBetaServer
                     .All(subsystem => ReadLong(ReadDictionary(rollbackCounts, subsystem), "removed", 0) > 0);
                 bool storesClean = !SaveSyncTestMarkerExists(campaignId, "future")
                     && SaveSyncTestFutureSqlRows(campaignId) == 0
-                    && SaveSyncTestSqlValue(campaignId, "SELECT affinity_a_to_b FROM relationship_pair_chemistry WHERE pair_key='hero_a|hero_b';", "affinity_a_to_b") == "1"
-                    && SaveSyncTestSqlValue(campaignId, "SELECT reputation_value FROM character_reputations WHERE campaign_id=$campaign AND subject_id='hero_a' AND tag_id='test_reputation';", "reputation_value", campaignId) == "1"
+                    && SaveSyncTestSqlValue(campaignId, PersistenceStore.SelectRelationshipPairChemistrySql, "affinity_a_to_b") == "1"
+                    && SaveSyncTestSqlValue(campaignId, PersistenceStore.SelectCharacterReputationsSql, "reputation_value", campaignId) == "1"
                     && affectedCountsAuditable;
                 add("older_save_rolls_back_all_temporal_stores", ReadBool(rolledBack, "ok", false) && ReadString(rolledBack, "result", "") == "rolled_back" && storesClean, "Older-save apply removes future conversations, events, memories, relationships, world history, rumors, actions, diplomacy, rebellions, court/reputation state, and character runtime state.");
                 add("original_input_and_receipt_round_trip_exactly", SaveSyncTestSqlValue(campaignId,
-                    "SELECT text FROM conversation_turns WHERE turn_id='old_original';", "text") == "  *I trace a 🌿.*\r\nHello.\t "
-                    && SaveSyncTestSqlValue(campaignId, "SELECT source_hash FROM conversation_input_receipts WHERE input_id='old_input';", "source_hash")
+                    PersistenceStore.SelectConversationTurnsSql, "text") == "  *I trace a 🌿.*\r\nHello.\t "
+                    && SaveSyncTestSqlValue(campaignId, PersistenceStore.SelectConversationInputReceiptsSql, "source_hash")
                         == DialogueService.ConversationExactTextHash("  *I trace a 🌿.*\r\nHello.\t "),
                     "Author-only originals and receipt hashes survive snapshot restore byte-for-byte; future receipts and originals are removed with their branch.");
                 add("pre_sync_backup_created", ReadBool(rolledBack, "backupCreated", false) && Directory.Exists(ReadString(rolledBack, "backupPath", "")), "Destructive apply creates a retained pre-sync recovery snapshot.");
@@ -433,9 +431,9 @@ namespace ReignBetaServer
                 Dictionary<string, object> boundNoOp = SaveSyncLoadApi(new Dictionary<string, object>(newPayload) { ["loadSessionId"] = "noop_a_" + token }, false);
                 Dictionary<string, object> repeatNoOp = SaveSyncLoadApi(new Dictionary<string, object>(newPayload) { ["loadSessionId"] = "noop_b_" + token }, false);
                 string boundSession = SaveSyncTestSqlValue(campaignId,
-                    "SELECT load_session_id FROM memory_restored_source_context WHERE state_id='current';", "load_session_id");
+                    PersistenceStore.SelectMemoryRestoredSourceContextSql2, "load_session_id");
                 string liveRestoreGeneration = SaveSyncTestSqlValue(campaignId,
-                    "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';", "restore_generation");
+                    PersistenceStore.SelectMemoryPrecisionStateSql2, "restore_generation");
                 add("no_op_load_proof_bind_keeps_no_op",
                     ReadString(boundNoOp, "result", "") == "no_op" && ReadString(repeatNoOp, "result", "") == "no_op"
                     && boundSession == "noop_b_" + token && liveRestoreGeneration.Length > 0
@@ -481,7 +479,7 @@ namespace ReignBetaServer
                 // The real ImportCampaignArchive stamp (not a simulated update): the exported context
                 // was bound to a verified no-op session, and the imported one names no load at all.
                 string importedLoadSession = ReadBool(imported, "ok", false) ? SaveSyncTestSqlValue(campaignId,
-                    "SELECT load_session_id FROM memory_restored_source_context WHERE state_id='current';", "load_session_id") : "";
+                    PersistenceStore.SelectMemoryRestoredSourceContextSql2, "load_session_id") : "";
                 add("import_stamps_restore_context_load_session",
                     boundSession == "noop_b_" + token
                     && importedLoadSession == Reign.Core.Contracts.Actions.TerminalActionReportProtocol.ImportedLoadSession,
@@ -1021,63 +1019,39 @@ namespace ReignBetaServer
                 CourtService.EnsureCourtSchema(connection);
                 ReputationService.EnsureSocialReputationSchema(connection);
                 long ts = marker == "old" ? 10 : 1;
-                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO events(event_id,campaign_id,ts,world_day,event_type,summary,created_utc) VALUES($id,$campaign,$ts,$day,'test',$id,$utc);", new Dictionary<string, object> { ["id"] = marker + "_event", ["campaign"] = campaignId, ["ts"] = ts, ["day"] = (double)ts, ["utc"] = DateTime.UtcNow.ToString("o") });
-                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO memories(memory_id,event_id,owner_id,ts,world_day,summary) VALUES($id,$event,'hero_a',$ts,$day,$id);", new Dictionary<string, object> { ["id"] = marker + "_memory", ["event"] = marker + "_event", ["ts"] = ts, ["day"] = (double)ts });
-                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO relationship_pair_chemistry(
-pair_key,hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,tag_a_to_b,tag_b_to_a,
-first_day,last_day,projected_native_relation,last_decay_period,updated_ts)
-VALUES('hero_a|hero_b','hero_a','hero_b',$affinity,$affinity,'neutral','neutral',
-$day,$day,$affinity,0,$ts);", new Dictionary<string, object>
+                PersistenceStore.UpsertEvents(connection, new Dictionary<string, object> { ["id"] = marker + "_event", ["campaign"] = campaignId, ["ts"] = ts, ["day"] = (double)ts, ["utc"] = DateTime.UtcNow.ToString("o") });
+                PersistenceStore.UpsertMemories(connection, new Dictionary<string, object> { ["id"] = marker + "_memory", ["event"] = marker + "_event", ["ts"] = ts, ["day"] = (double)ts });
+                PersistenceStore.UpsertRelationshipPairChemistry(connection, new Dictionary<string, object>
                 {
                     ["affinity"] = marker == "future" ? 99 : 1, ["day"] = (double)ts, ["ts"] = ts
                 });
-                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO relationship_pair_lifecycle(
-pair_key,hero_a_id,hero_b_id,last_processed_day,updated_ts)
-VALUES('hero_a|hero_b','hero_a','hero_b',$day,$ts);",
-                    new Dictionary<string, object> { ["day"] = (int)ts, ["ts"] = ts });
-                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_sessions(session_id,campaign_id,npc_id,start_ts) VALUES($id,$campaign,'hero_a',$ts);", new Dictionary<string, object> { ["id"] = marker + "_session", ["campaign"] = campaignId, ["ts"] = ts });
-                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_turns(turn_id,session_id,turn_order,role,text,ts) VALUES($id,$session,1,'npc',$id,$ts);", new Dictionary<string, object> { ["id"] = marker + "_turn", ["session"] = marker + "_session", ["ts"] = ts });
+                PersistenceStore.UpsertRelationshipPairLifecycle(connection, new Dictionary<string, object> { ["day"] = (int)ts, ["ts"] = ts });
+                PersistenceStore.UpsertConversationSessions(connection, new Dictionary<string, object> { ["id"] = marker + "_session", ["campaign"] = campaignId, ["ts"] = ts });
+                PersistenceStore.UpsertConversationTurns(connection, new Dictionary<string, object> { ["id"] = marker + "_turn", ["session"] = marker + "_session", ["ts"] = ts });
                 DialogueService.EnsureConversationInputSchema(connection);
                 const string exactOriginal = "  *I trace a 🌿.*\r\nHello.\t ";
-                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_turns(turn_id,session_id,turn_order,role,text,ts,status) VALUES($id,$session,-1,'player_source',$text,$ts,'source_only');",
-                    TestDict("id", marker + "_original", "session", marker + "_session", "text", exactOriginal, "ts", ts));
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_input_receipts(input_id,timeline_id,session_id,player_id,source_turn_id,source_hash,restore_generation,status,created_ts,updated_ts)
-VALUES($id,'timeline_test',$session,'player',$source,$hash,'fixture','received',$ts,$ts) ON CONFLICT(input_id) DO NOTHING;",
-                    TestDict("id", marker + "_input", "session", marker + "_session", "source", marker + "_original", "hash", DialogueService.ConversationExactTextHash(exactOriginal), "ts", ts));
-                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO rumor_occurrences(
-occurrence_id,campaign_id,timeline_id,archetype_id,thread_key,source_event_id,world_day,expires_day,status,
-exposure_chance,exposure_roll,catalog_revision,participants_json,provenance_summary,snapshot_json,created_ts,updated_ts)
-VALUES($id,$campaign,'timeline_test','marital_strife','hero_a|hero_b',$event,$day,999999,'active',
-1,0,1,'[""hero_a"",""hero_b""]',$summary,'{}',$ts,$ts);",
-                    new Dictionary<string, object>
+                PersistenceStore.UpsertConversationTurns2(connection, TestDict("id", marker + "_original", "session", marker + "_session", "text", exactOriginal, "ts", ts));
+                PersistenceStore.InsertOrIgnoreConversationInputReceipts(connection, TestDict("id", marker + "_input", "session", marker + "_session", "source", marker + "_original", "hash", DialogueService.ConversationExactTextHash(exactOriginal), "ts", ts));
+                PersistenceStore.UpsertRumorOccurrences(connection, new Dictionary<string, object>
                     {
                         ["id"] = marker + "_rumor_occurrence", ["campaign"] = campaignId,
                         ["event"] = marker + "_event", ["day"] = (double)ts,
                         ["summary"] = marker + "_rumor_summary", ["ts"] = ts
                     });
-                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO rumor_subject_tags(
-occurrence_id,subject_id,tag_id,subject_role,description,rumor_value,reputation_value,status,
-co_participants_json,snapshot_json,updated_ts)
-VALUES($occurrence,'hero_a','marital_strife','spouse',$description,-5,-10,'active','[""hero_b""]','{}',$ts);",
-                    new Dictionary<string, object>
+                PersistenceStore.UpsertRumorSubjectTags(connection, new Dictionary<string, object>
                     {
                         ["occurrence"] = marker + "_rumor_occurrence",
                         ["description"] = marker + "_rumor_description", ["ts"] = ts
                     });
-                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO world_history_events(event_id,campaign_id,timeline_id,sequence,world_day,event_type,summary,created_utc) VALUES($id,$campaign,'timeline_test',$ts,$day,'test',$id,$utc);", new Dictionary<string, object> { ["id"] = marker + "_history", ["campaign"] = campaignId, ["ts"] = ts, ["day"] = (double)ts, ["utc"] = DateTime.UtcNow.ToString("o") });
-                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO rebellion_movements(movement_id,campaign_id,timeline_id,parent_kingdom_id,leader_clan_id,leader_hero_id,ruler_hero_id,objective,stage,pressure,relationship_pressure,trait_pressure,factual_pressure,viability,readiness,correlation_id,created_day,updated_day)
-VALUES($id,$campaign,'timeline_test','kingdom_a','clan_a','hero_a','hero_b','claimant','organizing',1,1,1,1,1,1,$id,$day,$day);", new Dictionary<string, object> { ["id"] = marker + "_rebellion", ["campaign"] = campaignId, ["day"] = (double)ts });
-                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO court_sessions(session_id,campaign_id,timeline_id,authority,host_settlement_id,created_ts,updated_ts) VALUES($id,$campaign,'timeline_test','royal','town_a',$ts,$ts);", new Dictionary<string, object> { ["id"] = marker + "_court", ["campaign"] = campaignId, ["ts"] = ts });
-                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO character_reputations(
-campaign_id,timeline_id,subject_id,tag_id,source_occurrence_id,archetype_id,subject_role,description,
-reputation_value,acquired_day,catalog_revision,snapshot_json,status,updated_ts)
-VALUES($campaign,'timeline_test','hero_a','test_reputation',$occurrence,'test','subject',$description,1,$day,1,'{}','active',$ts);",
-                    new Dictionary<string, object>
+                PersistenceStore.UpsertWorldHistoryEvents(connection, new Dictionary<string, object> { ["id"] = marker + "_history", ["campaign"] = campaignId, ["ts"] = ts, ["day"] = (double)ts, ["utc"] = DateTime.UtcNow.ToString("o") });
+                PersistenceStore.UpsertRebellionMovements(connection, new Dictionary<string, object> { ["id"] = marker + "_rebellion", ["campaign"] = campaignId, ["day"] = (double)ts });
+                PersistenceStore.UpsertCourtSessions(connection, new Dictionary<string, object> { ["id"] = marker + "_court", ["campaign"] = campaignId, ["ts"] = ts });
+                PersistenceStore.UpsertCharacterReputations(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["occurrence"] = marker + "_rumor_occurrence",
                         ["description"] = marker + "_reputation", ["day"] = (double)ts, ["ts"] = ts
                     });
-                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO director_outbox(outbox_id,kind,status,world_day,subject_ids_json,payload_json,created_ts) VALUES($id,'test','pending',$day,'[]',$payload,$ts);", new Dictionary<string, object> { ["id"] = marker + "_outbox", ["day"] = (double)ts, ["payload"] = "{\"marker\":\"" + marker + "\"}", ["ts"] = ts });
+                PersistenceStore.UpsertDirectorOutbox(connection, new Dictionary<string, object> { ["id"] = marker + "_outbox", ["day"] = (double)ts, ["payload"] = "{\"marker\":\"" + marker + "\"}", ["ts"] = ts });
             }
         }
 
@@ -1086,7 +1060,7 @@ VALUES($campaign,'timeline_test','hero_a','test_reputation',$occurrence,'test','
             PrepareSaveSyncTestCampaign(campaignId, "future");
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                ReignDatabase.ExecuteSql(connection, "UPDATE character_reputations SET reputation_value=99,updated_ts=20 WHERE campaign_id=$campaign AND subject_id='hero_a' AND tag_id='test_reputation';", new Dictionary<string, object> { ["campaign"] = campaignId });
+                PersistenceStore.UpdateCharacterReputations(connection, new Dictionary<string, object> { ["campaign"] = campaignId });
             }
             Program.WriteJsonObject(Path.Combine(StrictCampaignDirectory(campaignId), "characters", "hero_a", "background.json"), new Dictionary<string, object> { ["text"] = "later static definition" });
             File.WriteAllBytes(Path.Combine(StrictCampaignDirectory(campaignId), "characters", "hero_a", "portraits", "portrait.png"), new byte[] { 9, 8, 7, 6 });
@@ -1139,7 +1113,7 @@ VALUES($campaign,'timeline_test','hero_a','test_reputation',$occurrence,'test','
                 .Any(path => { try { return File.ReadAllText(path).Contains(marker); } catch { return false; } });
             bool sqlMarker;
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
-                sqlMarker = ReadLong(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM events WHERE event_id=$id;", new Dictionary<string, object> { ["id"] = marker + "_event" }).FirstOrDefault(), "count", 0) > 0;
+                sqlMarker = ReadLong(PersistenceStore.CountEvents(connection, new Dictionary<string, object> { ["id"] = marker + "_event" }).FirstOrDefault(), "count", 0) > 0;
             return fileMarker || sqlMarker;
         }
 
@@ -1149,20 +1123,20 @@ VALUES($campaign,'timeline_test','hero_a','test_reputation',$occurrence,'test','
             {
                 string[] queries =
                 {
-                    "SELECT COUNT(*) count FROM events WHERE event_id='future_event';",
-                    "SELECT COUNT(*) count FROM memories WHERE memory_id='future_memory';",
-                    "SELECT COUNT(*) count FROM conversation_turns WHERE turn_id='future_turn';",
-                    "SELECT COUNT(*) count FROM conversation_turns WHERE turn_id='future_original';",
-                    "SELECT COUNT(*) count FROM conversation_input_receipts WHERE input_id='future_input';",
-                    "SELECT COUNT(*) count FROM rumor_occurrences WHERE occurrence_id='future_rumor_occurrence';",
-                    "SELECT COUNT(*) count FROM rumor_subject_tags WHERE occurrence_id='future_rumor_occurrence' AND subject_id='hero_a';",
-                    "SELECT COUNT(*) count FROM character_reputations WHERE subject_id='hero_a' AND tag_id='test_reputation' AND reputation_value=99;",
-                    "SELECT COUNT(*) count FROM world_history_events WHERE event_id='future_history';",
-                    "SELECT COUNT(*) count FROM rebellion_movements WHERE movement_id='future_rebellion';",
-                    "SELECT COUNT(*) count FROM court_sessions WHERE session_id='future_court';",
-                    "SELECT COUNT(*) count FROM director_outbox WHERE outbox_id='future_outbox';"
+                    PersistenceStore.CountEventsSql,
+                    PersistenceStore.CountMemoriesSql,
+                    PersistenceStore.CountConversationTurnsSql,
+                    PersistenceStore.CountConversationTurnsSql2,
+                    PersistenceStore.CountConversationInputReceiptsSql,
+                    PersistenceStore.CountRumorOccurrencesSql,
+                    PersistenceStore.CountRumorSubjectTagsSql,
+                    PersistenceStore.CountCharacterReputationsSql,
+                    PersistenceStore.CountWorldHistoryEventsSql,
+                    PersistenceStore.CountRebellionMovementsSql,
+                    PersistenceStore.CountCourtSessionsSql,
+                    PersistenceStore.CountDirectorOutboxSql
                 };
-                return queries.Sum(sql => ReadLong(ReignDatabase.QuerySql(connection, sql).FirstOrDefault(), "count", 0));
+                return queries.Sum(sql => ReadLong(PersistenceStore.QuerySql(connection, sql).FirstOrDefault(), "count", 0));
             }
         }
 
@@ -1182,7 +1156,7 @@ VALUES($campaign,'timeline_test','hero_a','test_reputation',$occurrence,'test','
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 Dictionary<string, object> parameters = string.IsNullOrWhiteSpace(parameterCampaign) ? null : new Dictionary<string, object> { ["campaign"] = parameterCampaign };
-                Dictionary<string, object> row = ReignDatabase.QuerySql(connection, sql, parameters).FirstOrDefault();
+                Dictionary<string, object> row = PersistenceStore.QuerySql(connection, sql, parameters).FirstOrDefault();
                 object value = row != null && row.ContainsKey(field) ? row[field] : null;
                 return Convert.ToString(value, CultureInfo.InvariantCulture) ?? "";
             }
