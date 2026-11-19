@@ -59,6 +59,9 @@
     <Compile Remove="src\**\*Tests.cs" />
     <Compile Remove="src\**\*Fixtures.cs" />
     <Compile Remove="src\Modules\Platform\VerificationLab.cs" />
+    <Compile Remove="src\Modules\Platform\VerificationLab.Contracts.cs" />
+    <Compile Remove="src\Modules\Platform\VerificationLab.Suites.cs" />
+    <Compile Remove="src\Modules\Platform\VerificationLab.Support.cs" />
     <Compile Remove="src\Modules\Platform\VerificationSourceLocator.cs" />
     <Compile Remove="src\Modules\Platform\CodexPerformanceVerification.cs" />
     <Compile Remove="src\Modules\Court\CapitalAmbassadorTestSystem.cs" />

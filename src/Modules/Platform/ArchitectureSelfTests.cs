@@ -1578,7 +1578,9 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                 string diplomacyExecutorText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
                 string actionBehaviorText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
                 string relationshipCampaignText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
-                string liveTestServerText = File.Exists(liveTestServerPath) ? File.ReadAllText(liveTestServerPath) : "";
+                string liveTestServerText = File.Exists(liveTestServerPath)
+                    ? VerificationSourceLocator.ReadServerSplitSourceText(Path.Combine(qualificationSourceRoot, "ReignServer"), "LiveInteractionTest.cs", "src")
+                    : "";
                 string passiveWorldControllerText = File.Exists(passiveWorldControllerPath) ? File.ReadAllText(passiveWorldControllerPath) : "";
                 string passiveWorldHostText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
                 add("kingdom_catastrophe_and_prosperity_contract",
@@ -1769,7 +1771,10 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         "QualificationRunner.cs",
                         "ReignLiveTest/Features/Dialogue");
                 string qualificationRunnerText = File.Exists(qualificationRunnerPath)
-                    ? File.ReadAllText(qualificationRunnerPath)
+                    ? VerificationSourceLocator.ReadServerSplitSourceText(
+                        Path.Combine(qualificationSourceRoot, "ReignServer"),
+                        "QualificationRunner.cs",
+                        "ReignLiveTest/Features/Dialogue")
                     : "";
                 add("qualification_same_build_guarded_target_contract",
                     qualificationRunnerText.Contains("[\"effects\"] = \"guarded\"", StringComparison.Ordinal)
@@ -1825,7 +1830,10 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         "Program.cs",
                         "ReignLiveTest");
                 string liveTestControllerText = File.Exists(liveTestControllerPath)
-                    ? File.ReadAllText(liveTestControllerPath)
+                    ? VerificationSourceLocator.ReadServerSplitSourceText(
+                        Path.Combine(qualificationSourceRoot, "ReignServer"),
+                        "Program.cs",
+                        "ReignLiveTest")
                     : "";
                 string finalGauntletLongHorizonPath =
                     string.IsNullOrWhiteSpace(qualificationSourceRoot)
@@ -2158,7 +2166,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     ? ""
                     : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignServer"), "LiveInteractionTest.cs", "src");
                 string liveInteractionSourceText = File.Exists(liveInteractionSourcePath)
-                    ? File.ReadAllText(liveInteractionSourcePath)
+                    ? VerificationSourceLocator.ReadServerSplitSourceText(Path.Combine(qualificationSourceRoot, "ReignServer"), "LiveInteractionTest.cs", "src")
                     : "";
                 add("qualification_lie_relationship_focus",
                     qualificationRunnerText.Contains("lieRelationshipOnly", StringComparison.Ordinal)

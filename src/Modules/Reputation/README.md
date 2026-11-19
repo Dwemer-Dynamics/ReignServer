@@ -12,7 +12,8 @@ the social-balance test harness.
 - `Program.ReputationRoutes.cs`: this module's route registrations (see `Platform/RouteTable.cs`).
 - `SocialReputation.cs`, `ExpandedSocialReputation.cs`, `CharacterSocialProfile.cs`, `PublicStanding.cs`.
 - `CourtSocialReputation.cs`, `RulerFavorContact.cs`, `WhoremongerReputation.cs`.
-- `SocialBalanceTest.cs`: the social-balance harness and its routes.
+- `SocialBalanceTest.cs`: the social-balance harness and its routes (with its `SocialBalanceTest.Profiles.cs` and
+  `SocialBalanceTest.Status.cs` partials).
 
 ## Service class
 

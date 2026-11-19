@@ -213,7 +213,8 @@ The shipped server contains its own test system. It is not a separate test proje
 The default build is unchanged and still ships everything above. Building with
 `-p:ReignExcludeVerification=true` defines `REIGN_EXCLUDE_VERIFICATION` and removes the compiled-in test system:
 
-- Sources left out: `src/**/*SelfTests*.cs`, `src/**/*Tests.cs`, `src/**/*Fixtures.cs`, `Platform/VerificationLab.cs`,
+- Sources left out: `src/**/*SelfTests*.cs`, `src/**/*Tests.cs`, `src/**/*Fixtures.cs`, `Platform/VerificationLab.cs`
+  with its `VerificationLab.Contracts.cs`, `VerificationLab.Suites.cs` and `VerificationLab.Support.cs` partials,
   `Platform/VerificationSourceLocator.cs`, `Platform/CodexPerformanceVerification.cs`,
   `Court/CapitalAmbassadorTestSystem.cs`, `Portraits/BackgroundPortraitContracts.cs` and
   `Dialogue/PersonalGossipCompositionProbe.cs`.

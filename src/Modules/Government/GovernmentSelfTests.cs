@@ -515,7 +515,9 @@ namespace ReignBetaServer
             string liveHost = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             string serverLivePath = VerificationSourceLocator.ResolveUnique(Path.Combine(root, "ReignServer"),
                 "LiveInteractionTest.cs", "src");
-            string serverLive = File.Exists(serverLivePath) ? File.ReadAllText(serverLivePath) : string.Empty;
+            string serverLive = File.Exists(serverLivePath)
+                ? VerificationSourceLocator.ReadServerSplitSourceText(Path.Combine(root, "ReignServer"), "LiveInteractionTest.cs", "src")
+                : string.Empty;
             string manifestPath = Path.Combine(root, "ReignServer", "tests", "ReignLiveTest", "scenarios",
                 "government-system-manifest.json");
             string mcpPath = VerificationSourceLocator.ResolveUnique(Path.Combine(root, "ReignMcp"),
