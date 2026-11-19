@@ -1284,9 +1284,21 @@ namespace ReignBetaServer
             // MbtiRelationships partial file it lives.
             string relationshipLoopSource = VerificationSourceLocator.ReadServerSplitMemberSourceText(
                 serverRoot, "MbtiRelationships.cs", "MbtiRelationshipSnapshotApi", "src");
+            // The overview's SQL lives in the WorldSimulation Data stores: read the store methods it calls.
+            string worldSimulationStoreText = string.Concat(Directory.EnumerateFiles(
+                    Path.Combine(serverRoot, "src", "Modules", "WorldSimulation", "Data"), "*.cs")
+                .OrderBy(path => path, StringComparer.Ordinal).Select(File.ReadAllText));
+            string relationshipOverviewSql = string.Join("\n", Regex.Matches(relationshipOverviewSource, @"WorldSimulationStore\.(\w+)\(")
+                .Cast<Match>().Select(match => match.Groups[1].Value).Distinct(StringComparer.Ordinal)
+                .Select(name =>
+                {
+                    int start = worldSimulationStoreText.IndexOf(" " + name + "(", StringComparison.Ordinal);
+                    int end = start < 0 ? -1 : worldSimulationStoreText.IndexOf("\n        }\n", start, StringComparison.Ordinal);
+                    return end < 0 ? "" : worldSimulationStoreText.Substring(start, end - start);
+                }));
             bool worldTestAuthoritativeOverviewValid =
-                relationshipOverviewSource.Contains("relationship_pair_chemistry")
-                && !relationshipOverviewSource.Contains("world_test_relationship_memberships")
+                (relationshipOverviewSource + relationshipOverviewSql).Contains("relationship_pair_chemistry")
+                && !(relationshipOverviewSource + relationshipOverviewSql).Contains("world_test_relationship_memberships")
                 && !relationshipLoopSource.Contains("RefreshWorldTestRelationshipMaterialization")
                 && !relationshipLoopSource.Contains("ApplyWorldTestRelationshipPairDelta")
                 && relationshipLoopSource.Contains("permanentMbtiByHero");
