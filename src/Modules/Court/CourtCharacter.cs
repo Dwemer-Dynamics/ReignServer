@@ -336,9 +336,7 @@ namespace ReignBetaServer
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureCourtSchema(connection);
-                Dictionary<string, object> row = ReignDatabase.QuerySql(connection,
-                    "SELECT * FROM court_plots WHERE campaign_id=$campaign AND timeline_id='main' AND director_id=$subject AND target_id=$target AND status='active' ORDER BY updated_ts DESC LIMIT 1;",
-                    new Dictionary<string, object> { ["campaign"] = campaignId, ["subject"] = subjectId, ["target"] = targetId }).FirstOrDefault();
+                Dictionary<string, object> row = CourtStore.SelectCourtPlots(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["subject"] = subjectId, ["target"] = targetId }).FirstOrDefault();
                 if (row == null) return new Dictionary<string, object>();
                 Dictionary<string, object> payload = TryParseJsonObject(ReadString(row, "payload_json", ""))
                     ?? new Dictionary<string, object>();
@@ -346,9 +344,7 @@ namespace ReignBetaServer
                 string stage = ReadString(payload, "stage", "adopted");
                 if (tactic == "pregnancy_leverage" && stage != "leverage_available")
                 {
-                    Dictionary<string, object> conception = ReignDatabase.QuerySql(connection,
-                        "SELECT conception_id,status,conception_day FROM conceptions WHERE mother_id=$mother AND biological_father_id=$father AND conception_day>=$adopted AND status NOT IN ('failed','cancelled') ORDER BY conception_day DESC LIMIT 1;",
-                        new Dictionary<string, object>
+                    Dictionary<string, object> conception = CourtStore.SelectConceptions(connection, new Dictionary<string, object>
                         {
                             ["mother"] = subjectId, ["father"] = targetId,
                             ["adopted"] = ReadDouble(row, "created_day", 0d)
@@ -359,9 +355,7 @@ namespace ReignBetaServer
                         payload["stage"] = stage;
                         payload["verifiedConceptionId"] = ReadString(conception, "conception_id", "");
                         payload["verifiedConceptionStatus"] = ReadString(conception, "status", "");
-                        ReignDatabase.ExecuteSql(connection,
-                            "UPDATE court_plots SET payload_json=$payload,progress=0.75,updated_ts=$ts WHERE plot_id=$id;",
-                            new Dictionary<string, object>
+                        CourtStore.UpdateCourtPlots(connection, new Dictionary<string, object>
                             {
                                 ["payload"] = Json.Serialize(payload),
                                 ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
@@ -425,9 +419,7 @@ namespace ReignBetaServer
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureCourtSchema(connection);
-                List<Dictionary<string, object>> existingRows = ReignDatabase.QuerySql(connection,
-                    "SELECT * FROM court_plots WHERE campaign_id=$campaign AND timeline_id='main' AND director_id=$subject AND target_id=$target AND status='active' ORDER BY updated_ts DESC;",
-                    new Dictionary<string, object> { ["campaign"] = campaignId, ["subject"] = subjectId, ["target"] = targetId });
+                List<Dictionary<string, object>> existingRows = CourtStore.SelectCourtPlots2(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["subject"] = subjectId, ["target"] = targetId });
                 Dictionary<string, object> existing = existingRows.FirstOrDefault(row =>
                 {
                     Dictionary<string, object> priorPayload = TryParseJsonObject(ReadString(row, "payload_json", ""))
@@ -452,11 +444,7 @@ namespace ReignBetaServer
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 if (existing == null)
                 {
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO court_plots(
-plot_id,campaign_id,timeline_id,plot_type,director_id,target_id,participants_json,known_by_json,hidden_from_json,status,
-created_day,due_day,progress,terms_hash,secret_knowledge_id,revision,payload_json,created_ts,updated_ts)
-VALUES($id,$campaign,'main','scheme',$subject,$target,$participants,$known,$hidden,'active',$day,-1,0,'','',1,$payload,$ts,$ts);",
-                        new Dictionary<string, object>
+                    CourtStore.InsertCourtPlots(connection, new Dictionary<string, object>
                         {
                             ["id"] = plotId, ["campaign"] = campaignId, ["subject"] = subjectId, ["target"] = targetId,
                             ["participants"] = Json.Serialize(new[] { subjectId, targetId }),
@@ -467,9 +455,7 @@ VALUES($id,$campaign,'main','scheme',$subject,$target,$participants,$known,$hidd
                 }
                 else
                 {
-                    ReignDatabase.ExecuteSql(connection,
-                        "UPDATE court_plots SET payload_json=$payload,revision=revision+1,updated_ts=$ts WHERE plot_id=$id;",
-                        new Dictionary<string, object> { ["payload"] = Json.Serialize(plotPayload), ["ts"] = ts, ["id"] = plotId });
+                    CourtStore.UpdateCourtPlots2(connection, new Dictionary<string, object> { ["payload"] = Json.Serialize(plotPayload), ["ts"] = ts, ["id"] = plotId });
                 }
                 return new Dictionary<string, object>
                 {

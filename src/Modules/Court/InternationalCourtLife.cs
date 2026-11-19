@@ -9,13 +9,8 @@ namespace ReignBetaServer
     {
         private static void EnsureInternationalCourtLifeSchema(ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS international_court_queue (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,matter_id TEXT NOT NULL,kind TEXT NOT NULL,
-severity_rank INTEGER NOT NULL,created_day REAL NOT NULL,payload_json TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',
-PRIMARY KEY(campaign_id,timeline_id,matter_id));");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS international_court_referrals (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,matter_id TEXT NOT NULL,referral_id TEXT NOT NULL,
-PRIMARY KEY(campaign_id,timeline_id,referral_id));");
+            CourtSchema.CreateInternationalCourtQueue(connection);
+            CourtSchema.CreateInternationalCourtReferrals(connection);
         }
 
         internal static void QueueInternationalPoliticalIncident(string campaignId, string timelineId, double day,
@@ -51,10 +46,7 @@ PRIMARY KEY(campaign_id,timeline_id,referral_id));");
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureInternationalCourtLifeSchema(connection);
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO international_court_queue
-(campaign_id,timeline_id,matter_id,kind,severity_rank,created_day,payload_json,status)
-VALUES($campaign,$timeline,$matter,$kind,$severity,$day,$payload,'pending')
-ON CONFLICT(campaign_id,timeline_id,matter_id) DO NOTHING;", new Dictionary<string, object>
+                CourtStore.InsertOrIgnoreInternationalCourtQueue(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId, ["matter"] = matterId,
                     ["kind"] = kind, ["severity"] = severity, ["day"] = day, ["payload"] = Json.Serialize(data)
@@ -76,13 +68,8 @@ ON CONFLICT(campaign_id,timeline_id,matter_id) DO NOTHING;", new Dictionary<stri
             {
                 EnsureInternationalCourtLifeSchema(connection);
                 EnsureForeignAmbassadorSchema(connection);
-                List<Dictionary<string, object>> rows = ReignDatabase.QuerySql(connection, @"SELECT payload_json FROM international_court_queue
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='pending' ORDER BY created_day,matter_id LIMIT 100;",
-                    new Dictionary<string, object> { ["campaign"] = ctx.CampaignId, ["timeline"] = ctx.TimelineId });
-                List<Dictionary<string, object>> replies = ReignDatabase.QuerySql(connection, @"SELECT l.matter_id,r.* FROM international_court_referrals l
-JOIN ambassador_referrals r ON l.referral_id=r.referral_id AND l.campaign_id=r.campaign_id AND l.timeline_id=r.timeline_id
-WHERE l.campaign_id=$campaign AND l.timeline_id=$timeline ORDER BY r.due_day,r.referral_id;",
-                    new Dictionary<string, object> { ["campaign"] = ctx.CampaignId, ["timeline"] = ctx.TimelineId });
+                List<Dictionary<string, object>> rows = CourtStore.SelectInternationalCourtQueue(connection, new Dictionary<string, object> { ["campaign"] = ctx.CampaignId, ["timeline"] = ctx.TimelineId });
+                List<Dictionary<string, object>> replies = CourtStore.SelectInternationalCourtReferrals(connection, new Dictionary<string, object> { ["campaign"] = ctx.CampaignId, ["timeline"] = ctx.TimelineId });
                 foreach (Dictionary<string, object> reply in replies.Where(x => ReadString(x, "status", "") == "countered"))
                 {
                     Dictionary<string, object> counter = ParseAmbassadorJsonObject(ReadString(reply, "counter_terms_json", "{}"));
@@ -103,9 +90,7 @@ WHERE l.campaign_id=$campaign AND l.timeline_id=$timeline ORDER BY r.due_day,r.r
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureInternationalCourtLifeSchema(connection);
-                return ReignDatabase.QuerySql(connection, @"SELECT matter_id FROM international_court_referrals
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND referral_id=$referral;",
-                    new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["referral"] = referralId }).Count > 0;
+                return CourtStore.SelectInternationalCourtReferrals2(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["referral"] = referralId }).Count > 0;
             }
         }
 
@@ -122,9 +107,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND referral_id=$referral;
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
                 EnsureForeignAmbassadorSchema(connection);
-                Dictionary<string, object> posting = ReignDatabase.QuerySql(connection, @"SELECT * FROM foreign_ambassador_postings
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND posting_id=$posting AND status IN ('resident','sheltered');",
-                    new Dictionary<string, object> { ["campaign"] = ctx.CampaignId, ["timeline"] = ctx.TimelineId, ["posting"] = postingId }).FirstOrDefault();
+                Dictionary<string, object> posting = CourtStore.SelectForeignAmbassadorPostings10(connection, new Dictionary<string, object> { ["campaign"] = ctx.CampaignId, ["timeline"] = ctx.TimelineId, ["posting"] = postingId }).FirstOrDefault();
                 string host = ReadString(posting, "host_kingdom_id", "");
                 string foreign = ReadString(posting, "origin_kingdom_id", "");
                 if (posting == null || !host.Equals(ReadString(payload, "playerKingdomStringId", ""), StringComparison.OrdinalIgnoreCase))
@@ -140,9 +123,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND posting_id=$posting AN
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
                 EnsureInternationalCourtLifeSchema(connection);
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO international_court_referrals(campaign_id,timeline_id,matter_id,referral_id)
-VALUES($campaign,$timeline,$matter,$referral) ON CONFLICT(campaign_id,timeline_id,referral_id) DO NOTHING;",
-                    new Dictionary<string, object> { ["campaign"] = ctx.CampaignId, ["timeline"] = ctx.TimelineId,
+                CourtStore.InsertOrIgnoreInternationalCourtReferrals(connection, new Dictionary<string, object> { ["campaign"] = ctx.CampaignId, ["timeline"] = ctx.TimelineId,
                         ["matter"] = matterId, ["referral"] = ReadString(referral, "referralId", "") });
             }
             referral["ok"] = true;
@@ -173,8 +154,7 @@ VALUES($campaign,$timeline,$matter,$referral) ON CONFLICT(campaign_id,timeline_i
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
                 EnsureInternationalCourtLifeSchema(connection);
-                Dictionary<string, object> queued = ReignDatabase.QuerySql(connection, @"SELECT payload_json FROM international_court_queue
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND matter_id=$matter;", new Dictionary<string, object>
+                Dictionary<string, object> queued = CourtStore.SelectInternationalCourtQueue2(connection, new Dictionary<string, object>
                     { ["campaign"] = ctx.CampaignId, ["timeline"] = ctx.TimelineId, ["matter"] = matterId }).FirstOrDefault();
                 incidentAlreadyApplied = ReadBool(TryParseJsonObject(ReadString(queued, "payload_json", "{}")), "pressureAlreadyApplied", false);
             }
@@ -185,9 +165,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND matter_id=$matter;", n
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
                 EnsureInternationalCourtLifeSchema(connection);
-                ReignDatabase.ExecuteSql(connection, @"UPDATE international_court_queue SET status='resolved'
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND matter_id=$matter;",
-                    new Dictionary<string, object> { ["campaign"] = ctx.CampaignId, ["timeline"] = ctx.TimelineId, ["matter"] = matterId });
+                CourtStore.UpdateInternationalCourtQueue(connection, new Dictionary<string, object> { ["campaign"] = ctx.CampaignId, ["timeline"] = ctx.TimelineId, ["matter"] = matterId });
             }
             StoreCourtLifeResolutionContinuity(ctx.CampaignId, ctx.TimelineId, payload);
             return new Dictionary<string, object> { ["ok"] = true, ["matterId"] = matterId,

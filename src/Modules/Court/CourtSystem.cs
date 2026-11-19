@@ -15,76 +15,38 @@ namespace ReignBetaServer
 
         internal static void EnsureCourtSchema(ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS court_sessions (
-session_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,authority TEXT NOT NULL,host_settlement_id TEXT NOT NULL,
-state TEXT NOT NULL DEFAULT 'inactive',opened_day REAL NOT NULL DEFAULT 0,closed_day REAL NOT NULL DEFAULT -1,last_agenda_day INTEGER NOT NULL DEFAULT -1,
-active_matter_id TEXT NOT NULL DEFAULT '',time_mode INTEGER NOT NULL DEFAULT 0,revision INTEGER NOT NULL DEFAULT 0,interruption_reason TEXT NOT NULL DEFAULT '',
-native_snapshot_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);" );
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_court_sessions_scope ON court_sessions(campaign_id,timeline_id,state,updated_ts DESC);");
-            ReignDatabase.EnsureDatabaseColumn(connection, "court_sessions", "scope", "TEXT NOT NULL DEFAULT 'local'");
-            ReignDatabase.EnsureDatabaseColumn(connection, "court_sessions", "capital_settlement_id", "TEXT NOT NULL DEFAULT ''");
-            ReignDatabase.ExecuteSql(connection, @"UPDATE court_sessions SET state='closed',interruption_reason='Legacy clan and household courts are no longer supported.',updated_ts=$ts
-WHERE LOWER(authority)<>'royal' AND state NOT IN ('inactive','closed');", new Dictionary<string, object>{{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS court_matters (
-matter_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,session_id TEXT NOT NULL DEFAULT '',source_key TEXT NOT NULL,
-kind TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'queued',title TEXT NOT NULL DEFAULT '',summary TEXT NOT NULL DEFAULT '',confidentiality TEXT NOT NULL DEFAULT 'public',
-participants_json TEXT NOT NULL DEFAULT '[]',witnesses_json TEXT NOT NULL DEFAULT '[]',known_by_json TEXT NOT NULL DEFAULT '[]',hidden_from_json TEXT NOT NULL DEFAULT '[]',
-settlement_id TEXT NOT NULL DEFAULT '',kingdom_id TEXT NOT NULL DEFAULT '',created_day REAL NOT NULL DEFAULT 0,due_day REAL NOT NULL DEFAULT -1,
-scheduled_day REAL NOT NULL DEFAULT -1,resolved_day REAL NOT NULL DEFAULT -1,priority INTEGER NOT NULL DEFAULT 0,is_critical INTEGER NOT NULL DEFAULT 0,
-is_major INTEGER NOT NULL DEFAULT 0,is_ambient INTEGER NOT NULL DEFAULT 0,options_json TEXT NOT NULL DEFAULT '[]',default_outcome_json TEXT NOT NULL DEFAULT '{}',
-selected_option_id TEXT NOT NULL DEFAULT '',terms_hash TEXT NOT NULL DEFAULT '',resolution_json TEXT NOT NULL DEFAULT '{}',invalid_reason TEXT NOT NULL DEFAULT '',
-requires_server INTEGER NOT NULL DEFAULT 1,revision INTEGER NOT NULL DEFAULT 0,created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);" );
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_court_matters_scope ON court_matters(campaign_id,timeline_id,state,due_day,priority DESC);");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_court_matters_source ON court_matters(campaign_id,timeline_id,source_key,state);");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS court_agenda (
-agenda_item_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,session_id TEXT NOT NULL,matter_id TEXT NOT NULL,
-agenda_day INTEGER NOT NULL,slot INTEGER NOT NULL,is_urgent INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'scheduled',created_ts INTEGER NOT NULL,
-UNIQUE(campaign_id,timeline_id,session_id,matter_id,agenda_day));" );
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_court_agenda_day ON court_agenda(campaign_id,timeline_id,session_id,agenda_day,slot);");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS court_office_history (
-assignment_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,office TEXT NOT NULL,hero_id TEXT NOT NULL,
-status TEXT NOT NULL DEFAULT 'active',assigned_day REAL NOT NULL,dismissed_day REAL NOT NULL DEFAULT -1,dismissal_reason TEXT NOT NULL DEFAULT '',
-revision INTEGER NOT NULL DEFAULT 0,payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);" );
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_court_office_active ON court_office_history(campaign_id,timeline_id,office,status);");
-            ReignDatabase.ExecuteSql(connection, "UPDATE court_office_history SET office='economicadvisor' WHERE LOWER(office)='treasurer';");
-            ReignDatabase.ExecuteSql(connection, "UPDATE court_office_history SET office='foreignadvisor' WHERE LOWER(office)='chancellor';");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS court_regent_history (
-assignment_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,hero_id TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'active',
-assigned_day REAL NOT NULL,dismissed_day REAL NOT NULL DEFAULT -1,dismissal_reason TEXT NOT NULL DEFAULT '',revision INTEGER NOT NULL DEFAULT 0,
-payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);" );
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_court_regent_active ON court_regent_history(campaign_id,timeline_id,status);");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ambassador_postings (
-posting_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,hero_id TEXT NOT NULL,target_kingdom_id TEXT NOT NULL,
-mission_type TEXT NOT NULL DEFAULT 'public_information',mission_terms_json TEXT NOT NULL DEFAULT '{}',status TEXT NOT NULL DEFAULT 'traveling',
-assigned_day REAL NOT NULL,arrival_day REAL NOT NULL,last_report_day REAL NOT NULL DEFAULT -1,recalled_day REAL NOT NULL DEFAULT -1,
-revision INTEGER NOT NULL DEFAULT 0,payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);" );
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_ambassador_active ON ambassador_postings(campaign_id,timeline_id,status,assigned_day DESC);");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS intelligence_operations (
-operation_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,operation_type TEXT NOT NULL,target_type TEXT NOT NULL,target_id TEXT NOT NULL,
-status TEXT NOT NULL DEFAULT 'planned',gold_cost INTEGER NOT NULL DEFAULT 0,influence_cost REAL NOT NULL DEFAULT 0,started_day REAL NOT NULL,due_day REAL NOT NULL,
-risk REAL NOT NULL DEFAULT 0,confidence REAL NOT NULL DEFAULT 0,source_chain_json TEXT NOT NULL DEFAULT '[]',result_json TEXT NOT NULL DEFAULT '{}',
-is_exposed INTEGER NOT NULL DEFAULT 0,revision INTEGER NOT NULL DEFAULT 0,payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);" );
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_intelligence_active ON intelligence_operations(campaign_id,timeline_id,status,due_day);");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS court_plots (
-plot_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,plot_type TEXT NOT NULL,director_id TEXT NOT NULL DEFAULT '',target_id TEXT NOT NULL DEFAULT '',
-participants_json TEXT NOT NULL DEFAULT '[]',known_by_json TEXT NOT NULL DEFAULT '[]',hidden_from_json TEXT NOT NULL DEFAULT '[]',status TEXT NOT NULL DEFAULT 'active',
-created_day REAL NOT NULL,due_day REAL NOT NULL DEFAULT -1,progress REAL NOT NULL DEFAULT 0,terms_hash TEXT NOT NULL DEFAULT '',secret_knowledge_id TEXT NOT NULL DEFAULT '',
-revision INTEGER NOT NULL DEFAULT 0,payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);" );
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_court_plots_scope ON court_plots(campaign_id,timeline_id,status,due_day);");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS court_commands (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,command_id TEXT NOT NULL,command_type TEXT NOT NULL,response_json TEXT NOT NULL,created_ts INTEGER NOT NULL,
-PRIMARY KEY(campaign_id,timeline_id,command_id));" );
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS court_audit (
-audit_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,command_id TEXT NOT NULL DEFAULT '',record_type TEXT NOT NULL,record_id TEXT NOT NULL DEFAULT '',
-action TEXT NOT NULL,status TEXT NOT NULL,world_day REAL NOT NULL DEFAULT 0,receipt_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL);" );
+            CourtSchema.CreateCourtSessions(connection);
+            CourtSchema.CreateIndexCourtSessionsScope(connection);
+            CourtSchema.EnsureColumnCourtSessionsScope(connection);
+            CourtSchema.EnsureColumnCourtSessionsCapitalSettlementId(connection);
+            CourtStore.UpdateCourtSessions(connection, new Dictionary<string, object>{{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});
+            CourtSchema.CreateCourtMatters(connection);
+            CourtSchema.CreateIndexCourtMattersScope(connection);
+            CourtSchema.CreateIndexCourtMattersSource(connection);
+            CourtSchema.CreateCourtAgenda(connection);
+            CourtSchema.CreateIndexCourtAgendaDay(connection);
+            CourtSchema.CreateCourtOfficeHistory(connection);
+            CourtSchema.CreateIndexCourtOfficeActive(connection);
+            CourtStore.UpdateCourtOfficeHistory(connection);
+            CourtStore.UpdateCourtOfficeHistory2(connection);
+            CourtSchema.CreateCourtRegentHistory(connection);
+            CourtSchema.CreateIndexCourtRegentActive(connection);
+            CourtSchema.CreateAmbassadorPostings(connection);
+            CourtSchema.CreateIndexAmbassadorActive(connection);
+            CourtSchema.CreateIntelligenceOperations(connection);
+            CourtSchema.CreateIndexIntelligenceActive(connection);
+            CourtSchema.CreateCourtPlots(connection);
+            CourtSchema.CreateIndexCourtPlotsScope(connection);
+            CourtSchema.CreateCourtCommands(connection);
+            CourtSchema.CreateCourtAudit(connection);
 
-            ReignDatabase.EnsureDatabaseColumn(connection, "obligations", "obligation_type", "TEXT NOT NULL DEFAULT 'promise'");
-            ReignDatabase.EnsureDatabaseColumn(connection, "obligations", "due_day", "REAL NOT NULL DEFAULT -1");
-            ReignDatabase.EnsureDatabaseColumn(connection, "obligations", "terms_hash", "TEXT NOT NULL DEFAULT ''");
-            ReignDatabase.EnsureDatabaseColumn(connection, "obligations", "breach_rule_json", "TEXT NOT NULL DEFAULT '{}'");
-            ReignDatabase.EnsureDatabaseColumn(connection, "obligations", "resolution_json", "TEXT NOT NULL DEFAULT '{}'");
-            ReignDatabase.EnsureDatabaseColumn(connection, "obligations", "timeline_id", "TEXT NOT NULL DEFAULT 'main'");
-            ReignDatabase.EnsureDatabaseColumn(connection, "obligations", "revision", "INTEGER NOT NULL DEFAULT 0");
+            CourtSchema.EnsureColumnObligationsObligationType(connection);
+            CourtSchema.EnsureColumnObligationsDueDay(connection);
+            CourtSchema.EnsureColumnObligationsTermsHash(connection);
+            CourtSchema.EnsureColumnObligationsBreachRuleJson(connection);
+            CourtSchema.EnsureColumnObligationsResolutionJson(connection);
+            CourtSchema.EnsureColumnObligationsTimelineId(connection);
+            CourtSchema.EnsureColumnObligationsRevision(connection);
             EnsureForeignAmbassadorSchema(connection);
         }
 
@@ -136,13 +98,11 @@ action TEXT NOT NULL,status TEXT NOT NULL,world_day REAL NOT NULL DEFAULT 0,rece
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
                 if (TryReadCourtCommand(connection, ctx, out Dictionary<string, object> prior)) return prior;
-                Dictionary<string, object> existing = ReignDatabase.QuerySql(connection, "SELECT * FROM court_sessions WHERE session_id=$id AND campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
-                    new Dictionary<string, object>{{"id",sessionId},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault();
+                Dictionary<string, object> existing = CourtStore.SelectCourtSessions(connection, new Dictionary<string, object>{{"id",sessionId},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault();
                 long revision = existing == null ? 0L : ReadLong(existing, "revision", 0L);
                 if (revision != ctx.ExpectedRevision) return CourtRevisionError(revision);
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO court_sessions(session_id,campaign_id,timeline_id,authority,host_settlement_id,state,opened_day,closed_day,last_agenda_day,active_matter_id,time_mode,revision,interruption_reason,native_snapshot_json,created_ts,updated_ts,scope,capital_settlement_id)
-VALUES($id,$campaign,$timeline,$authority,$host,'sitting',$day,-1,$agenda,'',0,$revision,'',$snapshot,$created,$ts,$scope,$capital);", new Dictionary<string, object>
+                CourtStore.UpsertCourtSessions(connection, new Dictionary<string, object>
                 {
                     {"id",sessionId},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"authority",authority},
                     {"host",hostSettlementId},{"day",ctx.WorldDay},{"agenda",ReadInt(payload,"lastAgendaDay",-1)},
@@ -177,8 +137,7 @@ VALUES($id,$campaign,$timeline,$authority,$host,'sitting',$day,-1,$agenda,'',0,$
                 string requestedCapital=ReadString(payload,"capitalSettlementStringId",ReadString(session,"capital_settlement_id",""));
                 if(requestedScope!="local"&&requestedScope!="capital")return CourtError("Court scope must be local or capital.");
                 if(requestedScope=="capital"&&!string.Equals(ReadString(session,"host_settlement_id",""),requestedCapital,StringComparison.OrdinalIgnoreCase))return CourtError("Capital scope requires the session host to remain the active capital.");
-                ReignDatabase.ExecuteSql(connection, @"UPDATE court_sessions SET state=$state,active_matter_id=$matter,time_mode=$time,interruption_reason=$reason,native_snapshot_json=$snapshot,scope=$scope,capital_settlement_id=$capital,revision=revision+1,updated_ts=$ts WHERE session_id=$id;",
-                    new Dictionary<string, object>{{"state",state},{"matter",ReadString(payload,"activeMatterId",ReadString(session,"active_matter_id",""))},{"time",ReadInt(payload,"timeMode",ReadInt(session,"time_mode",0))},
+                CourtStore.UpdateCourtSessions2(connection, new Dictionary<string, object>{{"state",state},{"matter",ReadString(payload,"activeMatterId",ReadString(session,"active_matter_id",""))},{"time",ReadInt(payload,"timeMode",ReadInt(session,"time_mode",0))},
                     {"reason",ReadString(payload,"interruptionReason",ReadString(session,"interruption_reason",""))},{"snapshot",Json.Serialize(ReadDictionary(payload,"nativeSnapshot")??new Dictionary<string,object>())},
                     {"scope",requestedScope},{"capital",requestedCapital},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",sessionId}});
                 TickIntelligenceOperations(connection, ctx);
@@ -201,8 +160,7 @@ VALUES($id,$campaign,$timeline,$authority,$host,'sitting',$day,-1,$agenda,'',0,$
                 if (session == null) return CourtError("Court session was not found in this timeline.");
                 long revision = ReadLong(session, "revision", 0L);
                 if (revision != ctx.ExpectedRevision) return CourtRevisionError(revision);
-                ReignDatabase.ExecuteSql(connection, "UPDATE court_sessions SET state='closed',closed_day=$day,interruption_reason=$reason,revision=revision+1,updated_ts=$ts WHERE session_id=$id;",
-                    new Dictionary<string, object>{{"day",ctx.WorldDay},{"reason",ReadString(payload,"reason","")},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",sessionId}});
+                CourtStore.UpdateCourtSessions3(connection, new Dictionary<string, object>{{"day",ctx.WorldDay},{"reason",ReadString(payload,"reason","")},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",sessionId}});
                 Dictionary<string, object> response = CourtMutationResult(ctx, sessionId, revision + 1, "court_session_closed", new ArrayList());
                 StoreCourtCommand(connection, ctx, "session_close", response);
                 AddCourtAudit(connection, ctx, "session", sessionId, "close", "completed", response);
@@ -226,9 +184,7 @@ VALUES($id,$campaign,$timeline,$authority,$host,'sitting',$day,-1,$agenda,'',0,$
                 foreach (Dictionary<string, object> candidate in ReadDictionaryList(payload, "candidateMatters")) UpsertCourtMatterCandidate(connection, ctx, sessionId, candidate);
                 ExpireCourtMatters(connection, ctx, agendaDay);
 
-                List<Dictionary<string, object>> candidates = ReignDatabase.QuerySql(connection, @"SELECT * FROM court_matters WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<0 THEN 999999 ELSE due_day END ASC,priority DESC,created_day ASC;",
-                    new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}})
+                List<Dictionary<string, object>> candidates = CourtStore.SelectCourtMatters(connection, new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}})
                     .GroupBy(x=>ReadString(x,"source_key",""),StringComparer.OrdinalIgnoreCase).Select(x=>x.First()).ToList();
                 if(string.Equals(ReadString(session,"scope","local"),"local",StringComparison.OrdinalIgnoreCase))
                 {
@@ -244,23 +200,18 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
                     selected.Add(matter); major|=isMajor; ambient|=isAmbient;
                     if (selected.Count >= CourtAgendaLimit) break;
                 }
-                ReignDatabase.ExecuteSql(connection,"DELETE FROM court_agenda WHERE campaign_id=$campaign AND timeline_id=$timeline AND session_id=$session AND agenda_day=$day;",
-                    new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"session",sessionId},{"day",agendaDay}});
+                CourtStore.DeleteCourtAgenda(connection, new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"session",sessionId},{"day",agendaDay}});
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 for(int i=0;i<selected.Count;i++)
                 {
                     string matterId=ReadString(selected[i],"matter_id","");
-                    ReignDatabase.ExecuteSql(connection,"INSERT INTO court_agenda(agenda_item_id,campaign_id,timeline_id,session_id,matter_id,agenda_day,slot,is_urgent,status,created_ts) VALUES($id,$campaign,$timeline,$session,$matter,$day,$slot,0,'scheduled',$ts);",
-                        new Dictionary<string, object>{{"id","agenda_"+Guid.NewGuid().ToString("N")},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"session",sessionId},{"matter",matterId},{"day",agendaDay},{"slot",i},{"ts",ts}});
-                    ReignDatabase.ExecuteSql(connection,"UPDATE court_matters SET state='scheduled',scheduled_day=$day,revision=revision+1,updated_ts=$ts WHERE matter_id=$id;",
-                        new Dictionary<string, object>{{"day",agendaDay},{"ts",ts},{"id",matterId}});
+                    CourtStore.InsertCourtAgenda(connection, new Dictionary<string, object>{{"id","agenda_"+Guid.NewGuid().ToString("N")},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"session",sessionId},{"matter",matterId},{"day",agendaDay},{"slot",i},{"ts",ts}});
+                    CourtStore.UpdateCourtMatters(connection, new Dictionary<string, object>{{"day",agendaDay},{"ts",ts},{"id",matterId}});
                 }
-                ReignDatabase.ExecuteSql(connection,"UPDATE court_sessions SET last_agenda_day=$day,revision=revision+1,updated_ts=$ts WHERE session_id=$id;",
-                    new Dictionary<string, object>{{"day",agendaDay},{"ts",ts},{"id",sessionId}});
+                CourtStore.UpdateCourtSessions4(connection, new Dictionary<string, object>{{"day",agendaDay},{"ts",ts},{"id",sessionId}});
                 Dictionary<string, object> response = CourtMutationResult(ctx, sessionId, revision+1, "court_agenda_built", new ArrayList());
                 response["agendaDay"] = agendaDay;
-                response["agenda"] = ReignDatabase.QuerySql(connection,"SELECT a.*,m.title,m.summary,m.kind,m.state,m.due_day,m.revision FROM court_agenda a JOIN court_matters m ON m.matter_id=a.matter_id WHERE a.campaign_id=$campaign AND a.timeline_id=$timeline AND a.session_id=$session AND a.agenda_day=$day ORDER BY a.is_urgent DESC,a.slot;",
-                    new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"session",sessionId},{"day",agendaDay}});
+                response["agenda"] = CourtStore.SelectCourtAgenda(connection, new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"session",sessionId},{"day",agendaDay}});
                 StoreCourtCommand(connection, ctx, "agenda_build", response);
                 AddCourtAudit(connection,ctx,"agenda",sessionId,"build","completed",response);
                 return response;
@@ -273,8 +224,7 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
                 EnsureMarriageCourtMatters(connection, ctx);
-                List<Dictionary<string, object>> matters = VisibleCourtRows(connection,ctx,ReignDatabase.QuerySql(connection,"SELECT * FROM court_matters WHERE campaign_id=$campaign AND timeline_id=$timeline AND state NOT IN ('resolved','refused','expired','invalidated') ORDER BY is_critical DESC,due_day ASC,priority DESC LIMIT 80;",
-                    new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}));
+                List<Dictionary<string, object>> matters = VisibleCourtRows(connection,ctx,CourtStore.SelectCourtMatters2(connection, new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}));
                 Dictionary<string, object> activeSession = ReadActiveCourtSession(connection, ctx);
                 bool localScope = string.Equals(ReadString(activeSession, "scope", "local"), "local", StringComparison.OrdinalIgnoreCase);
                 string localHost = ReadString(activeSession, "host_settlement_id", ctx.HostSettlementId);
@@ -287,12 +237,12 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
                     {"scope",localScope?"local":"capital"},{"hostSettlementId",localHost},
                     {"dailyAgenda",matters.Where(x=>ReadString(x,"state","")=="scheduled").Take(localScope?100:6).ToList()},
                     {"peopleMatters",localScope?new List<Dictionary<string,object>>():matters.Where(x=>Program.ContainsAny(ReadString(x,"kind",""),"obligation","relationship","marriage","private_counsel")).Take(6).ToList()},
-                    {"ambassadors",localScope?new List<Dictionary<string,object>>():ReignDatabase.QuerySql(connection,"SELECT * FROM ambassador_postings WHERE campaign_id=$campaign AND timeline_id=$timeline AND status NOT IN ('recalled','replaced') ORDER BY assigned_day DESC LIMIT 3;",new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}})},
-                    {"operations",localScope?new List<Dictionary<string,object>>():ReignDatabase.QuerySql(connection,"SELECT * FROM intelligence_operations WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY started_day DESC LIMIT 100;",new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}})},
-                    {"rumors",localScope?new List<Dictionary<string,object>>():rumors},{"offices",localScope?new List<Dictionary<string,object>>():ReignDatabase.QuerySql(connection,"SELECT * FROM court_office_history WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='active' ORDER BY office;",new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}})},
-                    {"regent",localScope?null:ReignDatabase.QuerySql(connection,"SELECT * FROM court_regent_history WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='active' LIMIT 1;",new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault()},
-                    {"obligations",localScope?new List<Dictionary<string,object>>():VisibleCourtRows(connection,ctx,ReignDatabase.QuerySql(connection,"SELECT * FROM obligations WHERE timeline_id=$timeline AND status NOT IN ('resolved','breached','cancelled') ORDER BY CASE WHEN due_day<0 THEN 999999 ELSE due_day END LIMIT 200;",new Dictionary<string,object>{{"timeline",ctx.TimelineId}}))},
-                    {"plots",localScope?new List<Dictionary<string,object>>():VisibleCourtRows(connection,ctx,ReignDatabase.QuerySql(connection,"SELECT * FROM court_plots WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='active' ORDER BY due_day,created_day DESC LIMIT 200;",new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}))},
+                    {"ambassadors",localScope?new List<Dictionary<string,object>>():CourtStore.SelectAmbassadorPostings(connection, new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}})},
+                    {"operations",localScope?new List<Dictionary<string,object>>():CourtStore.SelectIntelligenceOperations(connection, new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}})},
+                    {"rumors",localScope?new List<Dictionary<string,object>>():rumors},{"offices",localScope?new List<Dictionary<string,object>>():CourtStore.SelectCourtOfficeHistory(connection, new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}})},
+                    {"regent",localScope?null:CourtStore.SelectCourtRegentHistory(connection, new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault()},
+                    {"obligations",localScope?new List<Dictionary<string,object>>():VisibleCourtRows(connection,ctx,CourtStore.SelectObligations(connection, new Dictionary<string,object>{{"timeline",ctx.TimelineId}}))},
+                    {"plots",localScope?new List<Dictionary<string,object>>():VisibleCourtRows(connection,ctx,CourtStore.SelectCourtPlots3(connection, new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}))},
                     {"serverCapabilities",new ArrayList{"generated_matters","mutations","obligations","plots","intelligence"}}
                 };
             }
@@ -312,24 +262,24 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
                 Dictionary<string, object> scope=new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}};
                 if(tab=="court")
                 {
-                    List<Dictionary<string,object>> courtMatters=VisibleCourtRows(connection,ctx,ReignDatabase.QuerySql(connection,"SELECT * FROM court_matters WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY created_day DESC LIMIT 200;",scope));
+                    List<Dictionary<string,object>> courtMatters=VisibleCourtRows(connection,ctx,CourtStore.SelectCourtMatters3(connection, scope));
                     if(localScope) courtMatters=courtMatters.Where(x=>string.Equals(ReadString(x,"settlement_id",""),localHost,StringComparison.OrdinalIgnoreCase)).ToList();
                     result["matters"]=courtMatters;
-                    result["offices"]=localScope?new List<Dictionary<string,object>>():ReignDatabase.QuerySql(connection,"SELECT * FROM court_office_history WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY assigned_day DESC LIMIT 100;",scope);
-                    result["obligations"]=localScope?new List<Dictionary<string,object>>():VisibleCourtRows(connection,ctx,ReignDatabase.QuerySql(connection,"SELECT * FROM obligations WHERE timeline_id=$timeline ORDER BY due_day ASC,created_day DESC LIMIT 200;",scope));
+                    result["offices"]=localScope?new List<Dictionary<string,object>>():CourtStore.SelectCourtOfficeHistory2(connection, scope);
+                    result["obligations"]=localScope?new List<Dictionary<string,object>>():VisibleCourtRows(connection,ctx,CourtStore.SelectObligations2(connection, scope));
                 }
                 else if(tab=="subjects")
                 {
-                    result["marriageProposals"]=ReignDatabase.QuerySql(connection,"SELECT * FROM marriage_evaluations WHERE timeline_id=$timeline AND status='player_court_pending' ORDER BY world_day DESC LIMIT 100;",scope);
-                    result["plots"]=VisibleCourtRows(connection,ctx,ReignDatabase.QuerySql(connection,"SELECT * FROM court_plots WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY created_day DESC LIMIT 100;",scope));
+                    result["marriageProposals"]=CourtStore.SelectMarriageEvaluations(connection, scope);
+                    result["plots"]=VisibleCourtRows(connection,ctx,CourtStore.SelectCourtPlots4(connection, scope));
                 }
-                else if(tab=="diplomacy") result["marriageProposals"]=ReignDatabase.QuerySql(connection,"SELECT * FROM marriage_evaluations WHERE timeline_id=$timeline AND status='awaiting_diplomacy' ORDER BY world_day DESC LIMIT 100;",scope);
-                else if(tab=="ambassadors") result["postings"]=ReignDatabase.QuerySql(connection,"SELECT * FROM ambassador_postings WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY assigned_day DESC LIMIT 100;",scope);
+                else if(tab=="diplomacy") result["marriageProposals"]=CourtStore.SelectMarriageEvaluations2(connection, scope);
+                else if(tab=="ambassadors") result["postings"]=CourtStore.SelectAmbassadorPostings2(connection, scope);
                 else if(tab=="spymaster")
                 {
-                    result["operations"]=ReignDatabase.QuerySql(connection,"SELECT * FROM intelligence_operations WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY started_day DESC LIMIT 200;",scope);
+                    result["operations"]=CourtStore.SelectIntelligenceOperations2(connection, scope);
                     result["rumors"]=VisibleRumors(connection,ctx).ToList();
-                    result["plots"]=VisibleCourtRows(connection,ctx,ReignDatabase.QuerySql(connection,"SELECT * FROM court_plots WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY created_day DESC LIMIT 100;",scope));
+                    result["plots"]=VisibleCourtRows(connection,ctx,CourtStore.SelectCourtPlots4(connection, scope));
                 }
                 else result["serverRecords"]=new ArrayList();
                 return result;
@@ -348,7 +298,7 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
                 if(!CourtMatterVisibilityAllows(matter,ctx.ViewerId))return CourtError("This matter is not known to the viewer.");
                 long revision=ReadLong(matter,"revision",0L);if(revision!=ctx.ExpectedRevision)return CourtRevisionError(revision);
                 string state=ReadString(matter,"state","");if(CourtMatterTerminal(state))return CourtError("The matter is already closed.");
-                ReignDatabase.ExecuteSql(connection,"UPDATE court_matters SET state='active',revision=revision+1,updated_ts=$ts WHERE matter_id=$id;",new Dictionary<string, object>{{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",matterId}});
+                CourtStore.UpdateCourtMatters2(connection, new Dictionary<string, object>{{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",matterId}});
                 Dictionary<string,object> response=CourtMutationResult(ctx,matterId,revision+1,"court_matter_started",new ArrayList());response["matter"]=ReadCourtMatter(connection,ctx,matterId);
                 StoreCourtCommand(connection,ctx,"matter_start",response);AddCourtAudit(connection,ctx,"matter",matterId,"start","completed",response);return response;
             }
@@ -374,7 +324,7 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
                 Dictionary<string,object> reply=Program.DialogueRespond(dialoguePayload);
                 if(!ReadBool(reply,"ok",false))return reply;
                 reply.Remove("actions");reply.Remove("worldActions");reply.Remove("actionGate");reply["mechanicalEffectsAllowed"]=false;reply["matterId"]=matterId;
-                ReignDatabase.ExecuteSql(connection,"UPDATE court_matters SET state='awaiting_decision',revision=revision+1,updated_ts=$ts WHERE matter_id=$id;",new Dictionary<string, object>{{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",matterId}});
+                CourtStore.UpdateCourtMatters3(connection, new Dictionary<string, object>{{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",matterId}});
                 reply["revision"]=ReadLong(ReadCourtMatter(connection,ctx,matterId),"revision",0L);
                 StoreCourtCommand(connection,ctx,"matter_respond",reply);
                 AddCourtAudit(connection,ctx,"dialogue",matterId,"respond","completed",new Dictionary<string,object>{{"dialogueOnly",true},{"reply",reply}});return reply;
@@ -398,8 +348,7 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
                         &&!ReadDictionaryList(ReadDictionary(payload,"nativeReceipt"),"actions").Any(x=>ReadBool(x,"marriageVerified",false)&&ReadBool(x,"paymentVerified",false)))
                         return CourtError("Marriage completion requires reciprocal spouse and payment evidence.");
                     string next=status=="completed"?"resolved":status=="wedding_cancelled"?"invalidated":"awaiting_decision";string receiptJson=Json.Serialize(ReadDictionary(payload,"nativeReceipt")??new Dictionary<string,object>());
-                    ReignDatabase.ExecuteSql(connection,"UPDATE court_matters SET state=$state,resolved_day=$day,resolution_json=$receipt,revision=revision+1,updated_ts=$ts WHERE matter_id=$id;",
-                        new Dictionary<string, object>{{"state",next},{"day",status=="completed"?ctx.WorldDay:-1d},{"receipt",receiptJson},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",matterId}});
+                    CourtStore.UpdateCourtMatters4(connection, new Dictionary<string, object>{{"state",next},{"day",status=="completed"?ctx.WorldDay:-1d},{"receipt",receiptJson},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",matterId}});
                     UpdateMarriageEvaluationForMatter(connection,matter,status=="completed"?"executed":status=="wedding_cancelled"?"obsolete":"player_court_pending",ctx.WorldDay,status=="completed");
                     if(status=="completed")UpdateObligationForMatter(connection,matter,"resolved",ctx.WorldDay,new Dictionary<string,object>{{"nativeReceipt",ReadDictionary(payload,"nativeReceipt")??new Dictionary<string,object>()}});
                     Dictionary<string,object> report=CourtMutationResult(ctx,matterId,revision+1,status=="completed"?"court_matter_resolved":"court_native_execution_failed",new ArrayList());
@@ -415,8 +364,7 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
                 ArrayList nativeActions=ValidateCourtNativeActions(consequences,out string actionError);if(!string.IsNullOrWhiteSpace(actionError))return CourtError(actionError);
                 bool refused=SameCourtText(optionId,"refuse");string nextState=nativeActions.Count>0?"resolving":refused?"refused":"resolved";
                 Dictionary<string,object> receipt=new Dictionary<string, object>{{"receiptId","court_receipt_"+Guid.NewGuid().ToString("N")},{"commandId",ctx.CommandId},{"matterId",matterId},{"optionId",optionId},{"termsHash",expectedHash},{"nativeActionCount",nativeActions.Count}};
-                ReignDatabase.ExecuteSql(connection,"UPDATE court_matters SET state=$state,selected_option_id=$option,terms_hash=$hash,resolved_day=$day,resolution_json=$receipt,revision=revision+1,updated_ts=$ts WHERE matter_id=$id;",
-                    new Dictionary<string, object>{{"state",nextState},{"option",optionId},{"hash",expectedHash},{"day",nativeActions.Count==0?ctx.WorldDay:-1d},{"receipt",Json.Serialize(receipt)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",matterId}});
+                CourtStore.UpdateCourtMatters5(connection, new Dictionary<string, object>{{"state",nextState},{"option",optionId},{"hash",expectedHash},{"day",nativeActions.Count==0?ctx.WorldDay:-1d},{"receipt",Json.Serialize(receipt)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",matterId}});
                 if(ReadString(matter,"source_key","").StartsWith("marriage_evaluation:",StringComparison.OrdinalIgnoreCase))
                 {
                     string marriageStatus=nativeActions.Count>0?"court_resolving":SameCourtText(optionId,"counter")?"countered_by_player":"rejected_by_player";
@@ -438,12 +386,11 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
             using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
                 if(TryReadCourtCommand(connection,ctx,out Dictionary<string,object> prior))return prior;
-                Dictionary<string,object> active=ReignDatabase.QuerySql(connection,"SELECT * FROM court_office_history WHERE campaign_id=$campaign AND timeline_id=$timeline AND office=$office AND status='active' LIMIT 1;",new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"office",office}}).FirstOrDefault();
+                Dictionary<string,object> active=CourtStore.SelectCourtOfficeHistory3(connection, new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"office",office}}).FirstOrDefault();
                 long revision=active==null?0:ReadLong(active,"revision",0);if(revision!=ctx.ExpectedRevision)return CourtRevisionError(revision);
-                if(ReignDatabase.QuerySql(connection,"SELECT assignment_id FROM court_office_history WHERE campaign_id=$campaign AND timeline_id=$timeline AND hero_id=$hero AND status='active' LIMIT 1;",new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"hero",heroId}}).Any())return CourtError("One person may hold only one major office.");
-                long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();if(active!=null)ReignDatabase.ExecuteSql(connection,"UPDATE court_office_history SET status='dismissed',dismissed_day=$day,dismissal_reason='replaced',revision=revision+1,updated_ts=$ts WHERE assignment_id=$id;",new Dictionary<string, object>{{"day",ctx.WorldDay},{"ts",ts},{"id",ReadString(active,"assignment_id","")}});
-                string id="office_"+Guid.NewGuid().ToString("N");ReignDatabase.ExecuteSql(connection,"INSERT INTO court_office_history(assignment_id,campaign_id,timeline_id,office,hero_id,status,assigned_day,dismissed_day,dismissal_reason,revision,payload_json,created_ts,updated_ts) VALUES($id,$campaign,$timeline,$office,$hero,'active',$day,-1,'',1,$payload,$ts,$ts);",
-                    new Dictionary<string, object>{{"id",id},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"office",office},{"hero",heroId},{"day",ctx.WorldDay},{"payload",Json.Serialize(payload)},{"ts",ts}});
+                if(CourtStore.SelectCourtOfficeHistory4(connection, new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"hero",heroId}}).Any())return CourtError("One person may hold only one major office.");
+                long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();if(active!=null)CourtStore.UpdateCourtOfficeHistory3(connection, new Dictionary<string, object>{{"day",ctx.WorldDay},{"ts",ts},{"id",ReadString(active,"assignment_id","")}});
+                string id="office_"+Guid.NewGuid().ToString("N");CourtStore.InsertCourtOfficeHistory(connection, new Dictionary<string, object>{{"id",id},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"office",office},{"hero",heroId},{"day",ctx.WorldDay},{"payload",Json.Serialize(payload)},{"ts",ts}});
                 ArrayList actions=new ArrayList{new Dictionary<string,object>{{"type","court_assign_office"},{"assignmentId",id},{"office",office},{"heroStringId",heroId}}};Dictionary<string,object> response=CourtMutationResult(ctx,id,1,"court_office_assigned",actions);
                 StoreCourtCommand(connection,ctx,"office_assign",response);AddCourtAudit(connection,ctx,"office",id,"assign","validated",response);return response;
             }
@@ -454,8 +401,8 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
             CourtApiContext ctx=ReadCourtContext(payload);string office=CourtCanonicalOffice(ReadString(payload,"office",""));if(string.IsNullOrWhiteSpace(ctx.CommandId)||!CourtOfficeAllowed(office))return CourtError("commandId and a valid major office are required.");
             using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
-                if(TryReadCourtCommand(connection,ctx,out Dictionary<string,object> prior))return prior;Dictionary<string,object> active=ReignDatabase.QuerySql(connection,"SELECT * FROM court_office_history WHERE campaign_id=$campaign AND timeline_id=$timeline AND office=$office AND status='active' LIMIT 1;",new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"office",office}}).FirstOrDefault();if(active==null)return CourtError("That office is already vacant.");
-                long revision=ReadLong(active,"revision",0);if(revision!=ctx.ExpectedRevision)return CourtRevisionError(revision);string id=ReadString(active,"assignment_id","");ReignDatabase.ExecuteSql(connection,"UPDATE court_office_history SET status='dismissed',dismissed_day=$day,dismissal_reason=$reason,revision=revision+1,updated_ts=$ts WHERE assignment_id=$id;",new Dictionary<string, object>{{"day",ctx.WorldDay},{"reason",ReadString(payload,"reason","dismissed")},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id}});
+                if(TryReadCourtCommand(connection,ctx,out Dictionary<string,object> prior))return prior;Dictionary<string,object> active=CourtStore.SelectCourtOfficeHistory3(connection, new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"office",office}}).FirstOrDefault();if(active==null)return CourtError("That office is already vacant.");
+                long revision=ReadLong(active,"revision",0);if(revision!=ctx.ExpectedRevision)return CourtRevisionError(revision);string id=ReadString(active,"assignment_id","");CourtStore.UpdateCourtOfficeHistory4(connection, new Dictionary<string, object>{{"day",ctx.WorldDay},{"reason",ReadString(payload,"reason","dismissed")},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id}});
                 ArrayList actions=new ArrayList{new Dictionary<string,object>{{"type","court_dismiss_office"},{"assignmentId",id},{"office",office},{"heroStringId",ReadString(active,"hero_id","")}}};Dictionary<string,object> response=CourtMutationResult(ctx,id,revision+1,"court_office_dismissed",actions);StoreCourtCommand(connection,ctx,"office_dismiss",response);AddCourtAudit(connection,ctx,"office",id,"dismiss","validated",response);return response;
             }
         }
@@ -468,10 +415,10 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
             using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
                 if(TryReadCourtCommand(connection,ctx,out Dictionary<string,object> prior))return prior;
-                Dictionary<string,object> active=ReignDatabase.QuerySql(connection,"SELECT * FROM court_regent_history WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='active' LIMIT 1;",new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault();
+                Dictionary<string,object> active=CourtStore.SelectCourtRegentHistory(connection, new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault();
                 long revision=active==null?0:ReadLong(active,"revision",0);if(revision!=ctx.ExpectedRevision)return CourtRevisionError(revision);
-                long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();if(active!=null)ReignDatabase.ExecuteSql(connection,"UPDATE court_regent_history SET status='dismissed',dismissed_day=$day,dismissal_reason='replaced',revision=revision+1,updated_ts=$ts WHERE assignment_id=$id;",new Dictionary<string,object>{{"day",ctx.WorldDay},{"ts",ts},{"id",ReadString(active,"assignment_id","")}});
-                string id="regent_"+Guid.NewGuid().ToString("N");ReignDatabase.ExecuteSql(connection,"INSERT INTO court_regent_history(assignment_id,campaign_id,timeline_id,hero_id,status,assigned_day,dismissed_day,dismissal_reason,revision,payload_json,created_ts,updated_ts) VALUES($id,$campaign,$timeline,$hero,'active',$day,-1,'',1,$payload,$ts,$ts);",new Dictionary<string,object>{{"id",id},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"hero",heroId},{"day",ctx.WorldDay},{"payload",Json.Serialize(payload)},{"ts",ts}});
+                long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();if(active!=null)CourtStore.UpdateCourtRegentHistory(connection, new Dictionary<string,object>{{"day",ctx.WorldDay},{"ts",ts},{"id",ReadString(active,"assignment_id","")}});
+                string id="regent_"+Guid.NewGuid().ToString("N");CourtStore.InsertCourtRegentHistory(connection, new Dictionary<string,object>{{"id",id},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"hero",heroId},{"day",ctx.WorldDay},{"payload",Json.Serialize(payload)},{"ts",ts}});
                 Dictionary<string,object> response=CourtMutationResult(ctx,id,1,"court_regent_assigned",new ArrayList());response["heroStringId"]=heroId;StoreCourtCommand(connection,ctx,"regent_assign",response);AddCourtAudit(connection,ctx,"regent",id,"assign","completed",response);return response;
             }
         }
@@ -481,8 +428,8 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
             CourtApiContext ctx=ReadCourtContext(payload);if(string.IsNullOrWhiteSpace(ctx.CommandId))return CourtError("commandId is required.");
             using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
-                if(TryReadCourtCommand(connection,ctx,out Dictionary<string,object> prior))return prior;Dictionary<string,object> active=ReignDatabase.QuerySql(connection,"SELECT * FROM court_regent_history WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='active' LIMIT 1;",new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault();if(active==null)return CourtError("No Regent is assigned.");
-                long revision=ReadLong(active,"revision",0);if(revision!=ctx.ExpectedRevision)return CourtRevisionError(revision);string id=ReadString(active,"assignment_id","");ReignDatabase.ExecuteSql(connection,"UPDATE court_regent_history SET status='dismissed',dismissed_day=$day,dismissal_reason=$reason,revision=revision+1,updated_ts=$ts WHERE assignment_id=$id;",new Dictionary<string,object>{{"day",ctx.WorldDay},{"reason",ReadString(payload,"reason","dismissed_by_ruler")},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id}});
+                if(TryReadCourtCommand(connection,ctx,out Dictionary<string,object> prior))return prior;Dictionary<string,object> active=CourtStore.SelectCourtRegentHistory(connection, new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault();if(active==null)return CourtError("No Regent is assigned.");
+                long revision=ReadLong(active,"revision",0);if(revision!=ctx.ExpectedRevision)return CourtRevisionError(revision);string id=ReadString(active,"assignment_id","");CourtStore.UpdateCourtRegentHistory2(connection, new Dictionary<string,object>{{"day",ctx.WorldDay},{"reason",ReadString(payload,"reason","dismissed_by_ruler")},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id}});
                 Dictionary<string,object> response=CourtMutationResult(ctx,id,revision+1,"court_regent_dismissed",new ArrayList());StoreCourtCommand(connection,ctx,"regent_dismiss",response);AddCourtAudit(connection,ctx,"regent",id,"dismiss","completed",response);return response;
             }
         }
@@ -495,11 +442,10 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
             using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
                 if(TryReadCourtCommand(connection,ctx,out Dictionary<string,object> prior))return prior;Dictionary<string,object> args=new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}};
-                if(ReignDatabase.QuerySql(connection,"SELECT posting_id FROM ambassador_postings WHERE campaign_id=$campaign AND timeline_id=$timeline AND status NOT IN ('recalled','replaced') LIMIT 3;",args).Count>=3)return CourtError("Royal court supports at most three active ambassador postings.");
-                args["hero"]=heroId;if(ReignDatabase.QuerySql(connection,"SELECT posting_id FROM ambassador_postings WHERE campaign_id=$campaign AND timeline_id=$timeline AND hero_id=$hero AND status NOT IN ('recalled','replaced') LIMIT 1;",args).Any())return CourtError("That hero already has an active ambassador posting.");
+                if(CourtStore.SelectAmbassadorPostings3(connection, args).Count>=3)return CourtError("Royal court supports at most three active ambassador postings.");
+                args["hero"]=heroId;if(CourtStore.SelectAmbassadorPostings4(connection, args).Any())return CourtError("That hero already has an active ambassador posting.");
                 long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();string id="ambassador_"+Guid.NewGuid().ToString("N");double arrival=ReadDouble(payload,"arrivalDay",ctx.WorldDay+Math.Max(1d,ReadDouble(payload,"travelDays",3d)));
-                ReignDatabase.ExecuteSql(connection,"INSERT INTO ambassador_postings(posting_id,campaign_id,timeline_id,hero_id,target_kingdom_id,mission_type,mission_terms_json,status,assigned_day,arrival_day,last_report_day,recalled_day,revision,payload_json,created_ts,updated_ts) VALUES($id,$campaign,$timeline,$hero,$kingdom,$mission,$terms,'traveling',$day,$arrival,-1,-1,1,$payload,$ts,$ts);",
-                    new Dictionary<string, object>{{"id",id},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"hero",heroId},{"kingdom",kingdomId},{"mission",ReadString(payload,"missionType","public_information")},{"terms",CourtCanonicalJson(ReadDictionary(payload,"missionTerms")??new Dictionary<string,object>())},{"day",ctx.WorldDay},{"arrival",arrival},{"payload",Json.Serialize(payload)},{"ts",ts}});
+                CourtStore.InsertAmbassadorPostings(connection, new Dictionary<string, object>{{"id",id},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"hero",heroId},{"kingdom",kingdomId},{"mission",ReadString(payload,"missionType","public_information")},{"terms",CourtCanonicalJson(ReadDictionary(payload,"missionTerms")??new Dictionary<string,object>())},{"day",ctx.WorldDay},{"arrival",arrival},{"payload",Json.Serialize(payload)},{"ts",ts}});
                 ArrayList actions=new ArrayList{new Dictionary<string,object>{{"type","court_assign_ambassador"},{"postingId",id},{"heroStringId",heroId},{"targetKingdomStringId",kingdomId}}};Dictionary<string,object> response=CourtMutationResult(ctx,id,1,"court_ambassador_assigned",actions);StoreCourtCommand(connection,ctx,"ambassador_assign",response);AddCourtAudit(connection,ctx,"ambassador",id,"assign","validated",response);return response;
             }
         }
@@ -511,7 +457,7 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
             {
                 if(TryReadCourtCommand(connection,ctx,out Dictionary<string,object> prior))return prior;Dictionary<string,object> row=ReadCourtScopedRow(connection,ctx,"ambassador_postings","posting_id",id);if(row==null)return CourtError("Ambassador posting was not found in this timeline.");long revision=ReadLong(row,"revision",0);if(revision!=ctx.ExpectedRevision)return CourtRevisionError(revision);if(Program.ContainsAny(ReadString(row,"status",""),"recalled","replaced"))return CourtError("The posting is no longer active.");
                 Dictionary<string,object> terms=ReadDictionary(payload,"missionTerms")??new Dictionary<string,object>();string hash=CourtHash(CourtCanonicalJson(terms));string supplied=ReadString(payload,"termsHash",hash);if(!SameCourtText(hash,supplied))return CourtError("Mission terms hash does not match canonical terms.");
-                ReignDatabase.ExecuteSql(connection,"UPDATE ambassador_postings SET mission_type=$mission,mission_terms_json=$terms,status='posted',revision=revision+1,updated_ts=$ts WHERE posting_id=$id;",new Dictionary<string, object>{{"mission",ReadString(payload,"missionType","public_information")},{"terms",CourtCanonicalJson(terms)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id}});
+                CourtStore.UpdateAmbassadorPostings(connection, new Dictionary<string, object>{{"mission",ReadString(payload,"missionType","public_information")},{"terms",CourtCanonicalJson(terms)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id}});
                 ArrayList actions=new ArrayList{new Dictionary<string,object>{{"type","court_ambassador_mission"},{"postingId",id},{"missionType",ReadString(payload,"missionType","public_information")},{"termsHash",hash}}};Dictionary<string,object> response=CourtMutationResult(ctx,id,revision+1,"court_ambassador_mission_set",actions);StoreCourtCommand(connection,ctx,"ambassador_mission",response);AddCourtAudit(connection,ctx,"ambassador",id,"mission","validated",response);return response;
             }
         }
@@ -522,7 +468,7 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
             using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
                 if(TryReadCourtCommand(connection,ctx,out Dictionary<string,object> prior))return prior;Dictionary<string,object> row=ReadCourtScopedRow(connection,ctx,"ambassador_postings","posting_id",id);if(row==null)return CourtError("Ambassador posting was not found in this timeline.");long revision=ReadLong(row,"revision",0);if(revision!=ctx.ExpectedRevision)return CourtRevisionError(revision);
-                ReignDatabase.ExecuteSql(connection,"UPDATE ambassador_postings SET status='recalled',recalled_day=$day,revision=revision+1,updated_ts=$ts WHERE posting_id=$id;",new Dictionary<string, object>{{"day",ctx.WorldDay},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id}});
+                CourtStore.UpdateAmbassadorPostings2(connection, new Dictionary<string, object>{{"day",ctx.WorldDay},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id}});
                 ArrayList actions=new ArrayList{new Dictionary<string,object>{{"type","court_recall_ambassador"},{"postingId",id},{"heroStringId",ReadString(row,"hero_id","")}}};Dictionary<string,object> response=CourtMutationResult(ctx,id,revision+1,"court_ambassador_recalled",actions);StoreCourtCommand(connection,ctx,"ambassador_recall",response);AddCourtAudit(connection,ctx,"ambassador",id,"recall","validated",response);return response;
             }
         }
@@ -533,10 +479,9 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
             if(string.IsNullOrWhiteSpace(ctx.CommandId)||!CourtIntelligenceTypeAllowed(type)||string.IsNullOrWhiteSpace(targetType)||string.IsNullOrWhiteSpace(targetId))return CourtError("A valid operation type, target, and commandId are required.");
             using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
-                if(TryReadCourtCommand(connection,ctx,out Dictionary<string,object> prior))return prior;if(!ReignDatabase.QuerySql(connection,"SELECT assignment_id FROM court_office_history WHERE campaign_id=$campaign AND timeline_id=$timeline AND office='spymaster' AND status='active' LIMIT 1;",new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).Any())return CourtError("Advanced intelligence operations require an appointed Spymaster.");
+                if(TryReadCourtCommand(connection,ctx,out Dictionary<string,object> prior))return prior;if(!CourtStore.SelectCourtOfficeHistory5(connection, new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).Any())return CourtError("Advanced intelligence operations require an appointed Spymaster.");
                 int gold=Math.Max(0,ReadInt(payload,"goldCost",0));double influence=Math.Max(0d,ReadDouble(payload,"influenceCost",0d));double duration=Math.Max(1d,Math.Min(90d,ReadDouble(payload,"durationDays",7d)));double risk=Program.ClampDouble(ReadDouble(payload,"risk",0.25d),0d,1d);double officerReliability=Program.ClampDouble(ReadDouble(payload,"officerReportReliability",0.5d),0.2d,0.95d);string id=FirstNonEmpty(ReadString(payload,"operationId",""),"intel_"+Guid.NewGuid().ToString("N"));long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                ReignDatabase.ExecuteSql(connection,"INSERT INTO intelligence_operations(operation_id,campaign_id,timeline_id,operation_type,target_type,target_id,status,gold_cost,influence_cost,started_day,due_day,risk,confidence,source_chain_json,result_json,is_exposed,revision,payload_json,created_ts,updated_ts) VALUES($id,$campaign,$timeline,$type,$targetType,$target,'active',$gold,$influence,$day,$due,$risk,0,'[]','{}',0,1,$payload,$ts,$ts);",
-                    new Dictionary<string, object>{{"id",id},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"type",type},{"targetType",targetType},{"target",targetId},{"gold",gold},{"influence",influence},{"day",ctx.WorldDay},{"due",ctx.WorldDay+duration},{"risk",risk},{"payload",Json.Serialize(new Dictionary<string,object>(payload,StringComparer.OrdinalIgnoreCase){{"validatedOfficerReportReliability",officerReliability}})},{"ts",ts}});
+                CourtStore.InsertIntelligenceOperations(connection, new Dictionary<string, object>{{"id",id},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"type",type},{"targetType",targetType},{"target",targetId},{"gold",gold},{"influence",influence},{"day",ctx.WorldDay},{"due",ctx.WorldDay+duration},{"risk",risk},{"payload",Json.Serialize(new Dictionary<string,object>(payload,StringComparer.OrdinalIgnoreCase){{"validatedOfficerReportReliability",officerReliability}})},{"ts",ts}});
                 ArrayList actions=new ArrayList();if(gold>0)actions.Add(new Dictionary<string,object>{{"type","spend_player_gold"},{"amount",gold},{"reason","intelligence_operation"}});if(influence>0)actions.Add(new Dictionary<string,object>{{"type","spend_clan_influence"},{"amount",influence},{"reason","intelligence_operation"}});
                 Dictionary<string,object> response=CourtMutationResult(ctx,id,1,"court_intelligence_started",actions);StoreCourtCommand(connection,ctx,"intelligence_start",response);AddCourtAudit(connection,ctx,"intelligence",id,"start","validated",response);return response;
             }
@@ -548,7 +493,7 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
             using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
                 if(TryReadCourtCommand(connection,ctx,out Dictionary<string,object> prior))return prior;Dictionary<string,object> row=ReadCourtScopedRow(connection,ctx,"intelligence_operations","operation_id",id);if(row==null)return CourtError("Operation was not found in this timeline.");long revision=ReadLong(row,"revision",0);if(revision!=ctx.ExpectedRevision)return CourtRevisionError(revision);if(ReadString(row,"status","")!="active")return CourtError("Only an active operation may be cancelled.");
-                ReignDatabase.ExecuteSql(connection,"UPDATE intelligence_operations SET status='cancelled',revision=revision+1,updated_ts=$ts WHERE operation_id=$id;",new Dictionary<string, object>{{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id}});Dictionary<string,object> response=CourtMutationResult(ctx,id,revision+1,"court_intelligence_cancelled",new ArrayList());StoreCourtCommand(connection,ctx,"intelligence_cancel",response);AddCourtAudit(connection,ctx,"intelligence",id,"cancel","completed",response);return response;
+                CourtStore.UpdateIntelligenceOperations(connection, new Dictionary<string, object>{{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id}});Dictionary<string,object> response=CourtMutationResult(ctx,id,revision+1,"court_intelligence_cancelled",new ArrayList());StoreCourtCommand(connection,ctx,"intelligence_cancel",response);AddCourtAudit(connection,ctx,"intelligence",id,"cancel","completed",response);return response;
             }
         }
 
@@ -556,7 +501,7 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
         {
             CourtApiContext ctx=ReadCourtContext(payload);using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
-                List<Dictionary<string,object>> rows=ReignDatabase.QuerySql(connection,"SELECT * FROM obligations WHERE timeline_id=$timeline ORDER BY CASE WHEN due_day<0 THEN 999999 ELSE due_day END,created_day DESC LIMIT 300;",new Dictionary<string,object>{{"timeline",ctx.TimelineId}});
+                List<Dictionary<string,object>> rows=CourtStore.SelectObligations3(connection, new Dictionary<string,object>{{"timeline",ctx.TimelineId}});
                 rows=VisibleCourtRows(connection,ctx,rows);return new Dictionary<string,object>{{"ok",true},{"obligations",rows}};
             }
         }
@@ -567,9 +512,8 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
             if(string.IsNullOrWhiteSpace(ctx.CommandId)||string.IsNullOrWhiteSpace(owedBy)||string.IsNullOrWhiteSpace(owedTo))return CourtError("commandId, owedBy, and owedTo are required.");
             using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
-                if(TryReadCourtCommand(connection,ctx,out Dictionary<string,object> prior))return prior;Dictionary<string,object> existing=ReignDatabase.QuerySql(connection,"SELECT * FROM obligations WHERE obligation_id=$id AND timeline_id=$timeline LIMIT 1;",new Dictionary<string,object>{{"id",id},{"timeline",ctx.TimelineId}}).FirstOrDefault();long revision=existing==null?0:ReadLong(existing,"revision",0);if(revision!=ctx.ExpectedRevision)return CourtRevisionError(revision);
-                long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();ReignDatabase.ExecuteSql(connection,@"INSERT OR REPLACE INTO obligations(obligation_id,event_id,owed_by,owed_to,description,status,created_day,importance,participants_json,about_entities_json,known_by_json,hidden_from_json,visibility,ts,payload_json,obligation_type,due_day,terms_hash,breach_rule_json,resolution_json,timeline_id,revision)
-VALUES($id,$event,$by,$to,$description,$status,$created,$importance,$participants,$about,$known,$hidden,$visibility,$ts,$payload,$type,$due,$hash,$breach,$resolution,$timeline,$revision);",new Dictionary<string,object>
+                if(TryReadCourtCommand(connection,ctx,out Dictionary<string,object> prior))return prior;Dictionary<string,object> existing=CourtStore.SelectObligations4(connection, new Dictionary<string,object>{{"id",id},{"timeline",ctx.TimelineId}}).FirstOrDefault();long revision=existing==null?0:ReadLong(existing,"revision",0);if(revision!=ctx.ExpectedRevision)return CourtRevisionError(revision);
+                long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();CourtStore.UpsertObligations(connection, new Dictionary<string,object>
                 {
                     {"id",id},{"event",ReadString(payload,"eventId","")},{"by",owedBy},{"to",owedTo},{"description",ReadString(payload,"description","")},{"status",ReadString(payload,"status","unresolved")},
                     {"created",existing==null?ctx.WorldDay:ReadDouble(existing,"created_day",ctx.WorldDay)},{"importance",Program.ClampDouble(ReadDouble(payload,"importance",0.5d),0d,1d)},{"participants",Json.Serialize(ReadStringList(payload,"participants"))},
@@ -580,7 +524,7 @@ VALUES($id,$event,$by,$to,$description,$status,$created,$importance,$participant
                 int promisedGold=ReadInt(terms,"goldAmount",0);
                 if(promisedGold>0&&SameCourtText(owedBy,ctx.ViewerId))
                 {
-                    string activeSession=ReadString(ReignDatabase.QuerySql(connection,"SELECT session_id FROM court_sessions WHERE campaign_id=$campaign AND timeline_id=$timeline AND state NOT IN ('inactive','closed') ORDER BY updated_ts DESC LIMIT 1;",new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault(),"session_id","");
+                    string activeSession=ReadString(CourtStore.SelectCourtSessions2(connection, new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault(),"session_id","");
                     Dictionary<string,object> fulfill=new Dictionary<string,object>{{"nativeActions",new ArrayList{new Dictionary<string,object>{{"type","transfer_gold"},{"fromHeroStringId",owedBy},{"toHeroStringId",owedTo},{"amount",promisedGold}}}}};
                     UpsertCourtMatterCandidate(connection,ctx,activeSession,new Dictionary<string,object>
                     {
@@ -600,9 +544,9 @@ VALUES($id,$event,$by,$to,$description,$status,$created,$importance,$participant
             CourtApiContext ctx=ReadCourtContext(payload);string id=ReadString(payload,"obligationId","");if(string.IsNullOrWhiteSpace(ctx.CommandId)||string.IsNullOrWhiteSpace(id))return CourtError("commandId and obligationId are required.");
             using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
-                if(TryReadCourtCommand(connection,ctx,out Dictionary<string,object> prior))return prior;Dictionary<string,object> row=ReignDatabase.QuerySql(connection,"SELECT * FROM obligations WHERE obligation_id=$id AND timeline_id=$timeline LIMIT 1;",new Dictionary<string,object>{{"id",id},{"timeline",ctx.TimelineId}}).FirstOrDefault();if(row==null)return CourtError("Obligation was not found in this timeline.");long revision=ReadLong(row,"revision",0);if(revision!=ctx.ExpectedRevision)return CourtRevisionError(revision);if(!SameCourtText(ReadString(row,"terms_hash",""),ReadString(payload,"termsHash","")))return CourtError("The obligation terms hash changed.");
+                if(TryReadCourtCommand(connection,ctx,out Dictionary<string,object> prior))return prior;Dictionary<string,object> row=CourtStore.SelectObligations4(connection, new Dictionary<string,object>{{"id",id},{"timeline",ctx.TimelineId}}).FirstOrDefault();if(row==null)return CourtError("Obligation was not found in this timeline.");long revision=ReadLong(row,"revision",0);if(revision!=ctx.ExpectedRevision)return CourtRevisionError(revision);if(!SameCourtText(ReadString(row,"terms_hash",""),ReadString(payload,"termsHash","")))return CourtError("The obligation terms hash changed.");
                 string status=ReadString(payload,"status","resolved").ToLowerInvariant();if(!new[]{"resolved","breached","forgiven","invalidated"}.Contains(status))return CourtError("Invalid obligation resolution status.");Dictionary<string,object> resolution=ReadDictionary(payload,"resolution")??new Dictionary<string,object>();
-                ReignDatabase.ExecuteSql(connection,"UPDATE obligations SET status=$status,resolution_json=$resolution,revision=revision+1,ts=$ts WHERE obligation_id=$id;",new Dictionary<string,object>{{"status",status},{"resolution",CourtCanonicalJson(resolution)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id}});
+                CourtStore.UpdateObligations(connection, new Dictionary<string,object>{{"status",status},{"resolution",CourtCanonicalJson(resolution)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id}});
                 Dictionary<string,object> response=CourtMutationResult(ctx,id,revision+1,"court_obligation_"+status,new ArrayList());StoreCourtCommand(connection,ctx,"obligation_resolve",response);AddCourtAudit(connection,ctx,"obligation",id,"resolve",status,response);return response;
             }
         }
@@ -611,7 +555,7 @@ VALUES($id,$event,$by,$to,$description,$status,$created,$importance,$participant
         {
             CourtApiContext ctx=ReadCourtContext(payload);using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
-                List<Dictionary<string,object>> rows=ReignDatabase.QuerySql(connection,"SELECT * FROM court_plots WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY created_day DESC LIMIT 300;",new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}});return new Dictionary<string,object>{{"ok",true},{"plots",VisibleCourtRows(connection,ctx,rows)}};
+                List<Dictionary<string,object>> rows=CourtStore.SelectCourtPlots5(connection, new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}});return new Dictionary<string,object>{{"ok",true},{"plots",VisibleCourtRows(connection,ctx,rows)}};
             }
         }
 
@@ -621,8 +565,7 @@ VALUES($id,$event,$by,$to,$description,$status,$created,$importance,$participant
             Dictionary<string,object> terms=ReadDictionary(payload,"terms")??new Dictionary<string,object>();string hash=CourtHash(CourtCanonicalJson(terms));using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
                 if(TryReadCourtCommand(connection,ctx,out Dictionary<string,object> prior))return prior;Dictionary<string,object> existing=ReadCourtScopedRow(connection,ctx,"court_plots","plot_id",id);long revision=existing==null?0:ReadLong(existing,"revision",0);if(revision!=ctx.ExpectedRevision)return CourtRevisionError(revision);long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                ReignDatabase.ExecuteSql(connection,@"INSERT OR REPLACE INTO court_plots(plot_id,campaign_id,timeline_id,plot_type,director_id,target_id,participants_json,known_by_json,hidden_from_json,status,created_day,due_day,progress,terms_hash,secret_knowledge_id,revision,payload_json,created_ts,updated_ts)
-VALUES($id,$campaign,$timeline,$type,$director,$target,$participants,$known,$hidden,$status,$created,$due,$progress,$hash,$secret,$revision,$payload,$createdTs,$ts);",new Dictionary<string,object>
+                CourtStore.UpsertCourtPlots(connection, new Dictionary<string,object>
                 {
                     {"id",id},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"type",type},{"director",ReadString(payload,"directorHeroStringId","")},{"target",ReadString(payload,"targetStringId","")},{"participants",Json.Serialize(ReadStringList(payload,"participants"))},
                     {"known",Json.Serialize(ReadStringList(payload,"knownBy"))},{"hidden",Json.Serialize(ReadStringList(payload,"hiddenFrom"))},{"status",ReadString(payload,"status","active")},{"created",existing==null?ctx.WorldDay:ReadDouble(existing,"created_day",ctx.WorldDay)},
@@ -636,20 +579,19 @@ VALUES($id,$campaign,$timeline,$type,$director,$target,$participants,$known,$hid
         private static void UpsertCourtMatterCandidate(ReignDbConnection connection,CourtApiContext ctx,string sessionId,Dictionary<string,object> candidate)
         {
             string sourceKey=ReadString(candidate,"sourceKey","");if(string.IsNullOrWhiteSpace(sourceKey))return;
-            Dictionary<string,object> existing=ReignDatabase.QuerySql(connection,"SELECT * FROM court_matters WHERE campaign_id=$campaign AND timeline_id=$timeline AND source_key=$source AND state NOT IN ('resolved','refused','expired','invalidated') LIMIT 1;",new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"source",sourceKey}}).FirstOrDefault();if(existing!=null)return;
+            Dictionary<string,object> existing=CourtStore.SelectCourtMatters4(connection, new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"source",sourceKey}}).FirstOrDefault();if(existing!=null)return;
             List<Dictionary<string,object>> options=ReadDictionaryList(candidate,"options");foreach(Dictionary<string,object> option in options){Dictionary<string,object> consequences=ReadDictionary(option,"consequences")??new Dictionary<string,object>();option["consequences"]=consequences;option["termsHash"]=CourtHash(CourtCanonicalJson(consequences));}
             string id=FirstNonEmpty(ReadString(candidate,"matterId",""),"court_matter_"+Guid.NewGuid().ToString("N"));
-            Dictionary<string,object> idOwner=ReignDatabase.QuerySql(connection,"SELECT matter_id,timeline_id FROM court_matters WHERE matter_id=$id LIMIT 1;",new Dictionary<string,object>{{"id",id}}).FirstOrDefault();
+            Dictionary<string,object> idOwner=CourtStore.SelectCourtMatters5(connection, new Dictionary<string,object>{{"id",id}}).FirstOrDefault();
             if(idOwner!=null)
             {
                 if(SameCourtText(ReadString(idOwner,"timeline_id",""),ctx.TimelineId))return;
                 string timelineHash=CourtHash(ctx.TimelineId??"main");
                 id=id+"_"+timelineHash.Substring(0,Math.Min(12,timelineHash.Length));
-                if(ReignDatabase.QuerySql(connection,"SELECT matter_id FROM court_matters WHERE matter_id=$id LIMIT 1;",new Dictionary<string,object>{{"id",id}}).Any())return;
+                if(CourtStore.SelectCourtMatters6(connection, new Dictionary<string,object>{{"id",id}}).Any())return;
             }
             long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ReignDatabase.ExecuteSql(connection,@"INSERT INTO court_matters(matter_id,campaign_id,timeline_id,session_id,source_key,kind,state,title,summary,confidentiality,participants_json,witnesses_json,known_by_json,hidden_from_json,settlement_id,kingdom_id,created_day,due_day,scheduled_day,resolved_day,priority,is_critical,is_major,is_ambient,options_json,default_outcome_json,selected_option_id,terms_hash,resolution_json,invalid_reason,requires_server,revision,created_ts,updated_ts)
-VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$confidentiality,$participants,$witnesses,$known,$hidden,$settlement,$kingdom,$created,$due,-1,-1,$priority,$critical,$major,$ambient,$options,$default,'','','{}','',$requires,1,$ts,$ts);",new Dictionary<string,object>
+            CourtStore.InsertCourtMatters(connection, new Dictionary<string,object>
             {
                 {"id",id},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"session",sessionId},{"source",sourceKey},{"kind",ReadString(candidate,"kind","petition")},{"title",ReadString(candidate,"title","")},{"summary",ReadString(candidate,"summary","")},
                 {"confidentiality",ReadString(candidate,"confidentiality","public")},{"participants",Json.Serialize(ReadStringList(candidate,"participants"))},{"witnesses",Json.Serialize(ReadStringList(candidate,"witnesses"))},{"known",Json.Serialize(ReadStringList(candidate,"knownBy"))},{"hidden",Json.Serialize(ReadStringList(candidate,"hiddenFrom"))},
@@ -660,9 +602,9 @@ VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$
 
         private static void ExpireCourtMatters(ReignDbConnection connection,CourtApiContext ctx,int day)
         {
-            foreach(Dictionary<string,object> row in ReignDatabase.QuerySql(connection,"SELECT * FROM court_matters WHERE campaign_id=$campaign AND timeline_id=$timeline AND state NOT IN ('resolved','refused','expired','invalidated') AND due_day>=0 AND due_day<$day;",new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"day",day}}))
+            foreach(Dictionary<string,object> row in CourtStore.SelectCourtMatters7(connection, new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"day",day}}))
             {
-                ReignDatabase.ExecuteSql(connection,"UPDATE court_matters SET state='expired',selected_option_id='deadline_expired',resolved_day=$day,resolution_json=default_outcome_json,revision=revision+1,updated_ts=$ts WHERE matter_id=$id;",new Dictionary<string,object>{{"day",day},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",ReadString(row,"matter_id","")}});
+                CourtStore.UpdateCourtMatters6(connection, new Dictionary<string,object>{{"day",day},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",ReadString(row,"matter_id","")}});
                 UpdateMarriageEvaluationForMatter(connection,row,"expired",day,false);
                 UpdateObligationForMatter(connection,row,"breached",day,new Dictionary<string,object>{{"reason","deadline_expired"}});
             }
@@ -671,21 +613,20 @@ VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$
         private static void UpdateObligationForMatter(ReignDbConnection connection,Dictionary<string,object> matter,string status,double day,Dictionary<string,object> resolution)
         {
             string source=ReadString(matter,"source_key","");if(!source.StartsWith("obligation:",StringComparison.OrdinalIgnoreCase))return;string id=source.Substring("obligation:".Length);
-            ReignDatabase.ExecuteSql(connection,"UPDATE obligations SET status=$status,resolution_json=$resolution,revision=revision+1,ts=$ts WHERE obligation_id=$id AND timeline_id=$timeline;",new Dictionary<string,object>{{"status",status},{"resolution",CourtCanonicalJson(resolution??new Dictionary<string,object>())},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id},{"timeline",ReadString(matter,"timeline_id","main")}});
+            CourtStore.UpdateObligations2(connection, new Dictionary<string,object>{{"status",status},{"resolution",CourtCanonicalJson(resolution??new Dictionary<string,object>())},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id},{"timeline",ReadString(matter,"timeline_id","main")}});
         }
 
         private static void EnsureMarriageCourtMatters(ReignDbConnection connection, CourtApiContext ctx)
         {
             RelationshipsService.EnsureRelationshipDirectorSchema(connection);
-            bool royal = ReignDatabase.QuerySql(connection,"SELECT session_id FROM court_sessions WHERE campaign_id=$campaign AND timeline_id=$timeline AND authority='royal' AND state NOT IN ('closed','inactive') LIMIT 1;",
-                new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).Any();
+            bool royal = CourtStore.SelectCourtSessions3(connection, new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).Any();
             string statuses = royal ? "'player_court_pending','awaiting_diplomacy'" : "'player_court_pending'";
-            foreach(Dictionary<string,object> row in ReignDatabase.QuerySql(connection,"SELECT * FROM marriage_evaluations WHERE timeline_id=$timeline AND world_day<=$day AND status IN ("+statuses+") ORDER BY world_day DESC LIMIT 100;",new Dictionary<string,object>{{"timeline",ctx.TimelineId},{"day",ctx.WorldDay}}))
+            foreach(Dictionary<string,object> row in CourtStore.SelectMarriageEvaluations3(connection, statuses,new Dictionary<string,object>{{"timeline",ctx.TimelineId},{"day",ctx.WorldDay}}))
             {
                 string evaluationId=ReadString(row,"evaluation_id","");
                 if(string.IsNullOrWhiteSpace(evaluationId))continue;
                 string source="marriage_evaluation:"+evaluationId;
-                if(ReignDatabase.QuerySql(connection,"SELECT matter_id FROM court_matters WHERE campaign_id=$campaign AND timeline_id=$timeline AND source_key=$source AND state NOT IN ('resolved','refused','expired','invalidated') LIMIT 1;",new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"source",source}}).Any())continue;
+                if(CourtStore.SelectCourtMatters8(connection, new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"source",source}}).Any())continue;
                 string heroA=ReadString(row,"hero_a_id",""),heroB=ReadString(row,"hero_b_id","");
                 Dictionary<string,object> accept=new Dictionary<string,object>{{"nativeActions",new ArrayList{new Dictionary<string,object>{{"type","marriage_response"},{"evaluationId",evaluationId},{"heroAId",heroA},{"heroBId",heroB},{"timelineId",ctx.TimelineId},{"marriageTerms",ReadDictionary(TryParseJsonObject(ReadString(row,"payload_json","{}")),"marriageTerms")}}}}};
                 Dictionary<string,object> counter=new Dictionary<string,object>{{"counterTerms",new Dictionary<string,object>{{"delayDays",14},{"requiresRenewedConsent",true}}}};
@@ -713,10 +654,10 @@ VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$
             string source=ReadString(matter,"source_key","");if(!source.StartsWith("marriage_evaluation:",StringComparison.OrdinalIgnoreCase))return;
             string id=source.Substring("marriage_evaluation:".Length);if(string.IsNullOrWhiteSpace(id))return;
             using var marriageTransaction=connection.BeginTransaction();
-            ReignDatabase.ExecuteSql(connection,"UPDATE marriage_evaluations SET status=$status,updated_ts=$ts WHERE evaluation_id=$id AND timeline_id=$timeline;",new Dictionary<string,object>{{"status",status},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id},{"timeline",ReadString(matter,"timeline_id","main")}});
+            CourtStore.UpdateMarriageEvaluations(connection, new Dictionary<string,object>{{"status",status},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id},{"timeline",ReadString(matter,"timeline_id","main")}});
             if(status=="rejected_by_player")
             {
-                var evaluation=ReignDatabase.QuerySql(connection,"SELECT * FROM marriage_evaluations WHERE evaluation_id=$id;",new Dictionary<string,object>{{"id",id}}).FirstOrDefault();
+                var evaluation=CourtStore.SelectMarriageEvaluations4(connection, new Dictionary<string,object>{{"id",id}}).FirstOrDefault();
                 if(evaluation!=null)RelationshipsService.ApplyMarriageLeaderEffect(connection,ReadString(matter,"campaign_id","default"),ReadString(matter,"timeline_id","main"),id,ReadString(evaluation,"leader_a_id",""),ReadString(evaluation,"leader_b_id",""),-10,day);
             }
             if(finalize)RelationshipsService.FinalizeMarriage(connection,ReadString(matter,"campaign_id","default"),id,day,false);
@@ -790,7 +731,7 @@ VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$
                     if(normalizedCounter==null||normalizationErrors.Count>0)return CourtError("The foreign counteroffer was not executable: "+string.Join("; ",normalizationErrors));
                     normalizedCounter["source"]="court_negotiated_diplomacy";normalizedCounter["reason"]=publicReason;normalizedCounter["requiresAcceptance"]=false;
                     Dictionary<string,object> counterConsequences=new Dictionary<string,object>{{"nativeActions",new ArrayList{new Dictionary<string,object>{{"type","world_action"},{"action",normalizedCounter}}}}};
-                    string sessionId=ReadString(ReignDatabase.QuerySql(connection,"SELECT session_id FROM court_sessions WHERE campaign_id=$campaign AND timeline_id=$timeline AND authority='royal' AND state NOT IN ('inactive','closed') ORDER BY updated_ts DESC LIMIT 1;",new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault(),"session_id","");
+                    string sessionId=ReadString(CourtStore.SelectCourtSessions4(connection, new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault(),"session_id","");
                     counterMatterId="court_counter_"+Guid.NewGuid().ToString("N");UpsertCourtMatterCandidate(connection,ctx,sessionId,new Dictionary<string,object>
                     {
                         {"matterId",counterMatterId},{"sourceKey","player_diplomacy_counter:"+ctx.CommandId},{"kind","diplomacy_proposal"},{"title",ReadString(responder,"name","A foreign realm")+" offers revised terms"},{"summary",publicReason},
@@ -839,21 +780,21 @@ VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$
 
         private static void TickIntelligenceOperations(ReignDbConnection connection,CourtApiContext ctx)
         {
-            foreach(Dictionary<string,object> row in ReignDatabase.QuerySql(connection,"SELECT * FROM intelligence_operations WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='active' AND due_day<=$day;",new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"day",ctx.WorldDay}}))
+            foreach(Dictionary<string,object> row in CourtStore.SelectIntelligenceOperations3(connection, new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"day",ctx.WorldDay}}))
             {
                 string id=ReadString(row,"operation_id","");double risk=ReadDouble(row,"risk",0d);Dictionary<string,object> operationPayload=TryParseJsonObject(ReadString(row,"payload_json","{}"))??new Dictionary<string,object>();double officerReliability=Program.ClampDouble(ReadDouble(operationPayload,"validatedOfficerReportReliability",0.5d),0.2d,0.95d);double roll=RelationshipsService.StableUnit(ctx.CampaignId+"|"+ctx.TimelineId+"|"+id+"|exposure");bool exposed=roll<risk;double confidence=Program.ClampDouble((0.45d+(1d-risk)*0.45d)*(0.65d+officerReliability*0.35d),0.05d,0.95d);string status=exposed?"exposed":"completed";
                 Dictionary<string,object> result=new Dictionary<string,object>{{"reportType",ReadString(row,"operation_type","")},{"targetType",ReadString(row,"target_type","")},{"targetId",ReadString(row,"target_id","")},{"confidence",confidence},{"provenance","appointed_spymaster_operation"},{"note","This report is a source-limited claim, not canonical secret truth."}};
-                ReignDatabase.ExecuteSql(connection,"UPDATE intelligence_operations SET status=$status,confidence=$confidence,source_chain_json=$sources,result_json=$result,is_exposed=$exposed,revision=revision+1,updated_ts=$ts WHERE operation_id=$id;",new Dictionary<string,object>{{"status",status},{"confidence",confidence},{"sources",Json.Serialize(new ArrayList{"court_spymaster","operation:"+id})},{"result",Json.Serialize(result)},{"exposed",exposed?1:0},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id}});
+                CourtStore.UpdateIntelligenceOperations2(connection, new Dictionary<string,object>{{"status",status},{"confidence",confidence},{"sources",Json.Serialize(new ArrayList{"court_spymaster","operation:"+id})},{"result",Json.Serialize(result)},{"exposed",exposed?1:0},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id}});
             }
         }
 
         private static ArrayList TickAmbassadorPostings(ReignDbConnection connection,CourtApiContext ctx,string sessionId)
         {
             ArrayList nativeActions=new ArrayList();
-            foreach(Dictionary<string,object> row in ReignDatabase.QuerySql(connection,"SELECT * FROM ambassador_postings WHERE campaign_id=$campaign AND timeline_id=$timeline AND status NOT IN ('recalled','replaced');",new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}))
+            foreach(Dictionary<string,object> row in CourtStore.SelectAmbassadorPostings5(connection, new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}))
             {
                 string id=ReadString(row,"posting_id","");string status=ReadString(row,"status","");double arrival=ReadDouble(row,"arrival_day",ctx.WorldDay);double last=ReadDouble(row,"last_report_day",-1d);
-                if(status=="traveling"&&arrival<=ctx.WorldDay){status="posted";ReignDatabase.ExecuteSql(connection,"UPDATE ambassador_postings SET status='posted',revision=revision+1,updated_ts=$ts WHERE posting_id=$id;",new Dictionary<string,object>{{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id}});}
+                if(status=="traveling"&&arrival<=ctx.WorldDay){status="posted";CourtStore.UpdateAmbassadorPostings3(connection, new Dictionary<string,object>{{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id}});}
                 if(status!="posted"||(last>=0d&&ctx.WorldDay-last<7d))continue;
                 string mission=ReadString(row,"mission_type","public_information"),target=ReadString(row,"target_kingdom_id","");
                 Dictionary<string,object> report=new Dictionary<string,object>
@@ -865,7 +806,7 @@ VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$
                 };
                 UpsertCourtMatterCandidate(connection,ctx,sessionId,report);
                 if(mission=="improve_relations")nativeActions.Add(new Dictionary<string,object>{{"type","change_relation"},{"fromHeroStringId",ctx.ViewerId},{"toKingdomStringId",target},{"amount",1},{"commandId","ambassador_progress_"+id+"_"+(int)Math.Floor(ctx.WorldDay/7d)}});
-                ReignDatabase.ExecuteSql(connection,"UPDATE ambassador_postings SET last_report_day=$day,revision=revision+1,updated_ts=$ts WHERE posting_id=$id;",new Dictionary<string,object>{{"day",ctx.WorldDay},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id}});
+                CourtStore.UpdateAmbassadorPostings4(connection, new Dictionary<string,object>{{"day",ctx.WorldDay},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id}});
             }
             return nativeActions;
         }
@@ -889,7 +830,7 @@ VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$
             return Enumerable.Empty<Dictionary<string,object>>();
         }
 
-        private static Dictionary<string,object> ReadCourtSession(ReignDbConnection connection,CourtApiContext ctx,string id){return ReignDatabase.QuerySql(connection,"SELECT * FROM court_sessions WHERE session_id=$id AND campaign_id=$campaign AND timeline_id=$timeline AND LOWER(authority)='royal' LIMIT 1;",new Dictionary<string,object>{{"id",id},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault();}
+        private static Dictionary<string,object> ReadCourtSession(ReignDbConnection connection,CourtApiContext ctx,string id){return CourtStore.SelectCourtSessions5(connection, new Dictionary<string,object>{{"id",id},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault();}
         private static Dictionary<string,object> ReadActiveCourtSession(ReignDbConnection connection,CourtApiContext ctx)
         {
             if(!string.IsNullOrWhiteSpace(ctx.SessionId))
@@ -897,7 +838,7 @@ VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$
                 Dictionary<string,object> exact=ReadCourtSession(connection,ctx,ctx.SessionId);
                 if(exact!=null)return exact;
             }
-            return ReignDatabase.QuerySql(connection,"SELECT * FROM court_sessions WHERE campaign_id=$campaign AND timeline_id=$timeline AND LOWER(authority)='royal' AND state NOT IN ('closed','inactive') ORDER BY updated_ts DESC LIMIT 1;",new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault();
+            return CourtStore.SelectCourtSessions6(connection, new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault();
         }
         private static Dictionary<string,object> RequireCapitalCourtScope(Dictionary<string,object> payload)
         {
@@ -926,18 +867,18 @@ VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$
             if(session==null||!string.Equals(ReadString(session,"scope","local"),"local",StringComparison.OrdinalIgnoreCase))return true;
             return string.Equals(ReadString(matter,"settlement_id",""),ReadString(session,"host_settlement_id",""),StringComparison.OrdinalIgnoreCase);
         }
-        private static Dictionary<string,object> ReadCourtMatter(ReignDbConnection connection,CourtApiContext ctx,string id){return ReignDatabase.QuerySql(connection,"SELECT * FROM court_matters WHERE matter_id=$id AND campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",new Dictionary<string,object>{{"id",id},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault();}
+        private static Dictionary<string,object> ReadCourtMatter(ReignDbConnection connection,CourtApiContext ctx,string id){return CourtStore.SelectCourtMatters9(connection, new Dictionary<string,object>{{"id",id},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault();}
         private static Dictionary<string,object> ReadCourtScopedRow(ReignDbConnection connection,CourtApiContext ctx,string table,string idColumn,string id)
         {
-            HashSet<string> tables=new HashSet<string>(new[]{"ambassador_postings","intelligence_operations","court_plots"},StringComparer.Ordinal);HashSet<string> columns=new HashSet<string>(new[]{"posting_id","operation_id","plot_id"},StringComparer.Ordinal);if(!tables.Contains(table)||!columns.Contains(idColumn))throw new InvalidOperationException("Unsafe court table lookup.");return ReignDatabase.QuerySql(connection,"SELECT * FROM "+table+" WHERE "+idColumn+"=$id AND campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",new Dictionary<string,object>{{"id",id},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault();
+            HashSet<string> tables=new HashSet<string>(new[]{"ambassador_postings","intelligence_operations","court_plots"},StringComparer.Ordinal);HashSet<string> columns=new HashSet<string>(new[]{"posting_id","operation_id","plot_id"},StringComparer.Ordinal);if(!tables.Contains(table)||!columns.Contains(idColumn))throw new InvalidOperationException("Unsafe court table lookup.");return CourtStore.SelectDynamic(connection, table, idColumn,new Dictionary<string,object>{{"id",id},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault();
         }
 
         private static bool TryReadCourtCommand(ReignDbConnection connection,CourtApiContext ctx,out Dictionary<string,object> response)
         {
-            response=null;if(string.IsNullOrWhiteSpace(ctx.CommandId))return false;Dictionary<string,object> row=ReignDatabase.QuerySql(connection,"SELECT response_json FROM court_commands WHERE campaign_id=$campaign AND timeline_id=$timeline AND command_id=$command LIMIT 1;",new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"command",ctx.CommandId}}).FirstOrDefault();if(row==null)return false;response=TryParseJsonObject(ReadString(row,"response_json","{}"));if(response==null)response=new Dictionary<string,object>();response["idempotentReplay"]=true;return true;
+            response=null;if(string.IsNullOrWhiteSpace(ctx.CommandId))return false;Dictionary<string,object> row=CourtStore.SelectCourtCommands(connection, new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"command",ctx.CommandId}}).FirstOrDefault();if(row==null)return false;response=TryParseJsonObject(ReadString(row,"response_json","{}"));if(response==null)response=new Dictionary<string,object>();response["idempotentReplay"]=true;return true;
         }
-        private static void StoreCourtCommand(ReignDbConnection connection,CourtApiContext ctx,string type,Dictionary<string,object> response){ReignDatabase.ExecuteSql(connection,"INSERT OR REPLACE INTO court_commands(campaign_id,timeline_id,command_id,command_type,response_json,created_ts) VALUES($campaign,$timeline,$command,$type,$response,$ts);",new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"command",ctx.CommandId},{"type",type},{"response",Json.Serialize(response)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});}
-        private static void AddCourtAudit(ReignDbConnection connection,CourtApiContext ctx,string recordType,string recordId,string action,string status,Dictionary<string,object> receipt){ReignDatabase.ExecuteSql(connection,"INSERT INTO court_audit(audit_id,campaign_id,timeline_id,command_id,record_type,record_id,action,status,world_day,receipt_json,created_ts) VALUES($id,$campaign,$timeline,$command,$type,$record,$action,$status,$day,$receipt,$ts);",new Dictionary<string,object>{{"id","court_audit_"+Guid.NewGuid().ToString("N")},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"command",ctx.CommandId??""},{"type",recordType},{"record",recordId??""},{"action",action},{"status",status},{"day",ctx.WorldDay},{"receipt",Json.Serialize(receipt)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});}
+        private static void StoreCourtCommand(ReignDbConnection connection,CourtApiContext ctx,string type,Dictionary<string,object> response){CourtStore.UpsertCourtCommands(connection, new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"command",ctx.CommandId},{"type",type},{"response",Json.Serialize(response)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});}
+        private static void AddCourtAudit(ReignDbConnection connection,CourtApiContext ctx,string recordType,string recordId,string action,string status,Dictionary<string,object> receipt){CourtStore.InsertCourtAudit(connection, new Dictionary<string,object>{{"id","court_audit_"+Guid.NewGuid().ToString("N")},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"command",ctx.CommandId??""},{"type",recordType},{"record",recordId??""},{"action",action},{"status",status},{"day",ctx.WorldDay},{"receipt",Json.Serialize(receipt)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});}
         private static Dictionary<string,object> CourtMutationResult(CourtApiContext ctx,string recordId,long revision,string result,ArrayList actions){return new Dictionary<string,object>{{"ok",true},{"campaignId",ctx.CampaignId},{"timelineId",ctx.TimelineId},{"commandId",ctx.CommandId},{"recordId",recordId},{"result",result},{"revision",revision},{"receipt",new Dictionary<string,object>{{"receiptId","court_receipt_"+Guid.NewGuid().ToString("N")},{"commandId",ctx.CommandId},{"result",result}}},{"nativeActions",actions??new ArrayList()}};}
         private static Dictionary<string,object> CourtError(string error){return new Dictionary<string,object>{{"ok",false},{"error",error??"Court request failed."}};}
         private static Dictionary<string,object> CourtRevisionError(long revision){return new Dictionary<string,object>{{"ok",false},{"error","revision_conflict"},{"currentRevision",revision}};}
@@ -990,7 +931,7 @@ VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$
                 candidates.Add(new Dictionary<string,object>{{"sourceKey","source_0"},{"kind","petition"},{"title","Duplicate"},{"options",new List<object>{option}}});
                 Dictionary<string,object> agenda=CourtAgendaBuildApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId",timeline},{"commandId","agenda"},{"expectedRevision",1},{"sessionId",session},{"agendaDay",10},{"worldDay",10d},{"candidateMatters",candidates},{"playerHeroStringId","player"}});List<Dictionary<string,object>> agendaRows=ReadDictionaryList(agenda,"agenda");add("agenda_limit_dedup_caps",ReadBool(agenda,"ok",false)&&agendaRows.Count<=6&&agendaRows.Count(x=>ReadBool(x,"is_major",false))<=1,"Agenda caps six matters, deduplicates sources, and caps major events.",agenda);
                 Dictionary<string,object> replay=CourtAgendaBuildApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId",timeline},{"commandId","agenda"},{"expectedRevision",1},{"sessionId",session}});add("command_idempotency",ReadBool(replay,"idempotentReplay",false),"Duplicate command returns the stored receipt without a second mutation.",replay);
-                bool terminalReplayStable=false,crossTimelineStable=false;using(ReignDbConnection c=ReignDatabase.OpenCampaignConnection(campaign)){EnsureCourtSchema(c);CourtApiContext terminalContext=new CourtApiContext{CampaignId=campaign,TimelineId=timeline,SessionId=session,WorldDay=10d};Dictionary<string,object> terminalCandidate=new Dictionary<string,object>{{"matterId","court_terminal_replay"},{"sourceKey","terminal_replay"},{"kind","petition"},{"title","Terminal replay"},{"options",new List<object>{option}}};UpsertCourtMatterCandidate(c,terminalContext,session,terminalCandidate);ReignDatabase.ExecuteSql(c,"UPDATE court_matters SET state='resolved' WHERE matter_id=$id AND campaign_id=$campaign AND timeline_id=$timeline;",new Dictionary<string,object>{{"id","court_terminal_replay"},{"campaign",campaign},{"timeline",timeline}});UpsertCourtMatterCandidate(c,terminalContext,session,terminalCandidate);Dictionary<string,object> terminalRow=ReignDatabase.QuerySql(c,"SELECT COUNT(*) AS count,MAX(state) AS state FROM court_matters WHERE matter_id=$id AND campaign_id=$campaign AND timeline_id=$timeline;",new Dictionary<string,object>{{"id","court_terminal_replay"},{"campaign",campaign},{"timeline",timeline}}).FirstOrDefault();terminalReplayStable=ReadInt(terminalRow,"count",0)==1&&ReadString(terminalRow,"state","")=="resolved";CourtApiContext branchContext=new CourtApiContext{CampaignId=campaign,TimelineId="timeline_b",SessionId="session_branch",WorldDay=10d};UpsertCourtMatterCandidate(c,branchContext,"session_branch",terminalCandidate);UpsertCourtMatterCandidate(c,branchContext,"session_branch",terminalCandidate);Dictionary<string,object> branchRows=ReignDatabase.QuerySql(c,"SELECT COUNT(*) AS count,COUNT(DISTINCT matter_id) AS ids,COUNT(DISTINCT timeline_id) AS timelines FROM court_matters WHERE campaign_id=$campaign AND source_key='terminal_replay';",new Dictionary<string,object>{{"campaign",campaign}}).FirstOrDefault();crossTimelineStable=ReadInt(branchRows,"count",0)==2&&ReadInt(branchRows,"ids",0)==2&&ReadInt(branchRows,"timelines",0)==2;}add("terminal_matter_replay_idempotency",terminalReplayStable,"A restored native candidate cannot duplicate or resurrect an already-terminal matter in the same campaign timeline.",new Dictionary<string,object>{{"stable",terminalReplayStable}});add("cross_timeline_matter_id_namespace",crossTimelineStable,"A stable candidate id is deterministically namespaced when the same campaign replays it on another timeline, preserving both branches without a primary-key collision.",new Dictionary<string,object>{{"stable",crossTimelineStable}});
+                bool terminalReplayStable=false,crossTimelineStable=false;using(ReignDbConnection c=ReignDatabase.OpenCampaignConnection(campaign)){EnsureCourtSchema(c);CourtApiContext terminalContext=new CourtApiContext{CampaignId=campaign,TimelineId=timeline,SessionId=session,WorldDay=10d};Dictionary<string,object> terminalCandidate=new Dictionary<string,object>{{"matterId","court_terminal_replay"},{"sourceKey","terminal_replay"},{"kind","petition"},{"title","Terminal replay"},{"options",new List<object>{option}}};UpsertCourtMatterCandidate(c,terminalContext,session,terminalCandidate);CourtStore.UpdateCourtMatters7(c, new Dictionary<string,object>{{"id","court_terminal_replay"},{"campaign",campaign},{"timeline",timeline}});UpsertCourtMatterCandidate(c,terminalContext,session,terminalCandidate);Dictionary<string,object> terminalRow=CourtStore.CountCourtMatters(c, new Dictionary<string,object>{{"id","court_terminal_replay"},{"campaign",campaign},{"timeline",timeline}}).FirstOrDefault();terminalReplayStable=ReadInt(terminalRow,"count",0)==1&&ReadString(terminalRow,"state","")=="resolved";CourtApiContext branchContext=new CourtApiContext{CampaignId=campaign,TimelineId="timeline_b",SessionId="session_branch",WorldDay=10d};UpsertCourtMatterCandidate(c,branchContext,"session_branch",terminalCandidate);UpsertCourtMatterCandidate(c,branchContext,"session_branch",terminalCandidate);Dictionary<string,object> branchRows=CourtStore.CountCourtMatters2(c, new Dictionary<string,object>{{"campaign",campaign}}).FirstOrDefault();crossTimelineStable=ReadInt(branchRows,"count",0)==2&&ReadInt(branchRows,"ids",0)==2&&ReadInt(branchRows,"timelines",0)==2;}add("terminal_matter_replay_idempotency",terminalReplayStable,"A restored native candidate cannot duplicate or resurrect an already-terminal matter in the same campaign timeline.",new Dictionary<string,object>{{"stable",terminalReplayStable}});add("cross_timeline_matter_id_namespace",crossTimelineStable,"A stable candidate id is deterministically namespaced when the same campaign replays it on another timeline, preserving both branches without a primary-key collision.",new Dictionary<string,object>{{"stable",crossTimelineStable}});
                 Dictionary<string,object> agendaMatter=agendaRows.FirstOrDefault()??new Dictionary<string,object>();string agendaMatterId=ReadString(agendaMatter,"matter_id","");long agendaMatterRevision=ReadLong(agendaMatter,"revision",0);Dictionary<string,object> staleStart=CourtMatterStartApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId",timeline},{"commandId","start_stale"},{"expectedRevision",agendaMatterRevision+5},{"matterId",agendaMatterId},{"playerHeroStringId","player"}});Dictionary<string,object> goodStart=CourtMatterStartApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId",timeline},{"commandId","start_good"},{"expectedRevision",agendaMatterRevision},{"matterId",agendaMatterId},{"playerHeroStringId","player"}});Dictionary<string,object> staleRespond=CourtMatterRespondApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId",timeline},{"commandId","respond_stale"},{"expectedRevision",ReadLong(goodStart,"revision",0)+5},{"matterId",agendaMatterId},{"playerHeroStringId","player"}});add("matter_revision_guards",ReadString(staleStart,"error","")=="revision_conflict"&&ReadBool(goodStart,"ok",false)&&ReadString(staleRespond,"error","")=="revision_conflict","Start and dialogue mutations reject stale revisions before dialogue generation or state changes.",new Dictionary<string,object>{{"staleStart",staleStart},{"goodStart",goodStart},{"staleRespond",staleRespond}});
                 Dictionary<string,object> obligation=CourtObligationUpsertApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId",timeline},{"commandId","obligation"},{"expectedRevision",0},{"obligationId","ob_test"},{"owedBy","player"},{"owedTo","lord"},{"description","Keep the oath"},{"dueDay",20d},{"terms",new Dictionary<string,object>{{"gold",1000}}},{"knownBy",new List<object>{"player","lord"}},{"visibility","private"},{"worldDay",10d},{"playerHeroStringId","player"}});string termsHash=ReadString(obligation,"termsHash","");Dictionary<string,object> wrong=CourtObligationResolveApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId",timeline},{"commandId","resolve_wrong"},{"expectedRevision",1},{"obligationId","ob_test"},{"termsHash","wrong"},{"status","resolved"},{"worldDay",11d}});Dictionary<string,object> right=CourtObligationResolveApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId",timeline},{"commandId","resolve_right"},{"expectedRevision",1},{"obligationId","ob_test"},{"termsHash",termsHash},{"status","resolved"},{"worldDay",11d}});add("obligation_terms_hash",!ReadBool(wrong,"ok",true)&&ReadBool(right,"ok",false),"Obligations reject stale terms and resolve only with the canonical hash.",new Dictionary<string,object>{{"wrong",wrong},{"right",right}});
                 CourtObligationUpsertApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId",timeline},{"commandId","gold_promise"},{"expectedRevision",0},{"obligationId","ob_gold"},{"owedBy","player"},{"owedTo","lord"},{"description","Pay the promised gold"},{"dueDay",20d},{"terms",new Dictionary<string,object>{{"goldAmount",1000}}},{"knownBy",new List<object>{"player","lord"}},{"visibility","private"},{"worldDay",10d},{"playerHeroStringId","player"}});Dictionary<string,object> promiseHome=CourtHomeApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId",timeline},{"playerHeroStringId","player"},{"worldDay",10d}});Dictionary<string,object> promiseMatter=ReadDictionaryList(promiseHome,"peopleMatters").FirstOrDefault(x=>ReadString(x,"source_key","")=="obligation:ob_gold")??new Dictionary<string,object>();Dictionary<string,object> fulfillOption=CourtJsonList(ReadString(promiseMatter,"options_json","[]")).FirstOrDefault(x=>ReadString(x,"optionId","")=="fulfill")??new Dictionary<string,object>();Dictionary<string,object> fulfill=CourtMatterResolveApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId",timeline},{"commandId","fulfill_gold"},{"expectedRevision",ReadLong(promiseMatter,"revision",0)},{"matterId",ReadString(promiseMatter,"matter_id","")},{"optionId","fulfill"},{"termsHash",ReadString(fulfillOption,"termsHash","")},{"worldDay",11d},{"playerHeroStringId","player"}});Dictionary<string,object> fulfillReport=CourtMatterResolveApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId",timeline},{"commandId","fulfill_gold_report"},{"expectedRevision",ReadLong(fulfill,"revision",0)},{"matterId",ReadString(promiseMatter,"matter_id","")},{"executionStatus","completed"},{"nativeReceipt",new Dictionary<string,object>{{"ok",true}}},{"worldDay",11d},{"playerHeroStringId","player"}});Dictionary<string,object> obligationRows=CourtObligationsQueryApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId",timeline},{"playerHeroStringId","player"}});add("obligation_fulfillment_receipt",ReadDictionaryList(fulfill,"nativeActions").Any(x=>ReadString(x,"type","")=="transfer_gold")&&ReadBool(fulfillReport,"ok",false)&&ReadDictionaryList(obligationRows,"obligations").Any(x=>ReadString(x,"obligation_id","")=="ob_gold"&&ReadString(x,"status","")=="resolved"),"Gold promises become coded matters and resolve only after a native execution receipt.",new Dictionary<string,object>{{"validation",fulfill},{"report",fulfillReport}});
@@ -1011,7 +952,7 @@ VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$
                 Dictionary<string,object> nativeAction=new Dictionary<string,object>{{"type","fund_construction"},{"settlementStringId","town_test"},{"goldAmount",5000}};string nativeHash=CourtHash(CourtCanonicalJson(nativeAction));Dictionary<string,object> nativeValidated=CourtNativeActionValidateApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId",timeline},{"commandId","native_fund"},{"termsHash",nativeHash},{"nativeAction",nativeAction}});add("native_action_hash_boundary",ReadBool(nativeValidated,"ok",false)&&ReadDictionaryList(nativeValidated,"nativeActions").Count==1,"Governor, gift, and construction actions cross a canonical hash and command-id boundary before native revalidation.",nativeValidated);
                 Dictionary<string,object> worldAction=new Dictionary<string,object>{{"actionId","court_plan"},{"typeValue",100},{"source","court_player_plan"},{"actorHeroStringId","commander"},{"targetSettlementStringId","town"}};string worldHash=CourtHash(CourtCanonicalJson(worldAction));Dictionary<string,object> validatedPlan=CourtWorldActionValidateApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId",timeline},{"commandId","world_plan"},{"termsHash",worldHash},{"worldAction",worldAction}});add("world_action_validation_boundary",ReadBool(validatedPlan,"ok",false)&&ReadDictionaryList(validatedPlan,"nativeActions").Count==1,"Military and diplomatic plans cross a hashed server boundary before the existing native validator/executor.",validatedPlan);
                 Dictionary<string,object> diplomacyWorld=new Dictionary<string,object>{{"playerKingdomId","player_kingdom"},{"kingdoms",new List<object>{new Dictionary<string,object>{{"kingdomId","player_kingdom"},{"leaderHeroId","player"},{"isPlayerKingdom",true}},new Dictionary<string,object>{{"kingdomId","foreign"},{"leaderHeroId","foreign_ruler"},{"isPlayerKingdom",false}}}}};Dictionary<string,object> invalidDiplomacyAction=new Dictionary<string,object>{{"command","sign_trade_agreement"},{"actorKingdomStringId","foreign"},{"actorHeroStringId","foreign_ruler"},{"targetKingdomStringId","player_kingdom"},{"targetHeroStringId","player"},{"terms",new Dictionary<string,object>()}};Dictionary<string,object> invalidDiplomacy=CourtDiplomacyProposeApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId",timeline},{"commandId","invalid_player_actor"},{"worldAction",invalidDiplomacyAction},{"worldSnapshot",diplomacyWorld},{"termsHash",CourtHash(CourtCanonicalJson(invalidDiplomacyAction))},{"playerHeroStringId","player"}});add("diplomacy_never_answers_for_player",!ReadBool(invalidDiplomacy,"ok",true)&&ReadString(invalidDiplomacy,"error","").Contains("player's current royal court"),"The proposal endpoint rejects any attempt to make the NPC director act or answer for the player ruler.",invalidDiplomacy);
-                bool rollTimelines=false;using(ReignDbConnection c=ReignDatabase.OpenCampaignConnection(campaign)){RelationshipsService.EnsureRelationshipDirectorSchema(c);long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();ReignDatabase.ExecuteSql(c,"INSERT INTO marriage_evaluations(evaluation_id,route,status,hero_a_id,hero_b_id,clan_a_id,clan_b_id,leader_a_id,leader_b_id,world_day,score,leader_a_approved,leader_b_approved,resentment_a,resentment_b,payload_json,created_ts,updated_ts,timeline_id) VALUES('mar_test','arranged','player_court_pending','hero_a','hero_b','clan_a','clan_b','leader_a','leader_b',10,80,1,1,0,0,'{}',$ts,$ts,$timeline);",new Dictionary<string,object>{{"ts",ts},{"timeline",timeline}});ReignDatabase.ExecuteSql(c,"INSERT INTO marriage_leader_rolls(roll_id,timeline_id,period_index,leader_id,clan_id,world_day,chance,roll,urgency,status,payload_json,created_ts) VALUES('roll_a','timeline_a',1,'leader','clan',10,.01,.5,.2,'failed','{}',$ts),('roll_b','older_branch',1,'leader','clan',10,.01,.5,.2,'failed','{}',$ts);",new Dictionary<string,object>{{"ts",ts}});rollTimelines=ReadInt(ReignDatabase.QuerySql(c,"SELECT COUNT(*) AS count FROM marriage_leader_rolls WHERE period_index=1 AND leader_id='leader';").FirstOrDefault(),"count",0)==2;}Dictionary<string,object> marriageHome=CourtHomeApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId",timeline},{"playerHeroStringId","player"},{"worldDay",13d}});add("marriage_queue_materialized",ReadDictionaryList(marriageHome,"peopleMatters").Any(x=>ReadString(x,"source_key","")=="marriage_evaluation:mar_test"),"player_court_pending marriage evaluations become private Subjects/court matters with coded choices.",marriageHome);add("marriage_roll_timeline_isolation",rollTimelines,"Marriage director cadence records are isolated by timeline as well as leader and period.",new Dictionary<string,object>{{"isolated",rollTimelines}});
+                bool rollTimelines=false;using(ReignDbConnection c=ReignDatabase.OpenCampaignConnection(campaign)){RelationshipsService.EnsureRelationshipDirectorSchema(c);long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();CourtStore.InsertMarriageEvaluations(c, new Dictionary<string,object>{{"ts",ts},{"timeline",timeline}});CourtStore.InsertMarriageLeaderRolls(c, new Dictionary<string,object>{{"ts",ts}});rollTimelines=ReadInt(CourtStore.CountMarriageLeaderRolls(c).FirstOrDefault(),"count",0)==2;}Dictionary<string,object> marriageHome=CourtHomeApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId",timeline},{"playerHeroStringId","player"},{"worldDay",13d}});add("marriage_queue_materialized",ReadDictionaryList(marriageHome,"peopleMatters").Any(x=>ReadString(x,"source_key","")=="marriage_evaluation:mar_test"),"player_court_pending marriage evaluations become private Subjects/court matters with coded choices.",marriageHome);add("marriage_roll_timeline_isolation",rollTimelines,"Marriage director cadence records are isolated by timeline as well as leader and period.",new Dictionary<string,object>{{"isolated",rollTimelines}});
                 Dictionary<string,object> otherTimeline=CourtHomeApi(new Dictionary<string,object>{{"campaignId",campaign},{"timelineId","older_branch"},{"playerHeroStringId","player"},{"worldDay",10d}});add("timeline_isolation",ReadDictionaryList(otherTimeline,"dailyAgenda").Count==0,"An older timeline cannot see future court matters.",otherTimeline);
                 AppendForeignAmbassadorSelfTests(results,add,campaign,timeline,session);
                 foreach(Dictionary<string,object> row in DialogueService.RunDialogueIntegrityAssertions())

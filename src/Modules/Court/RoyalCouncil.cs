@@ -18,12 +18,8 @@ namespace ReignBetaServer
 
         private static void EnsureRoyalCouncilSchema(ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS royal_council_turns (
-turn_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,session_id TEXT NOT NULL,
-speaker_role TEXT NOT NULL,speaker_hero_id TEXT NOT NULL DEFAULT '',speaker_name TEXT NOT NULL DEFAULT '',
-player_text TEXT NOT NULL DEFAULT '',reply_text TEXT NOT NULL DEFAULT '',heard_by_json TEXT NOT NULL DEFAULT '[]',
-domain_packet_json TEXT NOT NULL DEFAULT '{}',is_opening INTEGER NOT NULL DEFAULT 0,created_ts INTEGER NOT NULL);" );
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_royal_council_session ON royal_council_turns(campaign_id,timeline_id,session_id,created_ts);");
+            CourtSchema.CreateRoyalCouncilTurns(connection);
+            CourtSchema.CreateIndexRoyalCouncilSession(connection);
         }
 
         internal static Dictionary<string, object> RoyalCouncilRespond(Dictionary<string, object> payload,
@@ -75,8 +71,7 @@ domain_packet_json TEXT NOT NULL DEFAULT '{}',is_opening INTEGER NOT NULL DEFAUL
             {
                 EnsureRoyalCouncilSchema(connection);
                 ReignDatabase.EnsureMemorySchema(connection);
-                ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO royal_council_turns(turn_id,campaign_id,timeline_id,session_id,speaker_role,speaker_hero_id,speaker_name,player_text,reply_text,heard_by_json,domain_packet_json,is_opening,created_ts)
-VALUES($id,$campaign,$timeline,$session,$role,$hero,$name,$player,$reply,$heard,$packet,$opening,$ts);", new Dictionary<string, object>
+                CourtStore.InsertOrIgnoreRoyalCouncilTurns(connection, new Dictionary<string, object>
                 {
                     ["id"] = turnId, ["campaign"] = campaignId, ["timeline"] = timelineId, ["session"] = sessionId, ["role"] = role,
                     ["hero"] = speakerId, ["name"] = speakerName, ["player"] = playerText, ["reply"] = reply,
@@ -108,9 +103,7 @@ VALUES($id,$campaign,$timeline,$session,$role,$hero,$name,$player,$reply,$heard,
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 DiplomacyService.EnsurePoliticalPressureSchema(connection);
-                bounded["politicalPressure"] = ReignDatabase.QuerySql(connection, @"SELECT world_day,actor_kingdom_id,target_kingdom_id,event_type,polarity,channel,severity,status,before_value,after_value,reason
-FROM political_pressure_activity WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY world_day DESC,created_ts DESC LIMIT 20;",
-                    new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId });
+                bounded["politicalPressure"] = CourtStore.SelectPoliticalPressureActivity(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId });
             }
         }
     }

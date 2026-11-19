@@ -151,8 +151,7 @@ namespace ReignBetaServer
                 charterRevision--;
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    ReignDatabase.ExecuteSql(connection,"UPDATE foreign_ambassador_postings SET authority_revision=$revision,authority_charter_json=$charter WHERE posting_id=$posting;",
-                        new Dictionary<string,object>{{"revision",charterRevision},{"charter",Json.Serialize(grantedCharter)},{"posting",postingId}});
+                    CourtSelfTestStore.UpdateForeignAmbassadorPostings(connection, new Dictionary<string,object>{{"revision",charterRevision},{"charter",Json.Serialize(grantedCharter)},{"posting",postingId}});
                 }
                 Dictionary<string,object> context = new Dictionary<string,object>
                 {
@@ -199,10 +198,8 @@ namespace ReignBetaServer
                 Dictionary<string,object> referralRow;
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    referralRow = ReignDatabase.QuerySql(connection,"SELECT * FROM ambassador_referrals WHERE referral_id=$id LIMIT 1;",
-                        new Dictionary<string,object>{{"id",referralId}}).FirstOrDefault();
-                    ReignDatabase.ExecuteSql(connection,"UPDATE ambassador_referrals SET status='countered',counter_terms_json=$terms WHERE referral_id=$id;",
-                        new Dictionary<string,object>{{"terms",ReadString(referralRow,"exact_terms_json","{}")},{"id",referralId}});
+                    referralRow = CourtSelfTestStore.SelectAmbassadorReferrals(connection, new Dictionary<string,object>{{"id",referralId}}).FirstOrDefault();
+                    CourtSelfTestStore.UpdateAmbassadorReferrals(connection, new Dictionary<string,object>{{"terms",ReadString(referralRow,"exact_terms_json","{}")},{"id",referralId}});
                 }
                 Dictionary<string,object> staleCounter = ForeignAmbassadorReferralRespondApi(new Dictionary<string,object>
                 {
@@ -231,8 +228,7 @@ namespace ReignBetaServer
                 Dictionary<string,object> decisionRow;
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    decisionRow = ReignDatabase.QuerySql(connection,"SELECT * FROM ambassador_decisions WHERE decision_id=$id LIMIT 1;",
-                        new Dictionary<string,object>{{"id",ReadString(persistedDecision,"decisionId","")}}).FirstOrDefault();
+                    decisionRow = CourtSelfTestStore.SelectAmbassadorDecisions(connection, new Dictionary<string,object>{{"id",ReadString(persistedDecision,"decisionId","")}}).FirstOrDefault();
                 }
                 AddCapitalAmbassadorTestAssertion(assertions, "server_official_archive_and_decision_persistence",
                     archive.Count==2 && archive.All(x=>ReadString(x,"channel","")=="ambassador_official")
@@ -304,8 +300,7 @@ namespace ReignBetaServer
                 });
                 string pendingStatus;
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
-                    pendingStatus = ReadString(ReignDatabase.QuerySql(connection,"SELECT status FROM ambassador_referrals WHERE referral_id=$id LIMIT 1;",
-                        new Dictionary<string,object>{{"id",ReadString(pending,"referralId","")}}).FirstOrDefault(),"status","");
+                    pendingStatus = ReadString(CourtSelfTestStore.SelectAmbassadorReferrals2(connection, new Dictionary<string,object>{{"id",ReadString(pending,"referralId","")}}).FirstOrDefault(),"status","");
                 AddCapitalAmbassadorTestAssertion(assertions, "server_war_recall_and_referral_cancellation",
                     ReadBool(ended,"ok",false) && ReadString(ended,"status","")=="ended" && pendingStatus=="cancelled_war",
                     "War recall ends the posting and cancels pending ruler referrals.",

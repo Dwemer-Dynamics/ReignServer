@@ -20,8 +20,7 @@ namespace ReignBetaServer
                     .OfType<string>().Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().Take(4))
                 {
                     string id = "court_resolution:" + CourtHash(timeline + "|" + matter + "|" + actor);
-                    ReignDatabase.ExecuteSql(connection, "INSERT OR IGNORE INTO court_life_turns(turn_id,timeline_id,matter_id,actor_id,phase,player_text,reply_text,created_ts) VALUES($id,$timeline,$matter,$actor,'resolution','',$facts,$ts);",
-                        new Dictionary<string, object> { ["id"] = id, ["timeline"] = timeline, ["matter"] = matter,
+                    CourtStore.InsertOrIgnoreCourtLifeTurns2(connection, new Dictionary<string, object> { ["id"] = id, ["timeline"] = timeline, ["matter"] = matter,
                             ["actor"] = actor, ["facts"] = Json.Serialize(facts), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                 }
             }
@@ -74,8 +73,7 @@ namespace ReignBetaServer
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsureCourtLifeSceneStore(connection);
-                var rows = ReignDatabase.QuerySql(connection, "SELECT reply_text FROM court_life_turns WHERE timeline_id=$timeline AND actor_id=$actor AND phase='resolution' ORDER BY created_ts DESC,turn_id DESC LIMIT 6;",
-                    new Dictionary<string, object> { ["timeline"] = timeline, ["actor"] = hero });
+                var rows = CourtStore.SelectCourtLifeTurns2(connection, new Dictionary<string, object> { ["timeline"] = timeline, ["actor"] = hero });
                 if (rows.Count == 0) return "";
                 return "\n\nAUTHORITATIVE COMPLETED COURT MATTERS YOU WITNESSED\n"
                     + "These native execution receipts supersede conflicting old dialogue, summaries, plans and crises about these exact matters. A confirmed payment is already received by the named recipient; do not demand coins in your own hands, proof of transfer or a second payment. Acceptance alone would not establish execution, but these records do. Update any obsolete plan/crisis accordingly while retaining unrelated concerns. Completion does not prove an original allegation or imply forgiveness. Only an explicit completed agreement record below establishes a treaty: acknowledge that agreement and its exact duration without asking for another authorization or proof of signing. An ordinary completed judgment does not establish a treaty. For an extortion demand, do not invent an injury whose proof remains outstanding. You can discuss feelings or the political consequences without reopening the completed demand. Do not recite internal IDs or balances.\n"
