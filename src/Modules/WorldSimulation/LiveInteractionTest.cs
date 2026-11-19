@@ -4955,8 +4955,6 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 ? "" : VerificationSourceLocator.ResolveUnique(Path.Combine(sourceRoot, "ReignServer"), fileName, "src");
             Func<string, string> serverSplitSource = fileName => string.IsNullOrWhiteSpace(sourceRoot)
                 ? "" : VerificationSourceLocator.ReadServerSplitSourceText(Path.Combine(sourceRoot, "ReignServer"), fileName, "src");
-            string socialReputationPath = serverSourcePath("SocialReputation.cs");
-            string worldRelationshipPath = serverSourcePath("WorldRelationshipModel.cs");
             string passiveWorldControlPath = string.IsNullOrWhiteSpace(sourceRoot) ? "" :
                 VerificationSourceLocator.ResolveUnique(
                     Path.Combine(sourceRoot, "ReignServer"),
@@ -4976,7 +4974,6 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                     "ReignLiveTest");
             string continuousRelationshipPath = serverSourcePath("ContinuousRelationshipWorker.cs");
             string postgreSqlSaveSyncPath = serverSourcePath("PostgreSqlSaveSync.cs");
-            string campaignBackupsPath = serverSourcePath("CampaignBackups.cs");
             string kingdomLeaderDiplomacyPath = serverSourcePath("KingdomLeaderDiplomacy.cs");
             string hostSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
             string hostSourceScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientSourceRoot, "ReignLiveInteractionTestHost");
@@ -4992,8 +4989,8 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             string socialEventClientSourceScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientSourceRoot, "ReignServerClient");
             string actionValidatorSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
             string identitySystemSource = serverSplitSource("IdentitySystem.cs");
-            string socialReputationSource = File.Exists(socialReputationPath) ? File.ReadAllText(socialReputationPath) : "";
-            string worldRelationshipSource = File.Exists(worldRelationshipPath) ? File.ReadAllText(worldRelationshipPath) : "";
+            string socialReputationSource = serverSplitSource("SocialReputation.cs");
+            string worldRelationshipSource = serverSplitSource("WorldRelationshipModel.cs");
             string aiBehaviorSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
             string settingsSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
             string socialVmSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
@@ -5016,7 +5013,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             string continuousRelationshipSource = File.Exists(continuousRelationshipPath) ? File.ReadAllText(continuousRelationshipPath) : "";
             string saveSyncSource = serverSplitSource("SaveSync.cs");
             string postgreSqlSaveSyncSource = File.Exists(postgreSqlSaveSyncPath) ? File.ReadAllText(postgreSqlSaveSyncPath) : "";
-            string campaignBackupsSource = File.Exists(campaignBackupsPath) ? File.ReadAllText(campaignBackupsPath) : "";
+            string campaignBackupsSource = serverSplitSource("CampaignBackups.cs");
             string worldDiplomacyDirectorSource = serverSplitSource("WorldDiplomacyDirector.cs");
             string kingdomLeaderDiplomacySource = File.Exists(kingdomLeaderDiplomacyPath) ? File.ReadAllText(kingdomLeaderDiplomacyPath) : "";
             string saveBehaviorSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
