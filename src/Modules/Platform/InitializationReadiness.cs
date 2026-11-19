@@ -24,28 +24,28 @@ namespace ReignBetaServer
                 ReputationService.ResumePendingSocialWorldHistoryOutcomes(campaignId, timelineId);
                 RelationshipsService.SignalContinuousRelationshipWorker();
             }
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 WorldSimulationService.EnsureWorldHistorySchema(connection);
                 ReputationService.EnsureSocialReputationSchema(connection);
                 ReputationService.EnsureSocialSubjectWorkSchema(connection);
                 RelationshipsService.EnsureWorldRelationshipSchema(connection);
                 RelationshipsService.EnsureMbtiRelationshipSchema(connection);
-                int pending = ReadInt(QuerySql(connection, @"
+                int pending = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
 AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
  WHERE r.event_id=e.event_id AND (r.completed<>0 OR r.attempt_count>=3));",
                     new Dictionary<string, object> { ["timeline"] = timelineId })
                     .FirstOrDefault(), "count", 0);
-                int completed = ReadInt(QuerySql(connection, @"
+                int completed = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM social_outcome_receipts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND completed=1;",
                     new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId
                     }).FirstOrDefault(), "count", 0);
-                int failed = ReadInt(QuerySql(connection, @"
+                int failed = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM social_outcome_receipts
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND (completed=-1 OR attempt_count>=3);",
@@ -53,7 +53,7 @@ AND (completed=-1 OR attempt_count>=3);",
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId
                     }).FirstOrDefault(), "count", 0);
-                Dictionary<string, object> lanes = QuerySql(connection, @"
+                Dictionary<string, object> lanes = ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS total,
 SUM(CASE WHEN status='processing' THEN 1 ELSE 0 END) AS processing,
 SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending,
@@ -65,7 +65,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                         ["campaign"] = campaignId, ["timeline"] = timelineId
                         , ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                     }).FirstOrDefault() ?? new Dictionary<string, object>();
-                int standingInvalidations = ReadInt(QuerySql(connection, @"
+                int standingInvalidations = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM public_standing_invalidations
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND status IN ('pending','processing');",
@@ -73,7 +73,7 @@ AND status IN ('pending','processing');",
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId
                     }).FirstOrDefault(), "count", 0);
-                int standingFailures = ReadInt(QuerySql(connection, @"
+                int standingFailures = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM character_public_standing
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND calculation_status='error';",
@@ -81,21 +81,21 @@ AND calculation_status='error';",
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId
                     }).FirstOrDefault(), "count", 0);
-                int nativeTargets = ReadInt(QuerySql(connection, @"
+                int nativeTargets = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_native_targets
 WHERE status IN ('pending','claimed','failed');").FirstOrDefault(),
                     "count", 0);
-                int nativeFailures = ReadInt(QuerySql(connection, @"
+                int nativeFailures = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_native_targets
 WHERE status='failed';").FirstOrDefault(), "count", 0);
-                int rumors = ReadInt(QuerySql(connection, @"
+                int rumors = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM rumor_occurrences
 WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                     new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId
                     }).FirstOrDefault(), "count", 0);
-                int reputations = ReadInt(QuerySql(connection, @"
+                int reputations = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM character_reputations
 WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                     new Dictionary<string, object>
@@ -164,11 +164,11 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
             if (string.IsNullOrWhiteSpace(campaignId))
                 return InitializationReadinessFailure(campaignId, timelineId,
                     InitializationReadinessSealVersion, "campaignId is required.");
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 ReputationService.EnsureSocialReputationSchema(connection);
                 ReputationService.EnsureSocialSubjectWorkSchema(connection);
-                ExecuteSql(connection, @"UPDATE social_outcome_receipts
+                ReignDatabase.ExecuteSql(connection, @"UPDATE social_outcome_receipts
 SET completed=0,attempt_count=0,last_error='',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND (completed=-1 OR attempt_count>=3);",
@@ -177,7 +177,7 @@ AND (completed=-1 OR attempt_count>=3);",
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                     });
-                ExecuteSql(connection, @"UPDATE social_subject_work_queue
+                ReignDatabase.ExecuteSql(connection, @"UPDATE social_subject_work_queue
 SET status='pending',claim_owner='',claim_expires_ts=0,last_error='',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND status<>'completed';",
@@ -226,13 +226,13 @@ AND status<>'completed';",
                     "The client readiness seal version is not supported.");
             }
 
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 WorldSimulationService.EnsureWorldHistorySchema(connection);
                 RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                 EnsureInitializationReadinessSchema(connection);
 
-                Dictionary<string, object> timeline = QuerySql(
+                Dictionary<string, object> timeline = ReignDatabase.QuerySql(
                     connection,
                     @"SELECT campaign_id,timeline_id,head_sequence
 FROM world_history_timelines
@@ -256,7 +256,7 @@ LIMIT 1;",
                     return failure;
                 }
 
-                int pendingNativeTargets = ReadInt(QuerySql(
+                int pendingNativeTargets = ReadInt(ReignDatabase.QuerySql(
                     connection,
                     "SELECT COUNT(*) AS count FROM relationship_native_targets;",
                     null).FirstOrDefault(), "count", 0);
@@ -276,7 +276,7 @@ LIMIT 1;",
                 bool relationshipPlanComplete = true;
                 if (!string.IsNullOrWhiteSpace(relationshipPlanId))
                 {
-                    Dictionary<string, object> plan = QuerySql(
+                    Dictionary<string, object> plan = ReignDatabase.QuerySql(
                         connection,
                         @"SELECT target_count,client_failed,client_remaining
 FROM relationship_native_sync_batches
@@ -315,7 +315,7 @@ LIMIT 1;",
                     return failure;
                 }
 
-                ExecuteSql(connection, @"INSERT INTO initialization_readiness_seals(
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO initialization_readiness_seals(
 campaign_id,timeline_id,seal_version,generation_id,history_sequence,
 relationship_plan_id,acknowledged_utc)
 VALUES($campaign,$timeline,$version,$generation,$sequence,$plan,$utc)
@@ -338,7 +338,7 @@ relationship_plan_id=$plan,acknowledged_utc=$utc;",
                 // behind this seal. This prevents the day-one worker from
                 // competing with native projection receipts and creating a
                 // second generation of targets inside the loading gate.
-                ExecuteSql(connection, @"UPDATE relationship_daily_inputs
+                ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_daily_inputs
 SET status='pending',last_error=''
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND status='initialization_pending';",
@@ -365,7 +365,7 @@ AND status='initialization_pending';",
 
         private static void EnsureInitializationReadinessSchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS initialization_readiness_seals (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS initialization_readiness_seals (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,seal_version INTEGER NOT NULL,
 generation_id TEXT NOT NULL,history_sequence INTEGER NOT NULL DEFAULT 0,
 relationship_plan_id TEXT NOT NULL DEFAULT '',acknowledged_utc TEXT NOT NULL,
@@ -429,10 +429,10 @@ PRIMARY KEY(campaign_id,timeline_id,seal_version));");
                 const string completedPlanId =
                     "native_sync_initialization_regression";
                 using (ReignDbConnection connection =
-                    OpenCampaignConnection(campaignId))
+                    ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     RelationshipsService.EnsureMbtiRelationshipSchema(connection);
-                    ExecuteSql(connection, @"INSERT INTO relationship_native_sync_batches(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_native_sync_batches(
 plan_id,campaign_id,timeline_id,world_day,target_count,issued_ts,
 client_applied,client_remaining,client_failed)
 VALUES($plan,$campaign,$timeline,1,1,1,1,0,0);",
@@ -442,12 +442,12 @@ VALUES($plan,$campaign,$timeline,1,1,1,1,0,0);",
                             ["campaign"] = campaignId,
                             ["timeline"] = timelineId
                         });
-                    ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
 pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,status,
 world_day,last_sync_day,attempt_count,claimed_ts,last_error,updated_ts)
 VALUES('later-a|later-b','later-a','later-b',3,0,'pending',
 1,-1000,0,0,'',1);");
-                    ExecuteSql(connection, @"INSERT INTO relationship_daily_inputs(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_daily_inputs(
 campaign_id,timeline_id,day_key,world_day,status,presence_groups_json,
 hero_changes_json,group_count,received_ts)
 VALUES($campaign,$timeline,1,1,'initialization_pending','[]','[]',0,1);",
@@ -471,9 +471,9 @@ VALUES($campaign,$timeline,1,1,'initialization_pending','[]','[]',0,1);",
                         });
                 string heldDailyInputStatus;
                 using (ReignDbConnection connection =
-                    OpenCampaignConnection(campaignId))
+                    ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    heldDailyInputStatus = ReadString(QuerySql(connection,
+                    heldDailyInputStatus = ReadString(ReignDatabase.QuerySql(connection,
                         @"SELECT status FROM relationship_daily_inputs
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=1;",
                         new Dictionary<string, object>
@@ -481,7 +481,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=1;",
                             ["campaign"] = campaignId,
                             ["timeline"] = timelineId
                         }).FirstOrDefault(), "status", "");
-                    ExecuteSql(connection,
+                    ReignDatabase.ExecuteSql(connection,
                         "DELETE FROM relationship_native_targets WHERE pair_key='later-a|later-b';");
                 }
                 Dictionary<string, object> acceptedAfterQuiescence =
@@ -496,8 +496,8 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=1;",
                             ["expectedHistorySequence"] = 3L
                         });
                 string releasedDailyInputStatus;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-                    releasedDailyInputStatus = ReadString(QuerySql(connection,
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+                    releasedDailyInputStatus = ReadString(ReignDatabase.QuerySql(connection,
                         @"SELECT status FROM relationship_daily_inputs
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=1;",
                         new Dictionary<string, object>

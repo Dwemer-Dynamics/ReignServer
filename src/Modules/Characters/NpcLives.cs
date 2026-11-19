@@ -8,13 +8,13 @@ namespace ReignBetaServer
 {
     internal static partial class CharactersService
     {
-        private static void EnsureNpcLivesSchema(ReignDbConnection c) => Program.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS character_npc_lives_state(
+        private static void EnsureNpcLivesSchema(ReignDbConnection c) => ReignDatabase.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS character_npc_lives_state(
 timeline_id TEXT PRIMARY KEY, value_json TEXT NOT NULL);");
 
         internal static NpcLivesState ReadNpcLives(ReignDbConnection c, string campaign, string timeline)
         {
             EnsureNpcLivesSchema(c);
-            string json = ReadString(Program.QuerySql(c, "SELECT value_json FROM character_npc_lives_state WHERE timeline_id=$timeline;",
+            string json = ReadString(ReignDatabase.QuerySql(c, "SELECT value_json FROM character_npc_lives_state WHERE timeline_id=$timeline;",
                 TestDict("timeline", timeline)).FirstOrDefault(), "value_json", "");
             var state = json.Length == 0 ? new NpcLivesState { CampaignId = campaign, TimelineId = timeline } : Json.Deserialize<NpcLivesState>(json);
             if (state.Version != 1 || state.CampaignId != campaign || state.TimelineId != timeline)
@@ -24,14 +24,14 @@ timeline_id TEXT PRIMARY KEY, value_json TEXT NOT NULL);");
         private static void WriteNpcLives(ReignDbConnection c, NpcLivesState state)
         {
             state.Revision++;
-            Program.ExecuteSql(c, @"INSERT INTO character_npc_lives_state(timeline_id,value_json) VALUES($timeline,$json)
+            ReignDatabase.ExecuteSql(c, @"INSERT INTO character_npc_lives_state(timeline_id,value_json) VALUES($timeline,$json)
 ON CONFLICT(timeline_id) DO UPDATE SET value_json=EXCLUDED.value_json;", TestDict("timeline", state.TimelineId, "json", Json.Serialize(state)));
         }
         internal static string NpcLivesGeneration(ReignDbConnection c) => ReadString(DialogueService.ReadMemoryPrecisionState(c), "restore_generation", "");
         private static int NpcLivesAffinity(ReignDbConnection c, string hero, string player, int native = 0)
         {
             RelationshipsService.EnsureMbtiRelationshipSchema(c);
-            var pair = Program.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;",
+            var pair = ReignDatabase.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;",
                 TestDict("pair", RelationshipsService.AmbientPairKey(hero, player))).FirstOrDefault();
             return pair == null ? native : ReputationService.EffectiveDirectionalAffinity(pair, ReadString(pair, "hero_a_id", "") == hero, native);
         }
@@ -48,7 +48,7 @@ ON CONFLICT(timeline_id) DO UPDATE SET value_json=EXCLUDED.value_json;", TestDic
                 return TestDict("ok", false, "error", "NPC Lives requires campaign, player, timeline and native campaign time.");
             if (operation == "open" || operation == "opening") return NpcLivesOpenApi(operation, p);
             using var ownership = PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign));
-            using var c = Program.OpenCampaignConnection(campaign);
+            using var c = ReignDatabase.OpenCampaignConnection(campaign);
             var state = ReadNpcLives(c, campaign, timeline);
             string generation = NpcLivesGeneration(c);
             if (operation == "state") return NpcLivesSnapshot(c, state);
@@ -153,7 +153,7 @@ ON CONFLICT(timeline_id) DO UPDATE SET value_json=EXCLUDED.value_json;", TestDic
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             // One canonical player source, with an explicit audience. No dialogue,
             // social evaluator, agency evaluator, reward or provider fan-out runs.
-            Program.ExecuteSql(c, @"INSERT INTO conversation_sessions
+            ReignDatabase.ExecuteSql(c, @"INSERT INTO conversation_sessions
 (session_id,campaign_id,npc_id,player_id,channel,status,start_ts,end_ts,start_world_day,end_world_day,location_id,participants_json,payload_json)
 VALUES($session,$campaign,'',$player,'party_announcement','closed',$ts,$ts,$day,$day,$location,$audience,$payload);",
                 TestDict("session", id, "campaign", state.CampaignId, "player", player, "ts", ts, "day", day, "location", announcement.LocationId,
@@ -179,12 +179,12 @@ VALUES($session,$campaign,'',$player,'party_announcement','closed',$ts,$ts,$day,
             DialogueService.PreservePlayerInputSource(c, p, announcement.Id, announcement.Id, announcement.Id, announcement.PlayerId,
                 ReadString(p, "playerName", "Player"), announcement.WorldDay, now, announcement.LocationId);
             DialogueService.BindAcceptedInputSource(c, p, announcement.Id, announcement.Id, new[] { announcement.Id + "_source" });
-            Program.ExecuteSql(c, @"INSERT INTO conversation_input_receipts
+            ReignDatabase.ExecuteSql(c, @"INSERT INTO conversation_input_receipts
 (input_id,timeline_id,session_id,player_id,source_turn_id,source_hash,restore_generation,status,created_ts,updated_ts)
 VALUES($id,$timeline,$session,$player,$source,$hash,$generation,'received',$now,$now) ON CONFLICT(input_id) DO NOTHING;",
                 TestDict("id", input, "timeline", state.TimelineId, "session", announcement.Id, "player", announcement.PlayerId,
                     "source", source, "hash", hash, "generation", generation, "now", now));
-            var saved = Program.QuerySql(c, "SELECT source_hash,source_turn_id FROM conversation_input_receipts WHERE input_id=$id;", TestDict("id", input)).Single();
+            var saved = ReignDatabase.QuerySql(c, "SELECT source_hash,source_turn_id FROM conversation_input_receipts WHERE input_id=$id;", TestDict("id", input)).Single();
             if (ReadString(saved, "source_hash", "") != hash || ReadString(saved, "source_turn_id", "") != source)
                 throw new InvalidOperationException("The original announcement receipt failed its identity check.");
             return TestDict("schema", DialogueService.ConversationInputSchema, "contributionId", announcement.Id, "inputId", input,

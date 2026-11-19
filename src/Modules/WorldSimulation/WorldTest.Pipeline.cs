@@ -24,24 +24,24 @@ namespace ReignBetaServer
             bool alignmentPending = ReadBool(saveSync, "alignmentPending", false);
             double relationshipDay = RelationshipsService.RelationshipLastProcessedDay(connection, timelineId);
             double relationshipLag = relationshipDay < 0d ? -1d : Math.Max(0d, latestDay - relationshipDay);
-            int relationshipInputBacklog = ReadInt(Program.QuerySql(connection, @"
+            int relationshipInputBacklog = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_daily_inputs
 WHERE timeline_id=$timeline AND status IN ('pending','processing');",
                 new Dictionary<string, object> { ["timeline"] = timelineId }).FirstOrDefault(), "count", 0);
-            double latestRelationshipIngestedDay = ReadDouble(Program.QuerySql(connection, @"
+            double latestRelationshipIngestedDay = ReadDouble(ReignDatabase.QuerySql(connection, @"
 SELECT MAX(world_day) AS day FROM relationship_daily_inputs
 WHERE timeline_id=$timeline;", new Dictionary<string, object> { ["timeline"] = timelineId })
                 .FirstOrDefault(), "day", -1d);
-            Dictionary<string, object> partialRelationshipDay = Program.QuerySql(connection, @"
+            Dictionary<string, object> partialRelationshipDay = ReignDatabase.QuerySql(connection, @"
 SELECT day_key,pair_cursor,candidate_pairs,processed_pairs,pair_day_evaluations,
 cadence_shard,window_start_day,window_day_count,started_ts,last_error
 FROM relationship_daily_inputs WHERE timeline_id=$timeline AND status='processing'
 ORDER BY day_key LIMIT 1;", new Dictionary<string, object> { ["timeline"] = timelineId })
                 .FirstOrDefault() ?? new Dictionary<string, object>();
-            string relationshipMbtiError = ReadString(Program.QuerySql(connection,
+            string relationshipMbtiError = ReadString(ReignDatabase.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='relationship_mbti_error' LIMIT 1;")
                 .FirstOrDefault(), "value", "");
-            Dictionary<string, object> relationshipShardCounts = Program.QuerySql(connection, @"
+            Dictionary<string, object> relationshipShardCounts = ReignDatabase.QuerySql(connection, @"
 SELECT processing_shard,COUNT(*) AS count
 FROM relationship_pair_chemistry
 WHERE processing_shard BETWEEN 0 AND $maxShard
@@ -55,13 +55,13 @@ ORDER BY processing_shard;",
                         .ToString(CultureInfo.InvariantCulture),
                     row => (object)ReadInt(row, "count", 0),
                     StringComparer.OrdinalIgnoreCase);
-            double oldestNativeTarget = ReadDouble(Program.QuerySql(connection, @"
+            double oldestNativeTarget = ReadDouble(ReignDatabase.QuerySql(connection, @"
 SELECT MIN(world_day) AS day FROM relationship_native_targets
 WHERE status IN ('pending','claimed','failed');").FirstOrDefault(), "day", -1d);
             double nativeProjectionLag = oldestNativeTarget < 0d ? 0d : Math.Max(0d, latestDay - oldestNativeTarget);
             Dictionary<string, object> storage =
                 WorldHistoryStorageDiagnostics(connection, campaignId, timelineId, latestDay);
-            Dictionary<string, object> matching = Program.QuerySql(connection, @"
+            Dictionary<string, object> matching = ReignDatabase.QuerySql(connection, @"
 SELECT day_key,counters_json FROM world_test_chunk_counters
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND subsystem='relationships'
@@ -139,8 +139,8 @@ ORDER BY day_key DESC LIMIT 1;",
                     ["native"] = latestDay,
                     ["relationships"] = relationshipDay,
                     ["rumors"] = Math.Max(
-                        ReadDouble(Program.QuerySql(connection, "SELECT MAX(world_day) AS day FROM rumor_occurrences;").FirstOrDefault(), "day", -1d),
-                        ReadDouble(Program.QuerySql(connection, @"SELECT MAX(e.world_day) AS day
+                        ReadDouble(ReignDatabase.QuerySql(connection, "SELECT MAX(world_day) AS day FROM rumor_occurrences;").FirstOrDefault(), "day", -1d),
+                        ReadDouble(ReignDatabase.QuerySql(connection, @"SELECT MAX(e.world_day) AS day
 FROM world_history_events e JOIN social_outcome_receipts r ON r.event_id=e.event_id
 WHERE e.timeline_id=$timeline AND e.event_type='social_outcome' AND r.completed=1;",
                             new Dictionary<string, object> { ["timeline"] = timelineId }).FirstOrDefault(), "day", -1d)),
@@ -372,12 +372,12 @@ WHERE e.timeline_id=$timeline AND e.event_type='social_outcome' AND r.completed=
                 if (!byId.TryGetValue(id, out Dictionary<string, object> existing)) byId[id] = row;
                 else foreach (KeyValuePair<string, object> pair in row) existing[pair.Key] = pair.Value;
             }
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                if (Program.QuerySql(connection,
+                if (ReignDatabase.QuerySql(connection,
                     "SELECT name FROM sqlite_master WHERE type='table' AND name='relationship_director_actions' LIMIT 1;").Any())
                 {
-                    foreach (Dictionary<string, object> row in Program.QuerySql(connection,
+                    foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection,
                         "SELECT * FROM relationship_director_actions;"))
                     {
                         string id = ReadString(row, "director_action_id", "");
@@ -410,18 +410,18 @@ WHERE e.timeline_id=$timeline AND e.event_type='social_outcome' AND r.completed=
         private static List<Dictionary<string, object>> LatestNativeArray(ReignDbConnection connection, string campaignId, string timelineId, string section, string key)
         {
             if (section == "rebellions" && key == "weeklyRolls")
-                return Program.QuerySql(connection, "SELECT payload_json FROM world_test_rebellion_rolls WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY rolled_day DESC;",
+                return ReignDatabase.QuerySql(connection, "SELECT payload_json FROM world_test_rebellion_rolls WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY rolled_day DESC;",
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
                     .Select(x => TryParseJsonObject(ReadString(x, "payload_json", "{}")) ?? new Dictionary<string, object>()).ToList();
             if (section == "rebellions" && key == "movements")
-                return Program.QuerySql(connection, "SELECT payload_json FROM world_test_rebellion_movements WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY updated_day DESC;",
+                return ReignDatabase.QuerySql(connection, "SELECT payload_json FROM world_test_rebellion_movements WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY updated_day DESC;",
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
                     .Select(x => TryParseJsonObject(ReadString(x, "payload_json", "{}")) ?? new Dictionary<string, object>()).ToList();
             if (section == "rebellions" && key == "memberships")
-                return Program.QuerySql(connection, "SELECT payload_json FROM world_test_rebellion_memberships WHERE campaign_id=$campaign AND timeline_id=$timeline;",
+                return ReignDatabase.QuerySql(connection, "SELECT payload_json FROM world_test_rebellion_memberships WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
                     .Select(x => TryParseJsonObject(ReadString(x, "payload_json", "{}")) ?? new Dictionary<string, object>()).ToList();
-            Dictionary<string, object> heartbeat = Program.QuerySql(connection,
+            Dictionary<string, object> heartbeat = ReignDatabase.QuerySql(connection,
                 "SELECT payload_json FROM world_test_native_heartbeats WHERE timeline_id=$timeline ORDER BY world_day DESC LIMIT 1;",
                 new Dictionary<string, object> { ["timeline"] = timelineId }).FirstOrDefault();
             Dictionary<string, object> payload = TryParseJsonObject(ReadString(heartbeat, "payload_json", "{}")) ?? new Dictionary<string, object>();
@@ -431,30 +431,30 @@ WHERE e.timeline_id=$timeline AND e.event_type='social_outcome' AND r.completed=
 
         private static int LatestPopulationValue(ReignDbConnection connection, string key)
         {
-            Dictionary<string, object> heartbeat = Program.QuerySql(connection, "SELECT payload_json FROM world_test_native_heartbeats ORDER BY world_day DESC LIMIT 1;").FirstOrDefault();
+            Dictionary<string, object> heartbeat = ReignDatabase.QuerySql(connection, "SELECT payload_json FROM world_test_native_heartbeats ORDER BY world_day DESC LIMIT 1;").FirstOrDefault();
             Dictionary<string, object> payload = TryParseJsonObject(ReadString(heartbeat, "payload_json", "{}")) ?? new Dictionary<string, object>();
             return ReadInt(ReadDictionary(payload, "population"), key, 0);
         }
 
         private static bool LatestFeatureFlag(ReignDbConnection connection, string key, bool fallback)
         {
-            Dictionary<string, object> heartbeat = Program.QuerySql(connection, "SELECT payload_json FROM world_test_native_heartbeats ORDER BY world_day DESC LIMIT 1;").FirstOrDefault();
+            Dictionary<string, object> heartbeat = ReignDatabase.QuerySql(connection, "SELECT payload_json FROM world_test_native_heartbeats ORDER BY world_day DESC LIMIT 1;").FirstOrDefault();
             Dictionary<string, object> payload = TryParseJsonObject(ReadString(heartbeat, "payload_json", "{}")) ?? new Dictionary<string, object>();
             return ReadBool(ReadDictionary(payload, "featureFlags"), key, fallback);
         }
 
         private static bool LatestFeatureFlagFromPayload(string campaignId, string key, bool fallback)
         {
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId)) return LatestFeatureFlag(connection, key, fallback);
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId)) return LatestFeatureFlag(connection, key, fallback);
         }
 
         internal static double LatestKnownWorldDay(ReignDbConnection connection,
             string campaignId)
         {
-            double relationship = ReadDouble(Program.QuerySql(connection,
+            double relationship = ReadDouble(ReignDatabase.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='mbti_relationship_last_processed_day' LIMIT 1;")
                 .FirstOrDefault(), "value", 0d);
-            double rumor = ReadDouble(Program.QuerySql(connection,
+            double rumor = ReadDouble(ReignDatabase.QuerySql(connection,
                 "SELECT MAX(world_day) AS day FROM rumor_occurrences;")
                 .FirstOrDefault(), "day", 0d);
             Dictionary<string, object> state = DiplomacyService.ReadDirectorState(campaignId);
@@ -467,28 +467,28 @@ WHERE e.timeline_id=$timeline AND e.event_type='social_outcome' AND r.completed=
         {
             string relationshipKey = "mbti_relationship_last_processed_day:"
                 + timelineId;
-            double relationship = ReadDouble(Program.QuerySql(connection,
+            double relationship = ReadDouble(ReignDatabase.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key=$key LIMIT 1;",
                 new Dictionary<string, object> { ["key"] = relationshipKey })
                 .FirstOrDefault(), "value", -1d);
             if (relationship < 0d && string.Equals(timelineId, "main",
                 StringComparison.OrdinalIgnoreCase))
-                relationship = ReadDouble(Program.QuerySql(connection,
+                relationship = ReadDouble(ReignDatabase.QuerySql(connection,
                     "SELECT value FROM schema_meta WHERE key='mbti_relationship_last_processed_day' LIMIT 1;")
                     .FirstOrDefault(), "value", -1d);
-            double ingested = ReadDouble(Program.QuerySql(connection, @"SELECT MAX(world_day) AS day
+            double ingested = ReadDouble(ReignDatabase.QuerySql(connection, @"SELECT MAX(world_day) AS day
 FROM relationship_daily_inputs WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                 new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId
                 }).FirstOrDefault(), "day", -1d);
-            double rumor = ReadDouble(Program.QuerySql(connection, @"SELECT MAX(world_day) AS day
+            double rumor = ReadDouble(ReignDatabase.QuerySql(connection, @"SELECT MAX(world_day) AS day
 FROM rumor_occurrences WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                 new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId
                 }).FirstOrDefault(), "day", -1d);
-            double rollup = ReadDouble(Program.QuerySql(connection, @"SELECT MAX(world_day) AS day
+            double rollup = ReadDouble(ReignDatabase.QuerySql(connection, @"SELECT MAX(world_day) AS day
 FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                 new Dictionary<string, object>
                 {
@@ -563,17 +563,17 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
 
         internal static int TableCount(ReignDbConnection connection, string table)
         {
-            if (!Program.QuerySql(connection, "SELECT name FROM sqlite_master WHERE type='table' AND name=$name LIMIT 1;",
+            if (!ReignDatabase.QuerySql(connection, "SELECT name FROM sqlite_master WHERE type='table' AND name=$name LIMIT 1;",
                 new Dictionary<string, object> { ["name"] = table }).Any()) return 0;
-            return ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM " + table + ";").FirstOrDefault(), "count", 0);
+            return ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS count FROM " + table + ";").FirstOrDefault(), "count", 0);
         }
 
         private static Dictionary<string, int> StatusCounts(ReignDbConnection connection, string table, string column)
         {
             Dictionary<string, int> result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            if (!Program.QuerySql(connection, "SELECT name FROM sqlite_master WHERE type='table' AND name=$name LIMIT 1;",
+            if (!ReignDatabase.QuerySql(connection, "SELECT name FROM sqlite_master WHERE type='table' AND name=$name LIMIT 1;",
                 new Dictionary<string, object> { ["name"] = table }).Any()) return result;
-            foreach (Dictionary<string, object> row in Program.QuerySql(connection,
+            foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection,
                 "SELECT " + column + ",COUNT(*) AS count FROM " + table + " GROUP BY " + column + ";"))
                 result[ReadString(row, column, "unknown")] = ReadInt(row, "count", 0);
             return result;
@@ -657,7 +657,7 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
                 && DiplomacyService.SelectPoliticalPressureClans(campaign, "petitioners", 12, petitionerClans, "realm", "", 4, "origin").Count == 0,
                 "A realm without a vassal or a known sovereign yields no petitioners rather than substituting the ruler.");
             DiplomacyService.EnsurePoliticalPressureSchema(connection);
-            Program.ExecuteSql(connection, "SAVEPOINT pressure_observation_contract;");
+            ReignDatabase.ExecuteSql(connection, "SAVEPOINT pressure_observation_contract;");
             try
             {
                 var values = new Dictionary<string, object>();
@@ -675,9 +675,9 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
                 values["origin_stance"] = "awaiting_player"; values["target_stance"] = "preserve_relations";
                 values["severity_rank"] = 2; values["pressure_amount"] = 10;
                 values["target_pressure_before"] = 17; values["target_pressure_after"] = 7;
-                Program.ExecuteSql(connection, "INSERT INTO political_pressure_incidents (" + string.Join(",", values.Keys)
+                ReignDatabase.ExecuteSql(connection, "INSERT INTO political_pressure_incidents (" + string.Join(",", values.Keys)
                     + ") VALUES (" + string.Join(",", values.Keys.Select(key => "$" + key)) + ");", values);
-                Program.ExecuteSql(connection, @"INSERT INTO political_pressure_activity
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO political_pressure_activity
 (activity_id,campaign_id,timeline_id,world_day,incident_id,actor_kingdom_id,target_kingdom_id,event_type,created_ts) VALUES
 ('pressure_observation_main',$campaign,'pressure_main',1,'pressure_observation_incident','player','foreign','incident_completed',1),
 ('pressure_observation_orphan',$campaign,'pressure_main',2,'missing_incident','','','message_receipt',2),
@@ -685,10 +685,10 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
                     new Dictionary<string, object> { ["campaign"] = campaign });
                 Func<string> snapshot = () => Json.Serialize(new Dictionary<string, object>
                 {
-                    ["incidents"] = Program.QuerySql(connection, "SELECT * FROM political_pressure_incidents ORDER BY incident_id;"),
-                    ["activity"] = Program.QuerySql(connection, "SELECT * FROM political_pressure_activity ORDER BY activity_id;"),
-                    ["pressure"] = Program.QuerySql(connection, "SELECT * FROM political_pressure_state ORDER BY actor_kingdom_id,target_kingdom_id;"),
-                    ["receipts"] = Program.QuerySql(connection, "SELECT * FROM political_pressure_delta_receipts ORDER BY incident_id,actor_kingdom_id,target_kingdom_id;")
+                    ["incidents"] = ReignDatabase.QuerySql(connection, "SELECT * FROM political_pressure_incidents ORDER BY incident_id;"),
+                    ["activity"] = ReignDatabase.QuerySql(connection, "SELECT * FROM political_pressure_activity ORDER BY activity_id;"),
+                    ["pressure"] = ReignDatabase.QuerySql(connection, "SELECT * FROM political_pressure_state ORDER BY actor_kingdom_id,target_kingdom_id;"),
+                    ["receipts"] = ReignDatabase.QuerySql(connection, "SELECT * FROM political_pressure_delta_receipts ORDER BY incident_id,actor_kingdom_id,target_kingdom_id;")
                 });
                 string before = snapshot();
                 var filter = new Dictionary<string, string> { ["pair"] = "player|foreign" };
@@ -714,8 +714,8 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
             }
             finally
             {
-                Program.ExecuteSql(connection, "ROLLBACK TO SAVEPOINT pressure_observation_contract;");
-                Program.ExecuteSql(connection, "RELEASE SAVEPOINT pressure_observation_contract;");
+                ReignDatabase.ExecuteSql(connection, "ROLLBACK TO SAVEPOINT pressure_observation_contract;");
+                ReignDatabase.ExecuteSql(connection, "RELEASE SAVEPOINT pressure_observation_contract;");
             }
         }
 
@@ -845,7 +845,7 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
                 Dictionary<string, object> first = WorldTestHeartbeatApi(heartbeat);
                 Dictionary<string, object> second = WorldTestHeartbeatApi(heartbeat);
                 ProcessNextWorldTestRollup();
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     EnsureWorldTestSchema(connection);
                     List<Dictionary<string, object>> announcementFixture = new List<Dictionary<string, object>>
@@ -908,9 +908,9 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
                     {
                         DiplomacyService.WriteDiplomaticEventQueue(campaign, previousAnnouncements);
                     }
-                    int count = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM world_test_native_heartbeats;").FirstOrDefault(), "count", 0);
-                    int rollups = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM world_test_daily_rollups;").FirstOrDefault(), "count", 0);
-                    int rebellionRolls = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM world_test_rebellion_rolls;").FirstOrDefault(), "count", 0);
+                    int count = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS count FROM world_test_native_heartbeats;").FirstOrDefault(), "count", 0);
+                    int rollups = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS count FROM world_test_daily_rollups;").FirstOrDefault(), "count", 0);
+                    int rebellionRolls = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS count FROM world_test_rebellion_rolls;").FirstOrDefault(), "count", 0);
                     bool heartbeatIdempotent = ReadBool(first, "ok", false)
                         && ReadBool(second, "ok", false) && count == 1
                         && rollups == 1 && rebellionRolls == 1;
@@ -926,13 +926,13 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
                                     ["worker"] = WorldTestRollupWorkerStatus()
                                 }));
                     RelationshipsService.EnsureMbtiRelationshipSchema(connection);
-                    Program.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
 pair_key,hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,tag_a_to_b,tag_b_to_a,shared_tag,
 first_day,last_day,updated_ts) VALUES
 ('a|b','a','b',-70,85,'nemesis','bonded','',1,7,1),
 ('a|c','a','c',10,10,'acquaintance','acquaintance','',2,7,1),
 ('a|player_hero','a','player_hero',100,100,'bonded','bonded','',2,7,1);");
-                    Program.ExecuteSql(connection, @"INSERT INTO relationship_observed_heroes(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_observed_heroes(
 hero_id,profile_json,profile_hash,first_observed_day,last_observed_day,updated_ts)
 VALUES
 ('a','{""heroStringId"":""a"",""isFemale"":false,""isAlive"":true,""spouseId"":""c""}','',1,7,1),
@@ -956,7 +956,7 @@ VALUES
                             ["tagAToB"] = "acquaintance", ["tagBToA"] = "acquaintance",
                             ["firstDay"] = 2
                         }, new Dictionary<string, object>());
-                    Program.ExecuteSql(connection, @"INSERT INTO marriage_evaluations(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO marriage_evaluations(
 evaluation_id,route,status,hero_a_id,hero_b_id,clan_a_id,clan_b_id,leader_a_id,leader_b_id,
 world_day,score,leader_a_approved,leader_b_approved,resentment_a,resentment_b,payload_json,created_ts,updated_ts,timeline_id)
 VALUES('arranged_executed','arranged','executed','a','b','clan_a','clan_b','leader_a','leader_b',
@@ -965,7 +965,7 @@ VALUES('arranged_executed','arranged','executed','a','b','clan_a','clan_b','lead
 7,70,1,1,0,0,'{}',1,1,'main'),
 ('arranged_player','arranged','executed','a','player_hero','clan_a','player_clan','leader_a','player_hero',
 7,99,1,1,0,0,'{}',1,1,'main');");
-                    Program.ExecuteSql(connection, @"INSERT INTO relationship_director_actions(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_director_actions(
 director_action_id,action_type,status,world_day,actor_id,target_id,payload_json,created_ts,resolved_ts)
 VALUES
 ('romantic_completed','marriage','completed',7,'a','c',
@@ -1068,11 +1068,11 @@ VALUES
                     && ReadInt(ReadDictionary(exactPairRow, "pair"), "affinity_a_to_b", 0) == 100
                     && ReadString(ReadDictionary(exactPairRow, "firstToSecond"), "observerId", "") == "player_hero",
                     "Explicit exact-pair diagnostics include player consequences and preserve requested observer direction; passive reports still exclude the player.");
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    int beforePairs = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS n FROM relationship_pair_chemistry;").First(), "n", 0);
+                    int beforePairs = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS n FROM relationship_pair_chemistry;").First(), "n", 0);
                     var missingPair = ReadWorldTestRelationshipPair(connection, campaign, "main", "missing_observer|missing_target");
-                    int afterPairs = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS n FROM relationship_pair_chemistry;").First(), "n", 0);
+                    int afterPairs = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS n FROM relationship_pair_chemistry;").First(), "n", 0);
                     bool rejected = false;
                     try { ReadWorldTestRelationshipPair(connection, campaign, "main", "a|a"); }
                     catch (ArgumentException) { rejected = true; }
@@ -1083,33 +1083,33 @@ VALUES
                         "Missing pair observation creates no relationship; malformed self-pairs fail before access.");
                     ReputationService.EnsureRulerFavorContactSchema(connection);
                     ReputationService.EnsureSocialReputationSchema(connection);
-                    Program.ExecuteSql(connection, "SAVEPOINT pair_observation_contract;");
+                    ReignDatabase.ExecuteSql(connection, "SAVEPOINT pair_observation_contract;");
                     try
                     {
                         var p = new Dictionary<string, object> { ["campaign"] = campaign };
-                        Program.ExecuteSql(connection, @"INSERT INTO court_ruler_favor_contact
+                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO court_ruler_favor_contact
 (campaign_id,timeline_id,ruler_id,favorite_id,last_contact_day,grace_day,contact_id)
 VALUES($campaign,'main','player_hero','a',-100,-100,'observation_fixture');", p);
-                        Program.ExecuteSql(connection, @"INSERT INTO character_reputations
+                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO character_reputations
 (campaign_id,timeline_id,subject_id,tag_id,acquired_day,catalog_revision,snapshot_json,status,updated_ts)
 VALUES($campaign,'main','player_hero','ruler_favoring:observation_fixture',-100,1,'{""linkedHeroId"":""a""}','active',1);", p);
-                        string beforeContact = Json.Serialize(Program.QuerySql(connection, "SELECT * FROM court_ruler_favor_contact;"));
-                        string beforeReputations = Json.Serialize(Program.QuerySql(connection, "SELECT * FROM character_reputations;"));
+                        string beforeContact = Json.Serialize(ReignDatabase.QuerySql(connection, "SELECT * FROM court_ruler_favor_contact;"));
+                        string beforeReputations = Json.Serialize(ReignDatabase.QuerySql(connection, "SELECT * FROM character_reputations;"));
                         var observed = ReadWorldTestRelationshipPair(connection, campaign, "main", "a|player_hero");
                         add("relationship_pair_favor_observation_is_non_mutating",
                             ReadDictionaryList(observed, "favorContact").Count == 1
                             && ReadDictionaryList(observed, "favorReputations").Count == 1
-                            && beforeContact == Json.Serialize(Program.QuerySql(connection, "SELECT * FROM court_ruler_favor_contact;"))
-                            && beforeReputations == Json.Serialize(Program.QuerySql(connection, "SELECT * FROM character_reputations;")),
+                            && beforeContact == Json.Serialize(ReignDatabase.QuerySql(connection, "SELECT * FROM court_ruler_favor_contact;"))
+                            && beforeReputations == Json.Serialize(ReignDatabase.QuerySql(connection, "SELECT * FROM character_reputations;")),
                             "Exact-pair favor observation returns the clock and established tag without refreshing contact or expiring reputation.");
                     }
                     finally
                     {
-                        Program.ExecuteSql(connection, "ROLLBACK TO SAVEPOINT pair_observation_contract;");
-                        Program.ExecuteSql(connection, "RELEASE SAVEPOINT pair_observation_contract;");
+                        ReignDatabase.ExecuteSql(connection, "ROLLBACK TO SAVEPOINT pair_observation_contract;");
+                        ReignDatabase.ExecuteSql(connection, "RELEASE SAVEPOINT pair_observation_contract;");
                     }
                 }
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
                     AddPoliticalPressureObservationContracts(connection, campaign, add);
                 Dictionary<string, object> dayEightHeartbeat =
                     new Dictionary<string, object>(heartbeat, StringComparer.OrdinalIgnoreCase)
@@ -1118,9 +1118,9 @@ VALUES($campaign,'main','player_hero','ruler_favoring:observation_fixture',-100,
                 };
                 WorldTestHeartbeatApi(dayEightHeartbeat);
                 ProcessNextWorldTestRollup();
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
+                    ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
 affinity_a_to_b=35,affinity_b_to_a=35,tag_a_to_b='friend',tag_b_to_a='friend',
 last_day=9,updated_ts=2 WHERE pair_key='a|c';");
                     ApplyWorldTestRelationshipPairDelta(connection, campaign, "main", 9,
@@ -1167,9 +1167,9 @@ last_day=9,updated_ts=2 WHERE pair_key='a|c';");
                         ? "One compact rollup per day reports affinity-band and tag population changes without storing per-change telemetry."
                         : "Compact daily distribution changes disagreed: "
                             + Json.Serialize(dailyChange));
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    Program.ExecuteSql(connection, @"INSERT INTO schema_meta(key,value)
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO schema_meta(key,value)
 VALUES($key,$day) ON CONFLICT(key) DO UPDATE SET value=$day;",
                         new Dictionary<string, object>
                         {
@@ -1222,7 +1222,7 @@ VALUES($key,$day) ON CONFLICT(key) DO UPDATE SET value=$day;",
                 Program.WriteJsonObject(Path.Combine(Program.CampaignDirectory(realCampaign), "campaign.json"),
                     new Dictionary<string, object> { ["campaignId"] = realCampaign, ["campaignLabel"] = "Real fixture" });
                 using (ReignDbConnection realConnection =
-                    Program.OpenCampaignConnection(realCampaign))
+                    ReignDatabase.OpenCampaignConnection(realCampaign))
                 {
                     EnsureWorldTestSchema(realConnection);
                 }
@@ -1239,15 +1239,15 @@ VALUES($key,$day) ON CONFLICT(key) DO UPDATE SET value=$day;",
                     && ReadString(Program.ReadJsonObject(Path.Combine(Program.CampaignDirectory(observedCampaign), "campaign.json")), "mainHeroName", "") == "Observed Hero";
                 add("heartbeat_establishes_real_campaign", heartbeatCreatedMetadata,
                     "A native World Test heartbeat makes a fresh campaign selectable before its first Save Sync registration.");
-                using (ReignDbConnection observedConnection = Program.OpenCampaignConnection(observedCampaign))
+                using (ReignDbConnection observedConnection = ReignDatabase.OpenCampaignConnection(observedCampaign))
                 {
                     ReputationService.EnsureRumorSchema(observedConnection);
-                    Program.ExecuteSql(observedConnection, @"INSERT OR REPLACE INTO rumor_occurrences(
+                    ReignDatabase.ExecuteSql(observedConnection, @"INSERT OR REPLACE INTO rumor_occurrences(
 occurrence_id,campaign_id,timeline_id,archetype_id,thread_key,world_day,expires_day,status,
 catalog_revision,participants_json,created_ts,updated_ts)
 VALUES('rumor_inspector_fixture',$campaign,'main','marital_strife','pair_fixture',7,37,'active',1,'[]',1,1);",
                         new Dictionary<string, object> { ["campaign"] = observedCampaign });
-                    Program.ExecuteSql(observedConnection, @"INSERT OR REPLACE INTO rumor_subject_tags(
+                    ReignDatabase.ExecuteSql(observedConnection, @"INSERT OR REPLACE INTO rumor_subject_tags(
 occurrence_id,subject_id,tag_id,subject_role,description,status,updated_ts)
 VALUES('rumor_inspector_fixture','npc_observer','marital_strife','spouse','Fixture social report','active',1);");
                 }
@@ -1264,8 +1264,8 @@ VALUES('rumor_inspector_fixture','npc_observer','marital_strife','spouse','Fixtu
                 observedHeartbeat["campaignLabel"] = "Legacy observed fixture";
                 WorldTestHeartbeatApi(observedHeartbeat);
                 File.Delete(Path.Combine(Program.CampaignDirectory(legacyObservedCampaign), "campaign.json"));
-                using (ReignDbConnection observedConnection = Program.OpenCampaignConnection(observedCampaign))
-                    Program.ExecuteSql(observedConnection,
+                using (ReignDbConnection observedConnection = ReignDatabase.OpenCampaignConnection(observedCampaign))
+                    ReignDatabase.ExecuteSql(observedConnection,
                         "UPDATE world_test_native_heartbeats SET updated_ts=9999999999;");
                 Dictionary<string, object> worldTestCampaigns = WorldTestCampaignsApi(new Dictionary<string, string>());
                 Dictionary<string, object> backupCampaigns = PersistenceService.CampaignListApi();

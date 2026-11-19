@@ -37,13 +37,13 @@ namespace ReignBetaServer
                 {
                     ["ok"] = false, ["error"] = "accusedHeroId is required."
                 };
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureWorldHistorySchema(connection);
                 List<string> evidenceIds = new List<string>();
                 if (TableExists(connection, "foreign_agent_assignments"))
                 {
-                    evidenceIds.AddRange(Program.QuerySql(connection, @"SELECT agent_hero_id,sponsor_kingdom_id
+                    evidenceIds.AddRange(ReignDatabase.QuerySql(connection, @"SELECT agent_hero_id,sponsor_kingdom_id
 FROM foreign_agent_assignments
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND agent_hero_id=$accused AND status='exposed';",
@@ -54,7 +54,7 @@ AND agent_hero_id=$accused AND status='exposed';",
                         }).Select(row => "foreign_agent:" + accusedId + ":"
                             + ReadString(row, "sponsor_kingdom_id", "unknown")));
                 }
-                List<Dictionary<string, object>> rows = Program.QuerySql(connection, @"SELECT DISTINCT e.*
+                List<Dictionary<string, object>> rows = ReignDatabase.QuerySql(connection, @"SELECT DISTINCT e.*
 FROM world_history_events e
 JOIN world_history_entities entity ON entity.event_id=e.event_id
 WHERE e.timeline_id=$timeline AND entity.entity_id=$accused
@@ -117,15 +117,15 @@ ORDER BY e.sequence DESC LIMIT 200;", new Dictionary<string, object>
             int reputationValue = Clamp(ReadInt(payload, "reputationValue", 0), -100, 100);
             string description = Program.LimitText(ReadString(payload, "description", ""), 1000);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 ReputationService.EnsureSocialReputationSchema(connection);
                 RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                 RelationshipsService.EnsureRelationshipDirectorSchema(connection);
-                Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                 try
                 {
-                    Dictionary<string, object> existing = Program.QuerySql(connection, @"
+                    Dictionary<string, object> existing = ReignDatabase.QuerySql(connection, @"
 SELECT * FROM character_reputations
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND subject_id=$subject AND tag_id=$tag LIMIT 1;",
@@ -177,7 +177,7 @@ AND subject_id=$subject AND tag_id=$tag LIMIT 1;",
                             ["arrestAppliedRelationshipDelta"] = appliedDelta,
                             ["playerOriginated"] = true
                         };
-                        Program.ExecuteSql(connection, @"
+                        ReignDatabase.ExecuteSql(connection, @"
 INSERT INTO character_reputations(campaign_id,timeline_id,subject_id,tag_id,
 source_occurrence_id,archetype_id,subject_role,description,reputation_value,
 acquired_day,catalog_revision,snapshot_json,status,updated_ts)
@@ -218,7 +218,7 @@ snapshot_json=$snapshot,status='active',updated_ts=$ts;",
                                     "The rescinded arrest relationship effect could not be removed.");
                             appliedDelta = 0;
                         }
-                        Program.ExecuteSql(connection, @"
+                        ReignDatabase.ExecuteSql(connection, @"
 UPDATE character_reputations SET status='rescinded_by_accuser',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND subject_id=$subject AND tag_id=$tag;",
@@ -228,7 +228,7 @@ AND subject_id=$subject AND tag_id=$tag;",
                                 ["subject"] = accusedId, ["tag"] = tagId, ["ts"] = ts
                             });
                     }
-                    Program.ExecuteSql(connection, "COMMIT;");
+                    ReignDatabase.ExecuteSql(connection, "COMMIT;");
                     RelationshipsService.InvalidateRelationshipPairStateCache(campaignId);
                     return new Dictionary<string, object>
                     {
@@ -240,7 +240,7 @@ AND subject_id=$subject AND tag_id=$tag;",
                 }
                 catch (Exception ex)
                 {
-                    try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                     return new Dictionary<string, object>
                     {
                         ["ok"] = false, ["caseId"] = caseId, ["error"] = ex.Message

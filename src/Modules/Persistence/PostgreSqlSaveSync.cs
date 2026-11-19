@@ -157,7 +157,7 @@ namespace ReignBetaServer
                 // source is compared with its snapshot row; the no-op marker is
                 // not permission to include arbitrary current/foreign history.
                 bool memorySourcesInitialized = false;
-                using (var memoryConnection = Program.OpenCampaignConnection(campaignId))
+                using (var memoryConnection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     var memoryContext = DialogueService.RestoredMemorySourceContext(memoryConnection, ReadString(point, "timelineId", ""));
                     if (ReadString(memoryContext, "save_point_id", "") != savePointId

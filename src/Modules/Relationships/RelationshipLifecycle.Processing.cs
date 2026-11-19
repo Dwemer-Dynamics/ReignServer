@@ -28,7 +28,7 @@ namespace ReignBetaServer
             else
             {
                 EnsureRelationshipLifecycleSchema(connection);
-                row = Program.QuerySql(connection,
+                row = ReignDatabase.QuerySql(connection,
                     "SELECT * FROM relationship_pair_lifecycle WHERE pair_key=$pair LIMIT 1;",
                     new Dictionary<string, object> { ["pair"] = pair.PairKey }).FirstOrDefault()
                     ?? new Dictionary<string, object>();
@@ -470,7 +470,7 @@ namespace ReignBetaServer
                             || (!marriedToEachOther && !unmarriedCommitment)
                             || !legalFatherId.Equals(fatherId,
                                 StringComparison.OrdinalIgnoreCase);
-                        Program.ExecuteSql(connection, @"INSERT INTO conceptions(
+                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO conceptions(
 conception_id,attempt_id,mother_id,biological_father_id,legal_father_id,conception_day,due_day,status,secrecy,
 payload_json,created_ts,updated_ts)
 VALUES($id,$attempt,$mother,$father,$legal,$day,$due,'pending_game',$secrecy,$payload,$ts,$ts);",
@@ -776,7 +776,7 @@ organic_marriage_colocated_days=$marriageColocatedDays,last_processed_day=$day,v
 
             // Seed missing checkpoints in one write. They are existing state,
             // not decay work for the current period.
-            Program.ExecuteSql(connection, @"
+            ReignDatabase.ExecuteSql(connection, @"
 UPDATE relationship_pair_chemistry
 SET last_decay_period=$period,updated_ts=$ts
 WHERE last_decay_period<0
@@ -787,7 +787,7 @@ AND (affinity_a_to_b<>0 OR affinity_b_to_a<>0);",
                     ["ts"] = ts
                 });
 
-            List<Dictionary<string, object>> rows = Program.QuerySql(connection, @"
+            List<Dictionary<string, object>> rows = ReignDatabase.QuerySql(connection, @"
 SELECT * FROM relationship_pair_chemistry
 WHERE last_decay_period>=0 AND last_decay_period<$period
 AND (affinity_a_to_b<>0 OR affinity_b_to_a<>0);",
@@ -805,7 +805,7 @@ AND (affinity_a_to_b<>0 OR affinity_b_to_a<>0);",
                 };
             }
 
-            Dictionary<string, int> standings = Program.QuerySql(connection, @"
+            Dictionary<string, int> standings = ReignDatabase.QuerySql(connection, @"
 SELECT subject_id,standing_value FROM character_public_standing
 WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                 new Dictionary<string, object>
@@ -819,11 +819,11 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                     row => ReadInt(row, "standing_value", 0),
                     StringComparer.OrdinalIgnoreCase);
             Dictionary<string, Dictionary<string, object>> lifecycleByPair =
-                Program.QuerySql(connection, "SELECT * FROM relationship_pair_lifecycle;")
+                ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_pair_lifecycle;")
                     .ToDictionary(row => ReadString(row, "pair_key", ""),
                         row => row, StringComparer.OrdinalIgnoreCase);
             Dictionary<string, Dictionary<string, object>> targetsByPair =
-                Program.QuerySql(connection, "SELECT * FROM relationship_native_targets;")
+                ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_native_targets;")
                     .ToDictionary(row => ReadString(row, "pair_key", ""),
                         row => row, StringComparer.OrdinalIgnoreCase);
 
@@ -1054,7 +1054,7 @@ WHERE chemistry.pair_key=x.pair;",
         private static void RecordRelationshipIncident(ReignDbConnection connection, AmbientPairContext pair, string kind,
             double day, string summary, Dictionary<string, object> payload, string rumorId = "")
         {
-            Program.ExecuteSql(connection, @"INSERT INTO relationship_incidents(
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_incidents(
 incident_id,pair_key,kind,hero_a_id,hero_b_id,world_day,summary,rumor_id,payload_json,created_ts)
 VALUES($id,$pair,$kind,$a,$b,$day,$summary,$rumor,$payload,$ts);",
                 new Dictionary<string, object>

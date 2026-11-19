@@ -29,7 +29,7 @@ namespace ReignBetaServer
             if (decision.Kind != "propose") return;
             string campaign = ReadString(payload, "campaignId", "");
             if (campaign.Length == 0) return;
-            using var c = Program.OpenCampaignConnection(campaign);
+            using var c = ReignDatabase.OpenCampaignConnection(campaign);
             var state = ReadNpcLives(c, campaign, DialogueService.ContinuityTimeline(payload));
             if (!IsDuplicateNpcStoryDuelProposal(state, hero, player, payload, decision)) return;
             // Reject the whole proposed bundle; silently retaining only some terms
@@ -52,7 +52,7 @@ namespace ReignBetaServer
             var assessment = ReadDictionary(parsed, "npcLeaveAssessment");
             string campaign = ReadString(payload, "campaignId", "");
             if (campaign.Length == 0) return;
-            using var c = Program.OpenCampaignConnection(campaign);
+            using var c = ReignDatabase.OpenCampaignConnection(campaign);
             var state = ReadNpcLives(c, campaign, DialogueService.ContinuityTimeline(payload));
             // The saved request owns this turn. An omitted or wrong model-supplied
             // assessment must not bypass the guard or publish an invented promise.

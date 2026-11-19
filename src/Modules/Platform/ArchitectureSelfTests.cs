@@ -12,7 +12,7 @@ namespace ReignBetaServer
         private static List<Dictionary<string, object>> PersistArchitectureSceneFixture(string campaignId, List<Dictionary<string, object>> turns)
         {
             const string session = "unknown_identity_scene_summary";
-            using var connection = OpenCampaignConnection(campaignId);
+            using var connection = ReignDatabase.OpenCampaignConnection(campaignId);
             int ordinal = 0;
             foreach (var turn in turns)
                 DialogueService.InsertConversationTurn(connection, ReadString(turn, "turn_id", ""), session, ReadString(turn, "event_id", ""), ++ordinal,
@@ -21,7 +21,7 @@ namespace ReignBetaServer
                     TryParseJsonObject(ReadString(turn, "payload_json", "{}")));
             // Compaction now verifies exact persisted source rows, including default
             // columns. A fabricated partial dictionary cannot establish provenance.
-            return QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$session ORDER BY turn_order;", TestDict("session", session));
+            return ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$session ORDER BY turn_order;", TestDict("session", session));
         }
 
         private static List<Dictionary<string, object>> RunInteractionArchitectureSelfTests()
@@ -210,9 +210,9 @@ namespace ReignBetaServer
                 };
                 string groupPrompt = DialogueService.BuildSharedGroupConversationPrompt(campaignId, groupPayload, "npc_a", lines, "What do all of you think?");
                 DialogueService.UpdateSharedGroupConversationState(campaignId, groupPayload, "npc_a", "NPC A", "NPC B is right about the eastern road. NPC C, why is the bridge worse?", "group_test", 100);
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    Dictionary<string, object> state = QuerySql(connection, "SELECT * FROM group_conversation_state WHERE session_id='group_test';").FirstOrDefault();
+                    Dictionary<string, object> state = ReignDatabase.QuerySql(connection, "SELECT * FROM group_conversation_state WHERE session_id='group_test';").FirstOrDefault();
                     add("shared_group_state", groupPrompt.Contains("npc_b") && groupPrompt.Contains("npc_c")
                         && groupPrompt.Contains("COMPACT DERIVED STATE")
                         && groupPrompt.Contains("acknowledge it instead of claiming omission", StringComparison.Ordinal)
@@ -259,7 +259,7 @@ namespace ReignBetaServer
                             foreach (var eventLine in new[] { playerRow, npcRow }.Where(row => row != null))
                             {
                                 eventLine["ts"] = 100L; // A real group beat can finish within one second.
-                                var persisted = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;",
+                                var persisted = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;",
                                     TestDict("id", ReadString(eventLine, "sourceTurnId", ""))).SingleOrDefault();
                                 sourceIdsMatchAcceptedRows &= persisted != null
                                     && ReadString(persisted, "role", "") == ReadString(eventLine, "role", "")
@@ -646,23 +646,23 @@ namespace ReignBetaServer
                     string firstId = DialogueService.UpsertTemporalAssertion(connection, campaignId, "evt_1", "belief_1", "belief", first, 100);
                     Dictionary<string, object> second = new Dictionary<string, object>(first) { ["claim"] = "The eastern bridge has collapsed.", ["confidence"] = 0.95d };
                     string secondId = DialogueService.UpsertTemporalAssertion(connection, campaignId, "evt_2", "belief_2", "belief", second, 200);
-                    List<Dictionary<string, object>> versions = QuerySql(connection, "SELECT * FROM temporal_knowledge_assertions WHERE fact_key=(SELECT fact_key FROM temporal_knowledge_assertions WHERE assertion_id=$id) ORDER BY observed_ts;", new Dictionary<string, object> { ["id"] = secondId });
+                    List<Dictionary<string, object>> versions = ReignDatabase.QuerySql(connection, "SELECT * FROM temporal_knowledge_assertions WHERE fact_key=(SELECT fact_key FROM temporal_knowledge_assertions WHERE assertion_id=$id) ORDER BY observed_ts;", new Dictionary<string, object> { ["id"] = secondId });
                     add("temporal_belief_versions", versions.Count == 2 && ReadLong(versions[0], "valid_to_ts", 0) == 200
                         && ReadString(versions[1], "supersedes_assertion_id", "") == firstId,
                         "A changed proposition closes the former validity interval and links the new belief to the superseded version.", versions);
 
                     // Simulate Save Sync restoring an older database after the path
                     // was cached as migrated by this process.
-                    ExecuteSql(connection, "DROP TABLE group_conversation_contributions;");
-                    ExecuteSql(connection, "DROP TABLE group_conversation_state;");
-                    ExecuteSql(connection, "UPDATE schema_meta SET value='2' WHERE key='version';");
+                    ReignDatabase.ExecuteSql(connection, "DROP TABLE group_conversation_contributions;");
+                    ReignDatabase.ExecuteSql(connection, "DROP TABLE group_conversation_state;");
+                    ReignDatabase.ExecuteSql(connection, "UPDATE schema_meta SET value='2' WHERE key='version';");
                 }
 
-                using (ReignDbConnection restored = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection restored = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    int restoredTables = ReadInt(QuerySql(restored, @"SELECT COUNT(*) AS count FROM sqlite_master
+                    int restoredTables = ReadInt(ReignDatabase.QuerySql(restored, @"SELECT COUNT(*) AS count FROM sqlite_master
 WHERE type='table' AND name IN ('group_conversation_state','group_conversation_contributions');").FirstOrDefault(), "count", 0);
-                    add("save_sync_schema_remigration", restoredTables == 2 && IsMemorySchemaCurrent(restored),
+                    add("save_sync_schema_remigration", restoredTables == 2 && ReignDatabase.IsMemorySchemaCurrent(restored),
                         "A Save Sync database replacement invalidates the path cache and reruns current migrations.", restoredTables);
                 }
 
@@ -989,14 +989,14 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                     && currentSessionHistory.Count(row => ReadString(row, "role", "") == "npc") == 2,
                     "The individual/official conversation database reader preserves one player line and both NPC lines from a shared exchange.", currentSessionHistory);
                 Dictionary<string, object> exactSocialHistory;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    ExecuteSql(connection, "UPDATE conversation_sessions SET status='closed',end_ts=302 WHERE session_id='social_event_social_memory_event';");
+                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_sessions SET status='closed',end_ts=302 WHERE session_id='social_event_social_memory_event';");
                     exactSocialHistory = DialogueService.SearchExactConversationHistory(connection, "npc_b", "Reconstruct our prior group discussion.",
                         new Dictionary<string, object> { ["primaryLane"] = "exact_history", ["needsExactTranscript"] = true }, 10000, null, "", 30);
-                    int playerTurns = ReadInt(QuerySql(connection, @"SELECT COUNT(*) AS count FROM conversation_turns
+                    int playerTurns = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count FROM conversation_turns
 WHERE session_id='social_event_social_memory_event' AND role='player';").FirstOrDefault(), "count", 0);
-                    int npcTurns = ReadInt(QuerySql(connection, @"SELECT COUNT(*) AS count FROM conversation_turns
+                    int npcTurns = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count FROM conversation_turns
 WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDefault(), "count", 0);
                     string exactText = ReadString(exactSocialHistory, "text", "");
                     add("social_event_canonical_group_history", playerTurns == 1 && npcTurns == 2
@@ -1185,9 +1185,9 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                 DialogueService.StoreSocialEventConversationExchange(campaignId, recallRequest, "npc_b", "player", "Player", "NPC B",
                     "Reconstruct our prior group discussion without guessing.",
                     "It happened at a roadside camp with dried meat.", "social_recall_source", "social_recall_event", 400);
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    ExecuteSql(connection, "UPDATE conversation_sessions SET status='closed',end_ts=402 WHERE session_id='social_event_social_recall_event';");
+                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_sessions SET status='closed',end_ts=402 WHERE session_id='social_event_social_recall_event';");
                     Dictionary<string, object> protectedHistory = DialogueService.SearchExactConversationHistory(connection, "npc_b",
                         "Reconstruct our prior group discussion without guessing.",
                         new Dictionary<string, object> { ["primaryLane"] = "exact_history", ["needsExactTranscript"] = true }, 14000, null, "", 30);
@@ -1212,9 +1212,9 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                 });
                 string recallAuditSummaryId = ReadString(recallAuditFinish, "sceneSummaryId", "");
                 Dictionary<string, object> recallAuditSummary;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    recallAuditSummary = QuerySql(connection, "SELECT * FROM summaries WHERE summary_id=$id LIMIT 1;",
+                    recallAuditSummary = ReignDatabase.QuerySql(connection, "SELECT * FROM summaries WHERE summary_id=$id LIMIT 1;",
                         new Dictionary<string, object> { ["id"] = recallAuditSummaryId }).FirstOrDefault() ?? new Dictionary<string, object>();
                 }
                 add("recall_scene_is_audit_only", ReadBool(recallAuditFinish, "recallOnlySession", false)
@@ -1248,9 +1248,9 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     new List<string> { "npc_a", "npc_b", "player" },
                     retrievalEligible: false);
                 Dictionary<string, object> recallProjectionCounts;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    recallProjectionCounts = QuerySql(connection, @"SELECT
+                    recallProjectionCounts = ReignDatabase.QuerySql(connection, @"SELECT
 (SELECT COUNT(*) FROM events WHERE event_id='recall_projection_event') AS events,
 (SELECT COUNT(*) FROM memories WHERE event_id='recall_projection_event') AS memories,
 (SELECT COUNT(*) FROM beliefs WHERE event_id='recall_projection_event') AS beliefs,
@@ -1289,9 +1289,9 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
                     "conversation:durable", 505L);
                 Dictionary<string, object> conversationProjectionCounts;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    conversationProjectionCounts = QuerySql(connection, @"SELECT
+                    conversationProjectionCounts = ReignDatabase.QuerySql(connection, @"SELECT
 (SELECT COUNT(*) FROM events WHERE event_id='low_salience_turn_event') AS low_events,
 (SELECT COUNT(*) FROM memories WHERE event_id='low_salience_turn_event') AS low_memories,
 (SELECT COUNT(*) FROM event_fts WHERE event_id='low_salience_turn_event') AS low_event_fts,
@@ -2544,11 +2544,11 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                 try
                 {
                     CampaignsRootOverride.Value = scopedResumeRoot;
-                    using (ReignDbConnection connection = OpenCampaignConnection(oldResumeCampaign))
+                    using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(oldResumeCampaign))
                     {
                         WorldSimulationService.EnsureWorldHistorySchema(connection);
                         ReputationService.EnsureSocialReputationSchema(connection);
-                        ExecuteSql(connection, @"INSERT INTO world_history_events(
+                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_events(
 event_id,campaign_id,timeline_id,sequence,world_day,event_type,summary,payload_json,created_utc)
 VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
 '{""subjectId"":""old_subject"",""archetypeId"":""battle_proven""}',$created);",
@@ -2568,8 +2568,8 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                 }
                 finally
                 {
-                    InvalidateCampaignSchemaCaches(oldResumeCampaign);
-                    InvalidateCampaignSchemaCaches(newResumeCampaign);
+                    ReignDatabase.InvalidateCampaignSchemaCaches(oldResumeCampaign);
+                    ReignDatabase.InvalidateCampaignSchemaCaches(newResumeCampaign);
                     ReignPostgreSqlStorage.DropCampaign(oldResumeCampaign);
                     ReignPostgreSqlStorage.DropCampaign(newResumeCampaign);
                     CampaignsRootOverride.Value = priorScopedResumeRoot;

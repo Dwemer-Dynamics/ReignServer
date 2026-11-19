@@ -56,7 +56,7 @@ namespace ReignBetaServer
                 && ReadBool(admission, "leaseReleased", false) && ReadBool(admission, "noPreparationStarted", false));
 
             Dictionary<string, object> validAdmission;
-            using (var admissionConnection = Program.OpenCampaignConnection(campaign))
+            using (var admissionConnection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 var admissionState = new NpcLivesState { CampaignId = campaign, TimelineId = "approach_admission" };
                 var admissionEncounter = new NpcConversationEncounter { Id = "admission", HeroId = encounter.HeroId,

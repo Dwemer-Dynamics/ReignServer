@@ -85,11 +85,11 @@ namespace ReignBetaServer
                     var context = TestDict("timelineId", "replay", "worldDay", 1d, "playerHeroStringId", player,
                         "conversationSessionId", session, "memoryActiveTopic", sources.LastOrDefault(s => ReadString(s, "speakerId", "") == "npc") is { } latest
                             ? ReadString(latest, "text", "") : "");
-                    using (var connection = Program.OpenCampaignConnection(campaign))
+                    using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                     {
                         // Case-local identities and source IDs prevent a prior replay
                         // from becoming evidence for a later independent case.
-                        Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,channel,status,
+                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,channel,status,
 start_ts,start_world_day,participants_json,payload_json) VALUES($session,$campaign,$npc,$player,'in_person','open',1,1,$participants,$payload);",
                             TestDict("session", session, "campaign", campaign, "npc", npc, "player", player,
                                 "participants", Json.Serialize(new[] { npc, player }), "payload", Json.Serialize(context)));

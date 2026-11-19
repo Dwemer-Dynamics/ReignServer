@@ -13,14 +13,14 @@ namespace ReignBetaServer
             var facts = NormalizeCourtLifeResolutionFacts(payload);
             if (facts == null) return;
             string matter = ReadString(payload, "matterId", "");
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsureCourtLifeSceneStore(connection);
                 foreach (string actor in Program.ObjectsFromValue(payload.TryGetValue("witnessHeroIds", out object witnesses) ? witnesses : null)
                     .OfType<string>().Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().Take(4))
                 {
                     string id = "court_resolution:" + CourtHash(timeline + "|" + matter + "|" + actor);
-                    Program.ExecuteSql(connection, "INSERT OR IGNORE INTO court_life_turns(turn_id,timeline_id,matter_id,actor_id,phase,player_text,reply_text,created_ts) VALUES($id,$timeline,$matter,$actor,'resolution','',$facts,$ts);",
+                    ReignDatabase.ExecuteSql(connection, "INSERT OR IGNORE INTO court_life_turns(turn_id,timeline_id,matter_id,actor_id,phase,player_text,reply_text,created_ts) VALUES($id,$timeline,$matter,$actor,'resolution','',$facts,$ts);",
                         new Dictionary<string, object> { ["id"] = id, ["timeline"] = timeline, ["matter"] = matter,
                             ["actor"] = actor, ["facts"] = Json.Serialize(facts), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                 }
@@ -71,10 +71,10 @@ namespace ReignBetaServer
         {
             string timeline = ReadString(payload, "timelineId", "");
             if (string.IsNullOrWhiteSpace(timeline) || string.IsNullOrWhiteSpace(hero)) return "";
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsureCourtLifeSceneStore(connection);
-                var rows = Program.QuerySql(connection, "SELECT reply_text FROM court_life_turns WHERE timeline_id=$timeline AND actor_id=$actor AND phase='resolution' ORDER BY created_ts DESC,turn_id DESC LIMIT 6;",
+                var rows = ReignDatabase.QuerySql(connection, "SELECT reply_text FROM court_life_turns WHERE timeline_id=$timeline AND actor_id=$actor AND phase='resolution' ORDER BY created_ts DESC,turn_id DESC LIMIT 6;",
                     new Dictionary<string, object> { ["timeline"] = timeline, ["actor"] = hero });
                 if (rows.Count == 0) return "";
                 return "\n\nAUTHORITATIVE COMPLETED COURT MATTERS YOU WITNESSED\n"

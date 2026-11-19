@@ -296,12 +296,12 @@ namespace ReignBetaServer
             string payloadJson = Json.Serialize(payload);
             List<string> memoryIds = new List<string>();
 
-            using (ReignDbConnection ownedConnection = existingConnection == null ? OpenCampaignConnection(campaignId) : null)
+            using (ReignDbConnection ownedConnection = existingConnection == null ? ReignDatabase.OpenCampaignConnection(campaignId) : null)
             {
                 var connection = existingConnection ?? ownedConnection;
                 using var publication = existingConnection == null ? connection.BeginTransaction() : null;
                 DeleteWorldMemoryEventProjection(connection, eventId);
-                ExecuteSql(connection, @"INSERT OR REPLACE INTO events(
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO events(
     event_id,campaign_id,ts,world_day,event_type,event_category,event_subtype,location_id,summary,participants_json,witnesses_json,about_entities_json,
     known_by_json,heard_as_rumor_by_json,hidden_from_json,visibility,importance,source_reliability,confidence,payload_json,vector_id,embedding_status,created_utc)
 VALUES(
@@ -352,7 +352,7 @@ VALUES(
                         InsertMemoryRow(connection, memoryId, eventId, "", memoryType, ts, worldDay, locationId, summary,
                             participants, witnesses, aboutEntitiesJson, new List<string>(), heardAsRumorBy, hiddenFrom, visibility,
                             importance, 0d, confidence, tags, "active", source, payloadJson, "", "not_indexed");
-                        ExecuteSql(connection, "UPDATE memories SET memory_domain=$domain WHERE memory_id=$id;",
+                        ReignDatabase.ExecuteSql(connection, "UPDATE memories SET memory_domain=$domain WHERE memory_id=$id;",
                             new Dictionary<string, object>
                             {
                                 ["domain"] = MemoryDomainForWorldEventProjection(eventCategory, eventType, memoryType, summary, tags, source),
@@ -377,7 +377,7 @@ VALUES(
                         InsertMemoryRow(connection, memoryId, eventId, ownerId, memoryType, ts, worldDay, locationId, summary,
                             participants, witnesses, aboutEntitiesJson, new List<string> { ownerId }, new List<string>(), hiddenFrom,
                             "private", importance, 0d, confidence, tags, "active", source, payloadJson, "", "not_indexed");
-                        ExecuteSql(connection, "UPDATE memories SET memory_domain=$domain WHERE memory_id=$id;",
+                        ReignDatabase.ExecuteSql(connection, "UPDATE memories SET memory_domain=$domain WHERE memory_id=$id;",
                             new Dictionary<string, object>
                             {
                                 ["domain"] = MemoryDomainForWorldEventProjection(eventCategory, eventType, memoryType, summary, tags, source),
@@ -446,13 +446,13 @@ VALUES(
             }
 
             Dictionary<string, object> parameters = new Dictionary<string, object> { ["event_id"] = eventId };
-            ExecuteSql(connection, "DELETE FROM memory_fts WHERE memory_id IN (SELECT memory_id FROM memories WHERE event_id=$event_id);", parameters);
-            ExecuteSql(connection, "DELETE FROM event_fts WHERE event_id=$event_id;", parameters);
-            ExecuteSql(connection, "DELETE FROM memories WHERE event_id=$event_id;", parameters);
-            ExecuteSql(connection, "DELETE FROM knowledge_receipts WHERE event_id=$event_id;", parameters);
-            ExecuteSql(connection, "DELETE FROM beliefs WHERE event_id=$event_id;", parameters);
-            ExecuteSql(connection, "DELETE FROM obligations WHERE event_id=$event_id;", parameters);
-            ExecuteSql(connection, "DELETE FROM comprehension WHERE event_id=$event_id;", parameters);
+            ReignDatabase.ExecuteSql(connection, "DELETE FROM memory_fts WHERE memory_id IN (SELECT memory_id FROM memories WHERE event_id=$event_id);", parameters);
+            ReignDatabase.ExecuteSql(connection, "DELETE FROM event_fts WHERE event_id=$event_id;", parameters);
+            ReignDatabase.ExecuteSql(connection, "DELETE FROM memories WHERE event_id=$event_id;", parameters);
+            ReignDatabase.ExecuteSql(connection, "DELETE FROM knowledge_receipts WHERE event_id=$event_id;", parameters);
+            ReignDatabase.ExecuteSql(connection, "DELETE FROM beliefs WHERE event_id=$event_id;", parameters);
+            ReignDatabase.ExecuteSql(connection, "DELETE FROM obligations WHERE event_id=$event_id;", parameters);
+            ReignDatabase.ExecuteSql(connection, "DELETE FROM comprehension WHERE event_id=$event_id;", parameters);
         }
 
         internal static void InsertMemoryRow(
@@ -482,7 +482,7 @@ VALUES(
             string vectorId,
             string embeddingStatus)
         {
-            ExecuteSql(connection, @"INSERT OR REPLACE INTO memories(
+            ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO memories(
     memory_id,event_id,owner_id,memory_type,ts,world_day,location_id,summary,participants_json,witnesses_json,about_entities_json,
     known_by_json,heard_as_rumor_by_json,hidden_from_json,visibility,importance,emotional_weight,confidence,tags_json,status,source,vector_id,embedding_status,payload_json)
 VALUES(
@@ -520,7 +520,7 @@ VALUES(
 
         internal static void InsertMemoryFts(ReignDbConnection connection, string memoryId, string text, List<string> tags, List<string> entities)
         {
-            ExecuteSql(connection, "INSERT INTO memory_fts(memory_id, text, tags, entities) VALUES($memory_id, $text, $tags, $entities);",
+            ReignDatabase.ExecuteSql(connection, "INSERT INTO memory_fts(memory_id, text, tags, entities) VALUES($memory_id, $text, $tags, $entities);",
                 new Dictionary<string, object>
                 {
                     ["memory_id"] = memoryId,
@@ -532,7 +532,7 @@ VALUES(
 
         private static void InsertEventFts(ReignDbConnection connection, string eventId, string text, List<string> tags, List<string> entities)
         {
-            ExecuteSql(connection, "INSERT INTO event_fts(event_id, text, tags, entities) VALUES($event_id, $text, $tags, $entities);",
+            ReignDatabase.ExecuteSql(connection, "INSERT INTO event_fts(event_id, text, tags, entities) VALUES($event_id, $text, $tags, $entities);",
                 new Dictionary<string, object>
                 {
                     ["event_id"] = eventId,
@@ -582,7 +582,7 @@ VALUES(
             }
 
             string beliefId = FirstNonEmpty(ReadFirstString(item, "belief_id", "beliefId", "id"), "belief_" + Guid.NewGuid().ToString("N"));
-            ExecuteSql(connection, @"INSERT OR REPLACE INTO beliefs(belief_id,event_id,believer_id,claim,confidence,source,known_by_json,about_entities_json,hidden_from_json,visibility,ts,payload_json)
+            ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO beliefs(belief_id,event_id,believer_id,claim,confidence,source,known_by_json,about_entities_json,hidden_from_json,visibility,ts,payload_json)
 VALUES($belief_id,$event_id,$believer_id,$claim,$confidence,$source,$known_by_json,$about_entities_json,$hidden_from_json,$visibility,$ts,$payload_json);",
                 new Dictionary<string, object>
                 {
@@ -613,7 +613,7 @@ VALUES($belief_id,$event_id,$believer_id,$claim,$confidence,$source,$known_by_js
             string obligationId = DialogueService.DialogueCommitmentTarget(connection, DialogueService.StableCommitmentId(item), item);
             if (obligationId == null) return; // Exact interpretation/proposal replay.
             DialogueService.PreserveCommitmentOriginalSource(connection, obligationId, eventId, item);
-            ExecuteSql(connection, @"INSERT OR REPLACE INTO obligations(obligation_id,event_id,owed_by,owed_to,description,status,created_day,importance,participants_json,about_entities_json,known_by_json,hidden_from_json,visibility,ts,payload_json,timeline_id)
+            ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO obligations(obligation_id,event_id,owed_by,owed_to,description,status,created_day,importance,participants_json,about_entities_json,known_by_json,hidden_from_json,visibility,ts,payload_json,timeline_id)
 VALUES($obligation_id,$event_id,$owed_by,$owed_to,$description,$status,$created_day,$importance,$participants_json,$about_entities_json,$known_by_json,$hidden_from_json,$visibility,$ts,$payload_json,$timeline);",
                 new Dictionary<string, object>
                 {
@@ -654,7 +654,7 @@ VALUES($obligation_id,$event_id,$owed_by,$owed_to,$description,$status,$created_
             }
 
             string comprehensionId = FirstNonEmpty(ReadFirstString(item, "comprehension_id", "comprehensionId", "id"), "comp_" + Guid.NewGuid().ToString("N"));
-            ExecuteSql(connection, @"INSERT OR REPLACE INTO comprehension(comprehension_id,event_id,owner_id,text,stance,confidence,known_by_json,about_entities_json,hidden_from_json,ts,payload_json)
+            ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO comprehension(comprehension_id,event_id,owner_id,text,stance,confidence,known_by_json,about_entities_json,hidden_from_json,ts,payload_json)
 VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by_json,$about_entities_json,$hidden_from_json,$ts,$payload_json);",
                 new Dictionary<string, object>
                 {
@@ -852,7 +852,7 @@ VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by
 
             Dictionary<string, object> stored;
             List<string> episodicMemoryIds = new List<string>();
-            using (ReignDbConnection ownedConnection = existingConnection == null ? OpenCampaignConnection(campaignId) : null)
+            using (ReignDbConnection ownedConnection = existingConnection == null ? ReignDatabase.OpenCampaignConnection(campaignId) : null)
             {
                 var connection = existingConnection ?? ownedConnection;
                 using var publication = existingConnection == null ? connection.BeginTransaction() : null;
@@ -914,7 +914,7 @@ VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by
                         Json.Serialize(copy),
                         ReadString(copy, "vector_id", ReadString(copy, "vectorId", "")),
                         ReadString(copy, "embedding_status", ReadString(copy, "embeddingStatus", "not_indexed")));
-                    ExecuteSql(connection, "UPDATE memories SET memory_domain=$domain WHERE memory_id=$id;",
+                    ReignDatabase.ExecuteSql(connection, "UPDATE memories SET memory_domain=$domain WHERE memory_id=$id;",
                         new Dictionary<string, object>
                         {
                             ["domain"] = DialogueService.ClassifyMemoryDomain(new Dictionary<string, object>(copy, StringComparer.OrdinalIgnoreCase)
@@ -932,7 +932,7 @@ VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by
                     stored["continuity"] = DialogueService.StoreAcceptedConversationContinuity(connection, continuityPayload,
                         heroId, playerId, eventId, reply, continuityWrites, ts);
                 }
-                ExecuteSql(connection, "DELETE FROM memory_projections WHERE owner_id=$owner;", new Dictionary<string, object> { ["owner"] = heroId });
+                ReignDatabase.ExecuteSql(connection, "DELETE FROM memory_projections WHERE owner_id=$owner;", new Dictionary<string, object> { ["owner"] = heroId });
                 publication?.Commit();
             }
             List<string> projectedMemoryIds = ReadStringList(stored, "memoryIds");
@@ -1152,9 +1152,9 @@ VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by
             int maxGroups = Math.Max(1, Math.Min(10, ReadInt(settings, "memoryConsolidationMaxGroups", 3)));
             int maxSourceItems = Math.Max(4, Math.Min(80, ReadInt(settings, "memoryConsolidationMaxSourceItems", 24)));
             List<Dictionary<string, object>> candidates;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                candidates = QuerySql(connection, @"SELECT * FROM memories
+                candidates = ReignDatabase.QuerySql(connection, @"SELECT * FROM memories
 WHERE owner_id=$owner_id AND status='active'
 ORDER BY ts DESC LIMIT 400;",
                     new Dictionary<string, object> { ["owner_id"] = npcId });
@@ -1242,12 +1242,12 @@ ORDER BY ts DESC LIMIT 400;",
                     ["correlationId"] = summaryCorrelationId
                 };
 
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 using (var publication = connection.BeginTransaction())
                 {
                     DialogueService.VerifyMemoryPublicationFence(connection);
                     DialogueService.VerifyMemorySourceRows(connection, "memories", "memory_id", rows);
-                    ExecuteSql(connection, @"INSERT INTO summaries(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO summaries(
 summary_id,scope,owner_id,summary_type,summary,source_events_json,start_ts,end_ts,event_count,location_id,
 participants_json,about_entities_json,known_by_json,hidden_from_json,visibility,importance,confidence,tags_json,
 status,source,vector_id,embedding_status,updated_ts,payload_json)
@@ -1290,7 +1290,7 @@ ON CONFLICT(summary_id) DO UPDATE SET summary=$summary,payload_json=$payload_jso
                     foreach (string memoryId in DialogueService.MemorySummaryCoversSources(summaryText, rows)
                         && ReadString(compact, "compactionStatus", "") == "complete" ? sourceMemoryIds : new List<string>())
                     {
-                        ExecuteSql(connection, "UPDATE memories SET status='consolidated' WHERE memory_id=$memory_id;",
+                        ReignDatabase.ExecuteSql(connection, "UPDATE memories SET status='consolidated' WHERE memory_id=$memory_id;",
                             new Dictionary<string, object> { ["memory_id"] = memoryId });
                     }
                     publication.Commit();
@@ -1437,9 +1437,9 @@ ON CONFLICT(summary_id) DO UPDATE SET summary=$summary,payload_json=$payload_jso
 
         internal static void InsertSummaryFts(ReignDbConnection connection, string summaryId, string text, List<string> tags, List<string> entities)
         {
-            ExecuteSql(connection, "DELETE FROM summary_fts WHERE summary_id=$summary_id;",
+            ReignDatabase.ExecuteSql(connection, "DELETE FROM summary_fts WHERE summary_id=$summary_id;",
                 new Dictionary<string, object> { ["summary_id"] = summaryId });
-            ExecuteSql(connection, "INSERT INTO summary_fts(summary_id,text,tags,entities) VALUES($summary_id,$text,$tags,$entities);",
+            ReignDatabase.ExecuteSql(connection, "INSERT INTO summary_fts(summary_id,text,tags,entities) VALUES($summary_id,$text,$tags,$entities);",
                 new Dictionary<string, object>
                 {
                     ["summary_id"] = summaryId,

@@ -46,7 +46,7 @@ namespace ReignBetaServer
             int remaining = 14000;
             foreach (string id in ids)
             {
-                var row = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).SingleOrDefault();
+                var row = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).SingleOrDefault();
                 if (row == null || !DialogueService.PrecisionTurnVisible(row, observer, access, connection)) continue;
                 string text = DialogueService.RenderExactHistoryTurn(row, access);
                 if (sharedOnly)
@@ -65,7 +65,7 @@ namespace ReignBetaServer
             }
             foreach (var evidence in DialogueService.LoadCorrespondenceMemory(connection, observer, peer, query, context, access))
             {
-                var letter = Program.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", evidence.SourceId)).SingleOrDefault();
+                var letter = ReignDatabase.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", evidence.SourceId)).SingleOrDefault();
                 if (letter == null) continue;
                 if (sharedOnly && !DialogueService.LetterVisibleToObserver(connection, letter, peer, otherAccess, out _)) continue;
                 string text = sharedOnly ? "Letter from " + ReadString(letter, "sender_id", "") + " to " + ReadString(letter, "recipient_id", "")
@@ -110,7 +110,7 @@ namespace ReignBetaServer
         {
             double day = ReadDouble(context, "worldDay", -1d);
             if (!double.IsFinite(day)) day = -1d;
-            return Program.QuerySql(connection, @"SELECT * FROM shared_relationship_history_chapters WHERE pair_key=$pair
+            return ReignDatabase.QuerySql(connection, @"SELECT * FROM shared_relationship_history_chapters WHERE pair_key=$pair
 AND ($scoped=0 OR (created_world_day<=$day AND source_basis_json::jsonb->>'timelineId'=$timeline))
 ORDER BY chapter_ordinal DESC LIMIT $limit;", TestDict("pair", pair, "scoped", context == null ? 0 : 1,
                 "day", day, "timeline", DialogueService.ContinuityTimeline(context), "limit", limit));
@@ -120,12 +120,12 @@ ORDER BY chapter_ordinal DESC LIMIT $limit;", TestDict("pair", pair, "scoped", c
         {
             string expected = ReadString(basis, "restoreGeneration", "");
             if (expected.Length == 0) return; // compatibility for explicit historical/test records
-            string current = ReadString(Program.QuerySql(connection, "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").Single(), "restore_generation", "");
+            string current = ReadString(ReignDatabase.QuerySql(connection, "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").Single(), "restore_generation", "");
             if (current != expected) throw new InvalidOperationException("The campaign changed during relationship-history generation.");
             foreach (var source in ReadDictionaryList(basis, "sharedSources"))
             {
                 bool letter = ReadString(source, "kind", "") == "letter";
-                var row = Program.QuerySql(connection, letter ? "SELECT * FROM letters WHERE letter_id=$id;" : "SELECT * FROM conversation_turns WHERE turn_id=$id;",
+                var row = ReignDatabase.QuerySql(connection, letter ? "SELECT * FROM letters WHERE letter_id=$id;" : "SELECT * FROM conversation_turns WHERE turn_id=$id;",
                     TestDict("id", ReadString(source, "sourceId", ""))).SingleOrDefault();
                 if (row == null || (letter ? DialogueService.LetterContentHash(row) : DialogueService.MemoryTranscriptSourceHash(row)) != ReadString(source, "sourceHash", ""))
                     throw new InvalidOperationException("An original relationship-history source changed before publication.");

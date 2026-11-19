@@ -183,7 +183,7 @@ namespace ReignBetaServer
         {
             if (Monitor.IsEntered(CampaignSchemaLock) && !Monitor.IsEntered(FileLock))
                 throw new InvalidOperationException("Settings require FileLock before CampaignSchemaLock.");
-            CampaignSchemaSettingsReadObserverForTests?.Invoke(Monitor.IsEntered(CampaignSchemaLock));
+            ReignDatabase.CampaignSchemaSettingsReadObserverForTests?.Invoke(Monitor.IsEntered(CampaignSchemaLock));
             lock(SettingsSaveGate)return LoadSettingsCore();
         }
         private static Dictionary<string, object> LoadSettingsCore()
@@ -244,7 +244,7 @@ namespace ReignBetaServer
         // Reuse the existing file coordinator: callers already holding FileLock can
         // read settings without a second lock-order dependency. Atomic replacement
         // and revision checks cover both user saves and normalization writes.
-        private static object SettingsSaveGate => FileLock;
+        internal static object SettingsSaveGate => FileLock;
         private static readonly object SettingsEffectsGate = new object();
         private static Dictionary<string, object> SaveSettings(Dictionary<string, object> incoming)
         {

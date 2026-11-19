@@ -10,19 +10,19 @@ namespace ReignBetaServer
     {
         internal static void EnsurePlayerPerformanceSchema(ReignDbConnection connection)
         {
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS character_performance_events (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS character_performance_events (
 receipt_id TEXT PRIMARY KEY,event_id TEXT NOT NULL,timeline_id TEXT NOT NULL,subject_id TEXT NOT NULL,world_day REAL NOT NULL,sequence INTEGER NOT NULL,
 kind TEXT NOT NULL,outcome TEXT NOT NULL,battle_type TEXT NOT NULL DEFAULT '',competition_id TEXT NOT NULL,
 source TEXT NOT NULL,source_hash TEXT NOT NULL,knowledge_rules_json TEXT NOT NULL DEFAULT '[]',
 UNIQUE(event_id,subject_id));");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_performance_subject_day ON character_performance_events(timeline_id,subject_id,world_day);");
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_performance_subject_day ON character_performance_events(timeline_id,subject_id,world_day);");
             // A compact native receipt survives lossy world-history retention.
             // Save Sync snapshots the whole campaign schema, including this ledger.
             const string marker = "character_performance_backfill_v1";
-            if (ReadString(Program.QuerySql(connection, "SELECT value FROM schema_meta WHERE key=$key;", TestDict("key", marker)).FirstOrDefault(), "value", "") == "1") return;
-            foreach (var row in Program.QuerySql(connection, "SELECT * FROM world_history_events WHERE is_complete=1 AND (event_type IN ('battle_completed','tournament_finished') OR (event_type='social_outcome' AND source='reign_social' AND payload_json LIKE '%\"duelMode\"%'));"))
+            if (ReadString(ReignDatabase.QuerySql(connection, "SELECT value FROM schema_meta WHERE key=$key;", TestDict("key", marker)).FirstOrDefault(), "value", "") == "1") return;
+            foreach (var row in ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_events WHERE is_complete=1 AND (event_type IN ('battle_completed','tournament_finished') OR (event_type='social_outcome' AND source='reign_social' AND payload_json LIKE '%\"duelMode\"%'));"))
                 ProjectPlayerPerformanceEvent(connection, row);
-            Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');", TestDict("key", marker));
+            ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');", TestDict("key", marker));
         }
 
         private static string NativePerformanceOutcome(string kind, Dictionary<string, object> facts, Dictionary<string, object> entity)
@@ -56,9 +56,9 @@ UNIQUE(event_id,subject_id));");
         internal static void ProjectPlayerPerformanceEvent(ReignDbConnection connection, Dictionary<string, object> row)
         {
             string id = ReadString(row, "event_id", "");
-            var rules = Program.QuerySql(connection, "SELECT audience_type,audience_id,available_day,acquisition_mode FROM world_history_knowledge_rules WHERE event_id=$id;", TestDict("id", id));
+            var rules = ReignDatabase.QuerySql(connection, "SELECT audience_type,audience_id,available_day,acquisition_mode FROM world_history_knowledge_rules WHERE event_id=$id;", TestDict("id", id));
             foreach (var receipt in BuildPlayerPerformanceReceipts(row, WorldSimulationService.QueryWorldHistoryEntities(connection, id), rules))
-                Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO character_performance_events
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO character_performance_events
 (receipt_id,event_id,timeline_id,subject_id,world_day,sequence,kind,outcome,battle_type,competition_id,source,source_hash,knowledge_rules_json)
 VALUES($receipt_id,$event_id,$timeline_id,$subject_id,$world_day,$sequence,$kind,$outcome,$battle_type,$competition_id,$source,$source_hash,$knowledge_rules_json);", receipt);
         }
@@ -116,7 +116,7 @@ VALUES($receipt_id,$event_id,$timeline_id,$subject_id,$world_day,$sequence,$kind
         private static Dictionary<string, object> ReadPlayerPerformanceCounts(ReignDbConnection connection, string timeline, string player,
             double day, Program.KnowledgeAccessContext access = null, IEnumerable<Program.KnowledgeAccessContext> additionalObservers = null, bool publicOnly = false)
         {
-            var rows = WorldSimulationService.TableExists(connection, "character_performance_events") ? Program.QuerySql(connection,
+            var rows = WorldSimulationService.TableExists(connection, "character_performance_events") ? ReignDatabase.QuerySql(connection,
                 "SELECT * FROM character_performance_events WHERE " + MemorySourceTimelineSql("character_performance_events")
                     + " AND subject_id=$player AND world_day<=$day ORDER BY world_day,sequence;",
                 TestDict("timeline", timeline, "player", player, "day", day)) : new List<Dictionary<string, object>>();
@@ -150,7 +150,7 @@ VALUES($receipt_id,$event_id,$timeline_id,$subject_id,$world_day,$sequence,$kind
         private static string BuildPlayerPerformancePrompt(ReignDbConnection connection, string observer, Dictionary<string, object> payload, List<string> sources,
             IEnumerable<string> additionalObservers = null)
         {
-            string player = WorldSimulationService.TableExists(connection, "identity_roster") ? ReadString(Program.QuerySql(connection,
+            string player = WorldSimulationService.TableExists(connection, "identity_roster") ? ReadString(ReignDatabase.QuerySql(connection,
                 "SELECT hero_id FROM identity_roster WHERE is_player=1 ORDER BY hero_id LIMIT 1;").FirstOrDefault(), "hero_id", "") : "";
             player = FirstNonEmpty(player, ReadFirstString(payload, "mainHeroStringId", "playerHeroStringId", "playerId"));
             if (player.Length == 0 || observer == player) return "";

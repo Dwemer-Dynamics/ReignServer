@@ -149,9 +149,9 @@ namespace ReignBetaServer
                     grantedPermission = ReadDictionaryList(grantedCharter,"permissions").FirstOrDefault(x=>ReadBool(x,"granted",false));
                 }
                 charterRevision--;
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    Program.ExecuteSql(connection,"UPDATE foreign_ambassador_postings SET authority_revision=$revision,authority_charter_json=$charter WHERE posting_id=$posting;",
+                    ReignDatabase.ExecuteSql(connection,"UPDATE foreign_ambassador_postings SET authority_revision=$revision,authority_charter_json=$charter WHERE posting_id=$posting;",
                         new Dictionary<string,object>{{"revision",charterRevision},{"charter",Json.Serialize(grantedCharter)},{"posting",postingId}});
                 }
                 Dictionary<string,object> context = new Dictionary<string,object>
@@ -197,11 +197,11 @@ namespace ReignBetaServer
                 string referralId = ReadString(referralDecision,"referralId","");
                 string referralHash = ReadString(referralDecision,"exactTermsHash","");
                 Dictionary<string,object> referralRow;
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    referralRow = Program.QuerySql(connection,"SELECT * FROM ambassador_referrals WHERE referral_id=$id LIMIT 1;",
+                    referralRow = ReignDatabase.QuerySql(connection,"SELECT * FROM ambassador_referrals WHERE referral_id=$id LIMIT 1;",
                         new Dictionary<string,object>{{"id",referralId}}).FirstOrDefault();
-                    Program.ExecuteSql(connection,"UPDATE ambassador_referrals SET status='countered',counter_terms_json=$terms WHERE referral_id=$id;",
+                    ReignDatabase.ExecuteSql(connection,"UPDATE ambassador_referrals SET status='countered',counter_terms_json=$terms WHERE referral_id=$id;",
                         new Dictionary<string,object>{{"terms",ReadString(referralRow,"exact_terms_json","{}")},{"id",referralId}});
                 }
                 Dictionary<string,object> staleCounter = ForeignAmbassadorReferralRespondApi(new Dictionary<string,object>
@@ -229,9 +229,9 @@ namespace ReignBetaServer
                 Dictionary<string,object> persistedDecision = PersistOfficialAmbassadorDecision(campaignId,officialPayload,exchange,DateTimeOffset.UtcNow.ToUnixTimeSeconds());
                 List<Dictionary<string,object>> archive = ReadOfficialAmbassadorArchiveLines(campaignId,officialPayload,20);
                 Dictionary<string,object> decisionRow;
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    decisionRow = Program.QuerySql(connection,"SELECT * FROM ambassador_decisions WHERE decision_id=$id LIMIT 1;",
+                    decisionRow = ReignDatabase.QuerySql(connection,"SELECT * FROM ambassador_decisions WHERE decision_id=$id LIMIT 1;",
                         new Dictionary<string,object>{{"id",ReadString(persistedDecision,"decisionId","")}}).FirstOrDefault();
                 }
                 AddCapitalAmbassadorTestAssertion(assertions, "server_official_archive_and_decision_persistence",
@@ -303,8 +303,8 @@ namespace ReignBetaServer
                     {"postingId",postingId},{"reason","war_recalled"},{"worldDay",25.5d}
                 });
                 string pendingStatus;
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
-                    pendingStatus = ReadString(Program.QuerySql(connection,"SELECT status FROM ambassador_referrals WHERE referral_id=$id LIMIT 1;",
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+                    pendingStatus = ReadString(ReignDatabase.QuerySql(connection,"SELECT status FROM ambassador_referrals WHERE referral_id=$id LIMIT 1;",
                         new Dictionary<string,object>{{"id",ReadString(pending,"referralId","")}}).FirstOrDefault(),"status","");
                 AddCapitalAmbassadorTestAssertion(assertions, "server_war_recall_and_referral_cancellation",
                     ReadBool(ended,"ok",false) && ReadString(ended,"status","")=="ended" && pendingStatus=="cancelled_war",
@@ -375,7 +375,7 @@ namespace ReignBetaServer
         {
             try
             {
-                Program.InvalidateCampaignSchemaCaches(campaignId);
+                ReignDatabase.InvalidateCampaignSchemaCaches(campaignId);
                 ReignPostgreSqlStorage.DropCampaign(campaignId);
                 PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
                 return !ReignPostgreSqlStorage.CampaignExists(campaignId)

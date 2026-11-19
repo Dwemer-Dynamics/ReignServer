@@ -15,7 +15,7 @@ namespace ReignBetaServer
         // are restored together by Save Sync; it must never become an autonomous NPC treaty engine.
         private static void EnsureClanAccordsSchema(ReignDbConnection connection)
         {
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS clan_accord_snapshots(
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS clan_accord_snapshots(
 timeline_id TEXT PRIMARY KEY, player_hero_id TEXT NOT NULL, snapshot_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS clan_accord_event_receipts(
 timeline_id TEXT NOT NULL,event_id TEXT NOT NULL,payload_json TEXT NOT NULL,
@@ -130,7 +130,7 @@ delta INTEGER NOT NULL,PRIMARY KEY(timeline_id,receipt_id,observer_id,target_id)
             string timeline = ReadString(payload, "timelineId", "");
             var acknowledged = new List<string>();
             lock (RelationshipsService.CampaignRelationshipWriteLock(campaign))
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsureClanAccordsSchema(connection);
                 RelationshipsService.EnsureMbtiRelationshipSchema(connection);
@@ -141,28 +141,28 @@ delta INTEGER NOT NULL,PRIMARY KEY(timeline_id,receipt_id,observer_id,target_id)
                     string id = ReadString(evt, "eventId", "");
                     string json = Json.Serialize(evt);
                     var args = new Dictionary<string, object> { ["timeline"] = timeline, ["event"] = id, ["json"] = json };
-                    Dictionary<string, object> receipt = Program.QuerySql(connection,
+                    Dictionary<string, object> receipt = ReignDatabase.QuerySql(connection,
                         "SELECT * FROM clan_accord_event_receipts WHERE timeline_id=$timeline AND event_id=$event;", args).FirstOrDefault();
                     if (receipt != null && ReadString(receipt, "payload_json", "") != json) return ClanAccordError("event_id_conflict");
                     if (receipt == null || ReadInt(receipt, "effects_done", 0) == 0)
                     {
                         using (ReignDbTransaction transaction = connection.BeginTransaction())
                         {
-                            Program.ExecuteSql(connection, @"INSERT INTO clan_accord_event_receipts(timeline_id,event_id,payload_json)
+                            ReignDatabase.ExecuteSql(connection, @"INSERT INTO clan_accord_event_receipts(timeline_id,event_id,payload_json)
 VALUES($timeline,$event,$json) ON CONFLICT(timeline_id,event_id) DO NOTHING;", args);
                             ApplyClanAccordEventRelations(connection, campaign, timeline, evt);
-                            Program.ExecuteSql(connection, "UPDATE clan_accord_event_receipts SET effects_done=1 WHERE timeline_id=$timeline AND event_id=$event;", args);
+                            ReignDatabase.ExecuteSql(connection, "UPDATE clan_accord_event_receipts SET effects_done=1 WHERE timeline_id=$timeline AND event_id=$event;", args);
                             transaction.Commit();
                         }
                     }
                     if (receipt == null || ReadInt(receipt, "memory_done", 0) == 0)
                     {
                         EnsureClanAccordEventMemory(connection, campaign, timeline, evt);
-                        Program.ExecuteSql(connection, "UPDATE clan_accord_event_receipts SET memory_done=1 WHERE timeline_id=$timeline AND event_id=$event;", args);
+                        ReignDatabase.ExecuteSql(connection, "UPDATE clan_accord_event_receipts SET memory_done=1 WHERE timeline_id=$timeline AND event_id=$event;", args);
                     }
                     acknowledged.Add(id);
                 }
-                Program.ExecuteSql(connection, @"INSERT INTO clan_accord_snapshots(timeline_id,player_hero_id,snapshot_json)
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO clan_accord_snapshots(timeline_id,player_hero_id,snapshot_json)
 VALUES($timeline,$player,$json) ON CONFLICT(timeline_id) DO UPDATE SET player_hero_id=$player,snapshot_json=$json;",
                     new Dictionary<string, object> { ["timeline"] = timeline, ["player"] = ReadString(payload, "playerHeroId", ""), ["json"] = Json.Serialize(snapshot) });
                 return new Dictionary<string, object> { ["ok"] = true, ["acknowledgedEventIds"] = acknowledged, ["snapshot"] = snapshot };
@@ -184,7 +184,7 @@ VALUES($timeline,$player,$json) ON CONFLICT(timeline_id) DO UPDATE SET player_he
                 {
                     string observer = reverse ? player : member, target = reverse ? member : player;
                     var args = new Dictionary<string, object> { ["timeline"] = timeline, ["receipt"] = key, ["observer"] = observer, ["target"] = target };
-                    if (Program.QuerySql(connection, @"SELECT delta FROM clan_accord_relation_receipts
+                    if (ReignDatabase.QuerySql(connection, @"SELECT delta FROM clan_accord_relation_receipts
 WHERE timeline_id=$timeline AND receipt_id=$receipt AND observer_id=$observer AND target_id=$target;", args).Count != 0) continue;
                     if (kind == "season") RelationshipsService.ApplyAuthoritativeRelationshipDelta(connection, campaign, observer, target, 0,
                         ReadDouble(evt, "worldDay", 0), "clan_accord_season", timeline, ensurePair: true);
@@ -193,7 +193,7 @@ WHERE timeline_id=$timeline AND receipt_id=$receipt AND observer_id=$observer AN
                     RelationshipsService.ApplyAuthoritativeRelationshipDelta(connection, campaign, observer, target, delta,
                         ReadDouble(evt, "worldDay", 0), "clan_accord_" + kind, timeline);
                     args["delta"] = delta;
-                    Program.ExecuteSql(connection, @"INSERT INTO clan_accord_relation_receipts(timeline_id,receipt_id,observer_id,target_id,delta)
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO clan_accord_relation_receipts(timeline_id,receipt_id,observer_id,target_id,delta)
 VALUES($timeline,$receipt,$observer,$target,$delta);", args);
                 }
             }
@@ -208,9 +208,9 @@ VALUES($timeline,$receipt,$observer,$target,$delta);", args);
                 ReadString(record, "EndActorId", "") }.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.Ordinal).ToList();
             // StoreWorldMemoryEvent replaces projections. Only retry it when projection was interrupted;
             // a delivered event is never deleted/regenerated just because its native ack was lost.
-            var existing = Program.QuerySql(connection, "SELECT event_id FROM events WHERE event_id=$event;",
+            var existing = ReignDatabase.QuerySql(connection, "SELECT event_id FROM events WHERE event_id=$event;",
                 new Dictionary<string, object> { ["event"] = memoryEventId });
-            var owners = Program.QuerySql(connection, "SELECT owner_id FROM memories WHERE event_id=$event;",
+            var owners = ReignDatabase.QuerySql(connection, "SELECT owner_id FROM memories WHERE event_id=$event;",
                 new Dictionary<string, object> { ["event"] = memoryEventId });
             if (existing.Count != 0 && participants.All(x => owners.Any(y => ReadString(y, "owner_id", "") == x)))
             {
@@ -270,10 +270,10 @@ VALUES($timeline,$receipt,$observer,$target,$delta);", args);
         internal static Dictionary<string, object> ClanAccordsSnapshot(string campaignId, string timelineId)
         {
             if (!ValidClanAccordId(campaignId) || !ValidClanAccordId(timelineId)) return ClanAccordError("campaign_and_timeline_required");
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanAccordsSchema(connection);
-                var row = Program.QuerySql(connection, "SELECT snapshot_json FROM clan_accord_snapshots WHERE timeline_id=$timeline;",
+                var row = ReignDatabase.QuerySql(connection, "SELECT snapshot_json FROM clan_accord_snapshots WHERE timeline_id=$timeline;",
                     new Dictionary<string, object> { ["timeline"] = timelineId }).FirstOrDefault();
                 return row == null ? new Dictionary<string, object> { ["ok"] = true, ["available"] = false }
                     : Json.Deserialize<Dictionary<string, object>>(ReadString(row, "snapshot_json", "{}"));

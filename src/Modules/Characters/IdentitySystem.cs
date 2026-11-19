@@ -14,7 +14,7 @@ namespace ReignBetaServer
     {
         internal static void EnsureIdentitySchema(ReignDbConnection connection)
         {
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS acquaintances (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS acquaintances (
 observer_id TEXT NOT NULL,
 subject_id TEXT NOT NULL,
 identity_state TEXT NOT NULL DEFAULT 'encountered_unknown',
@@ -34,9 +34,9 @@ last_recognition_encounter_id TEXT NOT NULL DEFAULT '',
 payload_json TEXT NOT NULL DEFAULT '{}',
 updated_ts INTEGER NOT NULL DEFAULT 0,
 PRIMARY KEY(observer_id,subject_id));");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_acquaintances_subject ON acquaintances(subject_id,identity_state);");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_acquaintances_observer ON acquaintances(observer_id,identity_state);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS identity_evidence (
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_acquaintances_subject ON acquaintances(subject_id,identity_state);");
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_acquaintances_observer ON acquaintances(observer_id,identity_state);");
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS identity_evidence (
 evidence_id TEXT PRIMARY KEY,
 observer_id TEXT NOT NULL,
 subject_id TEXT NOT NULL,
@@ -50,55 +50,55 @@ confidence REAL NOT NULL DEFAULT 0,
 world_day REAL NOT NULL DEFAULT 0,
 payload_json TEXT NOT NULL DEFAULT '{}',
 created_ts INTEGER NOT NULL DEFAULT 0);");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_identity_evidence_pair ON identity_evidence(observer_id,subject_id,created_ts DESC);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS identity_roster (
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_identity_evidence_pair ON identity_evidence(observer_id,subject_id,created_ts DESC);");
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS identity_roster (
 hero_id TEXT PRIMARY KEY,canonical_name TEXT NOT NULL DEFAULT '',clan_id TEXT NOT NULL DEFAULT '',
 kingdom_id TEXT NOT NULL DEFAULT '',is_lord INTEGER NOT NULL DEFAULT 0,is_ruler INTEGER NOT NULL DEFAULT 0,
 family_ids_json TEXT NOT NULL DEFAULT '[]',updated_ts INTEGER NOT NULL DEFAULT 0);");
-            Program.EnsureDatabaseColumn(connection, "identity_roster", "is_alive", "INTEGER NOT NULL DEFAULT 1");
-            Program.EnsureDatabaseColumn(connection, "identity_roster", "is_adult", "INTEGER NOT NULL DEFAULT 1");
-            Program.EnsureDatabaseColumn(connection, "identity_roster", "is_player", "INTEGER NOT NULL DEFAULT 0");
-            Program.EnsureDatabaseColumn(connection, "identity_roster", "sex", "TEXT NOT NULL DEFAULT ''");
-            Program.EnsureDatabaseColumn(connection, "identity_roster", "clan_tier", "INTEGER NOT NULL DEFAULT 0");
-            Program.EnsureDatabaseColumn(connection, "identity_roster", "current_charm", "INTEGER NOT NULL DEFAULT 0");
-            Program.EnsureDatabaseColumn(connection, "identity_roster", "occupation", "TEXT NOT NULL DEFAULT ''");
-            Program.EnsureDatabaseColumn(connection, "identity_roster", "is_notable", "INTEGER NOT NULL DEFAULT 0");
-            Program.EnsureDatabaseColumn(connection, "identity_roster", "is_wanderer", "INTEGER NOT NULL DEFAULT 0");
-            Program.EnsureDatabaseColumn(connection, "identity_roster", "is_clan_leader", "INTEGER NOT NULL DEFAULT 0");
-            Program.EnsureDatabaseColumn(connection, "identity_roster", "is_mercenary_clan", "INTEGER NOT NULL DEFAULT 0");
-            Program.EnsureDatabaseColumn(connection, "identity_roster", "governor_settlement_id", "TEXT NOT NULL DEFAULT ''");
-            Program.EnsureDatabaseColumn(connection, "identity_roster", "governor_settlement_name", "TEXT NOT NULL DEFAULT ''");
-            Program.EnsureDatabaseColumn(connection, "acquaintances", "last_recognition_day", "REAL NOT NULL DEFAULT -1");
-            Program.EnsureDatabaseColumn(connection, "acquaintances", "last_recognition_probability", "REAL NOT NULL DEFAULT 0");
-            Program.EnsureDatabaseColumn(connection, "acquaintances", "last_recognition_roll", "REAL NOT NULL DEFAULT -1");
-            Program.EnsureDatabaseColumn(connection, "acquaintances", "recognition_rule_version", "INTEGER NOT NULL DEFAULT 0");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_identity_roster_clan ON identity_roster(clan_id,hero_id);");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_identity_roster_kingdom ON identity_roster(kingdom_id,is_lord,hero_id);");
+            ReignDatabase.EnsureDatabaseColumn(connection, "identity_roster", "is_alive", "INTEGER NOT NULL DEFAULT 1");
+            ReignDatabase.EnsureDatabaseColumn(connection, "identity_roster", "is_adult", "INTEGER NOT NULL DEFAULT 1");
+            ReignDatabase.EnsureDatabaseColumn(connection, "identity_roster", "is_player", "INTEGER NOT NULL DEFAULT 0");
+            ReignDatabase.EnsureDatabaseColumn(connection, "identity_roster", "sex", "TEXT NOT NULL DEFAULT ''");
+            ReignDatabase.EnsureDatabaseColumn(connection, "identity_roster", "clan_tier", "INTEGER NOT NULL DEFAULT 0");
+            ReignDatabase.EnsureDatabaseColumn(connection, "identity_roster", "current_charm", "INTEGER NOT NULL DEFAULT 0");
+            ReignDatabase.EnsureDatabaseColumn(connection, "identity_roster", "occupation", "TEXT NOT NULL DEFAULT ''");
+            ReignDatabase.EnsureDatabaseColumn(connection, "identity_roster", "is_notable", "INTEGER NOT NULL DEFAULT 0");
+            ReignDatabase.EnsureDatabaseColumn(connection, "identity_roster", "is_wanderer", "INTEGER NOT NULL DEFAULT 0");
+            ReignDatabase.EnsureDatabaseColumn(connection, "identity_roster", "is_clan_leader", "INTEGER NOT NULL DEFAULT 0");
+            ReignDatabase.EnsureDatabaseColumn(connection, "identity_roster", "is_mercenary_clan", "INTEGER NOT NULL DEFAULT 0");
+            ReignDatabase.EnsureDatabaseColumn(connection, "identity_roster", "governor_settlement_id", "TEXT NOT NULL DEFAULT ''");
+            ReignDatabase.EnsureDatabaseColumn(connection, "identity_roster", "governor_settlement_name", "TEXT NOT NULL DEFAULT ''");
+            ReignDatabase.EnsureDatabaseColumn(connection, "acquaintances", "last_recognition_day", "REAL NOT NULL DEFAULT -1");
+            ReignDatabase.EnsureDatabaseColumn(connection, "acquaintances", "last_recognition_probability", "REAL NOT NULL DEFAULT 0");
+            ReignDatabase.EnsureDatabaseColumn(connection, "acquaintances", "last_recognition_roll", "REAL NOT NULL DEFAULT -1");
+            ReignDatabase.EnsureDatabaseColumn(connection, "acquaintances", "recognition_rule_version", "INTEGER NOT NULL DEFAULT 0");
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_identity_roster_clan ON identity_roster(clan_id,hero_id);");
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_identity_roster_kingdom ON identity_roster(kingdom_id,is_lord,hero_id);");
             EnsureCompactIdentityEvidencePayloads(connection);
         }
 
         private static void EnsureCompactIdentityEvidencePayloads(ReignDbConnection connection)
         {
             const int version = 2;
-            int current = ReadInt(Program.QuerySql(connection,
+            int current = ReadInt(ReignDatabase.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='identity_payload_compaction_version' LIMIT 1;")
                 .FirstOrDefault(), "value", 0);
             if (current >= version) return;
-            Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+            ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
             try
             {
                 // Evidence rows are the canonical provenance store. Keeping the
                 // same request envelope on the acquaintance summary row doubled
                 // it without adding any authoritative state.
-                Program.ExecuteSql(connection,
+                ReignDatabase.ExecuteSql(connection,
                     "UPDATE acquaintances SET payload_json='{}' WHERE payload_json<>'{}';");
-                foreach (Dictionary<string, object> row in Program.QuerySql(connection,
+                foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection,
                     "SELECT evidence_id,payload_json FROM identity_evidence WHERE length(payload_json)>2048;"))
                 {
                     Dictionary<string, object> payload =
                         TryParseJsonObject(ReadString(row, "payload_json", ""))
                         ?? new Dictionary<string, object>();
-                    Program.ExecuteSql(connection,
+                    ReignDatabase.ExecuteSql(connection,
                         "UPDATE identity_evidence SET payload_json=$payload WHERE evidence_id=$id;",
                         new Dictionary<string, object>
                         {
@@ -106,16 +106,16 @@ family_ids_json TEXT NOT NULL DEFAULT '[]',updated_ts INTEGER NOT NULL DEFAULT 0
                             ["payload"] = Json.Serialize(CompactIdentityEvidencePayload(payload))
                         });
                 }
-                Program.ExecuteSql(connection,
+                ReignDatabase.ExecuteSql(connection,
                     "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('identity_payload_compaction_version',$version);",
                     new Dictionary<string, object> { ["version"] = version.ToString(CultureInfo.InvariantCulture) });
-                Program.ExecuteSql(connection,
+                ReignDatabase.ExecuteSql(connection,
                     "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('campaign_compaction_required','1');");
-                Program.ExecuteSql(connection, "COMMIT;");
+                ReignDatabase.ExecuteSql(connection, "COMMIT;");
             }
             catch
             {
-                try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                try { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                 throw;
             }
         }
@@ -205,7 +205,7 @@ family_ids_json TEXT NOT NULL DEFAULT '[]',updated_ts INTEGER NOT NULL DEFAULT 0
             int migrated = 0;
             Dictionary<string, object> storageRepair = new Dictionary<string, object>();
 
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 syncPhases["prepareAndConnectMs"] = syncTimer.ElapsedMilliseconds;
                 var phaseTimer = System.Diagnostics.Stopwatch.StartNew();
@@ -214,49 +214,49 @@ family_ids_json TEXT NOT NULL DEFAULT '[]',updated_ts INTEGER NOT NULL DEFAULT 0
                 // next native save asks Save Sync to snapshot them.
                 RelationshipsService.EnsureAmbientRelationshipSchema(connection);
                 EnsureIdentitySchema(connection);
-                string previousFingerprint = ReadString(Program.QuerySql(connection, "SELECT value FROM schema_meta WHERE key='identity_roster_fingerprint' LIMIT 1;").FirstOrDefault(), "value", "");
+                string previousFingerprint = ReadString(ReignDatabase.QuerySql(connection, "SELECT value FROM schema_meta WHERE key='identity_roster_fingerprint' LIMIT 1;").FirstOrDefault(), "value", "");
                 bool rosterChanged = !string.Equals(previousFingerprint, fingerprint, StringComparison.Ordinal);
                 Dictionary<string, Dictionary<string, object>> byId = heroes.ToDictionary(IdentityHeroId, x => x, StringComparer.OrdinalIgnoreCase);
                 storageRepair = ReconcileSyntheticIdentityRows(connection, heroes);
                 if (rosterChanged)
                 {
-                    var previousRoster = Program.QuerySql(connection, "SELECT * FROM identity_roster;");
+                    var previousRoster = ReignDatabase.QuerySql(connection, "SELECT * FROM identity_roster;");
                     var historicalBatch = PrepareHistoricalIdentityBatch(previousRoster, heroes);
                     syncPhases["historicalPrepareMs"] = phaseTimer.ElapsedMilliseconds;
                     phaseTimer.Restart();
-                    Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                    ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                     syncPhases["transactionWaitMs"] = phaseTimer.ElapsedMilliseconds;
                     phaseTimer.Restart();
                     try
                     {
                         // Another census may have committed while preparation ran.
                         // Rebase against its roster under the existing transaction lock.
-                        string lockedFingerprint = ReadString(Program.QuerySql(connection,
+                        string lockedFingerprint = ReadString(ReignDatabase.QuerySql(connection,
                             "SELECT value FROM schema_meta WHERE key='identity_roster_fingerprint' LIMIT 1;")
                             .FirstOrDefault(), "value", "");
                         if (!string.Equals(previousFingerprint, lockedFingerprint, StringComparison.Ordinal))
                         {
-                            previousRoster = Program.QuerySql(connection, "SELECT * FROM identity_roster;");
+                            previousRoster = ReignDatabase.QuerySql(connection, "SELECT * FROM identity_roster;");
                             historicalBatch = PrepareHistoricalIdentityBatch(previousRoster, heroes);
                         }
                         WriteHistoricalIdentityBatch(connection, historicalBatch, worldDay,
                             DateTimeOffset.UtcNow.ToUnixTimeSeconds());
                         syncPhases["historicalRows"] = historicalBatch.Count;
                         syncPhases["historicalWriteCommands"] = (historicalBatch.Count + 999) / 1000;
-                        Program.ExecuteSql(connection, "DELETE FROM identity_roster;");
+                        ReignDatabase.ExecuteSql(connection, "DELETE FROM identity_roster;");
                         long rosterTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                         // The roster was just cleared, so the existing batch writer
                         // persists the same rows/timestamps without thousands of
                         // command preparations and round trips under the campaign lock.
                         UpsertIdentityRosterHeroesBatch(connection, heroes, rosterTs);
-                        Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('identity_roster_fingerprint',$value);", new Dictionary<string, object> { ["value"] = fingerprint });
-                        Program.ExecuteSql(connection, "COMMIT;");
+                        ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('identity_roster_fingerprint',$value);", new Dictionary<string, object> { ["value"] = fingerprint });
+                        ReignDatabase.ExecuteSql(connection, "COMMIT;");
                         syncPhases["rosterTransactionMs"] = phaseTimer.ElapsedMilliseconds;
                         phaseTimer.Restart();
                     }
                     catch
                     {
-                        try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                        try { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                         throw;
                     }
                     ReputationService.EnsureSocialReputationSchema(connection);
@@ -265,12 +265,12 @@ family_ids_json TEXT NOT NULL DEFAULT '[]',updated_ts INTEGER NOT NULL DEFAULT 0
                     // processing. Recomputing every lord here made first startup
                     // perform thousands of empty relationship lookups before the
                     // initial save could flush World History.
-                    bool hasCourtPopularityState = ReadInt(Program.QuerySql(connection,
+                    bool hasCourtPopularityState = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM court_dynamic_reputation_metrics WHERE domain='popularity' LIMIT 1;")
                         .FirstOrDefault(), "count", 0) > 0;
                     var popularitySubjects = hasCourtPopularityState
                         ? SelectIdentityPopularitySubjects(connection, previousRoster,
-                            Program.QuerySql(connection, "SELECT * FROM identity_roster;")) : new List<string>();
+                            ReignDatabase.QuerySql(connection, "SELECT * FROM identity_roster;")) : new List<string>();
                     syncPhases["popularitySubjects"] = popularitySubjects.Count;
                     int courtPopularityChanges = ReputationService.RecomputeCourtPopularityReputationsBatch(connection, campaignId,
                         ReadString(payload, "timelineId", "main"), popularitySubjects, worldDay,
@@ -331,20 +331,20 @@ family_ids_json TEXT NOT NULL DEFAULT '[]',updated_ts INTEGER NOT NULL DEFAULT 0
         private static Dictionary<string, object> ReconcileSyntheticIdentityRows(ReignDbConnection connection, List<Dictionary<string, object>> heroes)
         {
             const int repairVersion = 3;
-            int currentVersion = ReadInt(Program.QuerySql(connection,
+            int currentVersion = ReadInt(ReignDatabase.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='identity_synthetic_repair_version' LIMIT 1;").FirstOrDefault(), "value", 0);
             if (currentVersion >= repairVersion)
                 return new Dictionary<string, object> { ["applied"] = false, ["version"] = currentVersion };
 
-            long evidenceBefore = ReadLong(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM identity_evidence;").FirstOrDefault(), "count", 0);
-            long acquaintancesBefore = ReadLong(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM acquaintances;").FirstOrDefault(), "count", 0);
-            Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+            long evidenceBefore = ReadLong(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS count FROM identity_evidence;").FirstOrDefault(), "count", 0);
+            long acquaintancesBefore = ReadLong(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS count FROM acquaintances;").FirstOrDefault(), "count", 0);
+            ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
             try
             {
                 string syntheticSources = "'same_clan','immediate_family','same_kingdom_nobility','realm_sovereign','ruler_network','live_same_realm_sovereign'";
-                Program.ExecuteSql(connection, @"DELETE FROM identity_evidence
+                ReignDatabase.ExecuteSql(connection, @"DELETE FROM identity_evidence
 WHERE source IN (" + syntheticSources + @");");
-                Program.ExecuteSql(connection, @"UPDATE acquaintances SET
+                ReignDatabase.ExecuteSql(connection, @"UPDATE acquaintances SET
 identity_state=CASE WHEN claimed_name<>'' THEN 'claimed' ELSE 'encountered_unknown' END,
 verification_source=CASE WHEN claimed_name<>'' THEN 'preserved_explicit_claim' ELSE 'recognition_required_after_rule_v3' END,
 source_entity_id='',confidence=CASE WHEN claimed_name<>'' THEN 0.6 ELSE 0 END,
@@ -357,7 +357,7 @@ AND NOT EXISTS (
     AND e.source NOT IN (" + syntheticSources + @")
     AND e.evidence_type='verified'
 );");
-                Program.ExecuteSql(connection, @"DELETE FROM acquaintances
+                ReignDatabase.ExecuteSql(connection, @"DELETE FROM acquaintances
 WHERE verification_source IN (" + syntheticSources + @")
 AND encounter_count=0
 AND claimed_name=''
@@ -366,19 +366,19 @@ AND NOT EXISTS (
     WHERE e.observer_id=acquaintances.observer_id AND e.subject_id=acquaintances.subject_id
     AND e.source NOT IN (" + syntheticSources + @")
 );");
-                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('identity_synthetic_repair_version',$version);",
+                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('identity_synthetic_repair_version',$version);",
                     new Dictionary<string, object> { ["version"] = repairVersion.ToString(CultureInfo.InvariantCulture) });
-                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('campaign_compaction_required','1');");
-                Program.ExecuteSql(connection, "COMMIT;");
+                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('campaign_compaction_required','1');");
+                ReignDatabase.ExecuteSql(connection, "COMMIT;");
             }
             catch
             {
-                try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                try { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                 throw;
             }
 
-            long evidenceAfter = ReadLong(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM identity_evidence;").FirstOrDefault(), "count", 0);
-            long acquaintancesAfter = ReadLong(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM acquaintances;").FirstOrDefault(), "count", 0);
+            long evidenceAfter = ReadLong(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS count FROM identity_evidence;").FirstOrDefault(), "count", 0);
+            long acquaintancesAfter = ReadLong(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS count FROM acquaintances;").FirstOrDefault(), "count", 0);
             return new Dictionary<string, object>
             {
                 ["applied"] = true,
@@ -391,7 +391,7 @@ AND NOT EXISTS (
 
         private static bool TryCompactCampaignDatabase(ReignDbConnection connection)
         {
-            if (!string.Equals(ReadString(Program.QuerySql(connection,
+            if (!string.Equals(ReadString(ReignDatabase.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='campaign_compaction_required' LIMIT 1;").FirstOrDefault(), "value", ""), "1", StringComparison.Ordinal))
                 return false;
             try
@@ -401,9 +401,9 @@ AND NOT EXISTS (
                 // VACUUM here monopolized SQLite for minutes on a fresh campaign.
                 // Keep startup maintenance bounded; retired pages can be reused by
                 // SQLite and Save Sync already snapshots through the backup API.
-                Program.ExecuteSql(connection, "PRAGMA wal_checkpoint(PASSIVE);");
-                Program.ExecuteSql(connection, "PRAGMA optimize;");
-                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('campaign_compaction_required','0');");
+                ReignDatabase.ExecuteSql(connection, "PRAGMA wal_checkpoint(PASSIVE);");
+                ReignDatabase.ExecuteSql(connection, "PRAGMA optimize;");
+                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('campaign_compaction_required','0');");
                 return true;
             }
             catch
@@ -419,7 +419,7 @@ AND NOT EXISTS (
             string heroId = IdentityHeroId(hero);
             if (string.IsNullOrWhiteSpace(heroId)) return;
             HashSet<string> family = IdentityFamilyIds(hero);
-            Program.ExecuteSql(connection, @"INSERT INTO identity_roster(
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO identity_roster(
 hero_id,canonical_name,clan_id,kingdom_id,is_lord,is_ruler,family_ids_json,is_alive,is_adult,is_player,sex,clan_tier,current_charm,
 occupation,is_notable,is_wanderer,is_clan_leader,is_mercenary_clan,governor_settlement_id,governor_settlement_name,updated_ts)
 VALUES($hero,$name,$clan,$kingdom,$lord,$ruler,$family,$alive,$adult,$player,$sex,$tier,$charm,
@@ -585,7 +585,7 @@ IS DISTINCT FROM
             List<Dictionary<string, object>> nextHeroes,
             double worldDay, long? fixedTimestamp = null)
         {
-            List<Dictionary<string, object>> previous = Program.QuerySql(connection, "SELECT * FROM identity_roster;");
+            List<Dictionary<string, object>> previous = ReignDatabase.QuerySql(connection, "SELECT * FROM identity_roster;");
             if (previous.Count == 0) return;
             Dictionary<string, Dictionary<string, object>> next = (nextHeroes ?? new List<Dictionary<string, object>>())
                 .Where(x => !string.IsNullOrWhiteSpace(IdentityHeroId(x)))
@@ -621,7 +621,7 @@ IS DISTINCT FROM
         {
             string source = ImplicitIdentitySource(observer, subject);
             if (string.IsNullOrWhiteSpace(source)) return;
-            Program.ExecuteSql(connection, @"INSERT INTO acquaintances(
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO acquaintances(
 observer_id,subject_id,identity_state,canonical_name,verification_source,confidence,first_met_day,last_met_day,updated_ts)
 VALUES($observer,$subject,'verified',$name,'historical_group_identity',1,$day,$day,$ts)
 ON CONFLICT(observer_id,subject_id) DO UPDATE SET
@@ -722,7 +722,7 @@ WHERE acquaintances.identity_state<>'verified';",
 
             Dictionary<string, object> observer = ReadDictionary(payload, "observer") ?? new Dictionary<string, object> { ["heroStringId"] = observerId };
             Dictionary<string, object> subject = ReadDictionary(payload, "subject") ?? new Dictionary<string, object> { ["heroStringId"] = subjectId, ["name"] = ReadString(payload, "canonicalName", "") };
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 ReputationService.EnsureSocialReputationSchema(connection);
                 Dictionary<string, object> stored =
@@ -761,7 +761,7 @@ WHERE acquaintances.identity_state<>'verified';",
                 }
                 else if (newEncounter)
                 {
-                    Program.ExecuteSql(connection, @"UPDATE acquaintances SET last_met_day=$day,encounter_count=encounter_count+1,last_encounter_id=$encounter,updated_ts=$ts WHERE observer_id=$observer AND subject_id=$subject;",
+                    ReignDatabase.ExecuteSql(connection, @"UPDATE acquaintances SET last_met_day=$day,encounter_count=encounter_count+1,last_encounter_id=$encounter,updated_ts=$ts WHERE observer_id=$observer AND subject_id=$subject;",
                         IdentitySqlArgs(observerId, subjectId, worldDay, encounterId));
                     existing = ReadAcquaintance(connection, observerId, subjectId);
                 }
@@ -835,7 +835,7 @@ WHERE acquaintances.identity_state<>'verified';",
                     && ReadString(row, "verification_source", "") == "self_introduction"
                     && AuthoritativeIntroductionSource(ReadString(row, "claimed_name", ""), subject).Length > 0)
                 {
-                    Dictionary<string, object> priorEvidence = Program.QuerySql(connection,
+                    Dictionary<string, object> priorEvidence = ReignDatabase.QuerySql(connection,
                         "SELECT payload_json FROM identity_evidence WHERE observer_id=$observer AND subject_id=$subject AND source='self_introduction' AND evidence_type='claimed_identity' ORDER BY created_ts DESC LIMIT 1;",
                         new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId }).FirstOrDefault();
                     Dictionary<string, object> priorPayload = TryParseJsonObject(ReadString(priorEvidence, "payload_json", ""));
@@ -884,7 +884,7 @@ WHERE acquaintances.identity_state<>'verified';",
                     ["liveImplicitRecognitionSource"] =
                         liveImplicitSource,
                     ["identityRosterAvailable"] =
-                        Program.QuerySql(connection,
+                        ReignDatabase.QuerySql(connection,
                             "SELECT COUNT(*) AS count FROM identity_roster;")
                             .Select(rowValue =>
                                 ReadLong(rowValue, "count", 0))
@@ -956,7 +956,7 @@ WHERE acquaintances.identity_state<>'verified';",
                 ? "recognized"
                 : "not_recognized";
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Program.ExecuteSql(connection, @"UPDATE acquaintances SET
+            ReignDatabase.ExecuteSql(connection, @"UPDATE acquaintances SET
 recognition_attempts=recognition_attempts+1,
 last_recognition_result=$result,
 last_recognition_encounter_id=$encounter,
@@ -1122,7 +1122,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             if (string.IsNullOrWhiteSpace(observerId) || string.IsNullOrWhiteSpace(subjectId) || string.IsNullOrWhiteSpace(claimedName))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "observer, subject, and claimedName are required." };
 
-            using (ReignDbConnection ownedConnection = existingConnection == null ? Program.OpenCampaignConnection(campaignId) : null)
+            using (ReignDbConnection ownedConnection = existingConnection == null ? ReignDatabase.OpenCampaignConnection(campaignId) : null)
             {
                 ReignDbConnection connection = existingConnection ?? ownedConnection;
                 bool verified = false;
@@ -1163,7 +1163,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             string observerId = ReadFirstString(payload, "observerHeroStringId", "observerId");
             string subjectId = ReadFirstString(payload, "subjectHeroStringId", "subjectId");
             int limit = Math.Max(1, Math.Min(2000, ReadInt(payload, "limit", 500)));
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 List<string> clauses = new List<string>();
                 Dictionary<string, object> args = new Dictionary<string, object> { ["limit"] = limit };
@@ -1180,10 +1180,10 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                 }
                 else
                 {
-                    rows = Program.QuerySql(connection, "SELECT * FROM acquaintances" + where + " ORDER BY updated_ts DESC LIMIT $limit;", args);
+                    rows = ReignDatabase.QuerySql(connection, "SELECT * FROM acquaintances" + where + " ORDER BY updated_ts DESC LIMIT $limit;", args);
                 }
                 List<Dictionary<string, object>> evidence = observerId.Length > 0 && subjectId.Length > 0
-                    ? Program.QuerySql(connection, "SELECT * FROM identity_evidence WHERE observer_id=$observer AND subject_id=$subject ORDER BY created_ts DESC LIMIT 200;", new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId })
+                    ? ReignDatabase.QuerySql(connection, "SELECT * FROM identity_evidence WHERE observer_id=$observer AND subject_id=$subject ORDER BY created_ts DESC LIMIT 200;", new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId })
                     : new List<Dictionary<string, object>>();
                 return new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaignId, ["acquaintances"] = rows, ["evidence"] = evidence };
             }
@@ -1198,11 +1198,11 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             string subjectId = ReadFirstString(payload, "subjectHeroStringId", "subjectId");
             string correlationId = Program.EnsureCorrelationId(payload);
             if (string.IsNullOrWhiteSpace(observerId) || string.IsNullOrWhiteSpace(subjectId)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "observer and subject are required." };
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 Dictionary<string, object> args = new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId };
-                Program.ExecuteSql(connection, "DELETE FROM acquaintances WHERE observer_id=$observer AND subject_id=$subject;", args);
-                Program.ExecuteSql(connection, "DELETE FROM identity_evidence WHERE observer_id=$observer AND subject_id=$subject;", args);
+                ReignDatabase.ExecuteSql(connection, "DELETE FROM acquaintances WHERE observer_id=$observer AND subject_id=$subject;", args);
+                ReignDatabase.ExecuteSql(connection, "DELETE FROM identity_evidence WHERE observer_id=$observer AND subject_id=$subject;", args);
             }
             Program.WriteAudit(campaignId, correlationId, "server", "identity", "identity.reset", observerId, "", "", "completed", 0, "Identity knowledge reset for beta testing.", new Dictionary<string, object> { ["observerId"] = observerId, ["subjectId"] = subjectId });
             return new Dictionary<string, object> { ["ok"] = true, ["observerId"] = observerId, ["subjectId"] = subjectId };
@@ -1235,9 +1235,9 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             int upgraded = 0;
             int unchanged = 0;
 
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                 try
                 {
                     foreach (Dictionary<string, object> hero in heroes)
@@ -1247,11 +1247,11 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                         else if (result == "upgraded") upgraded++;
                         else unchanged++;
                     }
-                    Program.ExecuteSql(connection, "COMMIT;");
+                    ReignDatabase.ExecuteSql(connection, "COMMIT;");
                 }
                 catch
                 {
-                    try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                     throw;
                 }
             }

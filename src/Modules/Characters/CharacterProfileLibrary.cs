@@ -519,8 +519,8 @@ namespace ReignBetaServer
                     corrected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     try
                     {
-                        using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
-                            foreach (Dictionary<string, object> row in Program.QuerySql(connection, "SELECT DISTINCT hero_id FROM character_editor_revisions;"))
+                        using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+                            foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection, "SELECT DISTINCT hero_id FROM character_editor_revisions;"))
                                 corrected.Add(ReadString(row, "hero_id", ""));
                     }
                     catch { }

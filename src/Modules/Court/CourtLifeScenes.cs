@@ -23,7 +23,7 @@ namespace ReignBetaServer
                 return CourtLifeSceneError("An exact international hearing and its participants are required.");
             string sceneKey = "court_scene:" + timeline + ":" + matter;
             var key = new Dictionary<string, object> { ["id"] = sceneKey, ["timeline"] = timeline, ["matter"] = matter };
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsureCourtLifeSceneStore(connection);
                 var saved = ReadCourtLifeScene(connection, key);
@@ -61,10 +61,10 @@ namespace ReignBetaServer
             if (!ReadBool(llm, "ok", false)) return CourtLifeSceneError(Program.LlmFailureForDisplay(llm));
             var scene = NormalizeCourtLifeScene(TryParseJsonObject(ReadString(llm, "content", "")));
             if (scene == null) return CourtLifeSceneError("The hearing's shared account was incomplete. Return and retry the audience.");
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsureCourtLifeSceneStore(connection);
-                Program.ExecuteSql(connection, "INSERT OR IGNORE INTO court_life_turns(turn_id,timeline_id,matter_id,actor_id,phase,player_text,reply_text,created_ts) VALUES($id,$timeline,$matter,'case_scene','scene','',$scene,$ts);",
+                ReignDatabase.ExecuteSql(connection, "INSERT OR IGNORE INTO court_life_turns(turn_id,timeline_id,matter_id,actor_id,phase,player_text,reply_text,created_ts) VALUES($id,$timeline,$matter,'case_scene','scene','',$scene,$ts);",
                     new Dictionary<string, object>(key) { ["scene"] = Json.Serialize(scene), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                 // Concurrent retries return the winning immutable account, never a second story.
                 scene = ReadCourtLifeScene(connection, key);
@@ -103,13 +103,13 @@ namespace ReignBetaServer
         }
 
         private static void EnsureCourtLifeSceneStore(ReignDbConnection connection)
-            => Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS court_life_turns(
+            => ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS court_life_turns(
 turn_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,matter_id TEXT NOT NULL,actor_id TEXT NOT NULL,
 phase TEXT NOT NULL,player_text TEXT NOT NULL,reply_text TEXT NOT NULL,created_ts INTEGER NOT NULL);");
 
         private static Dictionary<string, object> ReadCourtLifeScene(ReignDbConnection connection, Dictionary<string, object> key)
         {
-            var row = Program.QuerySql(connection, "SELECT reply_text FROM court_life_turns WHERE turn_id=$id AND timeline_id=$timeline AND matter_id=$matter AND actor_id='case_scene' AND phase='scene';", key).FirstOrDefault();
+            var row = ReignDatabase.QuerySql(connection, "SELECT reply_text FROM court_life_turns WHERE turn_id=$id AND timeline_id=$timeline AND matter_id=$matter AND actor_id='case_scene' AND phase='scene';", key).FirstOrDefault();
             return row == null ? null : NormalizeCourtLifeScene(TryParseJsonObject(ReadString(row, "reply_text", "")));
         }
 

@@ -14,8 +14,8 @@ namespace ReignBetaServer
             string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
             string timeline = ContinuityTimeline(payload);
             if (player.Length == 0) return legacy;
-            using var connection = Program.OpenCampaignConnection(campaign);
-            var rows = Program.QuerySql(connection, @"SELECT t.*,s.npc_id,s.player_id,s.payload_json AS session_payload
+            using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+            var rows = ReignDatabase.QuerySql(connection, @"SELECT t.*,s.npc_id,s.player_id,s.payload_json AS session_payload
 FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id
 WHERE s.player_id=$player AND ($session='' OR t.session_id=$session)
 AND ($npc='' OR s.npc_id=$npc OR (t.channel='party_announcement' AND t.participants_json::jsonb @> jsonb_build_array($npc)) OR EXISTS(SELECT 1 FROM conversation_turns n
@@ -46,7 +46,7 @@ AND t.status IN ('active','source_only') ORDER BY t.ts DESC,t.session_id DESC,t.
             {
                 var args = TestDict("player", player);
                 var parameters = batch.Select((id, index) => { args["source" + index] = id; return "$source" + index; }).ToList();
-                foreach (var source in Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE status='source_only' AND speaker_id=$player AND turn_id IN ("
+                foreach (var source in ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE status='source_only' AND speaker_id=$player AND turn_id IN ("
                     + string.Join(",", parameters) + ");", args).Where(r => MemoryTimeVisible(r, historyAccess, connection)))
                     sources[ReadString(source, "turn_id", "")] = source;
             }
@@ -58,7 +58,7 @@ AND t.status IN ('active','source_only') ORDER BY t.ts DESC,t.session_id DESC,t.
             {
                 var args = TestDict("player", player);
                 var parameters = batch.Select((id, index) => { args["turn" + index] = id; return "$turn" + index; }).ToList();
-                foreach (var source in Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE status='source_only' AND speaker_id=$player"
+                foreach (var source in ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE status='source_only' AND speaker_id=$player"
                     + " AND payload_json::jsonb->'originalRecovery'->>'acceptedTurnId' IN (" + string.Join(",", parameters) + ");", args)
                     .Where(r => MemoryTimeVisible(r, historyAccess, connection)))
                     sources[ReadString(source, "turn_id", "")] = source;

@@ -50,14 +50,14 @@ namespace ReignBetaServer
         internal static void ApplyCampaignBaselineSchema(ReignDbConnection connection,
             string campaignId, string providerGeneration)
         {
-            Program.EnsureMemorySchema(connection);
-            Program.CampaignSchemaAfterMemoryForTests?.Invoke();
+            ReignDatabase.EnsureMemorySchema(connection);
+            ReignDatabase.CampaignSchemaAfterMemoryForTests?.Invoke();
             DialogueService.EnsureCategorizedMemorySchema(connection);
             WorldSimulationService.EnsureWorldHistorySchema(connection);
             DialogueService.EnsureSemanticMemorySchema(connection, providerGeneration);
             DialogueService.RunCategorizedMemoryMigration(connection, campaignId);
             // Repair legacy scalar memories once, outside warm reads.
-            Program.ExecuteSql(connection, @"DELETE FROM memories
+            ReignDatabase.ExecuteSql(connection, @"DELETE FROM memories
 WHERE source='dialogue_llm'
   AND lower(trim(summary)) IN ('0','1','true','false','null','undefined');");
         }
@@ -94,7 +94,7 @@ WHERE source='dialogue_llm'
                 {
                     // Statements must not retry individually inside the
                     // migration transaction; the whole migration retries.
-                    using (new Program.SqlStatementRetrySuppression(connection))
+                    using (new ReignDatabase.SqlStatementRetrySuppression(connection))
                     using (ReignDbTransaction transaction = connection.BeginTransaction())
                     {
                         AcquirePostgreSqlTransactionMutationLock(connection, transaction);
@@ -104,7 +104,7 @@ WHERE source='dialogue_llm'
                             return false;
                         }
                         migration.Apply?.Invoke(connection);
-                        Program.ExecuteSql(connection,
+                        ReignDatabase.ExecuteSql(connection,
                             "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,$value);",
                             new Dictionary<string, object>
                             {
@@ -131,7 +131,7 @@ WHERE source='dialogue_llm'
         private static int ReadCampaignMigrationVersion(ReignDbConnection connection,
             ReignDbTransaction transaction)
         {
-            string value = ReadString(Program.QuerySql(connection,
+            string value = ReadString(ReignDatabase.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key=$key LIMIT 1;",
                 new Dictionary<string, object> { ["key"] = CampaignMigrationVersionKey },
                 transaction).FirstOrDefault(), "value", "");

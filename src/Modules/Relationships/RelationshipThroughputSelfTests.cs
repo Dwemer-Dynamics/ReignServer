@@ -67,7 +67,7 @@ namespace ReignBetaServer
             string campaign = "__throughput_" + Guid.NewGuid().ToString("N");
             try
             {
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     CharactersService.EnsureIdentitySchema(connection);
                     EnsureMbtiRelationshipSchema(connection);
@@ -81,12 +81,12 @@ namespace ReignBetaServer
                         ["childrenIds"] = new List<object>()
                     }).ToList();
                     CharactersService.UpsertIdentityRosterHeroesBatch(connection, heroes, 123);
-                    var previous = Program.QuerySql(connection, "SELECT * FROM identity_roster;");
+                    var previous = ReignDatabase.QuerySql(connection, "SELECT * FROM identity_roster;");
                     var next = heroes.Select(x => new Dictionary<string, object>(x)).ToList();
                     foreach (var hero in next.Take(7)) { hero["clanId"] = "new_clan"; hero["isRuler"] = false; }
                     next[15]["fatherId"] = "";
                     next.RemoveAt(39); // The serial rule does not invent knowledge for a removed NPC.
-                    Program.ExecuteSql(connection, @"INSERT INTO acquaintances(observer_id,subject_id,identity_state,canonical_name,verification_source,confidence,first_met_day,last_met_day,updated_ts)
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO acquaintances(observer_id,subject_id,identity_state,canonical_name,verification_source,confidence,first_met_day,last_met_day,updated_ts)
 VALUES('hero_0','hero_5','verified','Known name','explicit',1,1,2,123),
 ('hero_0','hero_1','claimed','Preserved claim','claim',0.6,1,2,123);");
                     Func<List<Dictionary<string, object>>, string> canonical = rows => Json.Serialize(rows
@@ -94,21 +94,21 @@ VALUES('hero_0','hero_5','verified','Known name','explicit',1,1,2,123),
                         .ThenBy(x => ReadString(x, "subject_id", ""), StringComparer.Ordinal)
                         .Select(x => x.Where(v => v.Key != "rowid").OrderBy(v => v.Key, StringComparer.Ordinal)
                             .ToDictionary(v => v.Key, v => v.Value)).ToList());
-                    string before = canonical(Program.QuerySql(connection, "SELECT * FROM acquaintances;"));
-                    Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                    string before = canonical(ReignDatabase.QuerySql(connection, "SELECT * FROM acquaintances;"));
+                    ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                     CharactersService.PreserveDepartingImplicitKnowledge(connection, next, 5, 456);
-                    string serial = canonical(Program.QuerySql(connection, "SELECT * FROM acquaintances;"));
-                    Program.ExecuteSql(connection, "ROLLBACK;");
+                    string serial = canonical(ReignDatabase.QuerySql(connection, "SELECT * FROM acquaintances;"));
+                    ReignDatabase.ExecuteSql(connection, "ROLLBACK;");
                     var batch = CharactersService.PrepareHistoricalIdentityBatch(previous, next);
-                    Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                    ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                     CharactersService.WriteHistoricalIdentityBatch(connection, batch, 5, 456);
-                    string actual = canonical(Program.QuerySql(connection, "SELECT * FROM acquaintances;"));
-                    Program.ExecuteSql(connection, "ROLLBACK;");
+                    string actual = canonical(ReignDatabase.QuerySql(connection, "SELECT * FROM acquaintances;"));
+                    ReignDatabase.ExecuteSql(connection, "ROLLBACK;");
                     add("historical_identity_batch_matches_serial_and_rollback", serial == actual
-                        && canonical(Program.QuerySql(connection, "SELECT * FROM acquaintances;")) == before && batch.Count > 0,
+                        && canonical(ReignDatabase.QuerySql(connection, "SELECT * FROM acquaintances;")) == before && batch.Count > 0,
                         "All persisted knowledge columns match the original transfer/family rules, existing verification and first-met dates; rollback restores the original rows.");
 
-                    Program.ExecuteSql(connection, @"INSERT INTO relationship_pair_lifecycle(pair_key,hero_a_id,hero_b_id,last_processed_day,flirt_attempted,flirt_passed,updated_ts)
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_pair_lifecycle(pair_key,hero_a_id,hero_b_id,last_processed_day,flirt_attempted,flirt_passed,updated_ts)
 VALUES('hero_0|hero_1','hero_0','hero_1',1,0,0,123),
 ('hero_2|hero_3','hero_2','hero_3',1,1,0,123),
 ('hero_4|hero_5','hero_4','hero_5',1,0,0,123),
@@ -119,7 +119,7 @@ VALUES('hero_0|hero_1','hero_0','hero_1',1,0,0,123),
                         [4] = new List<Dictionary<string, object>> { group(new[] { "hero_0", "hero_1" }), group(new[] { "hero_4", "hero_6", "hero_7" }) },
                         [5] = new List<Dictionary<string, object>> { group(new[] { "hero_5" }) }
                     };
-                    var full = Program.QuerySql(connection, "SELECT * FROM relationship_pair_lifecycle WHERE last_processed_day<5;");
+                    var full = ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_pair_lifecycle WHERE last_processed_day<5;");
                     var selected = LoadCoPresentLifecycleRows(connection, 5, groups);
                     var oracle = full.Where(row => groups.Values.Any(dayGroups => dayGroups.Any(g =>
                         ReadStringList(g, "heroIds").Contains(ReadString(row, "hero_a_id", ""), StringComparer.OrdinalIgnoreCase)
@@ -138,17 +138,17 @@ VALUES('hero_0|hero_1','hero_0','hero_1',1,0,0,123),
                         && workset.Any(row => ReadString(row, "pair_key", "") == "hero_2|hero_3" && ReadInt(row, "flirt_attempted", 0) == 1)
                         && WorldSimulationService.TableCount(connection, "relationship_pair_lifecycle") == 4,
                         "The transaction reloads complete state for matched and independent co-present pairs without reading or deleting unrelated historical rows.");
-                    Program.ExecuteSql(connection, "UPDATE relationship_pair_lifecycle SET romance_stage=$stage WHERE pair_key='hero_2|hero_3';",
+                    ReignDatabase.ExecuteSql(connection, "UPDATE relationship_pair_lifecycle SET romance_stage=$stage WHERE pair_key='hero_2|hero_3';",
                         new Dictionary<string, object> { ["stage"] = "\t\r\n" });
                     add("historical_exclusion_preserves_dotnet_whitespace", LoadHistoricalCourtshipExclusions(connection, 5).Contains("hero_2|hero_3"),
                         "The compact selector preserves IsNullOrWhiteSpace semantics for legacy romance stages.");
-                    Program.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
 pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,first_day,last_day,projected_native_relation,native_action_pending,updated_ts)
 VALUES('hero_0|hero_1','hero_0','hero_1','INTJ','ENFP',1,5,42,1,123);");
                     var pulled = RelationshipNativeTargetPullApi(new Dictionary<string, object> { ["campaignId"] = campaign, ["timelineId"] = "main" });
                     var target = ReadDictionaryList(pulled, "targets").Single();
                     bool observationRequested = ReadInt(pulled, "targetCount", 0) == 1
-                        && ReadInt(Program.QuerySql(connection, "SELECT requires_observation FROM relationship_native_targets;").Single(), "requires_observation", 0) == 1;
+                        && ReadInt(ReignDatabase.QuerySql(connection, "SELECT requires_observation FROM relationship_native_targets;").Single(), "requires_observation", 0) == 1;
                     var receipt = new Dictionary<string, object>
                     {
                         ["pairKey"] = "hero_0|hero_1", ["revision"] = ReadInt(target, "revision", 0),
@@ -157,58 +157,58 @@ VALUES('hero_0|hero_1','hero_0','hero_1','INTJ','ENFP',1,5,42,1,123);");
                     RelationshipNativeTargetReceiptsApi(new Dictionary<string, object>
                     { ["campaignId"] = campaign, ["timelineId"] = "main", ["worldDay"] = 5d, ["receipts"] = new List<object> { receipt } });
                     add("orphan_native_flag_requires_confirmed_observation", observationRequested
-                        && ReadInt(Program.QuerySql(connection, "SELECT native_action_pending FROM relationship_pair_chemistry;").Single(), "native_action_pending", 1) == 0
+                        && ReadInt(ReignDatabase.QuerySql(connection, "SELECT native_action_pending FROM relationship_pair_chemistry;").Single(), "native_action_pending", 1) == 0
                         && WorldSimulationService.TableCount(connection, "relationship_native_targets") == 0,
                         "An orphan flag becomes observation work and is cleared only by a matching native receipt.");
-                    Program.ExecuteSql(connection, "UPDATE relationship_pair_chemistry SET projected_native_relation=51,native_action_pending=1;");
+                    ReignDatabase.ExecuteSql(connection, "UPDATE relationship_pair_chemistry SET projected_native_relation=51,native_action_pending=1;");
                     RelationshipNativeTargetReceiptsApi(new Dictionary<string, object>
                     { ["campaignId"] = campaign, ["timelineId"] = "main", ["worldDay"] = 6d, ["receipts"] = new List<object> { receipt } });
                     add("late_receipt_cannot_clear_new_projection", CountUnrepresentedNativeFlags(connection, "") == 1,
                         "An older aligned receipt cannot erase new chemistry work that arrived after its target was retired.");
 
                     ReputationService.EnsureSocialReputationSchema(connection);
-                    var beforePopularity = Program.QuerySql(connection, "SELECT * FROM identity_roster;");
-                    Program.ExecuteSql(connection, "UPDATE identity_roster SET current_charm=current_charm+1;");
+                    var beforePopularity = ReignDatabase.QuerySql(connection, "SELECT * FROM identity_roster;");
+                    ReignDatabase.ExecuteSql(connection, "UPDATE identity_roster SET current_charm=current_charm+1;");
                     add("identity_charm_does_not_recompute_popularity", CharactersService.SelectIdentityPopularitySubjects(connection, beforePopularity,
-                        Program.QuerySql(connection, "SELECT * FROM identity_roster;")).Count == 0,
+                        ReignDatabase.QuerySql(connection, "SELECT * FROM identity_roster;")).Count == 0,
                         "Popularity dependency selection ignores attributes that the authoritative formula does not read.");
-                    Program.ExecuteSql(connection, "UPDATE identity_roster SET kingdom_id='transferred' WHERE hero_id='hero_1';");
-                    var scope = CharactersService.SelectIdentityPopularitySubjects(connection, beforePopularity, Program.QuerySql(connection, "SELECT * FROM identity_roster;"));
+                    ReignDatabase.ExecuteSql(connection, "UPDATE identity_roster SET kingdom_id='transferred' WHERE hero_id='hero_1';");
+                    var scope = CharactersService.SelectIdentityPopularitySubjects(connection, beforePopularity, ReignDatabase.QuerySql(connection, "SELECT * FROM identity_roster;"));
                     add("identity_transfer_invalidates_incoming_neighbors", scope.Contains("hero_0"),
                         "A transferred observer invalidates the subject on the other end of its chemistry pair.");
 
-                    Program.ExecuteSql(connection, "UPDATE identity_roster SET kingdom_id='one_realm';");
-                    Program.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,
+                    ReignDatabase.ExecuteSql(connection, "UPDATE identity_roster SET kingdom_id='one_realm';");
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,
 affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts)
 SELECT 'hero_0|'||hero_id,'hero_0',hero_id,'ENFP','INTJ',0,60,1,5,123 FROM identity_roster
 WHERE is_lord=1 AND hero_id<>'hero_0' ON CONFLICT(pair_key) DO NOTHING;");
                     ReputationService.RecomputeAllCourtPopularityReputations(connection, campaign, "main", 5, "scope_baseline");
-                    var popularityBaseline = Program.QuerySql(connection, "SELECT * FROM identity_roster;");
+                    var popularityBaseline = ReignDatabase.QuerySql(connection, "SELECT * FROM identity_roster;");
                     Func<string> popularityState = () => Json.Serialize(new object[]
                     {
-                        Program.QuerySql(connection, "SELECT subject_id,tag_id,status,reputation_value,description FROM character_reputations ORDER BY subject_id,tag_id;"),
-                        Program.QuerySql(connection, "SELECT subject_id,standing_value,revision,sources_json FROM character_public_standing ORDER BY subject_id;")
+                        ReignDatabase.QuerySql(connection, "SELECT subject_id,tag_id,status,reputation_value,description FROM character_reputations ORDER BY subject_id,tag_id;"),
+                        ReignDatabase.QuerySql(connection, "SELECT subject_id,standing_value,revision,sources_json FROM character_public_standing ORDER BY subject_id;")
                     });
                     string fullPopularity = "", scopedPopularity = "";
                     for (int route = 0; route < 2; route++)
                     {
-                        Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                        ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                         try
                         {
-                            Program.ExecuteSql(connection, "UPDATE identity_roster SET is_player=1 WHERE hero_id='hero_2';");
-                            Program.ExecuteSql(connection, "UPDATE identity_roster SET kingdom_id='elsewhere' WHERE hero_id='hero_4';");
-                            Program.ExecuteSql(connection, "UPDATE identity_roster SET is_alive=0 WHERE hero_id='hero_6';");
-                            Program.ExecuteSql(connection, "UPDATE identity_roster SET is_notable=1 WHERE hero_id='hero_8';");
+                            ReignDatabase.ExecuteSql(connection, "UPDATE identity_roster SET is_player=1 WHERE hero_id='hero_2';");
+                            ReignDatabase.ExecuteSql(connection, "UPDATE identity_roster SET kingdom_id='elsewhere' WHERE hero_id='hero_4';");
+                            ReignDatabase.ExecuteSql(connection, "UPDATE identity_roster SET is_alive=0 WHERE hero_id='hero_6';");
+                            ReignDatabase.ExecuteSql(connection, "UPDATE identity_roster SET is_notable=1 WHERE hero_id='hero_8';");
                             if (route == 0) ReputationService.RecomputeAllCourtPopularityReputations(connection, campaign, "main", 6, "scope_compare");
                             else
                             {
-                                var affected = CharactersService.SelectIdentityPopularitySubjects(connection, popularityBaseline, Program.QuerySql(connection, "SELECT * FROM identity_roster;"));
+                                var affected = CharactersService.SelectIdentityPopularitySubjects(connection, popularityBaseline, ReignDatabase.QuerySql(connection, "SELECT * FROM identity_roster;"));
                                 var changed = ReputationService.RecomputeCourtPopularityReputationsBatch(connection, campaign, "main", affected, 6, "scope_compare");
                                 ReputationService.ReconcileSocialRelationshipsForSubjects(connection, campaign, "main", changed, 6);
                             }
                             if (route == 0) fullPopularity = popularityState(); else scopedPopularity = popularityState();
                         }
-                        finally { Program.ExecuteSql(connection, "ROLLBACK;"); InvalidateRelationshipPairStateCache(campaign); }
+                        finally { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); InvalidateRelationshipPairStateCache(campaign); }
                     }
                     add("identity_scoped_popularity_matches_full_recompute", fullPopularity == scopedPopularity,
                         "Player eligibility, kingdom transfer, death and notable status changes produce the same reputation tags, values, revisions and standing as the original full sweep.");
@@ -219,16 +219,16 @@ WHERE is_lord=1 AND hero_id<>'hero_0' ON CONFLICT(pair_key) DO NOTHING;");
                     var compact = CompactNotableRelationshipProfile(profileRow);
                     ResolvePermanentRelationshipMbti(connection, campaign, 6, new Dictionary<string, object> { ["heroStringId"] = "hero_0" },
                         new Dictionary<string, Dictionary<string, object>> { ["hero_0"] = compact });
-                    var assignment = Program.QuerySql(connection, "SELECT traits_json,assignment_day FROM relationship_personalities WHERE hero_id='hero_0';").Single();
+                    var assignment = ReignDatabase.QuerySql(connection, "SELECT traits_json,assignment_day FROM relationship_personalities WHERE hero_id='hero_0';").Single();
                     add("compact_personality_preserves_authoritative_assignment", ReadString(assignment, "traits_json", "").Contains("91")
                         && ReadString(assignment, "traits_json", "").Contains("73") && ReadInt(assignment, "assignment_day", -1) == 2,
                         "Lazy expansion keeps the complete original trait document and assignment day when a permanent personality is written.");
 
-                    Program.ExecuteSql(connection, @"INSERT INTO relationship_daily_inputs(campaign_id,timeline_id,day_key,world_day,status,received_ts,started_ts)
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_daily_inputs(campaign_id,timeline_id,day_key,world_day,status,received_ts,started_ts)
 VALUES($campaign,'main',7,7,'processing',1,$now);", new Dictionary<string, object>
                     { ["campaign"] = campaign, ["now"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                     RecoverInterruptedRelationshipDays(connection, campaign);
-                    add("startup_recovers_recent_interrupted_day", ReadString(Program.QuerySql(connection,
+                    add("startup_recovers_recent_interrupted_day", ReadString(ReignDatabase.QuerySql(connection,
                         "SELECT status FROM relationship_daily_inputs WHERE day_key=7;").Single(), "status", "") == "pending",
                         "Startup does not wait five minutes to retry a day left processing by the previous worker; its cursor stays intact.");
                     // Readiness is now strictly read-only. The fixture must model
@@ -301,7 +301,7 @@ VALUES($campaign,'main',7,7,'processing',1,$now);", new Dictionary<string, objec
                             ["presenceGroups"] = present ? new List<object> { new Dictionary<string, object>
                             { ["kind"] = "party", ["id"] = "history_party", ["heroIds"] = new[] { "history_a", "history_b" } } } : new List<object>()
                         };
-                    using (var connection = Program.OpenCampaignConnection(campaign))
+                    using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                     {
                         EnsureMbtiRelationshipSchema(connection);
                         CharactersService.EnsureIdentitySchema(connection);
@@ -315,8 +315,8 @@ VALUES($campaign,'main',7,7,'processing',1,$now);", new Dictionary<string, objec
                     if (route > 0) PersistAndHydrateRelationshipDailyInput(input(102, new List<Dictionary<string, object>> { futureHero }, false));
                     var result = MbtiRelationshipSnapshotApi(pending);
                     focuses.Add(ReadInt(result, "courtshipFocusPairDays", -1));
-                    using (var connection = Program.OpenCampaignConnection(campaign))
-                        trajectories.Add(RelationshipReplayRowsHash(Program.QuerySql(connection, "SELECT * FROM relationship_pair_chemistry;"),
+                    using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                        trajectories.Add(RelationshipReplayRowsHash(ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_pair_chemistry;"),
                             new Dictionary<string, string>()));
                     PersistenceService.ClearSaveSyncCaches(campaign);
                     ReignPostgreSqlStorage.DropCampaign(campaign);
@@ -328,7 +328,7 @@ VALUES($campaign,'main',7,7,'processing',1,$now);", new Dictionary<string, objec
                     "Courtship focus counts (normal, legacy burst, corrected burst): " + string.Join(",", focuses)
                     + "; corrected burst retains the normal day's complete chemistry rows. Later marriage/pregnancy cannot rewrite an earlier day.");
 
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     EnsureMbtiRelationshipSchema(connection);
                     var versions = Enumerable.Range(1, 20).Select(day => new Dictionary<string, object>
@@ -339,7 +339,7 @@ VALUES($campaign,'main',7,7,'processing',1,$now);", new Dictionary<string, objec
                     { ["profile"] = "{\"heroStringId\":\"history_a\",\"age\":91}" };
                     WriteRelationshipHeroObservations(connection, "branch", new List<Dictionary<string, object>> { alternate });
                     PruneRelationshipHeroObservations(connection, "main", 18);
-                    var retained = Program.QuerySql(connection, "SELECT observed_day FROM relationship_hero_observations WHERE timeline_id='main' ORDER BY observed_day;");
+                    var retained = ReignDatabase.QuerySql(connection, "SELECT observed_day FROM relationship_hero_observations WHERE timeline_id='main' ORDER BY observed_day;");
                     add("hero_history_pruning_retains_anchor_and_future",
                         retained.Count == 10 && ReadInt(retained[0], "observed_day", 0) == 11
                         && ReadInt(retained.Last(), "observed_day", 0) == 20
@@ -355,19 +355,19 @@ VALUES($campaign,'main',7,7,'processing',1,$now);", new Dictionary<string, objec
                     WriteRelationshipHeroObservations(connection, "main", new List<Dictionary<string, object>> { unchangedFuture });
                     var olderChange = new Dictionary<string, object>(versions[18]) { ["day"] = 39, ["ts"] = 39 };
                     WriteRelationshipHeroObservations(connection, "main", new List<Dictionary<string, object>> { olderChange });
-                    var latest = Program.QuerySql(connection, "SELECT * FROM relationship_observed_heroes WHERE hero_id='history_a';").Single();
+                    var latest = ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_observed_heroes WHERE hero_id='history_a';").Single();
                     add("unchanged_later_observation_rejects_older_latest_overwrite",
                         ReadInt(latest, "last_observed_day", -1) == 40 && ReadInt(latest, "updated_ts", -1) == 20
                         && ReadString(latest, "profile_json", "") == ReadString(versions[19], "profile", "")
                         && ReadString(LoadRelationshipHeroObservations(connection, "main", 39, new[] { "history_a" }).Single(), "profile_json", "") == ReadString(olderChange, "profile", ""),
                         "A newer unchanged observation advances freshness without changing updated_ts; an older pending change remains historical and cannot replace the latest facts.");
-                    Program.ExecuteSql(connection, @"INSERT INTO relationship_daily_inputs(campaign_id,timeline_id,day_key,world_day,status,received_ts)
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_daily_inputs(campaign_id,timeline_id,day_key,world_day,status,received_ts)
 VALUES($campaign,'main',18,18,'pending',1);", new Dictionary<string, object> { ["campaign"] = campaign });
                     PruneRelationshipHeroObservations(connection, "main", 40);
                     add("earliest_pending_day_protects_hero_anchor",
-                        ReadInt(Program.QuerySql(connection, "SELECT MIN(observed_day) AS day FROM relationship_hero_observations WHERE timeline_id='main';").Single(), "day", -1) == 11,
+                        ReadInt(ReignDatabase.QuerySql(connection, "SELECT MIN(observed_day) AS day FROM relationship_hero_observations WHERE timeline_id='main';").Single(), "day", -1) == 11,
                         "Even an out-of-order pending day retains its needed predecessor when a later day requests cleanup.");
-                    Program.ExecuteSql(connection, "DELETE FROM relationship_daily_inputs WHERE day_key=18;");
+                    ReignDatabase.ExecuteSql(connection, "DELETE FROM relationship_daily_inputs WHERE day_key=18;");
                 }
                 var replayInput = new Dictionary<string, object>
                 {
@@ -378,23 +378,23 @@ VALUES($campaign,'main',18,18,'pending',1);", new Dictionary<string, object> { [
                 MarkRelationshipDailyInputProcessed(campaign, "main", 21);
                 replayInput["heroes"] = new List<object> { new Dictionary<string, object> { ["heroStringId"] = "history_a", ["age"] = 99 } };
                 PersistAndHydrateRelationshipDailyInput(replayInput);
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                     add("processed_day_retry_preserves_hero_history",
                         ReadString(LoadRelationshipHeroObservations(connection, "main", 21, new[] { "history_a" }).Single(), "profile_json", "").Contains("41")
-                        && ReadString(Program.QuerySql(connection, "SELECT hero_changes_json FROM relationship_daily_inputs WHERE day_key=21;").Single(), "hero_changes_json", "") == "[]",
+                        && ReadString(ReignDatabase.QuerySql(connection, "SELECT hero_changes_json FROM relationship_daily_inputs WHERE day_key=21;").Single(), "hero_changes_json", "") == "[]",
                         "A duplicate completed input leaves the historical version and cleared durable payload intact.");
                 replayInput["worldDay"] = 22;
                 replayInput["heroes"] = new List<object> { new Dictionary<string, object> { ["heroStringId"] = "history_a", ["age"] = 42 } };
                 PersistAndHydrateRelationshipDailyInput(replayInput);
-                using (var connection = Program.OpenCampaignConnection(campaign))
-                    Program.ExecuteSql(connection, @"UPDATE relationship_daily_inputs SET status='processing',started_ts=123,pair_cursor='history_a|history_b' WHERE day_key=22;");
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                    ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_daily_inputs SET status='processing',started_ts=123,pair_cursor='history_a|history_b' WHERE day_key=22;");
                 replayInput["heroes"] = new List<object> { new Dictionary<string, object> { ["heroStringId"] = "history_a", ["age"] = 99 } };
                 PersistAndHydrateRelationshipDailyInput(replayInput);
-                using (var connection = Program.OpenCampaignConnection(campaign)) RecoverInterruptedRelationshipDays(connection, campaign);
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign)) RecoverInterruptedRelationshipDays(connection, campaign);
                 PersistAndHydrateRelationshipDailyInput(replayInput);
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var partial = Program.QuerySql(connection, "SELECT * FROM relationship_daily_inputs WHERE day_key=22;").Single();
+                    var partial = ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_daily_inputs WHERE day_key=22;").Single();
                     add("recovered_partial_day_retry_keeps_original_facts",
                         ReadString(partial, "status", "") == "pending" && ReadInt(partial, "started_ts", 0) == 123
                         && ReadString(partial, "pair_cursor", "") == "history_a|history_b"
@@ -489,7 +489,7 @@ VALUES($campaign,'main',18,18,'pending',1);", new Dictionary<string, object> { [
             const string key = "native_a|native_b";
             try
             {
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     EnsureMbtiRelationshipSchema(connection);
                     CharactersService.EnsureIdentitySchema(connection);
@@ -499,14 +499,14 @@ VALUES($campaign,'main',18,18,'pending',1);", new Dictionary<string, object> { [
                         ["isAlive"] = true, ["isLord"] = true, ["isFemale"] = false
                     }).ToList();
                     CharactersService.UpsertIdentityRosterHeroesBatch(connection, heroes, 1);
-                    Program.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
 pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,base_chance_a_to_b,base_chance_b_to_a,
 affinity_a_to_b,affinity_b_to_a,first_day,last_day,projected_native_relation,native_action_pending,compatibility_version,updated_ts)
 VALUES('native_a|native_b','native_a','native_b','INTJ','INTJ',100,100,100,100,1,1,100,1,$version,1);",
                         new Dictionary<string, object> { ["version"] = MbtiChemistryVersion });
-                    Func<Dictionary<string, object>> pair = () => Program.QuerySql(connection, "SELECT * FROM relationship_pair_chemistry;").Single();
+                    Func<Dictionary<string, object>> pair = () => ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_pair_chemistry;").Single();
                     Func<bool> waiting = () => ReadInt(pair(), "native_action_pending", 0) == 1
-                        && Program.QuerySql(connection, "SELECT * FROM relationship_native_targets WHERE requires_observation=1;").Count == 1;
+                        && ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_native_targets WHERE requires_observation=1;").Count == 1;
                     var context = new AmbientPairContext { PairKey = key, HeroAId = "native_a", HeroBId = "native_b", ContextKind = "party" };
                     int day = Enumerable.Range(10, 1000).First(candidate =>
                     {
@@ -515,11 +515,11 @@ VALUES('native_a|native_b','native_a','native_b','INTJ','INTJ',100,100,100,100,1
                     });
                     foreach (string route in new[] { "single_projection", "bulk_projection", "commitment", "daily_snapshot" })
                     {
-                        Program.ExecuteSql(connection, "DELETE FROM relationship_native_targets;");
-                        Program.ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
+                        ReignDatabase.ExecuteSql(connection, "DELETE FROM relationship_native_targets;");
+                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
 pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,status,world_day,updated_ts,requires_observation)
 VALUES('native_a|native_b','native_a','native_b',100,100,'pending',1,1,1);");
-                        Program.ExecuteSql(connection, "UPDATE relationship_pair_chemistry SET native_action_pending=1;");
+                        ReignDatabase.ExecuteSql(connection, "UPDATE relationship_pair_chemistry SET native_action_pending=1;");
                         if (route == "single_projection") RefreshEffectivePairProjection(connection, campaign, "main", pair(), 2, "observation_test");
                         else if (route == "bulk_projection") RefreshEffectivePairProjectionsBulk(connection, campaign, "main", new List<Dictionary<string, object>> { pair() }, 2, "observation_test");
                         else if (route == "commitment") ApplyRelationshipCommitmentAffinityDelta(connection, campaign, key, 0, 2);
@@ -536,8 +536,8 @@ VALUES('native_a|native_b','native_a','native_b',100,100,'pending',1,1,1);");
                         add("native_observation_survives_" + route, waiting(),
                             "Recalculation preserves an observation-required target even when its unconfirmed stored values match.");
                     }
-                    Program.ExecuteSql(connection, "DELETE FROM relationship_native_targets;");
-                    Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET affinity_a_to_b=0,affinity_b_to_a=0,
+                    ReignDatabase.ExecuteSql(connection, "DELETE FROM relationship_native_targets;");
+                    ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET affinity_a_to_b=0,affinity_b_to_a=0,
 projected_native_relation=0,native_action_pending=1;");
                     RefreshEffectivePairProjectionsBulk(connection, campaign, "main", new List<Dictionary<string, object>> { pair() }, day + 1, "zero_orphan");
                     add("zero_projection_orphan_still_requires_observation", waiting(),

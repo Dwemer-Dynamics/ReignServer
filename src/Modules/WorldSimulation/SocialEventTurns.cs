@@ -42,7 +42,7 @@ namespace ReignBetaServer
             payload["conversationSessionId"] = FirstNonEmpty(ReadFirstString(payload, "conversationSessionId", "sessionId"),
                 "social_event_" + DialogueService.SafeMemoryKey(ReadFirstString(payload, "eventId", "socialEventId")));
             string generation;
-            using (var connection = Program.OpenCampaignConnection(campaign))
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 generation = ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "");
             DialogueService.AdmitConversationInput(campaign, payload, generation);
         }

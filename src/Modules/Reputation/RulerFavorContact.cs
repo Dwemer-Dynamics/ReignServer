@@ -15,11 +15,11 @@ namespace ReignBetaServer
         }
         internal static void EnsureRulerFavorContactSchema(ReignDbConnection connection)
         {
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS court_ruler_favor_contact (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS court_ruler_favor_contact (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,ruler_id TEXT NOT NULL,favorite_id TEXT NOT NULL,
 last_contact_day REAL,grace_day REAL NOT NULL,expired_day REAL,contact_id TEXT NOT NULL DEFAULT '',
 PRIMARY KEY(campaign_id,timeline_id,ruler_id,favorite_id));");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS court_ruler_favor_contact_receipts (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS court_ruler_favor_contact_receipts (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,ruler_id TEXT NOT NULL,favorite_id TEXT NOT NULL,
 contact_id TEXT NOT NULL,world_day REAL NOT NULL,PRIMARY KEY(campaign_id,timeline_id,ruler_id,favorite_id,contact_id));");
         }
@@ -37,12 +37,12 @@ contact_id TEXT NOT NULL,world_day REAL NOT NULL,PRIMARY KEY(campaign_id,timelin
                 if (ruler == null || !ReadBool(ruler, "isRuler", false)) continue;
                 var receipt = new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId,
                     ["ruler"] = rulerId, ["favorite"] = favoriteId, ["day"] = day, ["contact"] = contactId };
-                if (Program.QuerySql(connection, @"SELECT 1 FROM court_ruler_favor_contact_receipts WHERE campaign_id=$campaign
+                if (ReignDatabase.QuerySql(connection, @"SELECT 1 FROM court_ruler_favor_contact_receipts WHERE campaign_id=$campaign
 AND timeline_id=$timeline AND ruler_id=$ruler AND favorite_id=$favorite AND contact_id=$contact;", receipt).Any()) continue;
-                Program.ExecuteSql(connection, @"INSERT INTO court_ruler_favor_contact_receipts
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO court_ruler_favor_contact_receipts
 (campaign_id,timeline_id,ruler_id,favorite_id,contact_id,world_day) VALUES($campaign,$timeline,$ruler,$favorite,$contact,$day)
 ON CONFLICT(campaign_id,timeline_id,ruler_id,favorite_id,contact_id) DO NOTHING;", receipt);
-                Program.ExecuteSql(connection, @"INSERT INTO court_ruler_favor_contact
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO court_ruler_favor_contact
 (campaign_id,timeline_id,ruler_id,favorite_id,last_contact_day,grace_day,contact_id)
 VALUES($campaign,$timeline,$ruler,$favorite,$day,$day,$contact)
 ON CONFLICT(campaign_id,timeline_id,ruler_id,favorite_id) DO UPDATE SET
@@ -54,7 +54,7 @@ contact_id=$contact,expired_day=CASE WHEN court_ruler_favor_contact.expired_day 
 
         private static List<Dictionary<string, object>> ActiveRulerFavorRows(ReignDbConnection connection, string campaignId, string timelineId, double day)
         {
-            return Program.QuerySql(connection, @"SELECT cr.subject_id,cr.tag_id,cr.snapshot_json FROM character_reputations cr
+            return ReignDatabase.QuerySql(connection, @"SELECT cr.subject_id,cr.tag_id,cr.snapshot_json FROM character_reputations cr
 WHERE cr.campaign_id=$campaign AND cr.timeline_id=$timeline AND cr.status='active'
 AND (cr.tag_id='ruler_favoring' OR cr.tag_id LIKE 'ruler_favoring:%')
 UNION SELECT rst.subject_id,rst.tag_id,rst.snapshot_json FROM rumor_subject_tags rst
@@ -89,7 +89,7 @@ AND (rst.tag_id='ruler_favoring' OR rst.tag_id LIKE 'ruler_favoring:%');",
                 // Expiring one pair never changes another pair's exchange anchor.
                 // Initialize all anchors before expiry writes, then retain the
                 // existing per-tag effects, including duplicate-pair tags.
-                Program.ExecuteSql(connection, @"INSERT INTO court_ruler_favor_contact
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO court_ruler_favor_contact
 (campaign_id,timeline_id,ruler_id,favorite_id,last_contact_day,grace_day)
 SELECT $campaign,$timeline,ids.ruler_id,ids.favorite_id,
 (SELECT last_world_day FROM court_player_favoring_exchanges exchanges
@@ -98,7 +98,7 @@ SELECT $campaign,$timeline,ids.ruler_id,ids.favorite_id,
 FROM jsonb_to_recordset(CAST($keys AS jsonb)) AS ids(ruler_id TEXT,favorite_id TEXT)
 WHERE TRUE
 ON CONFLICT(campaign_id,timeline_id,ruler_id,favorite_id) DO NOTHING;", parameters);
-                foreach (var contact in Program.QuerySql(connection, @"SELECT contact.* FROM court_ruler_favor_contact contact
+                foreach (var contact in ReignDatabase.QuerySql(connection, @"SELECT contact.* FROM court_ruler_favor_contact contact
 JOIN jsonb_to_recordset(CAST($keys AS jsonb)) AS ids(ruler_id TEXT,favorite_id TEXT)
  ON contact.ruler_id=ids.ruler_id AND contact.favorite_id=ids.favorite_id
 WHERE contact.campaign_id=$campaign AND contact.timeline_id=$timeline;", parameters))
@@ -127,18 +127,18 @@ WHERE contact.campaign_id=$campaign AND contact.timeline_id=$timeline;", paramet
                 double anchor = contact.TryGetValue("last_contact_day", out contactDay) && contactDay != null && contactDay != DBNull.Value
                     ? ReadDouble(contact, "last_contact_day", day) : ReadDouble(contact, "grace_day", day);
                 if (!ReignFamilyVisitRules.FavorExpired(anchor, day)) continue;
-                Program.ExecuteSql(connection, @"UPDATE character_reputations SET status='forgotten',updated_ts=$ts
+                ReignDatabase.ExecuteSql(connection, @"UPDATE character_reputations SET status='forgotten',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$ruler AND tag_id=$tag AND status='active';", p);
-                Program.ExecuteSql(connection, @"UPDATE rumor_subject_tags SET status='forgotten',updated_ts=$ts
+                ReignDatabase.ExecuteSql(connection, @"UPDATE rumor_subject_tags SET status='forgotten',updated_ts=$ts
 WHERE subject_id=$ruler AND tag_id=$tag AND status='active' AND occurrence_id IN
 (SELECT occurrence_id FROM rumor_occurrences WHERE campaign_id=$campaign AND timeline_id=$timeline);", p);
-                Program.ExecuteSql(connection, @"UPDATE rumor_occurrences SET status='forgotten',updated_ts=$ts
+                ReignDatabase.ExecuteSql(connection, @"UPDATE rumor_occurrences SET status='forgotten',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='active'
 AND occurrence_id IN (SELECT occurrence_id FROM rumor_subject_tags WHERE subject_id=$ruler AND tag_id=$tag AND status='forgotten')
 AND NOT EXISTS (SELECT 1 FROM rumor_subject_tags live WHERE live.occurrence_id=rumor_occurrences.occurrence_id AND live.status='active');", p);
-                Program.ExecuteSql(connection, @"UPDATE court_ruler_favor_contact SET expired_day=$day
+                ReignDatabase.ExecuteSql(connection, @"UPDATE court_ruler_favor_contact SET expired_day=$day
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND ruler_id=$ruler AND favorite_id=$favorite;", p);
-                Program.ExecuteSql(connection, @"UPDATE court_player_favoring_exchanges SET exchange_count=0
+                ReignDatabase.ExecuteSql(connection, @"UPDATE court_player_favoring_exchanges SET exchange_count=0
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND ruler_id=$ruler AND favorite_id=$favorite;", p);
                 changed.Add(rulerId);
             }
@@ -151,7 +151,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND ruler_id=$ruler AND fa
             string rulerId, string favoriteId)
         {
             EnsureRulerFavorContactSchema(connection);
-            return Program.QuerySql(connection, @"SELECT 1 FROM court_ruler_favor_contact
+            return ReignDatabase.QuerySql(connection, @"SELECT 1 FROM court_ruler_favor_contact
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND ruler_id=$ruler AND favorite_id=$favorite
 AND expired_day IS NOT NULL AND (last_contact_day IS NULL OR last_contact_day<=expired_day) LIMIT 1;",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["ruler"] = rulerId, ["favorite"] = favoriteId }).Any();
@@ -171,7 +171,7 @@ AND expired_day IS NOT NULL AND (last_contact_day IS NULL OR last_contact_day<=e
             string parentId = ReadString(reply, "parent_letter_id", "");
             string sender = ReadString(reply, "sender_id", ""), recipient = ReadString(reply, "recipient_id", "");
             if (string.IsNullOrWhiteSpace(parentId) || string.IsNullOrWhiteSpace(ReadString(reply, "body", "")) || !IsPersonalFavorLetter(reply)) return;
-            var parent = Program.QuerySql(connection, @"SELECT * FROM letters WHERE letter_id=$id AND sender_id=$recipient
+            var parent = ReignDatabase.QuerySql(connection, @"SELECT * FROM letters WHERE letter_id=$id AND sender_id=$recipient
 AND recipient_id=$sender AND status IN ('delivered','read') LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = parentId, ["sender"] = sender, ["recipient"] = recipient }).FirstOrDefault();
             if (parent == null || string.IsNullOrWhiteSpace(ReadString(parent, "body", "")) || !IsPersonalFavorLetter(parent)) return;

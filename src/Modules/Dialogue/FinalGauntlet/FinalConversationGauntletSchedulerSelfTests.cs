@@ -390,7 +390,7 @@ WHERE table_schema=current_schema()
             FinalGauntletStore.EnsureSchema(connection);
             foreach (string runId in runIds ?? Array.Empty<string>())
             {
-                Program.ExecuteSql(
+                ReignDatabase.ExecuteSql(
                     connection,
                     "DELETE FROM final_gauntlet_runs WHERE run_id=$run;",
                     new Dictionary<string, object> { ["run"] = runId });

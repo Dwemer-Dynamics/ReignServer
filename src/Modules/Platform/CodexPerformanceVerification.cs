@@ -125,7 +125,7 @@ namespace ReignBetaServer
                         }
                         foreach (var memory in ReadDictionaryList(snapshot, "memories"))
                             AppendJsonLineToPath(CharacterFile(campaignId, heroId, "memory", "memories.jsonl"), memory);
-                        using (var connection = OpenCampaignConnection(campaignId))
+                        using (var connection = ReignDatabase.OpenCampaignConnection(campaignId))
                         {
                             int ordinal = 0;
                             foreach (var line in ReadDictionaryList(snapshot, "priorLines"))

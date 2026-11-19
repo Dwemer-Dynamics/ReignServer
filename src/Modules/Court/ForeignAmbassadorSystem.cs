@@ -27,35 +27,35 @@ namespace ReignBetaServer
 
         private static void EnsureForeignAmbassadorSchema(ReignDbConnection connection)
         {
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS foreign_ambassador_postings (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS foreign_ambassador_postings (
 posting_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,hero_id TEXT NOT NULL,origin_kingdom_id TEXT NOT NULL,
 origin_kingdom_name TEXT NOT NULL DEFAULT '',origin_ruler_id TEXT NOT NULL,origin_ruler_name TEXT NOT NULL DEFAULT '',host_kingdom_id TEXT NOT NULL,
 capital_settlement_id TEXT NOT NULL DEFAULT '',shelter_settlement_id TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'traveling',
 assigned_day REAL NOT NULL,arrival_day REAL NOT NULL,ended_day REAL NOT NULL DEFAULT -1,end_reason TEXT NOT NULL DEFAULT '',charm INTEGER NOT NULL,
 ruler_trust INTEGER NOT NULL DEFAULT 0,authority_revision INTEGER NOT NULL DEFAULT 1,authority_charter_json TEXT NOT NULL DEFAULT '{}',
 revision INTEGER NOT NULL DEFAULT 1,payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);" );
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_foreign_ambassador_active ON foreign_ambassador_postings(campaign_id,timeline_id,origin_kingdom_id,status,assigned_day DESC);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ambassador_official_archive (
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_foreign_ambassador_active ON foreign_ambassador_postings(campaign_id,timeline_id,origin_kingdom_id,status,assigned_day DESC);");
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ambassador_official_archive (
 archive_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,posting_id TEXT NOT NULL,origin_kingdom_id TEXT NOT NULL,
 ruler_id_at_turn TEXT NOT NULL,envoy_id TEXT NOT NULL,conversation_session_id TEXT NOT NULL,exchange_id TEXT NOT NULL DEFAULT '',turn_id TEXT NOT NULL,
 speaker_id TEXT NOT NULL,speaker_role TEXT NOT NULL,text TEXT NOT NULL,world_day REAL NOT NULL,created_ts INTEGER NOT NULL,
 UNIQUE(campaign_id,timeline_id,posting_id,turn_id));" );
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_ambassador_archive_kingdom ON ambassador_official_archive(campaign_id,timeline_id,origin_kingdom_id,world_day,created_ts);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ambassador_referrals (
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_ambassador_archive_kingdom ON ambassador_official_archive(campaign_id,timeline_id,origin_kingdom_id,world_day,created_ts);");
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ambassador_referrals (
 referral_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,posting_id TEXT NOT NULL,action_id TEXT NOT NULL,
 exact_terms_json TEXT NOT NULL,terms_hash TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',outcome TEXT NOT NULL DEFAULT 'refer',
 created_day REAL NOT NULL,due_day REAL NOT NULL,resolved_day REAL NOT NULL DEFAULT -1,counter_terms_json TEXT NOT NULL DEFAULT '{}',
 authoritative_receipt_json TEXT NOT NULL DEFAULT '{}',revision INTEGER NOT NULL DEFAULT 1,created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);" );
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_ambassador_referrals_due ON ambassador_referrals(campaign_id,timeline_id,status,due_day);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ambassador_decisions (
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_ambassador_referrals_due ON ambassador_referrals(campaign_id,timeline_id,status,due_day);");
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ambassador_decisions (
 decision_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,posting_id TEXT NOT NULL,conversation_session_id TEXT NOT NULL,
 exchange_id TEXT NOT NULL DEFAULT '',requested_action TEXT NOT NULL DEFAULT '',authority_result TEXT NOT NULL,outcome TEXT NOT NULL,
 terms_hash TEXT NOT NULL DEFAULT '',referral_id TEXT NOT NULL DEFAULT '',referral_state TEXT NOT NULL DEFAULT '',
 authoritative_receipt_json TEXT NOT NULL DEFAULT '{}',created_day REAL NOT NULL,payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL);" );
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ambassador_pressure_daily (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ambassador_pressure_daily (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,origin_kingdom_id TEXT NOT NULL,host_kingdom_id TEXT NOT NULL,day_index INTEGER NOT NULL,
 net_delta INTEGER NOT NULL DEFAULT 0,updated_ts INTEGER NOT NULL,PRIMARY KEY(campaign_id,timeline_id,origin_kingdom_id,host_kingdom_id,day_index));" );
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ambassador_pressure_audit (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ambassador_pressure_audit (
 audit_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,posting_id TEXT NOT NULL,origin_kingdom_id TEXT NOT NULL,
 host_kingdom_id TEXT NOT NULL,conversation_session_id TEXT NOT NULL,classification TEXT NOT NULL,requested_delta INTEGER NOT NULL,
 applied_delta INTEGER NOT NULL,before_value INTEGER NOT NULL,after_value INTEGER NOT NULL,pressure_channel TEXT NOT NULL,
@@ -75,11 +75,11 @@ evidence_turn_ids_json TEXT NOT NULL DEFAULT '[]',world_day REAL NOT NULL,create
                 return CourtError("Relations with that ruler must be -30 or better.");
             if (ReadBool(payload, "atWar", false)) return CourtError("Ambassadors cannot be established while the kingdoms are at war.");
 
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(ctx.CampaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
                 EnsureForeignAmbassadorSchema(connection);
                 if (TryReadCourtCommand(connection, ctx, out Dictionary<string, object> prior)) return prior;
-                Dictionary<string, object> existing = Program.QuerySql(connection, @"SELECT * FROM foreign_ambassador_postings
+                Dictionary<string, object> existing = ReignDatabase.QuerySql(connection, @"SELECT * FROM foreign_ambassador_postings
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND origin_kingdom_id=$origin AND status IN ('traveling','resident','sheltered')
 ORDER BY assigned_day DESC LIMIT 1;", new Dictionary<string, object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"origin",originKingdomId}}).FirstOrDefault();
                 if (existing != null)
@@ -107,7 +107,7 @@ ORDER BY assigned_day DESC LIMIT 1;", new Dictionary<string, object>{{"campaign"
                 Dictionary<string, object> charter = BuildAmbassadorAuthorityCharter(ctx.CampaignId, ctx.TimelineId, postingId, 1, charm, trust, originRulerId);
                 long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 string hostKingdomId = ReadString(payload, "playerKingdomStringId", "");
-                Program.ExecuteSql(connection, @"INSERT INTO foreign_ambassador_postings(posting_id,campaign_id,timeline_id,hero_id,origin_kingdom_id,origin_kingdom_name,
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO foreign_ambassador_postings(posting_id,campaign_id,timeline_id,hero_id,origin_kingdom_id,origin_kingdom_name,
 origin_ruler_id,origin_ruler_name,host_kingdom_id,capital_settlement_id,status,assigned_day,arrival_day,charm,ruler_trust,authority_revision,
 authority_charter_json,revision,payload_json,created_ts,updated_ts)
 VALUES($posting,$campaign,$timeline,$hero,$origin,$originName,$ruler,$rulerName,$host,$capital,'traveling',$assigned,$arrival,$charm,$trust,1,$charter,1,$payload,$ts,$ts);",
@@ -138,7 +138,7 @@ VALUES($posting,$campaign,$timeline,$hero,$origin,$originName,$ruler,$rulerName,
             CourtApiContext ctx = ReadCourtContext(payload);
             string postingId = ReadString(payload, "postingId", "");
             if (string.IsNullOrWhiteSpace(ctx.CommandId) || string.IsNullOrWhiteSpace(postingId)) return CourtError("commandId and postingId are required.");
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(ctx.CampaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
                 EnsureForeignAmbassadorSchema(connection);
                 if (TryReadCourtCommand(connection, ctx, out Dictionary<string, object> prior)) return prior;
@@ -147,9 +147,9 @@ VALUES($posting,$campaign,$timeline,$hero,$origin,$originName,$ruler,$rulerName,
                 long revision = ReadLong(row, "revision", 0);
                 if (revision != ctx.ExpectedRevision) return CourtRevisionError(revision);
                 string reason = ReadString(payload, "reason", "ended");
-                Program.ExecuteSql(connection, @"UPDATE foreign_ambassador_postings SET status='ended',ended_day=$day,end_reason=$reason,revision=revision+1,updated_ts=$ts WHERE posting_id=$posting;",
+                ReignDatabase.ExecuteSql(connection, @"UPDATE foreign_ambassador_postings SET status='ended',ended_day=$day,end_reason=$reason,revision=revision+1,updated_ts=$ts WHERE posting_id=$posting;",
                     new Dictionary<string, object>{{"day",ctx.WorldDay},{"reason",reason},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"posting",postingId}});
-                Program.ExecuteSql(connection, @"UPDATE ambassador_referrals SET status='cancelled_war',outcome='refer',resolved_day=$day,revision=revision+1,updated_ts=$ts
+                ReignDatabase.ExecuteSql(connection, @"UPDATE ambassador_referrals SET status='cancelled_war',outcome='refer',resolved_day=$day,revision=revision+1,updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND posting_id=$posting AND status='pending';",
                     new Dictionary<string, object>{{"day",ctx.WorldDay},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"posting",postingId}});
                 Dictionary<string, object> response = ForeignAmbassadorPostingResult(ctx, ReadForeignAmbassadorPosting(connection, ctx, postingId), "foreign_ambassador_ended");
@@ -164,7 +164,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND posting_id=$posting AN
             CourtApiContext ctx = ReadCourtContext(payload);
             string postingId = ReadString(payload, "postingId", "");
             if (string.IsNullOrWhiteSpace(ctx.CommandId) || string.IsNullOrWhiteSpace(postingId)) return CourtError("commandId and postingId are required.");
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(ctx.CampaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
                 EnsureForeignAmbassadorSchema(connection);
                 if (TryReadCourtCommand(connection, ctx, out Dictionary<string, object> prior)) return prior;
@@ -174,7 +174,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND posting_id=$posting AN
                 if (revision != ctx.ExpectedRevision) return CourtRevisionError(revision);
                 string status = ReadString(payload, "status", ReadString(row, "status", "traveling"));
                 if (!new[] { "traveling", "resident", "sheltered" }.Contains(status, StringComparer.OrdinalIgnoreCase)) return CourtError("Invalid ambassador location status.");
-                Program.ExecuteSql(connection, @"UPDATE foreign_ambassador_postings SET status=$status,capital_settlement_id=$capital,shelter_settlement_id=$shelter,
+                ReignDatabase.ExecuteSql(connection, @"UPDATE foreign_ambassador_postings SET status=$status,capital_settlement_id=$capital,shelter_settlement_id=$shelter,
 revision=revision+1,updated_ts=$ts WHERE posting_id=$posting;", new Dictionary<string, object>
                 {
                     {"status",status},{"capital",ReadString(payload,"capitalSettlementStringId",ReadString(row,"capital_settlement_id",""))},
@@ -192,7 +192,7 @@ revision=revision+1,updated_ts=$ts WHERE posting_id=$posting;", new Dictionary<s
             CourtApiContext ctx = ReadCourtContext(payload);
             string postingId = ReadString(payload, "postingId", "");
             if (string.IsNullOrWhiteSpace(ctx.CommandId) || string.IsNullOrWhiteSpace(postingId)) return CourtError("commandId and postingId are required.");
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(ctx.CampaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
                 EnsureForeignAmbassadorSchema(connection);
                 if (TryReadCourtCommand(connection, ctx, out Dictionary<string, object> prior)) return prior;
@@ -205,7 +205,7 @@ revision=revision+1,updated_ts=$ts WHERE posting_id=$posting;", new Dictionary<s
                 int charm = ReadInt(payload, "charm", ReadInt(row, "charm", 200));
                 int trust = ReadInt(payload, "rulerTrust", ReadInt(row, "ruler_trust", 0));
                 Dictionary<string, object> charter = BuildAmbassadorAuthorityCharter(ctx.CampaignId, ctx.TimelineId, postingId, authorityRevision, charm, trust, rulerId);
-                Program.ExecuteSql(connection, @"UPDATE foreign_ambassador_postings SET origin_ruler_id=$ruler,origin_ruler_name=$name,charm=$charm,ruler_trust=$trust,
+                ReignDatabase.ExecuteSql(connection, @"UPDATE foreign_ambassador_postings SET origin_ruler_id=$ruler,origin_ruler_name=$name,charm=$charm,ruler_trust=$trust,
 authority_revision=$authorityRevision,authority_charter_json=$charter,revision=revision+1,updated_ts=$ts WHERE posting_id=$posting;", new Dictionary<string, object>
                 {
                     {"ruler",rulerId},{"name",ReadString(payload,"originRulerName",rulerId)},{"charm",charm},{"trust",trust},
@@ -266,17 +266,17 @@ authority_revision=$authorityRevision,authority_charter_json=$charter,revision=r
             Dictionary<string, object> row = null;
             if (!string.IsNullOrWhiteSpace(postingId) || !string.IsNullOrWhiteSpace(heroId))
             {
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureForeignAmbassadorSchema(connection);
                     if (!string.IsNullOrWhiteSpace(postingId))
                     {
-                        row = Program.QuerySql(connection, "SELECT * FROM foreign_ambassador_postings WHERE posting_id=$posting AND campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
+                        row = ReignDatabase.QuerySql(connection, "SELECT * FROM foreign_ambassador_postings WHERE posting_id=$posting AND campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
                             new Dictionary<string, object>{{"posting",postingId},{"campaign",campaignId},{"timeline",timelineId}}).FirstOrDefault();
                     }
                     else
                     {
-                        row = Program.QuerySql(connection, @"SELECT * FROM foreign_ambassador_postings
+                        row = ReignDatabase.QuerySql(connection, @"SELECT * FROM foreign_ambassador_postings
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND hero_id=$hero
 AND status IN ('traveling','resident','sheltered') ORDER BY assigned_day DESC LIMIT 1;",
                             new Dictionary<string, object>{{"campaign",campaignId},{"timeline",timelineId},{"hero",heroId}}).FirstOrDefault();
@@ -323,10 +323,10 @@ AND status IN ('traveling','resident','sheltered') ORDER BY assigned_day DESC LI
             string postingId = ReadString(context, "postingId", "");
             string heroId = ReadString(payload, "heroStringId", "");
             string timelineId = ReadString(payload, "timelineId", "main");
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureForeignAmbassadorSchema(connection);
-                Dictionary<string, object> row = Program.QuerySql(connection, @"SELECT * FROM foreign_ambassador_postings WHERE posting_id=$posting AND campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
+                Dictionary<string, object> row = ReignDatabase.QuerySql(connection, @"SELECT * FROM foreign_ambassador_postings WHERE posting_id=$posting AND campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
                     new Dictionary<string, object>{{"posting",postingId},{"campaign",campaignId},{"timeline",timelineId}}).FirstOrDefault();
                 if (row == null || !new[] { "resident", "sheltered" }.Contains(ReadString(row, "status", ""), StringComparer.OrdinalIgnoreCase))
                     return CourtError("The official ambassador posting is not active and resident.");
@@ -348,15 +348,15 @@ AND status IN ('traveling','resident','sheltered') ORDER BY assigned_day DESC LI
         internal static bool HasActiveAmbassadorPosting(string campaignId, string timelineId, string heroId, string postingId)
         {
             if (string.IsNullOrWhiteSpace(heroId) && string.IsNullOrWhiteSpace(postingId)) return false;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureForeignAmbassadorSchema(connection);
                 Dictionary<string, object> row = !string.IsNullOrWhiteSpace(postingId)
-                    ? Program.QuerySql(connection, @"SELECT posting_id FROM foreign_ambassador_postings
+                    ? ReignDatabase.QuerySql(connection, @"SELECT posting_id FROM foreign_ambassador_postings
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND posting_id=$posting
 AND status IN ('traveling','resident','sheltered') LIMIT 1;",
                         new Dictionary<string, object>{{"campaign",campaignId},{"timeline",timelineId},{"posting",postingId}}).FirstOrDefault()
-                    : Program.QuerySql(connection, @"SELECT posting_id FROM foreign_ambassador_postings
+                    : ReignDatabase.QuerySql(connection, @"SELECT posting_id FROM foreign_ambassador_postings
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND hero_id=$hero
 AND status IN ('traveling','resident','sheltered') LIMIT 1;",
                         new Dictionary<string, object>{{"campaign",campaignId},{"timeline",timelineId},{"hero",heroId}}).FirstOrDefault();
@@ -377,13 +377,13 @@ AND status IN ('traveling','resident','sheltered') LIMIT 1;",
             bool officialMode = string.Equals(ReadString(payload, "conversationMode", ""), "ambassador_official", StringComparison.OrdinalIgnoreCase)
                 || ReadBool(payload, "officialMemoryFirewall", false);
             Dictionary<string, object> posting;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureForeignAmbassadorSchema(connection);
                 posting = !string.IsNullOrWhiteSpace(postingId)
-                    ? Program.QuerySql(connection, "SELECT * FROM foreign_ambassador_postings WHERE posting_id=$posting AND campaign_id=$campaign AND timeline_id=$timeline AND status IN ('traveling','resident','sheltered') LIMIT 1;",
+                    ? ReignDatabase.QuerySql(connection, "SELECT * FROM foreign_ambassador_postings WHERE posting_id=$posting AND campaign_id=$campaign AND timeline_id=$timeline AND status IN ('traveling','resident','sheltered') LIMIT 1;",
                         new Dictionary<string, object>{{"posting",postingId},{"campaign",campaignId},{"timeline",timelineId}}).FirstOrDefault()
-                    : Program.QuerySql(connection, @"SELECT * FROM foreign_ambassador_postings WHERE campaign_id=$campaign AND timeline_id=$timeline AND hero_id=$hero
+                    : ReignDatabase.QuerySql(connection, @"SELECT * FROM foreign_ambassador_postings WHERE campaign_id=$campaign AND timeline_id=$timeline AND hero_id=$hero
 AND status IN ('traveling','resident','sheltered') ORDER BY assigned_day DESC LIMIT 1;",
                         new Dictionary<string, object>{{"campaign",campaignId},{"timeline",timelineId},{"hero",heroId}}).FirstOrDefault();
             }
@@ -465,11 +465,11 @@ AND status IN ('traveling','resident','sheltered') ORDER BY assigned_day DESC LI
         {
             string referralId = "ambassador_referral_" + AmbassadorHash(campaignId + "|" + timelineId + "|" + postingId + "|" + actionId + "|" + termsHash).Substring(0, 24);
             int delay = StableAmbassadorInt(referralId + "|delay", 3) + 1;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureForeignAmbassadorSchema(connection);
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO ambassador_referrals(referral_id,campaign_id,timeline_id,posting_id,action_id,exact_terms_json,terms_hash,
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO ambassador_referrals(referral_id,campaign_id,timeline_id,posting_id,action_id,exact_terms_json,terms_hash,
 status,outcome,created_day,due_day,created_ts,updated_ts) VALUES($id,$campaign,$timeline,$posting,$action,$terms,$hash,'pending','refer',$day,$due,$ts,$ts);",
                     new Dictionary<string, object>{{"id",referralId},{"campaign",campaignId},{"timeline",timelineId},{"posting",postingId},{"action",actionId},
                     {"terms",CourtCanonicalJson(terms)},{"hash",termsHash},{"day",worldDay},{"due",worldDay+delay},{"ts",ts}});
@@ -521,10 +521,10 @@ status,outcome,created_day,due_day,created_ts,updated_ts) VALUES($id,$campaign,$
             string postingId = ReadString(context, "postingId", "");
             string timelineId = ReadString(payload, "timelineId", "main");
             if (string.IsNullOrWhiteSpace(postingId)) return new List<Dictionary<string, object>>();
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureForeignAmbassadorSchema(connection);
-                return Program.QuerySql(connection, @"SELECT * FROM ambassador_official_archive WHERE campaign_id=$campaign AND timeline_id=$timeline AND posting_id=$posting
+                return ReignDatabase.QuerySql(connection, @"SELECT * FROM ambassador_official_archive WHERE campaign_id=$campaign AND timeline_id=$timeline AND posting_id=$posting
 ORDER BY created_ts DESC LIMIT $limit;", new Dictionary<string, object>{{"campaign",campaignId},{"timeline",timelineId},{"posting",postingId},{"limit",Math.Max(1,limit)}})
                     .OrderBy(x => ReadLong(x, "created_ts", 0)).Select(x => new Dictionary<string, object>
                     {
@@ -550,13 +550,13 @@ ORDER BY created_ts DESC LIMIT $limit;", new Dictionary<string, object>{{"campai
             if (string.IsNullOrWhiteSpace(postingId) || string.IsNullOrWhiteSpace(rulerId) || turnIds.Count < 2) return;
             Dictionary<string, object>[] lines = { playerLine, npcLine };
             string[] speakerIds = { playerId, envoyId };
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureForeignAmbassadorSchema(connection);
                 for (int i = 0; i < 2; i++)
                 {
                     Dictionary<string, object> line = lines[i];
-                    Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO ambassador_official_archive(archive_id,campaign_id,timeline_id,posting_id,origin_kingdom_id,
+                    ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO ambassador_official_archive(archive_id,campaign_id,timeline_id,posting_id,origin_kingdom_id,
 ruler_id_at_turn,envoy_id,conversation_session_id,exchange_id,turn_id,speaker_id,speaker_role,text,world_day,created_ts)
 VALUES($archive,$campaign,$timeline,$posting,$kingdom,$ruler,$envoy,$session,$exchange,$turn,$speaker,$role,$text,$day,$ts);",
                         new Dictionary<string, object>{{"archive","ambassador_archive_"+turnIds[i]},{"campaign",campaignId},{"timeline",timelineId},{"posting",postingId},
@@ -588,10 +588,10 @@ VALUES($archive,$campaign,$timeline,$posting,$kingdom,$ruler,$envoy,$session,$ex
             string timelineId = ReadString(payload, "timelineId", "main");
             string decisionId = "ambassador_decision_" + AmbassadorHash(postingId + "|" + ReadString(conversationExchange, "exchangeId", "")).Substring(0, 24);
             decision["decisionId"] = decisionId;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureForeignAmbassadorSchema(connection);
-                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO ambassador_decisions(decision_id,campaign_id,timeline_id,posting_id,conversation_session_id,exchange_id,
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO ambassador_decisions(decision_id,campaign_id,timeline_id,posting_id,conversation_session_id,exchange_id,
 requested_action,authority_result,outcome,terms_hash,referral_id,referral_state,authoritative_receipt_json,created_day,payload_json,created_ts)
 VALUES($id,$campaign,$timeline,$posting,$session,$exchange,$action,$authority,$outcome,$hash,$referral,$state,$receipt,$day,'{}',$ts);",
                     new Dictionary<string, object>{{"id",decisionId},{"campaign",campaignId},{"timeline",timelineId},{"posting",postingId},
@@ -614,10 +614,10 @@ VALUES($id,$campaign,$timeline,$posting,$session,$exchange,$action,$authority,$o
             string postingId = ReadString(context, "postingId", "");
             string timelineId = ReadString(sessionPayload, "timelineId", "main");
             Dictionary<string, object> posting;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureForeignAmbassadorSchema(connection);
-                posting = Program.QuerySql(connection, "SELECT * FROM foreign_ambassador_postings WHERE posting_id=$posting AND campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
+                posting = ReignDatabase.QuerySql(connection, "SELECT * FROM foreign_ambassador_postings WHERE posting_id=$posting AND campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
                     new Dictionary<string, object>{{"posting",postingId},{"campaign",campaignId},{"timeline",timelineId}}).FirstOrDefault();
             }
             if (posting == null) return new Dictionary<string, object>{{"processed",false},{"reason","posting_not_found"}};
@@ -640,15 +640,15 @@ VALUES($id,$campaign,$timeline,$posting,$session,$exchange,$action,$authority,$o
             int pressureBefore = DiplomacyService.ReadPoliticalPressureValue(campaignId, timelineId, originKingdomId, hostKingdomId);
             int pressureAfter = pressureBefore;
             string auditId = "ambassador_pressure_" + AmbassadorHash(campaignId + "|" + timelineId + "|" + ReadString(session, "session_id", "")).Substring(0, 24);
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureForeignAmbassadorSchema(connection);
-                priorDaily = ReadInt(Program.QuerySql(connection, @"SELECT net_delta FROM ambassador_pressure_daily WHERE campaign_id=$campaign AND timeline_id=$timeline
+                priorDaily = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT net_delta FROM ambassador_pressure_daily WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND origin_kingdom_id=$origin AND host_kingdom_id=$host AND day_index=$day LIMIT 1;", new Dictionary<string, object>
                     {{"campaign",campaignId},{"timeline",timelineId},{"origin",originKingdomId},{"host",hostKingdomId},{"day",dayIndex}}).FirstOrDefault(), "net_delta", 0);
                 afterDaily = ClampAmbassadorDailyPressure(priorDaily, requestedDelta);
                 appliedDelta = afterDaily - priorDaily;
-                Program.ExecuteSql(connection, @"INSERT INTO ambassador_pressure_daily(campaign_id,timeline_id,origin_kingdom_id,host_kingdom_id,day_index,net_delta,updated_ts)
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO ambassador_pressure_daily(campaign_id,timeline_id,origin_kingdom_id,host_kingdom_id,day_index,net_delta,updated_ts)
 VALUES($campaign,$timeline,$origin,$host,$day,$delta,$ts)
 ON CONFLICT(campaign_id,timeline_id,origin_kingdom_id,host_kingdom_id,day_index) DO UPDATE SET net_delta=$delta,updated_ts=$ts;",
                     new Dictionary<string, object>{{"campaign",campaignId},{"timeline",timelineId},{"origin",originKingdomId},{"host",hostKingdomId},{"day",dayIndex},{"delta",afterDaily},{"ts",ts}});
@@ -667,9 +667,9 @@ ON CONFLICT(campaign_id,timeline_id,origin_kingdom_id,host_kingdom_id,day_index)
                     requestedDelta > 0 ? "treaty_strain" : "trade", auditId);
             }
             List<string> evidenceTurnIds = ReadStringList(classification, "evidenceTurnIds");
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO ambassador_pressure_audit(audit_id,campaign_id,timeline_id,posting_id,origin_kingdom_id,
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO ambassador_pressure_audit(audit_id,campaign_id,timeline_id,posting_id,origin_kingdom_id,
 host_kingdom_id,conversation_session_id,classification,requested_delta,applied_delta,before_value,after_value,pressure_channel,evidence_turn_ids_json,world_day,created_ts)
 VALUES($id,$campaign,$timeline,$posting,$origin,$host,$session,$classification,$requested,$applied,$before,$after,$channel,$evidence,$day,$ts);",
                     new Dictionary<string, object>{{"id",auditId},{"campaign",campaignId},{"timeline",timelineId},{"posting",postingId},{"origin",originKingdomId},{"host",hostKingdomId},
@@ -750,18 +750,18 @@ VALUES($id,$campaign,$timeline,$posting,$origin,$host,$session,$classification,$
             string timelineId = ReadString(payload, "timelineId", "main");
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             List<Dictionary<string, object>> due;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureForeignAmbassadorSchema(connection);
-                due = Program.QuerySql(connection, @"SELECT * FROM ambassador_referrals WHERE campaign_id=$campaign AND timeline_id=$timeline
+                due = ReignDatabase.QuerySql(connection, @"SELECT * FROM ambassador_referrals WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND status='pending' AND due_day<=$day ORDER BY due_day,created_ts LIMIT 50;",
                     new Dictionary<string, object>{{"campaign",campaignId},{"timeline",timelineId},{"day",worldDay}});
             }
             List<Dictionary<string, object>> resolved = due.Select(row => ResolveAmbassadorReferral(campaignId, timelineId, payload, row, worldDay)).ToList();
             List<Dictionary<string, object>> counters;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                counters = Program.QuerySql(connection, @"SELECT referral_id,posting_id,action_id,terms_hash,status,outcome,due_day,counter_terms_json,revision
+                counters = ReignDatabase.QuerySql(connection, @"SELECT referral_id,posting_id,action_id,terms_hash,status,outcome,due_day,counter_terms_json,revision
 FROM ambassador_referrals WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='countered' ORDER BY updated_ts LIMIT 50;",
                     new Dictionary<string, object>{{"campaign",campaignId},{"timeline",timelineId}});
             }
@@ -788,9 +788,9 @@ FROM ambassador_referrals WHERE campaign_id=$campaign AND timeline_id=$timeline 
                 ["referralId"] = referralId, ["source"] = "resident_ambassador_referral"
             };
             Dictionary<string, object> posting;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                posting = Program.QuerySql(connection, "SELECT * FROM foreign_ambassador_postings WHERE posting_id=$posting LIMIT 1;",
+                posting = ReignDatabase.QuerySql(connection, "SELECT * FROM foreign_ambassador_postings WHERE posting_id=$posting LIMIT 1;",
                     new Dictionary<string, object>{{"posting",postingId}}).FirstOrDefault();
             }
             if (posting == null) return UpdateAmbassadorReferralState(campaignId, referralId, "cancelled", "posting_ended", worldDay, new Dictionary<string, object>(), new Dictionary<string, object>());
@@ -846,10 +846,10 @@ FROM ambassador_referrals WHERE campaign_id=$campaign AND timeline_id=$timeline 
             string referralId = ReadString(payload, "referralId", "");
             bool accept = ReadBool(payload, "accept", false);
             Dictionary<string, object> referral;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureForeignAmbassadorSchema(connection);
-                referral = Program.QuerySql(connection, "SELECT * FROM ambassador_referrals WHERE referral_id=$id AND campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
+                referral = ReignDatabase.QuerySql(connection, "SELECT * FROM ambassador_referrals WHERE referral_id=$id AND campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
                     new Dictionary<string, object>{{"id",referralId},{"campaign",campaignId},{"timeline",timelineId}}).FirstOrDefault();
             }
             if (referral == null || !string.Equals(ReadString(referral, "status", ""), "countered", StringComparison.OrdinalIgnoreCase))
@@ -866,8 +866,8 @@ FROM ambassador_referrals WHERE campaign_id=$campaign AND timeline_id=$timeline 
                 ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["worldDay"] = worldDay
             };
             Dictionary<string, object> posting;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
-                posting = Program.QuerySql(connection, "SELECT * FROM foreign_ambassador_postings WHERE posting_id=$posting LIMIT 1;", new Dictionary<string, object>{{"posting",ReadString(referral,"posting_id","")}}).FirstOrDefault();
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+                posting = ReignDatabase.QuerySql(connection, "SELECT * FROM foreign_ambassador_postings WHERE posting_id=$posting LIMIT 1;", new Dictionary<string, object>{{"posting",ReadString(referral,"posting_id","")}}).FirstOrDefault();
             Dictionary<string, object> actor = DiplomacyService.FindDirectorKingdom(evaluationPayload, ReadString(posting, "origin_kingdom_id", ""));
             Dictionary<string, object> normalized = Program.NormalizeActionCommand(counter, campaignId, out List<string> errors,
                 DiplomacyService.BuildDirectorNormalizationPayload(evaluationPayload, actor ?? new Dictionary<string, object>()), "The player accepted the ruler's exact counteroffer.");
@@ -891,14 +891,14 @@ FROM ambassador_referrals WHERE campaign_id=$campaign AND timeline_id=$timeline 
             double worldDay, Dictionary<string, object> counterTerms, Dictionary<string, object> receipt)
         {
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureForeignAmbassadorSchema(connection);
-                Program.ExecuteSql(connection, @"UPDATE ambassador_referrals SET status=$status,outcome=$outcome,resolved_day=CASE WHEN $terminal=1 THEN $day ELSE resolved_day END,
+                ReignDatabase.ExecuteSql(connection, @"UPDATE ambassador_referrals SET status=$status,outcome=$outcome,resolved_day=CASE WHEN $terminal=1 THEN $day ELSE resolved_day END,
 counter_terms_json=$counter,authoritative_receipt_json=$receipt,revision=revision+1,updated_ts=$ts WHERE referral_id=$id;",
                     new Dictionary<string, object>{{"status",status},{"outcome",outcome},{"terminal",status=="countered"?0:1},{"day",worldDay},
                     {"counter",CourtCanonicalJson(counterTerms??new Dictionary<string,object>())},{"receipt",CourtCanonicalJson(receipt??new Dictionary<string,object>())},{"ts",ts},{"id",referralId}});
-                Dictionary<string, object> row = Program.QuerySql(connection, "SELECT * FROM ambassador_referrals WHERE referral_id=$id LIMIT 1;", new Dictionary<string, object>{{"id",referralId}}).FirstOrDefault();
+                Dictionary<string, object> row = ReignDatabase.QuerySql(connection, "SELECT * FROM ambassador_referrals WHERE referral_id=$id LIMIT 1;", new Dictionary<string, object>{{"id",referralId}}).FirstOrDefault();
                 return new Dictionary<string, object>{{"ok",true},{"referralId",referralId},{"status",status},{"outcome",outcome},{"termsHash",ReadString(row,"terms_hash","")},
                     {"counterTerms",counterTerms??new Dictionary<string,object>()},{"counterTermsHash",CourtHash(CourtCanonicalJson(counterTerms??new Dictionary<string,object>()))},{"authoritativeReceipt",receipt??new Dictionary<string,object>()}};
             }
@@ -913,13 +913,13 @@ counter_terms_json=$counter,authoritative_receipt_json=$receipt,revision=revisio
             {
                 {"state",status},{"actionId",ReadFirstString(payload,"serverActionId","actionId","id")},{"result",ReadDictionary(payload,"result")??new Dictionary<string,object>()}
             };
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureForeignAmbassadorSchema(connection);
                 string next = string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase) ? "executed" : "execution_failed";
-                Program.ExecuteSql(connection, "UPDATE ambassador_referrals SET status=$status,authoritative_receipt_json=$receipt,revision=revision+1,updated_ts=$ts WHERE referral_id=$id;",
+                ReignDatabase.ExecuteSql(connection, "UPDATE ambassador_referrals SET status=$status,authoritative_receipt_json=$receipt,revision=revision+1,updated_ts=$ts WHERE referral_id=$id;",
                     new Dictionary<string, object>{{"status",next},{"receipt",CourtCanonicalJson(receipt)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",referralId}});
-                Program.ExecuteSql(connection, "UPDATE ambassador_decisions SET authoritative_receipt_json=$receipt,referral_state=$status WHERE referral_id=$id;",
+                ReignDatabase.ExecuteSql(connection, "UPDATE ambassador_decisions SET authoritative_receipt_json=$receipt,referral_state=$status WHERE referral_id=$id;",
                     new Dictionary<string, object>{{"receipt",CourtCanonicalJson(receipt)},{"status",next},{"id",referralId}});
             }
         }
@@ -998,9 +998,9 @@ counter_terms_json=$counter,authoritative_receipt_json=$receipt,revision=revisio
                 {"postingId",postingId},{"reason","war_declared"},{"worldDay",14.5d}
             });
             string referralStatus;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                referralStatus = ReadString(Program.QuerySql(connection,"SELECT status FROM ambassador_referrals WHERE referral_id=$id LIMIT 1;",
+                referralStatus = ReadString(ReignDatabase.QuerySql(connection,"SELECT status FROM ambassador_referrals WHERE referral_id=$id LIMIT 1;",
                     new Dictionary<string,object>{{"id",ReadString(referral,"referralId","")}}).FirstOrDefault(),"status","");
             }
             add("ambassador_war_recall_cancels_referrals",ReadBool(ended,"ok",false) && referralStatus=="cancelled_war",
@@ -1009,7 +1009,7 @@ counter_terms_json=$counter,authoritative_receipt_json=$receipt,revision=revisio
 
         private static Dictionary<string, object> ReadForeignAmbassadorPosting(ReignDbConnection connection, CourtApiContext ctx, string postingId)
         {
-            return Program.QuerySql(connection, "SELECT * FROM foreign_ambassador_postings WHERE posting_id=$posting AND campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
+            return ReignDatabase.QuerySql(connection, "SELECT * FROM foreign_ambassador_postings WHERE posting_id=$posting AND campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
                 new Dictionary<string, object>{{"posting",postingId},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault();
         }
 
@@ -1019,9 +1019,9 @@ counter_terms_json=$counter,authoritative_receipt_json=$receipt,revision=revisio
             HashSet<string> existing = new HashSet<string>(Program.ReadJsonLinesFromPath(Program.CharacterFile(campaignId, rulerId, "history", "dialogue.jsonl"))
                 .Select(x => ReadFirstString(x, "turnId", "id")).Where(x => !string.IsNullOrWhiteSpace(x)), StringComparer.OrdinalIgnoreCase);
             List<Dictionary<string, object>> rows;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                rows = Program.QuerySql(connection, @"SELECT * FROM ambassador_official_archive WHERE campaign_id=$campaign AND timeline_id=$timeline AND posting_id=$posting ORDER BY created_ts;",
+                rows = ReignDatabase.QuerySql(connection, @"SELECT * FROM ambassador_official_archive WHERE campaign_id=$campaign AND timeline_id=$timeline AND posting_id=$posting ORDER BY created_ts;",
                     new Dictionary<string, object>{{"campaign",campaignId},{"timeline",timelineId},{"posting",postingId}});
             }
             foreach (Dictionary<string, object> row in rows)

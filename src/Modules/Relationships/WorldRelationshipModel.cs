@@ -124,7 +124,7 @@ namespace ReignBetaServer
                 if (!standing.TryGetValue(heroId, out Dictionary<string, object> row))
                 {
                     StandingReads++;
-                    row = Program.QuerySql(connection, @"SELECT subject_id,standing_value,sources_json,
+                    row = ReignDatabase.QuerySql(connection, @"SELECT subject_id,standing_value,sources_json,
 revision,last_changed_day,updated_ts,calculation_status,last_error FROM character_public_standing
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject LIMIT 1;",
                         new Dictionary<string, object> { ["campaign"] = campaignId,
@@ -150,7 +150,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject LI
                 if (!roster.TryGetValue(heroId, out Dictionary<string, object> row))
                 {
                     RosterReads++;
-                    roster[heroId] = row = Program.QuerySql(connection,
+                    roster[heroId] = row = ReignDatabase.QuerySql(connection,
                         "SELECT hero_id,kingdom_id,current_charm,is_player FROM identity_roster WHERE hero_id=$id LIMIT 1;",
                         new Dictionary<string, object> { ["id"] = heroId }).FirstOrDefault();
                 }
@@ -162,7 +162,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject LI
                 if (playerIds == null)
                 {
                     PlayerReads++;
-                    playerIds = new HashSet<string>(Program.QuerySql(connection,
+                    playerIds = new HashSet<string>(ReignDatabase.QuerySql(connection,
                         "SELECT hero_id FROM identity_roster WHERE is_player=1 AND hero_id<>'';")
                         .Select(row => ReadString(row, "hero_id", "")), StringComparer.OrdinalIgnoreCase);
                 }
@@ -256,12 +256,12 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject LI
                 .Where(id => !string.IsNullOrWhiteSpace(id)), StringComparer.OrdinalIgnoreCase);
             if (ids.Count == 0) return new List<Dictionary<string, object>>();
             if (!ReignPostgreSqlDialect.IsPostgreSql(connection))
-                return Program.QuerySql(connection, query, parameters)
+                return ReignDatabase.QuerySql(connection, query, parameters)
                     .Where(row => ids.Contains(ReadString(row, idColumn, ""))).ToList();
             Dictionary<string, object> requested = parameters == null
                 ? new Dictionary<string, object>() : new Dictionary<string, object>(parameters);
             requested["requestedHeroes"] = Json.Serialize(ids.OrderBy(id => id, StringComparer.OrdinalIgnoreCase).ToList());
-            return Program.QuerySql(connection, "SELECT source.* FROM (" + query + @") source
+            return ReignDatabase.QuerySql(connection, "SELECT source.* FROM (" + query + @") source
 JOIN jsonb_array_elements_text(CAST($requestedHeroes AS jsonb)) requested
 ON requested.value=source." + idColumn + ";", requested);
         }
@@ -270,14 +270,14 @@ ON requested.value=source." + idColumn + ";", requested);
         {
             const string marker =
                 "postgresql_world_relationship_schema_revision";
-            if (Program.IsPostgreSqlComponentSchemaReady(connection, marker,
+            if (ReignDatabase.IsPostgreSqlComponentSchemaReady(connection, marker,
                 PostgreSqlWorldRelationshipSchemaRevision))
                 return;
 
             EnsureWorldRelationshipSchemaCore(connection);
             if (ReignPostgreSqlDialect.IsPostgreSql(connection))
             {
-                Program.ExecuteSql(connection, @"
+                ReignDatabase.ExecuteSql(connection, @"
 INSERT INTO schema_meta(key,value)
 VALUES('postgresql_world_relationship_schema_revision',$revision)
 ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
@@ -286,7 +286,7 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
                         ["revision"] =
                             PostgreSqlWorldRelationshipSchemaRevision.ToString()
                     });
-                Program.MarkPostgreSqlComponentSchemaReady(connection, marker,
+                ReignDatabase.MarkPostgreSqlComponentSchemaReady(connection, marker,
                     PostgreSqlWorldRelationshipSchemaRevision);
             }
         }
@@ -295,28 +295,28 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
             ReignDbConnection connection)
         {
             ReputationService.EnsurePublicStandingSchema(connection);
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_pair_provenance (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_pair_provenance (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,pair_key TEXT NOT NULL,
 source TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,required INTEGER NOT NULL DEFAULT 0,
 first_day REAL NOT NULL,last_day REAL NOT NULL,details_json TEXT NOT NULL DEFAULT '{}',
 updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,pair_key,source));");
-            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_relationship_pair_provenance_active
+            ReignDatabase.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_relationship_pair_provenance_active
 ON relationship_pair_provenance(campaign_id,timeline_id,source,active,pair_key);");
-            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_relationship_pair_provenance_pair
+            ReignDatabase.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_relationship_pair_provenance_pair
 ON relationship_pair_provenance(pair_key,active,required,source);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS public_standing_invalidations (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS public_standing_invalidations (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,subject_id TEXT NOT NULL,
 standing_revision INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'pending',
 pair_cursor TEXT NOT NULL DEFAULT '',affected_pairs INTEGER NOT NULL DEFAULT 0,
 processed_pairs INTEGER NOT NULL DEFAULT 0,created_day REAL NOT NULL,
 created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,last_error TEXT NOT NULL DEFAULT '',
 PRIMARY KEY(campaign_id,timeline_id,subject_id));");
-            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_public_standing_invalidations_status
+            ReignDatabase.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_public_standing_invalidations_status
 ON public_standing_invalidations(status,updated_ts,campaign_id,timeline_id,subject_id);");
-            Program.EnsureDatabaseColumn(connection, "character_public_standing", "calculation_status",
+            ReignDatabase.EnsureDatabaseColumn(connection, "character_public_standing", "calculation_status",
                 "TEXT NOT NULL DEFAULT 'ready'");
-            Program.EnsureDatabaseColumn(connection, "character_public_standing", "last_error",
+            ReignDatabase.EnsureDatabaseColumn(connection, "character_public_standing", "last_error",
                 "TEXT NOT NULL DEFAULT ''");
         }
 
@@ -328,7 +328,7 @@ ON public_standing_invalidations(status,updated_ts,campaign_id,timeline_id,subje
                 return;
             EnsureWorldRelationshipSchema(connection);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Program.ExecuteSql(connection, @"INSERT INTO relationship_pair_provenance(
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_pair_provenance(
 campaign_id,timeline_id,pair_key,source,active,required,first_day,last_day,details_json,updated_ts)
 VALUES($campaign,$timeline,$pair,$source,1,$required,$day,$day,$details,$ts)
 ON CONFLICT(campaign_id,timeline_id,pair_key,source) DO UPDATE SET
@@ -354,7 +354,7 @@ OR relationship_pair_provenance.details_json<>$details;",
             RelationshipStandingContext context = RelationshipStandingContext.For(connection, campaignId, timelineId);
             if (context != null) return context.ReadStanding(subjectId);
             ReputationService.EnsurePublicStandingSchema(connection);
-            return Program.QuerySql(connection, @"SELECT subject_id,standing_value,sources_json,
+            return ReignDatabase.QuerySql(connection, @"SELECT subject_id,standing_value,sources_json,
 revision,last_changed_day,updated_ts,calculation_status,last_error
 FROM character_public_standing
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject
@@ -398,10 +398,10 @@ LIMIT 1;", new Dictionary<string, object>
             }
             double nonFavoring = sources.Where(source => !ReputationService.IsRulerFavoringStandingSource(source))
                 .Sum(source => ReadDouble(source, "effectiveContribution", 0d)) + spouseAdjustment;
-            Dictionary<string, object> subject = context != null ? context.ReadRoster(subjectId) : Program.QuerySql(connection,
+            Dictionary<string, object> subject = context != null ? context.ReadRoster(subjectId) : ReignDatabase.QuerySql(connection,
                 "SELECT kingdom_id,current_charm FROM identity_roster WHERE hero_id=$id LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = subjectId }).FirstOrDefault();
-            Dictionary<string, object> observer = context != null ? context.ReadRoster(observerId) : Program.QuerySql(connection,
+            Dictionary<string, object> observer = context != null ? context.ReadRoster(observerId) : ReignDatabase.QuerySql(connection,
                 "SELECT kingdom_id,is_player FROM identity_roster WHERE hero_id=$id LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = observerId }).FirstOrDefault();
             string subjectKingdom = ReadString(subject, "kingdom_id", "");
@@ -450,7 +450,7 @@ LIMIT 1;", new Dictionary<string, object>
         {
             EnsureWorldRelationshipSchema(connection);
             string pairKey = AmbientPairKey(observerId, targetId);
-            Dictionary<string, object> pair = Program.QuerySql(connection,
+            Dictionary<string, object> pair = ReignDatabase.QuerySql(connection,
                 "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                 new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
             Dictionary<string, object> standing = ReadPublicStandingRow(connection,
@@ -468,7 +468,7 @@ LIMIT 1;", new Dictionary<string, object>
             int standingValue = ReadInt(standingResolution, "value", 0);
             int effective = hasPair ? Clamp(personal + standingValue, -100, 100) : 0;
             List<string> provenance = hasPair
-                ? Program.QuerySql(connection, @"SELECT source FROM relationship_pair_provenance
+                ? ReignDatabase.QuerySql(connection, @"SELECT source FROM relationship_pair_provenance
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND pair_key=$pair AND active=1
 ORDER BY source;", new Dictionary<string, object>
                 {
@@ -518,12 +518,12 @@ ORDER BY source;", new Dictionary<string, object>
         {
             EnsureWorldRelationshipSchema(connection);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            int affected = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+            int affected = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM relationship_pair_chemistry
 WHERE hero_a_id=$subject OR hero_b_id=$subject;",
                 new Dictionary<string, object> { ["subject"] = subjectId })
                 .FirstOrDefault(), "count", 0);
-            Program.ExecuteSql(connection, @"INSERT INTO public_standing_invalidations(
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO public_standing_invalidations(
 campaign_id,timeline_id,subject_id,standing_revision,status,pair_cursor,
 affected_pairs,processed_pairs,created_day,created_ts,updated_ts,last_error)
 VALUES($campaign,$timeline,$subject,$revision,'pending','',$affected,0,$day,$ts,$ts,'')
@@ -561,11 +561,11 @@ processed_pairs=0,created_day=$day,created_ts=$ts,updated_ts=$ts,last_error='';"
                 string campaignId = System.IO.Path.GetFileName(directory);
                 try
                 {
-                    using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                    using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                     {
                         EnsureMbtiRelationshipSchema(connection);
                         EnsureWorldRelationshipSchema(connection);
-                        Dictionary<string, object> job = Program.QuerySql(connection, @"
+                        Dictionary<string, object> job = ReignDatabase.QuerySql(connection, @"
 SELECT * FROM public_standing_invalidations
 WHERE status='pending' ORDER BY updated_ts,subject_id LIMIT 1;").FirstOrDefault();
                         if (job == null) continue;
@@ -597,7 +597,7 @@ WHERE status='pending' ORDER BY updated_ts,subject_id LIMIT 1;").FirstOrDefault(
             string cursor = ReadString(job, "pair_cursor", "");
             int revision = ReadInt(job, "standing_revision", 1);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            List<Dictionary<string, object>> pairs = Program.QuerySql(connection, @"
+            List<Dictionary<string, object>> pairs = ReignDatabase.QuerySql(connection, @"
 SELECT * FROM relationship_pair_chemistry
 WHERE (hero_a_id=$subject OR hero_b_id=$subject) AND pair_key>$cursor
 ORDER BY pair_key LIMIT " + PublicStandingInvalidationBatchSize + ";",
@@ -610,7 +610,7 @@ ORDER BY pair_key LIMIT " + PublicStandingInvalidationBatchSize + ";",
                 "public_standing_revision");
             int processed = ReadInt(job, "processed_pairs", 0) + pairs.Count;
             bool complete = pairs.Count < PublicStandingInvalidationBatchSize;
-            Program.ExecuteSql(connection, @"UPDATE public_standing_invalidations SET
+            ReignDatabase.ExecuteSql(connection, @"UPDATE public_standing_invalidations SET
 status=$status,pair_cursor=$cursor,processed_pairs=$processed,updated_ts=$ts,last_error=''
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject
 AND standing_revision=$revision;",
@@ -674,7 +674,7 @@ AND standing_revision=$revision;",
                     pairKeys.Count == 0
                     ? new Dictionary<string, Dictionary<string, object>>(
                         StringComparer.OrdinalIgnoreCase)
-                    : Program.QuerySql(connection,
+                    : ReignDatabase.QuerySql(connection,
                         "SELECT * FROM relationship_native_targets WHERE pair_key IN ("
                         + string.Join(",", targetPlaceholders) + ");",
                         targetParameters)
@@ -806,7 +806,7 @@ AND standing_revision=$revision;",
                 campaignId, timelineId, heroB, heroA), "value", 0), -100, 100);
             int projected = ProjectNativeRelation(connection, heroA, heroB,
                 affinityAB, affinityBA, effectiveAB, effectiveBA);
-            Dictionary<string, object> target = Program.QuerySql(connection,
+            Dictionary<string, object> target = ReignDatabase.QuerySql(connection,
                 "SELECT * FROM relationship_native_targets WHERE pair_key=$pair LIMIT 1;",
                 new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
             int observed = target != null
@@ -824,7 +824,7 @@ AND standing_revision=$revision;",
                     StringComparison.Ordinal);
             if (pairProjectionChanged)
             {
-                Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
+                ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
 projected_native_relation=$projected,native_action_pending=$pending,
 native_action_id=$action,updated_ts=$ts WHERE pair_key=$pair;",
                     new Dictionary<string, object>
@@ -845,7 +845,7 @@ native_action_id=$action,updated_ts=$ts WHERE pair_key=$pair;",
                         StringComparer.OrdinalIgnoreCase);
                 if (targetChanged)
                 {
-                    Program.ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
 pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,status,world_day,
 last_sync_day,attempt_count,claimed_ts,last_error,updated_ts,revision,requires_observation)
 VALUES($pair,$a,$b,$target,$observed,'pending',$day,-1000,0,0,'',$ts,1,$requiresObservation)
@@ -870,7 +870,7 @@ ELSE relationship_native_targets.revision+1 END,updated_ts=$ts;",
             }
             else if (target != null)
             {
-                Program.ExecuteSql(connection,
+                ReignDatabase.ExecuteSql(connection,
                     "DELETE FROM relationship_native_targets WHERE pair_key=$pair;",
                     new Dictionary<string, object> { ["pair"] = pairKey });
                 nativeTargetChanged = true;
@@ -884,7 +884,7 @@ ELSE relationship_native_targets.revision+1 END,updated_ts=$ts;",
         {
             EnsureMbtiRelationshipSchema(connection);
             EnsureWorldRelationshipSchema(connection);
-            List<Dictionary<string, object>> leaders = Program.QuerySql(connection, @"
+            List<Dictionary<string, object>> leaders = ReignDatabase.QuerySql(connection, @"
 SELECT * FROM identity_roster
 WHERE is_alive=1 AND is_adult=1 AND is_player=0
 AND (is_clan_leader=1 OR is_ruler=1)
@@ -894,7 +894,7 @@ AND hero_id<>'';");
 
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             Dictionary<string, Dictionary<string, object>> existingPolitical =
-                Program.QuerySql(connection, @"SELECT * FROM relationship_pair_provenance
+                ReignDatabase.QuerySql(connection, @"SELECT * FROM relationship_pair_provenance
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND source IN ('kingdom_leadership','ruler_network');",
                     new Dictionary<string, object>
@@ -915,7 +915,7 @@ AND source IN ('kingdom_leadership','ruler_network');",
             // while holding the campaign relationship lock. Snapshot the compact
             // primary-key set once and keep it current as new pairs are inserted.
             HashSet<string> existingPairKeys = new HashSet<string>(
-                Program.QuerySql(connection,
+                ReignDatabase.QuerySql(connection,
                         "SELECT pair_key FROM relationship_pair_chemistry;")
                     .Select(row => ReadString(row, "pair_key", ""))
                     .Where(pairKey => !string.IsNullOrWhiteSpace(pairKey)),
@@ -927,7 +927,7 @@ AND source IN ('kingdom_leadership','ruler_network');",
                     || (ReadInt(existing.Value, "active", 0) == 0
                         && ReadInt(existing.Value, "required", 0) == 0))
                     continue;
-                Program.ExecuteSql(connection, @"UPDATE relationship_pair_provenance SET
+                ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_pair_provenance SET
 active=0,required=0,last_day=$day,updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND pair_key=$pair AND source=$source
@@ -1079,7 +1079,7 @@ AND (active<>0 OR required<>0);",
             double worldDay, bool deferNativeProjection = false,
             bool pairKnownMissing = false)
         {
-            if (!pairKnownMissing && Program.QuerySql(connection,
+            if (!pairKnownMissing && ReignDatabase.QuerySql(connection,
                 "SELECT 1 AS present FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                 new Dictionary<string, object> { ["pair"] = pairKey }).Any())
                 return false;
@@ -1094,7 +1094,7 @@ AND (active<>0 OR required<>0);",
             int baseAB = MbtiCompatibility(typeA, typeB);
             int baseBA = MbtiCompatibility(typeB, typeA);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            bool inserted = Program.QuerySql(connection, @"INSERT INTO relationship_pair_chemistry(
+            bool inserted = ReignDatabase.QuerySql(connection, @"INSERT INTO relationship_pair_chemistry(
 pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,base_chance_a_to_b,
 base_chance_b_to_a,chance_a_to_b,chance_b_to_a,affinity_a_to_b,
 affinity_b_to_a,tag_a_to_b,tag_b_to_a,first_day,last_day,
@@ -1119,7 +1119,7 @@ RETURNING pair_key;",
                 return false;
             if (!deferNativeProjection)
                 RefreshEffectivePairProjection(connection, campaignId, timelineId,
-                    Program.QuerySql(connection,
+                    ReignDatabase.QuerySql(connection,
                         "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;",
                         new Dictionary<string, object> { ["pair"] = pairKey }).First(),
                     worldDay, "political_pair_created");
@@ -1133,7 +1133,7 @@ RETURNING pair_key;",
             string campaignId = ReadString(payload, "campaignId", "default");
             string timelineId = ReadString(payload, "timelineId", "main");
             List<Dictionary<string, object>> requested = ReadDictionaryList(payload, "pairs");
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureMbtiRelationshipSchema(connection);
                 return new Dictionary<string, object>

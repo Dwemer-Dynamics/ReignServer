@@ -43,7 +43,7 @@ namespace ReignBetaServer
             for (int offset = 0; turns.Count < rawLimit; offset += 128)
             {
                 parameters["offset"] = offset;
-                var page = Program.QuerySql(connection, @"SELECT t.* FROM conversation_turns t
+                var page = ReignDatabase.QuerySql(connection, @"SELECT t.* FROM conversation_turns t
 JOIN conversation_sessions s ON s.session_id=t.session_id WHERE t.status='active' AND "
                     + MemorySessionObserverSql("s", "t") + @" AND t.world_day<=$day
 AND t.accepted_sequence<=$asOfSequence AND t.ts<=$asOfTimestamp
@@ -77,7 +77,7 @@ ORDER BY t.ts DESC,t.turn_order DESC,t.turn_id LIMIT $batch OFFSET $offset;", pa
             for (int offset = 0; summaries.Count < summaryLimit; offset += 128)
             {
                 parameters["offset"] = offset;
-                var page = Program.QuerySql(connection, @"SELECT * FROM summaries WHERE status='active'
+                var page = ReignDatabase.QuerySql(connection, @"SELECT * FROM summaries WHERE status='active'
 AND summary_type IN ('scene','middle_term')
 AND (summary_type='scene' OR scope LIKE 'scene:%' OR scope LIKE 'conversation:%'
  OR EXISTS (SELECT 1 FROM conversation_turns t WHERE t.status='active' AND t.event_id IN
@@ -160,7 +160,7 @@ CASE WHEN summary_type='scene' THEN 0 ELSE 1 END,summary_id LIMIT $batch OFFSET 
             evidence.AddRange(LinkedConversationEvidence(connection, plan.Observer, plan.Peer, plan.Timeline, plan.Query, knowledge));
             var parameters = new Dictionary<string, object> { ["owner"] = plan.Observer, ["peer"] = plan.Peer,
                 ["timeline"] = plan.Timeline, ["campaign"] = campaign, ["day"] = plan.WorldDay };
-            var continuity = Program.QuerySql(connection, @"SELECT * FROM conversation_continuity WHERE owner_id=$owner AND " + MemorySourceTimelineSql("conversation_continuity", access: knowledge) + @"
+            var continuity = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_continuity WHERE owner_id=$owner AND " + MemorySourceTimelineSql("conversation_continuity", access: knowledge) + @"
 AND status<>'invalidated' AND kind<>'question' AND (kind<>'relationship' OR peer_id=$peer)
 AND (kind<>'agenda' OR status NOT IN ('resolved','abandoned')) ORDER BY importance DESC,updated_ts DESC,record_id;", parameters);
             var episodeSources = LoadContinuityEpisodeSources(connection, continuity, plan.Observer);
@@ -193,7 +193,7 @@ AND (kind<>'agenda' OR status NOT IN ('resolved','abandoned')) ORDER BY importan
             // without replaying every reinforcing incident or creating a score.
             if (plan.Peer.Length > 0 && WorldSimulationService.TableExists(connection, "court_social_signal_evidence"))
             {
-                var signals = Program.QuerySql(connection, @"SELECT * FROM court_social_signal_evidence WHERE campaign_id=$campaign AND " + MemorySourceTimelineSql("court_social_signal_evidence") + @"
+                var signals = ReignDatabase.QuerySql(connection, @"SELECT * FROM court_social_signal_evidence WHERE campaign_id=$campaign AND " + MemorySourceTimelineSql("court_social_signal_evidence") + @"
 AND accepted=1 AND signal_type='sexual_intimacy_completed'
 AND ((speaker_id=$owner AND target_id=$peer) OR (speaker_id=$peer AND target_id=$owner)) ORDER BY created_ts,signal_id;", parameters)
                     .Where(r => MemoryTimeVisible(r, knowledge, connection)).ToList();
@@ -203,13 +203,13 @@ AND ((speaker_id=$owner AND target_id=$peer) OR (speaker_id=$peer AND target_id=
                         "relationship", plan.Observer, true, 100));
             }
             if (plan.Peer.Length > 0 && WorldSimulationService.TableExists(connection, "relationship_milestones"))
-                foreach (var row in Program.QuerySql(connection, @"SELECT * FROM relationship_milestones WHERE subject_id=$owner AND target_id=$peer
+                foreach (var row in ReignDatabase.QuerySql(connection, @"SELECT * FROM relationship_milestones WHERE subject_id=$owner AND target_id=$peer
 AND status='active' ORDER BY stability DESC,updated_ts DESC;", parameters).Where(r => MemoryTimeVisible(r, knowledge, connection)))
                     evidence.Add(EvidenceFromRow(row, "milestone_id", ReadString(row, "kind", "") + ": " + ReadString(row, "reason", ""),
                         "relationship", plan.Observer, true, 95));
             if (plan.Peer.Length > 0 && WorldSimulationService.TableExists(connection, "conversation_relationship_receipts"))
             {
-                var receipts = Program.QuerySql(connection, @"SELECT * FROM conversation_relationship_receipts WHERE campaign_id=$campaign AND " + MemorySourceTimelineSql("conversation_relationship_receipts") + @"
+                var receipts = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_relationship_receipts WHERE campaign_id=$campaign AND " + MemorySourceTimelineSql("conversation_relationship_receipts") + @"
 AND observer_id=$owner AND target_id=$peer AND status='applied' AND severity_tier<>'routine' ORDER BY created_ts,receipt_id;", parameters)
                     .Where(r => MemoryTimeVisible(r, knowledge, connection) && !IsUnsupportedWordingJudgment(ReadString(r, "summary", "")));
                 foreach (var row in receipts.GroupBy(r => ReadString(r, "act_kind", "") + ":" + ReadString(r, "valence", ""))
@@ -219,7 +219,7 @@ AND observer_id=$owner AND target_id=$peer AND status='applied' AND severity_tie
             }
             // Existing campaigns can lack structured milestones. Recover only
             // this pair's actual attributed words, keeping refusals/negation.
-            var pairTurns = Program.QuerySql(connection, @"SELECT t.* FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id
+            var pairTurns = ReignDatabase.QuerySql(connection, @"SELECT t.* FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id
 WHERE t.role='npc' AND t.speaker_id=$owner AND s.player_id=$peer AND t.status='active' AND t.world_day<=$day
 AND (lower(t.text) LIKE '%trust you%' OR lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%our night%'
  OR lower(t.text) LIKE '%betrayed me%' OR lower(t.text) LIKE '%shared a bed%' OR lower(t.text) LIKE '%our partnership%')
@@ -249,7 +249,7 @@ ORDER BY t.ts,t.turn_order,t.turn_id;", parameters).Where(r => MemoryTimeVisible
             {
                 var state = ReadMemoryPrecisionState(connection);
                 long revision = ReadLong(state, "source_revision", 0);
-                var cached = Program.QuerySql(connection, "SELECT * FROM memory_projections WHERE projection_id=$id AND restore_generation=$generation AND projection_generation=$projection AND source_hash=$revision;",
+                var cached = ReignDatabase.QuerySql(connection, "SELECT * FROM memory_projections WHERE projection_id=$id AND restore_generation=$generation AND projection_generation=$projection AND source_hash=$revision;",
                     new Dictionary<string, object> { ["id"] = key, ["generation"] = ReadString(state, "restore_generation", ""),
                         ["projection"] = ReadInt(state, "projection_generation", 1), ["revision"] = revision.ToString(CultureInfo.InvariantCulture) }).FirstOrDefault();
                 if (cached != null)
@@ -265,9 +265,9 @@ ORDER BY t.ts,t.turn_order,t.turn_id;", parameters).Where(r => MemoryTimeVisible
                         SourceTurns = ReadDictionaryList(e,"sourceTurns") }).ToList();
                 }
                 var evidence = LoadPrecisionFoundation(connection, campaign, plan, context, knowledge);
-                long watermark = ReadLong(Program.QuerySql(connection, "SELECT COALESCE(MAX(accepted_sequence),0) AS watermark FROM conversation_turns WHERE status='active';").Single(), "watermark", 0);
+                long watermark = ReadLong(ReignDatabase.QuerySql(connection, "SELECT COALESCE(MAX(accepted_sequence),0) AS watermark FROM conversation_turns WHERE status='active';").Single(), "watermark", 0);
                 if (!shadow)
-                    Program.ExecuteSql(connection, @"INSERT INTO memory_projections(projection_id,timeline_id,owner_id,peer_id,restore_generation,projection_generation,source_hash,watermark,payload_json,updated_ts)
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO memory_projections(projection_id,timeline_id,owner_id,peer_id,restore_generation,projection_generation,source_hash,watermark,payload_json,updated_ts)
 VALUES($id,$timeline,$owner,$peer,$generation,$projection,$revision,$watermark,$payload,$ts)
 ON CONFLICT(projection_id) DO UPDATE SET restore_generation=$generation,projection_generation=$projection,source_hash=$revision,watermark=$watermark,payload_json=$payload,updated_ts=$ts;",
                         new Dictionary<string, object> { ["id"] = key, ["timeline"] = plan.Timeline, ["owner"] = plan.Observer, ["peer"] = plan.Peer,
@@ -289,7 +289,7 @@ ON CONFLICT(projection_id) DO UPDATE SET restore_generation=$generation,projecti
         {
             string exchange = ReadString(anchor, "exchange_id", ""), session = ReadString(anchor, "session_id", "");
             var rows = exchange.Length == 0 ? new List<Dictionary<string, object>> { anchor }
-                : Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$session AND exchange_id=$exchange AND status='active' ORDER BY turn_order;",
+                : ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$session AND exchange_id=$exchange AND status='active' ORDER BY turn_order;",
                     new Dictionary<string, object> { ["session"] = session, ["exchange"] = exchange });
             rows = rows.Where(r => MemoryTimeVisible(r, knowledge, connection) && (ReadString(r, "speaker_id", "") == knowledge.NpcId
                 || Program.TextListFromJson(ReadString(r, "participants_json", "[]")).Contains(knowledge.NpcId, StringComparer.OrdinalIgnoreCase))).ToList();
@@ -368,13 +368,13 @@ ON CONFLICT(projection_id) DO UPDATE SET restore_generation=$generation,projecti
             for (int offset=0; result.Count<limit && offset / batch < maximumCandidatePages; offset+=batch)
             {
                 pageParameters["batch"]=batch; pageParameters["offset"]=offset;
-                var page=Program.QuerySql(connection,orderedSql+" LIMIT $batch OFFSET $offset;",pageParameters);
+                var page=ReignDatabase.QuerySql(connection,orderedSql+" LIMIT $batch OFFSET $offset;",pageParameters);
                 foreach(var row in page)
                 {
                     string session=ReadString(row,"session_id","");
                     if(!sourceSessions.TryGetValue(session,out bool sourceBearing))
                     {
-                        sourceBearing=!requirePlayerSource || Program.QuerySql(connection,"SELECT * FROM conversation_turns WHERE session_id=$session AND status='active' AND role='player';",
+                        sourceBearing=!requirePlayerSource || ReignDatabase.QuerySql(connection,"SELECT * FROM conversation_turns WHERE session_id=$session AND status='active' AND role='player';",
                             new Dictionary<string,object>{{"session",session}}).Any(t=>PrecisionTurnVisible(t, knowledge.NpcId, knowledge, connection)
                                 && !IsPureConversationRecallRequest(ReadString(t,"text","")));
                         sourceSessions[session]=sourceBearing;
@@ -573,7 +573,7 @@ ON CONFLICT(projection_id) DO UPDATE SET restore_generation=$generation,projecti
                 : table == "temporal_knowledge_assertions" ? "assertion_id" : "comprehension_id";
             string id = ReadString(row, key, ""), eventId = ReadString(row, "event_id", ReadString(row, "source_event_id", ""));
             string documentType = table == "summaries" ? "summary" : table == "temporal_knowledge_assertions" ? "assertion" : "memory";
-            return Program.QuerySql(connection, @"WITH RECURSIVE lineage(source_type,source_id,depth) AS (
+            return ReignDatabase.QuerySql(connection, @"WITH RECURSIVE lineage(source_type,source_id,depth) AS (
 SELECT source_type,source_id,1 FROM memory_sources WHERE document_type=$type AND document_id=$id
 UNION ALL SELECT m.source_type,m.source_id,l.depth+1 FROM memory_sources m JOIN lineage l
 ON m.document_type=l.source_type AND m.document_id=l.source_id WHERE l.depth<3)

@@ -82,10 +82,10 @@ namespace ReignBetaServer
             string pairKey = RelationshipsService.AmbientPairKey(firstId, secondId);
             Dictionary<string, object> before;
             Dictionary<string, object> after;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 RelationshipsService.EnsureMbtiRelationshipSchema(connection);
-                before = Program.QuerySql(connection,
+                before = ReignDatabase.QuerySql(connection,
                     "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                     new Dictionary<string, object> { ["pair"] = pairKey })
                     .FirstOrDefault();
@@ -146,7 +146,7 @@ namespace ReignBetaServer
                         connection, campaignId, secondId, firstId,
                         secondDelta, worldDay, "qualification_fixture",
                         ReadString(payload, "timelineId", "main"));
-                after = Program.QuerySql(connection,
+                after = ReignDatabase.QuerySql(connection,
                     "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                     new Dictionary<string, object> { ["pair"] = pairKey })
                     .FirstOrDefault();
@@ -231,9 +231,9 @@ namespace ReignBetaServer
             {
                 int removed = 0;
                 using (ReignDbConnection connection =
-                    Program.OpenCampaignConnection(campaignId))
+                    ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    Program.EnsureMemorySchema(connection);
+                    ReignDatabase.EnsureMemorySchema(connection);
                     foreach (Dictionary<string, object> fixture in fixtures)
                     {
                         if (ReadBool(fixture, "restored", false))
@@ -242,7 +242,7 @@ namespace ReignBetaServer
                             ReadString(fixture, "eventId", "");
                         if (!string.IsNullOrWhiteSpace(fixtureEventId))
                         {
-                            Program.ExecuteSql(connection,
+                            ReignDatabase.ExecuteSql(connection,
                                 @"DELETE FROM events
 WHERE event_id=$id
 AND event_type='verified_qualification_property_transfer';",
@@ -332,10 +332,10 @@ AND event_type='verified_qualification_property_transfer';",
                 + " a life-changing fully furnished city home from "
                 + giverId + ".";
             using (ReignDbConnection connection =
-                Program.OpenCampaignConnection(campaignId))
+                ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                Program.EnsureMemorySchema(connection);
-                Program.ExecuteSql(connection, @"INSERT INTO events(
+                ReignDatabase.EnsureMemorySchema(connection);
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO events(
 event_id,campaign_id,ts,world_day,event_type,summary,participants_json,
 witnesses_json,about_entities_json,known_by_json,visibility,importance,
 source_reliability,confidence,payload_json,embedding_status,created_utc)
@@ -393,7 +393,7 @@ known_by_json=$participants,payload_json=$payload,created_utc=$utc;",
                 ReadDictionaryList(state, "relationshipQualificationFixtures");
             int restored = 0;
             List<string> errors = new List<string>();
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                 foreach (Dictionary<string, object> fixture in fixtures)
@@ -407,16 +407,16 @@ known_by_json=$participants,payload_json=$payload,created_utc=$utc;",
                             ?? new Dictionary<string, object>();
                         if (!ReadBool(fixture, "originalExists", false))
                         {
-                            Program.ExecuteSql(connection,
+                            ReignDatabase.ExecuteSql(connection,
                                 "DELETE FROM relationship_native_targets WHERE pair_key=$pair;",
                                 new Dictionary<string, object> { ["pair"] = pairKey });
-                            Program.ExecuteSql(connection,
+                            ReignDatabase.ExecuteSql(connection,
                                 "DELETE FROM relationship_pair_chemistry WHERE pair_key=$pair;",
                                 new Dictionary<string, object> { ["pair"] = pairKey });
                         }
                         else
                         {
-                            Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
+                            ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
 affinity_a_to_b=$ab,affinity_b_to_a=$ba,tag_a_to_b=$tagAB,tag_b_to_a=$tagBA,
 shared_tag=$shared,projected_native_relation=$projected,
 native_action_pending=1,native_action_id=$action,updated_ts=$ts
@@ -434,7 +434,7 @@ WHERE pair_key=$pair;",
                                     ["action"] = "native_target:" + pairKey,
                                     ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                                 });
-                            Program.ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
+                            ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
 pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,status,world_day,last_sync_day,
 attempt_count,claimed_ts,last_error,updated_ts,revision)
 VALUES($pair,$a,$b,$target,0,'pending',$day,-1000,0,0,'',$ts,1)
@@ -625,7 +625,7 @@ updated_ts=$ts;",
                 List<Dictionary<string, object>> identityFixtures =
                     ReadDictionaryList(state, "manipulationIdentityFixtures");
                 using (ReignDbConnection connection =
-                    Program.OpenCampaignConnection(campaignId))
+                    ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     CharactersService.EnsureIdentitySchema(connection);
                     Dictionary<string, object> subject =
@@ -966,7 +966,7 @@ updated_ts=$ts;",
                 ReadDictionaryList(state, "manipulationIdentityFixtures");
             int restored = 0;
             List<string> errors = new List<string>();
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 CharactersService.EnsureIdentitySchema(connection);
                 foreach (Dictionary<string, object> fixture in fixtures)
@@ -978,7 +978,7 @@ updated_ts=$ts;",
                     string subject = ReadString(fixture, "subjectId", "");
                     try
                     {
-                        Program.ExecuteSql(connection, @"DELETE FROM identity_evidence
+                        ReignDatabase.ExecuteSql(connection, @"DELETE FROM identity_evidence
 WHERE observer_id=$observer AND subject_id=$subject
 AND source='qualification_manipulation_fixture';",
                             new Dictionary<string, object>
@@ -991,7 +991,7 @@ AND source='qualification_manipulation_fixture';",
                             ?? new Dictionary<string, object>();
                         if (!ReadBool(fixture, "originalExists", false))
                         {
-                            Program.ExecuteSql(connection, @"DELETE FROM acquaintances
+                            ReignDatabase.ExecuteSql(connection, @"DELETE FROM acquaintances
 WHERE observer_id=$observer AND subject_id=$subject;",
                                 new Dictionary<string, object>
                                 {
@@ -1001,7 +1001,7 @@ WHERE observer_id=$observer AND subject_id=$subject;",
                         }
                         else
                         {
-                            Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO acquaintances(
+                            ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO acquaintances(
 observer_id,subject_id,identity_state,canonical_name,claimed_name,aliases_json,
 verification_source,source_entity_id,confidence,first_met_day,last_met_day,
 encounter_count,last_encounter_id,recognition_attempts,last_recognition_result,

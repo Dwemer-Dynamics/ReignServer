@@ -133,12 +133,12 @@ namespace ReignBetaServer
             {
                 tags = Program.MergeStringLists(tags, new[] { "recall_reconstruction", "audit_only", "non_source" });
             }
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             using (var publication = connection.BeginTransaction())
             {
                 VerifyMemoryPublicationFence(connection);
                 VerifyMemorySourceRows(connection, "conversation_turns", "turn_id", turns);
-                Program.ExecuteSql(connection, @"INSERT INTO summaries(
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO summaries(
 summary_id,scope,owner_id,summary_type,summary,source_events_json,start_ts,end_ts,event_count,location_id,
 participants_json,about_entities_json,known_by_json,hidden_from_json,visibility,importance,confidence,tags_json,
 status,source,vector_id,embedding_status,updated_ts,payload_json,memory_lane)
@@ -210,7 +210,7 @@ ON CONFLICT(summary_id) DO UPDATE SET summary=$summary,payload_json=$payload,upd
                     LinkMemorySource(connection, "summary", summaryId, "relationship_receipt", ReadString(item, "receipt_id", ""), evidenceOrdinal++);
                 }
                 LinkMemorySource(connection, "summary", summaryId, "session", sessionId, 0);
-                Program.ExecuteSql(connection, "UPDATE conversation_sessions SET scene_summary_id=$summary WHERE session_id=$id;",
+                ReignDatabase.ExecuteSql(connection, "UPDATE conversation_sessions SET scene_summary_id=$summary WHERE session_id=$id;",
                     new Dictionary<string, object> { ["summary"] = summaryId, ["id"] = sessionId });
                 publication.Commit();
             }
@@ -245,12 +245,12 @@ ON CONFLICT(summary_id) DO UPDATE SET summary=$summary,payload_json=$payload,upd
                 .ToList();
             List<Dictionary<string, object>> evidence = new List<Dictionary<string, object>>();
             if (exchangeIds.Count == 0) return evidence;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 RelationshipsService.EnsureConversationRelationshipSchema(connection);
                 foreach (string exchangeId in exchangeIds)
                 {
-                    List<Dictionary<string, object>> rows = Program.QuerySql(connection, @"SELECT r.receipt_id,r.exchange_id,r.observer_id,r.target_id,r.lie_check_id,r.created_ts,
+                    List<Dictionary<string, object>> rows = ReignDatabase.QuerySql(connection, @"SELECT r.receipt_id,r.exchange_id,r.observer_id,r.target_id,r.lie_check_id,r.created_ts,
 l.raw_claim,l.objective_verdict,l.knowledge_basis,l.outcome,l.evidence_event_ids_json,l.prompt_packet_json
 FROM conversation_relationship_receipts r
 JOIN world_history_lie_checks l ON l.lie_check_id=r.lie_check_id
@@ -317,9 +317,9 @@ ORDER BY r.created_ts ASC;", new Dictionary<string, object> { ["exchange"] = exc
             memoryLane = MemoryLaneIds.Contains(memoryLane, StringComparer.OrdinalIgnoreCase) && memoryLane != "exact_history"
                 ? memoryLane : "interpersonal_history";
             List<Dictionary<string, object>> scenes;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                scenes = Program.QuerySql(connection, @"SELECT * FROM summaries WHERE owner_id=$npc AND summary_type='scene' AND status='active'
+                scenes = ReignDatabase.QuerySql(connection, @"SELECT * FROM summaries WHERE owner_id=$npc AND summary_type='scene' AND status='active'
 AND memory_lane=$lane AND ($player='' OR participants_json LIKE $player_like) ORDER BY updated_ts DESC LIMIT 12;",
                     new Dictionary<string, object> { ["npc"] = npcId, ["lane"] = memoryLane, ["player"] = playerId ?? "", ["player_like"] = "%" + (playerId ?? "") + "%" });
             }
@@ -384,12 +384,12 @@ AND memory_lane=$lane AND ($player='' OR participants_json LIKE $player_like) OR
             string arcId = "arc_" + SafeMemoryKey(npcId) + "_" + SafeMemoryKey(playerId) + "_" + SafeMemoryKey(memoryLane);
             List<string> tags = Program.MergeStringLists(ReadStringList(compact, "tags"), new[] { "rolling_arc", memoryLane });
             List<string> participants = Program.MergeStringLists(new[] { npcId, playerId }, new List<string>());
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             using (var publication = connection.BeginTransaction())
             {
                 VerifyMemoryPublicationFence(connection);
                 VerifyMemorySourceRows(connection, "summaries", "summary_id", scenes);
-                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO summaries(
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO summaries(
 summary_id,scope,owner_id,summary_type,summary,source_events_json,start_ts,end_ts,event_count,location_id,
 participants_json,about_entities_json,known_by_json,hidden_from_json,visibility,importance,confidence,tags_json,
 status,source,vector_id,embedding_status,updated_ts,payload_json,memory_lane)
@@ -420,9 +420,9 @@ VALUES($id,$scope,$owner,'arc',$summary,'[]',$start,$end,$count,'',$participants
                         })
                     });
                 Program.InsertSummaryFts(connection, arcId, text, tags, participants);
-                Program.ExecuteSql(connection, "UPDATE summaries SET memory_lane=$lane WHERE summary_id=$id;",
+                ReignDatabase.ExecuteSql(connection, "UPDATE summaries SET memory_lane=$lane WHERE summary_id=$id;",
                     new Dictionary<string, object> { ["lane"] = memoryLane, ["id"] = arcId });
-                Program.ExecuteSql(connection, "DELETE FROM memory_sources WHERE document_type='summary' AND document_id=$id;", new Dictionary<string, object> { ["id"] = arcId });
+                ReignDatabase.ExecuteSql(connection, "DELETE FROM memory_sources WHERE document_type='summary' AND document_id=$id;", new Dictionary<string, object> { ["id"] = arcId });
                 int ordinal = 0;
                 foreach (Dictionary<string, object> scene in scenes)
                 {
@@ -458,9 +458,9 @@ VALUES($id,$scope,$owner,'arc',$summary,'[]',$start,$end,$count,'',$participants
             int maxChars = Math.Max(500, Math.Min(5000,
                 ReadInt(Program.LoadSettings(), "memoryConsolidationMaxSummaryChars", 1800)));
             List<string> repairedIds = new List<string>();
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                List<Dictionary<string, object>> arcs = Program.QuerySql(connection, @"SELECT * FROM summaries
+                List<Dictionary<string, object>> arcs = ReignDatabase.QuerySql(connection, @"SELECT * FROM summaries
 WHERE owner_id=$npc AND summary_type='arc' AND status='active'
 AND ($player='' OR participants_json LIKE $player_like);",
                     new Dictionary<string, object>
@@ -483,7 +483,7 @@ AND ($player='' OR participants_json LIKE $player_like);",
                     payload["roleplayContinuityNormalized"] = true;
                     payload["latestSceneProvesReengagement"] = true;
                     payload["continuityNormalizedUtc"] = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-                    Program.ExecuteSql(connection, @"UPDATE summaries
+                    ReignDatabase.ExecuteSql(connection, @"UPDATE summaries
 SET summary=$summary,payload_json=$payload,updated_ts=$updated,embedding_status='not_indexed',vector_id=''
 WHERE summary_id=$id;", new Dictionary<string, object>
                     {
@@ -512,7 +512,7 @@ WHERE summary_id=$id;", new Dictionary<string, object>
             {
                 return;
             }
-            Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO memory_sources(document_type,document_id,source_type,source_id,ordinal,payload_json)
+            ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO memory_sources(document_type,document_id,source_type,source_id,ordinal,payload_json)
 VALUES($document_type,$document_id,$source_type,$source_id,$ordinal,'{}');", new Dictionary<string, object>
             {
                 ["document_type"] = documentType ?? "", ["document_id"] = documentId,
@@ -528,7 +528,7 @@ VALUES($document_type,$document_id,$source_type,$source_id,$ordinal,'{}');", new
                 return;
             }
             string receiptId = "knowledge_" + Guid.NewGuid().ToString("N");
-            Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO knowledge_receipts(
+            ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO knowledge_receipts(
 receipt_id,event_id,npc_id,acquisition_type,confidence,reliability,acquired_day,source_id,status,payload_json,created_ts)
 VALUES($id,$event,$npc,$type,$confidence,$reliability,$day,$source,'active','{}',$ts);", new Dictionary<string, object>
             {

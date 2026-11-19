@@ -12,7 +12,7 @@ namespace ReignBetaServer
             if (rows.Count == 0) return;
             // Preserve a pre-upgrade predecessor before replacing the latest document.
             // Both history and latest state commit with their durable daily input.
-            Program.ExecuteSql(connection, @"
+            ReignDatabase.ExecuteSql(connection, @"
 WITH incoming AS MATERIALIZED (
  SELECT * FROM jsonb_to_recordset(CAST($rows AS jsonb)) AS r(
   hero text,profile text,hash text,day integer,ts bigint)
@@ -50,10 +50,10 @@ WHERE excluded.last_observed_day>=relationship_observed_heroes.last_observed_day
             var parameters = new Dictionary<string, object>
             { ["heroes"] = Json.Serialize(ids), ["timeline"] = timelineId, ["day"] = day };
             if (RelationshipThroughputOriginalReadPath)
-                return Program.QuerySql(connection, @"SELECT o.hero_id,o.profile_json FROM relationship_observed_heroes o
+                return ReignDatabase.QuerySql(connection, @"SELECT o.hero_id,o.profile_json FROM relationship_observed_heroes o
 JOIN jsonb_array_elements_text(CAST($heroes AS jsonb)) requested ON requested.value=o.hero_id;", parameters);
 
-            var rows = Program.QuerySql(connection, @"
+            var rows = ReignDatabase.QuerySql(connection, @"
 SELECT requested.value AS hero_id,o.last_observed_day,
  COALESCE(h.profile_json,CASE WHEN o.last_observed_day<=$day THEN o.profile_json END) AS profile_json
 FROM jsonb_array_elements_text(CAST($heroes AS jsonb)) requested
@@ -76,7 +76,7 @@ LEFT JOIN LATERAL (
         {
             // Keep the newest predecessor plus all changes in/after the retained
             // window. A backlog's future inputs are never eligible for removal.
-            Program.ExecuteSql(connection, @"WITH retention AS (
+            ReignDatabase.ExecuteSql(connection, @"WITH retention AS (
  SELECT LEAST($cutoff,COALESCE(MIN(day_key)-$window,$cutoff)) AS cutoff
  FROM relationship_daily_inputs WHERE timeline_id=$timeline AND status IN ('pending','processing')
 )

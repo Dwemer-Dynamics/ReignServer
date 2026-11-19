@@ -22,15 +22,15 @@ namespace ReignBetaServer
             const int maxBatchSize = 1024;
             int limit = Clamp(ReadInt(payload, "limit", maxBatchSize), 1, maxBatchSize);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureMbtiRelationshipSchema(connection);
                 List<Dictionary<string, object>> rows;
                 int prunedAlignedCount;
-                Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                 try
                 {
-                    Program.ExecuteSql(connection, @"UPDATE relationship_native_targets target SET
+                    ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_native_targets target SET
 target_relation=pair.projected_native_relation,requires_observation=1,status='pending',
 revision=target.revision+1,claimed_ts=0,last_error='projection_changed_requires_observation',updated_ts=$ts
 FROM relationship_pair_chemistry pair WHERE pair.pair_key=target.pair_key
@@ -39,7 +39,7 @@ AND pair.native_action_pending=1 AND pair.projected_native_relation<>target.targ
                     // An old successful receipt can remove its target after the pair
                     // projection has changed. Orphan flags require a real native read;
                     // equality here is deliberately NOT evidence of alignment.
-                    Program.ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
 pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,status,world_day,last_sync_day,
 attempt_count,claimed_ts,last_error,revision,updated_ts,requires_observation)
 SELECT pair.pair_key,pair.hero_a_id,pair.hero_b_id,pair.projected_native_relation,pair.projected_native_relation,
@@ -48,19 +48,19 @@ FROM relationship_pair_chemistry pair
 WHERE pair.native_action_pending=1 AND NOT EXISTS (
  SELECT 1 FROM relationship_native_targets target WHERE target.pair_key=pair.pair_key)
 ON CONFLICT(pair_key) DO NOTHING;", new Dictionary<string, object> { ["ts"] = ts });
-                    prunedAlignedCount = ReadInt(Program.QuerySql(connection, @"
+                    prunedAlignedCount = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_native_targets
 WHERE target_relation=observed_relation AND requires_observation=0;").FirstOrDefault(), "count", 0);
-                    Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
+                    ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
 native_action_pending=0,native_action_id='',updated_ts=$ts
 WHERE pair_key IN (
     SELECT pair_key FROM relationship_native_targets
     WHERE target_relation=observed_relation AND requires_observation=0
 );", new Dictionary<string, object> { ["ts"] = ts });
-                    Program.ExecuteSql(connection, @"
+                    ReignDatabase.ExecuteSql(connection, @"
 DELETE FROM relationship_native_targets
 WHERE target_relation=observed_relation AND requires_observation=0;");
-                    rows = Program.QuerySql(connection, @"
+                    rows = ReignDatabase.QuerySql(connection, @"
 SELECT pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,world_day,revision
 FROM relationship_native_targets n
 WHERE (target_relation<>observed_relation OR requires_observation=1)
@@ -115,7 +115,7 @@ AND (target.status='pending'
                     {
                         foreach (Dictionary<string, object> row in rows)
                         {
-                            Program.ExecuteSql(connection, @"UPDATE relationship_native_targets
+                            ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_native_targets
 SET status='claimed',claimed_ts=$ts,updated_ts=$ts
 WHERE pair_key=$pair AND revision=$revision
 AND (target_relation<>observed_relation OR requires_observation=1)
@@ -129,11 +129,11 @@ AND (status='pending' OR (status='claimed' AND claimed_ts<$expired));",
                                 });
                         }
                     }
-                    Program.ExecuteSql(connection, "COMMIT;");
+                    ReignDatabase.ExecuteSql(connection, "COMMIT;");
                 }
                 catch
                 {
-                    try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                     throw;
                 }
                 return new Dictionary<string, object>
@@ -167,10 +167,10 @@ AND (status='pending' OR (status='claimed' AND claimed_ts<$expired));",
             List<Dictionary<string, object>> receipts = ReadDictionaryList(payload, "receipts");
             int accepted = 0, stale = 0, failed = 0;
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureMbtiRelationshipSchema(connection);
-                Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                 try
                 {
                     if (ReignPostgreSqlDialect.IsPostgreSql(connection))
@@ -194,7 +194,7 @@ AND (status='pending' OR (status='claimed' AND claimed_ts<$expired));",
                             .ToList();
                         string normalizedJson = Json.Serialize(normalized);
                         HashSet<string> currentKeys = new HashSet<string>(
-                            Program.QuerySql(connection, @"
+                            ReignDatabase.QuerySql(connection, @"
 SELECT target.pair_key,target.revision
 FROM relationship_native_targets AS target
 JOIN jsonb_to_recordset(CAST($rows AS jsonb))
@@ -289,11 +289,11 @@ AND target.revision=x.revision;",
                             receipts, worldDay, ts,
                             ref accepted, ref stale, ref failed);
                     }
-                    Program.ExecuteSql(connection, "COMMIT;");
+                    ReignDatabase.ExecuteSql(connection, "COMMIT;");
                 }
                 catch
                 {
-                    try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                     throw;
                 }
             }
@@ -324,7 +324,7 @@ AND target.revision=x.revision;",
                 string status = Program.NormalizeLookup(ReadString(
                         receipt, "status", "failed"))
                     .Replace(' ', '_');
-                Dictionary<string, object> current = Program.QuerySql(connection,
+                Dictionary<string, object> current = ReignDatabase.QuerySql(connection,
                     "SELECT * FROM relationship_native_targets WHERE pair_key=$pair LIMIT 1;",
                     new Dictionary<string, object>
                     {
@@ -340,14 +340,14 @@ AND target.revision=x.revision;",
                     ReadInt(current, "observed_relation", 0));
                 if (status == "applied" || status == "already_aligned")
                 {
-                    Program.ExecuteSql(connection,
+                    ReignDatabase.ExecuteSql(connection,
                         "DELETE FROM relationship_native_targets WHERE pair_key=$pair AND revision=$revision;",
                         new Dictionary<string, object>
                         {
                             ["pair"] = pairKey,
                             ["revision"] = revision
                         });
-                    Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
+                    ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
 native_action_pending=0,native_action_id='',last_native_sync_day=$day,updated_ts=$ts
 WHERE pair_key=$pair AND projected_native_relation=$observed;",
                         new Dictionary<string, object>
@@ -361,14 +361,14 @@ WHERE pair_key=$pair AND projected_native_relation=$observed;",
                 }
                 else if (status == "obsolete")
                 {
-                    Program.ExecuteSql(connection,
+                    ReignDatabase.ExecuteSql(connection,
                         "DELETE FROM relationship_native_targets WHERE pair_key=$pair AND revision=$revision;",
                         new Dictionary<string, object>
                         {
                             ["pair"] = pairKey,
                             ["revision"] = revision
                         });
-                    Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
+                    ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
 native_action_pending=0,native_action_id='',updated_ts=$ts
 WHERE pair_key=$pair;",
                         new Dictionary<string, object>
@@ -380,7 +380,7 @@ WHERE pair_key=$pair;",
                 }
                 else
                 {
-                    Program.ExecuteSql(connection, @"UPDATE relationship_native_targets SET
+                    ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_native_targets SET
 status='pending',observed_relation=$observed,attempt_count=attempt_count+1,
 claimed_ts=0,last_error=$error,updated_ts=$ts
 WHERE pair_key=$pair AND revision=$revision;",

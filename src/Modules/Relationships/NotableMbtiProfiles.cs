@@ -105,7 +105,7 @@ namespace ReignBetaServer
                 && IsRelationshipMaintenanceTableReady(connection, "character_editor_native_commands")
                 && IsRelationshipMaintenanceTableReady(connection, "character_editor_reconciliation")) return;
             CharactersService.EnsureCharacterEditorSchema(connection);
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS notable_mbti_profiles (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS notable_mbti_profiles (
 hero_id TEXT PRIMARY KEY,mbti_type TEXT NOT NULL,title TEXT NOT NULL,description TEXT NOT NULL,
 foundation_json TEXT NOT NULL,percentages_json TEXT NOT NULL,native_traits_json TEXT NOT NULL,
 source TEXT NOT NULL DEFAULT 'notable_mbti_template',template_version INTEGER NOT NULL,
@@ -113,8 +113,8 @@ first_observed_day REAL NOT NULL,native_sync_status TEXT NOT NULL DEFAULT 'pendi
 native_action_id TEXT NOT NULL DEFAULT '',native_action_created_day REAL NOT NULL DEFAULT -1,
 last_native_observed_json TEXT NOT NULL DEFAULT '{}',last_native_observed_day REAL NOT NULL DEFAULT -1,
 updated_ts INTEGER NOT NULL);" );
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_notable_mbti_type ON notable_mbti_profiles(mbti_type);");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_notable_mbti_sync ON notable_mbti_profiles(native_sync_status);");
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_notable_mbti_type ON notable_mbti_profiles(mbti_type);");
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_notable_mbti_sync ON notable_mbti_profiles(native_sync_status);");
         }
 
         internal static Dictionary<string, object> EnsureNotableMbtiProfile(
@@ -131,7 +131,7 @@ updated_ts INTEGER NOT NULL);" );
             if (string.IsNullOrWhiteSpace(heroId)) return new Dictionary<string, object>();
             if (!schemaReady) EnsureNotableMbtiSchema(connection);
 
-            Dictionary<string, object> row = Program.QuerySql(connection,
+            Dictionary<string, object> row = ReignDatabase.QuerySql(connection,
                 "SELECT * FROM notable_mbti_profiles WHERE hero_id=$id LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = heroId },
                 transaction).FirstOrDefault();
@@ -147,7 +147,7 @@ updated_ts INTEGER NOT NULL);" );
                 Dictionary<string, object> percentages = ReadDictionary(traits, "traitPercentages") ?? new Dictionary<string, object>();
                 Dictionary<string, object> native = ReadDictionary(traits, "mbtiNativeTraits") ?? new Dictionary<string, object>();
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO notable_mbti_profiles(
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO notable_mbti_profiles(
 hero_id,mbti_type,title,description,foundation_json,percentages_json,native_traits_json,source,template_version,
 first_observed_day,native_sync_status,updated_ts)
 VALUES($id,$type,$title,$description,$foundation,$percentages,$native,'notable_mbti_template',$version,$day,'pending',$ts);",
@@ -159,7 +159,7 @@ VALUES($id,$type,$title,$description,$foundation,$percentages,$native,'notable_m
                         ["version"] = NotableMbtiTemplateVersion, ["day"] = worldDay, ["ts"] = ts
                     },
                     transaction);
-                row = Program.QuerySql(connection, "SELECT * FROM notable_mbti_profiles WHERE hero_id=$id LIMIT 1;",
+                row = ReignDatabase.QuerySql(connection, "SELECT * FROM notable_mbti_profiles WHERE hero_id=$id LIMIT 1;",
                     new Dictionary<string, object> { ["id"] = heroId },
                     transaction).FirstOrDefault();
             }
@@ -173,7 +173,7 @@ VALUES($id,$type,$title,$description,$foundation,$percentages,$native,'notable_m
                 MaterializeNotableMbtiProfile(campaignId, hero, profile);
             }
             ObserveAndQueueNotableNativeTraits(connection, campaignId, worldDay, hero, profile, transaction);
-            row = Program.QuerySql(connection, "SELECT * FROM notable_mbti_profiles WHERE hero_id=$id LIMIT 1;",
+            row = ReignDatabase.QuerySql(connection, "SELECT * FROM notable_mbti_profiles WHERE hero_id=$id LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = heroId },
                 transaction).FirstOrDefault();
             return NotableMbtiRowToProfile(row);
@@ -196,7 +196,7 @@ VALUES($id,$type,$title,$description,$foundation,$percentages,$native,'notable_m
             Stopwatch totalTimer = Stopwatch.StartNew();
             long databaseMs;
             long materializationMs;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureNotableMbtiSchema(connection);
                 Stopwatch databaseTimer = Stopwatch.StartNew();
@@ -231,7 +231,7 @@ VALUES($id,$type,$title,$description,$foundation,$percentages,$native,'notable_m
                     HashSet<string> livingIds = new HashSet<string>(
                         heroes.Select(x => ReadFirstString(x, "heroStringId", "heroId", "id")),
                         StringComparer.OrdinalIgnoreCase);
-                    foreach (Dictionary<string, object> stale in Program.QuerySql(connection, @"
+                    foreach (Dictionary<string, object> stale in ReignDatabase.QuerySql(connection, @"
 SELECT hero_id,native_action_id FROM notable_mbti_profiles
 WHERE native_sync_status='failed';", null, transaction))
                     {
@@ -240,7 +240,7 @@ WHERE native_sync_status='failed';", null, transaction))
                             continue;
                         string staleActionId = ReadString(stale, "native_action_id", "");
                         long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                        Program.ExecuteSql(connection, @"UPDATE notable_mbti_profiles
+                        ReignDatabase.ExecuteSql(connection, @"UPDATE notable_mbti_profiles
 SET native_sync_status='obsolete',updated_ts=$ts WHERE hero_id=$hero;",
                             new Dictionary<string, object>
                             {
@@ -248,7 +248,7 @@ SET native_sync_status='obsolete',updated_ts=$ts WHERE hero_id=$hero;",
                             },
                             transaction);
                         if (!string.IsNullOrWhiteSpace(staleActionId))
-                            Program.ExecuteSql(connection, @"UPDATE character_editor_native_commands
+                            ReignDatabase.ExecuteSql(connection, @"UPDATE character_editor_native_commands
 SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;",
                                 new Dictionary<string, object>
                                 {
@@ -325,7 +325,7 @@ SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;
             int confirmed = 0;
             List<Dictionary<string, object>> failures = new List<Dictionary<string, object>>();
             Stopwatch timer = Stopwatch.StartNew();
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureNotableMbtiSchema(connection);
                 using (ReignDbTransaction transaction = connection.BeginTransaction())
@@ -333,7 +333,7 @@ SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;
                     foreach (Dictionary<string, object> observation in observations)
                     {
                         string heroId = ReadFirstString(observation, "heroStringId", "heroId", "id");
-                        Dictionary<string, object> row = Program.QuerySql(connection,
+                        Dictionary<string, object> row = ReignDatabase.QuerySql(connection,
                             "SELECT * FROM notable_mbti_profiles WHERE hero_id=$id LIMIT 1;",
                             new Dictionary<string, object> { ["id"] = heroId },
                             transaction).FirstOrDefault();
@@ -360,7 +360,7 @@ SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;
                         {
                             if (!string.IsNullOrWhiteSpace(actionId))
                             {
-                                Program.ExecuteSql(connection, @"UPDATE character_editor_native_commands
+                                ReignDatabase.ExecuteSql(connection, @"UPDATE character_editor_native_commands
 SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;",
                                     new Dictionary<string, object>
                                     {
@@ -374,7 +374,7 @@ SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;
                                     },
                                     transaction);
                             }
-                            Program.ExecuteSql(connection, @"UPDATE notable_mbti_profiles
+                            ReignDatabase.ExecuteSql(connection, @"UPDATE notable_mbti_profiles
 SET native_sync_status='obsolete',last_native_observed_day=$day,updated_ts=$ts
 WHERE hero_id=$hero;",
                                 new Dictionary<string, object>
@@ -392,7 +392,7 @@ WHERE hero_id=$hero;",
                                 ["heroId"] = heroId,
                                 ["error"] = "native_trait_observation_incomplete"
                             });
-                            Program.ExecuteSql(connection, @"UPDATE notable_mbti_profiles
+                            ReignDatabase.ExecuteSql(connection, @"UPDATE notable_mbti_profiles
 SET native_sync_status='awaiting_confirmation',updated_ts=$ts WHERE hero_id=$hero;",
                                 new Dictionary<string, object>
                                 {
@@ -404,7 +404,7 @@ SET native_sync_status='awaiting_confirmation',updated_ts=$ts WHERE hero_id=$her
                         if (!matches)
                         {
                             failures.Add(new Dictionary<string, object> { ["heroId"] = heroId, ["error"] = "native_trait_mismatch" });
-                            Program.ExecuteSql(connection, @"UPDATE notable_mbti_profiles SET native_sync_status='contradicted',
+                            ReignDatabase.ExecuteSql(connection, @"UPDATE notable_mbti_profiles SET native_sync_status='contradicted',
 last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts WHERE hero_id=$hero;",
                                 new Dictionary<string, object>
                                 {
@@ -416,7 +416,7 @@ last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts
                         }
                         if (!string.IsNullOrWhiteSpace(actionId))
                         {
-                            Program.ExecuteSql(connection, @"UPDATE character_editor_native_commands
+                            ReignDatabase.ExecuteSql(connection, @"UPDATE character_editor_native_commands
 SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;",
                                 new Dictionary<string, object>
                                 {
@@ -429,7 +429,7 @@ SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;
                                 },
                                 transaction);
                         }
-                        Program.ExecuteSql(connection, @"UPDATE notable_mbti_profiles SET native_sync_status='synchronized',
+                        ReignDatabase.ExecuteSql(connection, @"UPDATE notable_mbti_profiles SET native_sync_status='synchronized',
 last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts WHERE hero_id=$hero;",
                             new Dictionary<string, object>
                             {
@@ -690,7 +690,7 @@ last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts
             string heroId = ReadFirstString(hero, "heroStringId", "heroId", "id");
             if (CharactersService.CharacterHasEditorCorrections(campaignId, heroId))
             {
-                Program.ExecuteSql(connection, @"UPDATE notable_mbti_profiles SET native_sync_status='manual_override',
+                ReignDatabase.ExecuteSql(connection, @"UPDATE notable_mbti_profiles SET native_sync_status='manual_override',
 last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts WHERE hero_id=$hero;",
                     new Dictionary<string, object>
                     {
@@ -709,7 +709,7 @@ last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts
                     == Convert.ToInt32(pair.Value, CultureInfo.InvariantCulture));
             string actionId = "notable_mbti_native_" + heroId + "_v" + NotableMbtiTemplateVersion.ToString(CultureInfo.InvariantCulture);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Dictionary<string, object> command = Program.QuerySql(connection,
+            Dictionary<string, object> command = ReignDatabase.QuerySql(connection,
                 "SELECT * FROM character_editor_native_commands WHERE command_id=$id LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = actionId },
                 transaction).FirstOrDefault();
@@ -751,7 +751,7 @@ last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts
                         : "pending";
                 if (command == null)
                 {
-                    Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO character_editor_native_commands(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO character_editor_native_commands(
 command_id,revision_id,hero_id,status,changes_json,inverse_json,dangerous,confirmation,created_ts)
 VALUES($id,$revision,$hero,'pending',$changes,$inverse,0,'automatic_notable_mbti_sync',$ts);",
                         new Dictionary<string, object>
@@ -764,7 +764,7 @@ VALUES($id,$revision,$hero,'pending',$changes,$inverse,0,'automatic_notable_mbti
                 }
             }
             bool hasNativeAction = command != null || !matches;
-            Program.ExecuteSql(connection, @"UPDATE notable_mbti_profiles SET native_sync_status=$status,native_action_id=$action,
+            ReignDatabase.ExecuteSql(connection, @"UPDATE notable_mbti_profiles SET native_sync_status=$status,native_action_id=$action,
 native_action_created_day=CASE WHEN $hasAction=1 AND native_action_created_day<0 THEN $day ELSE native_action_created_day END,
 last_native_observed_json=CASE WHEN $hasObservation=1 THEN $observed ELSE last_native_observed_json END,
 last_native_observed_day=CASE WHEN $hasObservation=1 THEN $day ELSE last_native_observed_day END,
@@ -789,10 +789,10 @@ updated_ts=$ts WHERE hero_id=$hero;",
             Dictionary<string, object> embedded = ReadDictionary(traitDocument, "mbtiProfile") ?? new Dictionary<string, object>();
             if (ReadBool(profile, "isNotable", false))
             {
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureNotableMbtiSchema(connection);
-                    Dictionary<string, object> row = Program.QuerySql(connection,
+                    Dictionary<string, object> row = ReignDatabase.QuerySql(connection,
                         "SELECT * FROM notable_mbti_profiles WHERE hero_id=$id LIMIT 1;",
                         new Dictionary<string, object> { ["id"] = heroId }).FirstOrDefault();
                     if (row != null) return NotableMbtiRowToProfile(row);
@@ -911,7 +911,7 @@ updated_ts=$ts WHERE hero_id=$hero;",
             string persistenceCampaign = "__notable_persistence_"
                 + Guid.NewGuid().ToString("N").Substring(0, 12);
             using (ReignDbConnection connection =
-                Program.OpenCampaignConnection(persistenceCampaign))
+                ReignDatabase.OpenCampaignConnection(persistenceCampaign))
             {
                 Dictionary<string, object> notable = new Dictionary<string, object>
                 {
@@ -923,8 +923,8 @@ updated_ts=$ts WHERE hero_id=$hero;",
                 };
                 Dictionary<string, object> first = EnsureNotableMbtiProfile(connection, persistenceCampaign, 1d, notable, false);
                 Dictionary<string, object> second = EnsureNotableMbtiProfile(connection, persistenceCampaign, 2d, notable, false);
-                int profiles = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS total FROM notable_mbti_profiles;", null).FirstOrDefault(), "total", 0);
-                int commands = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS total FROM character_editor_native_commands;", null).FirstOrDefault(), "total", 0);
+                int profiles = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS total FROM notable_mbti_profiles;", null).FirstOrDefault(), "total", 0);
+                int commands = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS total FROM character_editor_native_commands;", null).FirstOrDefault(), "total", 0);
                 bool stableAssignment = ReadString(first, "type", "") == ReadString(second, "type", "")
                     && Math.Abs(ReadDouble(second, "assignedDay", -1d) - 1d) < 0.001d;
                 add("persistent_idempotent_assignment", stableAssignment && profiles == 1 && commands <= 1,
@@ -932,7 +932,7 @@ updated_ts=$ts WHERE hero_id=$hero;",
 
                 string actionId = ReadString(second, "nativeActionId", "");
                 if (!string.IsNullOrWhiteSpace(actionId))
-                    Program.ExecuteSql(connection, "UPDATE character_editor_native_commands SET status='completed' WHERE command_id=$id;",
+                    ReignDatabase.ExecuteSql(connection, "UPDATE character_editor_native_commands SET status='completed' WHERE command_id=$id;",
                         new Dictionary<string, object> { ["id"] = actionId });
                 Dictionary<string, object> contradicted = EnsureNotableMbtiProfile(connection, persistenceCampaign, 3d, notable, false);
                 add("native_contradiction", string.IsNullOrWhiteSpace(actionId)
@@ -949,10 +949,10 @@ updated_ts=$ts WHERE hero_id=$hero;",
                     EnsureNotableMbtiProfile(connection, persistenceCampaign, 3d, compactNotable, false);
                 string compactActionId = ReadString(compactFirst, "nativeActionId", "");
                 if (!string.IsNullOrWhiteSpace(compactActionId))
-                    Program.ExecuteSql(connection,
+                    ReignDatabase.ExecuteSql(connection,
                         "UPDATE character_editor_native_commands SET status='completed' WHERE command_id=$id;",
                         new Dictionary<string, object> { ["id"] = compactActionId });
-                Program.ExecuteSql(connection,
+                ReignDatabase.ExecuteSql(connection,
                     "UPDATE notable_mbti_profiles SET native_sync_status='synchronized' WHERE hero_id=$hero;",
                     new Dictionary<string, object> { ["hero"] = "compact_notable_test" });
                 Dictionary<string, object> compactRepeated =
@@ -967,7 +967,7 @@ updated_ts=$ts WHERE hero_id=$hero;",
             try
             {
                 using (ReignDbConnection connection =
-                    Program.OpenCampaignConnection(materializeCampaign))
+                    ReignDatabase.OpenCampaignConnection(materializeCampaign))
                 {
                     Dictionary<string, object> notable = new Dictionary<string, object>
                     {
@@ -1049,7 +1049,7 @@ updated_ts=$ts WHERE hero_id=$hero;",
                         ["isNotable"] = true, ["isAlive"] = true, ["traits"] = ReadDictionary(x, "traits")
                     }).ToList()
                 });
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(batchCampaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(batchCampaign))
                 {
                     Dictionary<string, object> departed = new Dictionary<string, object>
                     {
@@ -1066,10 +1066,10 @@ updated_ts=$ts WHERE hero_id=$hero;",
                     Dictionary<string, object> departedProfile =
                         EnsureNotableMbtiProfile(connection, batchCampaign, 1d, departed, false);
                     string departedAction = ReadString(departedProfile, "nativeActionId", "");
-                    Program.ExecuteSql(connection,
+                    ReignDatabase.ExecuteSql(connection,
                         "UPDATE character_editor_native_commands SET status='failed' WHERE command_id=$id;",
                         new Dictionary<string, object> { ["id"] = departedAction });
-                    Program.ExecuteSql(connection,
+                    ReignDatabase.ExecuteSql(connection,
                         "UPDATE notable_mbti_profiles SET native_sync_status='failed' WHERE hero_id=$hero;",
                         new Dictionary<string, object> { ["hero"] = "batch_departed_notable" });
                 }
@@ -1081,13 +1081,13 @@ updated_ts=$ts WHERE hero_id=$hero;",
                     });
                 int profiles, commands;
                 string departedStatus;
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(batchCampaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(batchCampaign))
                 {
-                    profiles = ReadInt(Program.QuerySql(connection,
+                    profiles = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) AS total FROM notable_mbti_profiles;").FirstOrDefault(), "total", 0);
-                    commands = ReadInt(Program.QuerySql(connection,
+                    commands = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) AS total FROM character_editor_native_commands;").FirstOrDefault(), "total", 0);
-                    departedStatus = ReadString(Program.QuerySql(connection,
+                    departedStatus = ReadString(ReignDatabase.QuerySql(connection,
                         "SELECT native_sync_status FROM notable_mbti_profiles WHERE hero_id='batch_departed_notable' LIMIT 1;")
                         .FirstOrDefault(), "native_sync_status", "");
                 }

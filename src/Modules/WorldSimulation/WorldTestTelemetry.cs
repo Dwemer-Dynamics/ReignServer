@@ -15,14 +15,14 @@ namespace ReignBetaServer
                 throw new ArgumentNullException(nameof(connection));
             const string marker =
                 "postgresql_world_test_telemetry_schema_revision";
-            if (Program.IsPostgreSqlComponentSchemaReady(connection, marker,
+            if (ReignDatabase.IsPostgreSqlComponentSchemaReady(connection, marker,
                 PostgreSqlWorldTestTelemetrySchemaRevision))
                 return;
 
             EnsureWorldTestTelemetrySchemaCore(connection);
             if (ReignPostgreSqlDialect.IsPostgreSql(connection))
             {
-                Program.ExecuteSql(connection, @"
+                ReignDatabase.ExecuteSql(connection, @"
 INSERT INTO schema_meta(key,value)
 VALUES('postgresql_world_test_telemetry_schema_revision',$revision)
 ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
@@ -31,7 +31,7 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
                         ["revision"] =
                             PostgreSqlWorldTestTelemetrySchemaRevision.ToString()
                     });
-                Program.MarkPostgreSqlComponentSchemaReady(connection, marker,
+                ReignDatabase.MarkPostgreSqlComponentSchemaReady(connection, marker,
                     PostgreSqlWorldTestTelemetrySchemaRevision);
             }
         }
@@ -40,34 +40,34 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
             ReignDbConnection connection)
         {
             if (connection == null) throw new ArgumentNullException(nameof(connection));
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_test_manifests (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_test_manifests (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,manifest_json TEXT NOT NULL DEFAULT '{}',
 first_observed_day REAL NOT NULL DEFAULT 0,latest_observed_day REAL NOT NULL DEFAULT 0,
 created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id));");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_test_chunk_counters (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_test_chunk_counters (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,day_key INTEGER NOT NULL,
 subsystem TEXT NOT NULL,chunk_key TEXT NOT NULL,counters_json TEXT NOT NULL DEFAULT '{}',
 created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,day_key,subsystem,chunk_key));");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_test_current_metrics (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_test_current_metrics (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,metric_scope TEXT NOT NULL,
 metric_key TEXT NOT NULL,metric_value INTEGER NOT NULL DEFAULT 0,
 updated_day INTEGER NOT NULL DEFAULT 0,updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,metric_scope,metric_key));");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_test_relationship_memberships (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_test_relationship_memberships (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,category_type TEXT NOT NULL,
 category_key TEXT NOT NULL,hero_id TEXT NOT NULL,edge_count INTEGER NOT NULL DEFAULT 0,
 directional_edge_count INTEGER NOT NULL DEFAULT 0,updated_day INTEGER NOT NULL DEFAULT 0,
 updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,category_type,category_key,hero_id));");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_test_relationship_pair_memberships (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_test_relationship_pair_memberships (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,category_type TEXT NOT NULL,
 category_key TEXT NOT NULL,pair_key TEXT NOT NULL,edge_count INTEGER NOT NULL DEFAULT 0,
 directional_edge_count INTEGER NOT NULL DEFAULT 0,updated_day INTEGER NOT NULL DEFAULT 0,
 updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,category_type,category_key,pair_key));");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_test_relationship_pairs (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_test_relationship_pairs (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,pair_key TEXT NOT NULL,
 hero_a_id TEXT NOT NULL DEFAULT '',hero_b_id TEXT NOT NULL DEFAULT '',
 affinity_a_to_b INTEGER NOT NULL DEFAULT 0,affinity_b_to_a INTEGER NOT NULL DEFAULT 0,
@@ -79,22 +79,22 @@ last_delta_b_to_a INTEGER NOT NULL DEFAULT 0,last_context_kind TEXT NOT NULL DEF
 first_day INTEGER NOT NULL DEFAULT 0,last_day INTEGER NOT NULL DEFAULT 0,
 updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,pair_key));");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_test_diagnostic_evidence (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_test_diagnostic_evidence (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,day_key INTEGER NOT NULL,
 subsystem TEXT NOT NULL,evidence_key TEXT NOT NULL,severity TEXT NOT NULL DEFAULT 'info',
 payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,subsystem,evidence_key));");
-            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_world_test_evidence_day
+            ReignDatabase.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_world_test_evidence_day
 ON world_test_diagnostic_evidence(campaign_id,timeline_id,subsystem,day_key);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_test_rollup_queue (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_test_rollup_queue (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,day_key INTEGER NOT NULL,
 status TEXT NOT NULL DEFAULT 'pending',revision INTEGER NOT NULL DEFAULT 1,
 reason TEXT NOT NULL DEFAULT '',attempt_count INTEGER NOT NULL DEFAULT 0,
 last_error TEXT NOT NULL DEFAULT '',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,day_key));");
-            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_world_test_rollup_queue_status
+            ReignDatabase.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_world_test_rollup_queue_status
 ON world_test_rollup_queue(status,updated_ts);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_test_checkpoint_reports (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_test_checkpoint_reports (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,checkpoint_day REAL NOT NULL,
 report_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,checkpoint_day));");
@@ -124,7 +124,7 @@ PRIMARY KEY(campaign_id,timeline_id,checkpoint_day));");
             Dictionary<string, object> counters)
         {
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Program.ExecuteSql(connection, @"INSERT INTO world_test_chunk_counters(
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_test_chunk_counters(
 campaign_id,timeline_id,day_key,subsystem,chunk_key,counters_json,created_ts,updated_ts)
 VALUES($campaign,$timeline,$day,$subsystem,$chunk,$counters,$ts,$ts)
 ON CONFLICT(campaign_id,timeline_id,day_key,subsystem,chunk_key) DO UPDATE SET
@@ -167,13 +167,13 @@ counters_json=$counters,updated_ts=$ts;",
                 ["subsystem"] = subsystem,
                 ["key"] = evidenceKey
             };
-            bool exists = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+            bool exists = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM world_test_diagnostic_evidence
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subsystem=$subsystem
 AND evidence_key=$key;", parameters).FirstOrDefault(), "count", 0) > 0;
             if (!important && !exists)
             {
-                int ordinaryCount = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+                int ordinaryCount = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM world_test_diagnostic_evidence
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subsystem=$subsystem
 AND day_key=$day AND severity NOT IN ('warning','error');", parameters).FirstOrDefault(), "count", 0);
@@ -184,7 +184,7 @@ AND day_key=$day AND severity NOT IN ('warning','error');", parameters).FirstOrD
             parameters["severity"] = severity;
             parameters["payload"] = Json.Serialize(payload ?? new Dictionary<string, object>());
             parameters["ts"] = now;
-            Program.ExecuteSql(connection, @"INSERT INTO world_test_diagnostic_evidence(
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_test_diagnostic_evidence(
 campaign_id,timeline_id,day_key,subsystem,evidence_key,severity,payload_json,created_ts,updated_ts)
 VALUES($campaign,$timeline,$day,$subsystem,$key,$severity,$payload,$ts,$ts)
 ON CONFLICT(campaign_id,timeline_id,subsystem,evidence_key) DO UPDATE SET
@@ -207,7 +207,7 @@ day_key=$day,severity=$severity,payload_json=$payload,updated_ts=$ts;", paramete
                 ReadString(after, "pair_key",
                     ReadString(before, "pairKey", ReadString(before, "pair_key", ""))));
             bool pairAlreadyMaterialized = !string.IsNullOrWhiteSpace(materializedPairKey)
-                && ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+                && ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM world_test_relationship_pairs
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND pair_key=$pair;",
                     new Dictionary<string, object>
@@ -274,7 +274,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND pair_key=$pair;",
                 pairKey = ReadString(before, "pairKey", ReadString(before, "pair_key", ""));
                 if (!string.IsNullOrWhiteSpace(pairKey))
                 {
-                    Program.ExecuteSql(connection, @"DELETE FROM world_test_relationship_pairs
+                    ReignDatabase.ExecuteSql(connection, @"DELETE FROM world_test_relationship_pairs
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND pair_key=$pair;",
                         new Dictionary<string, object>
                         {
@@ -286,7 +286,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND pair_key=$pair;",
                 return;
             }
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Program.ExecuteSql(connection, @"INSERT INTO world_test_relationship_pairs(
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_test_relationship_pairs(
 campaign_id,timeline_id,pair_key,hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,
 tag_a_to_b,tag_b_to_a,shared_tag,mbti_a,mbti_b,notable_a,notable_b,
 last_delta_a_to_b,last_delta_b_to_a,last_context_kind,first_day,last_day,updated_ts)
@@ -333,7 +333,7 @@ last_delta_b_to_a=$deltaBA,last_context_kind=$context,last_day=$last,updated_ts=
             InvalidateWorldTestOverviewCache(campaignId,
                 string.IsNullOrWhiteSpace(timelineId) ? "main" : timelineId);
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Program.ExecuteSql(connection, @"INSERT INTO world_test_rollup_queue(
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_test_rollup_queue(
 campaign_id,timeline_id,day_key,status,revision,reason,attempt_count,last_error,created_ts,updated_ts)
 VALUES($campaign,$timeline,$day,'pending',1,$reason,0,'',$ts,$ts)
 ON CONFLICT(campaign_id,timeline_id,day_key) DO UPDATE SET
@@ -468,7 +468,7 @@ reason=$reason,last_error='',updated_ts=$ts;",
         {
             Dictionary<string, object> parameters = WorldTestMembershipParameters(
                 campaignId, timelineId, dayKey, membership);
-            Dictionary<string, object> current = Program.QuerySql(connection, @"SELECT edge_count,directional_edge_count
+            Dictionary<string, object> current = ReignDatabase.QuerySql(connection, @"SELECT edge_count,directional_edge_count
 FROM world_test_relationship_memberships
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND category_type=$type
 AND category_key=$category AND hero_id=$hero;", parameters).FirstOrDefault();
@@ -480,13 +480,13 @@ AND category_key=$category AND hero_id=$hero;", parameters).FirstOrDefault();
             parameters["directional"] = newDirectional;
             if (newCount == 0)
             {
-                Program.ExecuteSql(connection, @"DELETE FROM world_test_relationship_memberships
+                ReignDatabase.ExecuteSql(connection, @"DELETE FROM world_test_relationship_memberships
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND category_type=$type
 AND category_key=$category AND hero_id=$hero;", parameters);
             }
             else
             {
-                Program.ExecuteSql(connection, @"INSERT INTO world_test_relationship_memberships(
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_test_relationship_memberships(
 campaign_id,timeline_id,category_type,category_key,hero_id,edge_count,
 directional_edge_count,updated_day,updated_ts)
 VALUES($campaign,$timeline,$type,$category,$hero,$count,$directional,$day,$ts)
@@ -516,7 +516,7 @@ edge_count=$count,directional_edge_count=$directional,updated_day=$day,updated_t
         {
             Dictionary<string, object> parameters = WorldTestMembershipParameters(
                 campaignId, timelineId, dayKey, membership);
-            Dictionary<string, object> current = Program.QuerySql(connection, @"SELECT edge_count,directional_edge_count
+            Dictionary<string, object> current = ReignDatabase.QuerySql(connection, @"SELECT edge_count,directional_edge_count
 FROM world_test_relationship_pair_memberships
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND category_type=$type
 AND category_key=$category AND pair_key=$pair;", parameters).FirstOrDefault();
@@ -528,13 +528,13 @@ AND category_key=$category AND pair_key=$pair;", parameters).FirstOrDefault();
             parameters["directional"] = newDirectional;
             if (newCount == 0)
             {
-                Program.ExecuteSql(connection, @"DELETE FROM world_test_relationship_pair_memberships
+                ReignDatabase.ExecuteSql(connection, @"DELETE FROM world_test_relationship_pair_memberships
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND category_type=$type
 AND category_key=$category AND pair_key=$pair;", parameters);
             }
             else
             {
-                Program.ExecuteSql(connection, @"INSERT INTO world_test_relationship_pair_memberships(
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_test_relationship_pair_memberships(
 campaign_id,timeline_id,category_type,category_key,pair_key,edge_count,
 directional_edge_count,updated_day,updated_ts)
 VALUES($campaign,$timeline,$type,$category,$pair,$count,$directional,$day,$ts)
@@ -578,7 +578,7 @@ edge_count=$count,directional_edge_count=$directional,updated_day=$day,updated_t
             int delta)
         {
             if (delta == 0) return;
-            Program.ExecuteSql(connection, @"INSERT INTO world_test_current_metrics(
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_test_current_metrics(
 campaign_id,timeline_id,metric_scope,metric_key,metric_value,updated_day,updated_ts)
 VALUES($campaign,$timeline,$scope,$key,MAX(0,$delta),$day,$ts)
 ON CONFLICT(campaign_id,timeline_id,metric_scope,metric_key) DO UPDATE SET
@@ -653,7 +653,7 @@ updated_day=$day,updated_ts=$ts;",
             bool failed,
             Dictionary<string, object> dimensions = null)
         {
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 Dictionary<string, object> counters =
                     BuildWorldTestDiplomacyEvaluationCounters(
@@ -846,7 +846,7 @@ updated_day=$day,updated_ts=$ts;",
                 string storageCampaign = "__world_test_telemetry_"
                     + Guid.NewGuid().ToString("N").Substring(0, 12);
                 using (ReignDbConnection connection =
-                    Program.OpenCampaignConnection(storageCampaign))
+                    ReignDatabase.OpenCampaignConnection(storageCampaign))
                 {
                     const string campaign = "telemetry_fixture";
                     EnsureWorldTestTelemetrySchema(connection);
@@ -911,7 +911,7 @@ updated_day=$day,updated_ts=$ts;",
                         connection, campaign, "main", 1, "relationships", "evaluatedPairs");
                     int branchEvaluated = WorldTestCounterValue(
                         connection, campaign, "branch", 1, "relationships", "evaluatedPairs");
-                    int evidenceCount = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+                    int evidenceCount = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM world_test_diagnostic_evidence
 WHERE campaign_id=$campaign AND timeline_id='main' AND subsystem='relationships'
 AND evidence_key='pair-a-b';",
@@ -934,7 +934,7 @@ AND evidence_key='pair-a-b';",
                         && WorldTestMetricValue(connection, campaign, "main", "relationships", "band:friend:directionalEdgeCount") == 2
                         && WorldTestMetricValue(connection, campaign, "main", "relationships", "band:friend:pairCount") == 1,
                         "Relationship category populations change only on edge, NPC, and pair membership transitions.");
-                    Dictionary<string, object> materializedPair = Program.QuerySql(connection, @"
+                    Dictionary<string, object> materializedPair = ReignDatabase.QuerySql(connection, @"
 SELECT hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,tag_a_to_b,tag_b_to_a
 FROM world_test_relationship_pairs
 WHERE campaign_id=$campaign AND timeline_id='main' AND pair_key='a|b' LIMIT 1;",
@@ -955,7 +955,7 @@ WHERE campaign_id=$campaign AND timeline_id='main' AND pair_key='a|b' LIMIT 1;",
                         && WorldTestMetricValue(connection, campaign, "branch", "relationships",
                             "band:friend:pairCount") == 1,
                         "A new timeline materializes inherited pair state even when its first processed values do not change.");
-                    int queuedRollups = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+                    int queuedRollups = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM world_test_rollup_queue WHERE campaign_id=$campaign AND timeline_id='main' AND day_key=2;",
                         new Dictionary<string, object> { ["campaign"] = campaign }).FirstOrDefault(), "count", 0);
                     add("rollup_queue_idempotent", queuedRollups == 1,
@@ -986,7 +986,7 @@ FROM world_test_rollup_queue WHERE campaign_id=$campaign AND timeline_id='main' 
             string subsystem,
             string metricKey)
         {
-            List<Dictionary<string, object>> rows = Program.QuerySql(connection, @"SELECT counters_json
+            List<Dictionary<string, object>> rows = ReignDatabase.QuerySql(connection, @"SELECT counters_json
 FROM world_test_chunk_counters
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day
 AND subsystem=$subsystem;",
@@ -1017,7 +1017,7 @@ AND subsystem=$subsystem;",
             EnsureWorldTestTelemetrySchema(connection);
             Dictionary<string, int> totals =
                 new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (Dictionary<string, object> row in Program.QuerySql(connection, @"SELECT counters_json
+            foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection, @"SELECT counters_json
 FROM world_test_chunk_counters
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subsystem=$subsystem;",
                 new Dictionary<string, object>
@@ -1046,7 +1046,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subsystem=$subsystem;"
             string metricScope,
             string metricKey)
         {
-            Dictionary<string, object> row = Program.QuerySql(connection, @"SELECT metric_value
+            Dictionary<string, object> row = ReignDatabase.QuerySql(connection, @"SELECT metric_value
 FROM world_test_current_metrics
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND metric_scope=$scope AND metric_key=$key LIMIT 1;",

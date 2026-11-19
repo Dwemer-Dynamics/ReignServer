@@ -402,7 +402,7 @@ namespace ReignBetaServer
                 return CharactersService.EnsureEncounteredResidentConstructed(campaignId, heroId, hero, source);
             if (ReadBool(hero, "isNotable", false))
             {
-                using (ReignDbConnection mbtiConnection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection mbtiConnection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     RelationshipsService.EnsureNotableMbtiProfile(mbtiConnection, campaignId, ReadDouble(hero, "worldDay", 0d), hero, true);
                 }
@@ -622,7 +622,7 @@ namespace ReignBetaServer
             Dictionary<string, object> traits;
             if (ReadBool(hero, "isNotable", false))
             {
-                using (ReignDbConnection mbtiConnection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection mbtiConnection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     Dictionary<string, object> mbti = RelationshipsService.EnsureNotableMbtiProfile(
                         mbtiConnection, campaignId, ReadDouble(hero, "worldDay", 0d), hero, false);

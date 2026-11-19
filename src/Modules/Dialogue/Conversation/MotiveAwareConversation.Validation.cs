@@ -11,11 +11,11 @@ namespace ReignBetaServer
     {
         internal static void EnsureConversationMotiveSchema(ReignDbConnection connection)
         {
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_motive_cooldowns (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_motive_cooldowns (
 cooldown_id TEXT PRIMARY KEY, subject_id TEXT NOT NULL, target_id TEXT NOT NULL, kind TEXT NOT NULL,
 session_id TEXT NOT NULL DEFAULT '', world_day REAL NOT NULL DEFAULT 0, created_ts INTEGER NOT NULL,
 UNIQUE(subject_id,target_id,kind,session_id));");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_motive_cooldown_pair ON conversation_motive_cooldowns(subject_id,target_id,kind,world_day DESC);");
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_motive_cooldown_pair ON conversation_motive_cooldowns(subject_id,target_id,kind,world_day DESC);");
         }
 
         internal static Dictionary<string, object> ApplyConversationMotiveOutcome(string campaignId, Dictionary<string, object> context, Dictionary<string, object> payload, string visibleReply, string privateIntent, string decisionId, Dictionary<string, object> decisionBrief)
@@ -31,10 +31,10 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             string session = FirstNonEmpty(ReadFirstString(payload, "conversationSessionId", "sessionId", "eventId", "socialEventId"), ReadString(context, "mode", "dialogue") + ":" + Math.Floor(day).ToString(CultureInfo.InvariantCulture));
             if (actedRomantically && ReadBool(initiative, "recommended", false))
             {
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureConversationMotiveSchema(connection);
-                    Program.ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_motive_cooldowns(cooldown_id,subject_id,target_id,kind,session_id,world_day,created_ts) VALUES($id,$subject,$target,'romantic_advance',$session,$day,$ts);", new Dictionary<string, object> { ["id"] = "mcd_" + Guid.NewGuid().ToString("N"), ["subject"] = subjectId, ["target"] = targetId, ["session"] = session, ["day"] = day, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
+                    ReignDatabase.ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_motive_cooldowns(cooldown_id,subject_id,target_id,kind,session_id,world_day,created_ts) VALUES($id,$subject,$target,'romantic_advance',$session,$day,$ts);", new Dictionary<string, object> { ["id"] = "mcd_" + Guid.NewGuid().ToString("N"), ["subject"] = subjectId, ["target"] = targetId, ["session"] = session, ["day"] = day, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                 }
             }
             bool calculated = romanceRelevant && ReadString(romance, "presentation", "") == "calculated";

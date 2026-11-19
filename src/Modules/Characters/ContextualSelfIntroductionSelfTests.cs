@@ -93,10 +93,10 @@ namespace ReignBetaServer
                     ReadString(row, "text", "").Contains("don't know yours", StringComparison.Ordinal))
                 && ReadInt(observedRequest, "maxTokens", 0) == 768,
                 "The helper receives the actual prior question and current spoken statement without stage directions or a full memory/profile packet.", packet);
-            using (var connection = Program.OpenCampaignConnection(campaignId))
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 var stored = ReadStoredAcquaintance(connection, "contextual_observer_constalia", "contextual_player");
-                var evidence = Program.QuerySql(connection, "SELECT payload_json FROM identity_evidence WHERE observer_id=$observer AND evidence_type='contextual_self_introduction';",
+                var evidence = ReignDatabase.QuerySql(connection, "SELECT payload_json FROM identity_evidence WHERE observer_id=$observer AND evidence_type='contextual_self_introduction';",
                     new Dictionary<string, object> { ["observer"] = "contextual_observer_constalia" });
                 add("contextual_introduction_persists_with_evidence", IdentityStateVerified(stored)
                     && ReadString(stored, "verification_source", "") == "authoritative_qualified_self_introduction_contextual"
@@ -208,7 +208,7 @@ namespace ReignBetaServer
             aliasCorrection["playerText"] = exactText;
             var correctedAlias = ResolveContextualIntroductionFixture(aliasCorrection,
                 request => ContextualIntroductionResponse("self_introduction", "Michael of Howarton", exactQuote));
-            using (var connection = Program.OpenCampaignConnection(campaignId))
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 var stored = ReadStoredAcquaintance(connection, "contextual_observer_alias_correction", "contextual_player");
                 add("contextual_introduction_preserves_prior_alias", ReadBool(correctedAlias, "canonicalNameAllowed", false)

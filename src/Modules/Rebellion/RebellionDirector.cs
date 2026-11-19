@@ -26,33 +26,33 @@ namespace ReignBetaServer
 
         internal static void EnsureRebellionSchema(ReignDbConnection connection)
         {
-            if (Program.IsPostgreSqlComponentSchemaReady(connection,
+            if (ReignDatabase.IsPostgreSqlComponentSchemaReady(connection,
                 RebellionSchemaMarker, RebellionSchemaRevision))
                 return;
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rebellion_movements (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rebellion_movements (
 movement_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,parent_kingdom_id TEXT NOT NULL,
 rebel_kingdom_id TEXT NOT NULL DEFAULT '',leader_clan_id TEXT NOT NULL,leader_hero_id TEXT NOT NULL,ruler_hero_id TEXT NOT NULL,
 objective TEXT NOT NULL,stage TEXT NOT NULL,pressure REAL NOT NULL,relationship_pressure REAL NOT NULL,
 trait_pressure REAL NOT NULL,factual_pressure REAL NOT NULL,viability REAL NOT NULL,readiness REAL NOT NULL,
 demand_json TEXT NOT NULL DEFAULT '{}',correlation_id TEXT NOT NULL,created_day REAL NOT NULL,updated_day REAL NOT NULL,
 cooldown_until_day REAL NOT NULL DEFAULT 0,is_player_kingdom INTEGER NOT NULL DEFAULT 0,payload_json TEXT NOT NULL DEFAULT '{}');");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rebellion_memberships (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rebellion_memberships (
 movement_id TEXT NOT NULL,clan_id TEXT NOT NULL,leader_hero_id TEXT NOT NULL,side TEXT NOT NULL,support_score REAL NOT NULL,
 switch_count INTEGER NOT NULL DEFAULT 0,last_switch_day REAL NOT NULL DEFAULT 0,reason_json TEXT NOT NULL DEFAULT '{}',
 PRIMARY KEY(movement_id,clan_id));");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rebellion_transitions (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rebellion_transitions (
 transition_id TEXT PRIMARY KEY,movement_id TEXT NOT NULL,world_day REAL NOT NULL,from_stage TEXT NOT NULL,to_stage TEXT NOT NULL,
 kind TEXT NOT NULL,actor_id TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS negotiated_action_drafts (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS negotiated_action_drafts (
 negotiation_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,broker_hero_id TEXT NOT NULL,
 first_kingdom_id TEXT NOT NULL,second_kingdom_id TEXT NOT NULL,first_ruler_id TEXT NOT NULL,second_ruler_id TEXT NOT NULL,
 command TEXT NOT NULL,political_result TEXT NOT NULL DEFAULT '',terms_json TEXT NOT NULL,terms_hash TEXT NOT NULL,
 status TEXT NOT NULL,created_day REAL NOT NULL,updated_day REAL NOT NULL,expires_day REAL NOT NULL,
 queued_action_id TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL DEFAULT '{}');");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS negotiated_action_approvals (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS negotiated_action_approvals (
 negotiation_id TEXT NOT NULL,ruler_hero_id TEXT NOT NULL,kingdom_id TEXT NOT NULL,terms_hash TEXT NOT NULL,
 status TEXT NOT NULL,approved_day REAL NOT NULL,reason TEXT NOT NULL DEFAULT '',PRIMARY KEY(negotiation_id,ruler_hero_id));");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rebellion_backing_requests (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rebellion_backing_requests (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,movement_id TEXT NOT NULL,world_day REAL NOT NULL,
 rebel_kingdom_id TEXT NOT NULL,parent_kingdom_id TEXT NOT NULL,rebel_ruler_id TEXT NOT NULL,parent_ruler_id TEXT NOT NULL,
 asked_kingdom_id TEXT NOT NULL DEFAULT '',asked_ruler_id TEXT NOT NULL DEFAULT '',eligibility_attitude INTEGER NOT NULL DEFAULT 0,
@@ -62,8 +62,8 @@ support_power REAL NOT NULL DEFAULT 0,opposition_power REAL NOT NULL DEFAULT 0,m
 support_coalition_json TEXT NOT NULL DEFAULT '[]',opposition_coalition_json TEXT NOT NULL DEFAULT '[]',status TEXT NOT NULL,
 reason TEXT NOT NULL DEFAULT '',action_id TEXT NOT NULL DEFAULT '',event_id TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,movement_id));");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_rebellion_backing_status ON rebellion_backing_requests(campaign_id,timeline_id,status,world_day);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rebellion_recognition_attempts (
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_rebellion_backing_status ON rebellion_backing_requests(campaign_id,timeline_id,status,world_day);");
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rebellion_recognition_attempts (
 attempt_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,movement_id TEXT NOT NULL,
 attempt_index INTEGER NOT NULL,world_day REAL NOT NULL,rebel_kingdom_id TEXT NOT NULL,parent_kingdom_id TEXT NOT NULL,
 rebel_ruler_id TEXT NOT NULL,parent_ruler_id TEXT NOT NULL,status TEXT NOT NULL,eligible INTEGER NOT NULL,
@@ -74,12 +74,12 @@ parent_pragmatism INTEGER NOT NULL DEFAULT 50,parent_mercy INTEGER NOT NULL DEFA
 reason TEXT NOT NULL DEFAULT '',negotiation_id TEXT NOT NULL DEFAULT '',action_id TEXT NOT NULL DEFAULT '',
 payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,
 UNIQUE(campaign_id,timeline_id,movement_id,attempt_index));");
-            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_rebellion_recognition_movement
+            ReignDatabase.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_rebellion_recognition_movement
 ON rebellion_recognition_attempts(campaign_id,timeline_id,movement_id,world_day DESC);");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_rebellion_campaign_stage ON rebellion_movements(campaign_id,timeline_id,stage,updated_day);");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_rebellion_parent ON rebellion_movements(campaign_id,parent_kingdom_id,stage);");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_negotiation_campaign_status ON negotiated_action_drafts(campaign_id,status,expires_day);");
-            Program.ExecuteSql(connection, @"INSERT INTO schema_meta(key,value)
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_rebellion_campaign_stage ON rebellion_movements(campaign_id,timeline_id,stage,updated_day);");
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_rebellion_parent ON rebellion_movements(campaign_id,parent_kingdom_id,stage);");
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_negotiation_campaign_status ON negotiated_action_drafts(campaign_id,status,expires_day);");
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO schema_meta(key,value)
 VALUES($key,$value)
 ON CONFLICT(key) DO UPDATE SET value=$value;",
                 new Dictionary<string, object>
@@ -88,7 +88,7 @@ ON CONFLICT(key) DO UPDATE SET value=$value;",
                     ["value"] = RebellionSchemaRevision.ToString(
                         CultureInfo.InvariantCulture)
                 });
-            Program.MarkPostgreSqlComponentSchemaReady(connection,
+            ReignDatabase.MarkPostgreSqlComponentSchemaReady(connection,
                 RebellionSchemaMarker, RebellionSchemaRevision);
         }
 
@@ -116,7 +116,7 @@ ON CONFLICT(key) DO UPDATE SET value=$value;",
             List<Dictionary<string, object>> savedMovements = ReadDictionaryList(payload, "movements");
             List<Dictionary<string, object>> updates = new List<Dictionary<string, object>>();
 
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureRebellionSchema(connection);
                 foreach (Dictionary<string, object> saved in savedMovements) MirrorSavedRebellionState(connection, campaignId, timelineId, worldDay, saved);
@@ -261,7 +261,7 @@ ON CONFLICT(key) DO UPDATE SET value=$value;",
         {
             string movementId = ReadString(movement, "movementId", "");
             if (string.IsNullOrWhiteSpace(movementId)) return null;
-            Dictionary<string, object> existing = Program.QuerySql(connection, @"SELECT * FROM rebellion_backing_requests
+            Dictionary<string, object> existing = ReignDatabase.QuerySql(connection, @"SELECT * FROM rebellion_backing_requests
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement LIMIT 1;",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["movement"] = movementId })
                 .FirstOrDefault();
@@ -454,7 +454,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement 
                 "civilWarStartedDay", ReadDouble(movement, "createdDay", worldDay));
             if (worldDay - civilWarStartedDay
                 < RebellionRecognitionMinimumWarDays) return null;
-            Dictionary<string, object> latest = Program.QuerySql(connection, @"SELECT *
+            Dictionary<string, object> latest = ReignDatabase.QuerySql(connection, @"SELECT *
 FROM rebellion_recognition_attempts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement
 ORDER BY attempt_index DESC LIMIT 1;", new Dictionary<string, object>
@@ -592,7 +592,7 @@ ORDER BY attempt_index DESC LIMIT 1;", new Dictionary<string, object>
                         ["attemptId"] = attemptId,
                         ["evidence"] = evidence
                     };
-                Program.ExecuteSql(connection, @"INSERT INTO negotiated_action_drafts(
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO negotiated_action_drafts(
 negotiation_id,campaign_id,timeline_id,broker_hero_id,first_kingdom_id,second_kingdom_id,
 first_ruler_id,second_ruler_id,command,political_result,terms_json,terms_hash,status,
 created_day,updated_day,expires_day,queued_action_id,payload_json)
@@ -617,7 +617,7 @@ VALUES($id,$campaign,$timeline,$broker,$rebelKingdom,$parentKingdom,$rebelRuler,
                         [rebelRulerId] = rebelKingdomId,
                         [parentRulerId] = parentKingdomId
                     })
-                    Program.ExecuteSql(connection, @"INSERT INTO negotiated_action_approvals(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO negotiated_action_approvals(
 negotiation_id,ruler_hero_id,kingdom_id,terms_hash,status,approved_day,reason)
 VALUES($id,$ruler,$kingdom,$hash,'approved',$day,$reason);",
                         new Dictionary<string, object>
@@ -631,14 +631,14 @@ VALUES($id,$ruler,$kingdom,$hash,'approved',$day,$reason);",
                                 ? "The rebel ruler formally proposed recognition."
                                 : "The challenged ruler passed the safeguarded recognition roll."
                         });
-                Dictionary<string, object> draft = Program.QuerySql(connection,
+                Dictionary<string, object> draft = ReignDatabase.QuerySql(connection,
                     "SELECT * FROM negotiated_action_drafts WHERE negotiation_id=$id;",
                     new Dictionary<string, object>
                     {
                         ["id"] = negotiationId
                     }).FirstOrDefault();
                 TryQueueApprovedNegotiation(connection, draft, worldDay);
-                Dictionary<string, object> queuedDraft = Program.QuerySql(connection,
+                Dictionary<string, object> queuedDraft = ReignDatabase.QuerySql(connection,
                     "SELECT * FROM negotiated_action_drafts WHERE negotiation_id=$id;",
                     new Dictionary<string, object>
                     {
@@ -674,7 +674,7 @@ VALUES($id,$ruler,$kingdom,$hash,'approved',$day,$reason);",
                 ["action_id"] = actionId,
                 ["payload_json"] = Json.Serialize(evidence)
             };
-            Program.ExecuteSql(connection, @"INSERT INTO rebellion_recognition_attempts(
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO rebellion_recognition_attempts(
 attempt_id,campaign_id,timeline_id,movement_id,attempt_index,world_day,rebel_kingdom_id,
 parent_kingdom_id,rebel_ruler_id,parent_ruler_id,status,eligible,chance_percent,roll,
 relationship_attitude,rebel_strength,parent_strength,rebel_fiefs,parent_fiefs,parent_other_wars,
@@ -776,7 +776,7 @@ $parentFiefs,$otherWars,$judgment,$pragmatism,$mercy,$pride,$reason,$negotiation
         private static void InsertRebellionBackingRequest(ReignDbConnection connection,
             Dictionary<string, object> row)
         {
-            Program.ExecuteSql(connection, @"INSERT INTO rebellion_backing_requests(
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO rebellion_backing_requests(
 campaign_id,timeline_id,movement_id,world_day,rebel_kingdom_id,parent_kingdom_id,rebel_ruler_id,parent_ruler_id,
 asked_kingdom_id,asked_ruler_id,eligibility_attitude,asked_to_rebel_attitude,asked_to_parent_attitude,
 rebel_roll,parent_roll,rebel_score,parent_score,support_power,opposition_power,military_chance,military_roll,
@@ -808,9 +808,9 @@ $supportPower,$oppositionPower,$chance,$militaryRoll,$supportCoalition,$oppositi
         {
             string id = ReadString(saved, "movementId", "");
             if (string.IsNullOrWhiteSpace(id)) return;
-            Dictionary<string, object> old = Program.QuerySql(connection, "SELECT stage FROM rebellion_movements WHERE movement_id=$id;", new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
+            Dictionary<string, object> old = ReignDatabase.QuerySql(connection, "SELECT stage FROM rebellion_movements WHERE movement_id=$id;", new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
             string oldStage = ReadString(old, "stage", "none"), stage = ReadString(saved, "stage", "none");
-            Program.ExecuteSql(connection, @"INSERT INTO rebellion_movements(movement_id,campaign_id,timeline_id,parent_kingdom_id,rebel_kingdom_id,leader_clan_id,leader_hero_id,ruler_hero_id,
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO rebellion_movements(movement_id,campaign_id,timeline_id,parent_kingdom_id,rebel_kingdom_id,leader_clan_id,leader_hero_id,ruler_hero_id,
 objective,stage,pressure,relationship_pressure,trait_pressure,factual_pressure,viability,readiness,demand_json,correlation_id,created_day,updated_day,cooldown_until_day,is_player_kingdom,payload_json)
 VALUES($id,$campaign,$timeline,$parent,$rebel,$clan,$hero,$ruler,$objective,$stage,$pressure,$relationship,$trait,$factual,$viability,$readiness,$demand,$correlation,$created,$updated,$cooldown,$player,$payload)
 ON CONFLICT(movement_id) DO UPDATE SET timeline_id=$timeline,rebel_kingdom_id=$rebel,leader_clan_id=$clan,leader_hero_id=$hero,stage=$stage,pressure=$pressure,
@@ -827,7 +827,7 @@ relationship_pressure=$relationship,trait_pressure=$trait,factual_pressure=$fact
                     ["player"] = ReadBool(saved, "isPlayerKingdom", false) ? 1 : 0, ["payload"] = Json.Serialize(saved)
                 });
             if (old != null && !string.Equals(oldStage, stage, StringComparison.OrdinalIgnoreCase))
-                Program.ExecuteSql(connection, @"INSERT INTO rebellion_transitions(transition_id,movement_id,world_day,from_stage,to_stage,kind,actor_id,payload_json,created_ts)
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO rebellion_transitions(transition_id,movement_id,world_day,from_stage,to_stage,kind,actor_id,payload_json,created_ts)
 VALUES($transition,$movement,$day,$from,$to,'game_state_mirror',$actor,$payload,$ts);", new Dictionary<string, object>
                 {
                     ["transition"] = Guid.NewGuid().ToString("N"), ["movement"] = id, ["day"] = worldDay, ["from"] = oldStage, ["to"] = stage,
@@ -909,7 +909,7 @@ VALUES($transition,$movement,$day,$from,$to,'game_state_mirror',$actor,$payload,
             if (ReadBool(clan, "leaderIsPrisoner", ReadBool(clan, "isPrisoner", false))) score += 5d;
             try
             {
-                List<Dictionary<string, object>> facts = Program.QuerySql(connection, @"SELECT DISTINCT e.event_type,e.world_day,e.payload_json
+                List<Dictionary<string, object>> facts = ReignDatabase.QuerySql(connection, @"SELECT DISTINCT e.event_type,e.world_day,e.payload_json
 FROM world_history_entities n JOIN world_history_events e ON e.event_id=n.event_id
 WHERE n.entity_id IN ($hero,$clan,$kingdom) AND e.world_day >= $from AND e.world_day <= $to;",
                     new Dictionary<string, object> { ["hero"] = heroId, ["clan"] = clanId, ["kingdom"] = kingdomId, ["from"] = worldDay - 126d, ["to"] = worldDay });
@@ -926,7 +926,7 @@ WHERE n.entity_id IN ($hero,$clan,$kingdom) AND e.world_day >= $from AND e.world
                     else if (Program.ContainsAny(type, "reward", "fief granted", "reconciliation", "promise fulfilled")) modifier = -12d;
                     score += modifier * decay;
                 }
-                int claimantSupport = Program.QuerySql(connection, "SELECT COUNT(*) count FROM events WHERE event_type='support_claimant' AND payload_json LIKE $clan;",
+                int claimantSupport = ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM events WHERE event_type='support_claimant' AND payload_json LIKE $clan;",
                     new Dictionary<string, object> { ["clan"] = "%" + clanId + "%" }).Select(x => ReadInt(x, "count", 0)).FirstOrDefault();
                 if (claimantSupport > 0) score += 15d;
             }
@@ -1053,10 +1053,10 @@ WHERE n.entity_id IN ($hero,$clan,$kingdom) AND e.world_day >= $from AND e.world
             Dictionary<string, object> update)
         {
             string movementId = ReadString(update, "movementId", "");
-            Dictionary<string, object> old = Program.QuerySql(connection, "SELECT stage FROM rebellion_movements WHERE movement_id=$id;",
+            Dictionary<string, object> old = ReignDatabase.QuerySql(connection, "SELECT stage FROM rebellion_movements WHERE movement_id=$id;",
                 new Dictionary<string, object> { ["id"] = movementId }).FirstOrDefault();
             string oldStage = ReadString(old, "stage", "none");
-            Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO rebellion_movements(movement_id,campaign_id,timeline_id,parent_kingdom_id,rebel_kingdom_id,
+            ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO rebellion_movements(movement_id,campaign_id,timeline_id,parent_kingdom_id,rebel_kingdom_id,
 leader_clan_id,leader_hero_id,ruler_hero_id,objective,stage,pressure,relationship_pressure,trait_pressure,factual_pressure,viability,readiness,
 demand_json,correlation_id,created_day,updated_day,cooldown_until_day,is_player_kingdom,payload_json)
 VALUES($id,$campaign,$timeline,$parent,$rebel,$clan,$hero,$ruler,$objective,$stage,$pressure,$relationship,$trait,$factual,$viability,$readiness,
@@ -1074,10 +1074,10 @@ $demand,$correlation,COALESCE((SELECT created_day FROM rebellion_movements WHERE
                     ["correlation"] = ReadString(update, "correlationId", movementId), ["day"] = worldDay,
                     ["player"] = ReadBool(update, "isPlayerKingdom", false) ? 1 : 0, ["payload"] = Json.Serialize(update)
                 });
-            Program.ExecuteSql(connection, "DELETE FROM rebellion_memberships WHERE movement_id=$id;", new Dictionary<string, object> { ["id"] = movementId });
+            ReignDatabase.ExecuteSql(connection, "DELETE FROM rebellion_memberships WHERE movement_id=$id;", new Dictionary<string, object> { ["id"] = movementId });
             foreach (Dictionary<string, object> member in ReadDictionaryList(update, "memberships"))
             {
-                Program.ExecuteSql(connection, @"INSERT INTO rebellion_memberships(movement_id,clan_id,leader_hero_id,side,support_score,switch_count,last_switch_day,reason_json)
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO rebellion_memberships(movement_id,clan_id,leader_hero_id,side,support_score,switch_count,last_switch_day,reason_json)
 VALUES($movement,$clan,$hero,$side,$score,$switches,$last,$reason);", new Dictionary<string, object>
                 {
                     ["movement"] = movementId, ["clan"] = ReadString(member, "clanId", ""), ["hero"] = ReadString(member, "leaderHeroId", ""),
@@ -1088,7 +1088,7 @@ VALUES($movement,$clan,$hero,$side,$score,$switches,$last,$reason);", new Dictio
             string newStage = ReadString(update, "stage", "");
             if (!string.Equals(oldStage, newStage, StringComparison.OrdinalIgnoreCase))
             {
-                Program.ExecuteSql(connection, @"INSERT INTO rebellion_transitions(transition_id,movement_id,world_day,from_stage,to_stage,kind,actor_id,payload_json,created_ts)
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO rebellion_transitions(transition_id,movement_id,world_day,from_stage,to_stage,kind,actor_id,payload_json,created_ts)
 VALUES($id,$movement,$day,$from,$to,'stage_changed',$actor,$payload,$ts);", new Dictionary<string, object>
                 {
                     ["id"] = Guid.NewGuid().ToString("N"), ["movement"] = movementId, ["day"] = worldDay, ["from"] = oldStage,

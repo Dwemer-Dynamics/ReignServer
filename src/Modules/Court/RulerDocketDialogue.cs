@@ -13,14 +13,14 @@ namespace ReignBetaServer
     {
         private static void EnsureRulerPetitionDialogueSchema(ReignDbConnection connection)
         {
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ruler_petition_turns (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ruler_petition_turns (
 turn_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,transcript_id TEXT NOT NULL,
 petition_id TEXT NOT NULL,phase TEXT NOT NULL,petitioner_hero_id TEXT NOT NULL DEFAULT '',
 petitioner_name TEXT NOT NULL DEFAULT '',petition_kind TEXT NOT NULL,severity TEXT NOT NULL,
 outcome TEXT NOT NULL DEFAULT '',player_text TEXT NOT NULL DEFAULT '',reply_text TEXT NOT NULL,created_ts INTEGER NOT NULL);" );
-            Program.EnsureDatabaseColumn(connection, "ruler_petition_turns", "player_text",
+            ReignDatabase.EnsureDatabaseColumn(connection, "ruler_petition_turns", "player_text",
                 "TEXT NOT NULL DEFAULT ''");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_ruler_petition_transcript ON ruler_petition_turns(campaign_id,timeline_id,transcript_id,created_ts);");
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_ruler_petition_transcript ON ruler_petition_turns(campaign_id,timeline_id,transcript_id,created_ts);");
         }
 
         internal static Dictionary<string, object> RulerPetitionRespond(Dictionary<string, object> payload,
@@ -99,7 +99,7 @@ outcome TEXT NOT NULL DEFAULT '',player_text TEXT NOT NULL DEFAULT '',reply_text
             DialogueService.PublishRouteConversation(memory, reply, petitionerName, connection =>
             {
                 EnsureRulerPetitionDialogueSchema(connection);
-                Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO ruler_petition_turns(
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO ruler_petition_turns(
 turn_id,campaign_id,timeline_id,transcript_id,petition_id,phase,petitioner_hero_id,petitioner_name,petition_kind,severity,outcome,player_text,reply_text,created_ts)
 VALUES($turn,$campaign,$timeline,$transcript,$petition,$phase,$hero,$name,$kind,$severity,$outcome,$player,$reply,$ts);",
                     new Dictionary<string, object> { ["turn"] = turnId, ["campaign"] = campaignId,

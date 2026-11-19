@@ -366,7 +366,7 @@ namespace ReignBetaServer
                 {
                     string instanceId =
                         ReadString(leased, "caseInstanceId", "");
-                    leased["case"] = Program.QuerySql(
+                    leased["case"] = ReignDatabase.QuerySql(
                         connection,
                         @"SELECT * FROM final_gauntlet_cases
 WHERE run_id=$run AND case_instance_id=$case LIMIT 1;",
@@ -503,7 +503,7 @@ WHERE run_id=$run AND case_instance_id=$case LIMIT 1;",
             if (liveRun.Count > 0)
                 evidence["sourceAuditEntries"] =
                     WorldSimulationService.CollectLiveTestAuditEvidence(liveRun);
-            Program.ExecuteSql(
+            ReignDatabase.ExecuteSql(
                 connection,
                 @"INSERT INTO final_gauntlet_evidence(
 run_id,case_instance_id,evidence_key,schema_version,payload_json,created_ts)
@@ -645,17 +645,17 @@ created_ts=excluded.created_ts;",
                 stored["ok"] = true;
                 if (includeReport)
                 {
-                    stored["attempts"] = Program.QuerySql(
+                    stored["attempts"] = ReignDatabase.QuerySql(
                         connection,
                         @"SELECT * FROM final_gauntlet_attempts
 WHERE run_id=$run ORDER BY case_instance_id,attempt_number;",
                         new Dictionary<string, object> { ["run"] = runId });
-                    stored["assertions"] = Program.QuerySql(
+                    stored["assertions"] = ReignDatabase.QuerySql(
                         connection,
                         @"SELECT * FROM final_gauntlet_assertions
 WHERE run_id=$run ORDER BY case_instance_id,assertion_id;",
                         new Dictionary<string, object> { ["run"] = runId });
-                    stored["evidence"] = Program.QuerySql(
+                    stored["evidence"] = ReignDatabase.QuerySql(
                         connection,
                         @"SELECT run_id,case_instance_id,evidence_key,
 schema_version,created_ts FROM final_gauntlet_evidence
@@ -682,7 +682,7 @@ WHERE run_id=$run ORDER BY case_instance_id,evidence_key;",
             using (ReignDbConnection connection =
                 FinalGauntletStore.OpenControlConnection())
             {
-                List<Dictionary<string, object>> items = Program.QuerySql(
+                List<Dictionary<string, object>> items = ReignDatabase.QuerySql(
                     connection,
                     @"SELECT review_id,case_instance_id,
 blinded_payload_json,created_ts
@@ -696,7 +696,7 @@ ORDER BY review_id;",
                 {
                     ["ok"] = true,
                     ["runId"] = runId,
-                    ["items"] = Program.QuerySql(
+                    ["items"] = ReignDatabase.QuerySql(
                         connection,
                         @"SELECT review_id,case_instance_id,
 blinded_payload_json,created_ts

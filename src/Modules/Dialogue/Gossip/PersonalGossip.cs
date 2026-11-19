@@ -19,9 +19,9 @@ namespace ReignBetaServer
         private static void EnsurePersonalGossipSchema(ReignDbConnection c)
         {
             const string marker = "personal_gossip_schema";
-            if (Program.IsPostgreSqlComponentSchemaReady(c, marker, 1)) return;
+            if (ReignDatabase.IsPostgreSqlComponentSchemaReady(c, marker, 1)) return;
             // Save Sync snapshots the whole schema, including decisions, reservations and receipts.
-            Program.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS personal_gossip_clock (
+            ReignDatabase.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS personal_gossip_clock (
 timeline_id TEXT PRIMARY KEY,world_day REAL NOT NULL,snapshot_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS personal_gossip_topics (
 topic_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,speaker_id TEXT NOT NULL,player_id TEXT NOT NULL,
@@ -40,21 +40,21 @@ receipt_id TEXT PRIMARY KEY,message_id TEXT NOT NULL,root_id TEXT NOT NULL,timel
 owner_id TEXT NOT NULL,peer_id TEXT NOT NULL,acquired_day REAL NOT NULL,raise_session TEXT NOT NULL DEFAULT '',
 payload_json TEXT NOT NULL,UNIQUE(message_id,owner_id));
 CREATE INDEX IF NOT EXISTS idx_gossip_history_owner ON personal_gossip_history(timeline_id,owner_id,acquired_day DESC);");
-            Program.ExecuteSql(c, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');", GossipFields("key", marker));
-            Program.MarkPostgreSqlComponentSchemaReady(c, marker, 1);
+            ReignDatabase.ExecuteSql(c, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');", GossipFields("key", marker));
+            ReignDatabase.MarkPostgreSqlComponentSchemaReady(c, marker, 1);
         }
 
         private static Dictionary<string, object> GossipJson(Dictionary<string, object> row) =>
             TryParseJsonObject(ReadString(row, "payload_json", "{}")) ?? new Dictionary<string, object>();
         private static string GossipTimeline(Dictionary<string, object> payload) => ReadString(payload, "timelineId", "main");
         private static Dictionary<string, object> GossipClock(ReignDbConnection c, string timeline) =>
-            Program.QuerySql(c, "SELECT * FROM personal_gossip_clock WHERE timeline_id=$timeline;", GossipFields("timeline", timeline)).FirstOrDefault();
+            ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_clock WHERE timeline_id=$timeline;", GossipFields("timeline", timeline)).FirstOrDefault();
         private static Dictionary<string, object> GossipSnapshot(ReignDbConnection c, string timeline) =>
             TryParseJsonObject(ReadString(GossipClock(c, timeline), "snapshot_json", "{}")) ?? new Dictionary<string, object>();
 
         private static string GossipClockEpoch(ReignDbConnection c) => PersonalGossipClockBoot + ":"
             + Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration).ToString(CultureInfo.InvariantCulture) + ":"
-            + (WorldSimulationService.TableExists(c, "memory_precision_state") ? ReadString(Program.QuerySql(c,
+            + (WorldSimulationService.TableExists(c, "memory_precision_state") ? ReadString(ReignDatabase.QuerySql(c,
                 "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';").FirstOrDefault(), "restore_generation", "") : "");
 
         private static Dictionary<string, object> GossipPlayerReference(ReignDbConnection c, string observer, string player,
@@ -96,7 +96,7 @@ CREATE INDEX IF NOT EXISTS idx_gossip_history_owner ON personal_gossip_history(t
             if (epoch.Length > 0 && epoch != GossipClockEpoch(c)) return false;
             var old = GossipClock(c, timeline);
             if (old != null && ReadDouble(old, "world_day", 0) > day) return false;
-            Program.ExecuteSql(c, @"INSERT INTO personal_gossip_clock(timeline_id,world_day,snapshot_json) VALUES($timeline,$day,$json)
+            ReignDatabase.ExecuteSql(c, @"INSERT INTO personal_gossip_clock(timeline_id,world_day,snapshot_json) VALUES($timeline,$day,$json)
 ON CONFLICT(timeline_id) DO UPDATE SET world_day=excluded.world_day,snapshot_json=excluded.snapshot_json;",
                 GossipFields("timeline", timeline, "day", day, "json", Json.Serialize(snapshot)));
             return true;
@@ -109,7 +109,7 @@ ON CONFLICT(timeline_id) DO UPDATE SET world_day=excluded.world_day,snapshot_jso
             if (!ReadBool(PersonalGossipSettings(), "enabled", true)) return GossipFields("ok", true, "enabled", false);
             int delivered;
             using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
-            using (var c = Program.OpenCampaignConnection(campaign))
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsurePersonalGossipSchema(c);
                 if (!GossipAcceptPresence(c, payload)) return GossipFields("ok", false, "error", "A current native gossip presence snapshot is required.");
@@ -123,7 +123,7 @@ ON CONFLICT(timeline_id) DO UPDATE SET world_day=excluded.world_day,snapshot_jso
         private static double GossipAffinity(ReignDbConnection c, string observer, string subject,
             Dictionary<string, object> observerProfile, Dictionary<string, object> subjectProfile)
         {
-            var row = Program.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
+            var row = ReignDatabase.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                 GossipFields("pair", RelationshipsService.AmbientPairKey(observer, subject))).FirstOrDefault();
             return row == null ? RelationshipsService.InitialReignAffinity(observerProfile, subjectProfile)
                 : ReputationService.EffectiveDirectionalAffinity(row, GossipSameId(ReadString(row, "hero_a_id", ""), observer));
@@ -133,11 +133,11 @@ ON CONFLICT(timeline_id) DO UPDATE SET world_day=excluded.world_day,snapshot_jso
             Dictionary<string, object> a, Dictionary<string, object> b)
         {
             if (GossipFamily(a, b)) return true;
-            if (WorldSimulationService.TableExists(c, "acquaintances") && Program.QuerySql(c,
+            if (WorldSimulationService.TableExists(c, "acquaintances") && ReignDatabase.QuerySql(c,
                 "SELECT subject_id FROM acquaintances WHERE observer_id=$a AND subject_id=$b AND identity_state='verified' LIMIT 1;",
                 GossipFields("a", observer, "b", target)).Count > 0) return true;
             // Persisted social contact, unlike a raw native relation, establishes a known pair.
-            return Program.QuerySql(c, "SELECT pair_key FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
+            return ReignDatabase.QuerySql(c, "SELECT pair_key FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                 GossipFields("pair", RelationshipsService.AmbientPairKey(observer, target))).Count > 0;
         }
 
@@ -204,7 +204,7 @@ ON CONFLICT(timeline_id) DO UPDATE SET world_day=excluded.world_day,snapshot_jso
         private static double GossipConversationDelta(ReignDbConnection c, string timeline, string session, string speaker, string player)
         {
             if (!WorldSimulationService.TableExists(c, "conversation_relationship_receipts")) return 0;
-            var row = Program.QuerySql(c, @"SELECT COALESCE(SUM(final_delta),0) AS delta FROM conversation_relationship_receipts r
+            var row = ReignDatabase.QuerySql(c, @"SELECT COALESCE(SUM(final_delta),0) AS delta FROM conversation_relationship_receipts r
 WHERE r.observer_id=$speaker AND r.target_id=$player AND (r.timeline_id=$timeline OR r.timeline_id='')
 AND r.status='applied' AND EXISTS(SELECT 1 FROM conversation_turns t WHERE t.session_id=$session AND t.exchange_id=r.exchange_id);",
                 GossipFields("speaker", speaker, "player", player, "timeline", timeline, "session", session)).FirstOrDefault();
@@ -220,7 +220,7 @@ AND r.status='applied' AND EXISTS(SELECT 1 FROM conversation_turns t WHERE t.ses
                 if (ReadBool(payload, "officialMemoryFirewall", false) || string.IsNullOrWhiteSpace(speaker)
                     || string.IsNullOrWhiteSpace(player) || !ReadBool(PersonalGossipSettings(), "enabled", true)) return;
                 using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
-                using (var c = Program.OpenCampaignConnection(campaign))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     EnsurePersonalGossipSchema(c);
                     if (!GossipAcceptPresence(c, payload)) return;
@@ -256,7 +256,7 @@ AND r.status='applied' AND EXISTS(SELECT 1 FROM conversation_turns t WHERE t.ses
                         string subject = ReadString(signal, "subjectId", "");
                         if (!mentioned.Contains(subject, StringComparer.OrdinalIgnoreCase)) subject = "";
                         string id = GossipTopicId(timeline, speaker, player, day, category, subject);
-                        var prior = Program.QuerySql(c, "SELECT * FROM personal_gossip_topics WHERE topic_id=$id;", GossipFields("id", id)).FirstOrDefault();
+                        var prior = ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_topics WHERE topic_id=$id;", GossipFields("id", id)).FirstOrDefault();
                         if (prior != null && ReadString(prior, "status", "") == "queued") continue;
                         var topic = GossipFields("id", id, "timelineId", timeline, "speakerId", speaker, "playerId", player,
                             "sessionId", session, "createdDay", prior == null ? day : ReadDouble(prior, "created_day", day),
@@ -355,11 +355,11 @@ AND r.status='applied' AND EXISTS(SELECT 1 FROM conversation_turns t WHERE t.ses
             {
                 if (!ReadBool(PersonalGossipSettings(), "enabled", true)) return;
                 using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
-                using (var c = Program.OpenCampaignConnection(campaign))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     EnsurePersonalGossipSchema(c);
                     string exchange = ReadFirstString(payload, "exchangeId", "turnId", "sceneTurnId");
-                    foreach (var row in Program.QuerySql(c, @"SELECT * FROM personal_gossip_topics WHERE status<>'queued' AND created_day>=$day;",
+                    foreach (var row in ReignDatabase.QuerySql(c, @"SELECT * FROM personal_gossip_topics WHERE status<>'queued' AND created_day>=$day;",
                         GossipFields("day", ReadDouble(payload, "worldDay", 0) - 1)))
                     {
                         var topic = GossipJson(row);
@@ -410,7 +410,7 @@ AND r.status='applied' AND EXISTS(SELECT 1 FROM conversation_turns t WHERE t.ses
 
         private static void SavePersonalGossipTopic(ReignDbConnection c, Dictionary<string, object> topic, string status)
         {
-            Program.ExecuteSql(c, @"INSERT INTO personal_gossip_topics(topic_id,timeline_id,speaker_id,player_id,session_id,created_day,status,payload_json)
+            ReignDatabase.ExecuteSql(c, @"INSERT INTO personal_gossip_topics(topic_id,timeline_id,speaker_id,player_id,session_id,created_day,status,payload_json)
 VALUES($id,$timeline,$speaker,$player,$session,$day,$status,$json) ON CONFLICT(topic_id) DO UPDATE SET status=excluded.status,payload_json=excluded.payload_json;",
                 GossipFields("id", ReadString(topic, "id", ""), "timeline", ReadString(topic, "timelineId", "main"),
                     "speaker", ReadString(topic, "speakerId", ""), "player", ReadString(topic, "playerId", ""),
@@ -426,7 +426,7 @@ VALUES($id,$timeline,$speaker,$player,$session,$day,$status,$json) ON CONFLICT(t
             var signal = ReadDictionary(topic, "signal");
             var traits = Program.ReadJsonObject(Program.CharacterFile(campaign, speaker, "traits.json"));
             double day = ReadDouble(topic, "worldDay", 0);
-            if (Program.QuerySql(c, "SELECT message_id FROM personal_gossip_messages WHERE topic_id=$id AND is_reply=0 LIMIT 1;", GossipFields("id", id)).Count > 0) return;
+            if (ReignDatabase.QuerySql(c, "SELECT message_id FROM personal_gossip_messages WHERE topic_id=$id AND is_reply=0 LIMIT 1;", GossipFields("id", id)).Count > 0) return;
             if (ReadInt(topic, "hop", 1) > ReadInt(policy, "maximumOutwardHops", 2)
                 || day > ReadDouble(topic, "rootCreatedDay", ReadDouble(topic, "createdDay", day)) + ReadDouble(policy, "expiryDays", 14))
             { SavePersonalGossipTopic(c, topic, "expired_or_hop_limit"); return; }
@@ -508,7 +508,7 @@ VALUES($id,$timeline,$speaker,$player,$session,$day,$status,$json) ON CONFLICT(t
                 if (type == "negative" || delta == 0 || disclosureRoll > existence) { SavePersonalGossipTopic(c, topic, "privacy_declined"); return; }
                 type = "impression";
             }
-            var capRows = Program.QuerySql(c, @"SELECT m.is_reply,m.hop,m.created_day,t.session_id FROM personal_gossip_messages m
+            var capRows = ReignDatabase.QuerySql(c, @"SELECT m.is_reply,m.hop,m.created_day,t.session_id FROM personal_gossip_messages m
 LEFT JOIN personal_gossip_topics t ON t.topic_id=m.topic_id WHERE m.timeline_id=$timeline AND m.speaker_id=$speaker AND m.is_reply=0
 AND (m.created_day>$day OR t.session_id=$session);", GossipFields("timeline", timeline, "speaker", speaker, "day", day - 1, "session", session));
             if (capRows.Count(r => ReadDouble(r, "created_day", 0) > day - 1) >= ReadInt(policy, "maximumOutgoingPerDay", 3)
@@ -571,13 +571,13 @@ AND (m.created_day>$day OR t.session_id=$session);", GossipFields("timeline", ti
             .Select(id => { var person = people.FirstOrDefault(p => GossipSameId(GossipHeroId(p), id));
                 // Confidence owners need not be living, available recipients. A
                 // persisted bond remains relevant when its owner is off this roster.
-                bool knownBond = person != null || Program.QuerySql(c, "SELECT pair_key FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
+                bool knownBond = person != null || ReignDatabase.QuerySql(c, "SELECT pair_key FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                     GossipFields("pair", RelationshipsService.AmbientPairKey(GossipHeroId(self), id))).Count > 0;
                 return knownBond ? Math.Max(0, GossipAffinity(c, GossipHeroId(self), id, self, person)) : 0; }).DefaultIfEmpty(0).Max();
 
         private static void InsertPersonalGossipMessage(ReignDbConnection c, Dictionary<string, object> data, string id, bool reply)
         {
-            Program.ExecuteSql(c, @"INSERT INTO personal_gossip_messages(message_id,topic_id,root_id,timeline_id,speaker_id,recipient_id,player_id,is_reply,hop,
+            ReignDatabase.ExecuteSql(c, @"INSERT INTO personal_gossip_messages(message_id,topic_id,root_id,timeline_id,speaker_id,recipient_id,player_id,is_reply,hop,
 created_day,due_day,expires_day,status,payload_json) VALUES($id,$topic,$root,$timeline,$speaker,$recipient,$player,$reply,$hop,$day,$due,$expires,'pending',$json)
 ON CONFLICT(message_id) DO NOTHING;", GossipFields("id", id, "topic", ReadString(data, "id", ""), "root", ReadString(data, "rootId", ""),
                 "timeline", ReadString(data, "timelineId", "main"), "speaker", ReadString(data, "speakerId", ""), "recipient", ReadString(data, "recipientId", ""),

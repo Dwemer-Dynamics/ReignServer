@@ -28,7 +28,7 @@ namespace ReignBetaServer
                     && simpleOptions.Contains("npcLivesSummonsTravelTimePercent") && simpleOptions.Contains("npcLivesChance20")
                     && diagnostics.Contains("npcStoryJson") && diagnostics.Contains("npcLivesResumeHours")
                     && diagnostics.Contains("npcLivesApproachProvider") && !diagnostics.Contains("npcLivesFrequencyPercent"));
-                using var c = Program.OpenCampaignConnection(campaign);
+                using var c = ReignDatabase.OpenCampaignConnection(campaign);
                 DialogueService.EnsureAcceptedConversationUnitSchema(c); DialogueService.EnsureConversationAgencySchema(c);
                 string generation = NpcLivesGeneration(c);
                 var state = ReadNpcLives(c, campaign, "test");
@@ -270,7 +270,7 @@ namespace ReignBetaServer
                     HeroId = "companion", LocationId = "town", Quote = "Add unsalted broth." });
                 var repeatState = new NpcLivesState { CampaignId = campaign, TimelineId = "test" };
                 repeatState.Stories.Add(repeatStory);
-                Program.ExecuteSql(c, @"INSERT INTO conversation_turns(turn_id,session_id,turn_order,role,speaker_id,text,ts)
+                ReignDatabase.ExecuteSql(c, @"INSERT INTO conversation_turns(turn_id,session_id,turn_order,role,speaker_id,text,ts)
 VALUES('repeat_original','repeat_session',0,'player','player','Add unsalted broth. Then taste it.',1);");
                 void SubmitRepeatProbe(string sourceId, string contributionText, string excerpt)
                 {
@@ -439,14 +439,14 @@ VALUES('repeat_original','repeat_session',0,'player','player','Add unsalted brot
                 NpcLivesAnnouncement(c, state, announcement, "player", options, 10);
                 var a = state.Announcements.Single();
                 Check("announcement_freezes_actual_roster_and_deduplicates", a.RecipientIds.SequenceEqual(new[] { "companion", "guest" })
-                    && Program.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id=$id AND status='active';", TestDict("id", announcementId)).Count == 1);
-                var originals = Program.QuerySql(c, "SELECT text,participants_json FROM conversation_turns WHERE session_id=$id AND status='source_only';", TestDict("id", announcementId));
-                var published = Program.QuerySql(c, "SELECT payload_json FROM conversation_turns WHERE turn_id=$id;", TestDict("id", announcementId + "_source")).Single();
+                    && ReignDatabase.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id=$id AND status='active';", TestDict("id", announcementId)).Count == 1);
+                var originals = ReignDatabase.QuerySql(c, "SELECT text,participants_json FROM conversation_turns WHERE session_id=$id AND status='source_only';", TestDict("id", announcementId));
+                var published = ReignDatabase.QuerySql(c, "SELECT payload_json FROM conversation_turns WHERE turn_id=$id;", TestDict("id", announcementId + "_source")).Single();
                 Check("announcement_receipt_retains_exact_author_original_without_duplicate_visible_line", ReadBool(announcementReceipt, "persisted", false)
                     && originals.Count == 1 && ReadString(originals[0], "text", "") == a.Text
                     && ReadString(originals[0], "participants_json", "") == Json.Serialize(new[] { "player" })
                     && ReadString(TryParseJsonObject(ReadString(published, "payload_json", "{}")), "inputSourceId", "") == ReadString(announcementReceipt, "sourceId", "")
-                    && Program.QuerySql(c, "SELECT input_id FROM conversation_input_receipts WHERE session_id=$id;", TestDict("id", announcementId)).Count == 1);
+                    && ReignDatabase.QuerySql(c, "SELECT input_id FROM conversation_input_receipts WHERE session_id=$id;", TestDict("id", announcementId)).Count == 1);
                 bool changedRejected = false;
                 announcement["text"] = "Different words";
                 try { NpcLivesAnnouncement(c, state, announcement, "player", options, 10); } catch (InvalidOperationException) { changedRejected = true; }
@@ -481,14 +481,14 @@ VALUES('repeat_original','repeat_session',0,'player','player','Add unsalted brot
                 opening.BeginOpening("opening_fixture", 10, 1); opening.OpeningDay = 10; opening.OpeningGeneration = generation;
                 opening.SessionId = "opening_session"; opening.OpeningPayload = Json.Serialize(TestDict("playerId", "player", "heroName", "Mira",
                     "campaignId", campaign, "timelineId", "test", "worldDay", 10d, "locationId", "town"));
-                Program.ExecuteSql(c, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
+                ReignDatabase.ExecuteSql(c, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
 VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",""companion""]','{""timelineId"":""test""}');", TestDict("campaign", campaign));
                 CompleteNpcOpening(c, state, opening, TestDict(), TestDict(), generation);
                 string fallback = opening.OpeningText;
                 CompleteNpcOpening(c, state, opening, TestDict(), TestDict("reply", "A late conflicting reply", "activity", "arguing"), generation);
                 Check("failed_opening_does_not_invent_or_accept_fallback", opening.OpeningText.Length == 0
                     && !opening.OpeningPending && !opening.LastAcceptedDay.HasValue
-                    && Program.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id='opening_session';").Count == 0
+                    && ReignDatabase.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id='opening_session';").Count == 0
                     && !ReadBool(NpcOpeningStatus(opening, generation), "ok", true));
                 Check("failed_opening_does_not_claim_announcement_reaction", a.ReactionPending("companion"));
                 foreach (bool foreignSessionTimeline in new[] { true, false })
@@ -496,22 +496,22 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                     string fencedId = foreignSessionTimeline ? "foreign_timeline" : "changed_audience";
                     opening.BeginOpening(fencedId, 10, 1);
                     var fencedPayload = BuildNpcOpeningRequest(state, opening, TestDict(), "player", "companion", fencedId, 10);
-                    Program.ExecuteSql(c, "UPDATE conversation_sessions SET payload_json=$payload,participants_json=$audience WHERE session_id='opening_session';",
+                    ReignDatabase.ExecuteSql(c, "UPDATE conversation_sessions SET payload_json=$payload,participants_json=$audience WHERE session_id='opening_session';",
                         TestDict("payload", Json.Serialize(TestDict("timelineId", foreignSessionTimeline ? "foreign" : "test")),
                             "audience", Json.Serialize(foreignSessionTimeline ? new[] { "player", "companion" } : new[] { "player", "companion", "unexpected_listener" })));
                     CompleteNpcOpening(c, state, opening, TestDict(),
                         SealNpcApproachDraft(fencedPayload, TestDict("reply", "An unpublished fenced opening.", "activity", "sorting herbs")), generation);
                     Check("publication_rejects_actual_session_" + fencedId, !opening.OpeningPending && !opening.LastAcceptedDay.HasValue
-                        && Program.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id='opening_session';").Count == 0);
+                        && ReignDatabase.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id='opening_session';").Count == 0);
                 }
-                Program.ExecuteSql(c, "UPDATE conversation_sessions SET payload_json=$payload,participants_json=$audience WHERE session_id='opening_session';",
+                ReignDatabase.ExecuteSql(c, "UPDATE conversation_sessions SET payload_json=$payload,participants_json=$audience WHERE session_id='opening_session';",
                     TestDict("payload", Json.Serialize(TestDict("timelineId", "test")), "audience", Json.Serialize(new[] { "player", "companion" })));
                 opening.BeginOpening("grounded_retry", 10, 1);
                 var retryPayload = BuildNpcOpeningRequest(state, opening, TestDict(), "player", "companion", "grounded_retry", 10);
                 var retryDraft = SealNpcApproachDraft(retryPayload, TestDict("reply", "A little company would be welcome.", "activity", "sorting herbs"));
                 CompleteNpcOpening(c, state, opening, TestDict(), retryDraft, generation);
                 Check("grounded_retry_publishes_once_without_player_speech", opening.OpeningText == "A little company would be welcome."
-                    && Program.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id='opening_session';").Count == 1);
+                    && ReignDatabase.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id='opening_session';").Count == 1);
                 Check("silent_resume_uses_elapsed_game_time", !opening.BeginOpening("too_soon", 10 + 59d / 1440, 1)
                     && opening.BeginOpening("due", 10 + 1d / 24, 1));
                 opening.OpeningDay = 10.5;
@@ -672,7 +672,7 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                     var poll = NpcLivesOpenApi("opening", TestDict("campaignId", campaign, "timelineId", "test", "playerId", "player",
                         "heroId", "companion", "operationId", opening.OpeningOperationId, "generation", generation, "worldDay", 10.5d));
                     Check("expired_legacy_deadline_keeps_live_provider_pending", ReadString(poll, "status", "") == "pending"
-                        && Program.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id='opening_session';").Count == 1);
+                        && ReignDatabase.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id='opening_session';").Count == 1);
                     var slowProvider = System.Diagnostics.Stopwatch.StartNew();
                     NpcOpeningTestProvider = (_, _) => { calls++; System.Threading.Thread.Sleep(3100); return TestDict("ok", true, "content",
                         Json.Serialize(TestDict("reply", "I am sorting herbs. A little company would be welcome.", "activity", "sorting herbs", "receptiveness", "receptive"))); };
@@ -688,13 +688,13 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                 state = ReadNpcLives(c, campaign, "test"); opening = state.Encounters.Single(e => e.Id == opening.Id);
                 Check("mocked_fast_provider_commits_once_and_resume_remains_silent", calls == 1 && opening.Activity == "sorting herbs"
                     && !opening.OpeningPending && !opening.BeginOpening("reopen", 10.5, 1)
-                    && Program.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id='opening_session';").Count == 2);
+                    && ReignDatabase.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id='opening_session';").Count == 2);
                 var disabledRequest = TestDict("campaignId", campaign, "timelineId", "test", "playerId", "player",
                     "heroId", "switch_npc", "worldDay", 12d);
-                int acceptedBefore = Program.QuerySql(c, "SELECT turn_id FROM conversation_turns;").Count;
+                int acceptedBefore = ReignDatabase.QuerySql(c, "SELECT turn_id FROM conversation_turns;").Count;
                 var disabledOpen = NpcLivesOpenApi("open", disabledRequest, initialApproachOff);
                 Check("disabled_initial_approach_starts_no_job_or_accepted_turn", ReadString(disabledOpen, "status", "") == "disabled"
-                    && Program.QuerySql(c, "SELECT turn_id FROM conversation_turns;").Count == acceptedBefore
+                    && ReignDatabase.QuerySql(c, "SELECT turn_id FROM conversation_turns;").Count == acceptedBefore
                     && !NpcOpeningJobs.ContainsKey(campaign + "|test|player:switch_npc")
                     && !ReadNpcLives(c, campaign, "test").Encounters.Any(e => e.HeroId == "switch_npc"));
                 var toggled = NpcEncounter(state, "player", "switch_npc", TestDict());
@@ -710,7 +710,7 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                 CompleteNpcOpening(c, state, toggled, TestDict(), TestDict("reply", "A late greeting."), generation);
                 Check("switch_off_poll_cancels_pending_draft_without_acceptance", ReadString(disabledPoll, "status", "") == "disabled"
                     && !toggled.OpeningPending && toggled.OpeningOperationId.Length == 0 && !toggled.LastAcceptedDay.HasValue
-                    && !NpcOpeningJobs.ContainsKey(toggledJob) && Program.QuerySql(c, "SELECT turn_id FROM conversation_turns;").Count == acceptedBefore);
+                    && !NpcOpeningJobs.ContainsKey(toggledJob) && ReignDatabase.QuerySql(c, "SELECT turn_id FROM conversation_turns;").Count == acceptedBefore);
                 toggled.BeginOpening("inflight_before_switch_off", 12, 1); toggled.OpeningGeneration = generation;
                 toggled.OpeningPayload = Json.Serialize(TestDict("playerId", "player"));
                 NpcOpeningJobs[toggledJob] = toggled.OpeningOperationId + "|" + generation;
@@ -718,7 +718,7 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                 var restoredToggle = ReadNpcLives(c, campaign, "test");
                 Check("switch_off_publication_does_not_consume_pending_reactions_or_clock", !toggled.OpeningPending
                     && !restoredToggle.Encounters.Single(e => e.HeroId == "switch_npc").LastAcceptedDay.HasValue
-                    && Program.QuerySql(c, "SELECT turn_id FROM conversation_turns;").Count == acceptedBefore
+                    && ReignDatabase.QuerySql(c, "SELECT turn_id FROM conversation_turns;").Count == acceptedBefore
                     && restoredToggle.Announcements.Single(n => n.Id == "unconsumed_at_switch_off").ReactionPending("switch_npc")
                     && !NpcOpeningJobs.ContainsKey(toggledJob)
                     && NpcLivesPromptBody(restoredToggle, "switch_npc", "player", TestDict("worldDay", 12d), initialApproachOff).Contains("We leave after breakfast."));
@@ -988,7 +988,7 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
             void Check(string id, bool passed) => results.Add(TestDict("caseId", "npc_lives_group_approach_" + id,
                 "passed", passed, "summary", id));
             const string timeline = "group_approach_branch";
-            using var c = Program.OpenCampaignConnection(campaign);
+            using var c = ReignDatabase.OpenCampaignConnection(campaign);
             var options = new NpcLivesOptions();
             foreach (string context in new[] { "party", "home:town", "castle:hall" })
             {
@@ -998,7 +998,7 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                 var start = DialogueService.ConversationStartApi(TestDict("campaignId", campaign, "timelineId", timeline,
                     "sessionId", session, "npcId", npcs[0], "playerId", "player", "channel", "party_chat",
                     "worldDay", 10d, "participants", audience));
-                var saved = Program.QuerySql(c, "SELECT * FROM conversation_sessions WHERE session_id=$id;", TestDict("id", session)).Single();
+                var saved = ReignDatabase.QuerySql(c, "SELECT * FROM conversation_sessions WHERE session_id=$id;", TestDict("id", session)).Single();
                 Check(prefix + "_session_retains_timeline_and_full_group", ReadBool(start, "ok", false)
                     && ReadString(TryParseJsonObject(ReadString(saved, "payload_json", "{}")), "timelineId", "") == timeline
                     && Program.TextListFromJson(ReadString(saved, "participants_json", "[]")).OrderBy(id => id)
@@ -1019,7 +1019,7 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                         "activity", "waiting in the room", "receptiveness", "receptive"));
                     CompleteNpcOpening(c, state, encounter, p, draft, encounter.OpeningGeneration, options);
                     CompleteNpcOpening(c, state, encounter, p, draft, encounter.OpeningGeneration, options);
-                    var accepted = Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE session_id=$session AND speaker_id=$hero;",
+                    var accepted = ReignDatabase.QuerySql(c, "SELECT * FROM conversation_turns WHERE session_id=$session AND speaker_id=$hero;",
                         TestDict("session", session, "hero", hero));
                     Check(prefix + "_" + hero + "_publishes_once_to_whole_group", !encounter.OpeningPending
                         && encounter.LastAcceptedDay == 10 && accepted.Count == 1
@@ -1029,7 +1029,7 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                     Check(prefix + "_" + hero + "_reopens_silently", ReadBool(resume, "ok", false)
                         && ReadString(resume, "status", "") == "resume");
                 }
-                Check(prefix + "_greetings_do_not_invent_player_speech", Program.QuerySql(c,
+                Check(prefix + "_greetings_do_not_invent_player_speech", ReignDatabase.QuerySql(c,
                     "SELECT turn_id FROM conversation_turns WHERE session_id=$id AND role='player';", TestDict("id", session)).Count == 0);
                 foreach (string mismatch in new[] { "timeline", "player", "missing_listener", "extra_listener", "missing_timeline" })
                 {
@@ -1039,14 +1039,14 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                         "npcLifeAudienceIds", mismatch == "missing_listener" ? new[] { "player", npcs[0] }
                             : mismatch == "extra_listener" ? audience.Concat(new[] { "unexpected_listener" }).ToArray() : audience);
                     if (mismatch == "missing_timeline")
-                        Program.ExecuteSql(c, "UPDATE conversation_sessions SET payload_json='{}' WHERE session_id=$id;", TestDict("id", session));
+                        ReignDatabase.ExecuteSql(c, "UPDATE conversation_sessions SET payload_json='{}' WHERE session_id=$id;", TestDict("id", session));
                     var rejected = NpcLivesOpenApi("open", p, options);
                     Check(prefix + "_rejects_" + mismatch + "_before_generation", !ReadBool(rejected, "ok", true)
                         && ReadString(rejected, "error", "").Contains("audience or timeline")
                         && !NpcOpeningJobs.Keys.Any(key => key.StartsWith(campaign + "|", StringComparison.Ordinal))
-                        && Program.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id=$id;", TestDict("id", session)).Count == 2);
+                        && ReignDatabase.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id=$id;", TestDict("id", session)).Count == 2);
                     if (mismatch == "missing_timeline")
-                        Program.ExecuteSql(c, "UPDATE conversation_sessions SET payload_json=$payload WHERE session_id=$id;",
+                        ReignDatabase.ExecuteSql(c, "UPDATE conversation_sessions SET payload_json=$payload WHERE session_id=$id;",
                             TestDict("id", session, "payload", ReadString(saved, "payload_json", "{}")));
                 }
             }

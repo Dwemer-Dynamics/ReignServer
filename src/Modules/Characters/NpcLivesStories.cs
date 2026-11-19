@@ -162,7 +162,7 @@ namespace ReignBetaServer
             {
                 // Compare the immutable accepted contribution, not the excerpt
                 // selected by the writer. Choosing another quote cannot reroll it.
-                var original = Program.QuerySql(c, "SELECT text FROM conversation_turns WHERE turn_id=$source AND speaker_id=$player AND role='player' LIMIT 1;",
+                var original = ReignDatabase.QuerySql(c, "SELECT text FROM conversation_turns WHERE turn_id=$source AND speaker_id=$player AND role='player' LIMIT 1;",
                     TestDict("source", id, "player", player)).FirstOrDefault();
                 if (original != null && string.Equals(current, Normalize(ReadString(original, "text", "")), StringComparison.OrdinalIgnoreCase)) return true;
             }
@@ -298,10 +298,10 @@ namespace ReignBetaServer
                 var ids = new[] { effect.HeroId, player }.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray();
                 RelationshipsService.EnsureMbtiRelationshipSchema(c); RelationshipsService.EnsureRelationshipNativeTargetSchema(c);
                 RelationshipsService.EnsurePoliticalRelationshipPair(c, state.CampaignId, state.TimelineId, key, ids[0], ids[1], day, true);
-                var pair = Program.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", key)).Single();
+                var pair = ReignDatabase.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", key)).Single();
                 string column = ReadString(pair, "hero_a_id", "") == effect.HeroId ? "affinity_a_to_b" : "affinity_b_to_a";
                 int affinity = Clamp(ReadInt(pair, column, 0) + effect.Amount, -100, 100);
-                Program.ExecuteSql(c, "UPDATE relationship_pair_chemistry SET " + column + "=$value WHERE pair_key=$pair;", TestDict("value", affinity, "pair", key));
+                ReignDatabase.ExecuteSql(c, "UPDATE relationship_pair_chemistry SET " + column + "=$value WHERE pair_key=$pair;", TestDict("value", affinity, "pair", key));
                 pair[column] = affinity;
                 RelationshipsService.RefreshEffectivePairProjection(c, state.CampaignId, state.TimelineId, pair, day, "npc_personal_story");
                 RelationshipsService.InvalidateRelationshipPairStateCache(state.CampaignId);

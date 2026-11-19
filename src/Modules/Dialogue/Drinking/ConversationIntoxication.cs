@@ -118,12 +118,12 @@ Engine owns intoxication, recovery and tolerance; stateUpdates cannot change the
         {
             // Campaign schemas and their tables are cloned atomically by Save Sync.
             // Restored state seeds a new history branch instead of resetting sobriety.
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_intoxication (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_intoxication (
 hero_id TEXT PRIMARY KEY, state_json TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS conversation_drinking_turns (
 hero_id TEXT NOT NULL, turn_key TEXT NOT NULL, receipt_json TEXT NOT NULL,
 PRIMARY KEY(hero_id,turn_key));");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_drink_scene (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_drink_scene (
 scene_id TEXT PRIMARY KEY, state_json TEXT NOT NULL DEFAULT '{}');");
         }
 
@@ -136,10 +136,10 @@ scene_id TEXT PRIMARY KEY, state_json TEXT NOT NULL DEFAULT '{}');");
         {
             Dictionary<string, object> stored;
             DrinkScene scene;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureIntoxicationSchema(connection);
-                var row = Program.QuerySql(connection, "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero;",
+                var row = ReignDatabase.QuerySql(connection, "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero;",
                     new Dictionary<string, object> { ["hero"] = heroId }).FirstOrDefault();
                 stored = TryParseJsonObject(ReadString(row, "state_json", "{}"));
                 scene = LoadDrinkScene(connection, payload, IntoxicationWorldHour(payload));
@@ -229,15 +229,15 @@ scene_id TEXT PRIMARY KEY, state_json TEXT NOT NULL DEFAULT '{}');");
             double hour = IntoxicationWorldHour(payload);
             bool missingClock = double.IsNaN(hour) || double.IsInfinity(hour);
             string proposedReply = reply;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureIntoxicationSchema(connection);
                 using (ReignDbTransaction transaction = connection.BeginTransaction())
                 {
                     var args = new Dictionary<string, object> { ["hero"] = heroId, ["turn"] = key };
-                    Program.ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_intoxication(hero_id,state_json) VALUES($hero,'{}');", args);
-                    var row = Program.QuerySql(connection, "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero FOR UPDATE;", args).First();
-                    var previous = Program.QuerySql(connection, "SELECT receipt_json FROM conversation_drinking_turns WHERE hero_id=$hero AND turn_key=$turn;", args).FirstOrDefault();
+                    ReignDatabase.ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_intoxication(hero_id,state_json) VALUES($hero,'{}');", args);
+                    var row = ReignDatabase.QuerySql(connection, "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero FOR UPDATE;", args).First();
+                    var previous = ReignDatabase.QuerySql(connection, "SELECT receipt_json FROM conversation_drinking_turns WHERE hero_id=$hero AND turn_key=$turn;", args).FirstOrDefault();
                     if (previous != null)
                     {
                         var receipt = TryParseJsonObject(ReadString(previous, "receipt_json", "{}"));
@@ -353,8 +353,8 @@ scene_id TEXT PRIMARY KEY, state_json TEXT NOT NULL DEFAULT '{}');");
                     if (persist)
                     {
                         CommitDrinkScene(connection, receiptNew);
-                        Program.ExecuteSql(connection, "UPDATE conversation_intoxication SET state_json=$state WHERE hero_id=$hero;", args);
-                        Program.ExecuteSql(connection, "INSERT INTO conversation_drinking_turns(hero_id,turn_key,receipt_json) VALUES($hero,$turn,$receipt);", args);
+                        ReignDatabase.ExecuteSql(connection, "UPDATE conversation_intoxication SET state_json=$state WHERE hero_id=$hero;", args);
+                        ReignDatabase.ExecuteSql(connection, "INSERT INTO conversation_drinking_turns(hero_id,turn_key,receipt_json) VALUES($hero,$turn,$receipt);", args);
                         transaction.Commit();
                     }
                     else transaction.Rollback();

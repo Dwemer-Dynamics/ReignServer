@@ -42,7 +42,7 @@ namespace ReignBetaServer
             var access = Program.EnterCampaignRequestAccess("/npc-lives/opening");
             try
             {
-                using (var c = Program.OpenCampaignConnection(scope.Campaign))
+                using (var c = ReignDatabase.OpenCampaignConnection(scope.Campaign))
                 {
                     var current = ReadNpcLives(c, scope.Campaign, scope.Timeline);
                     if (NpcLivesGeneration(c) != scope.Generation

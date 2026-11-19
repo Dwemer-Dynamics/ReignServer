@@ -71,11 +71,11 @@ namespace ReignBetaServer
                 // pending wave rather than repeating the same table sweep for
                 // every independently finalized subject lane.
                 using (ReignDbConnection expirationConnection =
-                    Program.OpenCampaignConnection(campaignId))
+                    ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureSocialReputationSchema(expirationConnection);
                     WorldSimulationService.EnsureWorldTestTelemetrySchema(expirationConnection);
-                    Dictionary<string, object> latest = Program.QuerySql(
+                    Dictionary<string, object> latest = ReignDatabase.QuerySql(
                         expirationConnection, @"SELECT MAX(e.world_day) AS world_day
 FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
@@ -167,13 +167,13 @@ AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
         private static int RefreshSocialSubjectWorkQueue(string campaignId,
             string timelineId)
         {
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 WorldSimulationService.EnsureWorldHistorySchema(connection);
                 EnsureSocialReputationSchema(connection);
                 EnsureSocialSubjectWorkSchema(connection);
                 long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                Program.ExecuteSql(connection, @"UPDATE social_subject_work_queue
+                ReignDatabase.ExecuteSql(connection, @"UPDATE social_subject_work_queue
 SET status='pending',claim_owner='',claim_expires_ts=0,updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND status='processing' AND claim_expires_ts<$ts;",
@@ -184,7 +184,7 @@ AND status='processing' AND claim_expires_ts<$ts;",
                     });
                 if (ReignPostgreSqlDialect.IsPostgreSql(connection))
                 {
-                    Program.ExecuteSql(connection, @"
+                    ReignDatabase.ExecuteSql(connection, @"
 WITH pending AS (
  SELECT e.sequence,e.subject_id
  FROM world_history_events e
@@ -211,7 +211,7 @@ ON CONFLICT(campaign_id,timeline_id,subject_id) DO UPDATE SET
                             ["timeline"] = timelineId,
                             ["ts"] = now
                         });
-                    Dictionary<string, object> summary = Program.QuerySql(connection, @"
+                    Dictionary<string, object> summary = ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS event_count,
        COUNT(DISTINCT e.subject_id)
          FILTER (WHERE e.subject_id<>'')
@@ -230,7 +230,7 @@ AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
                         postgreSqlSubjects);
                     return ReadInt(summary, "event_count", 0);
                 }
-                List<Dictionary<string, object>> pending = Program.QuerySql(connection, @"
+                List<Dictionary<string, object>> pending = ReignDatabase.QuerySql(connection, @"
 SELECT e.sequence,e.event_id,e.payload_json
 FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
@@ -252,7 +252,7 @@ ORDER BY e.sequence,e.event_id;",
                         StringComparer.OrdinalIgnoreCase))
                 {
                     long first = subject.Min(row => ReadLong(row, "sequence", 0));
-                    Program.ExecuteSql(connection, @"INSERT INTO social_subject_work_queue(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO social_subject_work_queue(
 campaign_id,timeline_id,subject_id,status,first_sequence,pending_count,
 claim_owner,claim_expires_ts,updated_ts,last_error)
 VALUES($campaign,$timeline,$subject,'pending',$sequence,$count,'',0,$ts,'')
@@ -283,20 +283,20 @@ status=CASE WHEN social_subject_work_queue.status='processing'
         internal static void EnsureSocialSubjectWorkSchema(
             ReignDbConnection connection)
         {
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS social_subject_work_queue(
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS social_subject_work_queue(
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,subject_id TEXT NOT NULL,
 status TEXT NOT NULL DEFAULT 'pending',first_sequence INTEGER NOT NULL DEFAULT 0,
 pending_count INTEGER NOT NULL DEFAULT 0,claim_owner TEXT NOT NULL DEFAULT '',
 claim_expires_ts INTEGER NOT NULL DEFAULT 0,updated_ts INTEGER NOT NULL,
 last_error TEXT NOT NULL DEFAULT '',
 PRIMARY KEY(campaign_id,timeline_id,subject_id));");
-            Program.EnsureDatabaseColumn(connection, "social_subject_work_queue",
+            ReignDatabase.EnsureDatabaseColumn(connection, "social_subject_work_queue",
                 "needs_finalize", "INTEGER NOT NULL DEFAULT 0");
-            Program.EnsureDatabaseColumn(connection, "social_subject_work_queue",
+            ReignDatabase.EnsureDatabaseColumn(connection, "social_subject_work_queue",
                 "last_world_day", "REAL NOT NULL DEFAULT 0");
-            Program.EnsureDatabaseColumn(connection, "social_subject_work_queue",
+            ReignDatabase.EnsureDatabaseColumn(connection, "social_subject_work_queue",
                 "last_event_id", "TEXT NOT NULL DEFAULT ''");
-            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_social_subject_work_claim
+            ReignDatabase.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_social_subject_work_claim
 ON social_subject_work_queue(campaign_id,timeline_id,status,first_sequence,subject_id);");
         }
 
@@ -307,7 +307,7 @@ ON social_subject_work_queue(campaign_id,timeline_id,status,first_sequence,subje
             try
             {
                 using (ReignDbConnection connection =
-                    Program.OpenCampaignConnection(campaignId))
+                    ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     Dictionary<string, object> socialCatalog =
                         ReadGlobalSocialCatalog();
@@ -333,11 +333,11 @@ ON social_subject_work_queue(campaign_id,timeline_id,status,first_sequence,subje
                                     Interlocked.Increment(
                                         ref SocialOutcomeTransactionConflicts);
                                 using (ReignDbConnection recoveryConnection =
-                                    Program.OpenCampaignConnection(campaignId))
+                                    ReignDatabase.OpenCampaignConnection(campaignId))
                                 {
                                     EnsureSocialSubjectWorkSchema(
                                         recoveryConnection);
-                                    Program.ExecuteSql(recoveryConnection, @"UPDATE social_subject_work_queue SET
+                                    ReignDatabase.ExecuteSql(recoveryConnection, @"UPDATE social_subject_work_queue SET
 status='pending',claim_owner='',claim_expires_ts=0,updated_ts=$ts,last_error=$error
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                                         new Dictionary<string, object>
@@ -371,7 +371,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             using (ReignDbTransaction transaction = connection.BeginTransaction())
             {
                 long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                Dictionary<string, object> row = Program.QuerySql(connection, @"
+                Dictionary<string, object> row = ReignDatabase.QuerySql(connection, @"
 SELECT subject_id FROM social_subject_work_queue
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND (status='pending' OR (status='processing' AND claim_expires_ts<$ts))
@@ -388,7 +388,7 @@ LIMIT 1 FOR UPDATE SKIP LOCKED;",
                     transaction.Commit();
                     return "";
                 }
-                Program.ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
+                ReignDatabase.ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
 status='processing',claim_owner=$owner,claim_expires_ts=$expires,updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject
 AND (status='pending' OR claim_expires_ts<$ts);",
@@ -416,7 +416,7 @@ AND (status='pending' OR claim_expires_ts<$ts);",
                 new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             List<string> batchEventIds = new List<string>();
             {
-                Dictionary<string, object> lane = Program.QuerySql(connection, @"SELECT
+                Dictionary<string, object> lane = ReignDatabase.QuerySql(connection, @"SELECT
 last_world_day,last_event_id FROM social_subject_work_queue
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject
 LIMIT 1;", new Dictionary<string, object>
@@ -427,7 +427,7 @@ LIMIT 1;", new Dictionary<string, object>
                 lastWorldDay = ReadDouble(lane, "last_world_day", 0d);
                 lastEventId = ReadString(lane, "last_event_id", "");
                 rows = ReignPostgreSqlDialect.IsPostgreSql(connection)
-                    ? Program.QuerySql(connection, @"
+                    ? ReignDatabase.QuerySql(connection, @"
 SELECT e.sequence,e.event_id,e.world_day,e.event_type,e.summary,e.payload_json
 FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
@@ -441,7 +441,7 @@ ORDER BY e.sequence,e.event_id LIMIT $limit;",
                             ["subject"] = subjectId,
                             ["limit"] = SocialSubjectBatchSize
                         })
-                    : Program.QuerySql(connection, @"
+                    : ReignDatabase.QuerySql(connection, @"
 SELECT e.sequence,e.event_id,e.world_day,e.event_type,e.summary,e.payload_json
 FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
@@ -457,7 +457,7 @@ ORDER BY e.sequence,e.event_id;",
                     .Take(SocialSubjectBatchSize).ToList();
                 Stopwatch eventTransactionTimer = Stopwatch.StartNew();
                 Interlocked.Increment(ref SocialOutcomeTransactionAttempts);
-                Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                 try
                 {
                     foreach (Dictionary<string, object> row in rows)
@@ -514,7 +514,7 @@ ORDER BY e.sequence,e.event_id;",
                             (int)Math.Floor(lastWorldDay + 0.000001d),
                             "rumors", telemetryKey, batchTelemetry);
                     }
-                    Program.ExecuteSql(connection, "COMMIT;");
+                    ReignDatabase.ExecuteSql(connection, "COMMIT;");
                     eventTransactionTimer.Stop();
                     RecordSocialOutcomeTransactionDuration(
                         eventTransactionTimer.ElapsedMilliseconds,
@@ -522,12 +522,12 @@ ORDER BY e.sequence,e.event_id;",
                 }
                 catch
                 {
-                    try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                     throw;
                 }
                 if (processed > 0)
                 {
-                    Program.ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
+                    ReignDatabase.ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
 needs_finalize=1,last_world_day=$day,last_event_id=$event,updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                         new Dictionary<string, object>
@@ -541,7 +541,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                 }
                 bool more = HasPendingSocialWorldHistoryOutcomesForSubject(
                     connection, timelineId, subjectId);
-                Program.ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
+                ReignDatabase.ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
 status=$status,claim_owner='',claim_expires_ts=0,pending_count=$count,
 updated_ts=$ts,last_error=''
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
@@ -566,10 +566,10 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             {
                 List<Dictionary<string, object>> lanes;
                 using (ReignDbConnection readConnection =
-                    Program.OpenCampaignConnection(campaignId))
+                    ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureSocialSubjectWorkSchema(readConnection);
-                    lanes = Program.QuerySql(readConnection, @"
+                    lanes = ReignDatabase.QuerySql(readConnection, @"
 SELECT subject_id,last_world_day,last_event_id
 FROM social_subject_work_queue
 WHERE campaign_id=$campaign AND timeline_id=$timeline
@@ -588,9 +588,9 @@ LIMIT $limit;", new Dictionary<string, object>
                 try
                 {
                     using (ReignDbConnection connection =
-                        Program.OpenCampaignConnection(campaignId))
+                        ReignDatabase.OpenCampaignConnection(campaignId))
                     {
-                        Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                        ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                         try
                         {
                             foreach (Dictionary<string, object> lane in lanes)
@@ -607,7 +607,7 @@ LIMIT $limit;", new Dictionary<string, object>
                                 ReconcileSocialRelationshipsForSubjects(
                                     connection, campaignId, timelineId,
                                     new[] { subjectId }, worldDay, true, true);
-                                Program.ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
+                                ReignDatabase.ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
 needs_finalize=0,updated_ts=$ts,last_error=''
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND subject_id=$subject AND status='completed';",
@@ -620,11 +620,11 @@ AND subject_id=$subject AND status='completed';",
                                         ["subject"] = subjectId
                                     });
                             }
-                            Program.ExecuteSql(connection, "COMMIT;");
+                            ReignDatabase.ExecuteSql(connection, "COMMIT;");
                         }
                         catch
                         {
-                            try { Program.ExecuteSql(connection, "ROLLBACK;"); }
+                            try { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); }
                             catch { }
                             throw;
                         }
@@ -728,7 +728,7 @@ AND subject_id=$subject AND status='completed';",
         {
             if (ReignPostgreSqlDialect.IsPostgreSql(connection))
             {
-                return Program.QuerySql(connection, @"
+                return ReignDatabase.QuerySql(connection, @"
 SELECT 1 AS present FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
 AND e.subject_id=$subject
@@ -740,7 +740,7 @@ LIMIT 1;", new Dictionary<string, object>
                     ["subject"] = subjectId
                 }).Count > 0;
             }
-            return Program.QuerySql(connection, @"
+            return ReignDatabase.QuerySql(connection, @"
 SELECT e.payload_json FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
 AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
@@ -763,11 +763,11 @@ AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
                 {
                     List<Dictionary<string, object>> pending;
                     bool processedAny = false;
-                    using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                    using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                     {
                         WorldSimulationService.EnsureWorldHistorySchema(connection);
                         EnsureSocialReputationSchema(connection);
-                        pending = Program.QuerySql(connection, @"
+                        pending = ReignDatabase.QuerySql(connection, @"
 SELECT e.event_id,e.world_day,e.event_type,e.summary,e.payload_json
 FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
@@ -835,9 +835,9 @@ ORDER BY e.sequence,e.event_id LIMIT $limit;",
         {
             try
             {
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    return Program.QuerySql(connection, @"
+                    return ReignDatabase.QuerySql(connection, @"
 SELECT 1 FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
 AND NOT EXISTS (

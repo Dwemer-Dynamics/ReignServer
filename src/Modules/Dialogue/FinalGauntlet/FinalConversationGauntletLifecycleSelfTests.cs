@@ -460,7 +460,7 @@ WHERE run_id='pause-heartbeat-run';";
                     ReignPostgreSqlStorage.OpenCampaignConnection(
                         postgresCampaign))
                 {
-                    Program.ExecuteSql(
+                    ReignDatabase.ExecuteSql(
                         campaignConnection,
                         @"CREATE TABLE IF NOT EXISTS gauntlet_rollback_probe(
 id TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -477,7 +477,7 @@ ON CONFLICT(id) DO UPDATE SET value=excluded.value;");
                     FinalGauntletStore.OpenControlConnection())
                 {
                     string schema = ReadString(
-                        Program.QuerySql(
+                        ReignDatabase.QuerySql(
                             control,
                             "SELECT current_schema() AS schema;")
                             .FirstOrDefault(),
@@ -542,7 +542,7 @@ ON CONFLICT(id) DO UPDATE SET value=excluded.value;");
                 using (ReignDbConnection campaignConnection =
                     ReignPostgreSqlStorage.OpenCampaignConnection(
                         postgresCampaign))
-                    Program.ExecuteSql(
+                    ReignDatabase.ExecuteSql(
                         campaignConnection,
                         @"UPDATE gauntlet_rollback_probe
 SET value='after' WHERE id='state';");
@@ -555,7 +555,7 @@ SET value='after' WHERE id='state';");
                         postgresCampaign))
                 {
                     long runRows = ReadLong(
-                        Program.QuerySql(
+                        ReignDatabase.QuerySql(
                             control,
                             @"SELECT COUNT(*) AS count
 FROM final_gauntlet_runs WHERE run_id=$run;",
@@ -565,7 +565,7 @@ FROM final_gauntlet_runs WHERE run_id=$run;",
                             }).FirstOrDefault(),
                         "count", 0);
                     long providerRows = ReadLong(
-                        Program.QuerySql(
+                        ReignDatabase.QuerySql(
                             control,
                             @"SELECT COUNT(*) AS count
 FROM final_gauntlet_provider_calls WHERE run_id=$run;",
@@ -575,13 +575,13 @@ FROM final_gauntlet_provider_calls WHERE run_id=$run;",
                             }).FirstOrDefault(),
                         "count", 0);
                     string restoredValue = ReadString(
-                        Program.QuerySql(
+                        ReignDatabase.QuerySql(
                             campaignConnection,
                             @"SELECT value FROM gauntlet_rollback_probe
 WHERE id='state';").FirstOrDefault(),
                         "value", "");
                     long campaignControlTables = ReadLong(
-                        Program.QuerySql(
+                        ReignDatabase.QuerySql(
                             campaignConnection,
                             @"SELECT COUNT(*) AS count
 FROM information_schema.tables
@@ -612,7 +612,7 @@ AND table_name LIKE 'final_gauntlet_%';")
                 {
                     using (ReignDbConnection control =
                         FinalGauntletStore.OpenControlConnection())
-                        Program.ExecuteSql(
+                        ReignDatabase.ExecuteSql(
                             control,
                             @"DELETE FROM final_gauntlet_runs
 WHERE run_id=$run;",

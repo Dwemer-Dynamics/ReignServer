@@ -13,21 +13,21 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> RebellionQueryApi(Dictionary<string, string> query)
         {
             string campaignId = RebellionQueryValue(query, "campaignId", "default");
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureRebellionSchema(connection);
                 string movementId = RebellionQueryValue(query, "movementId", "");
                 List<Dictionary<string, object>> movements = string.IsNullOrWhiteSpace(movementId)
-                    ? Program.QuerySql(connection, "SELECT * FROM rebellion_movements WHERE campaign_id=$campaign ORDER BY updated_day DESC LIMIT 200;", new Dictionary<string, object> { ["campaign"] = campaignId })
-                    : Program.QuerySql(connection, "SELECT * FROM rebellion_movements WHERE movement_id=$id;", new Dictionary<string, object> { ["id"] = movementId });
+                    ? ReignDatabase.QuerySql(connection, "SELECT * FROM rebellion_movements WHERE campaign_id=$campaign ORDER BY updated_day DESC LIMIT 200;", new Dictionary<string, object> { ["campaign"] = campaignId })
+                    : ReignDatabase.QuerySql(connection, "SELECT * FROM rebellion_movements WHERE movement_id=$id;", new Dictionary<string, object> { ["id"] = movementId });
                 foreach (Dictionary<string, object> movement in movements)
                 {
-                    movement["memberships"] = Program.QuerySql(connection, "SELECT * FROM rebellion_memberships WHERE movement_id=$id ORDER BY support_score DESC;", new Dictionary<string, object> { ["id"] = ReadString(movement, "movement_id", "") });
-                    movement["transitions"] = Program.QuerySql(connection, "SELECT * FROM rebellion_transitions WHERE movement_id=$id ORDER BY world_day;", new Dictionary<string, object> { ["id"] = ReadString(movement, "movement_id", "") });
-                    movement["backingRequest"] = Program.QuerySql(connection, @"SELECT * FROM rebellion_backing_requests
+                    movement["memberships"] = ReignDatabase.QuerySql(connection, "SELECT * FROM rebellion_memberships WHERE movement_id=$id ORDER BY support_score DESC;", new Dictionary<string, object> { ["id"] = ReadString(movement, "movement_id", "") });
+                    movement["transitions"] = ReignDatabase.QuerySql(connection, "SELECT * FROM rebellion_transitions WHERE movement_id=$id ORDER BY world_day;", new Dictionary<string, object> { ["id"] = ReadString(movement, "movement_id", "") });
+                    movement["backingRequest"] = ReignDatabase.QuerySql(connection, @"SELECT * FROM rebellion_backing_requests
 WHERE campaign_id=$campaign AND movement_id=$id ORDER BY world_day DESC LIMIT 1;",
                         new Dictionary<string, object> { ["campaign"] = campaignId, ["id"] = ReadString(movement, "movement_id", "") }).FirstOrDefault();
-                    movement["recognitionAttempts"] = Program.QuerySql(connection, @"SELECT * FROM rebellion_recognition_attempts
+                    movement["recognitionAttempts"] = ReignDatabase.QuerySql(connection, @"SELECT * FROM rebellion_recognition_attempts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$id
 ORDER BY attempt_index DESC LIMIT 20;", new Dictionary<string, object>
                     {
@@ -64,13 +64,13 @@ ORDER BY attempt_index DESC LIMIT 20;", new Dictionary<string, object>
             if (!string.IsNullOrWhiteSpace(politicalResult)) terms["politicalResult"] = politicalResult;
             string termsJson = CanonicalTermsJson(terms);
             string hash = StableSha256(command + "|" + termsJson);
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureRebellionSchema(connection);
-                Dictionary<string, object> old = Program.QuerySql(connection, "SELECT terms_hash FROM negotiated_action_drafts WHERE negotiation_id=$id;", new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
+                Dictionary<string, object> old = ReignDatabase.QuerySql(connection, "SELECT terms_hash FROM negotiated_action_drafts WHERE negotiation_id=$id;", new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
                 if (old != null && !string.Equals(ReadString(old, "terms_hash", ""), hash, StringComparison.OrdinalIgnoreCase))
-                    Program.ExecuteSql(connection, "DELETE FROM negotiated_action_approvals WHERE negotiation_id=$id;", new Dictionary<string, object> { ["id"] = id });
-                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO negotiated_action_drafts(negotiation_id,campaign_id,timeline_id,broker_hero_id,first_kingdom_id,
+                    ReignDatabase.ExecuteSql(connection, "DELETE FROM negotiated_action_approvals WHERE negotiation_id=$id;", new Dictionary<string, object> { ["id"] = id });
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO negotiated_action_drafts(negotiation_id,campaign_id,timeline_id,broker_hero_id,first_kingdom_id,
 second_kingdom_id,first_ruler_id,second_ruler_id,command,political_result,terms_json,terms_hash,status,created_day,updated_day,expires_day,queued_action_id,payload_json)
 VALUES($id,$campaign,$timeline,$broker,$firstKingdom,$secondKingdom,$firstRuler,$secondRuler,$command,$result,$terms,$hash,'draft',
 COALESCE((SELECT created_day FROM negotiated_action_drafts WHERE negotiation_id=$id),$day),$day,$expires,'',$payload);",
@@ -96,28 +96,28 @@ COALESCE((SELECT created_day FROM negotiated_action_drafts WHERE negotiation_id=
             string kingdomId = ReadString(payload, "kingdomId", "");
             string response = ReadString(payload, "response", "approve").ToLowerInvariant();
             double day = ReadDouble(payload, "worldDay", 0d);
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureRebellionSchema(connection);
-                Dictionary<string, object> draft = Program.QuerySql(connection, "SELECT * FROM negotiated_action_drafts WHERE negotiation_id=$id AND campaign_id=$campaign;",
+                Dictionary<string, object> draft = ReignDatabase.QuerySql(connection, "SELECT * FROM negotiated_action_drafts WHERE negotiation_id=$id AND campaign_id=$campaign;",
                     new Dictionary<string, object> { ["id"] = id, ["campaign"] = campaignId }).FirstOrDefault();
                 if (draft == null) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Negotiation draft was not found." };
                 if (day > ReadDouble(draft, "expires_day", 0d))
                 {
-                    Program.ExecuteSql(connection, "UPDATE negotiated_action_drafts SET status='expired',updated_day=$day WHERE negotiation_id=$id;", new Dictionary<string, object> { ["day"] = day, ["id"] = id });
+                    ReignDatabase.ExecuteSql(connection, "UPDATE negotiated_action_drafts SET status='expired',updated_day=$day WHERE negotiation_id=$id;", new Dictionary<string, object> { ["day"] = day, ["id"] = id });
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Negotiation approval expired." };
                 }
                 bool authorized = string.Equals(rulerId, ReadString(draft, "first_ruler_id", ""), StringComparison.OrdinalIgnoreCase)
                     || string.Equals(rulerId, ReadString(draft, "second_ruler_id", ""), StringComparison.OrdinalIgnoreCase);
                 if (!authorized) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Only a named current ruler may answer this draft." };
                 string status = response == "reject" ? "rejected" : "approved";
-                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO negotiated_action_approvals(negotiation_id,ruler_hero_id,kingdom_id,terms_hash,status,approved_day,reason)
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO negotiated_action_approvals(negotiation_id,ruler_hero_id,kingdom_id,terms_hash,status,approved_day,reason)
 VALUES($id,$ruler,$kingdom,$hash,$status,$day,$reason);", new Dictionary<string, object>
                 {
                     ["id"] = id, ["ruler"] = rulerId, ["kingdom"] = kingdomId, ["hash"] = ReadString(draft, "terms_hash", ""),
                     ["status"] = status, ["day"] = day, ["reason"] = ReadString(payload, "reason", "")
                 });
-                if (status == "rejected") Program.ExecuteSql(connection, "UPDATE negotiated_action_drafts SET status='rejected',updated_day=$day WHERE negotiation_id=$id;", new Dictionary<string, object> { ["day"] = day, ["id"] = id });
+                if (status == "rejected") ReignDatabase.ExecuteSql(connection, "UPDATE negotiated_action_drafts SET status='rejected',updated_day=$day WHERE negotiation_id=$id;", new Dictionary<string, object> { ["day"] = day, ["id"] = id });
                 else TryQueueApprovedNegotiation(connection, draft, day);
                 return LoadNegotiation(connection, id, day);
             }
@@ -127,13 +127,13 @@ VALUES($id,$ruler,$kingdom,$hash,$status,$day,$reason);", new Dictionary<string,
         {
             string id = ReadString(draft, "negotiation_id", "");
             string hash = ReadString(draft, "terms_hash", "");
-            List<Dictionary<string, object>> approvals = Program.QuerySql(connection,
+            List<Dictionary<string, object>> approvals = ReignDatabase.QuerySql(connection,
                 "SELECT * FROM negotiated_action_approvals WHERE negotiation_id=$id AND status='approved' AND terms_hash=$hash;",
                 new Dictionary<string, object> { ["id"] = id, ["hash"] = hash });
             HashSet<string> approved = new HashSet<string>(approvals.Select(x => ReadString(x, "ruler_hero_id", "")), StringComparer.OrdinalIgnoreCase);
             if (!approved.Contains(ReadString(draft, "first_ruler_id", "")) || !approved.Contains(ReadString(draft, "second_ruler_id", "")))
             {
-                Program.ExecuteSql(connection, "UPDATE negotiated_action_drafts SET status='awaiting_approval',updated_day=$day WHERE negotiation_id=$id;", new Dictionary<string, object> { ["day"] = day, ["id"] = id });
+                ReignDatabase.ExecuteSql(connection, "UPDATE negotiated_action_drafts SET status='awaiting_approval',updated_day=$day WHERE negotiation_id=$id;", new Dictionary<string, object> { ["day"] = day, ["id"] = id });
                 return;
             }
             if (!string.IsNullOrWhiteSpace(ReadString(draft, "queued_action_id", ""))) return;
@@ -160,12 +160,12 @@ VALUES($id,$ruler,$kingdom,$hash,$status,$day,$reason);", new Dictionary<string,
             Dictionary<string, object> normalized = Program.NormalizeActionCommand(raw, ReadString(draft, "campaign_id", "default"), out List<string> errors, raw);
             if (errors.Count > 0 || normalized == null)
             {
-                Program.ExecuteSql(connection, "UPDATE negotiated_action_drafts SET status='failed',updated_day=$day,payload_json=$payload WHERE negotiation_id=$id;",
+                ReignDatabase.ExecuteSql(connection, "UPDATE negotiated_action_drafts SET status='failed',updated_day=$day,payload_json=$payload WHERE negotiation_id=$id;",
                     new Dictionary<string, object> { ["day"] = day, ["payload"] = Json.Serialize(errors), ["id"] = id });
                 return;
             }
             Dictionary<string, object> queued = Program.QueueAction(ReadString(draft, "campaign_id", "default"), normalized);
-            Program.ExecuteSql(connection, "UPDATE negotiated_action_drafts SET status='queued',queued_action_id=$action,updated_day=$day WHERE negotiation_id=$id;",
+            ReignDatabase.ExecuteSql(connection, "UPDATE negotiated_action_drafts SET status='queued',queued_action_id=$action,updated_day=$day WHERE negotiation_id=$id;",
                 new Dictionary<string, object> { ["action"] = ReadString(queued, "actionId", ReadString(normalized, "actionId", "")), ["day"] = day, ["id"] = id });
         }
 
@@ -173,27 +173,27 @@ VALUES($id,$ruler,$kingdom,$hash,$status,$day,$reason);", new Dictionary<string,
         {
             string campaignId = RebellionQueryValue(query, "campaignId", "default");
             double day = double.TryParse(RebellionQueryValue(query, "worldDay", "0"), NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed) ? parsed : 0d;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureRebellionSchema(connection);
                 string id = RebellionQueryValue(query, "negotiationId", "");
                 if (!string.IsNullOrWhiteSpace(id)) return LoadNegotiation(connection, id, day);
-                List<Dictionary<string, object>> rows = Program.QuerySql(connection, "SELECT * FROM negotiated_action_drafts WHERE campaign_id=$campaign ORDER BY updated_day DESC LIMIT 200;", new Dictionary<string, object> { ["campaign"] = campaignId });
-                foreach (Dictionary<string, object> row in rows) row["approvals"] = Program.QuerySql(connection, "SELECT * FROM negotiated_action_approvals WHERE negotiation_id=$id;", new Dictionary<string, object> { ["id"] = ReadString(row, "negotiation_id", "") });
+                List<Dictionary<string, object>> rows = ReignDatabase.QuerySql(connection, "SELECT * FROM negotiated_action_drafts WHERE campaign_id=$campaign ORDER BY updated_day DESC LIMIT 200;", new Dictionary<string, object> { ["campaign"] = campaignId });
+                foreach (Dictionary<string, object> row in rows) row["approvals"] = ReignDatabase.QuerySql(connection, "SELECT * FROM negotiated_action_approvals WHERE negotiation_id=$id;", new Dictionary<string, object> { ["id"] = ReadString(row, "negotiation_id", "") });
                 return new Dictionary<string, object> { ["ok"] = true, ["negotiations"] = rows };
             }
         }
 
         private static Dictionary<string, object> LoadNegotiation(ReignDbConnection connection, string id, double day)
         {
-            Dictionary<string, object> row = Program.QuerySql(connection, "SELECT * FROM negotiated_action_drafts WHERE negotiation_id=$id;", new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
+            Dictionary<string, object> row = ReignDatabase.QuerySql(connection, "SELECT * FROM negotiated_action_drafts WHERE negotiation_id=$id;", new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
             if (row == null) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Negotiation draft was not found." };
             if (day > ReadDouble(row, "expires_day", double.MaxValue) && !Program.ContainsAny(Program.NormalizeLookup(ReadString(row, "status", "")), "queued", "completed", "rejected", "failed"))
             {
-                Program.ExecuteSql(connection, "UPDATE negotiated_action_drafts SET status='expired',updated_day=$day WHERE negotiation_id=$id;", new Dictionary<string, object> { ["day"] = day, ["id"] = id });
+                ReignDatabase.ExecuteSql(connection, "UPDATE negotiated_action_drafts SET status='expired',updated_day=$day WHERE negotiation_id=$id;", new Dictionary<string, object> { ["day"] = day, ["id"] = id });
                 row["status"] = "expired";
             }
-            row["approvals"] = Program.QuerySql(connection, "SELECT * FROM negotiated_action_approvals WHERE negotiation_id=$id ORDER BY approved_day;", new Dictionary<string, object> { ["id"] = id });
+            row["approvals"] = ReignDatabase.QuerySql(connection, "SELECT * FROM negotiated_action_approvals WHERE negotiation_id=$id ORDER BY approved_day;", new Dictionary<string, object> { ["id"] = id });
             row["ok"] = true;
             return row;
         }
@@ -203,12 +203,12 @@ VALUES($id,$ruler,$kingdom,$hash,$status,$day,$reason);", new Dictionary<string,
             if (string.IsNullOrWhiteSpace(campaignId) || string.IsNullOrWhiteSpace(actionId)) return;
             try
             {
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureRebellionSchema(connection);
                     string normalized = (status ?? string.Empty).ToLowerInvariant();
                     string draftStatus = normalized == "completed" ? "completed" : normalized == "failed" ? "failed" : normalized == "retry" ? "queued" : "executing";
-                    Program.ExecuteSql(connection, @"UPDATE negotiated_action_drafts SET status=$status,updated_day=$day,payload_json=$payload
+                    ReignDatabase.ExecuteSql(connection, @"UPDATE negotiated_action_drafts SET status=$status,updated_day=$day,payload_json=$payload
 WHERE campaign_id=$campaign AND queued_action_id=$action;", new Dictionary<string, object>
                     {
                         ["status"] = draftStatus, ["day"] = ReadDouble(payload, "worldDay", 0d), ["payload"] = Json.Serialize(payload),
@@ -226,13 +226,13 @@ WHERE campaign_id=$campaign AND queued_action_id=$action;", new Dictionary<strin
             string actionId, string status, Dictionary<string, object> payload)
         {
             if (string.IsNullOrWhiteSpace(campaignId) || string.IsNullOrWhiteSpace(actionId)) return;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureRebellionSchema(connection);
                 string normalized = Program.NormalizeLookup(status).Replace(' ', '_');
                 string backingStatus = normalized == "completed" ? "completed"
                     : Program.ContainsAny(normalized, "failed", "invalid", "expired", "cancel") ? "invalidated" : "accepted";
-                Program.ExecuteSql(connection, @"UPDATE rebellion_backing_requests SET status=$status,
+                ReignDatabase.ExecuteSql(connection, @"UPDATE rebellion_backing_requests SET status=$status,
 reason=CASE WHEN $terminal=1 THEN $reason ELSE reason END,payload_json=$payload
 WHERE campaign_id=$campaign AND action_id=$action;", new Dictionary<string, object>
                 {

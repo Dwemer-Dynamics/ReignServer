@@ -19,7 +19,7 @@ namespace ReignBetaServer
             internal int ProviderCalls;
         }
 
-        private static void EnsureRouteConversationAcceptanceSchema(ReignDbConnection connection) => Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_route_acceptance (
+        private static void EnsureRouteConversationAcceptanceSchema(ReignDbConnection connection) => ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_route_acceptance (
 unit_id TEXT PRIMARY KEY, input_hash TEXT NOT NULL, accepted_reply_hash TEXT NOT NULL,
 result_json TEXT NOT NULL, restore_generation TEXT NOT NULL, created_ts BIGINT NOT NULL);");
 
@@ -49,12 +49,12 @@ result_json TEXT NOT NULL, restore_generation TEXT NOT NULL, created_ts BIGINT N
             payload["heroStringId"] = observer;
             payload["playerHeroStringId"] = player;
             payload["participants"] = context.Audience;
-            using var connection = Program.OpenCampaignConnection(campaign);
+            using var connection = ReignDatabase.OpenCampaignConnection(campaign);
             ReadMemoryPrecisionState(connection);
             EnsureRouteConversationAcceptanceSchema(connection);
             using (var transaction = connection.BeginTransaction())
             {
-                context.Generation = ReadString(Program.QuerySql(connection,
+                context.Generation = ReadString(ReignDatabase.QuerySql(connection,
                     "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").Single(), "restore_generation", "");
                 payload["memoryAsOfAcceptedSequence"] = ReadAcceptedMemorySourceWatermark(connection);
                 payload["memoryAsOfTimestamp"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -96,14 +96,14 @@ result_json TEXT NOT NULL, restore_generation TEXT NOT NULL, created_ts BIGINT N
             if (politicalActor.Count > 0) request["politicalAuthors"] = new[] { politicalActor };
             request["model"] = FirstNonEmpty(ReadString(request, "model", ""), Program.ModelForRequest(context.Settings, ReadString(request, "requestType", "dialogue")));
             request["routeMemoryContract"] = domainContract;
-            using (var connection = Program.OpenCampaignConnection(context.Campaign))
+            using (var connection = ReignDatabase.OpenCampaignConnection(context.Campaign))
             {
-                var prior = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", context.Unit + "_npc")).SingleOrDefault();
+                var prior = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", context.Unit + "_npc")).SingleOrDefault();
                 if (prior != null)
                 {
                     if (ReadString(TryParseJsonObject(ReadString(prior, "payload_json", "{}")), "routeInputHash", "") != context.InputHash)
                         return TestDict("ok", false, "error", "This accepted conversation turn belongs to different input.");
-                    var receipt = Program.QuerySql(connection, "SELECT * FROM conversation_route_acceptance WHERE unit_id=$unit;", TestDict("unit", context.Unit)).SingleOrDefault();
+                    var receipt = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_route_acceptance WHERE unit_id=$unit;", TestDict("unit", context.Unit)).SingleOrDefault();
                     if (receipt != null && (ReadString(receipt, "input_hash", "") != context.InputHash
                         || ReadString(receipt, "accepted_reply_hash", "") != PromptHash(ReadString(prior, "text", ""))))
                         return TestDict("ok", false, "error", "The accepted route receipt does not match its original response.");
@@ -206,23 +206,23 @@ result_json TEXT NOT NULL, restore_generation TEXT NOT NULL, created_ts BIGINT N
                 : !ReadBool(context.Result, "ok", false) || string.IsNullOrWhiteSpace(reply)
                     || ReadString(TryParseJsonObject(ReadString(context.Result, "content", "")), "reply", "") != reply)
                 throw new InvalidOperationException("Only the exact accepted route response may be published.");
-            using var connection = Program.OpenCampaignConnection(context.Campaign);
+            using var connection = ReignDatabase.OpenCampaignConnection(context.Campaign);
             using var transaction = connection.BeginTransaction();
             LockConversationSourcePublication(connection, context.Session);
-            var current = Program.QuerySql(connection, "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").Single();
+            var current = ReignDatabase.QuerySql(connection, "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").Single();
             if (ReadString(current, "restore_generation", "") != context.Generation)
                 throw new InvalidOperationException("The campaign changed before this route's response could be accepted.");
             var payload = context.Payload;
             double day = ReadDouble(payload, "worldDay", 0d);
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             string location = ReadFirstString(payload, "locationId", "currentSettlementId", "settlementId");
-            Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO conversation_sessions
+            ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO conversation_sessions
 (session_id,campaign_id,npc_id,player_id,channel,status,start_ts,end_ts,start_world_day,end_world_day,location_id,participants_json,payload_json)
 VALUES($session,$campaign,$npc,$player,$channel,'open',$now,$now,$day,$day,$location,$audience,$payload);",
                 TestDict("session", context.Session, "campaign", context.Campaign, "npc", context.Observer, "player", context.Player,
                     "channel", context.Channel, "now", now, "day", day, "location", location,
                     "audience", Json.Serialize(context.Audience), "payload", SerializeConversationTurnStoragePayload(payload)));
-            int order = ReadInt(Program.QuerySql(connection, "SELECT COALESCE(MAX(turn_order),-1)+1 AS n FROM conversation_turns WHERE session_id=$session;",
+            int order = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COALESCE(MAX(turn_order),-1)+1 AS n FROM conversation_turns WHERE session_id=$session;",
                 TestDict("session", context.Session)).Single(), "n", 0);
             string playerText = ReadString(payload, "publicPlayerText", ReadString(payload, "playerText", ""));
             PreservePlayerInputSource(connection, payload, context.Session, context.Unit, context.Unit, context.Player,
@@ -255,11 +255,11 @@ VALUES($session,$campaign,$npc,$player,$channel,'open',$now,$now,$day,$day,$loca
             string replayJson = Json.Serialize(replayResult);
             if (replayJson.Length > 65536)
                 throw new InvalidOperationException("The complete route acceptance receipt exceeded its storage bound.");
-            Program.ExecuteSql(connection, @"INSERT INTO conversation_route_acceptance(unit_id,input_hash,accepted_reply_hash,result_json,restore_generation,created_ts)
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_route_acceptance(unit_id,input_hash,accepted_reply_hash,result_json,restore_generation,created_ts)
 VALUES($unit,$input,$reply,$result,$generation,$now) ON CONFLICT(unit_id) DO NOTHING;",
                 TestDict("unit", context.Unit, "input", context.InputHash, "reply", PromptHash(reply),
                     "result", replayJson, "generation", context.Generation, "now", now));
-            var stored = Program.QuerySql(connection, "SELECT input_hash,accepted_reply_hash FROM conversation_route_acceptance WHERE unit_id=$unit;", TestDict("unit", context.Unit)).Single();
+            var stored = ReignDatabase.QuerySql(connection, "SELECT input_hash,accepted_reply_hash FROM conversation_route_acceptance WHERE unit_id=$unit;", TestDict("unit", context.Unit)).Single();
             if (ReadString(stored, "input_hash", "") != context.InputHash || ReadString(stored, "accepted_reply_hash", "") != PromptHash(reply))
                 throw new InvalidOperationException("Another accepted response already owns this route turn.");
             boundary?.Invoke("after_sources");
@@ -271,7 +271,7 @@ VALUES($unit,$input,$reply,$result,$generation,$now) ON CONFLICT(unit_id) DO NOT
                         reply, context.Channel, accepted, connection, context.Audience);
             }
             boundary?.Invoke("after_route_write");
-            Program.ExecuteSql(connection, @"UPDATE conversation_sessions SET end_ts=$now,end_world_day=$day,
+            ReignDatabase.ExecuteSql(connection, @"UPDATE conversation_sessions SET end_ts=$now,end_world_day=$day,
 status=CASE WHEN $phase='closing' THEN 'closed' ELSE status END WHERE session_id=$session;",
                 TestDict("now", now, "day", day, "phase", ReadString(payload, "phase", ""), "session", context.Session));
             transaction.Commit();

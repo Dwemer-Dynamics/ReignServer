@@ -9,7 +9,7 @@ namespace ReignBetaServer
     {
         internal const string ViewWardrobeEvidenceOutputContract = "viewWardrobeEvidence: always [] or <=8 {source:player|reply,characterIds:[supplied IDs],quote:exact source words <=400 chars}. Include clothing/dressing and plans, agreements, refusals, corrections or resets from current player text/final reply; retain negation/conditions. No invented garments, equipment/age inference or game effects.";
 
-        internal static void EnsureChatViewWardrobeSchema(ReignDbConnection connection) => Program.ExecuteSql(connection, @"
+        internal static void EnsureChatViewWardrobeSchema(ReignDbConnection connection) => ReignDatabase.ExecuteSql(connection, @"
 CREATE TABLE IF NOT EXISTS chat_view_wardrobe_evidence (
 entry_id TEXT PRIMARY KEY,session_id TEXT NOT NULL,timeline_id TEXT NOT NULL,
 source_hash TEXT NOT NULL,payload_json TEXT NOT NULL);
@@ -38,7 +38,7 @@ CREATE INDEX IF NOT EXISTS idx_view_wardrobe_session ON chat_view_wardrobe_evide
             var meta = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
             string originalId = ReadString(meta, "inputSourceId", "");
             if (originalId.Length == 0) return text;
-            var original = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='source_only' AND speaker_id=$speaker;",
+            var original = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='source_only' AND speaker_id=$speaker;",
                 TestDict("id", originalId, "speaker", ReadString(row, "speaker_id", ""))).SingleOrDefault();
             if (original == null || access != null && !DialogueService.MemoryTimeVisible(original, access, connection))
                 throw new InvalidDataException("The original wardrobe evidence is unavailable in this timeline.");
@@ -53,7 +53,7 @@ CREATE INDEX IF NOT EXISTS idx_view_wardrobe_session ON chat_view_wardrobe_evide
             var reply = rows.LastOrDefault(r => ReadString(r, "role", "") == "npc" && ReadString(r, "speaker_id", "") == npc);
             if (reply == null) return TestDict("status", "no_accepted_reply");
             string turn = ReadString(reply, "turn_id", ""), session = ReadString(reply, "session_id", "");
-            var storedFrame = Program.QuerySql(connection, "SELECT frame_json FROM chat_view_frames WHERE turn_id=$turn;", TestDict("turn", turn)).SingleOrDefault();
+            var storedFrame = ReignDatabase.QuerySql(connection, "SELECT frame_json FROM chat_view_frames WHERE turn_id=$turn;", TestDict("turn", turn)).SingleOrDefault();
             if (storedFrame == null) return TestDict("status", "no_scene_frame");
             var frame = TryParseJsonObject(ReadString(storedFrame, "frame_json", "{}"));
             var allowed = new HashSet<string>(ReadDictionaryList(frame, "actors").Select(a => ReadString(a, "id", "")), StringComparer.Ordinal);
@@ -87,7 +87,7 @@ CREATE INDEX IF NOT EXISTS idx_view_wardrobe_session ON chat_view_wardrobe_evide
                 evidence.Clear(); rejected.Clear(); rejected.Add("evidence_budget_exceeded");
                 payload = Json.Serialize(TestDict("contract", ChatViewWardrobeContract, "evidence", evidence, "rejected", rejected));
             }
-            Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO chat_view_wardrobe_evidence(entry_id,session_id,timeline_id,source_hash,payload_json)
+            ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO chat_view_wardrobe_evidence(entry_id,session_id,timeline_id,source_hash,payload_json)
 VALUES($id,$session,$timeline,$hash,$payload);", TestDict("id", turn, "session", session,
                 "timeline", DialogueService.ContinuityTimeline(request), "hash", DialogueService.PromptHash(ReadString(reply, "text", "")), "payload", payload));
             return TestDict("status", "recorded", "evidenceCount", evidence.Count, "rejected", rejected);
@@ -101,7 +101,7 @@ VALUES($id,$session,$timeline,$hash,$payload);", TestDict("id", turn, "session",
             string scope = ChatViewWardrobeFrameScope(ReadDictionary(window.First(), "frame"));
             var access = new Program.KnowledgeAccessContext { NpcId = player, TimelineId = ReadString(request, "timelineId", ""),
                 WorldDay = ReadDouble(request, "worldDay", double.MaxValue), AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue };
-            var prior = Program.QuerySql(connection, @"SELECT t.*,f.frame_json,f.timeline_id FROM conversation_turns t
+            var prior = ReignDatabase.QuerySql(connection, @"SELECT t.*,f.frame_json,f.timeline_id FROM conversation_turns t
 LEFT JOIN chat_view_frames f ON f.turn_id=t.turn_id WHERE t.session_id=$session AND t.status='active' AND t.turn_order<$first
 ORDER BY t.turn_order DESC LIMIT 4097;", TestDict("session", session, "first", first));
             var eligible = new List<Dictionary<string, object>>();
@@ -117,7 +117,7 @@ ORDER BY t.turn_order DESC LIMIT 4097;", TestDict("session", session, "first", f
             if (eligible.Count > 4096) throw new InvalidOperationException("This scene exceeds View's retained clothing-context limit; no history was truncated or image requested.");
             var byId = eligible.ToDictionary(r => ReadString(r, "turn_id", ""), StringComparer.Ordinal);
             int minimum = eligible.Count == 0 ? first : eligible.Min(r => ReadInt(r, "turn_order", 0));
-            var entries = Program.QuerySql(connection, @"SELECT e.* FROM chat_view_wardrobe_evidence e JOIN conversation_turns t ON t.turn_id=e.entry_id
+            var entries = ReignDatabase.QuerySql(connection, @"SELECT e.* FROM chat_view_wardrobe_evidence e JOIN conversation_turns t ON t.turn_id=e.entry_id
 WHERE e.session_id=$session AND t.turn_order>=$minimum AND t.turn_order<$first ORDER BY t.turn_order LIMIT 4097;",
                 TestDict("session", session, "minimum", minimum, "first", first));
             var sources = new Dictionary<string, Dictionary<string, object>>(StringComparer.Ordinal);

@@ -20,22 +20,22 @@ namespace ReignBetaServer
 
         internal static void ApplyPlayerApproachSchemaDdl(ReignDbConnection c)
         {
-            Program.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS player_attention_events (
+            ReignDatabase.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS player_attention_events (
 sequence_id BIGSERIAL PRIMARY KEY,timeline_id TEXT NOT NULL,player_id TEXT NOT NULL,
 observer_id TEXT NOT NULL,target_id TEXT NOT NULL,calendar_day INTEGER NOT NULL,
 target_name TEXT NOT NULL,location_id TEXT NOT NULL,exchange_id TEXT NOT NULL,source_id TEXT NOT NULL,event_text TEXT NOT NULL,created_ts BIGINT NOT NULL DEFAULT 0,
 UNIQUE(timeline_id,player_id,observer_id,target_id,calendar_day));");
-            Program.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS player_approach_state (
+            ReignDatabase.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS player_approach_state (
 timeline_id TEXT NOT NULL,state_key TEXT NOT NULL,value_json TEXT NOT NULL,
 PRIMARY KEY(timeline_id,state_key));");
         }
 
         internal static Dictionary<string, object> ApproachState(ReignDbConnection c, string timeline, string key) =>
-            TryParseJsonObject(ReadString(Program.QuerySql(c, "SELECT value_json FROM player_approach_state WHERE timeline_id=$timeline AND state_key=$key;",
+            TryParseJsonObject(ReadString(ReignDatabase.QuerySql(c, "SELECT value_json FROM player_approach_state WHERE timeline_id=$timeline AND state_key=$key;",
                 TestDict("timeline", timeline, "key", key)).FirstOrDefault(), "value_json", "{}")) ?? TestDict();
 
         private static void PutApproachState(ReignDbConnection c, string timeline, string key, Dictionary<string, object> value) =>
-            Program.ExecuteSql(c, @"INSERT INTO player_approach_state(timeline_id,state_key,value_json) VALUES($timeline,$key,$value)
+            ReignDatabase.ExecuteSql(c, @"INSERT INTO player_approach_state(timeline_id,state_key,value_json) VALUES($timeline,$key,$value)
 ON CONFLICT(timeline_id,state_key) DO UPDATE SET value_json=EXCLUDED.value_json;",
                 TestDict("timeline", timeline, "key", key, "value", Json.Serialize(value)));
 
@@ -66,14 +66,14 @@ ON CONFLICT(timeline_id,state_key) DO UPDATE SET value_json=EXCLUDED.value_json;
             {
                 string id = ReadString(observer, "heroId", "");
                 if (id.Length == 0 || id == unit.Hero || id == unit.Player || !ReadStringList(observer, "scopes").Intersect(scopes).Any()) continue;
-                Program.ExecuteSql(c, @"INSERT INTO player_attention_events(timeline_id,player_id,observer_id,target_id,calendar_day,target_name,location_id,exchange_id,source_id,event_text,created_ts)
+                ReignDatabase.ExecuteSql(c, @"INSERT INTO player_attention_events(timeline_id,player_id,observer_id,target_id,calendar_day,target_name,location_id,exchange_id,source_id,event_text,created_ts)
 VALUES($timeline,$player,$observer,$target,$day,$name,$location,$exchange,$source,$text,$ts) ON CONFLICT DO NOTHING;",
                     TestDict("timeline", timeline, "player", unit.Player, "observer", id, "target", unit.Hero, "day", day,
                         "name", unit.HeroName, "location", unit.Location ?? "", "exchange", exchange, "source", source,
                         "ts", unit.Timestamp, "text", "On day " + day + ", the player spent time talking to " + unit.HeroName + " at " + unit.Location + "."));
                 observed++;
             }
-            long sequence = ReadLong(Program.QuerySql(c, "SELECT COALESCE(MAX(sequence_id),0) AS sequence FROM player_attention_events;").First(), "sequence", 0);
+            long sequence = ReadLong(ReignDatabase.QuerySql(c, "SELECT COALESCE(MAX(sequence_id),0) AS sequence FROM player_attention_events;").First(), "sequence", 0);
             PutApproachState(c, timeline, "contact:" + unit.Player + ":" + unit.Hero,
                 TestDict("sequence", sequence, "exchange", exchange, "day", day));
             PutApproachState(c, timeline, "cadence:" + unit.Player + ":" + unit.Hero, TestDict("day", day, "sharedDays", 0));
@@ -103,10 +103,10 @@ VALUES($timeline,$player,$observer,$target,$day,$name,$location,$exchange,$sourc
             if (!options.Allows(kind)) return TestDict("ok", true, "status", "disabled", "requests", new List<Dictionary<string, object>>());
             int day = (int)Math.Floor(worldDay);
             lock (CampaignRelationshipWriteLock(campaign))
-            using (var c = Program.OpenCampaignConnection(campaign))
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsurePlayerApproachSchema(c); EnsureMbtiRelationshipSchema(c);
-                Program.ExecuteSql(c, "BEGIN;");
+                ReignDatabase.ExecuteSql(c, "BEGIN;");
                 try
                 {
                     var winners = new List<Dictionary<string, object>>();
@@ -132,11 +132,11 @@ VALUES($timeline,$player,$observer,$target,$day,$name,$location,$exchange,$sourc
                         if (traits == null || traits.Count == 0) traits = CharactersService.BuildTraitDocument(ReadDictionary(candidate, "profile"));
                         double jealousy = RelationshipTraitPercent(traits, "jealousy"), patience = RelationshipTraitPercent(traits, "patience");
                         double boldness = RelationshipTraitPercent(traits, "boldness"), pride = RelationshipTraitPercent(traits, "pride"), irritability = RelationshipTraitPercent(traits, "irritability");
-                        var pair = Program.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", AmbientPairKey(hero, player))).FirstOrDefault();
+                        var pair = ReignDatabase.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", AmbientPairKey(hero, player))).FirstOrDefault();
                         int affinity = pair == null ? ReadInt(candidate, "nativeRelation", 0)
                             : ReadInt(pair, ReadString(pair, "hero_a_id", "") == hero ? "affinity_a_to_b" : "affinity_b_to_a", 0);
                         var contact = ApproachState(c, timeline, "contact:" + player + ":" + hero);
-                        var rivals = Program.QuerySql(c, @"SELECT target_id,MAX(target_name) AS target_name,COUNT(*) AS days,
+                        var rivals = ReignDatabase.QuerySql(c, @"SELECT target_id,MAX(target_name) AS target_name,COUNT(*) AS days,
 MIN(calendar_day) AS first_day,MAX(calendar_day) AS last_day,
 array_to_json((array_agg(source_id ORDER BY sequence_id DESC))[1:64])::text AS source_ids_json FROM player_attention_events
 WHERE timeline_id=$timeline AND player_id=$player AND observer_id=$hero AND sequence_id>$sequence AND exchange_id<>$exchange
@@ -203,12 +203,12 @@ GROUP BY target_id;", TestDict("timeline", timeline, "player", player, "hero", h
                     }
                     return FinishApproachEvaluation(c, TestDict("ok", true, "requests", requests, "checks", diagnostics));
                 }
-                catch { Program.ExecuteSql(c, "ROLLBACK;"); throw; }
+                catch { ReignDatabase.ExecuteSql(c, "ROLLBACK;"); throw; }
             }
         }
 
         private static Dictionary<string, object> FinishApproachEvaluation(ReignDbConnection c, Dictionary<string, object> result)
-        { Program.ExecuteSql(c, "COMMIT;"); return result; }
+        { ReignDatabase.ExecuteSql(c, "COMMIT;"); return result; }
 
         internal static Dictionary<string, object> PlayerApproachDecisionApi(Dictionary<string, object> p, PlayerApproachOptions options = null)
         {
@@ -216,10 +216,10 @@ GROUP BY target_id;", TestDict("timeline", timeline, "player", player, "hero", h
             string choice = ReadString(p, "choice", "");
             if (id.Length == 0 || !new[] { "accept", "refuse", "cancel", "acknowledge" }.Contains(choice)) return TestDict("ok", false, "error", "Invalid approach decision.");
             lock (CampaignRelationshipWriteLock(campaign))
-            using (var c = Program.OpenCampaignConnection(campaign))
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsurePlayerApproachSchema(c); EnsureMbtiRelationshipSchema(c);
-                Program.ExecuteSql(c, "BEGIN;");
+                ReignDatabase.ExecuteSql(c, "BEGIN;");
                 try
                 {
                     var request = ApproachState(c, timeline, "request:" + id);
@@ -276,7 +276,7 @@ GROUP BY target_id;", TestDict("timeline", timeline, "player", player, "hero", h
                     PutApproachState(c, timeline, "request:" + id, request);
                     return FinishApproachEvaluation(c, TestDict("ok", true, "request", request));
                 }
-                catch { Program.ExecuteSql(c, "ROLLBACK;"); throw; }
+                catch { ReignDatabase.ExecuteSql(c, "ROLLBACK;"); throw; }
             }
         }
 
@@ -284,10 +284,10 @@ GROUP BY target_id;", TestDict("timeline", timeline, "player", player, "hero", h
         {
             string player = ReadFirstString(payload, "playerHeroStringId", "playerId");
             if (player.Length == 0) return new List<Dictionary<string, object>>();
-            using (var c = Program.OpenCampaignConnection(campaign))
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsurePlayerApproachSchema(c);
-                return Program.QuerySql(c, @"SELECT event_text,source_id,calendar_day,created_ts FROM player_attention_events
+                return ReignDatabase.QuerySql(c, @"SELECT event_text,source_id,calendar_day,created_ts FROM player_attention_events
 WHERE timeline_id=$timeline AND observer_id=$hero AND player_id=$player ORDER BY sequence_id DESC LIMIT 80;",
                     TestDict("timeline", DialogueService.ContinuityTimeline(payload), "hero", hero, "player", player)).Select(r => TestDict("role", "system", "speaker", "Bannerlord Reign",
                         "text", ReadString(r, "event_text", ""), "channel", "witnessed_player_attention", "sourceId", ReadString(r, "source_id", ""),
@@ -320,10 +320,10 @@ WHERE timeline_id=$timeline AND observer_id=$hero AND player_id=$player ORDER BY
         {
             if (payload == null || !payload.ContainsKey("playerAttentionPresence")) return "";
             string timeline = DialogueService.ContinuityTimeline(payload), player = ReadFirstString(payload, "playerHeroStringId", "playerId");
-            using (var c = Program.OpenCampaignConnection(campaign))
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsurePlayerApproachSchema(c);
-                var events = Program.QuerySql(c, @"SELECT event_text,source_id FROM player_attention_events WHERE timeline_id=$timeline
+                var events = ReignDatabase.QuerySql(c, @"SELECT event_text,source_id FROM player_attention_events WHERE timeline_id=$timeline
 AND observer_id=$hero AND player_id=$player ORDER BY calendar_day DESC,sequence_id DESC LIMIT 64;",
                     TestDict("timeline", timeline, "hero", hero, "player", player));
                 string context = events.Count == 0 ? "" : "\n\nWITNESSED PLAYER ATTENTION (generic public history only)\n" + Json.Serialize(events);

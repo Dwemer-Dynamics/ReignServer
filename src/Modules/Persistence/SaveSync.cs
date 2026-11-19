@@ -1184,7 +1184,7 @@ namespace ReignBetaServer
                     ? @"SELECT d.*,w.event_type,w.dissemination_class FROM embedding_documents d
 LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.event_id=d.source_id;"
                     : "SELECT d.*,'' event_type,'' dissemination_class FROM embedding_documents d;";
-                foreach (Dictionary<string, object> row in Program.QuerySql(connection, sql))
+                foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection, sql))
                 {
                     rows[SaveSyncEmbeddingDocumentKey(row)] = row;
                 }

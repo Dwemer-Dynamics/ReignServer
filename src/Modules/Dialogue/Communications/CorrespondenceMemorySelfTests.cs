@@ -18,7 +18,7 @@ namespace ReignBetaServer
                 "playerHeroStringId", "player", "playerText", "You wrote to me about the carved wooden horse.");
             try
             {
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     letterId = ReadString(RelationshipsService.InsertLetter(connection, "npc", "Author", "player", "Player", body,
                         "npc_initiated", "gift", "", "a", "b", 10d, 13d, TestDict()), "letterId", "");
@@ -43,14 +43,14 @@ namespace ReignBetaServer
                     Check("disguise_does_not_reveal_matching_private_history", Recall("npc", new Dictionary<string, object>(context) {
                         ["identityView"] = TestDict("knowsIdentity", false) }).Count == 0);
                     Check("future_dispatch_excluded", Recall("npc", new Dictionary<string, object>(context) { ["worldDay"] = 9d }).Count == 0);
-                    var row = Program.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", letterId)).Single();
+                    var row = ReignDatabase.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", letterId)).Single();
                     Check("same_day_future_sequence_excluded", Recall("npc", new Dictionary<string, object>(context) {
                         ["memoryAsOfAcceptedSequence"] = ReadLong(row, "dispatch_sequence", 0) - 1 }).Count == 0);
                     Check("later_recording_excluded", Recall("npc", new Dictionary<string, object>(context) {
                         ["memoryAsOfTimestamp"] = ReadLong(row, "created_ts", 0) - 1 }).Count == 0);
-                    Program.ExecuteSql(connection, "UPDATE letters SET status='delivered',delivered_day=11 WHERE letter_id=$id;", TestDict("id", letterId));
+                    ReignDatabase.ExecuteSql(connection, "UPDATE letters SET status='delivered',delivered_day=11 WHERE letter_id=$id;", TestDict("id", letterId));
                     Check("unread_receipt_is_not_body_knowledge", Recall("player").Count == 0);
-                    Program.ExecuteSql(connection, "UPDATE letters SET status='read',read_day=12,delivery_timeline_id='main' WHERE letter_id=$id;", TestDict("id", letterId));
+                    ReignDatabase.ExecuteSql(connection, "UPDATE letters SET status='read',read_day=12,delivery_timeline_id='main' WHERE letter_id=$id;", TestDict("id", letterId));
                     Check("recipient_knows_exact_read_body", Recall("player").Single().Text.Contains(body)
                         && Recall("player").Single().Text.Contains("received and read these words on day 12"));
                     Check("author_does_not_gain_read_receipt", Recall("npc").Single().Text == sent.Single().Text);
@@ -157,17 +157,17 @@ namespace ReignBetaServer
                 var point = TestDict("savePointId", "letter_before", "timelineId", "restored_main", "campaignTimeDays", 20d,
                     "worldHistorySequence", 8L, "worldHistoryHeadEventId", "history_head");
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "letter_before");
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                     futureId = ReadString(RelationshipsService.InsertLetter(connection, "npc", "Author", "player", "Player", "Future secret after the save.", "npc_initiated", "future", "", "a", "b", 21d, 24d, TestDict()), "letterId", "");
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "letter_before");
                 AdvanceMemoryRestoreGeneration(campaign, point);
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     var restored = new Dictionary<string, object>(context) { ["timelineId"] = "restored_main" };
                     bool Knows(string who, Dictionary<string, object> ctx) => LoadCorrespondenceMemory(connection, who,
                         who == "npc" ? "player" : "npc", "carved wooden horse", ctx, Program.BuildKnowledgeAccessContext(who, "player", "", ctx)).Any(e => e.SourceId == letterId);
                     Check("actual_snapshot_restores_inherited_authorship_and_receipt", Knows("npc", restored) && Knows("player", restored)
-                        && Program.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", futureId)).Count == 0);
+                        && ReignDatabase.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", futureId)).Count == 0);
                     var sibling = new Dictionary<string, object>(restored) { ["timelineId"] = "other_branch" };
                     Check("restore_membership_cannot_leak_to_sibling", !Knows("npc", sibling));
                     BindRecoveredLetterSources(connection, "restored_main", "bad_recovery", 7L, "wrong_head");
@@ -176,12 +176,12 @@ namespace ReignBetaServer
                     BindRecoveredLetterSources(connection, "restored_main", "restored_recovered", 8L, "history_head");
                     var recovered = new Dictionary<string, object>(restored) { ["timelineId"] = "restored_recovered" };
                     Check("verified_recovery_rebinds_membership", Knows("npc", recovered) && !Knows("npc", restored));
-                    Program.ExecuteSql(connection, "UPDATE letters SET body='Altered later account.' WHERE letter_id=$id;", TestDict("id", letterId));
+                    ReignDatabase.ExecuteSql(connection, "UPDATE letters SET body='Altered later account.' WHERE letter_id=$id;", TestDict("id", letterId));
                     Check("changed_source_cannot_reuse_restored_membership", !Knows("npc", recovered));
-                    Program.ExecuteSql(connection, "UPDATE letters SET body=$body WHERE letter_id=$id;", TestDict("id", letterId, "body", body));
+                    ReignDatabase.ExecuteSql(connection, "UPDATE letters SET body=$body WHERE letter_id=$id;", TestDict("id", letterId, "body", body));
                 }
                 AdvanceMemoryRestoreGeneration(campaign);
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     var recovered = new Dictionary<string, object>(context) { ["timelineId"] = "restored_recovered" };
                     Check("restore_generation_invalidates_old_membership", !LoadCorrespondenceMemory(connection, "npc", "player", "carved wooden horse", recovered,

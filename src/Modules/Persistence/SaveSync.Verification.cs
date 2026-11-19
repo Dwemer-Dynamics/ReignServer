@@ -180,9 +180,9 @@ namespace ReignBetaServer
                 Directory.CreateDirectory(Path.Combine(preexistingCampaign, "world"));
                 File.WriteAllText(Path.Combine(preexistingCampaign, "world", "history.jsonl"), "{}" + Environment.NewLine, Encoding.UTF8);
                 using (ReignDbConnection preexistingConnection =
-                    Program.OpenCampaignConnection(preexistingId))
+                    ReignDatabase.OpenCampaignConnection(preexistingId))
                 {
-                    Program.ExecuteSql(preexistingConnection,
+                    ReignDatabase.ExecuteSql(preexistingConnection,
                         "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('preexisting_test','ready');");
                 }
                 Dictionary<string, object> preexistingPayload = SaveSyncTestPointPayload(preexistingId, "pre_" + token, 1d, "Preexisting World History");
@@ -615,7 +615,7 @@ namespace ReignBetaServer
                     "A retried native deletion receipt cannot recreate or re-delete a retired campaign.");
 
                 using (ReignDbConnection databaseOnlyConnection =
-                    Program.OpenCampaignConnection(databaseOnlyRetirementId)) { }
+                    ReignDatabase.OpenCampaignConnection(databaseOnlyRetirementId)) { }
                 TryDeleteDirectory(StrictCampaignDirectory(
                     databaseOnlyRetirementId));
                 Dictionary<string, object> databaseOnlyDeleted;
@@ -1013,7 +1013,7 @@ namespace ReignBetaServer
             AppendSaveSyncTestPath(campaignId, Path.Combine("negotiations", "events.jsonl"), marker);
             Program.WriteJsonObject(Path.Combine(campaign, "actions", "action-queue.json"), new Dictionary<string, object> { ["marker"] = marker, ["items"] = new List<object> { marker + "_queued_action" } });
             Program.WriteJsonObject(Path.Combine(campaign, "world", "calendar.json"), new Dictionary<string, object> { ["marker"] = marker, ["nativeDayAnchor"] = marker == "old" ? 10d : 20d });
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 RebellionService.EnsureRebellionSchema(connection);
                 RelationshipsService.EnsureRelationshipDirectorSchema(connection);
@@ -1021,9 +1021,9 @@ namespace ReignBetaServer
                 CourtService.EnsureCourtSchema(connection);
                 ReputationService.EnsureSocialReputationSchema(connection);
                 long ts = marker == "old" ? 10 : 1;
-                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO events(event_id,campaign_id,ts,world_day,event_type,summary,created_utc) VALUES($id,$campaign,$ts,$day,'test',$id,$utc);", new Dictionary<string, object> { ["id"] = marker + "_event", ["campaign"] = campaignId, ["ts"] = ts, ["day"] = (double)ts, ["utc"] = DateTime.UtcNow.ToString("o") });
-                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO memories(memory_id,event_id,owner_id,ts,world_day,summary) VALUES($id,$event,'hero_a',$ts,$day,$id);", new Dictionary<string, object> { ["id"] = marker + "_memory", ["event"] = marker + "_event", ["ts"] = ts, ["day"] = (double)ts });
-                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO relationship_pair_chemistry(
+                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO events(event_id,campaign_id,ts,world_day,event_type,summary,created_utc) VALUES($id,$campaign,$ts,$day,'test',$id,$utc);", new Dictionary<string, object> { ["id"] = marker + "_event", ["campaign"] = campaignId, ["ts"] = ts, ["day"] = (double)ts, ["utc"] = DateTime.UtcNow.ToString("o") });
+                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO memories(memory_id,event_id,owner_id,ts,world_day,summary) VALUES($id,$event,'hero_a',$ts,$day,$id);", new Dictionary<string, object> { ["id"] = marker + "_memory", ["event"] = marker + "_event", ["ts"] = ts, ["day"] = (double)ts });
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO relationship_pair_chemistry(
 pair_key,hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,tag_a_to_b,tag_b_to_a,
 first_day,last_day,projected_native_relation,last_decay_period,updated_ts)
 VALUES('hero_a|hero_b','hero_a','hero_b',$affinity,$affinity,'neutral','neutral',
@@ -1031,20 +1031,20 @@ $day,$day,$affinity,0,$ts);", new Dictionary<string, object>
                 {
                     ["affinity"] = marker == "future" ? 99 : 1, ["day"] = (double)ts, ["ts"] = ts
                 });
-                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO relationship_pair_lifecycle(
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO relationship_pair_lifecycle(
 pair_key,hero_a_id,hero_b_id,last_processed_day,updated_ts)
 VALUES('hero_a|hero_b','hero_a','hero_b',$day,$ts);",
                     new Dictionary<string, object> { ["day"] = (int)ts, ["ts"] = ts });
-                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_sessions(session_id,campaign_id,npc_id,start_ts) VALUES($id,$campaign,'hero_a',$ts);", new Dictionary<string, object> { ["id"] = marker + "_session", ["campaign"] = campaignId, ["ts"] = ts });
-                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_turns(turn_id,session_id,turn_order,role,text,ts) VALUES($id,$session,1,'npc',$id,$ts);", new Dictionary<string, object> { ["id"] = marker + "_turn", ["session"] = marker + "_session", ["ts"] = ts });
+                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_sessions(session_id,campaign_id,npc_id,start_ts) VALUES($id,$campaign,'hero_a',$ts);", new Dictionary<string, object> { ["id"] = marker + "_session", ["campaign"] = campaignId, ["ts"] = ts });
+                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_turns(turn_id,session_id,turn_order,role,text,ts) VALUES($id,$session,1,'npc',$id,$ts);", new Dictionary<string, object> { ["id"] = marker + "_turn", ["session"] = marker + "_session", ["ts"] = ts });
                 DialogueService.EnsureConversationInputSchema(connection);
                 const string exactOriginal = "  *I trace a 🌿.*\r\nHello.\t ";
-                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_turns(turn_id,session_id,turn_order,role,text,ts,status) VALUES($id,$session,-1,'player_source',$text,$ts,'source_only');",
+                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_turns(turn_id,session_id,turn_order,role,text,ts,status) VALUES($id,$session,-1,'player_source',$text,$ts,'source_only');",
                     TestDict("id", marker + "_original", "session", marker + "_session", "text", exactOriginal, "ts", ts));
-                Program.ExecuteSql(connection, @"INSERT INTO conversation_input_receipts(input_id,timeline_id,session_id,player_id,source_turn_id,source_hash,restore_generation,status,created_ts,updated_ts)
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_input_receipts(input_id,timeline_id,session_id,player_id,source_turn_id,source_hash,restore_generation,status,created_ts,updated_ts)
 VALUES($id,'timeline_test',$session,'player',$source,$hash,'fixture','received',$ts,$ts) ON CONFLICT(input_id) DO NOTHING;",
                     TestDict("id", marker + "_input", "session", marker + "_session", "source", marker + "_original", "hash", DialogueService.ConversationExactTextHash(exactOriginal), "ts", ts));
-                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO rumor_occurrences(
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO rumor_occurrences(
 occurrence_id,campaign_id,timeline_id,archetype_id,thread_key,source_event_id,world_day,expires_day,status,
 exposure_chance,exposure_roll,catalog_revision,participants_json,provenance_summary,snapshot_json,created_ts,updated_ts)
 VALUES($id,$campaign,'timeline_test','marital_strife','hero_a|hero_b',$event,$day,999999,'active',
@@ -1055,7 +1055,7 @@ VALUES($id,$campaign,'timeline_test','marital_strife','hero_a|hero_b',$event,$da
                         ["event"] = marker + "_event", ["day"] = (double)ts,
                         ["summary"] = marker + "_rumor_summary", ["ts"] = ts
                     });
-                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO rumor_subject_tags(
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO rumor_subject_tags(
 occurrence_id,subject_id,tag_id,subject_role,description,rumor_value,reputation_value,status,
 co_participants_json,snapshot_json,updated_ts)
 VALUES($occurrence,'hero_a','marital_strife','spouse',$description,-5,-10,'active','[""hero_b""]','{}',$ts);",
@@ -1064,11 +1064,11 @@ VALUES($occurrence,'hero_a','marital_strife','spouse',$description,-5,-10,'activ
                         ["occurrence"] = marker + "_rumor_occurrence",
                         ["description"] = marker + "_rumor_description", ["ts"] = ts
                     });
-                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO world_history_events(event_id,campaign_id,timeline_id,sequence,world_day,event_type,summary,created_utc) VALUES($id,$campaign,'timeline_test',$ts,$day,'test',$id,$utc);", new Dictionary<string, object> { ["id"] = marker + "_history", ["campaign"] = campaignId, ["ts"] = ts, ["day"] = (double)ts, ["utc"] = DateTime.UtcNow.ToString("o") });
-                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO rebellion_movements(movement_id,campaign_id,timeline_id,parent_kingdom_id,leader_clan_id,leader_hero_id,ruler_hero_id,objective,stage,pressure,relationship_pressure,trait_pressure,factual_pressure,viability,readiness,correlation_id,created_day,updated_day)
+                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO world_history_events(event_id,campaign_id,timeline_id,sequence,world_day,event_type,summary,created_utc) VALUES($id,$campaign,'timeline_test',$ts,$day,'test',$id,$utc);", new Dictionary<string, object> { ["id"] = marker + "_history", ["campaign"] = campaignId, ["ts"] = ts, ["day"] = (double)ts, ["utc"] = DateTime.UtcNow.ToString("o") });
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO rebellion_movements(movement_id,campaign_id,timeline_id,parent_kingdom_id,leader_clan_id,leader_hero_id,ruler_hero_id,objective,stage,pressure,relationship_pressure,trait_pressure,factual_pressure,viability,readiness,correlation_id,created_day,updated_day)
 VALUES($id,$campaign,'timeline_test','kingdom_a','clan_a','hero_a','hero_b','claimant','organizing',1,1,1,1,1,1,$id,$day,$day);", new Dictionary<string, object> { ["id"] = marker + "_rebellion", ["campaign"] = campaignId, ["day"] = (double)ts });
-                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO court_sessions(session_id,campaign_id,timeline_id,authority,host_settlement_id,created_ts,updated_ts) VALUES($id,$campaign,'timeline_test','royal','town_a',$ts,$ts);", new Dictionary<string, object> { ["id"] = marker + "_court", ["campaign"] = campaignId, ["ts"] = ts });
-                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO character_reputations(
+                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO court_sessions(session_id,campaign_id,timeline_id,authority,host_settlement_id,created_ts,updated_ts) VALUES($id,$campaign,'timeline_test','royal','town_a',$ts,$ts);", new Dictionary<string, object> { ["id"] = marker + "_court", ["campaign"] = campaignId, ["ts"] = ts });
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO character_reputations(
 campaign_id,timeline_id,subject_id,tag_id,source_occurrence_id,archetype_id,subject_role,description,
 reputation_value,acquired_day,catalog_revision,snapshot_json,status,updated_ts)
 VALUES($campaign,'timeline_test','hero_a','test_reputation',$occurrence,'test','subject',$description,1,$day,1,'{}','active',$ts);",
@@ -1077,16 +1077,16 @@ VALUES($campaign,'timeline_test','hero_a','test_reputation',$occurrence,'test','
                         ["campaign"] = campaignId, ["occurrence"] = marker + "_rumor_occurrence",
                         ["description"] = marker + "_reputation", ["day"] = (double)ts, ["ts"] = ts
                     });
-                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO director_outbox(outbox_id,kind,status,world_day,subject_ids_json,payload_json,created_ts) VALUES($id,'test','pending',$day,'[]',$payload,$ts);", new Dictionary<string, object> { ["id"] = marker + "_outbox", ["day"] = (double)ts, ["payload"] = "{\"marker\":\"" + marker + "\"}", ["ts"] = ts });
+                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO director_outbox(outbox_id,kind,status,world_day,subject_ids_json,payload_json,created_ts) VALUES($id,'test','pending',$day,'[]',$payload,$ts);", new Dictionary<string, object> { ["id"] = marker + "_outbox", ["day"] = (double)ts, ["payload"] = "{\"marker\":\"" + marker + "\"}", ["ts"] = ts });
             }
         }
 
         private static void AppendSaveSyncTestFutureState(string campaignId)
         {
             PrepareSaveSyncTestCampaign(campaignId, "future");
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                Program.ExecuteSql(connection, "UPDATE character_reputations SET reputation_value=99,updated_ts=20 WHERE campaign_id=$campaign AND subject_id='hero_a' AND tag_id='test_reputation';", new Dictionary<string, object> { ["campaign"] = campaignId });
+                ReignDatabase.ExecuteSql(connection, "UPDATE character_reputations SET reputation_value=99,updated_ts=20 WHERE campaign_id=$campaign AND subject_id='hero_a' AND tag_id='test_reputation';", new Dictionary<string, object> { ["campaign"] = campaignId });
             }
             Program.WriteJsonObject(Path.Combine(StrictCampaignDirectory(campaignId), "characters", "hero_a", "background.json"), new Dictionary<string, object> { ["text"] = "later static definition" });
             File.WriteAllBytes(Path.Combine(StrictCampaignDirectory(campaignId), "characters", "hero_a", "portraits", "portrait.png"), new byte[] { 9, 8, 7, 6 });
@@ -1138,14 +1138,14 @@ VALUES($campaign,'timeline_test','hero_a','test_reputation',$occurrence,'test','
             bool fileMarker = gameplayPaths.Select(path => Path.Combine(campaign, path)).Where(File.Exists)
                 .Any(path => { try { return File.ReadAllText(path).Contains(marker); } catch { return false; } });
             bool sqlMarker;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
-                sqlMarker = ReadLong(Program.QuerySql(connection, "SELECT COUNT(*) count FROM events WHERE event_id=$id;", new Dictionary<string, object> { ["id"] = marker + "_event" }).FirstOrDefault(), "count", 0) > 0;
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+                sqlMarker = ReadLong(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM events WHERE event_id=$id;", new Dictionary<string, object> { ["id"] = marker + "_event" }).FirstOrDefault(), "count", 0) > 0;
             return fileMarker || sqlMarker;
         }
 
         private static long SaveSyncTestFutureSqlRows(string campaignId)
         {
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 string[] queries =
                 {
@@ -1162,7 +1162,7 @@ VALUES($campaign,'timeline_test','hero_a','test_reputation',$occurrence,'test','
                     "SELECT COUNT(*) count FROM court_sessions WHERE session_id='future_court';",
                     "SELECT COUNT(*) count FROM director_outbox WHERE outbox_id='future_outbox';"
                 };
-                return queries.Sum(sql => ReadLong(Program.QuerySql(connection, sql).FirstOrDefault(), "count", 0));
+                return queries.Sum(sql => ReadLong(ReignDatabase.QuerySql(connection, sql).FirstOrDefault(), "count", 0));
             }
         }
 
@@ -1179,10 +1179,10 @@ VALUES($campaign,'timeline_test','hero_a','test_reputation',$occurrence,'test','
 
         private static string SaveSyncTestSqlValue(string campaignId, string sql, string field, string parameterCampaign = "")
         {
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 Dictionary<string, object> parameters = string.IsNullOrWhiteSpace(parameterCampaign) ? null : new Dictionary<string, object> { ["campaign"] = parameterCampaign };
-                Dictionary<string, object> row = Program.QuerySql(connection, sql, parameters).FirstOrDefault();
+                Dictionary<string, object> row = ReignDatabase.QuerySql(connection, sql, parameters).FirstOrDefault();
                 object value = row != null && row.ContainsKey(field) ? row[field] : null;
                 return Convert.ToString(value, CultureInfo.InvariantCulture) ?? "";
             }

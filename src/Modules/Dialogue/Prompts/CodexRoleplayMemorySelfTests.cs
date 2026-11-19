@@ -87,9 +87,9 @@ namespace ReignBetaServer
                 var access = Program.ActiveCodexConversationScope.Value.MemoryAccess;
                 Check("default_timeline_and_time_fence", access.Knowledge.TimelineId == "main" && access.Knowledge.WorldDay == 3d,
                     "Missing native timeline means main, never all branches; the supplied memory time fence remains authoritative.");
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,channel,status,start_ts,participants_json,payload_json)
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,channel,status,start_ts,participants_json,payload_json)
 VALUES('direct-session',$campaign,'npc','player','in_person','closed',10,'[""npc"",""player""]','{""timelineId"":""main""}');", TestDict("campaign", campaign));
                     void Turn(string id, int index, string text, double day, List<string> audience, string timeline) =>
                         InsertConversationTurn(connection, id, "direct-session", id, index, id, "player", "player", "Player", text,

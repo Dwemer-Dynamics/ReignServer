@@ -20,16 +20,16 @@ namespace ReignBetaServer
                     "playerHeroStringId", "player", "playerName", "Player", "turnId", turn, "sceneTurnId", turn,
                     "playerText", "Remember the old mill beside the orchard?", "participants", new[] { "npc", "player" },
                     "speaker", TestDict("heroStringId", "npc", "name", "Mira", "age", 32d));
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     ReadMemoryPrecisionState(connection);
-                    Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
 VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','{""timelineId"":""route_branch""}');", TestDict("campaign", campaign));
                     InsertConversationTurn(connection, "mill_question", "old_mill", "mill_exchange", 0, "mill_exchange", "npc", "npc", "Mira",
                         "Which place would you choose beside the orchard?", "in_person", 10d, 1, "", new List<string> { "npc", "player" }, Payload("old"));
                     InsertConversationTurn(connection, "mill_answer", "old_mill", "mill_exchange", 1, "mill_exchange", "player", "player", "Player",
                         "The old mill beside the orchard is my choice.", "in_person", 10d, 2, "", new List<string> { "npc", "player" }, Payload("old"));
-                    Program.ExecuteSql(connection, "CREATE TABLE route_atomic_fixture(id TEXT PRIMARY KEY);");
+                    ReignDatabase.ExecuteSql(connection, "CREATE TABLE route_atomic_fixture(id TEXT PRIMARY KEY);");
                 }
                 string captured = ""; int calls = 0;
                 Dictionary<string, object> Writer(Dictionary<string, object> input)
@@ -42,8 +42,8 @@ VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','
                 }
                 int SourceCount(string channel)
                 {
-                    using var connection = Program.OpenCampaignConnection(campaign);
-                    return ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS n FROM conversation_turns WHERE channel=$channel;",
+                    using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                    return ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS n FROM conversation_turns WHERE channel=$channel;",
                         TestDict("channel", channel)).Single(), "n", 0);
                 }
                 var court = Payload("court_1");
@@ -89,9 +89,9 @@ VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','
                 Check("child_replay_preserves_emotion_intent_without_provider", calls == afterChild
                     && ReadString(childReplay, "emotion", "") == "curious" && ReadString(childReplay, "intent", "") == "answer"
                     && ReadInt(childReplay, "providerCallCount", -1) == 0 && SourceCount("family_chambers_child") == 2);
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    string memory = ReadString(Program.QuerySql(connection, "SELECT summary FROM childhood_experiences WHERE hero_id='child';").Single(), "summary", "");
+                    string memory = ReadString(ReignDatabase.QuerySql(connection, "SELECT summary FROM childhood_experiences WHERE hero_id='child';").Single(), "summary", "");
                     Check("child_memory_is_actual_speech_not_model_invention", memory.Contains("Player said or visibly did:")
                         && memory.Contains("I remember your choice of the old mill.") && !memory.Contains("MUST-NOT-BE-STORED"));
                 }
@@ -110,14 +110,14 @@ VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','
                     bool failed = false, invisible = false;
                     try
                     {
-                        PublishRouteConversation(context, accepted, "Mira", connection => Program.ExecuteSql(connection, "INSERT INTO route_atomic_fixture(id) VALUES('fault');"),
+                        PublishRouteConversation(context, accepted, "Mira", connection => ReignDatabase.ExecuteSql(connection, "INSERT INTO route_atomic_fixture(id) VALUES('fault');"),
                             actual => { if (actual != phase) return; invisible = SourceCount("route_atomic") == 0; throw new InvalidOperationException("Injected route fault."); });
                     }
                     catch (InvalidOperationException) { failed = true; }
-                    using var connection = Program.OpenCampaignConnection(campaign);
+                    using var connection = ReignDatabase.OpenCampaignConnection(campaign);
                     Check("source_and_route_rollback_" + phase, failed && invisible && SourceCount("route_atomic") == 0
-                        && ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS n FROM route_atomic_fixture;").Single(), "n", 0) == 0
-                        && ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS n FROM conversation_route_acceptance WHERE unit_id=$unit;",
+                        && ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS n FROM route_atomic_fixture;").Single(), "n", 0) == 0
+                        && ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS n FROM conversation_route_acceptance WHERE unit_id=$unit;",
                             TestDict("unit", context.Unit)).Single(), "n", 0) == 0);
                 }
                 AdvanceMemoryRestoreGeneration(campaign);
@@ -146,8 +146,8 @@ VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','
                 var replaySingle = CourtService.RulerPetitionRespond(checkedPetition, enabled, SingleWriter);
                 Check("route_receipt_replay_adds_no_calls", purposes.Count == 1 && ReadInt(replaySingle, "providerCallCount", -1) == 0
                     && ReadString(replaySingle, "reply", "") == ReadString(acceptedSingle, "reply", ""));
-                using (var connection = Program.OpenCampaignConnection(campaign))
-                    Program.ExecuteSql(connection, "UPDATE conversation_route_acceptance SET accepted_reply_hash='changed' WHERE accepted_reply_hash=$hash;",
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_route_acceptance SET accepted_reply_hash='changed' WHERE accepted_reply_hash=$hash;",
                         TestDict("hash", PromptHash(ReadString(acceptedSingle, "reply", ""))));
                 var corruptReplay = CourtService.RulerPetitionRespond(checkedPetition, enabled, SingleWriter);
                 Check("mismatched_route_receipt_rejected_without_provider", !ReadBool(corruptReplay, "ok", true) && purposes.Count == 1);
@@ -186,10 +186,10 @@ VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','
                     && ReadBool(ReadDictionary(empty, "conversationRecovery"), "canContinue", false)
                     && SourceCount("empty_recovery") == 1
                     && ReadString(ReadDictionary(empty, "inputRecovery"), "status", "") == "player_input_retained");
-                using (var connection = Program.OpenCampaignConnection(campaign))
-                    Check("failed_generation_has_no_npc_or_acceptance", !Program.QuerySql(connection,
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                    Check("failed_generation_has_no_npc_or_acceptance", !ReignDatabase.QuerySql(connection,
                         "SELECT * FROM conversation_turns WHERE channel='empty_recovery' AND role='npc';").Any()
-                        && !Program.QuerySql(connection, "SELECT * FROM conversation_route_acceptance WHERE unit_id=$id;",
+                        && !ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_route_acceptance WHERE unit_id=$id;",
                             TestDict("id", emptyContext.Unit)).Any());
                 var retried = GenerateRouteConversation(emptyContext, Program.CloneDictionary(request), "No native effects.", 800,
                     _ => TestDict("ok", true, "content", Json.Serialize(TestDict("reply", "We can discuss the gate."))));

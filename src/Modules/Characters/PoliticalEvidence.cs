@@ -37,9 +37,9 @@ namespace ReignBetaServer
             GovernmentPoliticalProfile profile, double worldDay)
         {
             if (worldDay < 0) return profile;
-            using var connection = Program.OpenCampaignConnection(campaign);
+            using var connection = ReignDatabase.OpenCampaignConnection(campaign);
             DialogueService.EnsureAcceptedConversationUnitSchema(connection);
-            var receipts = Program.QuerySql(connection, @"SELECT receipt_json FROM conversation_accepted_units
+            var receipts = ReignDatabase.QuerySql(connection, @"SELECT receipt_json FROM conversation_accepted_units
 WHERE receipt_json::jsonb->'politicalReflection'->>'heroId'=$hero
 AND receipt_json::jsonb->'politicalReflection'->>'timelineId'=$timeline
 ORDER BY created_ts,unit_id;", TestDict("hero", hero, "timeline", profile.TimelineId));

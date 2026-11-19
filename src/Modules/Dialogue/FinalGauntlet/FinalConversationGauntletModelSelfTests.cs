@@ -159,7 +159,7 @@ namespace ReignBetaServer
                     && recordAttempt != null
                     && loadRun != null)
                 {
-                    using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                    using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                     {
                         ensureSchema.Invoke(null, new object[] { connection });
                         FinalGauntletCaseDescriptor scheduled =

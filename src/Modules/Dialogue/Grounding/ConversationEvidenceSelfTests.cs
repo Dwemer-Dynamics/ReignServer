@@ -180,12 +180,12 @@ namespace ReignBetaServer
                 Check("explicit_start_has_logical_id", ReadBool(first, "ok", false) && ReadString(first, "logicalConversationId", "").Length > 0, first);
                 var replay = ConversationStartApi(Program.CloneDictionary(start));
                 Check("session_start_retry_idempotent", ReadBool(replay, "idempotent", false), replay);
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     var next = TestDict("timelineId", "fixture", "continuedFromSessionId", "session-a", "continuationReason", "scene_transition");
                     Check("open_parent_cannot_be_resumed", !ReadBool(PrepareLogicalConversation(connection, next,
                         campaign, "npc", "player", "session-b"), "ok", true));
-                    Program.ExecuteSql(connection, "UPDATE conversation_sessions SET status='closed',close_reason='scene_transition' WHERE session_id='session-a';");
+                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_sessions SET status='closed',close_reason='scene_transition' WHERE session_id='session-a';");
                     var continued = PrepareLogicalConversation(connection, next, campaign, "npc", "player", "session-b");
                     Check("scene_transition_keeps_logical_id", ReadBool(continued, "ok", false)
                         && ReadString(continued, "logicalConversationId", "") == ReadString(first, "logicalConversationId", ""), continued);
@@ -200,7 +200,7 @@ namespace ReignBetaServer
                         "I would choose the old orchard.", "in_person", 5d, 2L, "", new List<string> { "npc", "player" }, context);
                     InsertConversationTurn(connection, "reciprocal", "session-a", "event-r", 2, "exchange-r", "player", "player", "Player",
                         "And what quiet place would you choose?", "in_person", 5d, 3L, "", new List<string> { "npc", "player" }, context);
-                    var anchor = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='question';").Single();
+                    var anchor = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='question';").Single();
                     var bundle = ExpandConversationSequence(connection, new List<Dictionary<string, object>> { anchor },
                         new Program.KnowledgeAccessContext { NpcId = "npc", TimelineId = "fixture", WorldDay = 5d });
                     Check("question_answer_reciprocal_whole_sequence", bundle.Select(r => ReadString(r, "turn_id", "")).SequenceEqual(new[] { "question", "answer", "reciprocal" }), bundle);
@@ -208,7 +208,7 @@ namespace ReignBetaServer
                     var compact = ExpandPrecisionQuestionContext(connection, new List<Dictionary<string, object>> { anchor }, compactContext);
                     Check("compact_question_keeps_answer_and_reciprocal", compact.Select(r => ReadString(r, "turn_id", ""))
                         .SequenceEqual(new[] { "question", "answer", "reciprocal" }));
-                    var answering = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='answer';").Single();
+                    var answering = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='answer';").Single();
                     Check("compact_answer_keeps_question_owner", ExpandPrecisionQuestionContext(connection,
                         new List<Dictionary<string, object>> { answering }, compactContext).Any(r => ReadString(r, "turn_id", "") == "question"));
                     var earlyContext = new Program.KnowledgeAccessContext { NpcId = "npc", TimelineId = "fixture", WorldDay = 5d, AsOfTimestamp = 1L };
@@ -222,12 +222,12 @@ namespace ReignBetaServer
                             "I accept the orchard road.", "in_person", 5d, 11L, "", new List<string> { "npc", "player" }, context);
                         InsertConversationTurn(connection, "other-topic", "session-a", "event-other", 12, "exchange-other", "player", "player", "Player",
                             "Now let us discuss the unrelated fishing contest.", "in_person", 5d, 12L, "", new List<string> { "npc", "player" }, context);
-                        var core = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE exchange_id='exchange-topic' ORDER BY turn_order;");
+                        var core = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE exchange_id='exchange-topic' ORDER BY turn_order;");
                         Check("compact_statement_avoids_unrelated_adjacent_bundle", ExpandPrecisionQuestionContext(connection, core, compactContext).Count == 2
                             && ExpandConversationSequence(connection, core, compactContext).Count == 3);
-                        Program.ExecuteSql(connection, "UPDATE conversation_turns SET text='Will you stay here?' WHERE turn_id='topic-npc';");
-                        Program.ExecuteSql(connection, "UPDATE conversation_turns SET participants_json='[\"player\",\"other-npc\"]' WHERE turn_id='other-topic';");
-                        core = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE exchange_id='exchange-topic' ORDER BY turn_order;");
+                        ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET text='Will you stay here?' WHERE turn_id='topic-npc';");
+                        ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET participants_json='[\"player\",\"other-npc\"]' WHERE turn_id='other-topic';");
+                        core = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE exchange_id='exchange-topic' ORDER BY turn_order;");
                         Check("compact_question_does_not_skip_unheard_answer", ExpandPrecisionQuestionContext(connection, core, compactContext).Count == 2);
                         narrow.Rollback();
                     }
@@ -246,8 +246,8 @@ namespace ReignBetaServer
                                 "chain-exchange-" + ((i + 1) / 2), chain[i].Role, chain[i].Role == "npc" ? "npc" : "player",
                                 chain[i].Role == "npc" ? "Mira" : "Player", chain[i].Text, "in_person", 5d, 20L + i,
                                 "", new List<string> { "npc", "player" }, context);
-                        var questionAnchor = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='chain-0';");
-                        var answerAnchor = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE exchange_id='chain-exchange-1' ORDER BY turn_order;");
+                        var questionAnchor = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='chain-0';");
+                        var answerAnchor = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE exchange_id='chain-exchange-1' ORDER BY turn_order;");
                         string[] Ids(List<Dictionary<string, object>> rows, Program.KnowledgeAccessContext access = null) =>
                             ExpandPrecisionQuestionContext(connection, rows, access ?? compactContext)
                                 .Select(row => ReadString(row, "turn_id", "")).ToArray();
@@ -260,15 +260,15 @@ namespace ReignBetaServer
                             NpcId = "npc", TimelineId = "fixture", WorldDay = 5d, AsOfTimestamp = 23L };
                         Check("compact_return_answer_cannot_cross_historical_cutoff",
                             Ids(questionAnchor, untilReturnQuestion).SequenceEqual(completeIds.Take(4)));
-                        Program.ExecuteSql(connection, "UPDATE conversation_turns SET participants_json='[\"player\",\"other-npc\"]' WHERE turn_id='chain-3';");
+                        ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET participants_json='[\"player\",\"other-npc\"]' WHERE turn_id='chain-3';");
                         Check("compact_return_chain_stops_at_unheard_question", Ids(questionAnchor).SequenceEqual(completeIds.Take(3)));
-                        Program.ExecuteSql(connection, "UPDATE conversation_turns SET participants_json='[\"npc\",\"player\"]' WHERE turn_id='chain-3';");
-                        Program.ExecuteSql(connection, "UPDATE conversation_turns SET participants_json='[\"player\",\"other-npc\"]',speaker_id='other-npc' WHERE turn_id='chain-4';");
+                        ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET participants_json='[\"npc\",\"player\"]' WHERE turn_id='chain-3';");
+                        ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET participants_json='[\"player\",\"other-npc\"]',speaker_id='other-npc' WHERE turn_id='chain-4';");
                         Check("compact_return_chain_excludes_other_speakers_private_answer", Ids(answerAnchor).SequenceEqual(completeIds.Take(4)));
-                        Program.ExecuteSql(connection, "UPDATE conversation_turns SET participants_json='[\"npc\",\"player\"]',speaker_id='npc' WHERE turn_id='chain-4';");
+                        ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET participants_json='[\"npc\",\"player\"]',speaker_id='npc' WHERE turn_id='chain-4';");
                         foreach (string unrelated in new[] { "What does grain cost?", "*I wonder how about you?* We can leave soon." })
                         {
-                            Program.ExecuteSql(connection, "UPDATE conversation_turns SET text=$text WHERE turn_id='chain-3';", TestDict("text", unrelated));
+                            ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET text=$text WHERE turn_id='chain-3';", TestDict("text", unrelated));
                             Check("compact_return_context_does_not_follow_new_topic_or_private_question_" + unrelated.Length,
                                 Ids(answerAnchor).SequenceEqual(completeIds.Take(3)));
                         }
@@ -288,8 +288,8 @@ namespace ReignBetaServer
                                 "statement-exchange-" + i / 2, chain[i].Role, chain[i].Role == "npc" ? "npc" : "player",
                                 chain[i].Role == "npc" ? "Mira" : "Player", chain[i].Text, "in_person", 5d, 40L + i,
                                 "", new List<string> { "npc", "player" }, context);
-                        var proposal = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE exchange_id='statement-exchange-0' ORDER BY turn_order;");
-                        var reply = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE exchange_id='statement-exchange-1' ORDER BY turn_order;");
+                        var proposal = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE exchange_id='statement-exchange-0' ORDER BY turn_order;");
+                        var reply = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE exchange_id='statement-exchange-1' ORDER BY turn_order;");
                         string[] Ids(List<Dictionary<string, object>> rows, Program.KnowledgeAccessContext access = null) =>
                             ExpandPrecisionQuestionContext(connection, rows, access ?? compactContext)
                                 .Select(row => ReadString(row, "turn_id", "")).ToArray();
@@ -302,26 +302,26 @@ namespace ReignBetaServer
                             && ReadString(exact.Single(r => ReadString(r, "turn_id", "") == "statement-2"), "speaker_id", "") == "player");
                         Check("compact_statement_cannot_pull_future_reply", Ids(proposal, new Program.KnowledgeAccessContext {
                             NpcId = "npc", TimelineId = "fixture", WorldDay = 5d, AsOfTimestamp = 41L }).SequenceEqual(linked.Take(2)));
-                        Program.ExecuteSql(connection, "UPDATE conversation_turns SET participants_json='[\"player\",\"other-npc\"]' WHERE turn_id='statement-2';");
+                        ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET participants_json='[\"player\",\"other-npc\"]' WHERE turn_id='statement-2';");
                         Check("compact_statement_stops_at_unheard_reply_without_skipping_to_ack", Ids(proposal).SequenceEqual(linked.Take(2)));
-                        Program.ExecuteSql(connection, "UPDATE conversation_turns SET participants_json='[\"npc\",\"player\"]' WHERE turn_id='statement-2';");
-                        Program.ExecuteSql(connection, "UPDATE conversation_turns SET session_id='session-other' WHERE turn_id IN ('statement-2','statement-3');");
+                        ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET participants_json='[\"npc\",\"player\"]' WHERE turn_id='statement-2';");
+                        ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET session_id='session-other' WHERE turn_id IN ('statement-2','statement-3');");
                         Check("compact_statement_does_not_link_across_storage_sessions", Ids(proposal).SequenceEqual(linked.Take(2)));
-                        Program.ExecuteSql(connection, "UPDATE conversation_turns SET session_id='session-a' WHERE turn_id IN ('statement-2','statement-3');");
-                        Program.ExecuteSql(connection, "UPDATE conversation_turns SET text='Yes, I hear you.' WHERE turn_id='statement-4';");
+                        ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET session_id='session-a' WHERE turn_id IN ('statement-2','statement-3');");
+                        ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET text='Yes, I hear you.' WHERE turn_id='statement-4';");
                         Check("compact_statement_reply_hop_is_bounded", Ids(proposal).SequenceEqual(linked));
-                        Program.ExecuteSql(connection, "UPDATE conversation_turns SET text=$text WHERE turn_id='statement-4';", TestDict("text", chain[4].Text));
+                        ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET text=$text WHERE turn_id='statement-4';", TestDict("text", chain[4].Text));
                         foreach (string direct in new[] { "No, I will not leave my post.", "Not yet. I need time to think.",
                             "I decline your offer.", "Agreed, but only if the council approves." })
                         {
-                            Program.ExecuteSql(connection, "UPDATE conversation_turns SET text=$text WHERE turn_id='statement-2';", TestDict("text", direct));
+                            ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET text=$text WHERE turn_id='statement-2';", TestDict("text", direct));
                             Check("compact_statement_preserves_reply_without_judging_agreement_" + direct.Length, Ids(proposal).SequenceEqual(linked));
                         }
                         foreach (string unrelated in new[] { "Now let us discuss the fishing contest.",
                             "*I think yes, but do not say it.* The lamps are bright.", "She said yes to someone else.",
                             "\"Yes,\" I might say if the terms changed.", "If I agree, I might have to leave." })
                         {
-                            Program.ExecuteSql(connection, "UPDATE conversation_turns SET text=$text WHERE turn_id='statement-2';", TestDict("text", unrelated));
+                            ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET text=$text WHERE turn_id='statement-2';", TestDict("text", unrelated));
                             Check("compact_statement_excludes_unrelated_private_quoted_hypothetical_cues_" + unrelated.Length,
                                 Ids(proposal).SequenceEqual(linked.Take(2)));
                         }
@@ -331,7 +331,7 @@ namespace ReignBetaServer
                         "conversationSessionId", "session-a"));
                     using (var rarity = connection.BeginTransaction())
                     {
-                        Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,channel,status,start_ts,
+                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,channel,status,start_ts,
 participants_json,payload_json) VALUES('rarity-scene',$campaign,'npc','player','in_person','closed',10,'[""npc"",""player""]','{""timelineId"":""fixture""}');", TestDict("campaign", campaign));
                         var audience = new List<string> { "npc", "player" };
                         for (int i = 0; i < 25; i++)
@@ -402,7 +402,7 @@ participants_json,payload_json) VALUES('rarity-scene',$campaign,'npc','player','
                     var oldLink = TestDict("relatedTurnId", "question", "relatedQuote", "What quiet place would you choose?", "relationKind", "answer",
                         "subject", "Quiet orchard", "worldDay", 5d);
                     ConversationContinuityLinkError(connection, oldLink, "npc", "fixture", 5d);
-                    void AddLink(string id, Dictionary<string, object> value, long updated) => Program.ExecuteSql(connection,
+                    void AddLink(string id, Dictionary<string, object> value, long updated) => ReignDatabase.ExecuteSql(connection,
                         @"INSERT INTO conversation_continuity(record_id,timeline_id,owner_id,peer_id,kind,status,importance,revision,source_event_id,source_turn_id,updated_ts,payload_json)
 VALUES($id,'fixture','npc','player','episode','resolved',0.5,1,'event-a','answer',$ts,$payload);",
                         TestDict("id", id, "ts", updated, "payload", Json.Serialize(value)));
@@ -456,7 +456,7 @@ VALUES($id,'fixture','npc','player','episode','resolved',0.5,1,'event-a','answer
                     "playerId", "player", "sessionId", "session-c", "continuedFromSessionId", "session-a",
                     "continuationReason", "scene_transition"));
                 Check("parent_handoff_consumed_once", !ReadBool(duplicate, "ok", true));
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     InsertConversationTurn(connection, "answer-after-transition", "session-b", "event-after", 0, "exchange-after", "npc", "npc", "Mira",
                         "I would choose the quiet mill. You answered my question before we moved.", "in_person", 5d, 7L, "",
@@ -471,7 +471,7 @@ VALUES($id,'fixture','npc','player','episode','resolved',0.5,1,'event-a','answer
                     var asOf = Program.BuildKnowledgeAccessContext("npc", "player", "", TestDict("timelineId", "fixture", "worldDay", 5d, "memoryAsOfTimestamp", 3L));
                     Check("continued_history_respects_as_of_before_limit", ReadLogicalConversationTurns(connection, "session-b", 2, asOf)
                         .Select(t => ReadString(t, "turn_id", "")).SequenceEqual(new[] { "answer", "reciprocal" }));
-                    Program.ExecuteSql(connection, "UPDATE conversation_sessions SET status='closed',close_reason='closed_by_player' WHERE session_id='session-b';");
+                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_sessions SET status='closed',close_reason='closed_by_player' WHERE session_id='session-b';");
                     Check("closed_player_conversation_cannot_resume", !ReadBool(PrepareLogicalConversation(connection,
                         TestDict("timelineId", "fixture", "continuedFromSessionId", "session-b", "continuationReason", "ui_continuation"),
                         campaign, "npc", "player", "session-d"), "ok", true));
@@ -484,7 +484,7 @@ VALUES($id,'fixture','npc','player','episode','resolved',0.5,1,'event-a','answer
                     for (int i = 0; i < 300; i++)
                     {
                         string later = "later-meeting-" + i;
-                        Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,start_world_day,participants_json,payload_json)
+                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,start_world_day,participants_json,payload_json)
 VALUES($session,$campaign,'npc','player','closed',$ts,$day,$participants,$payload);", TestDict("session", later, "campaign", campaign,
                             "ts", 1000L + i, "day", 6d + i, "participants", "[\"npc\",\"player\"]", "payload", "{\"timelineId\":\"fixture\"}"));
                         InsertConversationTurn(connection, later + "-p", later, later, 0, later, "player", "player", "Player",
@@ -524,7 +524,7 @@ VALUES($session,$campaign,'npc','player','closed',$ts,$day,$participants,$payloa
                 var payload = TestDict("campaignId", campaign, "timelineId", "fixture", "worldDay", 5d);
                 ConversationStartApi(TestDict("campaignId", campaign, "timelineId", "fixture", "npcId", "npc", "playerId", "player",
                     "sessionId", "citation-session", "worldDay", 5d, "ts", 1L));
-                using var connection = Program.OpenCampaignConnection(campaign);
+                using var connection = ReignDatabase.OpenCampaignConnection(campaign);
                 int order = 0;
                 foreach (string route in new[] { "dialogue_turn", "party_chat_turn", "social_event_turn" })
                 {
@@ -554,7 +554,7 @@ VALUES($session,$campaign,'npc','player','closed',$ts,$day,$participants,$payloa
                         normalized, new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
                         new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(), "conversation:citation-session", 2L,
                         new List<string> { "player", "npc" }, true, payload, existingConnection: connection);
-                    var stored = normalized.Select(write => Program.QuerySql(connection, "SELECT * FROM memories WHERE memory_id=$id;",
+                    var stored = normalized.Select(write => ReignDatabase.QuerySql(connection, "SELECT * FROM memories WHERE memory_id=$id;",
                         TestDict("id", ReadString(write, "id", ""))).Single()).ToList();
                     var validPayload = TryParseJsonObject(ReadString(stored[0], "payload_json", "{}"));
                     Check(route + "_unverified_paraphrases_excluded_from_active_index", stored.All(row =>

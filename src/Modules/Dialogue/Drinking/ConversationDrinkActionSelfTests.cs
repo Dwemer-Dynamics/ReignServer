@@ -38,21 +38,21 @@ namespace ReignBetaServer
             bool Diagnostic(Dictionary<string, object> receipt, string reason) => ReadDictionaryList(receipt, "diagnostics")
                 .Any(d => ReadString(d, "reason", "") == reason);
             Dictionary<string, object> State(string hero = "arytha") {
-                using var c = Program.OpenCampaignConnection(campaign); EnsureIntoxicationSchema(c);
-                return TryParseJsonObject(ReadString(Program.QuerySql(c, "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero;",
+                using var c = ReignDatabase.OpenCampaignConnection(campaign); EnsureIntoxicationSchema(c);
+                return TryParseJsonObject(ReadString(ReignDatabase.QuerySql(c, "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero;",
                     TestDict("hero", hero)).SingleOrDefault(), "state_json", "{}"));
             }
             Dictionary<string, object> Scene() {
-                using var c = Program.OpenCampaignConnection(campaign); EnsureIntoxicationSchema(c);
-                return TryParseJsonObject(ReadString(Program.QuerySql(c, "SELECT state_json FROM conversation_drink_scene WHERE scene_id='active';")
+                using var c = ReignDatabase.OpenCampaignConnection(campaign); EnsureIntoxicationSchema(c);
+                return TryParseJsonObject(ReadString(ReignDatabase.QuerySql(c, "SELECT state_json FROM conversation_drink_scene WHERE scene_id='active';")
                     .SingleOrDefault(), "state_json", "{}"));
             }
             void ClearScene() {
-                using var c = Program.OpenCampaignConnection(campaign); EnsureIntoxicationSchema(c);
-                Program.ExecuteSql(c, "DELETE FROM conversation_drink_scene WHERE scene_id='active';");
+                using var c = ReignDatabase.OpenCampaignConnection(campaign); EnsureIntoxicationSchema(c);
+                ReignDatabase.ExecuteSql(c, "DELETE FROM conversation_drink_scene WHERE scene_id='active';");
             }
             string Generation() {
-                using var c = Program.OpenCampaignConnection(campaign); return ReadString(ReadMemoryPrecisionState(c), "restore_generation", "");
+                using var c = ReignDatabase.OpenCampaignConnection(campaign); return ReadString(ReadMemoryPrecisionState(c), "restore_generation", "");
             }
             try
             {

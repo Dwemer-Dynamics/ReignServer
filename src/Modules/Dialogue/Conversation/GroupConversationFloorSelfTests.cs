@@ -70,12 +70,12 @@ namespace ReignBetaServer
                     TestDict("enableObservedGroupTurnStageFrame", true)) != null);
                 Check("stage_not_attested_by_queue_plan_or_different_input", BuildObservedGroupTurnStage(campaign, payload, "taren", "A later player interjection.") == null);
                 Check("stage_not_disclosed_to_absent_observer", BuildObservedGroupTurnStage(campaign, payload, "outsider", ReadString(payload, "playerText", "")) == null);
-                using (var orderConnection = Program.OpenCampaignConnection(campaign))
+                using (var orderConnection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    Program.ExecuteSql(orderConnection, "UPDATE group_conversation_contributions SET audience_json=$audience WHERE source_event_id='floor-accepted';",
+                    ReignDatabase.ExecuteSql(orderConnection, "UPDATE group_conversation_contributions SET audience_json=$audience WHERE source_event_id='floor-accepted';",
                         TestDict("audience", Json.Serialize(new[] { "taren_2" })));
                     Check("stage_audience_does_not_match_id_prefix", BuildObservedGroupTurnStage(campaign, payload, "taren", ReadString(payload, "playerText", "")) == null);
-                    Program.ExecuteSql(orderConnection, "UPDATE group_conversation_contributions SET audience_json=$audience WHERE source_event_id='floor-accepted';",
+                    ReignDatabase.ExecuteSql(orderConnection, "UPDATE group_conversation_contributions SET audience_json=$audience WHERE source_event_id='floor-accepted';",
                         TestDict("audience", Json.Serialize(new[] { "taren", "arven", "lysa", "player" })));
                     var current = ResolveQuestionSource(orderConnection, TestDict("turnId", "current_player", "speakerId", "player", "quote", "what is your view?"),
                         payload, "taren", "player", "different_npc_event", "I am listening.");
@@ -116,16 +116,16 @@ namespace ReignBetaServer
                     && quietPrompt.Contains("Queue position, an empty reply or a pending request never establishes an answer."));
                 var outsider = Program.CloneDictionary(quiet); outsider["speakerHeroStringId"] = "outsider";
                 Check("party_route_rejects_absent_speaker", !ReadBool(ApplyGroupConversationFloorToSpeaker(outsider), "ok", true));
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var heard = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE exchange_id='floor-quiet' AND status='active';");
+                    var heard = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE exchange_id='floor-quiet' AND status='active';");
                     var listener = Program.BuildKnowledgeAccessContext("taren", "player", "", quiet);
                     Check("all_quiet_retains_heard_words_without_fabricated_npc", heard.Count == 1
                         && ReadString(heard[0], "role", "") == "player"
                         && ReadString(heard[0], "text", "") == ReadString(quiet, "playerText", "")
                         && PrecisionTurnVisible(heard[0], "taren", listener));
                     GroupConversationFloorApi(quiet);
-                    Check("quiet_retry_has_one_source", Program.QuerySql(connection, "SELECT turn_id FROM conversation_turns WHERE exchange_id='floor-quiet' AND status='active';").Count == 1);
+                    Check("quiet_retry_has_one_source", ReignDatabase.QuerySql(connection, "SELECT turn_id FROM conversation_turns WHERE exchange_id='floor-quiet' AND status='active';").Count == 1);
                 }
                 var whisper = Program.CloneDictionary(payload);
                 whisper["sceneTurnId"] = "floor-whisper"; whisper["turnId"] = "floor-whisper"; whisper["contributionId"] = "floor-whisper";

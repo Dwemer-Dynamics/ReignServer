@@ -19,7 +19,7 @@ namespace ReignBetaServer
         {
             EnsureMbtiRelationshipSchema(connection);
             DialogueService.EnsureWorldHistoryLieDetectionSchema(connection);
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_relationship_receipts (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_relationship_receipts (
 receipt_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL DEFAULT '',exchange_id TEXT NOT NULL,
 source_turn_id TEXT NOT NULL DEFAULT '',observer_id TEXT NOT NULL,target_id TEXT NOT NULL,mode TEXT NOT NULL DEFAULT '',
 act_kind TEXT NOT NULL DEFAULT 'routine',severity_tier TEXT NOT NULL DEFAULT 'routine',valence TEXT NOT NULL DEFAULT 'positive',
@@ -32,22 +32,22 @@ confidence REAL NOT NULL DEFAULT 0,evidence_json TEXT NOT NULL DEFAULT '[]',modi
             summary TEXT NOT NULL DEFAULT '',current_conduct_quote TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'applied',native_application_status TEXT NOT NULL DEFAULT 'pending',
 native_applied_ts INTEGER NOT NULL DEFAULT 0,native_receipt_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,
 UNIQUE(exchange_id,observer_id,target_id));");
-            Program.EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "native_application_status", "TEXT NOT NULL DEFAULT 'pending'");
-            Program.EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "native_applied_ts", "INTEGER NOT NULL DEFAULT 0");
-            Program.EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "native_receipt_json", "TEXT NOT NULL DEFAULT '{}'");
-            Program.EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "native_pair_delta", "INTEGER NOT NULL DEFAULT 0");
-            Program.EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "gift_recipient_id", "TEXT NOT NULL DEFAULT ''");
-            Program.EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "current_conduct_quote", "TEXT NOT NULL DEFAULT ''");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_conversation_relationship_recent ON conversation_relationship_receipts(created_ts DESC);");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_conversation_relationship_pair ON conversation_relationship_receipts(observer_id,target_id,created_ts DESC);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_relationship_benefits (
+            ReignDatabase.EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "native_application_status", "TEXT NOT NULL DEFAULT 'pending'");
+            ReignDatabase.EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "native_applied_ts", "INTEGER NOT NULL DEFAULT 0");
+            ReignDatabase.EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "native_receipt_json", "TEXT NOT NULL DEFAULT '{}'");
+            ReignDatabase.EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "native_pair_delta", "INTEGER NOT NULL DEFAULT 0");
+            ReignDatabase.EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "gift_recipient_id", "TEXT NOT NULL DEFAULT ''");
+            ReignDatabase.EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "current_conduct_quote", "TEXT NOT NULL DEFAULT ''");
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_conversation_relationship_recent ON conversation_relationship_receipts(created_ts DESC);");
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_conversation_relationship_pair ON conversation_relationship_receipts(observer_id,target_id,created_ts DESC);");
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_relationship_benefits (
 benefit_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL DEFAULT '',giver_id TEXT NOT NULL,recipient_id TEXT NOT NULL,
 benefit_kind TEXT NOT NULL DEFAULT 'gift',description TEXT NOT NULL DEFAULT '',source_event_id TEXT NOT NULL DEFAULT '',source_turn_id TEXT NOT NULL DEFAULT '',
 original_delta INTEGER NOT NULL DEFAULT 0,retained_appreciation REAL NOT NULL DEFAULT 1,continued_utility REAL NOT NULL DEFAULT 1,
 status TEXT NOT NULL DEFAULT 'retained',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
 source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAULT '{}');");
-            Program.EnsureDatabaseColumn(connection, "conversation_relationship_benefits", "source_evidence_json", "TEXT NOT NULL DEFAULT '[]'");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_conversation_benefit_recipient ON conversation_relationship_benefits(recipient_id,giver_id,updated_ts DESC);");
+            ReignDatabase.EnsureDatabaseColumn(connection, "conversation_relationship_benefits", "source_evidence_json", "TEXT NOT NULL DEFAULT '[]'");
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_conversation_benefit_recipient ON conversation_relationship_benefits(recipient_id,giver_id,updated_ts DESC);");
         }
 
         internal static List<Dictionary<string, object>> NormalizeConversationRelationshipAssessments(
@@ -344,10 +344,10 @@ source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAU
 
             try
             {
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     DialogueService.EnsureCategorizedMemorySchema(connection);
-                    return Program.QuerySql(connection, @"SELECT speaker_id,speaker_name,text,turn_order,exchange_id
+                    return ReignDatabase.QuerySql(connection, @"SELECT speaker_id,speaker_name,text,turn_order,exchange_id
 FROM conversation_turns
 WHERE session_id=$session AND exchange_id<>$exchange AND role='npc' AND status='active'
 ORDER BY turn_order ASC;", new Dictionary<string, object>
@@ -537,10 +537,10 @@ ORDER BY turn_order ASC;", new Dictionary<string, object>
             Dictionary<string, Dictionary<string, object>> nativeChanges = new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
             Dictionary<string, List<string>> pairReceiptIds =
                 new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureConversationRelationshipSchema(connection);
-                Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                 try
                 {
                     foreach (IGrouping<string, Dictionary<string, object>> group in assessments
@@ -562,7 +562,7 @@ ORDER BY turn_order ASC;", new Dictionary<string, object>
                             continue;
                         }
                         string receiptId = "conversation_relation_" + DialogueService.PromptHash(exchangeId + "|" + observerId + "|" + targetId).Substring(0, 24).ToLowerInvariant();
-                        Dictionary<string, object> existing = Program.QuerySql(connection,
+                        Dictionary<string, object> existing = ReignDatabase.QuerySql(connection,
                             "SELECT * FROM conversation_relationship_receipts WHERE receipt_id=$id LIMIT 1;",
                             new Dictionary<string, object> { ["id"] = receiptId }).FirstOrDefault();
                         if (existing != null)
@@ -580,7 +580,7 @@ ORDER BY turn_order ASC;", new Dictionary<string, object>
                             ReignPostgreSqlDialect.IsPostgreSql(connection)
                                 ? "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1 FOR UPDATE;"
                                 : "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;";
-                        Dictionary<string, object> chemistry = Program.QuerySql(connection,
+                        Dictionary<string, object> chemistry = ReignDatabase.QuerySql(connection,
                             chemistrySelectSql,
                             new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
                         bool observerIsA = chemistry == null
@@ -612,7 +612,7 @@ ORDER BY turn_order ASC;", new Dictionary<string, object>
                                     + pairKey + ".");
                             int baseAB = MbtiCompatibility(typeA, typeB);
                             int baseBA = MbtiCompatibility(typeB, typeA);
-                            Program.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
+                            ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
 pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,base_chance_a_to_b,
 base_chance_b_to_a,chance_a_to_b,chance_b_to_a,
 affinity_a_to_b,affinity_b_to_a,tag_a_to_b,tag_b_to_a,
@@ -658,7 +658,7 @@ $ab,$ba,$tagAB,$tagBA,0,$day,$day,'conversation',$exchange,$shard,$version,$ts);
                                     ["mode"] = mode
                                 });
                         }
-                        chemistry = Program.QuerySql(connection,
+                        chemistry = ReignDatabase.QuerySql(connection,
                             "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                             new Dictionary<string, object> { ["pair"] = pairKey })
                             .FirstOrDefault();
@@ -688,7 +688,7 @@ $ab,$ba,$tagAB,$tagBA,0,$day,$day,'conversation',$exchange,$shard,$version,$ts);
                             ["modifiers"] = Json.Serialize(adjudicated.ContainsKey("modifiers") ? adjudicated["modifiers"] : new List<object>()), ["summary"] = ReadString(assessment, "summary", ""),
                             ["status"] = ReadString(adjudicated, "status", "applied"), ["ts"] = ts
                         };
-                        Program.ExecuteSql(connection, @"INSERT INTO conversation_relationship_receipts(
+                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_relationship_receipts(
 receipt_id,campaign_id,timeline_id,exchange_id,source_turn_id,observer_id,target_id,mode,act_kind,severity_tier,valence,
 base_delta,modifier_delta,final_delta,prior_affinity,resulting_affinity,prior_native_relation,resulting_native_relation,native_pair_delta,
   lie_check_id,benefit_event_id,gift_recipient_id,confidence,evidence_json,modifiers_json,summary,current_conduct_quote,status,created_ts)
@@ -696,7 +696,7 @@ VALUES($id,$campaign,$timeline,$exchange,$turn,$observer,$target,$mode,$act,$tie
 $priorAffinity,$resultingAffinity,$priorNative,$resultingNative,0,$lie,$benefit,$giftRecipient,$confidence,$evidence,$modifiers,$summary,$currentConductQuote,$status,$ts);", args);
                         if (finalDelta == 0)
                         {
-                            Program.ExecuteSql(connection, "UPDATE conversation_relationship_receipts SET native_application_status='skipped' WHERE receipt_id=$id;",
+                            ReignDatabase.ExecuteSql(connection, "UPDATE conversation_relationship_receipts SET native_application_status='skipped' WHERE receipt_id=$id;",
                                 new Dictionary<string, object> { ["id"] = receiptId });
                         }
                         UpdateConversationBenefitLedger(connection, campaignId, timelineId, assessment, adjudicated, receiptId, exchangeId, sourceTurnId, observerId, targetId, ts);
@@ -744,7 +744,7 @@ $priorAffinity,$resultingAffinity,$priorNative,$resultingNative,0,$lie,$benefit,
                         native["resultingNativeRelation"] = resultingNative;
                         foreach (string receiptId in atomicReceiptIds)
                         {
-                            Program.ExecuteSql(connection, @"UPDATE conversation_relationship_receipts
+                            ReignDatabase.ExecuteSql(connection, @"UPDATE conversation_relationship_receipts
 SET prior_native_relation=$prior,resulting_native_relation=$result,native_pair_delta=$delta
 WHERE receipt_id=$id;", new Dictionary<string, object>
                             {
@@ -753,15 +753,15 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
                             });
                         }
                     }
-                    Program.ExecuteSql(connection, "COMMIT;");
+                    ReignDatabase.ExecuteSql(connection, "COMMIT;");
                 }
                 catch
                 {
-                    try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                     throw;
                 }
             }
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureConversationRelationshipSchema(connection);
                 ReputationService.EnsureSocialReputationSchema(connection);
@@ -788,7 +788,7 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
                     ReputationService.SchedulePendingReputationReasonJobs(campaignId);
                 foreach (KeyValuePair<string, bool> receipt in receiptIdempotency)
                 {
-                    Dictionary<string, object> stored = Program.QuerySql(connection,
+                    Dictionary<string, object> stored = ReignDatabase.QuerySql(connection,
                         "SELECT * FROM conversation_relationship_receipts WHERE receipt_id=$id LIMIT 1;",
                         new Dictionary<string, object> { ["id"] = receipt.Key }).FirstOrDefault();
                     if (stored != null)
@@ -826,7 +826,7 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
             string exchangeId = ReadString(existing, "exchange_id", "");
             Dictionary<string, object> pairInput = FindRelationshipPair(relationshipPairs, observerId, targetId);
             int currentNative = ReadInt(pairInput, "nativeRelation", int.MinValue);
-            List<Dictionary<string, object>> pairReceipts = Program.QuerySql(connection, @"SELECT * FROM conversation_relationship_receipts
+            List<Dictionary<string, object>> pairReceipts = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_relationship_receipts
 WHERE exchange_id=$exchange AND ((observer_id=$a AND target_id=$b) OR (observer_id=$b AND target_id=$a));",
                 new Dictionary<string, object> { ["exchange"] = exchangeId, ["a"] = observerId, ["b"] = targetId });
             int priorNative = pairReceipts.Count == 0 ? ReadInt(existing, "prior_native_relation", 0) : ReadInt(pairReceipts[0], "prior_native_relation", 0);
@@ -837,7 +837,7 @@ WHERE exchange_id=$exchange AND ((observer_id=$a AND target_id=$b) OR (observer_
             {
                 foreach (string receiptId in receiptIds)
                 {
-                    Program.ExecuteSql(connection, @"UPDATE conversation_relationship_receipts
+                    ReignDatabase.ExecuteSql(connection, @"UPDATE conversation_relationship_receipts
 SET prior_native_relation=$prior,resulting_native_relation=$result,native_pair_delta=$delta,
 native_application_status='applied',native_applied_ts=$ts,native_receipt_json=$receipt
 WHERE receipt_id=$id;", new Dictionary<string, object>
@@ -886,7 +886,7 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
                 return TestDict("ok", false, "error", "Native receipt participants and measured before/after values are required and must be valid.");
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             int updated = 0;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureConversationRelationshipSchema(connection);
                 using var transaction = connection.BeginTransaction();
@@ -894,12 +894,12 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
                 // The acknowledgment update fires the revision trigger on this row, so
                 // take it for update before any receipt lock to keep one lock order.
                 string currentGeneration = receiptIds.Any(id => id.StartsWith(TerminalActionReportProtocol.ReceiptIdPrefix, StringComparison.Ordinal))
-                    ? ReadString(Program.QuerySql(connection,
+                    ? ReadString(ReignDatabase.QuerySql(connection,
                         "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR NO KEY UPDATE;").FirstOrDefault(), "restore_generation", "")
                     : "";
                 foreach (string receiptId in receiptIds.OrderBy(id => id, StringComparer.Ordinal))
                 {
-                    Dictionary<string, object> prior = Program.QuerySql(connection,
+                    Dictionary<string, object> prior = ReignDatabase.QuerySql(connection,
                         @"SELECT * FROM conversation_relationship_receipts WHERE receipt_id=$id FOR UPDATE;",
                         new Dictionary<string, object> { ["id"] = receiptId }).FirstOrDefault();
                     if (prior == null) return TestDict("ok", false, "error", "A native relationship receipt does not exist in this campaign.", "receiptId", receiptId);
@@ -966,14 +966,14 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
                         args["prior"] = actualPriorNativeRelation;
                         args["result"] = actualNativeRelation;
                         args["delta"] = effectiveDelta;
-                        Program.ExecuteSql(connection, @"UPDATE conversation_relationship_receipts
+                        ReignDatabase.ExecuteSql(connection, @"UPDATE conversation_relationship_receipts
 SET prior_native_relation=$prior,resulting_native_relation=$result,native_pair_delta=$delta,
 native_application_status='applied',native_applied_ts=$ts,native_receipt_json=$receipt
 WHERE receipt_id=$id AND native_application_status!='applied';", args);
                     }
                     else
                     {
-                        Program.ExecuteSql(connection, @"UPDATE conversation_relationship_receipts
+                        ReignDatabase.ExecuteSql(connection, @"UPDATE conversation_relationship_receipts
 SET native_application_status='applied',native_applied_ts=$ts,native_receipt_json=$receipt
 WHERE receipt_id=$id AND native_application_status!='applied';", args);
                     }
@@ -994,7 +994,7 @@ WHERE receipt_id=$id AND native_application_status!='applied';", args);
             string subjectId, string targetId, int sharedDelta, long ts)
         {
             string receiptId = TerminalActionReportProtocol.ReceiptId(actionId, timelineId, generation, reportSha256);
-            Program.ExecuteSql(connection, @"INSERT INTO conversation_relationship_receipts(
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_relationship_receipts(
 receipt_id,campaign_id,timeline_id,exchange_id,source_turn_id,observer_id,target_id,mode,act_kind,severity_tier,valence,
 base_delta,modifier_delta,final_delta,native_pair_delta,evidence_json,summary,status,native_application_status,created_ts)
 VALUES($id,$campaign,$timeline,$exchange,$action,$subject,$target,$mode,$mode,$tier,$valence,
@@ -1021,7 +1021,7 @@ $delta,0,$delta,$delta,$evidence,$summary,$status,'pending',$ts);", new Dictiona
         internal static Dictionary<string, object> CompletedActionRelationshipEffect(ReignDbConnection connection,
             string receiptId, string actionId, string timelineId, string generation, string reportSha256)
         {
-            Dictionary<string, object> row = Program.QuerySql(connection,
+            Dictionary<string, object> row = ReignDatabase.QuerySql(connection,
                 "SELECT * FROM conversation_relationship_receipts WHERE receipt_id=$id LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = receiptId }).FirstOrDefault();
             var evidence = TryParseJsonObject(ReadString(row, "evidence_json", "{}")) ?? new Dictionary<string, object>();

@@ -21,15 +21,15 @@ namespace ReignBetaServer
         private static void EnsurePublicWorldNewsKnowledge(ReignDbConnection connection)
         {
             const string marker = "public_world_news_legacy_rules_v2";
-            if (ReadString(Program.QuerySql(connection, "SELECT value FROM schema_meta WHERE key=$key;", TestDict("key", marker)).FirstOrDefault(), "value", "") == "1") return;
+            if (ReadString(ReignDatabase.QuerySql(connection, "SELECT value FROM schema_meta WHERE key=$key;", TestDict("key", marker)).FirstOrDefault(), "value", "") == "1") return;
             // Derived access only, never rewriting a source, deadline or article.
-            foreach (var row in Program.QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE e.is_complete=1 AND " + PublicWorldHistorySql)
+            foreach (var row in ReignDatabase.QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE e.is_complete=1 AND " + PublicWorldHistorySql)
                 .Where(ValidPublicWorldHistory))
-                Program.ExecuteSql(connection, @"INSERT INTO world_history_knowledge_rules
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_knowledge_rules
 (rule_id,event_id,audience_type,audience_id,available_day,acquisition_mode,confidence)
 VALUES($rule,$event,'global','all',$day,'public_world_news',1) ON CONFLICT(rule_id) DO NOTHING;",
                     TestDict("rule", ReadString(row, "event_id", "") + ":public_world_news", "event", ReadString(row, "event_id", ""), "day", ReadDouble(row, "world_day", 0)));
-            Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');", TestDict("key", marker));
+            ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');", TestDict("key", marker));
         }
 
         internal static bool ValidPublicWorldHistory(Dictionary<string, object> row)
@@ -78,11 +78,11 @@ VALUES($rule,$event,'global','all',$day,'public_world_news',1) ON CONFLICT(rule_
             }
             // Public announcements have their own ambient budget; tournament
             // traffic cannot displace the latest sentence or other public news.
-            Add(DistinctPublicWorldHistory(Program.QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE " + visible
+            Add(DistinctPublicWorldHistory(ReignDatabase.QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE " + visible
                 + " ORDER BY CASE WHEN e.event_type LIKE 'tournament_%' THEN 1 ELSE 0 END,e.world_day DESC,e.sequence DESC LIMIT 24;", args)).Take(6), false);
             // Resolve named subjects against the full eligible public archive,
             // before any ambient limit. Word boundaries prevent Ira/Tirana aliasing.
-            var subjects = Program.QuerySql(connection, @"SELECT DISTINCT n.entity_id,n.name_snapshot FROM world_history_entities n
+            var subjects = ReignDatabase.QuerySql(connection, @"SELECT DISTINCT n.entity_id,n.name_snapshot FROM world_history_entities n
 JOIN world_history_events e ON e.event_id=n.event_id WHERE " + visible + @"
 AND LENGTH(n.name_snapshot)>=3 AND LOWER($topic) LIKE '%' || LOWER(n.name_snapshot) || '%';", args)
                 .Where(n => Regex.IsMatch(topic ?? "", @"(?<![\p{L}\p{Nd}])" + Regex.Escape(ReadString(n, "name_snapshot", ""))
@@ -91,7 +91,7 @@ AND LENGTH(n.name_snapshot)>=3 AND LOWER($topic) LIKE '%' || LOWER(n.name_snapsh
             if (subjects.Count > 0)
             {
                 args["subjects"] = Json.Serialize(subjects);
-                Add(Program.QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE " + visible + @"
+                Add(ReignDatabase.QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE " + visible + @"
 AND EXISTS(SELECT 1 FROM world_history_entities n JOIN jsonb_array_elements_text(CAST($subjects AS jsonb)) s
 ON s.value=n.entity_id WHERE n.event_id=e.event_id) ORDER BY e.world_day DESC,e.sequence DESC;", args), true);
             }
@@ -101,7 +101,7 @@ ON s.value=n.entity_id WHERE n.event_id=e.event_id) ORDER BY e.world_day DESC,e.
             if (fts.Length > 0)
             {
                 args["query"] = fts;
-                Add(Program.QuerySql(connection, @"SELECT e.* FROM world_history_fts JOIN world_history_events e ON e.event_id=world_history_fts.event_id
+                Add(ReignDatabase.QuerySql(connection, @"SELECT e.* FROM world_history_fts JOIN world_history_events e ON e.event_id=world_history_fts.event_id
 WHERE world_history_fts MATCH $query AND " + visible + " ORDER BY e.world_day DESC,e.sequence DESC LIMIT 24;", args), true);
             }
             return DistinctPublicWorldHistory(rows.Values).Where(row => !observer.PlayerIdentityUnknown || !WorldSimulationService.QueryWorldHistoryEntities(connection,
@@ -166,7 +166,7 @@ WHERE world_history_fts MATCH $query AND " + visible + " ORDER BY e.world_day DE
             long ceiling = sequence;
             for (int depth = 0; depth < 32; depth++)
             {
-                var branch = Program.QuerySql(connection, "SELECT * FROM world_history_timelines WHERE timeline_id=$branch;", TestDict("branch", timeline)).SingleOrDefault();
+                var branch = ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_timelines WHERE timeline_id=$branch;", TestDict("branch", timeline)).SingleOrDefault();
                 string parent = ReadString(branch, "parent_timeline_id", "");
                 if (parent.Length == 0) break;
                 if (!seen.Add(parent)) return "(" + current + ")";
@@ -205,23 +205,23 @@ WHERE world_history_fts MATCH $query AND " + visible + " ORDER BY e.world_day DE
         internal static void EnsureImmediateTournamentKnowledge(ReignDbConnection connection)
         {
             const string marker = "world_history_immediate_tournament_news_v1";
-            if (ReadString(Program.QuerySql(connection, "SELECT value FROM schema_meta WHERE key=$key;",
+            if (ReadString(ReignDatabase.QuerySql(connection, "SELECT value FROM schema_meta WHERE key=$key;",
                 new Dictionary<string, object> { ["key"] = marker }).FirstOrDefault(), "value", "") == "1") return;
 
             // Add derived access rules to the existing events. Never rewrite an
             // outcome, duplicate an event, or publish a participant-only event.
-            Program.ExecuteSql(connection, @"INSERT INTO world_history_knowledge_rules
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_knowledge_rules
 (rule_id,event_id,audience_type,audience_id,available_day,acquisition_mode,confidence)
 SELECT event_id || ':public_tournament_news',event_id,'global','all',world_day,'public_tournament_news',1
 FROM world_history_events WHERE event_type IN ('tournament_started','tournament_finished')
 AND dissemination_class IN ('ordinary','major_world')
 ON CONFLICT(rule_id) DO UPDATE SET available_day=excluded.available_day;");
-            Program.ExecuteSql(connection, @"UPDATE world_history_knowledge_rules SET available_day=
+            ReignDatabase.ExecuteSql(connection, @"UPDATE world_history_knowledge_rules SET available_day=
 (SELECT e.world_day FROM world_history_events e WHERE e.event_id=world_history_knowledge_rules.event_id)
 WHERE acquisition_mode IN ('realm_news','major_world_news') AND event_id IN
 (SELECT event_id FROM world_history_events WHERE event_type IN ('tournament_started','tournament_finished')
 AND dissemination_class IN ('ordinary','major_world'));");
-            Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');",
+            ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');",
                 new Dictionary<string, object> { ["key"] = marker });
         }
 
@@ -273,12 +273,12 @@ OR (k.audience_type='kingdom' AND k.audience_id=$kingdom) OR k.audience_type='gl
 
             if (recognize)
             {
-                documentedPlayerTournamentWins = ReadInt(Program.QuerySql(connection,
+                documentedPlayerTournamentWins = ReadInt(ReignDatabase.QuerySql(connection,
                     "SELECT COUNT(DISTINCT e.event_id) AS count FROM world_history_events e WHERE " + visible + @"
 AND e.event_type='tournament_finished'
 AND EXISTS(SELECT 1 FROM world_history_entities n WHERE n.event_id=e.event_id
 AND n.entity_id=$player AND n.role LIKE '%winner%');", parameters).FirstOrDefault(), "count", 0);
-                var achievements = Program.QuerySql(connection, @"SELECT e.* FROM world_history_events e WHERE " + visible + @"
+                var achievements = ReignDatabase.QuerySql(connection, @"SELECT e.* FROM world_history_events e WHERE " + visible + @"
 AND e.event_type='tournament_finished'
 AND EXISTS(SELECT 1 FROM world_history_entities n WHERE n.event_id=e.event_id
 AND n.entity_id=$player AND n.role LIKE '%winner%')
@@ -292,7 +292,7 @@ ORDER BY CASE WHEN e.location_id=$location THEN 0 ELSE 1 END,e.sequence DESC LIM
             if (worldQuestion)
             {
                 if (tournamentQuestion)
-                    add(Program.QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE " + visible
+                    add(ReignDatabase.QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE " + visible
                         + @" AND e.event_type IN ('tournament_started','tournament_finished')
 ORDER BY CASE WHEN e.location_id=$location THEN 0 ELSE 1 END,e.sequence DESC LIMIT 24;", parameters));
 
@@ -300,7 +300,7 @@ ORDER BY CASE WHEN e.location_id=$location THEN 0 ELSE 1 END,e.sequence DESC LIM
                 if (!string.IsNullOrWhiteSpace(ftsQuery))
                 {
                     parameters["query"] = ftsQuery;
-                    add(Program.QuerySql(connection, @"SELECT e.* FROM world_history_fts
+                    add(ReignDatabase.QuerySql(connection, @"SELECT e.* FROM world_history_fts
 JOIN world_history_events e ON e.event_id=world_history_fts.event_id
 WHERE world_history_fts MATCH $query AND " + visible + " AND " + eligible
                         + " ORDER BY e.sequence DESC LIMIT 48;", parameters));
@@ -324,7 +324,7 @@ WHERE world_history_fts MATCH $query AND " + visible + " AND " + eligible
                 }
                 if (ids.Count > 0)
                 {
-                    add(Program.QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE " + visible
+                    add(ReignDatabase.QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE " + visible
                         + " AND " + eligible + " AND e.event_id IN (" + string.Join(",", ids) + ");", parameters));
                     foreach (var pair in scores)
                         if (candidates.TryGetValue(pair.Key, out var row)) row["vectorSemanticScore"] = pair.Value;

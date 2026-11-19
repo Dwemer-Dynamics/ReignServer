@@ -75,34 +75,34 @@ namespace ReignBetaServer
 
         private static void EnsureWorldHistoryRetentionSchema(ReignDbConnection connection)
         {
-            Program.EnsureDatabaseColumn(connection, "world_history_events", "retention_class",
+            ReignDatabase.EnsureDatabaseColumn(connection, "world_history_events", "retention_class",
                 "TEXT NOT NULL DEFAULT 'significant'");
-            Program.EnsureDatabaseColumn(connection, "world_history_events", "player_involved",
+            ReignDatabase.EnsureDatabaseColumn(connection, "world_history_events", "player_involved",
                 "INTEGER NOT NULL DEFAULT 0");
-            Program.ExecuteSql(connection,
+            ReignDatabase.ExecuteSql(connection,
                 "CREATE INDEX IF NOT EXISTS idx_wh_retention_day ON world_history_events(timeline_id,retention_class,world_day,event_id);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_daily_aggregates (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_daily_aggregates (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,day_key INTEGER NOT NULL,
 event_type TEXT NOT NULL,category TEXT NOT NULL,retention_class TEXT NOT NULL,
 kingdom_id TEXT NOT NULL DEFAULT '',player_involved INTEGER NOT NULL DEFAULT 0,
 event_count INTEGER NOT NULL DEFAULT 0,quantity_total REAL NOT NULL DEFAULT 0,
 first_world_day REAL NOT NULL,last_world_day REAL NOT NULL,updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,day_key,event_type,category,retention_class,kingdom_id,player_involved));");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_seasonal_aggregates (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_seasonal_aggregates (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,season_start_day REAL NOT NULL,
 event_type TEXT NOT NULL,category TEXT NOT NULL,retention_class TEXT NOT NULL,
 kingdom_id TEXT NOT NULL DEFAULT '',player_involved INTEGER NOT NULL DEFAULT 0,
 event_count INTEGER NOT NULL DEFAULT 0,quantity_total REAL NOT NULL DEFAULT 0,
 first_world_day REAL NOT NULL,last_world_day REAL NOT NULL,updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,season_start_day,event_type,category,retention_class,kingdom_id,player_involved));");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_daily_aggregate_day ON world_history_daily_aggregates(timeline_id,day_key);");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_seasonal_aggregate_day ON world_history_seasonal_aggregates(timeline_id,season_start_day);");
-            string retentionRepair = ReadString(Program.QuerySql(connection,
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_daily_aggregate_day ON world_history_daily_aggregates(timeline_id,day_key);");
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_seasonal_aggregate_day ON world_history_seasonal_aggregates(timeline_id,season_start_day);");
+            string retentionRepair = ReadString(ReignDatabase.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='world_history_retention_repair_v2' LIMIT 1;")
                 .FirstOrDefault(), "value", "");
             if (retentionRepair != "1")
             {
-                Program.ExecuteSql(connection, @"UPDATE world_history_events
+                ReignDatabase.ExecuteSql(connection, @"UPDATE world_history_events
 SET retention_class='routine'
 WHERE retention_class='consequential' AND event_type IN (
 'settlement_entered','settlement_left','troops_recruited',
@@ -111,18 +111,18 @@ WHERE retention_class='consequential' AND event_type IN (
 'prisoners_sold','mobile_party_created','mobile_party_destroyed',
 'party_leader_changed','ship_created','ship_destroyed','ship_repaired',
 'ship_owner_changed','issue_updated');");
-                Program.ExecuteSql(connection, @"INSERT INTO schema_meta(key,value)
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO schema_meta(key,value)
 VALUES('world_history_retention_repair_v2','1')
 ON CONFLICT(key) DO UPDATE SET value='1';");
             }
-            string lootRepair = ReadString(Program.QuerySql(connection,
+            string lootRepair = ReadString(ReignDatabase.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='world_history_retention_repair_v3' LIMIT 1;")
                 .FirstOrDefault(), "value", "");
             if (lootRepair != "1")
             {
-                Program.ExecuteSql(connection, "CREATE TEMP TABLE IF NOT EXISTS world_history_removed_npc_loot_ids(event_id TEXT PRIMARY KEY);");
-                Program.ExecuteSql(connection, "DELETE FROM world_history_removed_npc_loot_ids;");
-                Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO world_history_removed_npc_loot_ids(event_id)
+                ReignDatabase.ExecuteSql(connection, "CREATE TEMP TABLE IF NOT EXISTS world_history_removed_npc_loot_ids(event_id TEXT PRIMARY KEY);");
+                ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_removed_npc_loot_ids;");
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO world_history_removed_npc_loot_ids(event_id)
 SELECT event_id FROM world_history_events
 WHERE event_type IN ('items_looted','loot_distributed') AND player_involved=0
 AND NOT EXISTS (
@@ -130,17 +130,17 @@ AND NOT EXISTS (
     WHERE entity.event_id=world_history_events.event_id
       AND (LOWER(entity.entity_id) IN ('main_hero','main_party')
            OR LOWER(entity.party_id)='main_party'));");
-                Program.ExecuteSql(connection, "DELETE FROM world_history_fts WHERE event_id IN (SELECT event_id FROM world_history_removed_npc_loot_ids);");
-                Program.ExecuteSql(connection, "DELETE FROM world_history_knowledge_rules WHERE event_id IN (SELECT event_id FROM world_history_removed_npc_loot_ids);");
-                Program.ExecuteSql(connection, "DELETE FROM world_history_entities WHERE event_id IN (SELECT event_id FROM world_history_removed_npc_loot_ids);");
+                ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_fts WHERE event_id IN (SELECT event_id FROM world_history_removed_npc_loot_ids);");
+                ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_knowledge_rules WHERE event_id IN (SELECT event_id FROM world_history_removed_npc_loot_ids);");
+                ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_entities WHERE event_id IN (SELECT event_id FROM world_history_removed_npc_loot_ids);");
                 if (TableExists(connection, "embedding_jobs"))
-                    Program.ExecuteSql(connection, "DELETE FROM embedding_jobs WHERE source_type='world_history_event' AND source_id IN (SELECT event_id FROM world_history_removed_npc_loot_ids);");
+                    ReignDatabase.ExecuteSql(connection, "DELETE FROM embedding_jobs WHERE source_type='world_history_event' AND source_id IN (SELECT event_id FROM world_history_removed_npc_loot_ids);");
                 if (TableExists(connection, "embedding_documents"))
-                    Program.ExecuteSql(connection, "DELETE FROM embedding_documents WHERE source_type='world_history_event' AND source_id IN (SELECT event_id FROM world_history_removed_npc_loot_ids);");
-                Program.ExecuteSql(connection, "DELETE FROM world_history_events WHERE event_id IN (SELECT event_id FROM world_history_removed_npc_loot_ids);");
-                Program.ExecuteSql(connection, "DELETE FROM world_history_daily_aggregates WHERE event_type IN ('items_looted','loot_distributed') AND player_involved=0;");
-                Program.ExecuteSql(connection, "DELETE FROM world_history_seasonal_aggregates WHERE event_type IN ('items_looted','loot_distributed') AND player_involved=0;");
-                Program.ExecuteSql(connection, @"INSERT INTO schema_meta(key,value)
+                    ReignDatabase.ExecuteSql(connection, "DELETE FROM embedding_documents WHERE source_type='world_history_event' AND source_id IN (SELECT event_id FROM world_history_removed_npc_loot_ids);");
+                ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_events WHERE event_id IN (SELECT event_id FROM world_history_removed_npc_loot_ids);");
+                ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_daily_aggregates WHERE event_type IN ('items_looted','loot_distributed') AND player_involved=0;");
+                ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_seasonal_aggregates WHERE event_type IN ('items_looted','loot_distributed') AND player_involved=0;");
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO schema_meta(key,value)
 VALUES('world_history_retention_repair_v3','1')
 ON CONFLICT(key) DO UPDATE SET value='1';");
             }
@@ -219,7 +219,7 @@ ON CONFLICT(key) DO UPDATE SET value='1';");
             // before opening its data transaction. Re-entering schema setup here
             // would take pg_advisory_xact_lock for the full compaction batch and
             // block unrelated live APIs behind maintenance work.
-            List<Dictionary<string, object>> expired = Program.QuerySql(connection, @"
+            List<Dictionary<string, object>> expired = ReignDatabase.QuerySql(connection, @"
 SELECT event_id,campaign_id,timeline_id,world_day,event_type,category,retention_class,player_involved,payload_json
 FROM world_history_events
 WHERE timeline_id=$timeline AND (
@@ -246,9 +246,9 @@ ORDER BY world_day,event_id LIMIT " + batchSize.ToString(CultureInfo.InvariantCu
                 new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
             if (ids.Count > 0)
             {
-                Program.ExecuteSql(connection,
+                ReignDatabase.ExecuteSql(connection,
                     "CREATE TEMP TABLE IF NOT EXISTS world_history_expired_ids(event_id TEXT PRIMARY KEY);");
-                Program.ExecuteSql(connection, "DELETE FROM world_history_expired_ids;");
+                ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_expired_ids;");
                 for (int offset = 0; offset < ids.Count;
                     offset += WorldHistoryCompactionIdChunkSize)
                 {
@@ -264,12 +264,12 @@ ORDER BY world_day,event_id LIMIT " + batchSize.ToString(CultureInfo.InvariantCu
                         parameters[name] = chunk[index];
                         values.Add("($" + name + ")");
                     }
-                    Program.ExecuteSql(connection,
+                    ReignDatabase.ExecuteSql(connection,
                         "INSERT OR IGNORE INTO world_history_expired_ids(event_id) VALUES"
                         + string.Join(",", values) + ";", parameters);
                 }
 
-                foreach (Dictionary<string, object> entity in Program.QuerySql(connection, @"
+                foreach (Dictionary<string, object> entity in ReignDatabase.QuerySql(connection, @"
 SELECT entity.event_id,entity.ordinal,entity.kingdom_id,entity.quantity
 FROM world_history_entities entity
 JOIN world_history_expired_ids expired ON expired.event_id=entity.event_id
@@ -347,7 +347,7 @@ ORDER BY entity.event_id,entity.ordinal;"))
                 foreach (WorldHistoryCompactionAggregate aggregate in
                     aggregates.Values)
                 {
-                    Program.ExecuteSql(connection, @"INSERT INTO world_history_daily_aggregates(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_daily_aggregates(
 campaign_id,timeline_id,day_key,event_type,category,retention_class,kingdom_id,player_involved,
 event_count,quantity_total,first_world_day,last_world_day,updated_ts)
 VALUES($campaign,$timeline,$dayKey,$type,$category,$retention,$kingdom,$player,$count,$quantity,$first,$last,$ts)
@@ -373,17 +373,17 @@ first_world_day=MIN(world_history_daily_aggregates.first_world_day,$first),last_
             }
             if (ids.Count > 0)
             {
-                Program.ExecuteSql(connection, "DELETE FROM world_history_fts WHERE event_id IN (SELECT event_id FROM world_history_expired_ids);");
-                Program.ExecuteSql(connection, "DELETE FROM world_history_knowledge_rules WHERE event_id IN (SELECT event_id FROM world_history_expired_ids);");
-                Program.ExecuteSql(connection, "DELETE FROM world_history_entities WHERE event_id IN (SELECT event_id FROM world_history_expired_ids);");
+                ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_fts WHERE event_id IN (SELECT event_id FROM world_history_expired_ids);");
+                ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_knowledge_rules WHERE event_id IN (SELECT event_id FROM world_history_expired_ids);");
+                ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_entities WHERE event_id IN (SELECT event_id FROM world_history_expired_ids);");
                 if (TableExists(connection, "embedding_jobs"))
-                    Program.ExecuteSql(connection, "DELETE FROM embedding_jobs WHERE source_type='world_history_event' AND source_id IN (SELECT event_id FROM world_history_expired_ids);");
+                    ReignDatabase.ExecuteSql(connection, "DELETE FROM embedding_jobs WHERE source_type='world_history_event' AND source_id IN (SELECT event_id FROM world_history_expired_ids);");
                 if (TableExists(connection, "embedding_documents"))
-                    Program.ExecuteSql(connection, "DELETE FROM embedding_documents WHERE source_type='world_history_event' AND source_id IN (SELECT event_id FROM world_history_expired_ids);");
-                Program.ExecuteSql(connection, "DELETE FROM world_history_events WHERE event_id IN (SELECT event_id FROM world_history_expired_ids);");
+                    ReignDatabase.ExecuteSql(connection, "DELETE FROM embedding_documents WHERE source_type='world_history_event' AND source_id IN (SELECT event_id FROM world_history_expired_ids);");
+                ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_events WHERE event_id IN (SELECT event_id FROM world_history_expired_ids);");
             }
             MergeExpiredDailyWorldHistoryAggregates(connection, campaignId, timelineId, currentDay, ts);
-            int remaining = ReadInt(Program.QuerySql(connection, @"
+            int remaining = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM world_history_events WHERE timeline_id=$timeline AND (
     (retention_class='routine' AND (
         (event_type IN (" + ShortRoutineWorldHistorySqlTypes + @") AND world_day<$shortRoutineCutoff)
@@ -399,7 +399,7 @@ SELECT COUNT(*) AS count FROM world_history_events WHERE timeline_id=$timeline A
             if (ids.Count >= batchSize && remaining == 0
                 && ReignPostgreSqlDialect.IsPostgreSql(connection))
             {
-                Program.ExecuteSql(connection, @"ANALYZE world_history_events;
+                ReignDatabase.ExecuteSql(connection, @"ANALYZE world_history_events;
 ANALYZE world_history_entities;
 ANALYZE world_history_knowledge_rules;
 ANALYZE world_history_daily_aggregates;");
@@ -421,7 +421,7 @@ ANALYZE world_history_daily_aggregates;");
         private static void MergeExpiredDailyWorldHistoryAggregates(
             ReignDbConnection connection, string campaignId, string timelineId, double currentDay, long ts)
         {
-            List<Dictionary<string, object>> rows = Program.QuerySql(connection, @"
+            List<Dictionary<string, object>> rows = ReignDatabase.QuerySql(connection, @"
 SELECT * FROM world_history_daily_aggregates
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key<$cutoff;",
                 new Dictionary<string, object>
@@ -471,7 +471,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key<$cutoff;",
             foreach (WorldHistoryCompactionAggregate aggregate in
                 seasonal.Values)
             {
-                Program.ExecuteSql(connection, @"INSERT INTO world_history_seasonal_aggregates(
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_seasonal_aggregates(
 campaign_id,timeline_id,season_start_day,event_type,category,retention_class,kingdom_id,player_involved,
 event_count,quantity_total,first_world_day,last_world_day,updated_ts)
 VALUES($campaign,$timeline,$season,$type,$category,$retention,$kingdom,$player,$count,$quantity,$first,$last,$ts)
@@ -496,7 +496,7 @@ first_world_day=MIN(world_history_seasonal_aggregates.first_world_day,$first),la
                     });
             }
             if (rows.Count > 0)
-                Program.ExecuteSql(connection, @"DELETE FROM world_history_daily_aggregates
+                ReignDatabase.ExecuteSql(connection, @"DELETE FROM world_history_daily_aggregates
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key<$cutoff;",
                     new Dictionary<string, object>
                     {
@@ -507,7 +507,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key<$cutoff;",
 
         internal static bool TableExists(ReignDbConnection connection, string table)
         {
-            return Program.QuerySql(connection,
+            return ReignDatabase.QuerySql(connection,
                 "SELECT name FROM sqlite_master WHERE type='table' AND name=$name LIMIT 1;",
                 new Dictionary<string, object> { ["name"] = table }).Any();
         }
@@ -517,12 +517,12 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key<$cutoff;",
         {
             double start = fromDay < 0 ? double.MinValue : fromDay;
             double end = toDay <= 0 ? double.MaxValue : toDay;
-            int daily = ReadInt(Program.QuerySql(connection, @"
+            int daily = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM world_history_daily_aggregates
 WHERE timeline_id=$timeline AND last_world_day>=$from AND first_world_day<=$to;",
                 new Dictionary<string, object> { ["timeline"] = timelineId, ["from"] = start, ["to"] = end })
                 .FirstOrDefault(), "count", 0);
-            int seasonal = ReadInt(Program.QuerySql(connection, @"
+            int seasonal = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM world_history_seasonal_aggregates
 WHERE timeline_id=$timeline AND last_world_day>=$from AND first_world_day<=$to;",
                 new Dictionary<string, object> { ["timeline"] = timelineId, ["from"] = start, ["to"] = end })
@@ -542,20 +542,20 @@ WHERE timeline_id=$timeline AND last_world_day>=$from AND first_world_day<=$to;"
                 ["databaseName"] = ReignPostgreSqlOptions.RequiredDatabaseName,
                 ["databaseBytes"] = databaseBytes,
                 ["walBytes"] = walBytes,
-                ["rawByRetentionClass"] = Program.QuerySql(connection, @"SELECT retention_class AS metric,COUNT(*) AS count
+                ["rawByRetentionClass"] = ReignDatabase.QuerySql(connection, @"SELECT retention_class AS metric,COUNT(*) AS count
 FROM world_history_events WHERE timeline_id=$timeline GROUP BY retention_class ORDER BY retention_class;",
                     new Dictionary<string, object> { ["timeline"] = timelineId }),
-                ["oldestRawDay"] = ReadDouble(Program.QuerySql(connection,
+                ["oldestRawDay"] = ReadDouble(ReignDatabase.QuerySql(connection,
                     "SELECT MIN(world_day) AS day FROM world_history_events WHERE timeline_id=$timeline;",
                     new Dictionary<string, object> { ["timeline"] = timelineId }).FirstOrDefault(), "day", -1d),
-                ["dailyAggregateRows"] = ReadInt(Program.QuerySql(connection,
+                ["dailyAggregateRows"] = ReadInt(ReignDatabase.QuerySql(connection,
                     "SELECT COUNT(*) AS count FROM world_history_daily_aggregates WHERE timeline_id=$timeline;",
                     new Dictionary<string, object> { ["timeline"] = timelineId }).FirstOrDefault(), "count", 0),
-                ["seasonalAggregateRows"] = ReadInt(Program.QuerySql(connection,
+                ["seasonalAggregateRows"] = ReadInt(ReignDatabase.QuerySql(connection,
                     "SELECT COUNT(*) AS count FROM world_history_seasonal_aggregates WHERE timeline_id=$timeline;",
                     new Dictionary<string, object> { ["timeline"] = timelineId }).FirstOrDefault(), "count", 0)
             };
-            result["compactionBacklog"] = ReadInt(Program.QuerySql(connection, @"
+            result["compactionBacklog"] = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM world_history_events WHERE timeline_id=$timeline AND (
     (retention_class='routine' AND (
         (event_type IN (" + ShortRoutineWorldHistorySqlTypes + @") AND world_day<$shortRoutineCutoff)
@@ -570,7 +570,7 @@ SELECT COUNT(*) AS count FROM world_history_events WHERE timeline_id=$timeline A
                 }).FirstOrDefault(), "count", 0);
             if (ReignPostgreSqlDialect.IsPostgreSql(connection))
             {
-                result["postgresTables"] = Program.QuerySql(connection, @"
+                result["postgresTables"] = ReignDatabase.QuerySql(connection, @"
 SELECT c.relname AS table_name,
 pg_total_relation_size(c.oid) AS total_bytes,
 pg_relation_size(c.oid) AS table_bytes,
@@ -683,33 +683,33 @@ ORDER BY pg_total_relation_size(c.oid) DESC LIMIT 20;");
                 string correlatedLootClass;
                 string playerLootClass;
                 int ephemeralRows;
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    routineClass = ReadString(Program.QuerySql(connection,
+                    routineClass = ReadString(ReignDatabase.QuerySql(connection,
                         "SELECT retention_class FROM world_history_events WHERE event_id='routine_visit';")
                         .FirstOrDefault(), "retention_class", "");
-                    ordinaryClass = ReadString(Program.QuerySql(connection,
+                    ordinaryClass = ReadString(ReignDatabase.QuerySql(connection,
                         "SELECT retention_class FROM world_history_events WHERE event_id='ordinary_battle';")
                         .FirstOrDefault(), "retention_class", "");
-                    woundClass = ReadString(Program.QuerySql(connection,
+                    woundClass = ReadString(ReignDatabase.QuerySql(connection,
                         "SELECT retention_class FROM world_history_events WHERE event_id='noble_wounded';")
                         .FirstOrDefault(), "retention_class", "");
-                    failedMarriageClass = ReadString(Program.QuerySql(connection,
+                    failedMarriageClass = ReadString(ReignDatabase.QuerySql(connection,
                         "SELECT retention_class FROM world_history_events WHERE event_id='failed_marriage';")
                         .FirstOrDefault(), "retention_class", "");
-                    failedDiplomacyClass = ReadString(Program.QuerySql(connection,
+                    failedDiplomacyClass = ReadString(ReignDatabase.QuerySql(connection,
                         "SELECT retention_class FROM world_history_events WHERE event_id='failed_diplomacy';")
                         .FirstOrDefault(), "retention_class", "");
-                    correlatedBattleClass = ReadString(Program.QuerySql(connection,
+                    correlatedBattleClass = ReadString(ReignDatabase.QuerySql(connection,
                         "SELECT retention_class FROM world_history_events WHERE event_id='consequential_battle';")
                         .FirstOrDefault(), "retention_class", "");
-                    correlatedLootClass = ReadString(Program.QuerySql(connection,
+                    correlatedLootClass = ReadString(ReignDatabase.QuerySql(connection,
                         "SELECT retention_class FROM world_history_events WHERE event_id='correlated_loot';")
                         .FirstOrDefault(), "retention_class", "");
-                    playerLootClass = ReadString(Program.QuerySql(connection,
+                    playerLootClass = ReadString(ReignDatabase.QuerySql(connection,
                         "SELECT retention_class FROM world_history_events WHERE event_id='player_party_loot';")
                         .FirstOrDefault(), "retention_class", "");
-                    ephemeralRows = ReadInt(Program.QuerySql(connection,
+                    ephemeralRows = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM world_history_events WHERE event_id='ephemeral_projection';")
                         .FirstOrDefault(), "count", -1);
                 }
@@ -732,15 +732,15 @@ ORDER BY pg_total_relation_size(c.oid) DESC LIMIT 20;");
                 int routineKnowledgeEvidence;
                 int routineSearchEvidence;
                 using (ReignDbConnection connection =
-                    Program.OpenCampaignConnection(campaignId))
+                    ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    routineEntityEvidence = ReadInt(Program.QuerySql(connection,
+                    routineEntityEvidence = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM world_history_entities WHERE event_id='routine_visit';")
                         .FirstOrDefault(), "count", 0);
-                    routineKnowledgeEvidence = ReadInt(Program.QuerySql(connection,
+                    routineKnowledgeEvidence = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM world_history_knowledge_rules WHERE event_id='routine_visit';")
                         .FirstOrDefault(), "count", 0);
-                    routineSearchEvidence = ReadInt(Program.QuerySql(connection,
+                    routineSearchEvidence = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM world_history_fts WHERE event_id='routine_visit';")
                         .FirstOrDefault(), "count", 0);
                 }
@@ -766,12 +766,12 @@ ORDER BY pg_total_relation_size(c.oid) DESC LIMIT 20;");
                 });
                 int shortRoutineRaw;
                 int normalRoutineRaw;
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    shortRoutineRaw = ReadInt(Program.QuerySql(connection,
+                    shortRoutineRaw = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM world_history_events WHERE event_id='day10_sale';")
                         .FirstOrDefault(), "count", -1);
-                    normalRoutineRaw = ReadInt(Program.QuerySql(connection,
+                    normalRoutineRaw = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM world_history_events WHERE event_id='day10_visit';")
                         .FirstOrDefault(), "count", -1);
                 }
@@ -793,18 +793,18 @@ ORDER BY pg_total_relation_size(c.oid) DESC LIMIT 20;");
                 int routineChildren;
                 int routineFts;
                 int routineAggregate;
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    routineRaw = ReadInt(Program.QuerySql(connection,
+                    routineRaw = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM world_history_events WHERE event_id='routine_visit';")
                         .FirstOrDefault(), "count", -1);
-                    routineChildren = ReadInt(Program.QuerySql(connection,
+                    routineChildren = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM world_history_entities WHERE event_id='routine_visit';")
                         .FirstOrDefault(), "count", -1);
-                    routineFts = ReadInt(Program.QuerySql(connection,
+                    routineFts = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM world_history_fts WHERE event_id='routine_visit';")
                         .FirstOrDefault(), "count", -1);
-                    routineAggregate = ReadInt(Program.QuerySql(connection, @"
+                    routineAggregate = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COALESCE(SUM(event_count),0) AS count FROM world_history_daily_aggregates
 WHERE timeline_id=$timeline AND event_type='settlement_entered' AND day_key=1;",
                         new Dictionary<string, object> { ["timeline"] = timelineId })
@@ -827,12 +827,12 @@ WHERE timeline_id=$timeline AND event_type='settlement_entered' AND day_key=1;",
                 });
                 int significantRaw;
                 int permanentRaw;
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    significantRaw = ReadInt(Program.QuerySql(connection,
+                    significantRaw = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM world_history_events WHERE event_id='ordinary_battle';")
                         .FirstOrDefault(), "count", -1);
-                    permanentRaw = ReadInt(Program.QuerySql(connection, @"
+                    permanentRaw = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM world_history_events
 WHERE event_id IN ('noble_wounded','failed_marriage','failed_diplomacy','consequential_battle','correlated_wound');")
                         .FirstOrDefault(), "count", -1);
@@ -866,12 +866,12 @@ WHERE event_id IN ('noble_wounded','failed_marriage','failed_diplomacy','consequ
                 });
                 int oldDaily;
                 int seasonal;
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    oldDaily = ReadInt(Program.QuerySql(connection,
+                    oldDaily = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM world_history_daily_aggregates WHERE day_key=1;")
                         .FirstOrDefault(), "count", -1);
-                    seasonal = ReadInt(Program.QuerySql(connection,
+                    seasonal = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COALESCE(SUM(event_count),0) AS count FROM world_history_seasonal_aggregates;")
                         .FirstOrDefault(), "count", 0);
                 }

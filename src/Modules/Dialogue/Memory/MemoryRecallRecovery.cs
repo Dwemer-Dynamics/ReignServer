@@ -456,7 +456,7 @@ namespace ReignBetaServer
             // even when that observation was not phrased as a question. Inspect
             // the actual neighbor before filtering: never jump over an unheard,
             // future or other-branch turn to manufacture a conversation link.
-            var previous = Program.QuerySql(connection, @"SELECT * FROM conversation_turns
+            var previous = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_turns
 WHERE session_id=$session AND status='active' AND turn_order<$order ORDER BY turn_order DESC LIMIT 1;",
                 TestDict("session", ReadString(first, "session_id", ""), "order", ReadLong(first, "turn_order", 0))).FirstOrDefault();
             if (previous == null || ReadString(previous, "role", "") != "npc"

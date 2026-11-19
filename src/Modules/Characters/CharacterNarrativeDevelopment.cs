@@ -74,7 +74,7 @@ namespace ReignBetaServer
             if (string.IsNullOrWhiteSpace(exchangeId) || string.IsNullOrWhiteSpace(sessionId))
                 return new Dictionary<string, object> { ["status"] = "rejected", ["reason"] = "missing_conversation_evidence_identity" };
             var basis = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "narrative.json"));
-            var rows = Program.QuerySql(connection, "SELECT * FROM dynamic_characteristics WHERE owner_id=$hero AND category='narrative_development' ORDER BY first_ts;",
+            var rows = ReignDatabase.QuerySql(connection, "SELECT * FROM dynamic_characteristics WHERE owner_id=$hero AND category='narrative_development' ORDER BY first_ts;",
                 new Dictionary<string, object> { ["hero"] = heroId });
             string id = "narrative_development_" + DialogueService.PromptHash(heroId + "|" + ReadString(proposal, "itemId", "") + "|" + exchangeId).Substring(0, 24);
             var replay = rows.FirstOrDefault(x => ReadString(x, "characteristic_id", "") == id);
@@ -92,12 +92,12 @@ namespace ReignBetaServer
             bool major = false;
             if (evidenceId.Length > 0 && item != null)
             {
-                var history = Program.QuerySql(connection, @"SELECT e.* FROM world_history_events e
+                var history = ReignDatabase.QuerySql(connection, @"SELECT e.* FROM world_history_events e
 WHERE e.event_id=$event AND e.campaign_id=$campaign AND e.source='native'
 AND e.is_complete=1 AND e.phase='completed' AND e.world_day<=$day
 AND e.timeline_id=(SELECT timeline_id FROM world_history_timelines WHERE is_active=1 AND campaign_id=$campaign ORDER BY updated_utc DESC LIMIT 1) LIMIT 1;",
                     new Dictionary<string, object> { ["event"] = evidenceId, ["campaign"] = campaignId, ["day"] = worldDay }).FirstOrDefault();
-                var participants = Program.QuerySql(connection, "SELECT entity_id FROM world_history_entities WHERE event_id=$event;",
+                var participants = ReignDatabase.QuerySql(connection, "SELECT entity_id FROM world_history_entities WHERE event_id=$event;",
                     new Dictionary<string, object> { ["event"] = evidenceId }).Select(x => ReadString(x, "entity_id", "")).ToList();
                 var profile = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json"));
                 var family = ReadStringList(profile, "childrenIds").Concat(new[] { ReadString(profile, "fatherId", ""),
@@ -108,7 +108,7 @@ AND e.timeline_id=(SELECT timeline_id FROM world_history_timelines WHERE is_acti
             decision["baseItemFingerprint"] = basisFingerprint;
             string state = ReadString(decision, "decision", "") == "accepted" ? "active" : "rejected";
             var payload = new Dictionary<string, object> { ["narrativeDevelopment"] = decision };
-            Program.ExecuteSql(connection, @"INSERT INTO dynamic_characteristics
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO dynamic_characteristics
 (characteristic_id,owner_id,category,topic_key,text,normalized_key,status,confidence,importance,provenance,compatibility_status,rejection_reason,
 source_event_id,source_session_id,source_exchange_id,world_day,first_ts,last_ts,payload_json)
 VALUES($id,$hero,'narrative_development',$topic,$text,$id,$state,1,1,'evidence_gated_narrative_development',$decision,$reason,$event,$session,$exchange,$day,$ts,$ts,$payload)
@@ -119,12 +119,12 @@ ON CONFLICT(owner_id,normalized_key) DO NOTHING;", new Dictionary<string, object
                 ["payload"] = Json.Serialize(payload) });
             if (state == "active")
             {
-                Program.ExecuteSql(connection, "UPDATE dynamic_characteristics SET status='superseded' WHERE owner_id=$hero AND category='narrative_development' AND topic_key=$topic AND characteristic_id<>$id AND status='active';",
+                ReignDatabase.ExecuteSql(connection, "UPDATE dynamic_characteristics SET status='superseded' WHERE owner_id=$hero AND category='narrative_development' AND topic_key=$topic AND characteristic_id<>$id AND status='active';",
                     new Dictionary<string, object> { ["hero"] = heroId, ["topic"] = "narrative/" + ReadString(proposal, "itemId", ""), ["id"] = id });
                 DialogueService.InvalidatePromptRuntimeCache();
             }
             EnsureCharacterEditorSchema(connection);
-            Program.ExecuteSql(connection, "UPDATE character_editor_heads SET revision_token=$token,updated_ts=$ts WHERE hero_id=$hero;",
+            ReignDatabase.ExecuteSql(connection, "UPDATE character_editor_heads SET revision_token=$token,updated_ts=$ts WHERE hero_id=$hero;",
                 new Dictionary<string, object> { ["token"] = DialogueService.PromptHash(id + "|" + ts), ["ts"] = ts, ["hero"] = heroId });
             return new Dictionary<string, object> { ["characteristic_id"] = id, ["status"] = state, ["narrativeDevelopment"] = decision };
         }

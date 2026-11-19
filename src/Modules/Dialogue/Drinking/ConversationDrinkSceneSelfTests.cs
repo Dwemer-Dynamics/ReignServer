@@ -39,7 +39,7 @@ namespace ReignBetaServer
             double Consumed(Dictionary<string, object> receipt) => ReadDouble(receipt, "consumed", -1);
             string Generation()
             {
-                using (var connection = Program.OpenCampaignConnection(campaign)) return ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign)) return ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
             }
             try
             {
@@ -109,8 +109,8 @@ namespace ReignBetaServer
                     p["campaignId"] = campaign; p["heroStringId"] = "mira";
                     p["conversationSessionId"] = "drink_scene_session_" + mode;
                     p["playerText"] = "Tell me about your clan.";
-                    using (var connection = Program.OpenCampaignConnection(campaign))
-                        Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions
+                    using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions
 (session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
 VALUES($session,$campaign,'mira','player','open',1,1,'[""mira"",""player""]','{""timelineId"":""main""}');",
                             TestDict("session", ReadString(p, "conversationSessionId", ""), "campaign", campaign));
@@ -130,10 +130,10 @@ VALUES($session,$campaign,'mira','player','open',1,1,'[""mira"",""player""]','{"
                         : StoreConversationExchange(campaign, p, "mira", "player", "Player", "Mira", unit.PlayerText, unit.Reply, unit.EventId, unit.Timestamp, acceptance: accept));
                     Check(mode + "_accepted_observation_and_hidden_choice", ReadBool(published, "ok", false)
                         && ReadDouble(Own(Scene(p)), "remaining", -1) == .75, published);
-                    using (var connection = Program.OpenCampaignConnection(campaign))
-                        Check(mode + "_source_and_receipt_published_together", Program.QuerySql(connection,
+                    using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                        Check(mode + "_source_and_receipt_published_together", ReignDatabase.QuerySql(connection,
                             "SELECT turn_id FROM conversation_turns WHERE session_id=$session;", TestDict("session", ReadString(p, "conversationSessionId", ""))).Count == 2
-                            && Program.QuerySql(connection, "SELECT unit_id FROM conversation_accepted_units WHERE unit_id=$id;", TestDict("id", unit.EventId)).Count == 1);
+                            && ReignDatabase.QuerySql(connection, "SELECT unit_id FROM conversation_accepted_units WHERE unit_id=$id;", TestDict("id", unit.EventId)).Count == 1);
                 }
 
                 payload = Payload("rollback", "rollback-fixture");

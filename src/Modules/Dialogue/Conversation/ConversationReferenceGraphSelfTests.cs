@@ -73,12 +73,12 @@ namespace ReignBetaServer
                     && typeError == "ambiguous_reference_source_id" && SelectOfferedConversationReference(typeOffer, "letter", "unique", out typeError) == null
                     && typeError == "ambiguous_reference_source_id");
                 string generation;
-                using (var c = Program.OpenCampaignConnection(campaign))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     EnsureConversationReferenceGraphSchema(c);
                     generation = ReadString(ReadMemoryPrecisionState(c), "restore_generation", "");
                     foreach (string session in new[] { "old", "current", "private", "foreign", "future", "public_other" })
-                        Program.ExecuteSql(c, @"INSERT INTO conversation_sessions
+                        ReignDatabase.ExecuteSql(c, @"INSERT INTO conversation_sessions
 (session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
 VALUES($session,$campaign,$npc,'player',$status,1,1,$audience,$payload);",
                             TestDict("session", session, "campaign", campaign, "npc", session == "private" ? "other" : "npc",
@@ -98,8 +98,8 @@ VALUES($session,$campaign,$npc,'player',$status,1,1,$audience,$payload);",
                 }
                 int Edges(string eventId = "")
                 {
-                    using var c = Program.OpenCampaignConnection(campaign);
-                    return ReadInt(Program.QuerySql(c, "SELECT COUNT(*) AS n FROM conversation_reference_edges" + (eventId.Length == 0 ? "" : " WHERE source_event_id=$id") + ";",
+                    using var c = ReignDatabase.OpenCampaignConnection(campaign);
+                    return ReadInt(ReignDatabase.QuerySql(c, "SELECT COUNT(*) AS n FROM conversation_reference_edges" + (eventId.Length == 0 ? "" : " WHERE source_event_id=$id") + ";",
                         eventId.Length == 0 ? null : TestDict("id", eventId)).Single(), "n", 0);
                 }
                 AcceptedConversationUnit Unit(string name)
@@ -155,14 +155,14 @@ VALUES($session,$campaign,$npc,'player',$status,1,1,$audience,$payload);",
                 Bind(otherHeard, RenderContinuityRecord("other_heard_npc", "targeted_historical_exchange", "npc", "public_other", 10, 95, true,
                     "- [Day 10] [source=other_heard_npc role=npc] Mira: Bring the green flag to the west gate before dusk."));
                 Check("eligible_other_character_source_links_by_id_despite_shared_name", ReadInt(ReadDictionary(Publish(otherHeard), "references"), "stored", 0) == 2);
-                using (var c = Program.OpenCampaignConnection(campaign))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var meta = Program.QuerySql(c, "SELECT payload_json FROM conversation_reference_edges WHERE source_event_id=$id;", TestDict("id", first.EventId))
+                    var meta = ReignDatabase.QuerySql(c, "SELECT payload_json FROM conversation_reference_edges WHERE source_event_id=$id;", TestDict("id", first.EventId))
                         .Select(row => TryParseJsonObject(ReadString(row, "payload_json", "{}"))).ToList();
                     Check("links_never_certify_facts_or_cancel_promises", meta.Count == 2 && meta.All(m => ReadString(m, "status", "") == "proposed"
                         && !ReadBool(m, "nativeFactVerified", true) && !ReadBool(m, "relationEntailmentVerified", true) && !ReadBool(m, "changesAgreementStatus", true))
-                        && ReadString(Program.QuerySql(c, "SELECT text FROM conversation_turns WHERE turn_id='old_npc';").Single(), "text", "") == original);
-                    Check("existing_lineage_table_does_not_receive_graph_rows", Program.QuerySql(c,
+                        && ReadString(ReignDatabase.QuerySql(c, "SELECT text FROM conversation_turns WHERE turn_id='old_npc';").Single(), "text", "") == original);
+                    Check("existing_lineage_table_does_not_receive_graph_rows", ReignDatabase.QuerySql(c,
                         "SELECT document_id FROM memory_sources WHERE document_type LIKE 'conversation_reference%';").Count == 0);
                 }
                 var failed = Unit("rollback"); Bind(failed, Packet());
@@ -191,17 +191,17 @@ VALUES($session,$campaign,$npc,'player',$status,1,1,$audience,$payload);",
                 var rejected = ReadDictionary(Publish(falseQuote), "references");
                 Check("fabricated_target_quote_rejected", ReadInt(rejected, "stored", 0) == 1 && ReadDictionaryList(rejected, "rejected").Any(r => ReadString(r, "reason", "") == "reference_quote_outside_delivered_view"));
                 var changed = Unit("changed_source"); NeutralReply(changed); Bind(changed, Packet());
-                using (var c = Program.OpenCampaignConnection(campaign)) Program.ExecuteSql(c, "UPDATE conversation_turns SET text=$text WHERE turn_id='old_npc';", TestDict("text", original + " Changed later."));
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign)) ReignDatabase.ExecuteSql(c, "UPDATE conversation_turns SET text=$text WHERE turn_id='old_npc';", TestDict("text", original + " Changed later."));
                 Check("source_revision_invalidates_old_offer", ReadInt(ReadDictionary(Publish(changed), "references"), "stored", -1) == 0);
-                using (var c = Program.OpenCampaignConnection(campaign)) Program.ExecuteSql(c, "UPDATE conversation_turns SET text=$text WHERE turn_id='old_npc';", TestDict("text", original));
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign)) ReignDatabase.ExecuteSql(c, "UPDATE conversation_turns SET text=$text WHERE turn_id='old_npc';", TestDict("text", original));
                 var attempt = Unit("ambiguous_attempt"); NeutralReply(attempt); Bind(attempt, Packet()); Bind(attempt, Packet(), "The repair omitted the original.");
                 Check("different_attempt_offers_cannot_be_borrowed", ReadString(ReadDictionary(Publish(attempt), "references"), "status", "") == "ambiguous_attempt_offer");
                 var suppressed = Unit("suppressed"); Bind(suppressed, Packet());
-                using (var c = Program.OpenCampaignConnection(campaign)) Check("failed_response_cannot_supply_player_side_links",
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign)) Check("failed_response_cannot_supply_player_side_links",
                     ReadInt(StoreAcceptedConversationReferences(c, suppressed, new(), true), "stored", -1) == 0);
 
                 List<Dictionary<string, object>> sources;
-                using (var c = Program.OpenCampaignConnection(campaign)) sources = Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE event_id=$id AND status='active' ORDER BY turn_order;", TestDict("id", first.EventId));
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign)) sources = ReignDatabase.QuerySql(c, "SELECT * FROM conversation_turns WHERE event_id=$id AND status='active' ORDER BY turn_order;", TestDict("id", first.EventId));
                 string firstPlayerId = ReadString(sources.Single(r => ReadString(r, "role", "") == "player"), "turn_id", "");
                 var chain = Unit("second_mention"); NeutralReply(chain);
                 foreach (var p in ReadDictionaryList(chain.Parsed, "memoryReferences"))
@@ -220,7 +220,7 @@ VALUES($session,$campaign,$npc,'player',$status,1,1,$audience,$payload);",
                     unit.Parsed["memoryReferences"] = targets.Select(t => TestDict("origin", "player_input", "targetType", "turn",
                         "targetId", t.Id, "relation", "refers_to", "originQuote", "red flag condition", "targetQuote", t.Quote)).ToList();
                     var packets = new List<string>();
-                    using (var c = Program.OpenCampaignConnection(campaign))
+                    using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                     foreach (var target in targets)
                     {
                         var source = ResolveConversationReferenceSource(c, "turn", target.Id,
@@ -232,14 +232,14 @@ VALUES($session,$campaign,$npc,'player',$status,1,1,$audience,$payload);",
                     }
                     Bind(unit, string.Join("\n\n", packets));
                     Check("chain_fixture_published_" + name, ReadInt(ReadDictionary(Publish(unit), "references"), "stored", 0) == targets.Length);
-                    using var read = Program.OpenCampaignConnection(campaign);
-                    return ReadString(Program.QuerySql(read, "SELECT * FROM conversation_turns WHERE event_id=$event AND role='player' AND status='active';",
+                    using var read = ReignDatabase.OpenCampaignConnection(campaign);
+                    return ReadString(ReignDatabase.QuerySql(read, "SELECT * FROM conversation_turns WHERE event_id=$event AND role='player' AND status='active';",
                         TestDict("event", unit.EventId)).Single(), "turn_id", "");
                 }
-                using (var c = Program.OpenCampaignConnection(campaign))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     var access = new Program.KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "main", WorldDay = 21 };
-                    var chainRows = Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE event_id=$id AND status='active';", TestDict("id", chain.EventId));
+                    var chainRows = ReignDatabase.QuerySql(c, "SELECT * FROM conversation_turns WHERE event_id=$id AND status='active';", TestDict("id", chain.EventId));
                     var seeds = chainRows.Select(r => ("turn", ReadString(r, "turn_id", ""))).ToList();
                     var one = ExpandConversationReferences(c, seeds, access, generation, 1, 12, TestDict());
                     var two = ExpandConversationReferences(c, seeds, access, generation, 2, 12, TestDict());
@@ -250,20 +250,20 @@ VALUES($session,$campaign,$npc,'player',$status,1,1,$audience,$payload);",
                     // Keeping a public target never makes a hidden origin traversable.
                     var firstRow = sources.Single(r => ReadString(r, "role", "") == "player");
                     string audience = ReadString(firstRow, "participants_json", "");
-                    Program.ExecuteSql(c, "UPDATE conversation_turns SET participants_json='[\"player\",\"other\"]' WHERE turn_id=$id;", TestDict("id", firstPlayerId));
+                    ReignDatabase.ExecuteSql(c, "UPDATE conversation_turns SET participants_json='[\"player\",\"other\"]' WHERE turn_id=$id;", TestDict("id", firstPlayerId));
                     Check("hidden_origin_blocks_both_ends_of_a_link", ExpandConversationReferences(c,
                         new() { ("turn", firstPlayerId) }, access, generation, 2, 12, TestDict()).Count == 0);
-                    Program.ExecuteSql(c, "UPDATE conversation_turns SET participants_json=$audience WHERE turn_id=$id;", TestDict("id", firstPlayerId, "audience", audience));
+                    ReignDatabase.ExecuteSql(c, "UPDATE conversation_turns SET participants_json=$audience WHERE turn_id=$id;", TestDict("id", firstPlayerId, "audience", audience));
                 }
                 string chainPlayerId;
-                using (var c = Program.OpenCampaignConnection(campaign)) chainPlayerId = ReadString(Program.QuerySql(c,
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign)) chainPlayerId = ReadString(ReignDatabase.QuerySql(c,
                     "SELECT * FROM conversation_turns WHERE event_id=$event AND role='player' AND status='active';", TestDict("event", chain.EventId)).Single(), "turn_id", "");
                 string third = LinkedInput("third_mention", (chainPlayerId, "red flag condition"));
                 string fourth = LinkedInput("fourth_mention", (third, "red flag condition"));
                 string sibling = LinkedInput("sibling_callback", ("old_npc", "only if you bring the red flag"));
                 string star = LinkedInput("star_callback", ("old_npc", "only if you bring the red flag"));
                 string diamond = LinkedInput("diamond_callback", (third, "red flag condition"), (sibling, "red flag condition"));
-                using (var c = Program.OpenCampaignConnection(campaign))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     var access = new Program.KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "main", WorldDay = 21 };
                     var deepAudit = TestDict();
@@ -284,39 +284,39 @@ VALUES($session,$campaign,$npc,'player',$status,1,1,$audience,$payload);",
                         && diamondRead.Select(s => s.Type + ":" + s.Id).Distinct().Count() == diamondRead.Count && Edges() == beforeRead);
                     using (var hidden = c.BeginTransaction())
                     {
-                        Program.ExecuteSql(c, "UPDATE conversation_turns SET participants_json='[\"other\",\"player\"]' WHERE turn_id=$id;", TestDict("id", third));
+                        ReignDatabase.ExecuteSql(c, "UPDATE conversation_turns SET participants_json='[\"other\",\"player\"]' WHERE turn_id=$id;", TestDict("id", third));
                         Check("hidden_intermediate_stops_forward_and_reverse_walk", ExpandConversationReferences(c, new() { ("turn", fourth) }, access, generation, 64, 64, TestDict()).Count == 0
                             && !ExpandConversationReferences(c, new() { ("turn", chainPlayerId) }, access, generation, 64, 64, TestDict()).Any(s => s.Id == fourth));
                         hidden.Rollback();
                     }
                     using (var stale = c.BeginTransaction())
                     {
-                        Program.ExecuteSql(c, "UPDATE conversation_turns SET text=text || ' Changed after the reference.' WHERE turn_id=$id;", TestDict("id", third));
+                        ReignDatabase.ExecuteSql(c, "UPDATE conversation_turns SET text=text || ' Changed after the reference.' WHERE turn_id=$id;", TestDict("id", third));
                         Check("revised_intermediate_cannot_bridge_chain", ExpandConversationReferences(c, new() { ("turn", fourth) }, access, generation, 64, 64, TestDict()).Count == 0);
                         stale.Rollback();
                     }
                     using (var future = c.BeginTransaction())
                     {
-                        Program.ExecuteSql(c, "UPDATE conversation_reference_edges SET world_day=40 WHERE from_id=$id;", TestDict("id", fourth));
+                        ReignDatabase.ExecuteSql(c, "UPDATE conversation_reference_edges SET world_day=40 WHERE from_id=$id;", TestDict("id", fourth));
                         Check("future_edge_cannot_bridge_chain", ExpandConversationReferences(c, new() { ("turn", fourth) }, access, generation, 64, 64, TestDict()).Count == 0);
                         future.Rollback();
                     }
                     Check("other_generation_has_no_forward_or_reverse_path", ExpandConversationReferences(c, new() { ("turn", "old_npc") }, access, "other_generation", 64, 64, TestDict()).Count == 0);
                     using (var proposedWithdrawal = c.BeginTransaction())
                     {
-                        string originalHash = MemoryTranscriptSourceHash(Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id='old_npc';").Single());
-                        Program.ExecuteSql(c, "UPDATE conversation_reference_edges SET relation='withdraws' WHERE from_id=$id;", TestDict("id", sibling));
+                        string originalHash = MemoryTranscriptSourceHash(ReignDatabase.QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id='old_npc';").Single());
+                        ReignDatabase.ExecuteSql(c, "UPDATE conversation_reference_edges SET relation='withdraws' WHERE from_id=$id;", TestDict("id", sibling));
                         var withdrawalAudit = TestDict();
                         var related = ExpandConversationReferences(c, new() { ("turn", "old_npc") }, access, generation, 1, 64, withdrawalAudit);
                         Check("incoming_withdrawal_hint_does_not_change_original_status", related.Any(s => s.Id == sibling)
                             && ReadInt(withdrawalAudit, "reverseAdmitted", 0) > 0
-                            && ReadString(Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id='old_npc';").Single(), "status", "") == "active"
-                            && MemoryTranscriptSourceHash(Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id='old_npc';").Single()) == originalHash);
+                            && ReadString(ReignDatabase.QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id='old_npc';").Single(), "status", "") == "active"
+                            && MemoryTranscriptSourceHash(ReignDatabase.QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id='old_npc';").Single()) == originalHash);
                         proposedWithdrawal.Rollback();
                     }
                     using (var foreignAssociation = c.BeginTransaction())
                     {
-                        Program.ExecuteSql(c, "UPDATE conversation_reference_edges SET owner_id='other' WHERE from_id=$id;", TestDict("id", fourth));
+                        ReignDatabase.ExecuteSql(c, "UPDATE conversation_reference_edges SET owner_id='other' WHERE from_id=$id;", TestDict("id", fourth));
                         Check("shared_endpoints_do_not_share_private_observer_association", ExpandConversationReferences(c, new() { ("turn", fourth) }, access, generation, 64, 64, TestDict()).Count == 0
                             && !ExpandConversationReferences(c, new() { ("turn", third) }, access, generation, 64, 64, TestDict()).Any(s => s.Id == fourth));
                         foreignAssociation.Rollback();
@@ -333,7 +333,7 @@ VALUES($session,$campaign,$npc,'player',$status,1,1,$audience,$payload);",
                             dense.Add(ResolveConversationReferenceSource(c, "turn", id, access));
                         }
                         for (int i = 1; i < dense.Count; i++)
-                            Program.ExecuteSql(c, @"INSERT INTO conversation_reference_edges(edge_id,owner_id,timeline_id,restore_generation,from_type,from_id,from_hash,to_type,to_id,to_hash,
+                            ReignDatabase.ExecuteSql(c, @"INSERT INTO conversation_reference_edges(edge_id,owner_id,timeline_id,restore_generation,from_type,from_id,from_hash,to_type,to_id,to_hash,
 relation,source_event_id,as_of_sequence,world_day,created_ts,payload_json)
 SELECT $prefix || n,'npc','main',$generation,'turn',$from,$fromHash,'turn',$to,$toHash,'refers_to',$from,$sequence,10,10,$payload FROM generate_series(1,32) n;",
                                 TestDict("prefix", "bounded_edge_" + i + "_", "generation", generation, "from", dense[i].Id, "fromHash", dense[i].Hash,
@@ -406,7 +406,7 @@ SELECT $prefix || n,'npc','main',$generation,'turn',$from,$fromHash,'turn',$to,$
                 Check("off_mode_has_no_graph_text_or_writer_instructions", BuildConversationReferenceContext(campaign, "npc", "And that condition?", readPayload, sources, "RAW_BASELINE") == ""
                     && ConversationReferenceInstructions() == "");
                 Check("off_mode_prefix_is_byte_identical_with_persisted_edges", disabledPrefix == BuildDialogueGlobalPrefix(false, false, new List<Dictionary<string, object>>()));
-                using (var c = Program.OpenCampaignConnection(campaign))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     string id = ReadString(RelationshipsService.InsertLetter(c, "npc", "Mira", "player", "Player", "I moved the plant into a pot beside the stone wall.",
                         "npc_initiated", "plant", "", "a", "b", 10d, 15d, TestDict()), "letterId", "");
@@ -431,7 +431,7 @@ SELECT $prefix || n,'npc','main',$generation,'turn',$from,$fromHash,'turn',$to,$
                         proposal["originQuote"] = ReadString(proposal, "origin", "") == "player_input" ? "moving the plant" : "moved the plant into a pot";
                         proposal["targetQuote"] = "I moved the plant into a pot beside the stone wall.";
                     }
-                    var letterRow = Program.QuerySql(c, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", id)).Single();
+                    var letterRow = ReignDatabase.QuerySql(c, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", id)).Single();
                     AcceptedConversationUnit NormalizedLetterUnit(string name)
                     {
                         var unit = Unit(name);
@@ -454,82 +454,82 @@ SELECT $prefix || n,'npc','main',$generation,'turn',$from,$fromHash,'turn',$to,$
                     var unofferedLetter = NormalizedLetterUnit("normalized_letter_unoffered"); Bind(unofferedLetter, Packet());
                     Check("normalized_type_never_discovers_unoffered_letter", ReadInt(ReadDictionary(Publish(unofferedLetter), "references"), "stored", -1) == 0);
                     var revisedLetter = NormalizedLetterUnit("normalized_letter_changed_revision"); Bind(revisedLetter, letterPacket);
-                    Program.ExecuteSql(c, "UPDATE letters SET body=$body WHERE letter_id=$id;", TestDict("id", id, "body", ReadString(letterRow, "body", "") + " Changed later."));
+                    ReignDatabase.ExecuteSql(c, "UPDATE letters SET body=$body WHERE letter_id=$id;", TestDict("id", id, "body", ReadString(letterRow, "body", "") + " Changed later."));
                     Check("normalized_type_preserves_current_revision_gate", ReadInt(ReadDictionary(Publish(revisedLetter), "references"), "stored", -1) == 0);
-                    Program.ExecuteSql(c, "UPDATE letters SET body=$body WHERE letter_id=$id;", TestDict("id", id, "body", ReadString(letterRow, "body", "")));
+                    ReignDatabase.ExecuteSql(c, "UPDATE letters SET body=$body WHERE letter_id=$id;", TestDict("id", id, "body", ReadString(letterRow, "body", "")));
                     Bind(letterUnit, RenderMemoryEvidence(CorrespondenceMemoryEvidence(letterRow, "npc", 10), "m7"));
                     var letterReferences = ReadDictionary(Publish(letterUnit), "references");
                     Check("accepted_pair_can_link_canonical_authored_letter", ReadInt(letterReferences, "stored", 0) == 2);
                     Check("accepted_letter_type_normalization_is_reported_and_canonical", ReadInt(letterReferences, "normalizedTargetTypeProposals", 0) == 1
-                        && Program.QuerySql(c, "SELECT edge_id FROM conversation_reference_edges WHERE source_event_id=$event AND to_type<>'letter';", TestDict("event", letterUnit.EventId)).Count == 0
-                        && Program.QuerySql(c, "SELECT edge_id FROM conversation_reference_edges WHERE source_event_id=$event AND payload_json LIKE '%targetTypeDerivedFromUniqueOffer%';", TestDict("event", letterUnit.EventId)).Count == 2);
-                    var letterSources = Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE event_id=$id AND status='active';", TestDict("id", letterUnit.EventId));
+                        && ReignDatabase.QuerySql(c, "SELECT edge_id FROM conversation_reference_edges WHERE source_event_id=$event AND to_type<>'letter';", TestDict("event", letterUnit.EventId)).Count == 0
+                        && ReignDatabase.QuerySql(c, "SELECT edge_id FROM conversation_reference_edges WHERE source_event_id=$event AND payload_json LIKE '%targetTypeDerivedFromUniqueOffer%';", TestDict("event", letterUnit.EventId)).Count == 2);
+                    var letterSources = ReignDatabase.QuerySql(c, "SELECT * FROM conversation_turns WHERE event_id=$id AND status='active';", TestDict("id", letterUnit.EventId));
                     ConversationReferenceValidationMode.Value = "enabled";
                     string letterGraph = BuildConversationReferenceContext(campaign, "npc", "And the plant?", readPayload, letterSources, "RAW_BASELINE");
                     Check("letter_expansion_preserves_authorship_without_granting_read_receipt", letterGraph.Contains("I moved the plant into a pot beside the stone wall.")
                         && letterGraph.Contains("Recipient receipt/read state is unknown")
-                        && ReadString(Program.QuerySql(c, "SELECT status FROM letters WHERE letter_id=$id;", TestDict("id", id)).Single(), "status", "") != "read");
+                        && ReadString(ReignDatabase.QuerySql(c, "SELECT status FROM letters WHERE letter_id=$id;", TestDict("id", id)).Single(), "status", "") != "read");
                 }
-                using (var c = Program.OpenCampaignConnection(campaign))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     var point = TestDict("savePointId", "reference_restore", "timelineId", "main", "campaignTimeDays", 21d,
                         "worldHistorySequence", 100L, "worldHistoryHeadEventId", "reference_head");
                     const string restored = "reference_restored_generation";
                     CaptureRestoredMemorySources(c, point, restored);
-                    Program.ExecuteSql(c, "UPDATE memory_precision_state SET restore_generation=$generation WHERE state_id='current';", TestDict("generation", restored));
+                    ReignDatabase.ExecuteSql(c, "UPDATE memory_precision_state SET restore_generation=$generation WHERE state_id='current';", TestDict("generation", restored));
                     CaptureRestoredLetterSources(c, point);
                     RebindRestoredConversationReferences(c, point, restored);
-                    int CountRestored() => ReadInt(Program.QuerySql(c, "SELECT COUNT(*) AS n FROM conversation_reference_edges WHERE restore_generation=$generation;",
+                    int CountRestored() => ReadInt(ReignDatabase.QuerySql(c, "SELECT COUNT(*) AS n FROM conversation_reference_edges WHERE restore_generation=$generation;",
                         TestDict("generation", restored)).Single(), "n", 0);
                     int count = CountRestored();
-                    Check("restore_preserves_exact_letter_target_membership", Program.QuerySql(c,
+                    Check("restore_preserves_exact_letter_target_membership", ReignDatabase.QuerySql(c,
                         "SELECT edge_id FROM conversation_reference_edges WHERE restore_generation=$generation AND to_type='letter' AND to_id=$id;",
                         TestDict("generation", restored, "id", linkedLetterId)).Count == 2);
-                    Check("restore_rebinds_only_exact_eligible_sources", count >= 4 && Program.QuerySql(c,
+                    Check("restore_rebinds_only_exact_eligible_sources", count >= 4 && ReignDatabase.QuerySql(c,
                         "SELECT edge_id FROM conversation_reference_edges WHERE restore_generation=$generation AND to_id IN ('secret_npc','foreign_npc','future_npc');",
                         TestDict("generation", restored)).Count == 0);
                     RebindRestoredConversationReferences(c, point, restored);
                     Check("restore_rebinding_is_idempotent", CountRestored() == count);
                     const string again = "reference_restored_again";
                     CaptureRestoredMemorySources(c, point, again);
-                    Program.ExecuteSql(c, "UPDATE memory_precision_state SET restore_generation=$generation WHERE state_id='current'; DELETE FROM memory_restored_sources WHERE source_id='old_npc';",
+                    ReignDatabase.ExecuteSql(c, "UPDATE memory_precision_state SET restore_generation=$generation WHERE state_id='current'; DELETE FROM memory_restored_sources WHERE source_id='old_npc';",
                         TestDict("generation", again));
                     CaptureRestoredLetterSources(c, point);
                     RebindRestoredConversationReferences(c, point, again);
-                    Check("missing_snapshot_member_is_not_recovered_by_graph", Program.QuerySql(c,
+                    Check("missing_snapshot_member_is_not_recovered_by_graph", ReignDatabase.QuerySql(c,
                         "SELECT edge_id FROM conversation_reference_edges WHERE restore_generation=$generation AND to_id='old_npc';",
-                        TestDict("generation", again)).Count == 0 && Program.QuerySql(c,
+                        TestDict("generation", again)).Count == 0 && ReignDatabase.QuerySql(c,
                         "SELECT edge_id FROM conversation_reference_edges WHERE restore_generation=$generation AND to_id=$id;",
                         TestDict("generation", again, "id", firstPlayerId)).Count > 0);
-                    Check("restores_do_not_accumulate_duplicate_generations", Program.QuerySql(c,
+                    Check("restores_do_not_accumulate_duplicate_generations", ReignDatabase.QuerySql(c,
                         "SELECT edge_id FROM conversation_reference_edges WHERE restore_generation<>$generation;", TestDict("generation", again)).Count == 0);
                 }
                 int snapshotEdges = Edges();
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, snapshotName);
                 snapshotCreated = true;
-                using (var c = Program.OpenCampaignConnection(campaign))
-                    Program.ExecuteSql(c, "DELETE FROM conversation_reference_edges; UPDATE conversation_turns SET text='Abandoned post-snapshot replacement.' WHERE turn_id=$id;",
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
+                    ReignDatabase.ExecuteSql(c, "DELETE FROM conversation_reference_edges; UPDATE conversation_turns SET text='Abandoned post-snapshot replacement.' WHERE turn_id=$id;",
                         TestDict("id", firstPlayerId));
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, snapshotName);
                 AdvanceMemoryRestoreGeneration(campaign, TestDict("savePointId", snapshotName, "timelineId", "main", "campaignTimeDays", 21d,
                     "worldHistorySequence", 100L, "worldHistoryHeadEventId", "reference_head"), ReignPostgreSqlStorage.SnapshotSchemaName(campaign, snapshotName));
-                using (var c = Program.OpenCampaignConnection(campaign))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     string restoredGeneration = ReadString(ReadMemoryPrecisionState(c), "restore_generation", "");
                     Check("database_snapshot_preserves_reference_table_and_original_ids", snapshotEdges > 0 && Edges() == snapshotEdges
-                        && ReadString(Program.QuerySql(c, "SELECT text FROM conversation_turns WHERE turn_id=$id;", TestDict("id", firstPlayerId)).Single(), "text", "") == first.PlayerText
-                        && Program.QuerySql(c, "SELECT edge_id FROM conversation_reference_edges WHERE restore_generation<>$generation;", TestDict("generation", restoredGeneration)).Count == 0);
-                    var chainRows = Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE event_id=$id AND status='active';", TestDict("id", chain.EventId));
+                        && ReadString(ReignDatabase.QuerySql(c, "SELECT text FROM conversation_turns WHERE turn_id=$id;", TestDict("id", firstPlayerId)).Single(), "text", "") == first.PlayerText
+                        && ReignDatabase.QuerySql(c, "SELECT edge_id FROM conversation_reference_edges WHERE restore_generation<>$generation;", TestDict("generation", restoredGeneration)).Count == 0);
+                    var chainRows = ReignDatabase.QuerySql(c, "SELECT * FROM conversation_turns WHERE event_id=$id AND status='active';", TestDict("id", chain.EventId));
                     ConversationReferenceValidationMode.Value = "enabled";
                     string next = BuildConversationReferenceContext(campaign, "npc", "And that condition?", readPayload, chainRows, "RAW_BASELINE");
                     Check("post_snapshot_read_follows_rebound_original_sources", next.Contains(first.PlayerText) && next.Contains(first.Reply)
                         && !next.Contains("Abandoned post-snapshot replacement."));
-                    var letterSources = Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE event_id=$id AND status='active';", TestDict("id", letterOriginEvent));
+                    var letterSources = ReignDatabase.QuerySql(c, "SELECT * FROM conversation_turns WHERE event_id=$id AND status='active';", TestDict("id", letterOriginEvent));
                     string letterNext = BuildConversationReferenceContext(campaign, "npc", "And the plant?", readPayload, letterSources, "RAW_BASELINE");
                     Check("post_snapshot_read_preserves_letter_links_without_marking_recipient_read", letterNext.Contains("I moved the plant into a pot beside the stone wall.")
-                        && Program.QuerySql(c, "SELECT edge_id FROM conversation_reference_edges WHERE restore_generation=$generation AND to_type='letter' AND to_id=$id;",
+                        && ReignDatabase.QuerySql(c, "SELECT edge_id FROM conversation_reference_edges WHERE restore_generation=$generation AND to_type='letter' AND to_id=$id;",
                             TestDict("generation", restoredGeneration, "id", linkedLetterId)).Count == 2
-                        && ReadString(Program.QuerySql(c, "SELECT status FROM letters WHERE letter_id=$id;", TestDict("id", linkedLetterId)).Single(), "status", "") != "read");
+                        && ReadString(ReignDatabase.QuerySql(c, "SELECT status FROM letters WHERE letter_id=$id;", TestDict("id", linkedLetterId)).Single(), "status", "") != "read");
                 }
                 const string secret = "PRIVATE-GRAPH-QUOTE-948";
                 var privateOutput = TestDict("reply", "I remember.", "parsed", TestDict("reply", "I remember.", "memoryReferences", new[] { TestDict("targetQuote", secret) }),

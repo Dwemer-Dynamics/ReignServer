@@ -208,9 +208,9 @@ namespace ReignBetaServer
             string campaign = "view_wardrobe_" + Guid.NewGuid().ToString("N");
             try
             {
-                using var c = Program.OpenCampaignConnection(campaign);
+                using var c = ReignDatabase.OpenCampaignConnection(campaign);
                 DialogueService.ReadMemoryPrecisionState(c); DialogueService.EnsureChatViewSchema(c);
-                Program.ExecuteSql(c, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json)
+                ReignDatabase.ExecuteSql(c, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json)
 VALUES('clothes',$campaign,'ira','player','open',1,1,'[""player"",""ira""]');", TestDict("campaign", campaign));
                 var people = new[] { TestDict("heroStringId", "player", "name", "Player"), TestDict("heroStringId", "ira", "name", "Ira") };
                 var payload = TestDict("timelineId", "main", "locationId", "camp", "sceneInterface", "party", "sceneParticipants", people, "activeHeroIds", new[] { "ira" });
@@ -220,7 +220,7 @@ VALUES('clothes',$campaign,'ira','player','open',1,1,'[""player"",""ira""]');", 
                     string answer = n == 1 ? "Agreed, let us do that." : "Ira lunges toward the player.";
                     DialogueService.InsertConversationTurn(c, "p" + n, "clothes", "event" + n, n * 2, "e" + n, "player", "player", "Player", p, "party_chat", 4, 100, "camp", new List<string> { "player", "ira" }, payload);
                     DialogueService.InsertConversationTurn(c, "n" + n, "clothes", "event" + n, n * 2 + 1, "e" + n, "npc", "ira", "Ira", answer, "party_chat", 4, 100, "camp", new List<string> { "player", "ira" }, payload);
-                    var rows = Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE session_id='clothes' AND exchange_id=$e ORDER BY turn_order;", TestDict("e", "e" + n));
+                    var rows = ReignDatabase.QuerySql(c, "SELECT * FROM conversation_turns WHERE session_id='clothes' AND exchange_id=$e ORDER BY turn_order;", TestDict("e", "e" + n));
                     StoreChatViewWardrobeEvidence(c, payload, TestDict("viewWardrobeEvidence", n == 1 ? new[] {
                         TestDict("source", "player", "characterIds", new[] { "player", "ira" }, "quote", p) } : new Dictionary<string, object>[0]), rows, "ira");
                 }
@@ -234,11 +234,11 @@ VALUES('clothes',$campaign,'ira','player','open',1,1,'[""player"",""ira""]');", 
                         && ReadStringList(hints[0], "characterIds").Count == 2, "Older source nominations were dropped or multiplied.");
                     using (var transaction = c.BeginTransaction())
                     {
-                        var row = Program.QuerySql(c, "SELECT payload_json FROM chat_view_wardrobe_evidence WHERE entry_id='n6';").Single();
+                        var row = ReignDatabase.QuerySql(c, "SELECT payload_json FROM chat_view_wardrobe_evidence WHERE entry_id='n6';").Single();
                         var nomination = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
                         nomination["evidence"] = new[] { TestDict("turnId", "p6", "quote", "We continue training.", "sourceHash", DialogueService.PromptHash("We continue training."),
                             "start", 0, "length", "We continue training.".Length, "characterIds", new[] { "player" }) };
-                        Program.ExecuteSql(c, "UPDATE chat_view_wardrobe_evidence SET payload_json=$payload WHERE entry_id='n6';", TestDict("payload", Json.Serialize(nomination)));
+                        ReignDatabase.ExecuteSql(c, "UPDATE chat_view_wardrobe_evidence SET payload_json=$payload WHERE entry_id='n6';", TestDict("payload", Json.Serialize(nomination)));
                         hints = ReadChatViewCoverageEvidence(c, "clothes", window, history);
                         require(hints.Count == 2 && hints.Any(h => ReadString(h, "turnId", "") == "p6"), "Current-window player evidence was not exposed to the selector.");
                         require(ReadChatViewCoverageEvidence(c, "other", window, history).Count == 0, "Other-session nominations leaked.");
@@ -281,12 +281,12 @@ VALUES('clothes',$campaign,'ira','player','open',1,1,'[""player"",""ira""]');", 
                     request["sessionId"] = "clothes";
                 });
                 check("wardrobe_rejected_and_invalid_nominations_do_not_change_accepted_words", () => {
-                    var rows = Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE session_id='clothes' AND exchange_id='e6' ORDER BY turn_order;");
+                    var rows = ReignDatabase.QuerySql(c, "SELECT * FROM conversation_turns WHERE session_id='clothes' AND exchange_id='e6' ORDER BY turn_order;");
                     var receipt = StoreChatViewWardrobeEvidence(c, payload, TestDict("viewWardrobeEvidence", new[] {
                         TestDict("source", "reply", "characterIds", new[] { "absent" }, "quote", "invented clothes") }), rows, "ira");
                     require(ReadStringList(receipt, "rejected").Count == 1 && ReadString(rows.Last(), "text", "") == "Ira lunges toward the player.", "Optional clothing metadata rewrote/rejected dialogue.");
                 });
-                check("wardrobe_evidence_journal_replays_idempotently", () => require(Program.QuerySql(c, "SELECT * FROM chat_view_wardrobe_evidence WHERE session_id='clothes';").Count == 6, "An accepted response got duplicate clothing journal rows."));
+                check("wardrobe_evidence_journal_replays_idempotently", () => require(ReignDatabase.QuerySql(c, "SELECT * FROM chat_view_wardrobe_evidence WHERE session_id='clothes';").Count == 6, "An accepted response got duplicate clothing journal rows."));
                 check("wardrobe_scene_transition_discards_earlier_context", () => {
                     var modified = window.Select(Program.CloneDictionary).ToList(); var frame = Program.CloneDictionary(ReadDictionary(modified[0], "frame")); frame["wardrobeScene"] = "another scene"; modified[0]["frame"] = frame;
                     require(ReadDictionaryList(ReadChatViewWardrobeHistory(c, request, modified), "sources").Count == 0, "Clothing context crossed a physical scene boundary.");
@@ -300,7 +300,7 @@ VALUES('clothes',$campaign,'ira','player','open',1,1,'[""player"",""ira""]');", 
                             string answer = n == 7 ? "No, I will keep my current clothes." : "Ira raises her training blade.";
                             DialogueService.InsertConversationTurn(c, "p" + n, "clothes", "event" + n, n * 2, "e" + n, "player", "player", "Player", text, "party_chat", 4, 100, "camp", new List<string> { "player", "ira" }, payload);
                             DialogueService.InsertConversationTurn(c, "n" + n, "clothes", "event" + n, n * 2 + 1, "e" + n, "npc", "ira", "Ira", answer, "party_chat", 4, 100, "camp", new List<string> { "player", "ira" }, payload);
-                            var rows = Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE session_id='clothes' AND exchange_id=$e ORDER BY turn_order;", TestDict("e", "e" + n));
+                            var rows = ReignDatabase.QuerySql(c, "SELECT * FROM conversation_turns WHERE session_id='clothes' AND exchange_id=$e ORDER BY turn_order;", TestDict("e", "e" + n));
                             StoreChatViewWardrobeEvidence(c, payload, TestDict("viewWardrobeEvidence", n == 7 ? new[] {
                                 TestDict("source", "player", "characterIds", new[] { "player", "ira" }, "quote", text) } : new Dictionary<string, object>[0]), rows, "ira");
                         }
@@ -310,14 +310,14 @@ VALUES('clothes',$campaign,'ira','player','open',1,1,'[""player"",""ira""]');", 
                             && context.Any(t => ReadString(t, "turnId", "") == "p7" && ReadString(t, "text", "").Contains("red suits")), "A clothing proposal lost its actual refusal.");
                         transaction.Rollback();
                     }
-                    require(Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id='n7';").Count == 0
-                        && Program.QuerySql(c, "SELECT * FROM chat_view_wardrobe_evidence WHERE entry_id='n7';").Count == 0, "Rollback retained clothing evidence without its accepted source.");
+                    require(ReignDatabase.QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id='n7';").Count == 0
+                        && ReignDatabase.QuerySql(c, "SELECT * FROM chat_view_wardrobe_evidence WHERE entry_id='n7';").Count == 0, "Rollback retained clothing evidence without its accepted source.");
                 });
                 c.Dispose();
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "before_clothing_change");
-                using (var changed = Program.OpenCampaignConnection(campaign)) Program.ExecuteSql(changed, "DELETE FROM chat_view_wardrobe_evidence;");
+                using (var changed = ReignDatabase.OpenCampaignConnection(campaign)) ReignDatabase.ExecuteSql(changed, "DELETE FROM chat_view_wardrobe_evidence;");
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "before_clothing_change");
-                using var restored = Program.OpenCampaignConnection(campaign);
+                using var restored = ReignDatabase.OpenCampaignConnection(campaign);
                 check("wardrobe_actual_save_snapshot_restores_frozen_evidence", () => require(ReadDictionaryList(ReadChatViewWardrobeHistory(restored, request, window), "sources").Count == 2, "Save restore lost the independent clothing journal."));
             }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }

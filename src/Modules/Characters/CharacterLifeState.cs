@@ -41,7 +41,7 @@ namespace ReignBetaServer
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             // This is a rebuildable projection of retained receipts/native events.
             // It grants no new membership, action, emotion, or public knowledge.
-            Program.ExecuteSql(connection, @"INSERT INTO dynamic_characteristics
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO dynamic_characteristics
 (characteristic_id,owner_id,category,topic_key,text,normalized_key,status,confidence,importance,provenance,
 compatibility_status,source_event_id,world_day,known_by_json,first_ts,last_ts,payload_json)
 VALUES($id,$owner,'life_transition',$topic,$text,$id,'active',1,1,'source_backed_life_transition',
@@ -58,7 +58,7 @@ WHERE dynamic_characteristics.payload_json<>excluded.payload_json;",
         {
             var result = new List<Dictionary<string, object>>();
             if (!WorldSimulationService.TableExists(connection, "conversation_negotiation_turns")) return result;
-            var receipts = Program.QuerySql(connection, @"SELECT n.*,d.value AS decision_json FROM conversation_negotiation_turns n
+            var receipts = ReignDatabase.QuerySql(connection, @"SELECT n.*,d.value AS decision_json FROM conversation_negotiation_turns n
 CROSS JOIN LATERAL jsonb_array_elements(COALESCE(n.payload_json::jsonb->'updates','[]'::jsonb)) d(value)
 WHERE n.owner_id=$owner
 ORDER BY n.receipt_id;",
@@ -72,7 +72,7 @@ ORDER BY n.receipt_id;",
                 string turn = ReadString(row, "turn_id", ""), reply = ReadString(decision, "reply", "");
                 // Membership in a group or an unchecked generated summary cannot
                 // supply this NPC's acceptance. Follow their own original words.
-                var sources = Program.QuerySql(connection, @"SELECT * FROM conversation_turns WHERE speaker_id=$owner
+                var sources = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_turns WHERE speaker_id=$owner
 AND (turn_id=$turn OR turn_id=$npcTurn OR event_id=$turn OR exchange_id=$turn) ORDER BY turn_order;",
                     TestDict("owner", owner, "turn", turn, "npcTurn", turn + "_npc"));
                 var source = sources.FirstOrDefault(s => DialogueService.PrecisionTurnVisible(s, owner, access, connection)
@@ -80,7 +80,7 @@ AND (turn_id=$turn OR turn_id=$npcTurn OR event_id=$turn OR exchange_id=$turn) O
                 Dictionary<string, object> letter = null;
                 if (source == null && WorldSimulationService.TableExists(connection, "letters"))
                 {
-                    letter = Program.QuerySql(connection, "SELECT * FROM letters WHERE sender_id=$owner AND (letter_id=$turn OR 'turn_letter_'||letter_id=$turn);",
+                    letter = ReignDatabase.QuerySql(connection, "SELECT * FROM letters WHERE sender_id=$owner AND (letter_id=$turn OR 'turn_letter_'||letter_id=$turn);",
                         TestDict("owner", owner, "turn", turn)).FirstOrDefault();
                     if (letter == null || !DialogueService.LetterVisibleToObserver(connection, letter, owner, access, out _)
                         || reply.Length == 0 || !DialogueService.AgencyContainsExactQuote(ReadString(letter, "body", ""), reply)) continue;
@@ -111,7 +111,7 @@ AND (turn_id=$turn OR turn_id=$npcTurn OR event_id=$turn OR exchange_id=$turn) O
             var family = Program.CharacterIdFrom(profile) == owner ? ReadStringList(profile, "childrenIds").Concat(new[] {
                 ReadString(profile, "fatherId", ""), ReadString(profile, "motherId", ""), ReadString(profile, "spouseId", "") })
                 .Where(id => id.Length > 0 && id != owner).Distinct().ToList() : new List<string>();
-            var rows = Program.QuerySql(connection, @"SELECT e.* FROM world_history_events e WHERE e.timeline_id=$timeline
+            var rows = ReignDatabase.QuerySql(connection, @"SELECT e.* FROM world_history_events e WHERE e.timeline_id=$timeline
 AND e.world_day<=$day AND e.is_complete=1 AND e.phase='completed' AND e.source IN ('native','bannerlord_native')
 AND e.event_type ~* '(marri|divorc|birth|concep|death|killed|executed|prisoner|captur|releas|rescu|escape|wounded|clan_join|clan_leave|changed_clan|changed_kingdom|kingdom_join|kingdom_leave|kingdom_created|ruling_clan|ruler|succession|fief|settlement_owner|parentage|affair|lover|betray)'
 AND EXISTS(SELECT 1 FROM world_history_entities p WHERE p.event_id=e.event_id AND (p.entity_id=$owner
@@ -219,7 +219,7 @@ OR (k.audience_type='kingdom' AND k.audience_id=$kingdom))) ORDER BY e.world_day
         {
             try
             {
-                using var connection = Program.OpenCampaignConnection(campaign);
+                using var connection = ReignDatabase.OpenCampaignConnection(campaign);
                 return BuildCharacterLifeStatePrompt(connection, owner, peer, payload, sourceIds);
             }
             catch (Exception ex)
@@ -234,17 +234,17 @@ OR (k.audience_type='kingdom' AND k.audience_id=$kingdom))) ORDER BY e.world_day
         {
             try
             {
-                using var connection = Program.OpenCampaignConnection(campaign);
+                using var connection = ReignDatabase.OpenCampaignConnection(campaign);
                 using var transaction = connection.BeginTransaction();
                 AcquirePostgreSqlTransactionMutationLock(connection);
                 var transitions = ReadCharacterDecisionTransitions(connection, owner, access);
                 transitions.AddRange(ReadCharacterNativeLifeTransitions(connection, owner, access));
                 var current = new HashSet<string>(CurrentCharacterLifeState(transitions).Select(r => ReadString(r, "id", "")));
-                Program.ExecuteSql(connection, "UPDATE dynamic_characteristics SET status='source_unavailable' WHERE owner_id=$owner AND category='life_transition';", TestDict("owner", owner));
+                ReignDatabase.ExecuteSql(connection, "UPDATE dynamic_characteristics SET status='source_unavailable' WHERE owner_id=$owner AND category='life_transition';", TestDict("owner", owner));
                 foreach (var row in transitions)
                 {
                     StoreCharacterLifeProjection(connection, row);
-                    Program.ExecuteSql(connection, "UPDATE dynamic_characteristics SET status=$status WHERE characteristic_id=$id;",
+                    ReignDatabase.ExecuteSql(connection, "UPDATE dynamic_characteristics SET status=$status WHERE characteristic_id=$id;",
                         TestDict("id", ReadString(row, "id", ""), "status", current.Contains(ReadString(row, "id", "")) ? "active" : "superseded"));
                 }
                 transaction.Commit();

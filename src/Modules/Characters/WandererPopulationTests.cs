@@ -155,7 +155,7 @@ namespace ReignBetaServer
             });
             Check("durable_contact_history_scope", () => {
                 string campaign = "verify_wanderer_" + Guid.NewGuid().ToString("N").Substring(0, 8);
-                using (var c = Program.OpenCampaignConnection(campaign)) DialogueService.EnsureCategorizedMemorySchema(c);
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign)) DialogueService.EnsureCategorizedMemorySchema(c);
                 var request = new Dictionary<string, object> { ["eventId"] = "wanderer_event", ["sceneTurnId"] = "wanderer_turn", ["timelineId"] = "main",
                     ["worldDay"] = 42d, ["activeHeroIds"] = new List<string> { "speaker", "bystander" }, ["attendees"] = new List<Dictionary<string, object>>() };
                 DialogueService.StoreSocialEventConversationExchange(campaign, request, "speaker", "player", "Player", "Traveler", "Tell me about your travels.", "I have worked along the coast.", "wanderer-test", "wanderer_event", 300);

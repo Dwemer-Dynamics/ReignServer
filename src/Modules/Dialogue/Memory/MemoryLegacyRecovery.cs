@@ -18,14 +18,14 @@ namespace ReignBetaServer
         {
             string parent = ReadString(branch, "parent_timeline_id", ""), fork = ReadString(branch, "fork_event_id", "");
             if (parent.Length == 0 || fork.Length == 0) return -1;
-            var retained = Program.QuerySql(connection, "SELECT sequence FROM world_history_events WHERE event_id=$fork AND timeline_id=$parent;",
+            var retained = ReignDatabase.QuerySql(connection, "SELECT sequence FROM world_history_events WHERE event_id=$fork AND timeline_id=$parent;",
                 TestDict("fork", fork, "parent", parent)).SingleOrDefault();
             if (retained != null) return ReadLong(retained, "sequence", -1);
             var match = Regex.Match(fork, "^" + Regex.Escape(parent) + @"_([0-9]{12})_[0-9a-f]{8}$", RegexOptions.CultureInvariant);
             if (!match.Success || !long.TryParse(match.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out long sequence)
                 || sequence <= 0 || sequence == long.MaxValue) return -1;
             string child = ReadString(branch, "timeline_id", "");
-            var first = Program.QuerySql(connection, "SELECT event_id,sequence FROM world_history_events WHERE timeline_id=$child ORDER BY sequence LIMIT 1;",
+            var first = ReignDatabase.QuerySql(connection, "SELECT event_id,sequence FROM world_history_events WHERE timeline_id=$child ORDER BY sequence LIMIT 1;",
                 TestDict("child", child)).SingleOrDefault();
             return first != null && ReadLong(first, "sequence", -1) == sequence + 1
                 && Regex.IsMatch(ReadString(first, "event_id", ""), "^" + Regex.Escape(child) + "_"
@@ -46,7 +46,7 @@ namespace ReignBetaServer
             for (int depth = 0; depth < 32; depth++)
             {
                 if (!seen.Add(timeline)) return new(); // Corrupt/cyclic lineage is never authority.
-                var branch = Program.QuerySql(connection, "SELECT * FROM world_history_timelines WHERE timeline_id=$timeline AND campaign_id=$campaign;",
+                var branch = ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_timelines WHERE timeline_id=$timeline AND campaign_id=$campaign;",
                     TestDict("timeline", timeline, "campaign", campaign)).SingleOrDefault();
                 if (branch == null || ReadString(branch, "parent_timeline_id", "").Length == 0) break;
                 long forkSequence = VerifiedLegacyMemoryForkSequence(connection, branch);
@@ -80,12 +80,12 @@ namespace ReignBetaServer
                     || ReadString(manifest, "databaseProvider", "") != "postgresql") continue;
                 string snapshotPoint = PersistenceService.SaveSyncPostgreSqlSnapshotPointId(savedPoint);
                 string schema = ReignPostgreSqlStorage.SnapshotSchemaName(campaign, snapshotPoint);
-                var metadata = Program.QuerySql(connection, @"SELECT extract(epoch FROM created_utc)::double precision AS created_epoch
+                var metadata = ReignDatabase.QuerySql(connection, @"SELECT extract(epoch FROM created_utc)::double precision AS created_epoch
 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campaign AND save_point_id=$point AND schema_name=$schema;",
                     TestDict("campaign", campaign, "point", snapshotPoint, "schema", schema)).SingleOrDefault();
                 if (metadata == null || ReadDouble(metadata, "created_epoch", double.MaxValue) >= ReadDouble(boundary, "beforeEpoch", 0d)
-                    || ReadString(Program.QuerySql(connection, "SELECT to_regclass($table)::text AS name;", TestDict("table", schema + ".world_history_timelines")).Single(), "name", "").Length == 0) continue;
-                var savedTimeline = Program.QuerySql(connection, "SELECT timeline_id FROM " + schema
+                    || ReadString(ReignDatabase.QuerySql(connection, "SELECT to_regclass($table)::text AS name;", TestDict("table", schema + ".world_history_timelines")).Single(), "name", "").Length == 0) continue;
+                var savedTimeline = ReignDatabase.QuerySql(connection, "SELECT timeline_id FROM " + schema
                     + ".world_history_timelines WHERE campaign_id=$campaign AND timeline_id=$timeline AND is_active=1 AND head_sequence=$sequence AND head_event_id=$head;",
                     TestDict("campaign", campaign, "timeline", ancestor, "sequence", sequence, "head", head)).SingleOrDefault();
                 if (savedTimeline == null) continue;
@@ -106,11 +106,11 @@ FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campaign AND save_point_i
                 foreach (var entry in SnapshotMemoryKeys)
                 {
                     string schema = ReadString(proof, "schema", "");
-                    if (!WorldSimulationService.TableExists(connection, entry.Key) || ReadString(Program.QuerySql(connection, "SELECT to_regclass($table)::text AS name;",
+                    if (!WorldSimulationService.TableExists(connection, entry.Key) || ReadString(ReignDatabase.QuerySql(connection, "SELECT to_regclass($table)::text AS name;",
                         TestDict("table", schema + "." + entry.Key)).Single(), "name", "").Length == 0) continue;
                     string day = "COALESCE((to_jsonb(saved)->>'world_day')::double precision,(to_jsonb(saved)->>'learned_day')::double precision,"
                         + "((to_jsonb(saved)->>'payload_json')::jsonb->>'worldDay')::double precision,0)";
-                    Program.ExecuteSql(connection, "INSERT INTO memory_restored_sources(source_table,source_id,restore_generation,content_hash) SELECT '"
+                    ReignDatabase.ExecuteSql(connection, "INSERT INTO memory_restored_sources(source_table,source_id,restore_generation,content_hash) SELECT '"
                         + entry.Key + "',saved." + entry.Value + ",$generation," + SnapshotSourceHashSql("saved") + " FROM " + schema + "." + entry.Key
                         + " saved JOIN " + entry.Key + " current_source ON current_source." + entry.Value + "=saved." + entry.Value
                         + " AND " + SnapshotSourceHashSql("current_source") + "=" + SnapshotSourceHashSql("saved")
@@ -120,7 +120,7 @@ FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campaign AND save_point_i
                 }
                 RecoverLegacyPerformanceSources(connection, proof, generation);
             }
-            Program.ExecuteSql(connection, "UPDATE memory_restored_source_context SET legacy_recovery_version=$version WHERE state_id='current' AND restore_generation=$generation;",
+            ReignDatabase.ExecuteSql(connection, "UPDATE memory_restored_source_context SET legacy_recovery_version=$version WHERE state_id='current' AND restore_generation=$generation;",
                 TestDict("version", LegacyMemoryRecoveryVersion, "generation", generation));
             Program.LogOperational("memory.legacy_source_recovery", TestDict("campaignId", campaign, "savePointId", ReadString(point, "savePointId", ""),
                 "restoreGeneration", generation, "verifiedSnapshots", proofs.Select(p => TestDict("savePointId", p["savePointId"],
@@ -158,18 +158,18 @@ FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campaign AND save_point_i
             if (!WorldSimulationService.TableExists(connection, "character_performance_events")) return;
             string schema = ReadString(proof, "schema", ""); // Produced only by the canonical verified snapshot resolver.
             foreach (string table in new[] { "world_history_events", "world_history_entities", "world_history_knowledge_rules" })
-                if (ReadString(Program.QuerySql(connection, "SELECT to_regclass($table)::text AS name;", TestDict("table", schema + "." + table)).Single(), "name", "").Length == 0) return;
+                if (ReadString(ReignDatabase.QuerySql(connection, "SELECT to_regclass($table)::text AS name;", TestDict("table", schema + "." + table)).Single(), "name", "").Length == 0) return;
             var parameters = TestDict("ancestor", ReadString(proof, "timeline", ""), "day", ReadDouble(proof, "day", 0d), "sequence", ReadLong(proof, "sequence", -1));
-            var candidates = Program.QuerySql(connection, "SELECT p.*, " + SnapshotSourceHashSql("p") + " AS restored_content_hash,to_jsonb(saved)::text AS native_source_json"
+            var candidates = ReignDatabase.QuerySql(connection, "SELECT p.*, " + SnapshotSourceHashSql("p") + " AS restored_content_hash,to_jsonb(saved)::text AS native_source_json"
                 + " FROM character_performance_events p JOIN " + schema + ".world_history_events saved ON saved.event_id=p.event_id"
                 + " JOIN world_history_events current_event ON current_event.event_id=saved.event_id AND " + SnapshotSourceHashSql("current_event") + "=" + SnapshotSourceHashSql("saved")
                 + " WHERE p.timeline_id=$ancestor AND saved.timeline_id=$ancestor AND p.world_day<=$day AND saved.world_day<=$day"
                 + " AND p.sequence<=$sequence AND saved.sequence<=$sequence;", parameters);
             if (candidates.Count == 0) return;
             string eligible = " WHERE EXISTS(SELECT 1 FROM character_performance_events p WHERE p.event_id=source.event_id AND p.timeline_id=$ancestor AND p.world_day<=$day AND p.sequence<=$sequence)";
-            var entities = Program.QuerySql(connection, "SELECT source.* FROM " + schema + ".world_history_entities source" + eligible + " ORDER BY source.event_id,source.ordinal;", parameters)
+            var entities = ReignDatabase.QuerySql(connection, "SELECT source.* FROM " + schema + ".world_history_entities source" + eligible + " ORDER BY source.event_id,source.ordinal;", parameters)
                 .ToLookup(r => ReadString(r, "event_id", ""));
-            var rules = Program.QuerySql(connection, "SELECT source.event_id,source.audience_type,source.audience_id,source.available_day,source.acquisition_mode FROM "
+            var rules = ReignDatabase.QuerySql(connection, "SELECT source.event_id,source.audience_type,source.audience_id,source.available_day,source.acquisition_mode FROM "
                 + schema + ".world_history_knowledge_rules source" + eligible + ";", parameters).ToLookup(r => ReadString(r, "event_id", ""));
             var proven = new List<Dictionary<string, object>>();
             foreach (var group in candidates.GroupBy(r => ReadString(r, "event_id", "")))
@@ -187,7 +187,7 @@ FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campaign AND save_point_i
                     values.Add("('character_performance_events',$id" + i + ",$generation,$hash" + i + ")");
                     args["id" + i] = ReadString(batch[i], "receipt_id", ""); args["hash" + i] = ReadString(batch[i], "restored_content_hash", "");
                 }
-                Program.ExecuteSql(connection, "INSERT INTO memory_restored_sources(source_table,source_id,restore_generation,content_hash) VALUES " + string.Join(",", values)
+                ReignDatabase.ExecuteSql(connection, "INSERT INTO memory_restored_sources(source_table,source_id,restore_generation,content_hash) VALUES " + string.Join(",", values)
                     + " ON CONFLICT(source_table,source_id,restore_generation) DO NOTHING;", args);
             }
         }
@@ -211,7 +211,7 @@ FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campaign AND save_point_i
             string cause = RecallLossCause(claim);
             if (connection == null || knowledge == null || cause.Length == 0) return false;
             string needle = cause == "head_injury" ? "head" : cause;
-            var sources = Program.QuerySql(connection, @"SELECT t.* FROM conversation_turns t
+            var sources = ReignDatabase.QuerySql(connection, @"SELECT t.* FROM conversation_turns t
 WHERE t.role='player' AND t.status='active' AND t.text ILIKE $cause AND t.text ~* 'memor|amnesia'
 AND t.world_day<=$day AND t.accepted_sequence<=$sequence AND t.ts<=$timestamp
 AND (t.speaker_id=$observer OR t.participants_json::jsonb ? $observer)
@@ -220,7 +220,7 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 128;",
                     "timestamp", knowledge.AsOfTimestamp, "observer", knowledge.NpcId));
             foreach (var source in sources.Where(s => PrecisionTurnVisible(s, knowledge.NpcId, knowledge, connection)))
             {
-                var name = Program.QuerySql(connection, @"SELECT speaker_name FROM conversation_turns
+                var name = ReignDatabase.QuerySql(connection, @"SELECT speaker_name FROM conversation_turns
 WHERE session_id=$session AND role='npc' AND speaker_id=$observer AND status='active'
 AND world_day<=$day AND accepted_sequence<=$sequence AND ts<=$timestamp
 ORDER BY turn_order LIMIT 1;", TestDict("session", ReadString(source, "session_id", ""), "observer", knowledge.NpcId,
@@ -238,7 +238,7 @@ ORDER BY turn_order LIMIT 1;", TestDict("session", ReadString(source, "session_i
             if (RecallLossCause(claim).Length == 0 || payload == null || string.IsNullOrWhiteSpace(observer)
                 || string.IsNullOrWhiteSpace(campaign)) return false;
             var access = Program.BuildKnowledgeAccessContext(observer, ReadFirstString(payload, "playerHeroStringId", "playerId"), "", payload);
-            using var connection = Program.OpenCampaignConnection(campaign);
+            using var connection = ReignDatabase.OpenCampaignConnection(campaign);
             return HasStoredRecallLossSupport(connection, access, claim);
         }
 
