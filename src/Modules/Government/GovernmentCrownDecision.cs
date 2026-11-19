@@ -106,10 +106,7 @@ namespace ReignBetaServer
             using var connection = ReignDatabase.OpenCampaignConnection(campaign);
             // Observer-visible accepted originals only. The player-facing unfiltered history
             // helper must never be used here, nor can a future/other-timeline turn be recalled.
-            var rows = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_turns WHERE status='active'
-AND (speaker_id=$hero OR participants_json::jsonb ? $hero)
-AND (speaker_id=$ruler OR participants_json::jsonb ? $ruler)
-ORDER BY ts DESC,turn_order DESC,turn_id DESC LIMIT 1200;", TestDict("hero", hero, "ruler", ruler));
+            var rows = GovernmentStore.SelectConversationTurns(connection, TestDict("hero", hero, "ruler", ruler));
             var visible = rows.Where(row => DialogueService.PrecisionTurnVisible(row, hero, access, connection))
                 .OrderByDescending(row => ReadLong(row, "ts", 0)).ToList();
             var accepted = new List<string>();
