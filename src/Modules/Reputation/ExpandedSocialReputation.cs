@@ -75,13 +75,8 @@ namespace ReignBetaServer
                 {
                     EnsureSocialReputationSchema(expirationConnection);
                     WorldSimulationService.EnsureWorldTestTelemetrySchema(expirationConnection);
-                    Dictionary<string, object> latest = ReignDatabase.QuerySql(
-                        expirationConnection, @"SELECT MAX(e.world_day) AS world_day
-FROM world_history_events e
-WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
-AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
- WHERE r.event_id=e.event_id AND (r.completed<>0 OR r.attempt_count>=3));",
-                        new Dictionary<string, object>
+                    Dictionary<string, object> latest = ReputationStore.SelectWorldHistoryEvents(
+                        expirationConnection, new Dictionary<string, object>
                         {
                             ["timeline"] = timelineId
                         }).FirstOrDefault();
@@ -173,54 +168,20 @@ AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
                 EnsureSocialReputationSchema(connection);
                 EnsureSocialSubjectWorkSchema(connection);
                 long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                ReignDatabase.ExecuteSql(connection, @"UPDATE social_subject_work_queue
-SET status='pending',claim_owner='',claim_expires_ts=0,updated_ts=$ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND status='processing' AND claim_expires_ts<$ts;",
-                    new Dictionary<string, object>
+                ReputationStore.UpdateSocialSubjectWorkQueue(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["ts"] = now
                     });
                 if (ReignPostgreSqlDialect.IsPostgreSql(connection))
                 {
-                    ReignDatabase.ExecuteSql(connection, @"
-WITH pending AS (
- SELECT e.sequence,e.subject_id
- FROM world_history_events e
- WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
- AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
-  WHERE r.event_id=e.event_id AND (r.completed<>0 OR r.attempt_count>=3))
-), grouped AS (
- SELECT subject_id,MIN(sequence) AS first_sequence,COUNT(*) AS pending_count
- FROM pending WHERE subject_id<>'' GROUP BY subject_id
-)
-INSERT INTO social_subject_work_queue(
- campaign_id,timeline_id,subject_id,status,first_sequence,pending_count,
- claim_owner,claim_expires_ts,updated_ts,last_error)
-SELECT $campaign,$timeline,subject_id,'pending',first_sequence,pending_count,
-       '',0,$ts,'' FROM grouped
-ON CONFLICT(campaign_id,timeline_id,subject_id) DO UPDATE SET
- first_sequence=excluded.first_sequence,pending_count=excluded.pending_count,
- status=CASE WHEN social_subject_work_queue.status='processing'
-  AND social_subject_work_queue.claim_expires_ts>$ts THEN 'processing'
-  ELSE 'pending' END,updated_ts=$ts;",
-                        new Dictionary<string, object>
+                    ReputationStore.SelectGrouped(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId,
                             ["timeline"] = timelineId,
                             ["ts"] = now
                         });
-                    Dictionary<string, object> summary = ReignDatabase.QuerySql(connection, @"
-SELECT COUNT(*) AS event_count,
-       COUNT(DISTINCT e.subject_id)
-         FILTER (WHERE e.subject_id<>'')
-         AS subject_count
-FROM world_history_events e
-WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
-AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
- WHERE r.event_id=e.event_id AND (r.completed<>0 OR r.attempt_count>=3));",
-                        new Dictionary<string, object>
+                    Dictionary<string, object> summary = ReputationStore.CountWorldHistoryEvents(connection, new Dictionary<string, object>
                         {
                             ["timeline"] = timelineId
                         }).FirstOrDefault() ?? new Dictionary<string, object>();
@@ -230,14 +191,7 @@ AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
                         postgreSqlSubjects);
                     return ReadInt(summary, "event_count", 0);
                 }
-                List<Dictionary<string, object>> pending = ReignDatabase.QuerySql(connection, @"
-SELECT e.sequence,e.event_id,e.payload_json
-FROM world_history_events e
-WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
-AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
- WHERE r.event_id=e.event_id AND (r.completed<>0 OR r.attempt_count>=3))
-ORDER BY e.sequence,e.event_id;",
-                    new Dictionary<string, object> { ["timeline"] = timelineId });
+                List<Dictionary<string, object>> pending = ReputationStore.SelectWorldHistoryEvents2(connection, new Dictionary<string, object> { ["timeline"] = timelineId });
                 foreach (IGrouping<string, Dictionary<string, object>> subject in pending
                     .Select(row => new
                     {
@@ -252,16 +206,7 @@ ORDER BY e.sequence,e.event_id;",
                         StringComparer.OrdinalIgnoreCase))
                 {
                     long first = subject.Min(row => ReadLong(row, "sequence", 0));
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO social_subject_work_queue(
-campaign_id,timeline_id,subject_id,status,first_sequence,pending_count,
-claim_owner,claim_expires_ts,updated_ts,last_error)
-VALUES($campaign,$timeline,$subject,'pending',$sequence,$count,'',0,$ts,'')
-ON CONFLICT(campaign_id,timeline_id,subject_id) DO UPDATE SET
-first_sequence=excluded.first_sequence,pending_count=excluded.pending_count,
-status=CASE WHEN social_subject_work_queue.status='processing'
- AND social_subject_work_queue.claim_expires_ts>$ts THEN 'processing'
- ELSE 'pending' END,updated_ts=$ts;",
-                        new Dictionary<string, object>
+                    ReputationStore.UpsertSocialSubjectWorkQueue(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId,
                             ["subject"] = subject.Key, ["sequence"] = first,
@@ -283,21 +228,11 @@ status=CASE WHEN social_subject_work_queue.status='processing'
         internal static void EnsureSocialSubjectWorkSchema(
             ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS social_subject_work_queue(
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,subject_id TEXT NOT NULL,
-status TEXT NOT NULL DEFAULT 'pending',first_sequence INTEGER NOT NULL DEFAULT 0,
-pending_count INTEGER NOT NULL DEFAULT 0,claim_owner TEXT NOT NULL DEFAULT '',
-claim_expires_ts INTEGER NOT NULL DEFAULT 0,updated_ts INTEGER NOT NULL,
-last_error TEXT NOT NULL DEFAULT '',
-PRIMARY KEY(campaign_id,timeline_id,subject_id));");
-            ReignDatabase.EnsureDatabaseColumn(connection, "social_subject_work_queue",
-                "needs_finalize", "INTEGER NOT NULL DEFAULT 0");
-            ReignDatabase.EnsureDatabaseColumn(connection, "social_subject_work_queue",
-                "last_world_day", "REAL NOT NULL DEFAULT 0");
-            ReignDatabase.EnsureDatabaseColumn(connection, "social_subject_work_queue",
-                "last_event_id", "TEXT NOT NULL DEFAULT ''");
-            ReignDatabase.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_social_subject_work_claim
-ON social_subject_work_queue(campaign_id,timeline_id,status,first_sequence,subject_id);");
+            ReputationSchema.CreateSocialSubjectWorkQueue(connection);
+            ReputationSchema.EnsureColumnSocialSubjectWorkQueueNeedsFinalize(connection);
+            ReputationSchema.EnsureColumnSocialSubjectWorkQueueLastWorldDay(connection);
+            ReputationSchema.EnsureColumnSocialSubjectWorkQueueLastEventId(connection);
+            ReputationSchema.CreateIndexSocialSubjectWorkClaim(connection);
         }
 
         private static void DrainSocialSubjectLanes(string campaignId,
@@ -337,10 +272,7 @@ ON social_subject_work_queue(campaign_id,timeline_id,status,first_sequence,subje
                                 {
                                     EnsureSocialSubjectWorkSchema(
                                         recoveryConnection);
-                                    ReignDatabase.ExecuteSql(recoveryConnection, @"UPDATE social_subject_work_queue SET
-status='pending',claim_owner='',claim_expires_ts=0,updated_ts=$ts,last_error=$error
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
-                                        new Dictionary<string, object>
+                                    ReputationStore.UpdateSocialSubjectWorkQueue2(recoveryConnection, new Dictionary<string, object>
                                         {
                                             ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                                             ["error"] = Program.LimitText(ex.Message, 1000),
@@ -371,33 +303,23 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             using (ReignDbTransaction transaction = connection.BeginTransaction())
             {
                 long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                Dictionary<string, object> row = ReignDatabase.QuerySql(connection, @"
-SELECT subject_id FROM social_subject_work_queue
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND (status='pending' OR (status='processing' AND claim_expires_ts<$ts))
-ORDER BY first_sequence,subject_id
-LIMIT 1 FOR UPDATE SKIP LOCKED;",
-                    new Dictionary<string, object>
+                Dictionary<string, object> row = ReputationStore.SelectSocialSubjectWorkQueue(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["ts"] = now
-                    }, transaction).FirstOrDefault();
+                    },transaction).FirstOrDefault();
                 string subjectId = ReadString(row, "subject_id", "");
                 if (string.IsNullOrWhiteSpace(subjectId))
                 {
                     transaction.Commit();
                     return "";
                 }
-                ReignDatabase.ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
-status='processing',claim_owner=$owner,claim_expires_ts=$expires,updated_ts=$ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject
-AND (status='pending' OR claim_expires_ts<$ts);",
-                    new Dictionary<string, object>
+                ReputationStore.UpdateSocialSubjectWorkQueue3(connection, new Dictionary<string, object>
                     {
                         ["owner"] = owner, ["expires"] = now + 120,
                         ["ts"] = now, ["campaign"] = campaignId,
                         ["timeline"] = timelineId, ["subject"] = subjectId
-                    }, transaction);
+                    },transaction);
                 transaction.Commit();
                 return subjectId;
             }
@@ -416,10 +338,7 @@ AND (status='pending' OR claim_expires_ts<$ts);",
                 new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             List<string> batchEventIds = new List<string>();
             {
-                Dictionary<string, object> lane = ReignDatabase.QuerySql(connection, @"SELECT
-last_world_day,last_event_id FROM social_subject_work_queue
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject
-LIMIT 1;", new Dictionary<string, object>
+                Dictionary<string, object> lane = ReputationStore.SelectSocialSubjectWorkQueue2(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId,
                     ["subject"] = subjectId
@@ -427,28 +346,13 @@ LIMIT 1;", new Dictionary<string, object>
                 lastWorldDay = ReadDouble(lane, "last_world_day", 0d);
                 lastEventId = ReadString(lane, "last_event_id", "");
                 rows = ReignPostgreSqlDialect.IsPostgreSql(connection)
-                    ? ReignDatabase.QuerySql(connection, @"
-SELECT e.sequence,e.event_id,e.world_day,e.event_type,e.summary,e.payload_json
-FROM world_history_events e
-WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
-AND e.subject_id=$subject
-AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
- WHERE r.event_id=e.event_id AND (r.completed<>0 OR r.attempt_count>=3))
-ORDER BY e.sequence,e.event_id LIMIT $limit;",
-                        new Dictionary<string, object>
+                    ? ReputationStore.SelectWorldHistoryEvents3(connection, new Dictionary<string, object>
                         {
                             ["timeline"] = timelineId,
                             ["subject"] = subjectId,
                             ["limit"] = SocialSubjectBatchSize
                         })
-                    : ReignDatabase.QuerySql(connection, @"
-SELECT e.sequence,e.event_id,e.world_day,e.event_type,e.summary,e.payload_json
-FROM world_history_events e
-WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
-AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
- WHERE r.event_id=e.event_id AND (r.completed<>0 OR r.attempt_count>=3))
-ORDER BY e.sequence,e.event_id;",
-                    new Dictionary<string, object> { ["timeline"] = timelineId })
+                    : ReputationStore.SelectWorldHistoryEvents4(connection, new Dictionary<string, object> { ["timeline"] = timelineId })
                     .Where(row => ReadFirstString(
                         TryParseJsonObject(ReadString(row, "payload_json", "{}"))
                             ?? new Dictionary<string, object>(),
@@ -457,7 +361,7 @@ ORDER BY e.sequence,e.event_id;",
                     .Take(SocialSubjectBatchSize).ToList();
                 Stopwatch eventTransactionTimer = Stopwatch.StartNew();
                 Interlocked.Increment(ref SocialOutcomeTransactionAttempts);
-                ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                ReputationStore.Begin(connection);
                 try
                 {
                     foreach (Dictionary<string, object> row in rows)
@@ -514,7 +418,7 @@ ORDER BY e.sequence,e.event_id;",
                             (int)Math.Floor(lastWorldDay + 0.000001d),
                             "rumors", telemetryKey, batchTelemetry);
                     }
-                    ReignDatabase.ExecuteSql(connection, "COMMIT;");
+                    ReputationStore.Commit(connection);
                     eventTransactionTimer.Stop();
                     RecordSocialOutcomeTransactionDuration(
                         eventTransactionTimer.ElapsedMilliseconds,
@@ -522,15 +426,12 @@ ORDER BY e.sequence,e.event_id;",
                 }
                 catch
                 {
-                    try { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { ReputationStore.Rollback(connection); } catch { }
                     throw;
                 }
                 if (processed > 0)
                 {
-                    ReignDatabase.ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
-needs_finalize=1,last_world_day=$day,last_event_id=$event,updated_ts=$ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
-                        new Dictionary<string, object>
+                    ReputationStore.UpdateSocialSubjectWorkQueue4(connection, new Dictionary<string, object>
                         {
                             ["day"] = lastWorldDay, ["event"] = lastEventId,
                             ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
@@ -541,11 +442,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                 }
                 bool more = HasPendingSocialWorldHistoryOutcomesForSubject(
                     connection, timelineId, subjectId);
-                ReignDatabase.ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
-status=$status,claim_owner='',claim_expires_ts=0,pending_count=$count,
-updated_ts=$ts,last_error=''
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
-                    new Dictionary<string, object>
+                ReputationStore.UpdateSocialSubjectWorkQueue5(connection, new Dictionary<string, object>
                     {
                         ["status"] = more ? "pending" : "completed",
                         ["count"] = more ? 1 : 0,
@@ -569,13 +466,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                     ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureSocialSubjectWorkSchema(readConnection);
-                    lanes = ReignDatabase.QuerySql(readConnection, @"
-SELECT subject_id,last_world_day,last_event_id
-FROM social_subject_work_queue
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND status='completed' AND needs_finalize<>0
-ORDER BY first_sequence,subject_id
-LIMIT $limit;", new Dictionary<string, object>
+                    lanes = ReputationStore.SelectSocialSubjectWorkQueue3(readConnection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId,
                         ["timeline"] = timelineId,
@@ -590,7 +481,7 @@ LIMIT $limit;", new Dictionary<string, object>
                     using (ReignDbConnection connection =
                         ReignDatabase.OpenCampaignConnection(campaignId))
                     {
-                        ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                        ReputationStore.Begin(connection);
                         try
                         {
                             foreach (Dictionary<string, object> lane in lanes)
@@ -607,11 +498,7 @@ LIMIT $limit;", new Dictionary<string, object>
                                 ReconcileSocialRelationshipsForSubjects(
                                     connection, campaignId, timelineId,
                                     new[] { subjectId }, worldDay, true, true);
-                                ReignDatabase.ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
-needs_finalize=0,updated_ts=$ts,last_error=''
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND subject_id=$subject AND status='completed';",
-                                    new Dictionary<string, object>
+                                ReputationStore.UpdateSocialSubjectWorkQueue6(connection, new Dictionary<string, object>
                                     {
                                         ["ts"] = DateTimeOffset.UtcNow
                                             .ToUnixTimeSeconds(),
@@ -620,11 +507,11 @@ AND subject_id=$subject AND status='completed';",
                                         ["subject"] = subjectId
                                     });
                             }
-                            ReignDatabase.ExecuteSql(connection, "COMMIT;");
+                            ReputationStore.Commit(connection);
                         }
                         catch
                         {
-                            try { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); }
+                            try { ReputationStore.Rollback(connection); }
                             catch { }
                             throw;
                         }
@@ -728,24 +615,13 @@ AND subject_id=$subject AND status='completed';",
         {
             if (ReignPostgreSqlDialect.IsPostgreSql(connection))
             {
-                return ReignDatabase.QuerySql(connection, @"
-SELECT 1 AS present FROM world_history_events e
-WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
-AND e.subject_id=$subject
-AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
- WHERE r.event_id=e.event_id AND (r.completed<>0 OR r.attempt_count>=3))
-LIMIT 1;", new Dictionary<string, object>
+                return ReputationStore.SelectWorldHistoryEvents5(connection, new Dictionary<string, object>
                 {
                     ["timeline"] = timelineId,
                     ["subject"] = subjectId
                 }).Count > 0;
             }
-            return ReignDatabase.QuerySql(connection, @"
-SELECT e.payload_json FROM world_history_events e
-WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
-AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
- WHERE r.event_id=e.event_id AND (r.completed<>0 OR r.attempt_count>=3));",
-                    new Dictionary<string, object> { ["timeline"] = timelineId })
+            return ReputationStore.SelectWorldHistoryEvents6(connection, new Dictionary<string, object> { ["timeline"] = timelineId })
                 .Any(row => ReadFirstString(
                     TryParseJsonObject(ReadString(row, "payload_json", "{}"))
                         ?? new Dictionary<string, object>(),
@@ -767,16 +643,7 @@ AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
                     {
                         WorldSimulationService.EnsureWorldHistorySchema(connection);
                         EnsureSocialReputationSchema(connection);
-                        pending = ReignDatabase.QuerySql(connection, @"
-SELECT e.event_id,e.world_day,e.event_type,e.summary,e.payload_json
-FROM world_history_events e
-WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
-AND NOT EXISTS (
-    SELECT 1 FROM social_outcome_receipts r
-    WHERE r.event_id=e.event_id AND (r.completed<>0 OR r.attempt_count>=3)
-)
-ORDER BY e.sequence,e.event_id LIMIT $limit;",
-                            new Dictionary<string, object>
+                        pending = ReputationStore.SelectWorldHistoryEvents7(connection, new Dictionary<string, object>
                             {
                                 ["timeline"] = timelineId,
                                 ["limit"] = SocialWorldHistoryBatchSize
@@ -837,18 +704,7 @@ ORDER BY e.sequence,e.event_id LIMIT $limit;",
             {
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    return ReignDatabase.QuerySql(connection, @"
-SELECT 1 FROM world_history_events e
-WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
-AND NOT EXISTS (
-    SELECT 1 FROM social_outcome_receipts r
-    WHERE r.event_id=e.event_id AND (r.completed<>0 OR r.attempt_count>=3)
-)
-UNION ALL
-SELECT 1 FROM social_subject_work_queue q
-WHERE q.campaign_id=$campaign AND q.timeline_id=$timeline
-AND q.needs_finalize<>0
-LIMIT 1;", new Dictionary<string, object>
+                    return ReputationStore.SelectWorldHistoryEvents8(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId,
                         ["timeline"] = timelineId
