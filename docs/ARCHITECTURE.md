@@ -148,7 +148,7 @@ Documented lock order, outermost first: `CampaignDataGate`, then `CampaignBackup
 `DeleteAllScheduleLock` (innermost; never held across I/O or waits). Cold per-campaign schema initialisation takes
 `FileLock` (also exposed as `SettingsSaveGate`) before `CampaignSchemaLock`; `OpenCampaignConnection` throws if
 the reverse order is attempted. Other module-local lock orders are documented in comments at their call sites (for
-example `Dialogue/PlayerActionIntents.cs`, `Relationships/WorldRelationshipModel.cs`, `Platform/VerificationLab.cs`).
+example `Dialogue/Actions/PlayerActionIntents.cs`, `Relationships/WorldRelationshipModel.cs`, `Platform/VerificationLab.cs`).
 
 ## Storage
 
@@ -217,7 +217,7 @@ The default build is unchanged and still ships everything above. Building with
   with its `VerificationLab.Contracts.cs`, `VerificationLab.Suites.cs` and `VerificationLab.Support.cs` partials,
   `Platform/VerificationSourceLocator.cs`, `Platform/CodexPerformanceVerification.cs`,
   `Court/CapitalAmbassadorTestSystem.cs`, `Portraits/BackgroundPortraitContracts.cs` and
-  `Dialogue/PersonalGossipCompositionProbe.cs`.
+  `Dialogue/Gossip/PersonalGossipCompositionProbe.cs`.
 - `#if !REIGN_EXCLUDE_VERIFICATION` guards the product call sites that reach them: the `Run*SelfTests` aggregators
   inside product files, the `--run-*` / `--cancel-verification` dispatch in `RunServer` (the flavour refuses those
   flags with exit code 1 instead of starting the server), the `/tests/*` and `/verification/*` route
@@ -234,7 +234,7 @@ The default build is unchanged and still ships everything above. Building with
 `services/vector-worker/worker.py` is a local HTTP service (default loopback port 5102) for semantic memory:
 FastEmbed ONNX `BAAI/bge-small-en-v1.5` embeddings with local Qdrant, ColBERT late-interaction discovery, memory
 selection/reranking and dialogue claim validation helpers. The server owns its lifetime: the semantic memory
-subsystem (`Dialogue/SemanticMemory.cs`) starts it with `REIGN_VECTOR_PYTHON` against the data directory, monitors
+subsystem (`Dialogue/Memory/SemanticMemory.cs`) starts it with `REIGN_VECTOR_PYTHON` against the data directory, monitors
 `/health`, and stops it on shutdown. When semantic retrieval is unavailable, memory retrieval falls back to
 PostgreSQL full-text search. See
 `services/vector-worker/README.md`.
