@@ -106,8 +106,7 @@ namespace ReignBetaServer
                 using var c = ReignDatabase.OpenCampaignConnection(campaign);
                 DialogueService.ReadMemoryPrecisionState(c);
                 DialogueService.EnsureChatViewSchema(c);
-                ReignDatabase.ExecuteSql(c, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json)
-VALUES('view_session',$campaign,'npc0','player','open',1,1,'[""player"",""npc0""]');", TestDict("campaign", campaign));
+                PortraitsSelfTestStore.InsertConversationSessions(c, TestDict("campaign", campaign));
                 var ids = Enumerable.Range(0, 10).Select(i => "npc" + i).ToList();
                 var people = ids.Concat(new[] { "player" }).Select(id => TestDict("heroStringId", id, "name", id)).ToList();
                 var payload = TestDict("timelineId", "main", "sceneParticipants", people, "activeHeroIds", ids);
@@ -143,7 +142,7 @@ VALUES('view_session',$campaign,'npc0','player','open',1,1,'[""player"",""npc0""
                 SaveChatViewJob(c, job);
                 var restored = ChatViewResponse(campaign, job, true);
                 Check("publication_recovers_without_providers", ReadString(restored, "status", "") == "ready" && ReadString(restored, "imageSha256", "") == Sha256Hex(raw));
-                ReignDatabase.ExecuteSql(c, "INSERT INTO chat_view_requests(request_id,session_id,timeline_id,player_id,job_id) VALUES($request,'view_session','main','player',$job);", TestDict("request", new string('b', 32), "job", ReadString(job, "jobId", "")));
+                PortraitsSelfTestStore.InsertChatViewRequests(c, TestDict("request", new string('b', 32), "job", ReadString(job, "jobId", "")));
                 request["requestId"] = new string('b', 32); request["worldDay"] = 5d;
                 Check("transport_retry_uses_admitted_job", ReadString(ChatViewApi(request, "start"), "jobId", "") == ReadString(job, "jobId", ""));
                 Check("same_timeline_archive_visible", DialogueService.ChatViewJobVisible(c, job, request));

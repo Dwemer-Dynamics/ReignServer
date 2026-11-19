@@ -22,8 +22,7 @@ namespace ReignBetaServer
             if (replies.Count == 0) return new List<Dictionary<string, object>>();
             var parameters = TestDict("session", session);
             var slots = replies.Select((r, i) => { parameters["e" + i] = ReadString(r, "turnId", ""); return "$e" + i; }).ToArray();
-            var rows = ReignDatabase.QuerySql(connection, "SELECT entry_id,source_hash,payload_json FROM chat_view_wardrobe_evidence WHERE session_id=$session AND entry_id IN ("
-                + string.Join(",", slots) + ");", parameters);
+            var rows = PortraitsStore.SelectChatViewWardrobeEvidence(connection, string.Join(",", slots),parameters);
             var hints = new Dictionary<string, Dictionary<string, object>>(StringComparer.Ordinal);
             var historicalIds = new HashSet<string>(earlier.Select(t => ReadString(t, "turnId", "")), StringComparer.Ordinal);
             foreach (var row in rows)

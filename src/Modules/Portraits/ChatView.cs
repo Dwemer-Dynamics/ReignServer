@@ -37,32 +37,27 @@ namespace ReignBetaServer
                 DialogueService.EnsureChatViewSchema(connection);
                 if (action == "archive")
                 {
-                    if (ReignDatabase.QuerySql(connection, "SELECT session_id FROM conversation_sessions WHERE player_id=$player LIMIT 1;", TestDict("player", player)).Count == 0)
+                    if (PortraitsStore.SelectConversationSessions(connection, TestDict("player", player)).Count == 0)
                         return TestDict("ok", true, "entries", new List<object>(), "nextOffset", -1);
                 }
                 else DialogueService.ChatViewScope(connection, request);
                 if (action == "list" || action == "archive")
                 {
                     int offset = Math.Max(0, Math.Min(100000, ReadInt(request, "offset", 0)));
-                    var jobs = ReignDatabase.QuerySql(connection, @"SELECT payload_json FROM chat_view_jobs WHERE player_id=$player
-AND ($session='' OR session_id=$session) ORDER BY created_ts,job_id LIMIT 100 OFFSET $offset;",
-                        TestDict("player", player, "timeline", timeline, "session", action == "archive" ? "" : session, "offset", offset));
+                    var jobs = PortraitsStore.SelectChatViewJobs(connection, TestDict("player", player, "timeline", timeline, "session", action == "archive" ? "" : session, "offset", offset));
                     return TestDict("ok", true, "entries", jobs.Select(j => TryParseJsonObject(ReadString(j, "payload_json", "{}")))
                         .Where(j => DialogueService.ChatViewJobVisible(connection, j, request)).Select(j => ChatViewResponse(campaign, j, false)).ToList(), "nextOffset", jobs.Count == 100 ? offset + 100 : -1);
                 }
                 if (action == "state")
                 {
-                    var stored = ReignDatabase.QuerySql(connection, @"SELECT payload_json FROM chat_view_jobs WHERE job_id=$id AND player_id=$player
-AND ($session='' OR session_id=$session);", TestDict("id", ReadString(request, "jobId", ""), "player", player, "timeline", timeline, "session", session)).SingleOrDefault();
+                    var stored = PortraitsStore.SelectChatViewJobs2(connection, TestDict("id", ReadString(request, "jobId", ""), "player", player, "timeline", timeline, "session", session)).SingleOrDefault();
                     return stored == null || !DialogueService.ChatViewJobVisible(connection, TryParseJsonObject(ReadString(stored, "payload_json", "{}")), request) ? ChatViewError("This image is not in the current conversation timeline.")
                         : ChatViewResponse(campaign, TryParseJsonObject(ReadString(stored, "payload_json", "{}")), ReadBool(request, "includeImage", true));
                 }
                 if (action != "start") return ChatViewError("Unknown View operation.");
                 string requestId = ReadString(request, "requestId", "");
                 if (!Guid.TryParseExact(requestId, "N", out _)) return ChatViewError("A unique View request identity is required.");
-                var admitted = ReignDatabase.QuerySql(connection, @"SELECT j.payload_json FROM chat_view_requests r JOIN chat_view_jobs j ON j.job_id=r.job_id
-WHERE r.request_id=$request AND r.player_id=$player AND r.session_id=$session AND r.timeline_id=$timeline;",
-                    TestDict("request", requestId, "player", player, "session", session, "timeline", timeline)).SingleOrDefault();
+                var admitted = PortraitsStore.SelectChatViewRequests(connection, TestDict("request", requestId, "player", player, "session", session, "timeline", timeline)).SingleOrDefault();
                 if (admitted != null) return ChatViewResponse(campaign, TryParseJsonObject(ReadString(admitted, "payload_json", "{}")), false);
                 var window = DialogueService.ReadChatViewWindow(connection, request);
                 var wardrobeHistory = ReadChatViewWardrobeHistory(connection, request, window);
@@ -94,13 +89,10 @@ WHERE r.request_id=$request AND r.player_id=$player AND r.session_id=$session AN
                 lock (ChatViewCreationGate)
                 {
                     // The first transport attempt may have admitted while this request read its sources.
-                    admitted = ReignDatabase.QuerySql(connection, @"SELECT j.payload_json FROM chat_view_requests r JOIN chat_view_jobs j ON j.job_id=r.job_id
-WHERE r.request_id=$request AND r.player_id=$player AND r.session_id=$session AND r.timeline_id=$timeline;",
-                        TestDict("request", requestId, "player", player, "session", session, "timeline", timeline)).SingleOrDefault();
+                    admitted = PortraitsStore.SelectChatViewRequests(connection, TestDict("request", requestId, "player", player, "session", session, "timeline", timeline)).SingleOrDefault();
                     if (admitted != null) return ChatViewResponse(campaign, TryParseJsonObject(ReadString(admitted, "payload_json", "{}")), false);
-                    var old = ReignDatabase.QuerySql(connection, "SELECT payload_json FROM chat_view_jobs WHERE job_id=$id;", TestDict("id", jobId)).SingleOrDefault();
-                    void bindRequest() => ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO chat_view_requests(request_id,session_id,timeline_id,player_id,job_id)
-VALUES($request,$session,$timeline,$player,$job);", TestDict("request", requestId, "session", session, "timeline", timeline, "player", player, "job", jobId));
+                    var old = PortraitsStore.SelectChatViewJobs3(connection, TestDict("id", jobId)).SingleOrDefault();
+                    void bindRequest() => PortraitsStore.InsertOrIgnoreChatViewRequests(connection, TestDict("request", requestId, "session", session, "timeline", timeline, "player", player, "job", jobId));
                     if (old != null) { bindRequest(); return ChatViewResponse(campaign, TryParseJsonObject(ReadString(old, "payload_json", "{}")), false); }
                     if (ChatViewWorkers.Count >= 8) return ChatViewError("The View queue is full. Try again when an image finishes.");
                     var job = TestDict("jobId", jobId, "campaignId", campaign, "timelineId", timeline, "sessionId", session, "playerId", player,
@@ -132,9 +124,7 @@ VALUES($request,$session,$timeline,$player,$job);", TestDict("request", requestI
 
         private static void SaveChatViewJob(ReignDbConnection connection, Dictionary<string, object> job)
         {
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO chat_view_jobs(job_id,session_id,timeline_id,player_id,created_ts,payload_json)
-VALUES($id,$session,$timeline,$player,$ts,$payload) ON CONFLICT(job_id) DO UPDATE SET payload_json=excluded.payload_json;",
-                TestDict("id", ReadString(job, "jobId", ""), "session", ReadString(job, "sessionId", ""), "timeline", ReadString(job, "timelineId", ""),
+            PortraitsStore.UpsertChatViewJobs(connection, TestDict("id", ReadString(job, "jobId", ""), "session", ReadString(job, "sessionId", ""), "timeline", ReadString(job, "timelineId", ""),
                     "player", ReadString(job, "playerId", ""), "ts", ReadLong(job, "createdTs", 0), "payload", Json.Serialize(job)));
         }
 
@@ -186,7 +176,7 @@ VALUES($id,$session,$timeline,$player,$ts,$payload) ON CONFLICT(job_id) DO UPDAT
             {
                 if (!current()) throw new OperationCanceledException("The campaign was replaced while View was pending.");
                 using var c = ReignDatabase.OpenCampaignConnection(campaign);
-                if (ReignDatabase.QuerySql(c, "SELECT job_id FROM chat_view_jobs WHERE job_id=$id;", TestDict("id", id)).Count == 0)
+                if (PortraitsStore.SelectChatViewJobs4(c, TestDict("id", id)).Count == 0)
                     throw new OperationCanceledException("The originating View job is no longer in this save.");
                 SaveChatViewJob(c, job);
             }
