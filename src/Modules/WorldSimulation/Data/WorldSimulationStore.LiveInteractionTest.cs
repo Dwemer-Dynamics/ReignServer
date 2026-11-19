@@ -152,7 +152,5 @@ AND source_id IN (" + part + ");", parameters, transaction);
         {
             return ReignDatabase.QuerySql(connection, "SELECT affinity_a_to_b,affinity_b_to_a FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;", parameters, transaction);
         }
-
-        internal const string CountRulerDiplomaticIncidentsSql = "SELECT COUNT(*) AS count FROM ruler_diplomatic_incidents";
     }
 }
