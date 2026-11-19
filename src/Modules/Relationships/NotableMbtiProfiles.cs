@@ -481,11 +481,11 @@ namespace ReignBetaServer
 
             Dictionary<string, object> nativeTraits = new Dictionary<string, object>
             {
-                ["valor"] = Program.ClampTrait(ReadInt(foundation, "courage", 0)),
-                ["generosity"] = Program.ClampTrait(ReadInt(foundation, "generosity", 0)),
-                ["honor"] = Program.ClampTrait(ReadInt(foundation, "honesty", 0)),
-                ["mercy"] = Program.ClampTrait(ReadInt(foundation, "mercy", 0)),
-                ["calculating"] = Program.ClampTrait((ReadInt(foundation, "pragmatism", 0)
+                ["valor"] = CharactersService.ClampTrait(ReadInt(foundation, "courage", 0)),
+                ["generosity"] = CharactersService.ClampTrait(ReadInt(foundation, "generosity", 0)),
+                ["honor"] = CharactersService.ClampTrait(ReadInt(foundation, "honesty", 0)),
+                ["mercy"] = CharactersService.ClampTrait(ReadInt(foundation, "mercy", 0)),
+                ["calculating"] = CharactersService.ClampTrait((ReadInt(foundation, "pragmatism", 0)
                     + ReadInt(foundation, "discipline", 0)) / 2)
             };
             Dictionary<string, object> document = new Dictionary<string, object>
@@ -590,7 +590,7 @@ namespace ReignBetaServer
                 Program.WriteJsonObject(traitsPath, existing);
             }
             Dictionary<string, object> constructed = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"));
-            if (!Program.IsUsableCharacterStatus(ReadString(constructed, "status", "")) || ReadBool(constructed, "llmUsed", false) == false)
+            if (!CharactersService.IsUsableCharacterStatus(ReadString(constructed, "status", "")) || ReadBool(constructed, "llmUsed", false) == false)
             {
                 constructed["ok"] = true;
                 constructed["status"] = "first_contact_pending";
@@ -805,7 +805,7 @@ namespace ReignBetaServer
                     && (ReadDictionary(traits, "traitPercentages") ?? new Dictionary<string, object>()).Count == CharactersService.CoreTraitKeys.Length
                     && (ReadDictionary(traits, "mbtiNativeTraits") ?? new Dictionary<string, object>()).Count == 5
                     && (ReadDictionary(traits, "visibleBannerlordTraits") ?? new Dictionary<string, object>()).Count == 5
-                    && Program.TraitDocumentReady(traits);
+                    && CharactersService.TraitDocumentReady(traits);
                 derives &= ReadString(DeriveMbtiAxes(traits), "type", "") == type;
             }
             add("complete_templates", complete, "Every type produces a validator-ready 43-trait document and five visible native Bannerlord trait targets.");
@@ -823,7 +823,7 @@ namespace ReignBetaServer
                 new Dictionary<string, object> { ["type"] = "INTJ", ["nativeTraits"] = ReadDictionary(legacy, "mbtiNativeTraits") },
                 new Dictionary<string, object> { ["name"] = "Legacy Hero" },
                 "legacy_hero");
-            add("legacy_trait_migration", legacyRepaired && Program.TraitDocumentReady(legacy),
+            add("legacy_trait_migration", legacyRepaired && CharactersService.TraitDocumentReady(legacy),
                 "Legacy notable MBTI documents gain visible native traits and the active foundation model before interaction.");
 
             int[] counts = new int[MbtiTypes.Length];

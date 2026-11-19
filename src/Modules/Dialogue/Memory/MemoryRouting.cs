@@ -25,7 +25,7 @@ namespace ReignBetaServer
             settings = settings ?? Program.LoadSettings();
             context = context ?? new Dictionary<string, object>();
             string normalized = (topic ?? "").ToLowerInvariant();
-            bool explicitExactRecall = LooksLikeMostRecentConversationRecall(topic) || LooksLikeExactFactRestatement(topic) || Program.ContainsAny(normalized,
+            bool explicitExactRecall = LooksLikeMostRecentConversationRecall(topic) || LooksLikeExactFactRestatement(topic) || DialogueService.ContainsAny(normalized,
                 "remember", "exactly", "exact words", "what you said", "what i said", "you told me", "i told you",
                 "when we met", "previous meeting", "earlier conversation", "first conversation", "first scene",
                 "repeat", "quote", "trail-name", "trail name", "wrote to", "letter said");
@@ -145,7 +145,7 @@ namespace ReignBetaServer
         {
             string text = topic ?? "";
             string normalized = text.ToLowerInvariant();
-            if (!Program.ContainsAny(normalized, "what happened", "happened to", "tell me about", "news of", "news about",
+            if (!DialogueService.ContainsAny(normalized, "what happened", "happened to", "tell me about", "news of", "news about",
                 "do you know about", "what became of", "where is", "where are"))
             {
                 return false;
@@ -225,7 +225,7 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> SearchExactConversationHistory(ReignDbConnection connection, string npcId, string topic,
             Dictionary<string, object> route, int charBudget, Dictionary<string, object> semanticSearch = null, string excludedSessionId = "",
-            int recentRawTurnLimit = 30, Program.KnowledgeAccessContext knowledge = null, Dictionary<string, object> queryContext = null)
+            int recentRawTurnLimit = 30, DialogueService.KnowledgeAccessContext knowledge = null, Dictionary<string, object> queryContext = null)
         {
             if (LooksLikeMostRecentConversationRecall(topic))
             {
@@ -238,8 +238,8 @@ namespace ReignBetaServer
             }
 
             List<Dictionary<string, object>> matched = new List<Dictionary<string, object>>();
-            List<string> terms = Program.MemoryQueryTerms(topic).Where(term => !ExactRecallStopWords.Contains(term, StringComparer.OrdinalIgnoreCase)).Take(64).ToList();
-            string fts = Program.BuildFtsQuery(terms);
+            List<string> terms = DialogueService.MemoryQueryTerms(topic).Where(term => !ExactRecallStopWords.Contains(term, StringComparer.OrdinalIgnoreCase)).Take(64).ToList();
+            string fts = DialogueService.BuildFtsQuery(terms);
             string excludeCurrent = (string.IsNullOrWhiteSpace(excludedSessionId) ? "" : " AND s.session_id<>$excluded_session")
                 + " AND t.world_day<=" + (knowledge?.WorldDay ?? double.MaxValue).ToString("R", CultureInfo.InvariantCulture)
                 + (string.IsNullOrWhiteSpace(knowledge?.TimelineId) ? "" : " AND " + MemorySourceTimelineSql("conversation_turns", "t", "'" + knowledge.TimelineId.Replace("'", "''") + "'"));
@@ -250,7 +250,7 @@ namespace ReignBetaServer
                 {
                     if (ReignPostgreSqlDialect.IsPostgreSql(connection))
                     {
-                        var access = knowledge ?? new Program.KnowledgeAccessContext { NpcId = npcId };
+                        var access = knowledge ?? new DialogueService.KnowledgeAccessContext { NpcId = npcId };
                         var plan = PlanMemoryQuery(npcId, access.PlayerId, topic, queryContext ?? new());
                         plan.Session = excludedSessionId ?? "";
                         plan.Timeline = access.TimelineId;
@@ -383,7 +383,7 @@ namespace ReignBetaServer
         }
 
         private static Dictionary<string, object> RenderExactConversationAnchor(ReignDbConnection connection, string npcId,
-            Dictionary<string, object> anchor, List<string> terms, int charBudget, Program.KnowledgeAccessContext knowledge, bool preserveWholeExchange,
+            Dictionary<string, object> anchor, List<string> terms, int charBudget, DialogueService.KnowledgeAccessContext knowledge, bool preserveWholeExchange,
             ISet<string> alreadyIncluded = null)
         {
             string sessionId = ReadString(anchor, "session_id", "");
@@ -392,7 +392,7 @@ namespace ReignBetaServer
                 ?? new Dictionary<string, object>();
             Dictionary<string, object> sourceSessionPayload =
                 TryParseJsonObject(ReadString(sourceSession, "payload_json", "")) ?? new Dictionary<string, object>();
-            List<string> sourceParticipants = Program.TextListFromJson(ReadString(sourceSession, "participants_json", "[]"));
+            List<string> sourceParticipants = DialogueService.TextListFromJson(ReadString(sourceSession, "participants_json", "[]"));
             string sourceLocation = FirstNonEmpty(
                 ReadFirstString(sourceSessionPayload, "locationName", "settlementName", "currentSettlementName"),
                 ReadString(sourceSession, "location_id", ReadFirstString(sourceSessionPayload, "locationId", "settlementId")),
@@ -400,10 +400,10 @@ namespace ReignBetaServer
             int effectiveBudget = Math.Max(600, charBudget);
             string sourceMetadata = "Source session metadata: session=" + sessionId
                 + "; participants=" + (sourceParticipants.Count == 0 ? "unknown" : string.Join(", ",
-                    sourceParticipants.Take(8).Select(value => Program.SanitizeUnknownIdentityEvidenceText(value, knowledge)).ToArray()))
+                    sourceParticipants.Take(8).Select(value => DialogueService.SanitizeUnknownIdentityEvidenceText(value, knowledge)).ToArray()))
                 + "; location=" + sourceLocation
                 + "; channel=" + ReadString(sourceSession, "channel", "unknown") + ".\n";
-            sourceMetadata = Program.SanitizeUnknownIdentityEvidenceText(sourceMetadata, knowledge);
+            sourceMetadata = DialogueService.SanitizeUnknownIdentityEvidenceText(sourceMetadata, knowledge);
             string sourceSemantics = effectiveBudget < 1200
                 ? "Source semantics: we/us/here refer to this recorded session; listed participants heard this conversation but are not automatically witnesses to events described within it.\n"
                 : "Historical deictic terms in this source (we/us/here/present/everyone/all three) refer only to the source conversation, never to the current group. Its participant list proves who heard this source conversation, not who witnessed an older event described inside it. Only an explicit source-event witness link or the current NPC's own attributed first-person line establishes firsthand participation; another NPC's collective wording cannot override this NPC's denial or missing witness evidence.\n";
@@ -475,8 +475,8 @@ namespace ReignBetaServer
             {
                 ["text"] = selected.Count == 0 ? "" : preserveWholeExchange
                     ? RenderContinuityRecord(string.Join(",", included), "targeted_historical_exchange", npcId, sessionId,
-                        ReadDouble(anchor, "world_day", 0d), 95, true, Program.SanitizeUnknownIdentityEvidenceText(builder.ToString().TrimEnd(), knowledge))
-                    : Program.SanitizeUnknownIdentityEvidenceText(builder.ToString().TrimEnd(), knowledge),
+                        ReadDouble(anchor, "world_day", 0d), 95, true, DialogueService.SanitizeUnknownIdentityEvidenceText(builder.ToString().TrimEnd(), knowledge))
+                    : DialogueService.SanitizeUnknownIdentityEvidenceText(builder.ToString().TrimEnd(), knowledge),
                 ["expandedTurnIds"] = included,
                 ["sessionId"] = sessionId,
                 ["anchorTurnId"] = anchorTurnId
@@ -484,7 +484,7 @@ namespace ReignBetaServer
         }
 
         internal static string RenderExactHistoryTurn(Dictionary<string, object> turn,
-            Program.KnowledgeAccessContext knowledge)
+            DialogueService.KnowledgeAccessContext knowledge)
         {
             turn = turn ?? new Dictionary<string, object>();
             string role = NormalizeMemoryCategory(ReadString(turn, "role", ""));
@@ -517,13 +517,13 @@ namespace ReignBetaServer
                     bool aimedAtCurrentStranger = Regex.IsMatch(body ?? "",
                         @"\b(you|your|yours|stranger|interlocutor|player)\b",
                         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-                    if (aimedAtCurrentStranger && Program.UnknownIdentityContainsPrivateStatus(body))
+                    if (aimedAtCurrentStranger && DialogueService.UnknownIdentityContainsPrivateStatus(body))
                     {
                         body = "[Earlier NPC wording withheld because it relied on canonical identity or private status evidence unavailable to this observer.]";
                     }
                 }
-                speaker = Program.SanitizeUnknownIdentityEvidenceText(speaker, knowledge);
-                body = Program.SanitizeUnknownIdentityEvidenceText(body, knowledge);
+                speaker = DialogueService.SanitizeUnknownIdentityEvidenceText(speaker, knowledge);
+                body = DialogueService.SanitizeUnknownIdentityEvidenceText(body, knowledge);
             }
 
             string caveat = role.Equals("npc", StringComparison.OrdinalIgnoreCase)
@@ -536,7 +536,7 @@ namespace ReignBetaServer
         }
 
         internal static Dictionary<string, object> SanitizeUnknownIdentityExactHistory(
-            Dictionary<string, object> exactHistory, Program.KnowledgeAccessContext knowledge)
+            Dictionary<string, object> exactHistory, DialogueService.KnowledgeAccessContext knowledge)
         {
             if (exactHistory == null || knowledge == null || !knowledge.PlayerIdentityUnknown)
             {
@@ -548,20 +548,20 @@ namespace ReignBetaServer
 
             Dictionary<string, object> copy =
                 new Dictionary<string, object>(exactHistory, StringComparer.OrdinalIgnoreCase);
-            copy["text"] = Program.SanitizeUnknownIdentityEvidenceText(ReadString(copy, "text", ""), knowledge);
+            copy["text"] = DialogueService.SanitizeUnknownIdentityEvidenceText(ReadString(copy, "text", ""), knowledge);
             return copy;
         }
 
         internal static bool LooksLikeMostRecentConversationRecall(string topic)
         {
             string text = (topic ?? "").ToLowerInvariant();
-            bool reconstructionRequest = Program.ContainsAnyTerm(text, "reconstruct", "reconstruction", "recap")
-                && Program.ContainsAnyTerm(text, "conversation", "conversations", "discussion", "discussions", "meeting", "meetings", "exchange", "exchanges", "speaker", "speakers", "scene", "scenes");
-            bool explicitStoredRecall = Program.ContainsAny(text,
+            bool reconstructionRequest = DialogueService.ContainsAnyTerm(text, "reconstruct", "reconstruction", "recap")
+                && DialogueService.ContainsAnyTerm(text, "conversation", "conversations", "discussion", "discussions", "meeting", "meetings", "exchange", "exchanges", "speaker", "speakers", "scene", "scenes");
+            bool explicitStoredRecall = DialogueService.ContainsAny(text,
                 "from your own records", "from your records", "using your own records", "using your records",
                 "according to your own records", "according to your records", "based on your own records", "based on your records",
                 "from your own memory", "from your memory", "according to your own memory", "according to your memory");
-            return reconstructionRequest || explicitStoredRecall || Program.ContainsAny(text, "last conversation", "our last conversation", "previous conversation", "previous meeting",
+            return reconstructionRequest || explicitStoredRecall || DialogueService.ContainsAny(text, "last conversation", "our last conversation", "previous conversation", "previous meeting",
                 "last time we spoke", "last time we talked", "most recent conversation", "most recent meeting",
                 "prior conversation", "prior discussion", "earlier conversation", "earlier discussion", "previous discussion",
                 "earlier i asked you to remember", "i asked you to remember", "what did i ask you to remember",
@@ -578,11 +578,11 @@ namespace ReignBetaServer
         internal static bool LooksLikeExactFactRestatement(string topic)
         {
             string text = (topic ?? "").ToLowerInvariant();
-            bool restatement = Program.ContainsAnyTerm(text, "paraphrase", "restate", "recite", "repeat", "summarize");
-            bool historicalQuestion = Program.ContainsAny(text,
+            bool restatement = DialogueService.ContainsAnyTerm(text, "paraphrase", "restate", "recite", "repeat", "summarize");
+            bool historicalQuestion = DialogueService.ContainsAny(text,
                 "what did i tell you", "what did i say", "what was its", "what were its",
                 "you once heard me", "you previously heard me", "i told you earlier", "i shared earlier");
-            bool preservation = Program.ContainsAny(text,
+            bool preservation = DialogueService.ContainsAny(text,
                 "without losing", "without omitting", "do not omit", "don't omit", "preserve the exact",
                 "keep the exact", "exact name", "exact number", "exact color", "exact colour",
                 "exact place", "exact location", "exact storage", "all exact details");
@@ -611,7 +611,7 @@ namespace ReignBetaServer
             // may ask for an old scene while also supplying new first-person information. Those
             // mixed turns still need exact history, but the new player-authored source must not be
             // discarded merely because the same message contains a recall request.
-            if (Program.ContainsAny(text,
+            if (DialogueService.ContainsAny(text,
                 "my real name is", "my name is", "i am introducing myself", "i'm introducing myself",
                 "a new detail for later", "a new low-salience detail for later", "a new fact for later",
                 "new information for later", "for later is", "for later:",
@@ -625,7 +625,7 @@ namespace ReignBetaServer
             {
                 if (string.IsNullOrWhiteSpace(clause)) continue;
                 bool recallClause = LooksLikeMostRecentConversationRecall(clause) || LooksLikeExactFactRestatement(clause)
-                    || Program.ContainsAny(clause, "recall", "reconstruct", "recap", "remember our", "remember the", "recover an earlier", "recover one older");
+                    || DialogueService.ContainsAny(clause, "recall", "reconstruct", "recap", "remember our", "remember the", "recover an earlier", "recover one older");
                 if (recallClause) continue;
 
                 if (Regex.IsMatch(clause,
@@ -856,7 +856,7 @@ namespace ReignBetaServer
         }
 
         internal static Dictionary<string, object> LoadMostRecentClosedConversation(ReignDbConnection connection, string npcId,
-            string excludedSessionId, int charBudget, int turnLimit, Program.KnowledgeAccessContext knowledge = null)
+            string excludedSessionId, int charBudget, int turnLimit, DialogueService.KnowledgeAccessContext knowledge = null)
         {
             string exclusion = string.IsNullOrWhiteSpace(excludedSessionId) ? "" : " AND session_id<>$excluded_session";
             List<Dictionary<string, object>> sessions = DialogueStore.SelectConversationSessions20(connection, MemoryJsonContainsSql("participants_json","$npc"), exclusion,                new Dictionary<string, object>
@@ -931,16 +931,16 @@ namespace ReignBetaServer
                         TryParseJsonObject(ReadString(sourceSession, "payload_json", "")) ?? new Dictionary<string, object>();
                     string locationName = ReadFirstString(sourceSessionPayload, "locationName", "settlementName", "currentSettlementName");
                     string locationId = ReadString(sourceSession, "location_id", ReadFirstString(sourceSessionPayload, "locationId", "settlementId"));
-                    List<string> sourceParticipants = Program.TextListFromJson(ReadString(sourceSession, "participants_json", "[]"));
+                    List<string> sourceParticipants = DialogueService.TextListFromJson(ReadString(sourceSession, "participants_json", "[]"));
                     string sourceScene = ReadString(sourceSessionPayload, "sceneContext", "");
                     builder.AppendLine("[HISTORICAL SOURCE SESSION " + rowSession + "]");
                     builder.AppendLine("Session setting metadata: location=" + FirstNonEmpty(locationName, locationId, "unknown")
                         + "; channel=" + ReadString(sourceSession, "channel", "")
                         + "; participants=" + (sourceParticipants.Count == 0 ? "unknown" : string.Join(", ",
-                            sourceParticipants.Take(8).Select(value => Program.SanitizeUnknownIdentityEvidenceText(value, knowledge)).ToArray()))
+                            sourceParticipants.Take(8).Select(value => DialogueService.SanitizeUnknownIdentityEvidenceText(value, knowledge)).ToArray()))
                         + "; world day=" + ReadDouble(sourceSession, "start_world_day", 0d).ToString("0.##", CultureInfo.InvariantCulture) + ".");
                     if (!string.IsNullOrWhiteSpace(sourceScene)) builder.AppendLine("Recorded scene context: "
-                        + Program.LimitText(Program.SanitizeUnknownIdentityEvidenceText(sourceScene, knowledge), 600));
+                        + DialogueService.LimitText(DialogueService.SanitizeUnknownIdentityEvidenceText(sourceScene, knowledge), 600));
                     builder.AppendLine("Distinguish the conversation setting above from places mentioned inside anecdotes.");
                 }
                 builder.AppendLine(ReadString(row, "text", ""));
@@ -948,7 +948,7 @@ namespace ReignBetaServer
             List<string> ids = selected.Select(row => ReadString(row, "turnId", "")).Where(id => !string.IsNullOrWhiteSpace(id)).ToList();
             return new Dictionary<string, object>
             {
-                ["text"] = Program.SanitizeUnknownIdentityEvidenceText(builder.ToString().TrimEnd(), knowledge),
+                ["text"] = DialogueService.SanitizeUnknownIdentityEvidenceText(builder.ToString().TrimEnd(), knowledge),
                 ["matchedTurnIds"] = ids, ["expandedTurnIds"] = ids,
                 ["sessionId"] = sessionId, ["selectionMode"] = "recent_closed_turn_window",
                 ["rawTurnLimit"] = Math.Max(2, Math.Min(100, turnLimit)), ["rawTurnCount"] = ids.Count
@@ -969,7 +969,7 @@ namespace ReignBetaServer
             }
             if (budget < 80)
             {
-                return Program.LimitText(value, budget);
+                return DialogueService.LimitText(value, budget);
             }
 
             int matchIndex = -1;
@@ -989,7 +989,7 @@ namespace ReignBetaServer
             }
             if (matchIndex < 0)
             {
-                return Program.LimitText(value, budget);
+                return DialogueService.LimitText(value, budget);
             }
 
             int prefixEnd = value.IndexOf(": ", StringComparison.Ordinal);

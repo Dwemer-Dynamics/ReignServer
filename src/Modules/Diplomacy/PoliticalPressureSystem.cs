@@ -616,7 +616,7 @@ namespace ReignBetaServer
                     {
                         ["id"] = ReadString(x, "id", "").Trim().ToLowerInvariant(),
                         ["highFavors"] = ReadString(x, "highFavors", "").Trim().ToLowerInvariant(),
-                        ["reason"] = Program.LimitText(ReadString(x, "reason", "Contextual court judgment."), 120)
+                        ["reason"] = DialogueService.LimitText(ReadString(x, "reason", "Contextual court judgment."), 120)
                     }).ToList()
                 };
             }
@@ -749,7 +749,7 @@ namespace ReignBetaServer
             Dictionary<string, object> llm = Program.ChatWithLlm(request);
             Dictionary<string, object> parsed = ReadBool(llm, "ok", false)
                 ? TryParseJsonObject(ReadString(llm, "content", "")) : null;
-            string narrative = Program.LimitText(ReadString(parsed, "narrative", ""), 900);
+            string narrative = DialogueService.LimitText(ReadString(parsed, "narrative", ""), 900);
             if (!string.IsNullOrWhiteSpace(narrative))
             {
                 status = "llm";

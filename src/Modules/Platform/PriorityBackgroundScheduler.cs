@@ -232,7 +232,7 @@ namespace ReignBetaServer
                 catch (Exception ex)
                 {
                     Log("background.work_release_failed", () => new Dictionary<string, object>
-                    { ["name"] = name, ["reason"] = reason, ["error"] = LimitText(ex.Message, 400) });
+                    { ["name"] = name, ["reason"] = reason, ["error"] = DialogueService.LimitText(ex.Message, 400) });
                 }
             }
 
@@ -317,7 +317,7 @@ namespace ReignBetaServer
                     return;
                 }
                 Log("background.work_failed", () => new Dictionary<string, object>
-                { ["name"] = item.Name, ["error"] = LimitText(error.Message, 800) });
+                { ["name"] = item.Name, ["error"] = DialogueService.LimitText(error.Message, 800) });
                 item.Completion.TrySetException(error);
             }
         }

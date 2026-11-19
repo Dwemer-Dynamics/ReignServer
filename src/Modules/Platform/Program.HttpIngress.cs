@@ -441,7 +441,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static void WriteFile(NetworkStream stream, string path, string contentType)
+        internal static void WriteFile(NetworkStream stream, string path, string contentType)
         {
             if (!File.Exists(path))
             {

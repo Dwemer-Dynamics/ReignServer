@@ -217,7 +217,7 @@ events|something amusing about the supplied shared encounter";
         private static List<Dictionary<string, object>> BanterSharedExcerpt(ReignDbConnection c, List<string> ids, Dictionary<string, object> p)
         {
             if (ids.Count < 2) return new();
-            var access = ids.Select(id => Program.BuildKnowledgeAccessContext(id, ReadString(p, "playerHeroStringId", ""), "", p)).ToList();
+            var access = ids.Select(id => DialogueService.BuildKnowledgeAccessContext(id, ReadString(p, "playerHeroStringId", ""), "", p)).ToList();
             var first = access[0];
             var rows = DialogueStore.SelectConversationTurns10(c, MemorySourceTimelineSql("conversation_turns", "t", access: first),TestDict("audience", Json.Serialize(ids),
                 "timeline", first.TimelineId, "day", first.WorldDay, "sequence", first.AsOfAcceptedSequence, "timestamp", first.AsOfTimestamp));
@@ -269,7 +269,7 @@ events|something amusing about the supplied shared encounter";
                     .SelectMany(n => n.Facts).Where(f => f.Active && !f.Private))
                     b.AppendLine("Established personal fact for " + id + ": " + fact.Text);
                 var voice = ReadDictionary(Program.ReadJsonObject(Program.CharacterFile(campaign, id, "narrative.json")), "voice") ?? Program.ReadJsonObject(Program.CharacterFile(campaign, id, "voice.json"));
-                b.AppendLine("Voice: " + Program.LimitText(ReadString(voice, "speechStyle", ""), 140));
+                b.AppendLine("Voice: " + DialogueService.LimitText(ReadString(voice, "speechStyle", ""), 140));
                 var persistentSources = new List<string>();
                 var otherObservers = heroes.Where(other => other != h).Select(Program.CharacterIdFrom).ToList();
                 var persistentPayload = Program.CloneDictionary(p);
@@ -330,7 +330,7 @@ events|something amusing about the supplied shared encounter";
                 foreach (string row in buffered.ToString().Split('\n').Skip(parsedLines)) AppendBanterDraft(campaign, id, generation, row, job);
                 UpdateGeneratedBanter(campaign, id, generation, job, "");
             }
-            catch (Exception ex) { UpdateGeneratedBanter(campaign, id, generation, job, Program.LimitText(ex.Message, 400)); }
+            catch (Exception ex) { UpdateGeneratedBanter(campaign, id, generation, job, DialogueService.LimitText(ex.Message, 400)); }
             finally { BanterJobs.TryRemove(BanterJobKey(campaign, id), out _); job.Cancellation.Dispose(); }
         }
         private static void AppendBanterDraft(string campaign, string id, string generation, string json, BanterJob job)
@@ -453,7 +453,7 @@ events|something amusing about the supplied shared encounter";
                 result.Add(TestDict("observerHeroStringId", observer, "targetHeroStringId", target, "eligibleTargetIds", ids,
                     "valence", valence, "severityTier", tier, "actKind", act, "confidence", .8d, "importance", .5d,
                     "currentConductQuote", quote, "sourceText", ReadString(drafts[source - 1], "text", ""),
-                    "sourceTurnIds", new[] { session + "_banter_" + source + "_npc_" + SafeMemoryKey(target) }, "summary", Program.LimitText(ReadString(reaction, "reason", ""), 300)));
+                    "sourceTurnIds", new[] { session + "_banter_" + source + "_npc_" + SafeMemoryKey(target) }, "summary", DialogueService.LimitText(ReadString(reaction, "reason", ""), 300)));
             }
             return result.GroupBy(x => ReadString(x, "observerHeroStringId", "") + "->" + ReadString(x, "targetHeroStringId", ""))
                 .Select(g => RelationshipsService.SelectDominantConversationAssessment(g.ToList())).ToList();

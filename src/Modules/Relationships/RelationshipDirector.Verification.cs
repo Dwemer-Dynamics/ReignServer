@@ -133,7 +133,7 @@ namespace ReignBetaServer
             Dictionary<string, object> dutiful=new Dictionary<string, object>{{"foundationTraits",new Dictionary<string, object>{{"dutyMotivation",2},{"familyMotivation",2},{"loyalty",2},{"traditionalism",2},{"pragmatism",2},{"assertiveness",-2},{"pride",-2},{"impulsiveness",-2}}},{"nativeRelationToLeader",80d}};
             Dictionary<string, object> resistant=new Dictionary<string, object>{{"foundationTraits",new Dictionary<string, object>{{"dutyMotivation",-2},{"familyMotivation",-2},{"loyalty",-2},{"traditionalism",-2},{"pragmatism",-2},{"assertiveness",2},{"pride",2},{"impulsiveness",2}}},{"nativeRelationToLeader",-50d}};
             add("compelled_marriage_trait_resentment",ArrangedMarriageResentment(resistant,new Dictionary<string, object>(),new Dictionary<string, object>(),40d)>ArrangedMarriageResentment(dutiful,new Dictionary<string, object>(),new Dictionary<string, object>(),40d),"Resistant personalities receive more arranged-marriage resentment than dutiful traditional personalities.");
-            double lowChance=Program.ClampDouble(0.01d+0.04d*0d,0.01d,0.05d),highChance=Program.ClampDouble(0.01d+0.04d*1d,0.01d,0.05d);
+            double lowChance=DialogueService.ClampDouble(0.01d+0.04d*0d,0.01d,0.05d),highChance=DialogueService.ClampDouble(0.01d+0.04d*1d,0.01d,0.05d);
             add("arranged_marriage_weekly_chance_cap",Math.Abs(lowChance-0.01d)<0.000001d&&Math.Abs(highChance-0.05d)<0.000001d,"Weekly clan-leader marriage chance scales from 1% and never exceeds 5%.");
             List<KeyValuePair<string,double>> eventCatalog=new List<KeyValuePair<string,double>>
             {
@@ -147,7 +147,7 @@ namespace ReignBetaServer
             HashSet<string> reached=new HashSet<string>(Enumerable.Range(0,2000).Select(i=>SelectWeightedPassiveEvent(eventCatalog,"reachability_"+i)),StringComparer.OrdinalIgnoreCase);
             add("weighted_event_catalog_reachability",eventCatalog.All(x=>reached.Contains(x.Key)),"Every discrete relationship event remains selectable when its eligibility gate supplies positive weight.");
             double simulated=0d;HashSet<int> processedDays=new HashSet<int>();bool duplicate=false;
-            for(int day=0;day<630;day++){if(!processedDays.Add(day)){duplicate=true;break;}double gap=25d-simulated;if(Math.Abs(gap)>=0.5d)simulated=Program.ClampDouble(simulated+Program.ClampDouble(gap*0.02d,-0.50d,0.50d),-100d,100d);}
+            for(int day=0;day<630;day++){if(!processedDays.Add(day)){duplicate=true;break;}double gap=25d-simulated;if(Math.Abs(gap)>=0.5d)simulated=DialogueService.ClampDouble(simulated+DialogueService.ClampDouble(gap*0.02d,-0.50d,0.50d),-100d,100d);}
             add("five_year_ambient_bounded_simulation",!duplicate&&simulated>=-25d&&simulated<=25d&&processedDays.Count==630,"A seeded five-year, 126-day-year daily simulation remains bounded and processes each day once.");
             string storyCampaign="relationship_story_selftest_"+Guid.NewGuid().ToString("N");
             using(ReignDbConnection storyConnection=ReignDatabase.OpenCampaignConnection(storyCampaign))

@@ -115,7 +115,7 @@ namespace ReignBetaServer
                         && ReadString(RelationshipsSelfTestStore.SelectConversationRelationshipReceipts4(connection).Single(), "native_application_status", "") == "pending");
                 }
             }
-            catch (Exception ex) { results.Add(TestDict("caseId", "native_relation_effect_suite_exception", "passed", false, "summary", Program.LimitText(ex.ToString(), 2500))); }
+            catch (Exception ex) { results.Add(TestDict("caseId", "native_relation_effect_suite_exception", "passed", false, "summary", DialogueService.LimitText(ex.ToString(), 2500))); }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             return results;
         }

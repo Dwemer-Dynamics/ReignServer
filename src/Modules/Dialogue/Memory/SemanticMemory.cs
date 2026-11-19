@@ -148,8 +148,8 @@ namespace ReignBetaServer
             if (row == null) return false;
             string embeddingStatus = ReadString(row, "embedding_status", "");
             string category = ReadString(row, "event_category", "");
-            return !Program.ContainsAny(embeddingStatus.ToLowerInvariant(), "skipped", "deleted", "inactive")
-                && !Program.ContainsAny(category.ToLowerInvariant(), "conversation", "correspondence");
+            return !DialogueService.ContainsAny(embeddingStatus.ToLowerInvariant(), "skipped", "deleted", "inactive")
+                && !DialogueService.ContainsAny(category.ToLowerInvariant(), "conversation", "correspondence");
         }
 
         private static void CreateEventEmbeddingTriggers(ReignDbConnection connection)
@@ -336,7 +336,7 @@ namespace ReignBetaServer
                             try
                             {
                                 Dictionary<string, object> health =
-                                    TryParseJsonObject(Program.GetTextFromUrl(baseUrl + "/health", 750)) ?? new Dictionary<string, object>();
+                                    TryParseJsonObject(DialogueService.GetTextFromUrl(baseUrl + "/health", 750)) ?? new Dictionary<string, object>();
                                 if (ReadBool(health, "modelLoaded", false))
                                 {
                                     SemanticWarmupState = "ready";
@@ -359,7 +359,7 @@ namespace ReignBetaServer
                                         ["top_k"] = 1
                                     };
                                     Dictionary<string, object> response =
-                                        TryParseJsonObject(Program.PostJsonToUrl(baseUrl + "/rerank", Json.Serialize(request), 30000))
+                                        TryParseJsonObject(DialogueService.PostJsonToUrl(baseUrl + "/rerank", Json.Serialize(request), 30000))
                                         ?? new Dictionary<string, object>();
                                     if (!ReadBool(response, "ok", false))
                                         throw new InvalidOperationException(ReadString(response, "error", "Vector worker warmup failed."));
@@ -373,7 +373,7 @@ namespace ReignBetaServer
                                         ["status"] = "active"
                                     };
                                     Dictionary<string, object> searchResponse =
-                                        TryParseJsonObject(Program.PostJsonToUrl(baseUrl + "/vectors/search", Json.Serialize(searchRequest), 30000))
+                                        TryParseJsonObject(DialogueService.PostJsonToUrl(baseUrl + "/vectors/search", Json.Serialize(searchRequest), 30000))
                                         ?? new Dictionary<string, object>();
                                     if (!ReadBool(searchResponse, "ok", false))
                                         throw new InvalidOperationException(ReadString(searchResponse, "error", "Vector search warmup failed."));
@@ -480,7 +480,7 @@ namespace ReignBetaServer
             string baseUrl = ReadString(settings, "vectorWorkerUrl", "http://127.0.0.1:8082").TrimEnd('/');
             try
             {
-                string healthy = Program.GetTextFromUrl(baseUrl + "/health", 300);
+                string healthy = DialogueService.GetTextFromUrl(baseUrl + "/health", 300);
                 if (healthy.IndexOf("ReignVectorWorker", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
                     SemanticWorkerLastHealthyUtc = DateTime.UtcNow;
@@ -578,7 +578,7 @@ namespace ReignBetaServer
                 List<string> types = (sourceTypes ?? SemanticSourceTypesForRoute(retrievalRoute)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 Dictionary<string, object> request = SemanticProviderRequest(settings);
                 request["collection"] = SemanticCollection;
-                request["query"] = Program.LimitText(query, 4000);
+                request["query"] = DialogueService.LimitText(query, 4000);
                 request["priority"] = "interactive";
                 request["limit"] = Math.Min(512, Math.Max(8, ReadInt(settings, "vectorSearchTopK", 96) * 3));
                 Dictionary<string, object> filters = new Dictionary<string, object>
@@ -610,7 +610,7 @@ namespace ReignBetaServer
                     }
                 }
                 request["filters"] = filters;
-                Dictionary<string, object> response = TryParseJsonObject(Program.PostJsonToUrl(SemanticWorkerUrl(settings, "/vectors/search"), Json.Serialize(request),
+                Dictionary<string, object> response = TryParseJsonObject(DialogueService.PostJsonToUrl(SemanticWorkerUrl(settings, "/vectors/search"), Json.Serialize(request),
                     Math.Max(8000, Math.Min(30000, ReadInt(settings, "vectorQueryTimeoutMs", 10000))))) ?? new Dictionary<string, object>();
                 if (!ReadBool(response, "ok", false)) throw new InvalidOperationException(ReadString(response, "error", "Semantic search failed."));
                 if (!string.IsNullOrWhiteSpace(observerId) && !ReadBool(response, "eligibilityApplied", false))
@@ -644,7 +644,7 @@ namespace ReignBetaServer
                 SemanticWorkerLastError = ex.Message;
                 SemanticWorkerUnavailableUntilUtc = DateTime.UtcNow.AddSeconds(Math.Max(1, Math.Min(600, ReadInt(settings, "minimeRetryCooldownSeconds", 30))));
                 status["reason"] = "fts_fallback";
-                status["error"] = Program.LimitText(ex.Message, 500);
+                status["error"] = DialogueService.LimitText(ex.Message, 500);
                 status["durationMs"] = timer.ElapsedMilliseconds;
                 LogSemanticFailureOnce("semantic.search_failed", ex.Message);
                 return status;
@@ -670,7 +670,7 @@ namespace ReignBetaServer
         }
 
         internal static List<Dictionary<string, object>> LoadSemanticRows(ReignDbConnection connection, string table, string idColumn,
-            string sourceType, Dictionary<string, object> search, Program.KnowledgeAccessContext knowledge)
+            string sourceType, Dictionary<string, object> search, DialogueService.KnowledgeAccessContext knowledge)
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
             foreach (Dictionary<string, object> hit in SemanticHits(search, sourceType))
@@ -679,9 +679,9 @@ namespace ReignBetaServer
                 string id = ReadString(payload, "sourceId", "");
                 if (string.IsNullOrWhiteSpace(id)) continue;
                 Dictionary<string, object> row = DialogueStore.SelectDynamic7(connection, table, idColumn,new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
-                if (row == null || !EmbeddingRowActive(sourceType, row) || !Program.KnowledgeRowVisibleToNpc(table, row, knowledge, connection)) continue;
+                if (row == null || !EmbeddingRowActive(sourceType, row) || !DialogueService.KnowledgeRowVisibleToNpc(table, row, knowledge, connection)) continue;
                 if (ReadString(payload, "sourceHash", "") != MemorySourceHash(new[] { row })) continue;
-                row["vectorSemanticScore"] = Program.ClampDouble(ReadDouble(hit, "score", 0d), -1d, 1d);
+                row["vectorSemanticScore"] = DialogueService.ClampDouble(ReadDouble(hit, "score", 0d), -1d, 1d);
                 rows.Add(row);
             }
             return rows;
@@ -704,8 +704,8 @@ namespace ReignBetaServer
 
         internal static double AddSemanticScore(Dictionary<string, object> row, double deterministic, Dictionary<string, object> settings)
         {
-            double semantic = Program.ClampDouble(ReadDouble(row, "vectorSemanticScore", 0d), -1d, 1d);
-            return deterministic + Math.Max(0d, semantic) * Program.ClampDouble(ReadDouble(settings, "vectorScoreWeight", 30d), 0d, 100d);
+            double semantic = DialogueService.ClampDouble(ReadDouble(row, "vectorSemanticScore", 0d), -1d, 1d);
+            return deterministic + Math.Max(0d, semantic) * DialogueService.ClampDouble(ReadDouble(settings, "vectorScoreWeight", 30d), 0d, 100d);
         }
 
         internal static List<Dictionary<string, object>> MergeSemanticWorldHistoryCandidates(ReignDbConnection connection,
@@ -751,7 +751,7 @@ namespace ReignBetaServer
                     byId[eventId] = row;
                 }
                 if (!WorldHistoryEventEmbeddingEligible(row)) continue;
-                row["vectorSemanticScore"] = Math.Max(ReadDouble(row, "vectorSemanticScore", -1d), Program.ClampDouble(ReadDouble(hit, "score", 0d), -1d, 1d));
+                row["vectorSemanticScore"] = Math.Max(ReadDouble(row, "vectorSemanticScore", -1d), DialogueService.ClampDouble(ReadDouble(hit, "score", 0d), -1d, 1d));
                 row["combinedScore"] = AddSemanticScore(row, ReadDouble(row, "deterministicScore", 0d), settings);
             }
             foreach (Dictionary<string, object> row in byId.Values)
@@ -765,10 +765,10 @@ namespace ReignBetaServer
             if (string.IsNullOrWhiteSpace(campaignId)) campaignId = Program.LatestCampaignId();
             Dictionary<string, object> settings = Program.LoadSettings();
             Dictionary<string, object> worker = new Dictionary<string, object>();
-            try { worker = TryParseJsonObject(Program.GetTextFromUrl(SemanticWorkerUrl(settings, "/vectors/status"), 750)) ?? new Dictionary<string, object>(); }
+            try { worker = TryParseJsonObject(DialogueService.GetTextFromUrl(SemanticWorkerUrl(settings, "/vectors/status"), 750)) ?? new Dictionary<string, object>(); }
             catch (Exception ex) { worker = new Dictionary<string, object> { ["ok"] = false, ["error"] = ex.Message }; }
             Dictionary<string, object> counts = new Dictionary<string, object>();
-            if (Program.HasCampaignPostgreSqlStorage(campaignId))
+            if (DialogueService.HasCampaignPostgreSqlStorage(campaignId))
             {
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
@@ -812,7 +812,7 @@ namespace ReignBetaServer
         {
             string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
             if (string.IsNullOrWhiteSpace(campaignId)) campaignId = Program.LatestCampaignId();
-            if (!Program.HasCampaignPostgreSqlStorage(campaignId))
+            if (!DialogueService.HasCampaignPostgreSqlStorage(campaignId))
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false,
@@ -847,7 +847,7 @@ namespace ReignBetaServer
                 if (DateTime.UtcNow < SemanticDiagnosticCooldownUntilUtc) return;
                 SemanticDiagnosticCooldownUntilUtc = DateTime.UtcNow.AddSeconds(30);
             }
-            Program.LogOperational(eventName, new Dictionary<string, object> { ["error"] = Program.LimitText(error, 500), ["fallback"] = "sqlite_fts5" });
+            Program.LogOperational(eventName, new Dictionary<string, object> { ["error"] = DialogueService.LimitText(error, 500), ["fallback"] = "sqlite_fts5" });
         }
 
         private sealed class EmbeddingSourceDocument

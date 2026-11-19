@@ -53,7 +53,7 @@ namespace ReignBetaServer
                     Dictionary<string, object> failure = CompactVerificationFailure(row);
                     string assertion = ReadString(ReadDictionary(row, "assertion"), "summary", "");
                     if (!string.IsNullOrWhiteSpace(assertion))
-                        failure["summary"] = ReadString(failure, "summary", "") + " " + LimitText(assertion, 500);
+                        failure["summary"] = ReadString(failure, "summary", "") + " " + DialogueService.LimitText(assertion, 500);
                     failures.Add(failure);
                 }
                 if (failFast && failures.Count > 0) break;

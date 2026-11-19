@@ -137,7 +137,7 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                SocialOutcomeLastError = Program.LimitText(ex.ToString(), 2000);
+                SocialOutcomeLastError = DialogueService.LimitText(ex.ToString(), 2000);
                 Program.LogOperational("world_history.social_parallel_drain_failed",
                     new Dictionary<string, object>
                     {
@@ -275,7 +275,7 @@ namespace ReignBetaServer
                                     ReputationStore.UpdateSocialSubjectWorkQueue2(recoveryConnection, new Dictionary<string, object>
                                         {
                                             ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                                            ["error"] = Program.LimitText(ex.Message, 1000),
+                                            ["error"] = DialogueService.LimitText(ex.Message, 1000),
                                             ["campaign"] = campaignId,
                                             ["timeline"] = timelineId,
                                             ["subject"] = subjectId
@@ -676,7 +676,7 @@ namespace ReignBetaServer
                                     ["campaignId"] = campaignId,
                                     ["timelineId"] = timelineId,
                                     ["eventId"] = ReadString(row, "event_id", ""),
-                                    ["error"] = Program.LimitText(ex.Message, 800)
+                                    ["error"] = DialogueService.LimitText(ex.Message, 800)
                                 });
                         }
                     }

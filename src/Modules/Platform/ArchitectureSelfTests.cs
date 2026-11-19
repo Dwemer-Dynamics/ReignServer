@@ -226,7 +226,7 @@ namespace ReignBetaServer
                         new Dictionary<string, object> { ["sourceTurnId"] = "turn_a", ["exchangeId"] = "exchange_1", ["speaker"] = "Player", ["text"] = "First line." },
                         new Dictionary<string, object> { ["sourceTurnId"] = "turn_b", ["exchangeId"] = "exchange_1", ["speaker"] = "NPC A", ["text"] = "Second line." }
                     };
-                    List<Dictionary<string, object>> canonicalTranscript = CanonicalizePromptTranscript(duplicateTranscript, 30);
+                    List<Dictionary<string, object>> canonicalTranscript = DialogueService.CanonicalizePromptTranscript(duplicateTranscript, 30);
                     add("canonical_transcript_deduplicates_turn_ids", canonicalTranscript.Count == 2
                         && canonicalTranscript.Select(DialogueService.PromptTranscriptIdentity).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 2,
                         "Prompt assembly renders each stable conversation turn once.", canonicalTranscript);
@@ -253,9 +253,9 @@ namespace ReignBetaServer
                                 "player", speakerId, playerWords, npcWords, "history_" + beat + "_" + speakerId,
                                 "history_roundtrip", 100);
                             retryReturnsSameSourceIds &= ReadStringList(accepted, "turnIds").SequenceEqual(ReadStringList(acceptedRetry, "turnIds"));
-                            var playerRow = speakerId == "npc_a" ? EventTranscriptLine("player", "player", playerWords, eventPayload) : null;
-                            var npcRow = EventTranscriptLine("npc", speakerId, npcWords, eventPayload);
-                            AttachAcceptedTranscriptSourceIds(playerRow, npcRow, accepted);
+                            var playerRow = speakerId == "npc_a" ? DialogueService.EventTranscriptLine("player", "player", playerWords, eventPayload) : null;
+                            var npcRow = DialogueService.EventTranscriptLine("npc", speakerId, npcWords, eventPayload);
+                            DialogueService.AttachAcceptedTranscriptSourceIds(playerRow, npcRow, accepted);
                             foreach (var eventLine in new[] { playerRow, npcRow }.Where(row => row != null))
                             {
                                 eventLine["ts"] = 100L; // A real group beat can finish within one second.
@@ -276,15 +276,15 @@ namespace ReignBetaServer
                     var duplicateNpcLine = new Dictionary<string, object>(eventHistoryFixture[1]);
                     duplicateNpcLine["id"] = "a-retry-can-have-a-new-file-row-id";
                     duplicateNpcLine["turnId"] = ReadString(duplicateNpcLine, "turnId", "").ToUpperInvariant();
-                    string eventHistoryPath = SocialEventTranscriptFile(campaignId, "history_roundtrip");
+                    string eventHistoryPath = DialogueService.SocialEventTranscriptFile(campaignId, "history_roundtrip");
                     foreach (var eventLine in eventHistoryFixture) AppendJsonLineToPath(eventHistoryPath, eventLine);
                     AppendJsonLineToPath(eventHistoryPath, duplicateNpcLine);
-                    var recoveredEventHistory = BuildSocialEventPromptTranscript(ReadJsonLinesFromPath(eventHistoryPath), 30);
+                    var recoveredEventHistory = DialogueService.BuildSocialEventPromptTranscript(ReadJsonLinesFromPath(eventHistoryPath), 30);
                     string[] expectedHistory = eventHistoryFixture.Select(row => ReadString(row, "text", "")).ToArray();
                     add("social_event_history_keeps_each_speaker_and_deduplicates_retries",
                         recoveredEventHistory.Select(row => ReadString(row, "text", "")).SequenceEqual(expectedHistory),
                         "Persisted player and two NPC contributions survive both shared event turn IDs; replaying one NPC row adds no duplicate.", recoveredEventHistory);
-                    var boundedEventHistory = BuildSocialEventPromptTranscript(ReadJsonLinesFromPath(eventHistoryPath), 2);
+                    var boundedEventHistory = DialogueService.BuildSocialEventPromptTranscript(ReadJsonLinesFromPath(eventHistoryPath), 2);
                     add("social_event_history_same_second_order_and_complete_boundary",
                         boundedEventHistory.Select(row => ReadString(row, "text", "")).SequenceEqual(expectedHistory.Skip(3)),
                         "Same-second lines retain append order and the window includes the whole latest player/NPC exchange.", boundedEventHistory);
@@ -293,8 +293,8 @@ namespace ReignBetaServer
                     legacyRetry.Remove("sourceTurnId");
                     var legacyRows = eventHistoryFixture.Concat(new[] { legacyRetry }).ToList();
                     add("social_event_unbound_new_storage_id_is_preserved",
-                        BuildSocialEventPromptTranscript(legacyRows, 30).Count == 7
-                        && BuildSocialEventPromptTranscript(legacyRows, 2).Select(row => ReadString(row, "text", ""))
+                        DialogueService.BuildSocialEventPromptTranscript(legacyRows, 30).Count == 7
+                        && DialogueService.BuildSocialEventPromptTranscript(legacyRows, 2).Select(row => ReadString(row, "text", ""))
                             .SequenceEqual(expectedHistory.Skip(3).Concat(new[] { ReadString(legacyRetry, "text", "") })),
                         "An unbound row with another storage ID is not erased by equal words or a shared beat; its whole boundary remains visible.", null);
                     var repeatedUnboundWords = new[] { TestDict("turnId", "beat", "role", "npc", "speakerHeroStringId", "npc_a", "text", "Yes."),
@@ -303,9 +303,9 @@ namespace ReignBetaServer
                     var changedAcceptedWords = new[] { new Dictionary<string, object>(distinctAcceptedWords[0]),
                         new Dictionary<string, object>(distinctAcceptedWords[0]) { ["text"] = "No." } };
                     add("transcript_identity_preserves_unknown_distinct_and_changed_statements",
-                        CanonicalizePromptTranscript(repeatedUnboundWords, 30).Count == 2
-                        && CanonicalizePromptTranscript(distinctAcceptedWords, 30).Count == 2
-                        && CanonicalizePromptTranscript(changedAcceptedWords, 30).Count == 2,
+                        DialogueService.CanonicalizePromptTranscript(repeatedUnboundWords, 30).Count == 2
+                        && DialogueService.CanonicalizePromptTranscript(distinctAcceptedWords, 30).Count == 2
+                        && DialogueService.CanonicalizePromptTranscript(changedAcceptedWords, 30).Count == 2,
                         "Unknown repeated words, distinct accepted IDs and different complete bodies remain separate statements.", null);
                     bool invalidAcceptancePreserved = true;
                     foreach (var invalid in new[] { TestDict("ok", false, "turnIds", new[] { "p", "n" }),
@@ -314,12 +314,12 @@ namespace ReignBetaServer
                     {
                         invalid["sessionId"] = "invalid_acceptance_session";
                         invalid["exchangeId"] = "invalid_acceptance_exchange";
-                        var row = EventTranscriptLine("npc", "npc_a", "Keep this unbound.", TestDict());
-                        AttachAcceptedTranscriptSourceIds(null, row, invalid);
+                        var row = DialogueService.EventTranscriptLine("npc", "npc_a", "Keep this unbound.", TestDict());
+                        DialogueService.AttachAcceptedTranscriptSourceIds(null, row, invalid);
                         invalidAcceptancePreserved &= !row.ContainsKey("sourceTurnId") && ReadString(row, "id", "").Length > 0;
                     }
-                    var quietPlayerRow = EventTranscriptLine("player", "player", "A player line without an NPC reply.", TestDict());
-                    AttachAcceptedTranscriptSourceIds(quietPlayerRow, null, TestDict("ok", true, "sessionId", "quiet_session", "exchangeId", "quiet_exchange", "turnIds", new[] { "accepted_player", "unused_npc" }));
+                    var quietPlayerRow = DialogueService.EventTranscriptLine("player", "player", "A player line without an NPC reply.", TestDict());
+                    DialogueService.AttachAcceptedTranscriptSourceIds(quietPlayerRow, null, TestDict("ok", true, "sessionId", "quiet_session", "exchangeId", "quiet_exchange", "turnIds", new[] { "accepted_player", "unused_npc" }));
                     add("transcript_identity_requires_successful_complete_acceptance", invalidAcceptancePreserved
                         && ReadString(quietPlayerRow, "sourceTurnId", "") == "accepted_player",
                         "Failed/incomplete acceptance supplies no source authority, while a missing NPC line does not discard the accepted player line.", null);
@@ -335,7 +335,7 @@ namespace ReignBetaServer
                         {
                             ["sessionId"] = "unrelated_private_session", ["text"] = "PRIVATE_HISTORY_MUST_NOT_LEAK"
                         });
-                        var history = BuildPartyChatPromptTranscript(new Dictionary<string, object>
+                        var history = DialogueService.BuildPartyChatPromptTranscript(new Dictionary<string, object>
                         {
                             ["mode"] = "party_chat", ["castleChatMode"] = sceneKind,
                             ["conversationSessionId"] = "history_" + sceneKind,
@@ -352,7 +352,7 @@ namespace ReignBetaServer
                         ["conversationSessionId"] = "castle_recovery_session",
                         ["limit"] = 2
                     };
-                    string partyHistoryPath = PartyChatSessionTranscriptFile(campaignId, partyHistoryPayload);
+                    string partyHistoryPath = DialogueService.PartyChatSessionTranscriptFile(campaignId, partyHistoryPayload);
                     AppendJsonLineToPath(partyHistoryPath, new Dictionary<string, object>
                     {
                         ["role"] = "player", ["speaker"] = "Player", ["text"] = "First recovery line.",
@@ -368,7 +368,7 @@ namespace ReignBetaServer
                         ["role"] = "npc", ["speaker"] = "NPC B", ["text"] = "Newest recovery line.",
                         ["sessionId"] = "castle_recovery_session", ["exchangeId"] = "castle_recovery_session_turn_1"
                     });
-                    Dictionary<string, object> partyHistory = PartyChatHistory(partyHistoryPayload);
+                    Dictionary<string, object> partyHistory = DialogueService.PartyChatHistory(partyHistoryPayload);
                     List<Dictionary<string, object>> recoveredPartyLines = ReadDictionaryList(partyHistory, "lines");
                     add("party_chat_history_recovers_latest_durable_lines",
                         ReadBool(partyHistory, "ok", false)
@@ -427,16 +427,16 @@ namespace ReignBetaServer
                         "Party prompts carry an observer-safe role map, withhold unidentified participant names, and reject private writes that relabel a directly addressed NPC as the player.",
                         new Dictionary<string, object> { ["roleBlock"] = roleBlock, ["safe"] = safeRoleWrites, ["rejected"] = rejectedRoleWrites });
                     add("legacy_player_npc_name_collision_quarantine",
-                        IsLegacyPlayerNpcRoleCollision(
+                        DialogueService.IsLegacyPlayerNpcRoleCollision(
                             new Dictionary<string, object> { ["summary"] = "Menor accepted a cup from the stranger claiming to be Menor." },
                             "Menor the Brewer", "Rhovarion")
-                        && IsLegacyPlayerNpcRoleCollision(
+                        && DialogueService.IsLegacyPlayerNpcRoleCollision(
                             new Dictionary<string, object> { ["summary"] = "The stranger calling himself Menor discussed a clay disk with Purios." },
                             new[] { "Purios the Viper", "Menor the Brewer", "Mystesa the Carpenter" }, "Rhovarion")
-                        && IsLegacyPlayerNpcRoleCollision(
+                        && DialogueService.IsLegacyPlayerNpcRoleCollision(
                             new Dictionary<string, object> { ["claim"] = "The player was calling himself Menor during the cup exchange." },
                             "Menor the Brewer", "Rhovarion")
-                        && !IsLegacyPlayerNpcRoleCollision(
+                        && !DialogueService.IsLegacyPlayerNpcRoleCollision(
                             new Dictionary<string, object> { ["summary"] = "Menor accepted a cup from the stranger named Rhovarion." },
                             "Menor the Brewer", "Rhovarion"),
                         "Legacy memories that assign the current NPC's own name to the player are quarantined without suppressing correctly attributed player identities.", null);
@@ -534,18 +534,18 @@ namespace ReignBetaServer
                     List<string> longSummaryRecords = Enumerable.Range(1, 12)
                         .Select(index => "record_" + index + " " + new string((char)('a' + (index % 20)), 1800))
                         .ToList();
-                    string balancedSummarySource = BuildBalancedSummarySource(longSummaryRecords, 10000);
+                    string balancedSummarySource = DialogueService.BuildBalancedSummarySource(longSummaryRecords, 10000);
                     var retainedSummaryRecords = balancedSummarySource.Split(new[] { "\n---\n" }, StringSplitOptions.RemoveEmptyEntries);
                     add("memory_summary_balanced_source_coverage",
                         balancedSummarySource.Length <= 10000 && retainedSummaryRecords.Length > 0
                         && retainedSummaryRecords.All(longSummaryRecords.Contains)
                         && retainedSummaryRecords.Select(record => longSummaryRecords.IndexOf(record)).SequenceEqual(retainedSummaryRecords.Select(record => longSummaryRecords.IndexOf(record)).OrderBy(x => x))
-                        && BuildBalancedSummarySource(longSummaryRecords, 30000) == string.Join("\n---\n", longSummaryRecords),
+                        && DialogueService.BuildBalancedSummarySource(longSummaryRecords, 30000) == string.Join("\n---\n", longSummaryRecords),
                         "Budgeted summary input retains whole chronological records; sufficient capacity preserves every record without clipping source evidence.",
                         new Dictionary<string, object> { ["sourceChars"] = balancedSummarySource.Length, ["recordCount"] = longSummaryRecords.Count });
-                    add("structured_event_first_attempt_budget", StructuredEventResponseMaxTokens(new Dictionary<string, object> { ["maxTokens"] = 900 }) == 16000,
+                    add("structured_event_first_attempt_budget", DialogueService.StructuredEventResponseMaxTokens(new Dictionary<string, object> { ["maxTokens"] = 900 }) == 16000,
                         "Structured party and social-event JSON receives enough first-attempt output space for the visible reply and all private classifications without a full prompt resend.", null);
-                    add("structured_dialogue_first_attempt_budget", StructuredDialogueResponseMaxTokens(new Dictionary<string, object> { ["maxTokens"] = 900 }) == 16000,
+                    add("structured_dialogue_first_attempt_budget", DialogueService.StructuredDialogueResponseMaxTokens(new Dictionary<string, object> { ["maxTokens"] = 900 }) == 16000,
                         "Structured individual-dialogue JSON receives enough first-attempt output space for the visible reply and all private classifications without a full prompt resend.", null);
                     add("empty_structured_response_retry_omits_redundant_character_context",
                         !FormatRetryNeedsCharacterContext("{}")
@@ -557,7 +557,7 @@ namespace ReignBetaServer
                         "volatile_native_state_"
                         + Guid.NewGuid().ToString("N");
                     Dictionary<string, object> volatileResult =
-                        IngestEvent(
+                        DialogueService.IngestEvent(
                             new Dictionary<string, object>
                             {
                                 ["campaignId"] = campaignId,
@@ -933,7 +933,7 @@ namespace ReignBetaServer
                             }
                         });
                 string compactEventPrompt =
-                    BuildEventJsonForPrompt(
+                    DialogueService.BuildEventJsonForPrompt(
                         new Dictionary<string, object>(
                             attributedGroupPayload)
                         {
@@ -980,7 +980,7 @@ namespace ReignBetaServer
                 DialogueService.StoreSocialEventConversationExchange(campaignId, socialRequest, "npc_b", "player", "Player", "NPC B",
                     "At the east gate I put a violet ribbon beneath the map and shared an oatcake.",
                     "NPC A is right about both details.", "social_source_b", "social_memory_event", 301);
-                var currentSessionHistory = CanonicalizePromptTranscript(
+                var currentSessionHistory = DialogueService.CanonicalizePromptTranscript(
                     DialogueService.ReadCurrentSessionDialogueLines(campaignId, "social_event_social_memory_event", 30), 30);
                 add("individual_history_reader_keeps_shared_exchange_speakers",
                     currentSessionHistory.Count == 3
@@ -1005,7 +1005,7 @@ namespace ReignBetaServer
                 {
                     ["eventId"] = "social_recall_event", ["sceneTurnId"] = "social_recall_turn_1"
                 };
-                string deicticMemoryPacket = BuildMemoryPacketText(
+                string deicticMemoryPacket = DialogueService.BuildMemoryPacketText(
                     "npc_a", "player",
                     new List<Dictionary<string, object>>
                     {
@@ -1032,7 +1032,7 @@ namespace ReignBetaServer
                     && deicticMemoryPacket.Contains("All three present heard the claim here.", StringComparison.Ordinal),
                     "Consolidated memories retain their source participant set and explicitly prevent historical deictic words from being remapped onto a new group.", deicticMemoryPacket);
 
-                KnowledgeAccessContext unknownIdentityKnowledge = BuildKnowledgeAccessContext(
+                DialogueService.KnowledgeAccessContext unknownIdentityKnowledge = DialogueService.BuildKnowledgeAccessContext(
                     "npc_a", "main_hero", "town_test", new Dictionary<string, object>
                     {
                         ["mainHeroStringId"] = "main_hero",
@@ -1058,8 +1058,8 @@ namespace ReignBetaServer
                     ["participants_json"] = Json.Serialize(new List<string> { "npc_a", "main_hero" })
                 };
                 Dictionary<string, object> sanitizedPreference =
-                    SanitizeUnknownIdentityMemoryRow(safePreferenceMemory, unknownIdentityKnowledge);
-                KnowledgeAccessContext knownIdentityKnowledge = BuildKnowledgeAccessContext(
+                    DialogueService.SanitizeUnknownIdentityMemoryRow(safePreferenceMemory, unknownIdentityKnowledge);
+                DialogueService.KnowledgeAccessContext knownIdentityKnowledge = DialogueService.BuildKnowledgeAccessContext(
                     "npc_a", "main_hero", "town_test", new Dictionary<string, object>
                     {
                         ["mainHeroStringId"] = "main_hero",
@@ -1069,18 +1069,18 @@ namespace ReignBetaServer
                         ["identityView"] = new Dictionary<string, object> { ["knowsIdentity"] = true }
                     });
                 add("unknown_identity_memory_boundary",
-                    !UnknownIdentityMemoryEvidenceAllowed(unsafeClanMemory, unknownIdentityKnowledge,
+                    !DialogueService.UnknownIdentityMemoryEvidenceAllowed(unsafeClanMemory, unknownIdentityKnowledge,
                         ReadString(unsafeClanMemory, "summary", ""))
-                    && UnknownIdentityMemoryEvidenceAllowed(safePreferenceMemory, unknownIdentityKnowledge,
+                    && DialogueService.UnknownIdentityMemoryEvidenceAllowed(safePreferenceMemory, unknownIdentityKnowledge,
                         ReadString(safePreferenceMemory, "summary", ""))
-                    && UnknownIdentityMemoryEvidenceAllowed(unsafeClanMemory, knownIdentityKnowledge,
+                    && DialogueService.UnknownIdentityMemoryEvidenceAllowed(unsafeClanMemory, knownIdentityKnowledge,
                         ReadString(unsafeClanMemory, "summary", ""))
                     && !ReadString(sanitizedPreference, "participants_json", "").Contains("main_hero", StringComparison.OrdinalIgnoreCase)
                     && ReadString(sanitizedPreference, "summary", "").Contains("blue ribbons", StringComparison.OrdinalIgnoreCase),
                     "Unknown observers retain harmless encounter continuity while canonical identity, clan, fief, wealth, and political-state records are withheld before ranking.",
                     new Dictionary<string, object>
                     {
-                        ["unsafeAllowed"] = UnknownIdentityMemoryEvidenceAllowed(unsafeClanMemory, unknownIdentityKnowledge,
+                        ["unsafeAllowed"] = DialogueService.UnknownIdentityMemoryEvidenceAllowed(unsafeClanMemory, unknownIdentityKnowledge,
                             ReadString(unsafeClanMemory, "summary", "")),
                         ["safe"] = sanitizedPreference
                     });
@@ -1218,7 +1218,7 @@ namespace ReignBetaServer
                     && ReadDictionaryList(recallAuditFinish, "participantConsolidations").Count == 0,
                     "Recall reconstructions retain source-linked audit summaries but cannot become retrievable memories, embeddings, arcs, or consolidation inputs.",
                     new Dictionary<string, object> { ["finish"] = recallAuditFinish, ["summary"] = recallAuditSummary });
-                Dictionary<string, object> recallTurnStore = StoreTurnMemoryLayers(
+                Dictionary<string, object> recallTurnStore = DialogueService.StoreTurnMemoryLayers(
                     campaignId,
                     "recall_projection_event",
                     "party_chat_turn",
@@ -1258,14 +1258,14 @@ namespace ReignBetaServer
                     && ReadInt(recallProjectionCounts, "event_fts", -1) == 0,
                     "A recall answer remains in canonical conversation/audit storage but cannot project itself into events, structured memory, FTS, or vectors.",
                     new Dictionary<string, object> { ["store"] = recallTurnStore, ["counts"] = recallProjectionCounts });
-                Dictionary<string, object> lowSalienceStore = StoreTurnMemoryLayers(
+                Dictionary<string, object> lowSalienceStore = DialogueService.StoreTurnMemoryLayers(
                     campaignId, "low_salience_turn_event", "dialogue_turn", "npc_a", "player", "town_test",
                     "Good afternoon.", "Good afternoon to you as well.",
                     new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
                     new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
                     new List<Dictionary<string, object>>(),
                     "conversation:low_salience", 504L);
-                Dictionary<string, object> durableTurnStore = StoreTurnMemoryLayers(
+                Dictionary<string, object> durableTurnStore = DialogueService.StoreTurnMemoryLayers(
                     campaignId, "durable_turn_event", "dialogue_turn", "npc_a", "player", "town_test",
                     "I keep a blue bead in my left glove.", "I will remember the blue bead in your left glove.",
                     new List<Dictionary<string, object>>
@@ -1330,7 +1330,7 @@ namespace ReignBetaServer
                 const string multiSceneRecallText = "Reconstruct our two closed conversations without guessing. At the group supper, what did each speaker say? In the later private exchange, what identity distinction did you make?";
                 Dictionary<string, object> multiSceneRecallRoute = DialogueService.BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
                     multiSceneRecallText, new Dictionary<string, object>());
-                List<Dictionary<string, object>> multiSceneContextPulls = DeterministicContextPullSelection("dialogue",
+                List<Dictionary<string, object>> multiSceneContextPulls = DialogueService.DeterministicContextPullSelection("dialogue",
                     multiSceneRecallText, "", ContextPullIds.ToList());
                 add("multi_scene_closed_conversation_recall_detection",
                     DialogueService.LooksLikeMostRecentConversationRecall(multiSceneRecallText)
@@ -2547,33 +2547,33 @@ namespace ReignBetaServer
                 }
 
                 Dictionary<string, object> localSettings = new Dictionary<string, object>();
-                List<Dictionary<string, object>> selected = DeterministicContextPullSelection("dialogue", "What villages and bandits are nearby?", "", ContextPullIds.ToList());
+                List<Dictionary<string, object>> selected = DialogueService.DeterministicContextPullSelection("dialogue", "What villages and bandits are nearby?", "", ContextPullIds.ToList());
                 add("foreground_context_router", selected.Any(x => ReadString(x, "id", "") == "nearby_settlements")
                     && selected.Any(x => ReadString(x, "id", "") == "nearby_bandit_parties"),
                     "Context helpers are selected locally on the foreground path without a second LLM request.", selected);
                 const string naturalNearbySettlementPrompt =
                     "What settlements are nearby, and which road would you consider most sensible? Do not invent distances you were not given.";
-                List<Dictionary<string, object>> naturalNearbySettlementSelected = PruneContextPullSelection(
+                List<Dictionary<string, object>> naturalNearbySettlementSelected = DialogueService.PruneContextPullSelection(
                     naturalNearbySettlementPrompt,
-                    DeterministicContextPullSelection("dialogue", naturalNearbySettlementPrompt, "", ContextPullIds.ToList()));
+                    DialogueService.DeterministicContextPullSelection("dialogue", naturalNearbySettlementPrompt, "", ContextPullIds.ToList()));
                 add("context_router_nearby_settlement_natural_word_order",
                     naturalNearbySettlementSelected.Any(x => ReadString(x, "id", "") == "nearby_settlements"),
                     "Natural 'settlements are nearby' wording deterministically includes the native nearby-settlement bundle and survives pruning.",
                     naturalNearbySettlementSelected);
                 const string characteristicInfluencePrompt =
                     "Earlier you established a quiet personal detail of your own. Explain one small way that exact detail influences your behavior.";
-                List<Dictionary<string, object>> characteristicInfluenceSelected = PruneContextPullSelection(
+                List<Dictionary<string, object>> characteristicInfluenceSelected = DialogueService.PruneContextPullSelection(
                     characteristicInfluencePrompt,
-                    DeterministicContextPullSelection("dialogue", characteristicInfluencePrompt, "", ContextPullIds.ToList()));
+                    DialogueService.DeterministicContextPullSelection("dialogue", characteristicInfluencePrompt, "", ContextPullIds.ToList()));
                 add("context_router_behavioral_influence_is_not_clan_influence",
                     !characteristicInfluenceSelected.Any(x => ReadString(x, "id", "") == "clan_wealth_and_influence"),
                     "The verb 'influences' in a personal-behavior question cannot trigger the clan wealth and political influence helper.",
                     characteristicInfluenceSelected);
-                List<Dictionary<string, object>> recallSelected = DeterministicContextPullSelection("party_chat",
+                List<Dictionary<string, object>> recallSelected = DialogueService.DeterministicContextPullSelection("party_chat",
                     "Address each other while recalling what the baker wrapped.", "", ContextPullIds.ToList());
                 add("context_router_word_boundary", !recallSelected.Any(x => ReadString(x, "id", "") == "check_player_appearance_status"),
                     "The word 'address' cannot accidentally trigger the player-appearance helper through its 'dress' substring.", recallSelected);
-                List<Dictionary<string, object>> historySelected = DeterministicContextPullSelection("party_chat",
+                List<Dictionary<string, object>> historySelected = DialogueService.DeterministicContextPullSelection("party_chat",
                     "What happened to Suruq's Party, and whose party was responsible according to canonical campaign history?", "", ContextPullIds.ToList());
                 add("context_router_world_history_lookup", historySelected.Any(x => ReadString(x, "id", "") == "verify_world_history")
                     && !historySelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer")
@@ -2582,9 +2582,9 @@ namespace ReignBetaServer
                     "General campaign-history questions select canonical history without incidental trade, personal-memory, or current-diplomacy pulls.", historySelected);
                 const string establishedRegionalHistoryPrompt =
                     "What established history about the Southern Empire or Danustica would matter to someone making plans here? Separate verified context from your interpretation.";
-                List<Dictionary<string, object>> establishedRegionalHistorySelected = PruneContextPullSelection(
+                List<Dictionary<string, object>> establishedRegionalHistorySelected = DialogueService.PruneContextPullSelection(
                     establishedRegionalHistoryPrompt,
-                    DeterministicContextPullSelection(
+                    DialogueService.DeterministicContextPullSelection(
                         "dialogue",
                         establishedRegionalHistoryPrompt,
                         "Current settlement: Danustica (`town_ES1`)",
@@ -2594,8 +2594,8 @@ namespace ReignBetaServer
                     "Natural established-history wording about an empire or settlement selects canonical world-history evidence and survives pruning.",
                     establishedRegionalHistorySelected);
                 const string currentDanusticaHistoryPrompt = "Using current native facts and canonical campaign history, who currently owns and governs Danustica, is it under siege, which lord parties are nearby, and who most recently captured it?";
-                List<Dictionary<string, object>> currentDanusticaHistorySelected = PruneContextPullSelection(currentDanusticaHistoryPrompt,
-                    DeterministicContextPullSelection("dialogue", currentDanusticaHistoryPrompt,
+                List<Dictionary<string, object>> currentDanusticaHistorySelected = DialogueService.PruneContextPullSelection(currentDanusticaHistoryPrompt,
+                    DialogueService.DeterministicContextPullSelection("dialogue", currentDanusticaHistoryPrompt,
                         "Current settlement: Danustica (`town_ES1`)", ContextPullIds.ToList()));
                 add("context_router_current_settlement_label_and_world_history_split",
                     currentDanusticaHistorySelected.Any(x => ReadString(x, "id", "") == "current_settlement_facts")
@@ -2605,22 +2605,22 @@ namespace ReignBetaServer
                     "A scene labeled Current settlement resolves named local facts while canonical campaign history remains distinct from personal memory.",
                     currentDanusticaHistorySelected);
                 const string generalCurrentDanusticaPrompt = "What can you responsibly tell me about Danustica right now, and which current local facts can you not verify?";
-                List<Dictionary<string, object>> generalCurrentDanusticaSelected = DeterministicContextPullSelection(
+                List<Dictionary<string, object>> generalCurrentDanusticaSelected = DialogueService.DeterministicContextPullSelection(
                     "dialogue", generalCurrentDanusticaPrompt,
                     "Current settlement: Danustica (`town_ES1`)", ContextPullIds.ToList());
                 add("context_router_general_named_current_settlement_question",
                     generalCurrentDanusticaSelected.Any(x => ReadString(x, "id", "") == "current_settlement_facts"),
                     "A general current-facts question naming the active settlement receives the authoritative native settlement bundle rather than inviting plausible invention.",
                     generalCurrentDanusticaSelected);
-                List<Dictionary<string, object>> hyphenatedHistorySelected = DeterministicContextPullSelection("party_chat",
+                List<Dictionary<string, object>> hyphenatedHistorySelected = DialogueService.DeterministicContextPullSelection("party_chat",
                     "Canonical-history probe: what happened to Suruq's Party?", "", ContextPullIds.ToList());
                 add("context_router_hyphenated_world_history", hyphenatedHistorySelected.Any(x => ReadString(x, "id", "") == "verify_world_history"),
                     "Hyphenated canonical-history wording still selects authoritative history evidence.", hyphenatedHistorySelected);
-                List<Dictionary<string, object>> nearbyOrderSelected = DeterministicContextPullSelection("party_chat",
+                List<Dictionary<string, object>> nearbyOrderSelected = DialogueService.DeterministicContextPullSelection("party_chat",
                     "Name nearby parties, nearby forces, or nearby troops supplied by current native context.", "", ContextPullIds.ToList());
                 add("context_router_nearby_word_order", nearbyOrderSelected.Any(x => ReadString(x, "id", "") == "nearby_lord_parties"),
                     "Natural nearby-first wording selects the nearby-party native helper.", nearbyOrderSelected);
-                List<Dictionary<string, object>> nearbyClauseSelected = DeterministicContextPullSelection("party_chat",
+                List<Dictionary<string, object>> nearbyClauseSelected = DialogueService.DeterministicContextPullSelection("party_chat",
                     "What named lord parties or armies are near Danustica, and which nearby settlements matter most?", "", ContextPullIds.ToList());
                 add("context_router_nearby_relational_clause", nearbyClauseSelected.Any(x => ReadString(x, "id", "") == "nearby_lord_parties"),
                     "A natural 'forces are near PLACE' clause selects the nearby-party native helper.", nearbyClauseSelected);
@@ -2642,7 +2642,7 @@ namespace ReignBetaServer
                         }
                     }
                 };
-                string nearbySpatialPrompt = BuildContextPullText("Which lord parties are nearby?", "Current settlement: Danustica",
+                string nearbySpatialPrompt = DialogueService.BuildContextPullText("Which lord parties are nearby?", "Current settlement: Danustica",
                     new Dictionary<string, object>(), new Dictionary<string, object>(), new Dictionary<string, object>(),
                     new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(), nearbySpatialPull, nearbySpatialBundle, false);
                 add("native_spatial_context_does_not_invent_time_or_bearing",
@@ -2682,7 +2682,7 @@ namespace ReignBetaServer
                         }
                     }
                 };
-                string playerAppearancePrompt = BuildContextPullText("What can you infer by looking at me?", "",
+                string playerAppearancePrompt = DialogueService.BuildContextPullText("What can you infer by looking at me?", "",
                     new Dictionary<string, object>(), new Dictionary<string, object>(), new Dictionary<string, object>(),
                     new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
                     playerAppearancePull, playerAppearanceBundle, false);
@@ -2698,7 +2698,7 @@ namespace ReignBetaServer
                     "Player appearance helpers retain observable clothing and apparent status while excluding canonical identity, exact money, clan standing, inventory value, and other private native state from the model prompt.",
                     playerAppearancePrompt);
                 const string clanDeferencePrompt = "How much public deference, private candor, or guarded distance should someone of my known standing receive from you? Show the answer through your conduct rather than reciting clan-tier rules.";
-                List<Dictionary<string, object>> clanDeferenceSelected = DeterministicContextPullSelection(
+                List<Dictionary<string, object>> clanDeferenceSelected = DialogueService.DeterministicContextPullSelection(
                     "dialogue", clanDeferencePrompt, "", ContextPullIds.ToList());
                 add("context_router_public_deference_is_not_trade_appraisal",
                     clanDeferenceSelected.Any(x => ReadString(x, "id", "") == "clan_wealth_and_influence")
@@ -2744,7 +2744,7 @@ namespace ReignBetaServer
                 {
                     ["identityState"] = "encountered_unknown", ["knowsIdentity"] = false
                 };
-                string privateClanPrompt = BuildContextPullText(clanDeferencePrompt, "",
+                string privateClanPrompt = DialogueService.BuildContextPullText(clanDeferencePrompt, "",
                     new Dictionary<string, object>(), new Dictionary<string, object>(), new Dictionary<string, object>(),
                     new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
                     clanDeferenceSelected, privateClanBundle, false, unverifiedPlayerIdentity);
@@ -2760,8 +2760,8 @@ namespace ReignBetaServer
                     "Unknown observers retain their own clan evidence and the player's visible presentation while exact player identity, clan, money, tier, and fiefs are withheld from the actual model prompt.",
                     privateClanPrompt);
                 const string immediateAnswerRecall = "Without checking new reports, recall your immediately preceding answer: which party had wounded troops and what raw distance did you give for the closest party?";
-                List<Dictionary<string, object>> immediateAnswerRecallPulls = PruneContextPullSelection(immediateAnswerRecall,
-                    DeterministicContextPullSelection("dialogue", immediateAnswerRecall, "Current settlement: Danustica", ContextPullIds.ToList()));
+                List<Dictionary<string, object>> immediateAnswerRecallPulls = DialogueService.PruneContextPullSelection(immediateAnswerRecall,
+                    DialogueService.DeterministicContextPullSelection("dialogue", immediateAnswerRecall, "Current settlement: Danustica", ContextPullIds.ToList()));
                 add("pure_answer_recall_cannot_refresh_live_native_context",
                     DialogueService.LooksLikeMostRecentConversationRecall(immediateAnswerRecall)
                     && DialogueService.IsPureConversationRecallRequest(immediateAnswerRecall)
@@ -2771,17 +2771,17 @@ namespace ReignBetaServer
                     && !immediateAnswerRecallPulls.Any(x => ReadString(x, "id", "") == "verify_world_history"),
                     "A pure probe of the NPC's immediately preceding answer uses transcript/memory evidence and cannot silently refresh native world facts.", immediateAnswerRecallPulls);
                 const string spymasterMissionRecall = "Aeroc, remind me what came of the two stories we planted about Ranaon, and whether your effort to clean up my reputation worked.";
-                List<Dictionary<string, object>> spymasterMissionRecallPulls = PruneContextPullSelection(spymasterMissionRecall,
-                    DeterministicContextPullSelection("dialogue", spymasterMissionRecall, "Current settlement: Zeonica", ContextPullIds.ToList()));
+                List<Dictionary<string, object>> spymasterMissionRecallPulls = DialogueService.PruneContextPullSelection(spymasterMissionRecall,
+                    DialogueService.DeterministicContextPullSelection("dialogue", spymasterMissionRecall, "Current settlement: Zeonica", ContextPullIds.ToList()));
                 add("natural_remind_me_selects_relevant_memory",
                     spymasterMissionRecallPulls.Any(x => ReadString(x, "id", "") == "relevant_memory"),
                     "Natural 'remind me' phrasing retrieves the NPC's private mission memory without requiring test-shaped recall language.",
                     spymasterMissionRecallPulls);
-                List<Dictionary<string, object>> artisanSelected = DeterministicContextPullSelection("party_chat",
+                List<Dictionary<string, object>> artisanSelected = DialogueService.DeterministicContextPullSelection("party_chat",
                     "How would this news matter to ordinary artisans?", "", ContextPullIds.ToList());
                 add("context_router_artisan_boundary", !artisanSelected.Any(x => ReadString(x, "id", "") == "kingdom_diplomacy_status"),
                     "The word 'artisans' cannot activate current diplomacy through its embedded 'war' letters.", artisanSelected);
-                List<Dictionary<string, object>> conversationalValueSelected = DeterministicContextPullSelection("party_chat",
+                List<Dictionary<string, object>> conversationalValueSelected = DialogueService.DeterministicContextPullSelection("party_chat",
                     "Ascyron, I'm newly arrived in Danustica and curious what each of you values most about this city. If someone before you says something worth responding to, address their point as well.", "", ContextPullIds.ToList());
                 add("context_router_conversational_value_boundary",
                     conversationalValueSelected.Any(x => ReadString(x, "id", "") == "current_settlement_facts")
@@ -2789,14 +2789,14 @@ namespace ReignBetaServer
                     && !conversationalValueSelected.Any(x => ReadString(x, "id", "") == "relevant_memory"),
                     "Conversational value and speaker-order wording select current settlement facts without inventing trade appraisal or memory retrieval intent.", conversationalValueSelected);
                 const string personalTradePrompt = "Let us trade something small and personal rather than useful information. I find the smell of lamp oil calming. Tell me one ordinary sound, smell, texture, or arrangement that makes you feel settled.";
-                List<Dictionary<string, object>> personalTradeSelected = PruneContextPullSelection(personalTradePrompt,
-                    DeterministicContextPullSelection("party_chat", personalTradePrompt, "", ContextPullIds.ToList()));
+                List<Dictionary<string, object>> personalTradeSelected = DialogueService.PruneContextPullSelection(personalTradePrompt,
+                    DialogueService.DeterministicContextPullSelection("party_chat", personalTradePrompt, "", ContextPullIds.ToList()));
                 add("context_router_personal_story_trade_is_not_inventory",
                     !personalTradeSelected.Any(x => ReadString(x, "id", "") == "check_inventory_appearance")
                     && !personalTradeSelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer")
                     && !personalTradeSelected.Any(x => ReadString(x, "id", "") == "clan_wealth_and_influence"),
                     "Trading personal stories or details is conversational reciprocity, not a material inventory, appraisal, or clan-wealth request.", personalTradeSelected);
-                List<Dictionary<string, object>> eventConcernSelected = DeterministicContextPullSelection("social_event",
+                List<Dictionary<string, object>> eventConcernSelected = DialogueService.DeterministicContextPullSelection("social_event",
                     "Identify the occasion and phase this gathering actually supplies, then tell me one concern about Danustica.",
                     "Location: Danustica\nEvent: Villa Supper\nPhase: Arrival and Seating", ContextPullIds.ToList());
                 add("context_router_event_supply_and_named_location_boundary",
@@ -2805,14 +2805,14 @@ namespace ReignBetaServer
                     && !eventConcernSelected.Any(x => ReadString(x, "id", "") == "relevant_memory"),
                     "Using 'supplies' as a verb does not request inventory, while a concern about the named current settlement receives live local facts.", eventConcernSelected);
                 const string currentOwnerGovernorPrompt = "My name is Rhovarion. According to current native settlement facts, which kingdom and clan own Danustica, who is its current governor, and is it under siege?";
-                List<Dictionary<string, object>> currentOwnerGovernorSelected = PruneContextPullSelection(currentOwnerGovernorPrompt,
-                    DeterministicContextPullSelection("dialogue", currentOwnerGovernorPrompt, "Location: Danustica", ContextPullIds.ToList()));
+                List<Dictionary<string, object>> currentOwnerGovernorSelected = DialogueService.PruneContextPullSelection(currentOwnerGovernorPrompt,
+                    DialogueService.DeterministicContextPullSelection("dialogue", currentOwnerGovernorPrompt, "Location: Danustica", ContextPullIds.ToList()));
                 add("context_router_local_owner_governor_is_not_broad_diplomacy",
                     currentOwnerGovernorSelected.Any(x => ReadString(x, "id", "") == "current_settlement_facts")
                     && !currentOwnerGovernorSelected.Any(x => ReadString(x, "id", "") == "kingdom_diplomacy_status")
                     && !currentOwnerGovernorSelected.Any(x => ReadString(x, "id", "") == "clan_wealth_and_influence"),
                     "A current owner, governor, and siege-status question uses the authoritative settlement bundle without unrelated kingdom-war or clan-wealth payloads.", currentOwnerGovernorSelected);
-                List<Dictionary<string, object>> keepsakeSelected = DeterministicContextPullSelection("party_chat",
+                List<Dictionary<string, object>> keepsakeSelected = DialogueService.DeterministicContextPullSelection("party_chat",
                     "I keep a blue glass bead inside my left glove. It is only a small keepsake, not a gift or trade offer.", "", ContextPullIds.ToList());
                 add("context_router_negation_and_glove_boundary",
                     !keepsakeSelected.Any(x => ReadString(x, "id", "") == "check_inventory_appearance")
@@ -2820,33 +2820,33 @@ namespace ReignBetaServer
                     && !keepsakeSelected.Any(x => ReadString(x, "id", "") == "relationship_history"),
                     "An explicitly non-commercial keepsake does not pull inventory or appraisal context, and 'glove' cannot activate relationship history through its embedded 'love'.", keepsakeSelected);
                 const string negatedClayDiscussion = "Purios, I found a plain clay disk with seven shallow notches. It is not valuable and I am not offering it as a gift or trade. Menor and Mystesa, say where your own trades lead you to agree or disagree.";
-                List<Dictionary<string, object>> negatedClaySelected = PruneContextPullSelection(negatedClayDiscussion,
-                    DeterministicContextPullSelection("party_chat", negatedClayDiscussion, "Current settlement: Danustica", ContextPullIds.ToList()));
+                List<Dictionary<string, object>> negatedClaySelected = DialogueService.PruneContextPullSelection(negatedClayDiscussion,
+                    DialogueService.DeterministicContextPullSelection("party_chat", negatedClayDiscussion, "Current settlement: Danustica", ContextPullIds.ToList()));
                 add("context_router_negated_exchange_and_occupational_trade",
                     !negatedClaySelected.Any(x => ReadString(x, "id", "") == "check_inventory_appearance")
                     && !negatedClaySelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer"),
                     "A negated gift/trade and occupational use of 'your trades' cannot fetch current inventory or appraisal evidence.", negatedClaySelected);
                 const string naturalNegatedAppraisal = "Menor and Mystesa, respond to Purios's runner tally from your own trades. Do not treat the disk as a gift or sale.";
-                List<Dictionary<string, object>> naturalNegatedSelected = PruneContextPullSelection(naturalNegatedAppraisal,
-                    DeterministicContextPullSelection("party_chat", naturalNegatedAppraisal, "Current settlement: Danustica", ContextPullIds.ToList()));
+                List<Dictionary<string, object>> naturalNegatedSelected = DialogueService.PruneContextPullSelection(naturalNegatedAppraisal,
+                    DialogueService.DeterministicContextPullSelection("party_chat", naturalNegatedAppraisal, "Current settlement: Danustica", ContextPullIds.ToList()));
                 add("context_router_natural_do_not_treat_negation",
                     !naturalNegatedSelected.Any(x => ReadString(x, "id", "") == "check_inventory_appearance")
                     && !naturalNegatedSelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer"),
                     "Natural 'do not treat this as a gift or sale' wording cannot be reinterpreted as a gift-appraisal request.", naturalNegatedSelected);
-                List<Dictionary<string, object>> materialGiftSelected = DeterministicContextPullSelection("party_chat",
+                List<Dictionary<string, object>> materialGiftSelected = DialogueService.DeterministicContextPullSelection("party_chat",
                     "Pacarios, I give you this finely worked silver cup as a personal gift, with no favor expected.", "", ContextPullIds.ToList());
                 add("context_router_material_gift_verification",
                     materialGiftSelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer")
                     && !materialGiftSelected.Any(x => ReadString(x, "id", "") == "check_inventory_appearance"),
                     "A concrete material gift uses the appraisal bundle containing both player and recipient inventories instead of inspecting only the speaking NPC.", materialGiftSelected);
-                List<Dictionary<string, object>> historicalSilverAccusationSelected = DeterministicContextPullSelection("party_chat",
+                List<Dictionary<string, object>> historicalSilverAccusationSelected = DialogueService.DeterministicContextPullSelection("party_chat",
                     "What exact evidence supports your accusation that I hand out silver and lie? If you did not witness it, identify the historical source or retract it.", "", ContextPullIds.ToList());
                 add("context_router_historical_gift_discussion_not_appraisal",
                     !historicalSilverAccusationSelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer"),
                     "Discussing evidence for an alleged past silver transfer does not masquerade as a present gift or trade offer.", historicalSilverAccusationSelected);
                 const string recordsCupRecall = "From your own records, who gave you the silver cup, who received it, and what exactly do you know about the giver identity?";
-                List<Dictionary<string, object>> recordsCupRecallSelected = PruneContextPullSelection(recordsCupRecall,
-                    DeterministicContextPullSelection("dialogue", recordsCupRecall, "", ContextPullIds.ToList()));
+                List<Dictionary<string, object>> recordsCupRecallSelected = DialogueService.PruneContextPullSelection(recordsCupRecall,
+                    DialogueService.DeterministicContextPullSelection("dialogue", recordsCupRecall, "", ContextPullIds.ToList()));
                 add("context_router_records_based_gift_recall",
                     recordsCupRecallSelected.Any(x => ReadString(x, "id", "") == "relevant_memory")
                     && !recordsCupRecallSelected.Any(x => ReadString(x, "id", "") == "check_inventory_appearance")
@@ -2855,56 +2855,56 @@ namespace ReignBetaServer
                     "A records-based question about a completed historical gift selects memory, not current inventory/appraisal, and remains an audit-only recall probe.",
                     recordsCupRecallSelected);
                 const string nameAndBoxFollowup = "Before we continue, my name is Rhovarion. Honoratus, answer Menor's prior point that the box is nothing to you until I give you a reason. Keep the cup attributed to my earlier claim.";
-                List<Dictionary<string, object>> nameAndBoxSelected = DeterministicContextPullSelection("party_chat",
+                List<Dictionary<string, object>> nameAndBoxSelected = DialogueService.DeterministicContextPullSelection("party_chat",
                     nameAndBoxFollowup, "", ContextPullIds.ToList());
                 add("context_router_distant_give_and_item_not_trade",
                     !nameAndBoxSelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer"),
                     "A non-commercial 'give you a reason' clause cannot combine with a later mentioned cup to create a false trade-appraisal pull.", nameAndBoxSelected);
-                List<Dictionary<string, object>> indirectRecallSelected = DeterministicContextPullSelection("party_chat",
+                List<Dictionary<string, object>> indirectRecallSelected = DialogueService.DeterministicContextPullSelection("party_chat",
                     "Earlier I told this group why I keep something hidden in one piece of clothing. Without guessing, tell me what the object was and where I kept it.", "", ContextPullIds.ToList());
                 add("context_router_indirect_recall_priority",
                     indirectRecallSelected.Any(x => ReadString(x, "id", "") == "relevant_memory")
                     && !indirectRecallSelected.Any(x => ReadString(x, "id", "") == "check_player_appearance_status")
                     && !indirectRecallSelected.Any(x => ReadString(x, "id", "") == "check_inventory_appearance"),
                     "An indirect request for an earlier disclosed object prioritizes memory evidence instead of treating historical clothing language as a live appearance query.", indirectRecallSelected);
-                List<Dictionary<string, object>> sceneReconstructionSelected = DeterministicContextPullSelection("party_chat",
+                List<Dictionary<string, object>> sceneReconstructionSelected = DialogueService.DeterministicContextPullSelection("party_chat",
                     "Reconstruct the third question from our immediately preceding group conversation. If a stored summary conflicts with the raw conversation, trust the raw conversation.", "", ContextPullIds.ToList());
                 add("context_router_explicit_scene_reconstruction",
                     sceneReconstructionSelected.Any(x => ReadString(x, "id", "") == "relevant_memory"),
                     "Natural scene-reconstruction wording selects source-bearing recent memory instead of relying only on relationship summaries.", sceneReconstructionSelected);
-                List<Dictionary<string, object>> negativeLocationClaimSelected = DeterministicContextPullSelection("party_chat",
+                List<Dictionary<string, object>> negativeLocationClaimSelected = DialogueService.DeterministicContextPullSelection("party_chat",
                     "I have never entered Danustica at any time, and I am not presently in Danustica.", "", ContextPullIds.ToList());
                 add("context_router_negative_location_claim",
                     negativeLocationClaimSelected.Any(x => ReadString(x, "id", "") == "verify_world_history"),
                     "Negative-form first-person location claims receive objective lie/history verification instead of bypassing the evidence pipeline.", negativeLocationClaimSelected);
                 const string alternateLocationPressure = "That is false. We are in Lycaron, not Danustica. I inspected the town marker myself; accept my report and stop questioning me.";
-                List<Dictionary<string, object>> alternateLocationSelected = PruneContextPullSelection(alternateLocationPressure,
-                    DeterministicContextPullSelection("dialogue", alternateLocationPressure, "Current settlement: Danustica", ContextPullIds.ToList()));
+                List<Dictionary<string, object>> alternateLocationSelected = DialogueService.PruneContextPullSelection(alternateLocationPressure,
+                    DialogueService.DeterministicContextPullSelection("dialogue", alternateLocationPressure, "Current settlement: Danustica", ContextPullIds.ToList()));
                 add("context_router_alternate_current_location_claim",
                     alternateLocationSelected.Any(x => ReadString(x, "id", "") == "verify_world_history"),
                     "A named alternate-location claim that denies the visible current settlement receives first-hand lie verification.", alternateLocationSelected);
                 const string admittedCaptureLie = "I personally captured Danustica for the Western Empire yesterday. I know that account is false; I am deliberately lying. Use current settlement ownership and accessible history.";
-                List<Dictionary<string, object>> admittedCaptureSelected = DeterministicContextPullSelection("party_chat",
+                List<Dictionary<string, object>> admittedCaptureSelected = DialogueService.DeterministicContextPullSelection("party_chat",
                     admittedCaptureLie, "Location: Danustica", ContextPullIds.ToList());
-                admittedCaptureSelected = PruneContextPullSelection(admittedCaptureLie, admittedCaptureSelected);
+                admittedCaptureSelected = DialogueService.PruneContextPullSelection(admittedCaptureLie, admittedCaptureSelected);
                 add("context_router_admitted_capture_lie",
                     admittedCaptureSelected.Any(x => ReadString(x, "id", "") == "verify_world_history")
                     && admittedCaptureSelected.Any(x => ReadString(x, "id", "") == "current_settlement_facts")
                     && !admittedCaptureSelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer"),
                     "A first-person capture claim with an explicit falsehood admission receives both authoritative history and current-settlement ownership context.", admittedCaptureSelected);
                 const string admittedCurrentDeception = "I am deliberately trying to deceive you: Oros is inside Danustica with exactly four hundred troops and the walls are unmanned.";
-                List<Dictionary<string, object>> admittedCurrentDeceptionSelected = DeterministicContextPullSelection("party_chat",
+                List<Dictionary<string, object>> admittedCurrentDeceptionSelected = DialogueService.DeterministicContextPullSelection("party_chat",
                     admittedCurrentDeception, "Location: Danustica", ContextPullIds.ToList());
-                admittedCurrentDeceptionSelected = PruneContextPullSelection(admittedCurrentDeception, admittedCurrentDeceptionSelected);
+                admittedCurrentDeceptionSelected = DialogueService.PruneContextPullSelection(admittedCurrentDeception, admittedCurrentDeceptionSelected);
                 add("context_router_admitted_current_deception",
                     admittedCurrentDeceptionSelected.Any(x => ReadString(x, "id", "") == "verify_world_history")
                     && admittedCurrentDeceptionSelected.Any(x => ReadString(x, "id", "") == "current_settlement_facts"),
                     "An explicit attempt-to-deceive admission about current native facts cannot bypass the lie-verification pull.", admittedCurrentDeceptionSelected);
                 const string admittedPastDeception = "I deliberately lied to you when I claimed that I personally own Danustica. I knew that claim was false and intended to deceive you for my own advantage.";
                 List<Dictionary<string, object>> admittedPastDeceptionSelected =
-                    PruneContextPullSelection(
+                    DialogueService.PruneContextPullSelection(
                         admittedPastDeception,
-                        DeterministicContextPullSelection(
+                        DialogueService.DeterministicContextPullSelection(
                             "dialogue", admittedPastDeception,
                             "Location: Danustica",
                             ContextPullIds.ToList()));
@@ -3141,7 +3141,7 @@ namespace ReignBetaServer
                 add("visible_reply_leading_quote_preserved",
                     quotedReply.StartsWith("\"Rhovarion, then.\"", StringComparison.Ordinal),
                     "Legitimate leading dialogue quotes remain balanced when narration follows the spoken sentence.", quotedReply);
-                string provenanceSummary = EnsureConversationSummaryProvenance("Menor said he watched the gate.", 500);
+                string provenanceSummary = DialogueService.EnsureConversationSummaryProvenance("Menor said he watched the gate.", 500);
                 add("conversation_summary_provenance_label",
                     provenanceSummary.StartsWith("Conversation record (reported speech; not independent proof of world facts):", StringComparison.Ordinal),
                     "Conversation-derived summaries carry an explicit evidence-class warning before semantic indexing and later retrieval.", provenanceSummary);

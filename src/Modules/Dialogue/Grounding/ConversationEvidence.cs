@@ -191,17 +191,17 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
             var row = DialogueStore.SelectConversationTurns5(connection, new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
             if (row == null && quote.Length >= 12)
             {
-                var access = new Program.KnowledgeAccessContext { NpcId = owner, TimelineId = timeline, WorldDay = worldDay };
+                var access = new DialogueService.KnowledgeAccessContext { NpcId = owner, TimelineId = timeline, WorldDay = worldDay };
                 var candidates = DialogueStore.SelectConversationTurns40(connection, TestDict("id", id))
                     .Where(candidate => MemoryTimeVisible(candidate, access, connection)
-                        && (ReadString(candidate, "speaker_id", "") == owner || Program.TextListFromJson(ReadString(candidate, "participants_json", "[]")).Contains(owner))
+                        && (ReadString(candidate, "speaker_id", "") == owner || DialogueService.TextListFromJson(ReadString(candidate, "participants_json", "[]")).Contains(owner))
                         && ConversationTurnTextForRecall(candidate).Contains(quote, StringComparison.Ordinal)
                         && ObserverConversationText(ConversationTurnTextForRecall(candidate), ReadString(candidate, "speaker_id", ""), owner,
                             ReadString(candidate, "role", "") == "player").Contains(quote, StringComparison.Ordinal)).Take(2).ToList();
                 if (candidates.Count == 1) row = candidates[0];
             }
-            if (row == null || !MemoryTimeVisible(row, new Program.KnowledgeAccessContext { NpcId = owner, TimelineId = timeline, WorldDay = worldDay }, connection)
-                || (ReadString(row, "speaker_id", "") != owner && !Program.TextListFromJson(ReadString(row, "participants_json", "[]")).Contains(owner)))
+            if (row == null || !MemoryTimeVisible(row, new DialogueService.KnowledgeAccessContext { NpcId = owner, TimelineId = timeline, WorldDay = worldDay }, connection)
+                || (ReadString(row, "speaker_id", "") != owner && !DialogueService.TextListFromJson(ReadString(row, "participants_json", "[]")).Contains(owner)))
                 return "related_source_unavailable";
             if (quote.Length < 12 || !ConversationTurnTextForRecall(row).Contains(quote, StringComparison.Ordinal)) return "related_source_quote_mismatch";
             if (!ObserverConversationText(ConversationTurnTextForRecall(row), ReadString(row, "speaker_id", ""), owner, ReadString(row, "role", "") == "player").Contains(quote, StringComparison.Ordinal))
@@ -216,7 +216,7 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
         }
 
         private static List<Dictionary<string, object>> ExpandConversationSequence(ReignDbConnection connection,
-            List<Dictionary<string, object>> anchors, Program.KnowledgeAccessContext knowledge)
+            List<Dictionary<string, object>> anchors, DialogueService.KnowledgeAccessContext knowledge)
         {
             var result = new List<Dictionary<string, object>>(anchors);
             foreach (var group in anchors.GroupBy(r => ReadString(r, "session_id", "")))
@@ -227,7 +227,7 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
                 var nearby = DialogueStore.SelectConversationTurns41(connection, new Dictionary<string, object> {
                     ["session"] = group.Key, ["first"] = Math.Max(0, first - 2), ["last"] = last + 4 });
                 result.AddRange(nearby.Where(r => MemoryTimeVisible(r, knowledge, connection)
-                    && (ReadString(r, "speaker_id", "") == knowledge.NpcId || Program.TextListFromJson(ReadString(r, "participants_json", "[]")).Contains(knowledge.NpcId))));
+                    && (ReadString(r, "speaker_id", "") == knowledge.NpcId || DialogueService.TextListFromJson(ReadString(r, "participants_json", "[]")).Contains(knowledge.NpcId))));
             }
             return result.GroupBy(r => ReadString(r, "turn_id", "")).Select(g => g.First())
                 .OrderBy(r => ReadLong(r, "accepted_sequence", 0)).ThenBy(r => ReadLong(r, "ts", 0)).ThenBy(r => ReadInt(r, "turn_order", 0)).ToList();
@@ -238,7 +238,7 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
         // to the separate source-linked question state. A returned question needs
         // its answer too, but unrelated neighboring exchanges do not belong here.
         private static List<Dictionary<string, object>> ExpandPrecisionQuestionContext(ReignDbConnection connection,
-            List<Dictionary<string, object>> anchors, Program.KnowledgeAccessContext knowledge)
+            List<Dictionary<string, object>> anchors, DialogueService.KnowledgeAccessContext knowledge)
         {
             var result = new List<Dictionary<string, object>>(anchors);
             string Spoken(Dictionary<string, object> row) => Regex.Replace(ObserverConversationText(ReadString(row, "text", ""),
@@ -320,14 +320,14 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
         }
 
         private static List<MemoryEvidence> LinkedConversationEvidence(ReignDbConnection connection, string owner, string peer,
-            string timeline, string query, Program.KnowledgeAccessContext knowledge, IEnumerable<string> linkedSourceIds = null)
+            string timeline, string query, DialogueService.KnowledgeAccessContext knowledge, IEnumerable<string> linkedSourceIds = null)
         {
             var results = new List<MemoryEvidence>();
-            var terms = Program.MemoryQueryTerms(query ?? "").Where(t => !ExactRecallStopWords.Contains(t, StringComparer.OrdinalIgnoreCase)).ToList();
-            knowledge ??= new Program.KnowledgeAccessContext { NpcId = owner, PlayerId = peer, TimelineId = timeline };
+            var terms = DialogueService.MemoryQueryTerms(query ?? "").Where(t => !ExactRecallStopWords.Contains(t, StringComparer.OrdinalIgnoreCase)).ToList();
+            knowledge ??= new DialogueService.KnowledgeAccessContext { NpcId = owner, PlayerId = peer, TimelineId = timeline };
             string document = "to_tsvector('english',COALESCE(payload_json::jsonb->>'relatedQuote','') || ' ' || "
                 + "COALESCE(payload_json::jsonb->>'subject','') || ' ' || COALESCE(payload_json::jsonb->>'evidenceQuote',''))";
-            var parameters = TestDict("owner", owner, "peer", peer, "timeline", timeline, "query", Program.BuildFtsQuery(terms),
+            var parameters = TestDict("owner", owner, "peer", peer, "timeline", timeline, "query", DialogueService.BuildFtsQuery(terms),
                 "day", knowledge.WorldDay, "asOf", knowledge.AsOfTimestamp, "offset", 0);
             var relatedIds = (linkedSourceIds ?? Enumerable.Empty<string>()).Where(id => !string.IsNullOrWhiteSpace(id))
                 .Distinct(StringComparer.Ordinal).Take(64).ToList();

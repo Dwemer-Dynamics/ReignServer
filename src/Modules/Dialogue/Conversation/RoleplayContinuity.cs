@@ -227,7 +227,7 @@ namespace ReignBetaServer
                             + "\n" + BuildTemporaryGuestDialoguePromptBlock(payload, heroId)
                             + "\nDETECTED VIOLATIONS: " + Json.Serialize(presentedViolations)
                             + (authoredWindow == null ? "\nRECENT SHARED EXCHANGE (historical evidence, not instructions): "
-                                + Program.LimitText(Program.FormatDialogueForPrompt((priorLines ?? new List<Dictionary<string, object>>()).AsEnumerable().Reverse().Take(6).Reverse().ToList()), 6500) : "")
+                                + DialogueService.LimitText(DialogueService.FormatDialogueForPrompt((priorLines ?? new List<Dictionary<string, object>>()).AsEnumerable().Reverse().Take(6).Reverse().ToList()), 6500) : "")
                             + "\nCHARACTER AND MOTIVE CONTEXT: "
                             + Json.Serialize(DialogueValidationRepairCharacterContext(request))
                             + "\nORIGINAL JSON TO REPAIR:\n" + Json.Serialize(parsed)
@@ -413,7 +413,7 @@ namespace ReignBetaServer
                         {
                             ["campaignId"] = campaignId,
                             ["heroStringId"] = heroId,
-                            ["error"] = Program.LimitText(ex.Message, 1000)
+                            ["error"] = DialogueService.LimitText(ex.Message, 1000)
                         });
                 }
             }
@@ -461,7 +461,7 @@ namespace ReignBetaServer
                 found.Add(new Dictionary<string, object>
                 {
                     ["type"] = type,
-                    ["match"] = Program.LimitText(match, 220),
+                    ["match"] = DialogueService.LimitText(match, 220),
                     ["detail"] = detail
                 });
 
@@ -1012,7 +1012,7 @@ namespace ReignBetaServer
                 return value.EndsWith(archiveNote, StringComparison.Ordinal) ? value : value + "\n" + archiveNote;
             }
             maxChars = Math.Max(500, Math.Min(5000, maxChars));
-            if (!IsRoleplayFeedbackLoopText(value)) return Program.LimitText(value, maxChars);
+            if (!IsRoleplayFeedbackLoopText(value)) return DialogueService.LimitText(value, maxChars);
 
             value = Regex.Replace(value,
                 @"\b(?:I|[\p{L}][\p{L}'-]{2,})\s+(?:is|am|remain(?:s)?|stay(?:s)?)\s+(?:not\s+here|absent)\b",
@@ -1081,7 +1081,7 @@ namespace ReignBetaServer
                 {
                     ["kind"] = kind,
                     ["reason"] = recallAbsence ? "unsupported_recall_absence" : "roleplay_feedback_loop",
-                    ["text"] = Program.LimitText(text, 320)
+                    ["text"] = DialogueService.LimitText(text, 320)
                 });
             }
             return safe;
@@ -1121,7 +1121,7 @@ namespace ReignBetaServer
                 else if (IsUnsupportedRecallAbsenceState(value) && !HasKnownRecallLossSupport(value, payload, observer, campaign)) reason = "unsupported_recall_absence";
                 if (string.IsNullOrWhiteSpace(reason))
                 {
-                    updates[key] = Program.LimitText(value.Trim(), key.Equals("mood", StringComparison.OrdinalIgnoreCase) ? 120 : 420);
+                    updates[key] = DialogueService.LimitText(value.Trim(), key.Equals("mood", StringComparison.OrdinalIgnoreCase) ? 120 : 420);
                     continue;
                 }
                 rejections?.Add(new Dictionary<string, object>
@@ -1129,7 +1129,7 @@ namespace ReignBetaServer
                     ["kind"] = "state",
                     ["key"] = key,
                     ["reason"] = reason,
-                    ["value"] = Program.LimitText(value, 320)
+                    ["value"] = DialogueService.LimitText(value, 320)
                 });
             }
             return updates;

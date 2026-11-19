@@ -136,7 +136,7 @@ namespace ReignBetaServer
                         foreach (XElement trait in npc.Descendants("Trait"))
                         {
                             string key = ((string)trait.Attribute("id") ?? "").ToLowerInvariant();
-                            if (nativeTraits.ContainsKey(key)) nativeTraits[key] = Program.ClampTrait(ParseInt((string)trait.Attribute("value")));
+                            if (nativeTraits.ContainsKey(key)) nativeTraits[key] = CharactersService.ClampTrait(ParseInt((string)trait.Attribute("value")));
                         }
                         Dictionary<string, object> skills = CharactersService.ResolveCatalogNativeSkills(npc, skillSets);
                         string homeSettlementId = CharactersService.RemoveObjectPrefix((string)clan?.Attribute("initial_home_settlement"));
@@ -161,7 +161,7 @@ namespace ReignBetaServer
                             ["clanGold"] = clanGold, ["gold"] = clanGold * 0.10d, ["influence"] = influence,
                             ["leadership"] = leadership, ["partyStrength"] = 80d + leadership * 1.2d,
                             ["clanStrength"] = 180d + clanTier * 160d + fiefCount * 120d,
-                            ["visibleStatusScore"] = Program.ClampDouble(clanTier * 12d + fiefCount * 6d + (kingdom != null && CharactersService.RemoveObjectPrefix((string)kingdom.Attribute("owner")).Equals(id, StringComparison.OrdinalIgnoreCase) ? 18d : 0d), 0d, 100d),
+                            ["visibleStatusScore"] = DialogueService.ClampDouble(clanTier * 12d + fiefCount * 6d + (kingdom != null && CharactersService.RemoveObjectPrefix((string)kingdom.Attribute("owner")).Equals(id, StringComparison.OrdinalIgnoreCase) ? 18d : 0d), 0d, 100d),
                             ["spouseId"] = CharactersService.RemoveObjectPrefix((string)hero.Attribute("spouse")),
                             ["fatherId"] = CharactersService.RemoveObjectPrefix((string)hero.Attribute("father")),
                             ["motherId"] = CharactersService.RemoveObjectPrefix((string)hero.Attribute("mother")),
@@ -590,7 +590,7 @@ namespace ReignBetaServer
                 double desired = ReadDouble(equilibrium, facet, current);
                 double gap = desired - current;
                 if (Math.Abs(gap) < 0.5d) continue;
-                double delta = Program.ClampDouble(gap * 0.02d * exposureWeight, -0.50d, 0.50d);
+                double delta = DialogueService.ClampDouble(gap * 0.02d * exposureWeight, -0.50d, 0.50d);
                 if (Math.Abs(delta) < 0.00001d) continue;
                 relation.Facets[facet] = ClampRelationship(current + delta);
                 changes[facet] = delta;
@@ -668,7 +668,7 @@ namespace ReignBetaServer
             RelationshipSimulationStoryThread thread=RelationshipSimulationStory(run,subject,target,kind,day,true);
             double current=EffectiveStoryIntensity(thread.Intensity,kind,thread.Route,thread.LastEventDay,day);
             string priorStage=StoryStage(kind,current);
-            thread.Intensity=Program.ClampDouble(current+delta,0d,100d);
+            thread.Intensity=DialogueService.ClampDouble(current+delta,0d,100d);
             if(!string.IsNullOrWhiteSpace(route))thread.Route=route;
             if(!string.IsNullOrWhiteSpace(motiveChannel))thread.MotiveChannel=motiveChannel;
             thread.LastEventDay=day;

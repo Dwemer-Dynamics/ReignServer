@@ -85,7 +85,7 @@ namespace ReignBetaServer
                     var envelope = DialogueService.CreatePromptEnvelope(eventMode ? "social_event" : "dialogue", "test", "Rules.", "Profile.", budget.Structure.WithoutMarkers(budget.LiveTurn));
                     AttachNpcPurposePrompt(envelope, purposePayload, "companion");
                     DialogueService.StructureConversationMessages(envelope, budget.Structure, "", new List<Dictionary<string, object>>(),
-                        Program.FormatDialogueForPrompt, "companion", "Player", purposePlayerText, eventMode, text => text);
+                        DialogueService.FormatDialogueForPrompt, "companion", "Player", purposePlayerText, eventMode, text => text);
                     DialogueService.FinalizeContinuityPromptBudget(envelope, purposePayload, TestDict("inputAllowance", 32000, "outputFits", true));
                     string authority = ReadString(envelope.Messages.Single(m => ReadString(m, "content", "").StartsWith("CURRENT NPC PERSONAL PURPOSE", StringComparison.Ordinal)), "content", "");
                     Check((eventMode ? "event" : "dialogue") + "_purpose_survives_message_structure_as_current_system_authority",
@@ -966,8 +966,8 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                Check("fixture_completed", false, Program.LimitText(ex.ToString(), 3000));
-                results.Last()["summary"] = "fixture_completed: " + Program.LimitText(ex.Message, 600);
+                Check("fixture_completed", false, DialogueService.LimitText(ex.ToString(), 3000));
+                results.Last()["summary"] = "fixture_completed: " + DialogueService.LimitText(ex.Message, 600);
             }
             finally
             {
@@ -997,7 +997,7 @@ namespace ReignBetaServer
                 var saved = CharactersSelfTestStore.SelectConversationSessions(c, TestDict("id", session)).Single();
                 Check(prefix + "_session_retains_timeline_and_full_group", ReadBool(start, "ok", false)
                     && ReadString(TryParseJsonObject(ReadString(saved, "payload_json", "{}")), "timelineId", "") == timeline
-                    && Program.TextListFromJson(ReadString(saved, "participants_json", "[]")).OrderBy(id => id)
+                    && DialogueService.TextListFromJson(ReadString(saved, "participants_json", "[]")).OrderBy(id => id)
                         .SequenceEqual(audience.OrderBy(id => id)));
                 foreach (string hero in npcs)
                 {
@@ -1018,7 +1018,7 @@ namespace ReignBetaServer
                     var accepted = CharactersSelfTestStore.SelectConversationTurns7(c, TestDict("session", session, "hero", hero));
                     Check(prefix + "_" + hero + "_publishes_once_to_whole_group", !encounter.OpeningPending
                         && encounter.LastAcceptedDay == 10 && accepted.Count == 1
-                        && Program.TextListFromJson(ReadString(accepted.Single(), "participants_json", "[]")).OrderBy(id => id)
+                        && DialogueService.TextListFromJson(ReadString(accepted.Single(), "participants_json", "[]")).OrderBy(id => id)
                             .SequenceEqual(audience.OrderBy(id => id)));
                     var resume = NpcLivesOpenApi("open", p, options);
                     Check(prefix + "_" + hero + "_reopens_silently", ReadBool(resume, "ok", false)
@@ -1077,7 +1077,7 @@ namespace ReignBetaServer
                 var envelope = DialogueService.CreatePromptEnvelope(eventMode ? "social_event" : "dialogue", "test", "Rules.", "Profile.", budget.Structure.WithoutMarkers(budget.LiveTurn));
                 AttachNpcPurposePrompt(envelope, payload, "corein");
                 DialogueService.StructureConversationMessages(envelope, budget.Structure, "", new List<Dictionary<string, object>>(),
-                    Program.FormatDialogueForPrompt, "corein", "Player", playerText, eventMode, text => text);
+                    DialogueService.FormatDialogueForPrompt, "corein", "Player", playerText, eventMode, text => text);
                 DialogueService.FinalizeContinuityPromptBudget(envelope, payload, TestDict("inputAllowance", 32000, "outputFits", true));
                 string messages = string.Join("\n", envelope.Messages.Select(m => ReadString(m, "content", "")));
                 bool pendingReference = messages.Contains("PENDING PERSONAL INVITATION [pending_music, revision 1]")

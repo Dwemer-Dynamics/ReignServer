@@ -64,7 +64,7 @@ namespace ReignBetaServer
         }
 
         internal static bool LetterVisibleToObserver(ReignDbConnection connection, Dictionary<string, object> letter,
-            string observer, Program.KnowledgeAccessContext access, out double learnedDay)
+            string observer, DialogueService.KnowledgeAccessContext access, out double learnedDay)
         {
             learnedDay = 0d;
             if (letter == null || observer.Length == 0 || access == null) return false;
@@ -95,7 +95,7 @@ namespace ReignBetaServer
         }
 
         internal static List<MemoryEvidence> LoadCorrespondenceMemory(ReignDbConnection connection,
-            string observer, string peer, string query, Dictionary<string, object> context, Program.KnowledgeAccessContext access)
+            string observer, string peer, string query, Dictionary<string, object> context, DialogueService.KnowledgeAccessContext access)
         {
             var result = new List<MemoryEvidence>();
             if (ReadBool(context, "officialMemoryFirewall", false) || access.PlayerIdentityUnknown
@@ -103,7 +103,7 @@ namespace ReignBetaServer
             string timeline = FirstNonEmpty(access.TimelineId, "main");
             var args = TestDict("observer", observer, "peer", peer ?? "", "day", access.WorldDay,
                 "ts", access.AsOfTimestamp, "sequence", access.AsOfAcceptedSequence, "timeline", timeline);
-            var terms = Program.MemoryQueryTerms((query ?? "") + " " + ReadString(context, "memoryActiveTopic", ""))
+            var terms = DialogueService.MemoryQueryTerms((query ?? "") + " " + ReadString(context, "memoryActiveTopic", ""))
                 .Where(t => !ExactRecallStopWords.Contains(t, StringComparer.OrdinalIgnoreCase)).Distinct().Take(16).ToList();
             string rank = "0";
             if (terms.Count > 0)
@@ -170,7 +170,7 @@ WHERE r.letter_id=l.letter_id AND c.state_id='current' AND c.timeline_id=$timeli
         {
             if (!id.StartsWith("letter_", StringComparison.Ordinal) || quote.Length < 4) return null;
             var row = DialogueStore.SelectLetters2(connection, TestDict("id", id)).FirstOrDefault();
-            if (!LetterVisibleToObserver(connection, row, observer, Program.BuildKnowledgeAccessContext(observer, peer, "", context), out double day)
+            if (!LetterVisibleToObserver(connection, row, observer, DialogueService.BuildKnowledgeAccessContext(observer, peer, "", context), out double day)
                 || ReadString(row, "sender_id", "") != requestedSpeaker) return null;
             string body = ReadString(row, "body", ""); int start = body.IndexOf(quote, StringComparison.Ordinal);
             if (start < 0) return null;

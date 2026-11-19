@@ -31,7 +31,7 @@ namespace ReignBetaServer
                     string context = ReignPatronageRules.PublicNativeHistoryContext(ReadString(row, "event_type", ""),
                         role("winner"), role("released_prisoner"), role("killed victim"), role("new owner"));
                     if (context.Length == 0 || subjects.Count(x => ReadString(x, "context", "") == context) >= 8) continue;
-                    string summary = Program.LimitText(ReadString(row, "summary", ""), 900);
+                    string summary = DialogueService.LimitText(ReadString(row, "summary", ""), 900);
                     if (context == "reconciliation") summary += " This confirms a public peace; it does not establish private friendship or forgiveness.";
                     if (context == "settlement") summary += " This confirms the named ownership transfer; do not invent its cause or an earlier conquest.";
                     subjects.Add(new Dictionary<string, object> { ["eventId"] = id, ["eventType"] = ReadString(row, "event_type", ""),

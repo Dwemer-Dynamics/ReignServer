@@ -19,7 +19,7 @@ using Reign.Core.Contracts.Court;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         internal static HashSet<string> SearchMemoryFts(ReignDbConnection connection, List<string> terms, int limit, KnowledgeAccessContext knowledge = null) =>
             SearchEligibleMemoryFts(connection, "memories", "memory_id", "memory_fts", terms, limit, knowledge);
@@ -196,12 +196,12 @@ namespace ReignBetaServer
                 + " " + ReadString(row, "payload_json", "")).ToLowerInvariant();
         }
 
-        private static bool IsLegacyPlayerNpcRoleCollision(Dictionary<string, object> row, string npcName, string playerName)
+        internal static bool IsLegacyPlayerNpcRoleCollision(Dictionary<string, object> row, string npcName, string playerName)
         {
             return IsLegacyPlayerNpcRoleCollision(row, new[] { npcName }, playerName);
         }
 
-        private static bool IsLegacyPlayerNpcRoleCollision(Dictionary<string, object> row, IEnumerable<string> npcNames, string playerName)
+        internal static bool IsLegacyPlayerNpcRoleCollision(Dictionary<string, object> row, IEnumerable<string> npcNames, string playerName)
         {
             string text = ReadFirstString(row ?? new Dictionary<string, object>(), "summary", "claim", "text", "description");
             if (string.IsNullOrWhiteSpace(text)) return false;
@@ -232,7 +232,7 @@ namespace ReignBetaServer
         private static string MemoryPacketDedupeKey(Dictionary<string, object> row)
         {
             string eventId = ReadString(row, "event_id", "");
-            string summary = NormalizeLookup(ReadString(row, "summary", ""));
+            string summary = Program.NormalizeLookup(ReadString(row, "summary", ""));
             if (!string.IsNullOrWhiteSpace(eventId))
             {
                 return eventId + "|" + summary;
@@ -241,7 +241,7 @@ namespace ReignBetaServer
             return FirstNonEmpty(ReadString(row, "memory_id", ""), summary, Guid.NewGuid().ToString("N"));
         }
 
-        private static string BuildMemoryPacketText(
+        internal static string BuildMemoryPacketText(
             string npcId,
             string playerId,
             List<Dictionary<string, object>> summaries,
@@ -568,7 +568,7 @@ namespace ReignBetaServer
                 .Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToList();
         }
 
-        private static string AppendMinimeTopics(string text, List<string> topics)
+        internal static string AppendMinimeTopics(string text, List<string> topics)
         {
             List<string> clean = NormalizeMinimeTopics(topics, 8);
             if (clean.Count == 0)
@@ -678,7 +678,7 @@ namespace ReignBetaServer
                     continue;
                 }
 
-                string key = NormalizeLookup(clean);
+                string key = Program.NormalizeLookup(clean);
                 if (string.IsNullOrWhiteSpace(key) || seen.Contains(key))
                 {
                     continue;
@@ -698,7 +698,7 @@ namespace ReignBetaServer
         private static List<string> ExtractEntityIds(object raw)
         {
             List<string> ids = new List<string>();
-            foreach (object item in ObjectsFromValue(raw))
+            foreach (object item in Program.ObjectsFromValue(raw))
             {
                 if (item is Dictionary<string, object> dict)
                 {
@@ -749,7 +749,7 @@ namespace ReignBetaServer
             try
             {
                 object parsed = Json.DeserializeObject(json);
-                return ObjectsFromValue(parsed).Select(Convert.ToString).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+                return Program.ObjectsFromValue(parsed).Select(Convert.ToString).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
             }
             catch
             {

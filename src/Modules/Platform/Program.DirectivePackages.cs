@@ -210,7 +210,7 @@ namespace ReignBetaServer
                 }
             }
 
-            AddIfMissing(terms, "packageText", LimitText(StripDirectiveMarkers(directive), 800));
+            AddIfMissing(terms, "packageText", DialogueService.LimitText(StripDirectiveMarkers(directive), 800));
         }
 
         private static void ApplyRansomPackageTerms(Dictionary<string, object> action, Dictionary<string, object> terms, Dictionary<string, object> payload, Dictionary<string, object> hero, string directiveText)
@@ -317,7 +317,7 @@ namespace ReignBetaServer
             string payeeHeroId = playerIsCaptor ? playerHeroId : speakerHeroId;
             if (!string.IsNullOrWhiteSpace(payerHeroId)) terms["goldFromHeroStringId"] = payerHeroId;
             if (!string.IsNullOrWhiteSpace(payeeHeroId)) terms["goldToHeroStringId"] = payeeHeroId;
-            AddIfMissing(terms, "packageText", LimitText(StripDirectiveMarkers(directive), 800));
+            AddIfMissing(terms, "packageText", DialogueService.LimitText(StripDirectiveMarkers(directive), 800));
         }
 
         private static void ApplyCompoundDiplomaticPackageTerms(Dictionary<string, object> action, Dictionary<string, object> terms, Dictionary<string, object> payload, Dictionary<string, object> hero, string directiveText)
@@ -384,7 +384,7 @@ namespace ReignBetaServer
                 AddIfMissing(terms, "treatyKind", "non_aggression_package");
             }
 
-            AddIfMissing(terms, "packageText", LimitText(StripDirectiveMarkers(directive), 800));
+            AddIfMissing(terms, "packageText", DialogueService.LimitText(StripDirectiveMarkers(directive), 800));
         }
 
         private static void ApplyMarriageDirectiveTerms(Dictionary<string, object> terms, Dictionary<string, object> payload, string directiveText)
@@ -395,8 +395,8 @@ namespace ReignBetaServer
             }
 
             string directive = LatestPlayerDirectiveOrText(directiveText);
-            AddIfMissing(terms, "marriageRequestText", LimitText(StripDirectiveMarkers(directive), 800));
-            AddIfMissing(terms, "packageText", LimitText(StripDirectiveMarkers(directive), 800));
+            AddIfMissing(terms, "marriageRequestText", DialogueService.LimitText(StripDirectiveMarkers(directive), 800));
+            AddIfMissing(terms, "packageText", DialogueService.LimitText(StripDirectiveMarkers(directive), 800));
             Dictionary<string, object> namedHero = FindMentionedMarriageHero(payload, directiveText);
             if (namedHero.Count > 0)
             {

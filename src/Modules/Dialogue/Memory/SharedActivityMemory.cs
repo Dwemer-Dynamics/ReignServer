@@ -118,7 +118,7 @@ namespace ReignBetaServer
                 "worldDay", ReadDouble(report, "worldDay", 0d), "eventType", "native_action_result", "phase", "completed",
                 "source", "verified_native_receipt", "correlationId", actionId,
                 "locationId", ReadString(report, "targetSettlementStringId", ""),
-                "summary", ReadString(report, "type", "Action") + ": " + status + ". " + Program.LimitText(ReadString(report, "message", ""), 1200),
+                "summary", ReadString(report, "type", "Action") + ": " + status + ". " + DialogueService.LimitText(ReadString(report, "message", ""), 1200),
                 "entities", entities, "payload", ActivityFields("playerHeroId", player, "actionId", actionId, "status", status,
                     "actionType", ReadString(report, "type", ""), "receipt", ReadDictionary(report, "result") ?? ActivityFields()));
         }
@@ -126,13 +126,13 @@ namespace ReignBetaServer
         private static string SharedActivityObserverRole(string type, Dictionary<string, object> entity)
         {
             string role = ReadString(entity, "role", "");
-            if (Program.ContainsAny(role, "prisoner", "captive", "casualty", "former owner")) return "affected_person";
+            if (DialogueService.ContainsAny(role, "prisoner", "captive", "casualty", "former owner")) return "affected_person";
             // Legacy battle heroes came from the entire party roster. Only the
             // mission adapter can establish that a hero actually fought.
             if (type.StartsWith("battle_", StringComparison.Ordinal))
                 return ReadBool(entity, "missionParticipant", false) ? "participant" : "accompanying_party_member";
             if (ReadBool(entity, "activityAccompanying", false)) return "accompanying_party_member";
-            if (Program.ContainsAny(role, "spectator", "witness", "observer")) return "direct_witness";
+            if (DialogueService.ContainsAny(role, "spectator", "witness", "observer")) return "direct_witness";
             return "participant";
         }
 
@@ -169,7 +169,7 @@ namespace ReignBetaServer
             string location = ReadFirstString(item, "locationId", "location_id");
             var value = ActivityFields("eventType", type, "kind", kind, "source", source,
                 "phase", ReadString(item, "phase", "completed"), "outcome", SharedActivityOutcome(type, facts),
-                "summary", Program.LimitText(ReadString(item, "summary", ""), 1600), "locationId", location,
+                "summary", DialogueService.LimitText(ReadString(item, "summary", ""), 1600), "locationId", location,
                 "locationName", ReadFirstString(item, "locationName", "location_name"),
                 "correlationId", ReadFirstString(item, "correlationId", "correlation_id"),
                 "facts", facts, "entities", entities, "playerId", player,
@@ -226,7 +226,7 @@ namespace ReignBetaServer
             // Family diversity and milestone filtering happen before limits, so
             // hundreds of routine visits cannot displace a tournament or battle.
             rows.AddRange(DialogueStore.SelectStatement10(connection, select.Replace("SELECT a.*,", "SELECT ROW_NUMBER() OVER(PARTITION BY a.kind ORDER BY a.world_day DESC,a.sequence DESC) AS family_rank,a.*,"),args));
-            var topics = Program.MemoryQueryTerms(query).Take(6).ToList();
+            var topics = DialogueService.MemoryQueryTerms(query).Take(6).ToList();
             if (WorldSimulationService.TableExists(connection, "conversation_continuity"))
                 topics.AddRange(DialogueStore.SelectConversationContinuity12(connection, args)
                     .Select(r => ReadString(ReadDictionary(TryParseJsonObject(ReadString(r, "payload_json", "{}")), "activityStep"), "targetId", ""))
@@ -405,7 +405,7 @@ namespace ReignBetaServer
             {
                 text.Append(" Type=").Append(ReadString(facts, "battleType", "unknown"));
                 foreach (var entity in ReadDictionaryList(value, "entities").Where(e =>
-                    ReadString(e, "entityType", "") == "party" || Program.ContainsAny(ReadString(e, "role", ""), "casualty", "captured", "routed")))
+                    ReadString(e, "entityType", "") == "party" || DialogueService.ContainsAny(ReadString(e, "role", ""), "casualty", "captured", "routed")))
                     text.Append("; ").Append(ReadString(entity, "name", ""))
                         .Append(" [").Append(ReadString(entity, "role", "")).Append("; count=")
                         .Append(ReadDouble(entity, "quantity", 0d).ToString(CultureInfo.InvariantCulture)).Append(']');
@@ -460,7 +460,7 @@ namespace ReignBetaServer
             var selected = mandatory
                 .Concat(activities.Where(a => ReadInt(a, "delivered", 0) == 0)
                     .OrderByDescending(a => ReadString(a, "kind", "") is "battle" or "tournament" or "quest" or "release").Take(6))
-                .Concat(activities.Where(a => Program.MemoryQueryTerms(query + " " + currentPlan).Any(term =>
+                .Concat(activities.Where(a => DialogueService.MemoryQueryTerms(query + " " + currentPlan).Any(term =>
                     ReadString(a, "payload_json", "").Contains(term, StringComparison.OrdinalIgnoreCase))).Take(4))
                 .Concat(activities.Where(a => ReadDouble(a, "world_day", 0d) >= Math.Max(lastDay, day - 15.75d))
                     .GroupBy(a => ReadString(a, "kind", "")).SelectMany(g => g

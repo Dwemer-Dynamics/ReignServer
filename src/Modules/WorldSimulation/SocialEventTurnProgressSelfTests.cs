@@ -99,7 +99,7 @@ namespace ReignBetaServer
                     && ReadString(completed, "status", "") == "completed" && ReadBool(replay, "idempotent", false)
                     && ReadDictionaryList(replay, "participantResults").Count == 3,
                     "Finalization returns the complete group receipt; replay invokes no provider and keeps each reply once.");
-                check("one_player_transcript_line", Program.ReadJsonLinesFromPath(Program.SocialEventTranscriptFile(campaignId, "progress_event"))
+                check("one_player_transcript_line", Program.ReadJsonLinesFromPath(DialogueService.SocialEventTranscriptFile(campaignId, "progress_event"))
                     .Count(row => ReadString(row, "turnId", "") == "progress_turn" && ReadString(row, "role", "") == "player") == 1,
                     "All progress requests, failures and replay retain exactly one authoritative player submission.");
 

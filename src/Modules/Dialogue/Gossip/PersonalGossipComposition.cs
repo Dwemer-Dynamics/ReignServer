@@ -128,7 +128,7 @@ namespace ReignBetaServer
             if (!ReadBool(response, "ok", false)) return GossipFields("error", "Malicious gossip review provider failed.");
             var review = TryParseStrictJsonObject(ReadString(response, "content", ""));
             bool True(string key) => review != null && review.TryGetValue(key, out object value) && value is bool flag && flag;
-            string quote = ReadString(review, "claimQuote", ""), reason = Program.LimitText(ReadString(review, "reason", ""), 400);
+            string quote = ReadString(review, "claimQuote", ""), reason = DialogueService.LimitText(ReadString(review, "reason", ""), 400);
             bool accepted = True("participantsPreserved") && True("aboutPlayerEncounter") && True("severityRealized")
                 && quote.Trim().Length >= 8 && body.IndexOf(quote, StringComparison.Ordinal) >= 0 && reason.Length > 0;
             var evidence = GossipFields("policyVersion", GossipCompositionReviewVersion, "accepted", accepted,
@@ -169,7 +169,7 @@ namespace ReignBetaServer
             if (!ReadBool(response, "ok", false)) return GossipFields("error", "Consultation review provider failed.");
             var review = TryParseStrictJsonObject(ReadString(response, "content", ""));
             bool True(string key) => review != null && review.TryGetValue(key, out object value) && value is bool flag && flag;
-            string quote = ReadString(review, "claimQuote", ""), reason = Program.LimitText(ReadString(review, "reason", ""), 400);
+            string quote = ReadString(review, "claimQuote", ""), reason = DialogueService.LimitText(ReadString(review, "reason", ""), 400);
             bool accepted = True("participantsPreserved") && True("questionPreserved") && True("factsSupported") && True("noAnswerInvented")
                 && quote.Trim().Length >= 8 && body.IndexOf(quote, StringComparison.Ordinal) >= 0 && PersonalGossipSubstantiveQuestion(quote) && reason.Length > 0;
             var evidence = GossipFields("policyVersion", "gossip-consultation-review-v1", "accepted", accepted,

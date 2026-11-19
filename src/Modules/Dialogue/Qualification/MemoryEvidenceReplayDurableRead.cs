@@ -65,7 +65,7 @@ namespace ReignBetaServer
 
         private static bool DurableSourceIncludesPair(Dictionary<string, object> source, string observer, string peer)
         {
-            var participants = Program.TextListFromJson(ReadString(source, "participants_json", "[]"));
+            var participants = DialogueService.TextListFromJson(ReadString(source, "participants_json", "[]"));
             return participants.Contains(observer) && participants.Contains(peer);
         }
 
@@ -139,7 +139,7 @@ namespace ReignBetaServer
             internal List<string> Denials { get; private set; } = new();
 
             internal MemoryEvidence ProjectRankedMemory(ReignDbConnection connection, Dictionary<string, object> row,
-                Program.KnowledgeAccessContext access, double score)
+                DialogueService.KnowledgeAccessContext access, double score)
             {
                 var payload = TryParseJsonObject(ReadString(row, "payload_json", ""));
                 var projection = ReadDictionary(payload, ReviewedDurableProjectionKey);
@@ -154,7 +154,7 @@ namespace ReignBetaServer
             }
 
             private List<string> CheckBinding(ReignDbConnection connection, Dictionary<string, object> row, Dictionary<string, object> payload,
-                Dictionary<string, object> projection, Program.KnowledgeAccessContext access)
+                Dictionary<string, object> projection, DialogueService.KnowledgeAccessContext access)
             {
                 if (ReadString(projection, "schema", "") != ReviewedDurableProjectionSchema
                     || !ValidDurableProjectionText(ReadString(projection, "text", ""))
@@ -167,7 +167,7 @@ namespace ReignBetaServer
                 string sourceId = ReadString(projection, "sourceTurnId", ""), eventId = ReadString(projection, "sourceEventId", "");
                 if (sourceId.Length == 0 || eventId.Length == 0 || ReadString(projection, "memoryId", "") != ReadString(row, "memory_id", "")
                     || !DurableMemoryBindingMatches(row, payload, observer, eventId, ReadString(projection, "sourceBodySha256", ""))
-                    || !Program.KnowledgeRowVisibleToNpc("memories", row, access)) return new() { "memory_binding" };
+                    || !DialogueService.KnowledgeRowVisibleToNpc("memories", row, access)) return new() { "memory_binding" };
                 var source = ReadDurableSourceMetadata(connection, sourceId);
                 if (source == null) return new() { "source_missing" };
                 var denials = new List<string>();
@@ -192,7 +192,7 @@ namespace ReignBetaServer
                 var row = DialogueStore.SelectMemories13(connection, TestDict("id", DiscoveredId)).Single();
                 var payload = TryParseJsonObject(ReadString(row, "payload_json", ""));
                 var projection = ReadDictionary(payload, ReviewedDurableProjectionKey);
-                var access = Program.BuildKnowledgeAccessContext(observer, peer, "", context);
+                var access = DialogueService.BuildKnowledgeAccessContext(observer, peer, "", context);
                 bool accepted = CheckBinding(connection, row, payload, projection, access).Count == 0;
                 var changed = Program.CloneDictionary(payload);
                 var sourceEvidence = ReadDictionary(changed, "sourceEvidence");
@@ -202,7 +202,7 @@ namespace ReignBetaServer
                 var alteredProjection = Program.CloneDictionary(projection);
                 alteredProjection["text"] = "Altered: " + ReadString(projection, "text", "");
                 bool alteredProjectionBlocked = CheckBinding(connection, row, payload, alteredProjection, access).SequenceEqual(new[] { "projection_integrity" });
-                var foreign = Program.BuildKnowledgeAccessContext(observer + ":foreign", peer, "", context);
+                var foreign = DialogueService.BuildKnowledgeAccessContext(observer + ":foreign", peer, "", context);
                 bool foreignBlocked = CheckBinding(connection, row, payload, projection, foreign).SequenceEqual(new[] { "reader_scope" });
                 access.AsOfAcceptedSequence = ReadLong(projection, "sourceSequence", 0) - 1;
                 bool earlyBlocked = CheckBinding(connection, row, payload, projection, access).SequenceEqual(new[] { "source_occurrence" });

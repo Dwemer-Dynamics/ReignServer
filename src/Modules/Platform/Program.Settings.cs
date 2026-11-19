@@ -499,7 +499,7 @@ namespace ReignBetaServer
                 {
                     string key = prefix + suffix;
                     double prior = ReadDouble(settings, key, fallback);
-                    double value = ClampDouble(prior, minimum, maximum);
+                    double value = DialogueService.ClampDouble(prior, minimum, maximum);
                     if (!settings.ContainsKey(key) || Math.Abs(prior - value) > 0.0001d) changed = true;
                     settings[key] = value;
                 };
@@ -538,7 +538,7 @@ namespace ReignBetaServer
             normalizeInt("memoryConsolidationMaxSourceItems", 24, 4, 80);
             normalizeInt("memoryConsolidationMaxSummaryChars", 1800, 500, 5000);
             double priorWeight = ReadDouble(settings, "vectorScoreWeight", 30d);
-            double weight = ClampDouble(priorWeight, 0d, 100d);
+            double weight = DialogueService.ClampDouble(priorWeight, 0d, 100d);
             if (!settings.ContainsKey("vectorScoreWeight") || Math.Abs(priorWeight - weight) > 0.0001d) changed = true;
             settings["vectorScoreWeight"] = weight;
             return changed;
@@ -782,10 +782,10 @@ namespace ReignBetaServer
                     {
                         ["heroStringId"] = Path.GetFileName(dir),
                         ["failedUtc"] = ReadString(constructed, "failedUtc", ""),
-                        ["failureKind"] = FirstNonEmpty(ReadString(constructed, "failureKind", ""), CharacterFailureKindFromText(ReadString(constructed, "error", ""))),
+                        ["failureKind"] = FirstNonEmpty(ReadString(constructed, "failureKind", ""), CharactersService.CharacterFailureKindFromText(ReadString(constructed, "error", ""))),
                         ["settingsRevision"] = ReadString(constructed, "settingsRevision", ""),
-                        ["diagnostic"] = LimitText(ReadString(constructed, "diagnostic", ReadString(constructed, "error", "")), 500),
-                        ["settingsNewer"] = ShouldRetryFailedConstruction(constructed, LoadSettings())
+                        ["diagnostic"] = DialogueService.LimitText(ReadString(constructed, "diagnostic", ReadString(constructed, "error", "")), 500),
+                        ["settingsNewer"] = CharactersService.ShouldRetryFailedConstruction(constructed, LoadSettings())
                     });
                 }
             }

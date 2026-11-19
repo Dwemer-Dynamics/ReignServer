@@ -86,7 +86,7 @@ namespace ReignBetaServer
                     ReadString(diplomaticEvent, "actorHeroId", ""),
                     ReadString(diplomaticEvent, "targetHeroId", "")
                 }.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                Program.StoreWorldMemoryEvent(new Dictionary<string, object>
+                DialogueService.StoreWorldMemoryEvent(new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["eventId"] = ReadString(diplomaticEvent, "eventId", ""),

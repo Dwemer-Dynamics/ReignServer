@@ -361,13 +361,13 @@ namespace ReignBetaServer
             StringBuilder builder = new StringBuilder();
             if (!string.IsNullOrWhiteSpace(heroId))
             {
-                foreach (Dictionary<string, object> line in ReadDialogueLines(campaignId, heroId, 8))
+                foreach (Dictionary<string, object> line in DialogueService.ReadDialogueLines(campaignId, heroId, 8))
                 {
                     string role = ReadString(line, "role", "");
                     string text = ReadString(line, "text", "");
                     if (!string.IsNullOrWhiteSpace(text))
                     {
-                        builder.AppendLine((string.IsNullOrWhiteSpace(role) ? "prior" : role) + ": " + LimitText(text, 900));
+                        builder.AppendLine((string.IsNullOrWhiteSpace(role) ? "prior" : role) + ": " + DialogueService.LimitText(text, 900));
                     }
                 }
             }
@@ -428,7 +428,7 @@ namespace ReignBetaServer
 
             if (string.IsNullOrWhiteSpace(ReadString(gate, "intent", "")) && ReadBool(gate, "needed", false))
             {
-                gate["intent"] = "Player request: " + LimitText(playerText ?? "", 400) + "\nNPC commitment: " + LimitText(visibleReply ?? "", 500);
+                gate["intent"] = "Player request: " + DialogueService.LimitText(playerText ?? "", 400) + "\nNPC commitment: " + DialogueService.LimitText(visibleReply ?? "", 500);
             }
 
             return gate;
@@ -451,7 +451,7 @@ namespace ReignBetaServer
             actionGate["needed"] = true;
             actionGate["commitment"] = "accepted";
             actionGate["intent"] = "The NPC accepts the player's clear present request: "
-                + LimitText(playerText ?? "", 500);
+                + DialogueService.LimitText(playerText ?? "", 500);
             actionGate["confidence"] = 1d;
             actionGate["reason"] = "Guarded action acceptance cooperation made the positive probe unconditional.";
             visibleReply = "Very well. I agree, and I will carry out that request now.";

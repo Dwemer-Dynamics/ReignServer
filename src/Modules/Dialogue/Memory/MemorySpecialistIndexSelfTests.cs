@@ -100,7 +100,7 @@ namespace ReignBetaServer
                 // topic; annotations widen discovery but never filter lexical recall.
                 StoreMemorySpecialistDocument(connection, source);
                 SpecialistFixtureTurn(connection, campaign, "source_player", "player", "The herb grows beside a stream.", ts:11, session: "session_source", role: "player");
-                var knowledge = new Program.KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "main", WorldDay = 20 };
+                var knowledge = new DialogueService.KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "main", WorldDay = 20 };
                 var plan = PlanMemoryQuery("npc", "player", "What did we say about botany?", TestDict("timelineId", "main", "worldDay", 20d));
                 Check("paraphrased_topic_finds_original", FindMemorySpecialistTurns(connection, plan, knowledge, 4, 32, true).Any(r => ReadString(r, "turn_id", "") == "source"));
                 var legacy=SearchExactConversationHistory(connection,"npc","botany",TestDict(),12000,null,"",30,knowledge);
@@ -125,20 +125,20 @@ namespace ReignBetaServer
                     .Any(r=>ReadString(r,"turn_id","")=="unrelated"));
                 Check("clarification_anchor_retains_preceding_claim", ExpandPrecisionQuestionContext(connection,new(){clarification,response},knowledge)
                     .Any(r=>ReadString(r,"turn_id","")=="claim"));
-                var beforeClarification = new Program.KnowledgeAccessContext { NpcId="npc",PlayerId="player",TimelineId="main",WorldDay=20,AsOfTimestamp=41 };
+                var beforeClarification = new DialogueService.KnowledgeAccessContext { NpcId="npc",PlayerId="player",TimelineId="main",WorldDay=20,AsOfTimestamp=41 };
                 Check("future_clarification_is_not_leaked", !ExpandPrecisionQuestionContext(connection,new(){assumption},beforeClarification)
                     .Any(r=>ReadString(r,"turn_id","")=="clarification"));
                 DialogueSelfTestStore.UpdateConversationTurns59(connection);
                 Check("hidden_correction_cannot_be_skipped_to_retrieve_ack", !ExpandPrecisionQuestionContext(connection,new(){assumption},knowledge)
                     .Any(r=>ReadString(r,"turn_id","")=="clarified_response"));
-                var early = new Program.KnowledgeAccessContext { NpcId="npc", PlayerId="player", TimelineId="main", WorldDay=9 };
+                var early = new DialogueService.KnowledgeAccessContext { NpcId="npc", PlayerId="player", TimelineId="main", WorldDay=9 };
                 var earlyPlan = PlanMemoryQuery("npc","player","botany",TestDict("timelineId","main","worldDay",9d));
                 Check("future_original_excluded", FindMemorySpecialistTurns(connection, earlyPlan, early, 4, 32, false).Count == 0);
-                var foreign = new Program.KnowledgeAccessContext { NpcId="outsider", TimelineId="main", WorldDay=20 };
+                var foreign = new DialogueService.KnowledgeAccessContext { NpcId="outsider", TimelineId="main", WorldDay=20 };
                 Check("unheard_source_excluded", FindMemorySpecialistTurns(connection, new MemoryQueryPlan { Observer="outsider", Query="botany", Timeline="main", WorldDay=20 }, foreign, 4, 32, false).Count == 0);
                 var privateSource = SpecialistFixtureTurn(connection,campaign,"private","npc","*I secretly remember our garden and the rare flower.* Let us discuss the weather.", ts:20);
                 StoreMemorySpecialistDocument(connection,privateSource);
-                var listener = new Program.KnowledgeAccessContext { NpcId="listener", TimelineId="main", WorldDay=20 };
+                var listener = new DialogueService.KnowledgeAccessContext { NpcId="listener", TimelineId="main", WorldDay=20 };
                 var publicPlan = new MemoryQueryPlan { Observer="listener", Query="botany", Timeline="main", WorldDay=20 };
                 Check("private_thought_tags_do_not_influence_listener_search", !FindMemorySpecialistTurns(connection,publicPlan,listener,8,32,false).Any(r=>ReadString(r,"turn_id","")=="private"));
                 Check("own_private_memory_remains_searchable", FindMemorySpecialistTurns(connection,plan,knowledge,8,32,false).Any(r=>ReadString(r,"turn_id","")=="private"));
@@ -148,7 +148,7 @@ namespace ReignBetaServer
                 Check("missing_index_does_not_filter_lexical_candidates", FuseMemorySpecialistRanks(new(){source},new(),1).Count==1);
                 Check("rank_fusion_deduplicates_source",FuseMemorySpecialistRanks(new(){source},new(){source},4).Count==1);
             }
-            catch(Exception ex) { results.Add(TestDict("caseId","memory_specialist_fixture_completed","passed",false,"summary",Program.LimitText(ex.ToString(),2500))); }
+            catch(Exception ex) { results.Add(TestDict("caseId","memory_specialist_fixture_completed","passed",false,"summary",DialogueService.LimitText(ex.ToString(),2500))); }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             return results;
         }

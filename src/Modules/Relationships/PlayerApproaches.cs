@@ -130,7 +130,7 @@ namespace ReignBetaServer
                             .Select(r => TestDict("heroId", ReadString(r, "target_id", ""), "name", ReadString(r, "target_name", ""), "days", ReadInt(r, "days", 0),
                                 "score", ReadInt(r, "days", 0) * PlayerApproachPolicy.Sensitivity(jealousy, patience),
                                 "firstDay", ReadInt(r, "first_day", 0), "lastDay", ReadInt(r, "last_day", 0),
-                                "sourceIds", Program.TextListFromJson(ReadString(r, "source_ids_json", "[]")), "sourceCoverage", "latest_64_sources_full_day_count"))
+                                "sourceIds", DialogueService.TextListFromJson(ReadString(r, "source_ids_json", "[]")), "sourceCoverage", "latest_64_sources_full_day_count"))
                             .OrderByDescending(r => ReadDouble(r, "score", 0)).ThenBy(r => ReadString(r, "heroId", ""), StringComparer.Ordinal).ToList();
                         double score = PlayerApproachPolicy.NeglectScore(rivals.Select(r => ReadInt(r, "days", 0)), jealousy, patience);
                         int level = PlayerApproachPolicy.NeglectLevel(score), interval = PlayerApproachPolicy.SharedDayInterval(jealousy, patience);

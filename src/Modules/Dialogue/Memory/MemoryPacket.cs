@@ -19,11 +19,11 @@ using Reign.Core.Contracts.Court;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         internal static Dictionary<string, object> BuildNpcMemoryPacket(string campaignId, string npcId, string playerId, string locationId, string topic, int tokenBudget, Dictionary<string, object> npcContext = null, Dictionary<string, object> settingsOverride = null)
         {
-            ReignTraceScope retrievalTrace = BeginReignSpan("memory.retrieve", new Dictionary<string, object>
+            Program.ReignTraceScope retrievalTrace = Program.BeginReignSpan("memory.retrieve", new Dictionary<string, object>
             { ["campaignId"] = campaignId, ["npcId"] = npcId, ["playerId"] = playerId, ["tokenBudget"] = tokenBudget });
             Stopwatch timer = Stopwatch.StartNew();
             Stopwatch phaseTimer = Stopwatch.StartNew();
@@ -42,7 +42,7 @@ namespace ReignBetaServer
             var recallAudit = TestDict();
             List<string> warnings = new List<string>();
             List<string> sourceEventIds = new List<string>();
-            Dictionary<string, object> settings = settingsOverride ?? LoadSettings();
+            Dictionary<string, object> settings = settingsOverride ?? Program.LoadSettings();
             Dictionary<string, object> routeContext = npcContext == null
                 ? new Dictionary<string, object>()
                 : new Dictionary<string, object>(npcContext, StringComparer.OrdinalIgnoreCase);
@@ -275,7 +275,7 @@ namespace ReignBetaServer
             string currentPlayerName = ReadFirstString(routeContext, "mainHeroName", "playerName");
             string currentPlayerId = ReadFirstString(routeContext, "mainHeroStringId", "playerHeroStringId", "playerId");
             List<string> interactionNpcNames = DialogueService.MergedInteractionParticipantProfiles(routeContext)
-                .Where(profile => !CharacterIdFrom(profile).Equals(currentPlayerId, StringComparison.OrdinalIgnoreCase)
+                .Where(profile => !Program.CharacterIdFrom(profile).Equals(currentPlayerId, StringComparison.OrdinalIgnoreCase)
                     && !ReadString(profile, "role", "npc").Equals("player", StringComparison.OrdinalIgnoreCase))
                 .Select(profile => ReadString(profile, "name", ""))
                 .Concat(new[] { currentNpcName })
@@ -975,7 +975,7 @@ namespace ReignBetaServer
 
         internal static bool UnknownIdentityContainsPrivateStatus(string text)
         {
-            string normalized = NormalizeLookup(text ?? "");
+            string normalized = Program.NormalizeLookup(text ?? "");
             if (string.IsNullOrWhiteSpace(normalized))
             {
                 return false;

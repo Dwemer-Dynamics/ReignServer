@@ -115,7 +115,7 @@ namespace ReignBetaServer
                 && final.Contains("neutral score does not erase acquaintance") && final.Contains("Preserve uncertainty and audience privacy"));
             Check("old_minimal_prompt_and_tiny_output_budget_retired", !final.Contains("under 240 characters")
                 && !final.Contains("activity already occupying you"));
-            var request = Program.BuildConversationGenerationRequest(TestDict("maxTokens", 900), approachEnvelope, campaign, "arrival_fixture", encounter.HeroId, "", false);
+            var request = DialogueService.BuildConversationGenerationRequest(TestDict("maxTokens", 900), approachEnvelope, campaign, "arrival_fixture", encounter.HeroId, "", false);
             ConfigureNpcApproachGeneration(request, p);
             Check("normal_schema_budget_and_repair_policy_remain", ReadInt(request, "maxTokens", 0) >= 8000
                 && ReadString(request, "requestType", "") == "npc_approach"

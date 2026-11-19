@@ -192,7 +192,7 @@ namespace ReignBetaServer
                     Check("answer_link_supports_information_requests", ConversationContinuityLinkError(connection, requestLink, "npc", "question_timeline", 5d) == "");
                     var requestRow = DialogueSelfTestStore.SelectConversationTurns17(connection).Single();
                     Check("retrieval_keeps_information_request_with_next_answer", ExpandPrecisionQuestionContext(connection,
-                        new[] { requestRow }.ToList(), Program.BuildKnowledgeAccessContext("npc", "player", "", requestPayload))
+                        new[] { requestRow }.ToList(), DialogueService.BuildKnowledgeAccessContext("npc", "player", "", requestPayload))
                         .Any(row => ReadString(row, "turn_id", "") == "information_answer"));
                     var requestFrames = GroupSpokenQuestionFrames("*He sits back.*\n\n" + conditionalRequest, "request_source", "npc", "same_beat", new List<string> { "npc", "player" });
                     Check("group_conditional_request_retains_original_words", requestFrames.Count == 1 && ReadString(requestFrames[0], "quote", "") == conditionalRequest
@@ -254,7 +254,7 @@ namespace ReignBetaServer
                         && nominalPrompt.Contains("linked answer state=answered"), nominalAnswered);
                     var nominalRow = DialogueSelfTestStore.SelectConversationTurns18(connection).Single();
                     Check("nominal_retrieval_keeps_adjacent_answer", ExpandPrecisionQuestionContext(connection,
-                        new[] { nominalRow }.ToList(), Program.BuildKnowledgeAccessContext("npc", "player", "", nominalPayload))
+                        new[] { nominalRow }.ToList(), DialogueService.BuildKnowledgeAccessContext("npc", "player", "", nominalPayload))
                         .Any(row => ReadString(row, "turn_id", "") == "nominal_answer"));
 
                     DialogueSelfTestStore.UpdateConversationTurns14(connection);

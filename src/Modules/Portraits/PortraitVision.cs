@@ -60,7 +60,7 @@ namespace ReignBetaServer
                     ["models"] = GetNanoPortraitVisionModels().Select(x => new Dictionary<string, object> {
                         ["id"] = ReadString(x, "id", ""), ["displayName"] = ReadString(x, "name", ReadString(x, "id", "")),
                         ["structuredOutput"] = ReadBool(ReadDictionary(x, "capabilities"), "structured_output", false) }).ToArray() }; }
-                catch (Exception ex) { return TestDict("ok", false, "provider", provider, "error", "NanoGPT subscription vision catalog unavailable: " + Program.LimitText(ex.Message, 400)); }
+                catch (Exception ex) { return TestDict("ok", false, "provider", provider, "error", "NanoGPT subscription vision catalog unavailable: " + DialogueService.LimitText(ex.Message, 400)); }
             }
             if (provider != "Codex") return TestDict("ok", false, "error", "Unknown portrait vision provider.");
             lock (Program.CodexStateLock) return new Dictionary<string, object> { ["ok"] = true, ["provider"] = "Codex",
@@ -162,7 +162,7 @@ namespace ReignBetaServer
                 if (stopped)
                 {
                     try { if (job.Length > 0) DeleteCodexImageJob(job); }
-                    catch (Exception ex) { Program.LogOperational("portrait.vision_cleanup_failed", new Dictionary<string, object> { ["error"] = Program.LimitText(ex.Message, 300) }); }
+                    catch (Exception ex) { Program.LogOperational("portrait.vision_cleanup_failed", new Dictionary<string, object> { ["error"] = DialogueService.LimitText(ex.Message, 300) }); }
                     CodexImageGate.Release();
                 }
                 else Program.LogOperational("portrait.vision_stop_failed", new Dictionary<string, object> { ["error"] = "The owned helper could not stop; the portrait queue remains closed until a managed restart." });

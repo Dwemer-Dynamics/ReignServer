@@ -79,7 +79,7 @@ namespace ReignBetaServer
                     || Regex.IsMatch(grant ?? "", @"(?i)\b(if|unless|might|would|could|not|won't|cannot)\b"))
                     errors.Add("Duty release requires an explicit present release by the authorized commander.");
                 terms["releaseConfirmed"] = errors.Count == 0;
-                terms["verifiedConsentQuote"] = Program.LimitText(grant, 1200);
+                terms["verifiedConsentQuote"] = DialogueService.LimitText(grant, 1200);
                 return;
             }
             if (recruit && !resident) errors.Add("Permanent resident recruitment requires encountered-resident metadata.");
@@ -92,7 +92,7 @@ namespace ReignBetaServer
             }
             if (!ResidentHasUnconditionalConsent(reply)) errors.Add("The current visible reply does not unconditionally agree to join.");
             terms["consentConfirmed"] = errors.Count == 0;
-            terms["verifiedConsentQuote"] = Program.LimitText(reply, 1200);
+            terms["verifiedConsentQuote"] = DialogueService.LimitText(reply, 1200);
             if (recruit && ReadString(terms, "agreementKind", "") != "permanent")
                 errors.Add("Permanent companion recruitment must explicitly identify agreementKind=permanent.");
             if (recruit || terms.ContainsKey("agreedGold"))

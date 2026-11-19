@@ -96,10 +96,10 @@ namespace ReignBetaServer
                     && ContextualIntroductionSpokenText(ReadFirstString(row, "text", "content", "message")) == spoken))
                 .TakeLast(4).Select(row => new Dictionary<string, object>
                 {
-                    ["role"] = Program.LimitText(ReadString(row, "role", ""), 32),
+                    ["role"] = DialogueService.LimitText(ReadString(row, "role", ""), 32),
                     ["isCurrentObserver"] = ReadFirstString(row, "speakerHeroStringId", "heroStringId", "npcId")
                         .Equals(ReadString(encounter, "observerHeroStringId", ""), StringComparison.OrdinalIgnoreCase),
-                    ["text"] = Program.LimitText(ReadFirstString(row, "text", "content", "message"), 1000)
+                    ["text"] = DialogueService.LimitText(ReadFirstString(row, "text", "content", "message"), 1000)
                 }).ToList();
             var request = new Dictionary<string, object>
             {

@@ -36,11 +36,11 @@ namespace ReignBetaServer
                 }
                 var existing = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"));
                 if (ReadBool(existing, "residentFirstContactComplete", false)
-                    && Program.IsCharacterConstructionReady(existing)
-                    && Program.TraitDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"))))
+                    && CharactersService.IsCharacterConstructionReady(existing)
+                    && CharactersService.TraitDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"))))
                 { existing["alreadyReady"] = true; return existing; }
-                var result = Program.ConstructCharacterFiles(campaignId, heroId, hero, true, true, source + "_encountered_resident");
-                if (!Program.IsCharacterConstructionReady(result) || !ReadBool(result, "llmUsed", false))
+                var result = CharactersService.ConstructCharacterFiles(campaignId, heroId, hero, true, true, source + "_encountered_resident");
+                if (!CharactersService.IsCharacterConstructionReady(result) || !ReadBool(result, "llmUsed", false))
                 {
                     result["ok"] = false;
                     result["residentFirstContactComplete"] = false;

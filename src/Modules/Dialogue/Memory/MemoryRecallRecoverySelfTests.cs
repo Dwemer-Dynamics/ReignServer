@@ -369,7 +369,7 @@ namespace ReignBetaServer
                 var lines = recentLines.Select(Program.CloneDictionary).ToList();
                 if (route == "letter") foreach (var line in lines) { line["channel"] = "correspondence"; line["direction"] = "exchanged"; }
                 string Transcript(List<Dictionary<string, object>> rows) => FormatContinuityTranscript(rows, route == "event"
-                    ? group => CharactersService.FormatEventLinesForObserver(group, recentPayload, "npc", knownPlayer) : Program.FormatDialogueForPrompt);
+                    ? group => CharactersService.FormatEventLinesForObserver(group, recentPayload, "npc", knownPlayer) : DialogueService.FormatDialogueForPrompt);
                 string transcript = Transcript(lines);
                 var context = Program.CloneDictionary(recentPayload); BindRecent(context, transcript, lines);
                 Check("recent_only_source_conflict_" + route, ContextConflict(context));
@@ -462,7 +462,7 @@ namespace ReignBetaServer
                                     "text", order == 0 ? "I left the bronze bell at the " + session + " gate." : "I saw the bell beside the " + session + " gate."));
                         }
                     }
-                    var observer = new Program.KnowledgeAccessContext { NpcId = "npc", WorldDay = 2, TimelineId = "order_main" };
+                    var observer = new DialogueService.KnowledgeAccessContext { NpcId = "npc", WorldDay = 2, TimelineId = "order_main" };
                     Dictionary<string, object> Read(int limit, string excluded = "") =>
                         LoadMostRecentClosedConversation(connection, "npc", excluded, 24000, limit, observer);
                     var bounded = Read(2);
@@ -501,7 +501,7 @@ namespace ReignBetaServer
             if (string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)) throw new InvalidOperationException("Recall recovery requires isolated Verification Lab storage.");
             var results = new List<Dictionary<string, object>>();
             void Check(string name, bool passed, object data = null) => results.Add(TestDict("caseId", "memory_recall_" + name, "passed", passed,
-                "summary", name + (passed || data == null ? "" : ": " + Program.LimitText(Json.Serialize(data), 2200)), "data", data));
+                "summary", name + (passed || data == null ? "" : ": " + DialogueService.LimitText(Json.Serialize(data), 2200)), "data", data));
             RunMemoryRecallGroundingAssertions(Check);
             RunMemoryRecallOrderingAssertions(Check);
             string campaign = "memory_recall_" + Guid.NewGuid().ToString("N");
@@ -619,11 +619,11 @@ namespace ReignBetaServer
                     string bad = UpsertTemporalAssertion(connection, campaign, "failed_0_n", "comprehension_fixture", "comprehension", item, 80);
                     // Simulate a pre-fix stored assertion; do not use the guarded writer to seed corruption.
                     DialogueSelfTestStore.UpdateTemporalKnowledgeAssertions(connection, TestDict("id", bad, "claim", absence));
-                    var access = Program.BuildKnowledgeAccessContext("npc", "player", "", context);
+                    var access = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", context);
                     var projectedPlayer = DialogueSelfTestStore.SelectConversationTurns65(connection).Single();
                     Check("interpreted_player_mid_clause_survives_eligible_recall", PrecisionTurnVisible(projectedPlayer, "npc", access, connection)
                         && RenderExactHistoryTurn(projectedPlayer, access).Contains(interpretedSpan));
-                    Check("interpreted_player_keeps_automatic_public_topic", Program.TextListFromJson(ReadString(DialogueSelfTestStore.SelectMemorySpecialistSources(connection).Single(), "public_topics_json", "[]")).Contains("botany"));
+                    Check("interpreted_player_keeps_automatic_public_topic", DialogueService.TextListFromJson(ReadString(DialogueSelfTestStore.SelectMemorySpecialistSources(connection).Single(), "public_topics_json", "[]")).Contains("botany"));
                     Check("interpreted_player_keeps_late_interaction_public_view", ReadString(LateInteractionView(projectedPlayer, "public"), "text", "").Contains(interpretedSpan));
                     Check("interpreted_player_keeps_commitment_source_words", CommitmentVisibleSourceText(projectedPlayer, access).Contains(interpretedSpan));
                     var sourceOnly = DialogueSelfTestStore.SelectConversationTurns66(connection).Single();
@@ -635,7 +635,7 @@ namespace ReignBetaServer
                     ReconcileMemorySpecialistIndex(campaign);
                     var rebuiltProjection = DialogueSelfTestStore.SelectMemorySpecialistSources2(connection).Single();
                     Check("old_projection_index_automatically_rebuilds_unchanged_original", ReadString(rebuiltProjection, "schema_version", "") == MemorySpecialistIndexSchema
-                        && Program.TextListFromJson(ReadString(rebuiltProjection, "public_topics_json", "[]")).Contains("botany")
+                        && DialogueService.TextListFromJson(ReadString(rebuiltProjection, "public_topics_json", "[]")).Contains("botany")
                         && MemorySpecialistSourceHash(DialogueSelfTestStore.SelectConversationTurns65(connection).Single()) == projectionOriginalHash);
                     Check("legacy_player_row_keeps_complete_narration_without_interpretation_binding", RenderExactHistoryTurn(new(projectedPlayer) {
                         ["payload_json"] = Json.Serialize(TestDict("playerNarrationProjectionVersion", 2)) }, access).Contains("balance the bronze bell"));
@@ -659,7 +659,7 @@ namespace ReignBetaServer
                     Check("overlapping_anchor_adds_missing_partner_without_duplicate", covered.Contains("gait") && !covered.Contains("gait_question")
                         && ReadString(completedPair, "text", "").Contains("Show me how your mare moves.")
                         && !ReadString(completedPair, "text", "").Contains(longGait));
-                    var earlier = Program.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["memoryAsOfTimestamp"] = 9L });
+                    var earlier = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["memoryAsOfTimestamp"] = 9L });
                     Check("preceding_context_cannot_cross_time_boundary", ExpandMemoryRecallPrecedingTurn(connection, new() { callback }, earlier).Count == 1);
                     Session("context_gate", 96);
                     Turn("context_visible", "context_gate", 0, "context_old", "npc", "An older visible observation.", 44, 90);
@@ -694,9 +694,9 @@ namespace ReignBetaServer
                         && NormalizeSafeConversationStateUpdates(TestDict("currentCrisis", lossClaim), new(), context, "npc", campaign).Count == 1
                         && FilterRoleplayFeedbackWrites(new() { TestDict("text", lossClaim) }, "memory", new(), context, "npc", campaign).Count == 1);
                     Check("different_cause_cannot_inherit_loss_exception", !HasStoredRecallLossSupport(connection, access, "I have memory loss after the fever."));
-                    var beforeLoss = Program.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["worldDay"] = 42d });
+                    var beforeLoss = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["worldDay"] = 42d });
                     Check("future_loss_event_is_not_support", !HasStoredRecallLossSupport(connection, beforeLoss, lossClaim));
-                    var otherObserver = Program.BuildKnowledgeAccessContext("other", "player", "", context);
+                    var otherObserver = DialogueService.BuildKnowledgeAccessContext("other", "player", "", context);
                     Check("unheard_loss_event_is_not_support", !HasStoredRecallLossSupport(connection, otherObserver, lossClaim));
                     foreach (string unsupported in new[] { "Korin lost his memories after a blow to his head.",
                         "Did you lose your memories after a blow to your head?", "You have not lost your memories after a blow to your head." })
@@ -714,7 +714,7 @@ namespace ReignBetaServer
                     var current = LoadTemporalKnowledgeForPrompt(connection, campaign, access, new() { "stable" }, 20);
                     Check("latest_revision_only_for_same_fact", current.Any(r => ReadString(r, "assertion_id", "") == after)
                         && current.All(r => ReadString(r, "assertion_id", "") != before));
-                    var historical = Program.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["worldDay"] = 20d });
+                    var historical = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["worldDay"] = 20d });
                     Check("historical_revision_before_correction", LoadTemporalKnowledgeForPrompt(connection, campaign, historical, new() { "stable" }, 20)
                         .Any(r => ReadString(r, "assertion_id", "") == before));
                 }
@@ -734,7 +734,7 @@ namespace ReignBetaServer
                 {
                     settings["memoryPrecisionMode"] = mode;
                     var callContext = new Dictionary<string, object>(context) { ["memoryQueryText"] = query.Text };
-                    var packet = Program.BuildNpcMemoryPacket(campaign, "npc", "player", "", query.Text + "\n" + string.Concat(Enumerable.Repeat(scene, 40)), 2500, callContext, settings);
+                    var packet = DialogueService.BuildNpcMemoryPacket(campaign, "npc", "player", "", query.Text + "\n" + string.Concat(Enumerable.Repeat(scene, 40)), 2500, callContext, settings);
                     string memory = ReadString(packet, "memoryPacket", "");
                     Check("originals_selected_" + mode + "_" + query.Id, query.Required.All(memory.Contains), TestDict("horse", memory.Contains(horse), "frog", memory.Contains(frog),
                             "reaction", memory.Contains(reaction), "reunion", memory.Contains(reunion), "acceptance", memory.Contains(acceptance),
@@ -780,7 +780,7 @@ namespace ReignBetaServer
                 results.AddRange(RunTemporalRecallRevisionAssertions());
                 results.AddRange(RunMemoryRecallGrowthAssertions());
             }
-            catch (Exception ex) { Check("suite_exception", false, ex.ToString()); results.Last()["summary"] = Program.LimitText(ex.ToString(), 2200); }
+            catch (Exception ex) { Check("suite_exception", false, ex.ToString()); results.Last()["summary"] = DialogueService.LimitText(ex.ToString(), 2200); }
             finally
             {
                 ReignPostgreSqlStorage.DropCampaign(campaign);
@@ -844,7 +844,7 @@ namespace ReignBetaServer
                         {
                             settings["memoryPrecisionMode"] = mode;
                             var callContext = new Dictionary<string, object>(context) { ["memoryQueryText"] = item.Query };
-                            var packet = Program.BuildNpcMemoryPacket(campaign, "npc", "player", "", item.Query, 2500, callContext, settings);
+                            var packet = DialogueService.BuildNpcMemoryPacket(campaign, "npc", "player", "", item.Query, 2500, callContext, settings);
                             string memory = ReadString(packet, "memoryPacket", "");
                             var payload = PromptParityPayload("in_person", false); foreach (var pair in callContext) payload[pair.Key] = pair.Value;
                             payload["playerText"] = item.Query; payload["memoryPrecisionEvidence"] = ReadDictionary(packet, "precisionEvidence");
@@ -871,7 +871,7 @@ namespace ReignBetaServer
                     results.Add(TestDict("caseId", "memory_recall_growth_original_hash_unchanged", "passed", oldHash == MemorySourceHash(DialogueSelfTestStore.SelectConversationTurns74(connection)), "summary", "History growth and recall do not rewrite originals."));
                 }
             }
-            catch (Exception ex) { results.Add(TestDict("caseId", "memory_recall_growth_exception", "passed", false, "summary", Program.LimitText(ex.ToString(), 2200))); }
+            catch (Exception ex) { results.Add(TestDict("caseId", "memory_recall_growth_exception", "passed", false, "summary", DialogueService.LimitText(ex.ToString(), 2200))); }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); PersistenceService.TryDeleteDirectory(PersistenceService.StrictCampaignDirectory(campaign)); }
             return results;
         }
@@ -908,8 +908,8 @@ namespace ReignBetaServer
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     BindRecoveredMemorySources(connection, "parent", "child", 8, "saved_head");
-                    var access = Program.BuildKnowledgeAccessContext("npc", "player", "", context);
-                    List<Dictionary<string, object>> Read(string query, Program.KnowledgeAccessContext boundary = null) =>
+                    var access = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", context);
+                    List<Dictionary<string, object>> Read(string query, DialogueService.KnowledgeAccessContext boundary = null) =>
                         LoadTemporalKnowledgeForPrompt(connection, campaign, boundary ?? access, new() { query }, 20);
                     Check("verified_parent_fact_recalled", Read("stable").Any(r => ReadString(r, "assertion_id", "") == originalId));
                     var originalRow = DialogueSelfTestStore.SelectTemporalKnowledgeAssertions2(connection, TestDict("id", originalId)).Single();
@@ -919,9 +919,9 @@ namespace ReignBetaServer
                     Check("child_correction_replaces_restored_parent", Read("stable").Count == 1 && ReadString(Read("stable").Single(), "assertion_id", "") == correction);
                     Check("old_wording_resolves_latest_value", Read("twenty").Count == 1 && ReadString(Read("twenty").Single(), "assertion_id", "") == correction);
                     Check("unrelated_old_episode_survives", Read("tournament").Any(r => ReadString(r, "assertion_id", "") == episodeId));
-                    var pastDay = Program.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["worldDay"] = 20d });
-                    var pastTime = Program.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["memoryAsOfTimestamp"] = 49L });
-                    var pastSequence = Program.BuildKnowledgeAccessContext("npc", "player", "", context); pastSequence.AsOfAcceptedSequence = 2;
+                    var pastDay = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["worldDay"] = 20d });
+                    var pastTime = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", new(context) { ["memoryAsOfTimestamp"] = 49L });
+                    var pastSequence = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", context); pastSequence.AsOfAcceptedSequence = 2;
                     foreach (var boundary in new[] { ("day", pastDay), ("timestamp", pastTime), ("sequence", pastSequence) })
                         Check("asof_" + boundary.Item1 + "_retains_parent", Read("stable", boundary.Item2).Count == 1
                             && ReadString(Read("stable", boundary.Item2).Single(), "assertion_id", "") == originalId);
@@ -943,7 +943,7 @@ namespace ReignBetaServer
                     Check("parent_snapshot_row_unchanged", originalHash == MemorySourceHash(DialogueSelfTestStore.SelectTemporalKnowledgeAssertions2(connection, TestDict("id", originalId))));
                 }
             }
-            catch (Exception ex) { results.Add(TestDict("caseId", "memory_recall_revision_exception", "passed", false, "summary", Program.LimitText(ex.ToString(), 2200))); }
+            catch (Exception ex) { results.Add(TestDict("caseId", "memory_recall_revision_exception", "passed", false, "summary", DialogueService.LimitText(ex.ToString(), 2200))); }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); PersistenceService.TryDeleteDirectory(PersistenceService.StrictCampaignDirectory(campaign)); }
             return results;
         }

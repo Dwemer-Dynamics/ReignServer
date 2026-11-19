@@ -41,7 +41,7 @@ namespace ReignBetaServer
             Dictionary<string, object> identityView =
                 ReadDictionary(interactionContext ?? new Dictionary<string, object>(), "identityView")
                 ?? new Dictionary<string, object>();
-            string context = precomputedSelectedContext ?? Program.BuildContextPullText(playerText, sceneContext, characteristics, relationships, summary, new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(), selectedContextPulls, contextBundles, eventMode, identityView);
+            string context = precomputedSelectedContext ?? DialogueService.BuildContextPullText(playerText, sceneContext, characteristics, relationships, summary, new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(), selectedContextPulls, contextBundles, eventMode, identityView);
             if (timing != null) timing["selectedContextFormattingMs"] = contextTimer.ElapsedMilliseconds;
             string selectedContext = context;
             contextTimer.Restart();
@@ -51,7 +51,7 @@ namespace ReignBetaServer
             // memory and group-state reads retain their existing sequential
             // behavior. Self-tests can supply an isolated snapshot without
             // opening a campaign connection or mutating campaign state.
-            string memory = precomputedMemoryPacket ?? Program.BuildMemoryPacketForPrompt(
+            string memory = precomputedMemoryPacket ?? DialogueService.BuildMemoryPacketForPrompt(
                 campaignId, heroId, profile, playerText, sceneContext,
                 interactionContext, interactionMode, timing);
             if (timing != null) timing["memoryPacketMs"] = contextTimer.ElapsedMilliseconds;
@@ -131,7 +131,7 @@ namespace ReignBetaServer
                 new CodexContextPreparationTask
                 {
                     Id = "selected_context",
-                    Prepare = () => Program.BuildContextPullText(playerText, sceneContext, characteristics, relationships, summary,
+                    Prepare = () => DialogueService.BuildContextPullText(playerText, sceneContext, characteristics, relationships, summary,
                         new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(), pulls, bundles, false, identity)
                 },
                 new CodexContextPreparationTask
@@ -147,7 +147,7 @@ namespace ReignBetaServer
                 new CodexContextPreparationTask
                 {
                     Id = "canonical_transcript",
-                    Prepare = () => FormatContinuityTranscript(prior, Program.FormatDialogueForPrompt)
+                    Prepare = () => FormatContinuityTranscript(prior, DialogueService.FormatDialogueForPrompt)
                 }
             };
             CodexParallelPreparationResult result = CodexConversationContracts.PrepareInParallel(
@@ -193,7 +193,7 @@ namespace ReignBetaServer
                 new CodexContextPreparationTask
                 {
                     Id = "selected_context",
-                    Prepare = () => Program.BuildContextPullText(playerText, sceneContext, characteristics, relationships, summary,
+                    Prepare = () => DialogueService.BuildContextPullText(playerText, sceneContext, characteristics, relationships, summary,
                         new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(), pulls, bundles, true, identity)
                 },
                 new CodexContextPreparationTask
@@ -425,32 +425,32 @@ namespace ReignBetaServer
             builder.AppendLine("Apply this character's stable identity and disposition. Never expose trait labels in visible dialogue.");
             builder.AppendLine(CharactersService.BuildCommonerPromptBlock(profile));
             builder.AppendLine();
-            Program.AppendPromptLine(builder, "Hero id", heroId);
-            Program.AppendPromptLine(builder, "Name", FirstNonEmpty(ReadString(profile, "name", ""), heroName, heroId));
-            Program.AppendPromptLine(builder, "Role", FirstNonEmpty(ReadString(profile, "occupation", ""), Program.CharacterArchetype(profile)));
+            DialogueService.AppendPromptLine(builder, "Hero id", heroId);
+            DialogueService.AppendPromptLine(builder, "Name", FirstNonEmpty(ReadString(profile, "name", ""), heroName, heroId));
+            DialogueService.AppendPromptLine(builder, "Role", FirstNonEmpty(ReadString(profile, "occupation", ""), CharactersService.CharacterArchetype(profile)));
             if (profile.TryGetValue("isFemale", out object nativeGender) && nativeGender != null
                 && bool.TryParse(Convert.ToString(nativeGender, CultureInfo.InvariantCulture), out bool nativeFemale))
-                Program.AppendPromptLine(builder, "Native gender and pronouns", nativeFemale ? "female; she/her" : "male; he/him");
+                DialogueService.AppendPromptLine(builder, "Native gender and pronouns", nativeFemale ? "female; she/her" : "male; he/him");
             else
-                Program.AppendPromptLine(builder, "Native gender and pronouns", "unknown; they/them");
+                DialogueService.AppendPromptLine(builder, "Native gender and pronouns", "unknown; they/them");
             builder.AppendLine("Use these native pronouns for this character. Titles such as Lord, personality, earlier event descriptions and transcript wording never override native identity; unknown gender stays neutral.");
-            Program.AppendPromptLine(builder, "Culture", FirstNonEmpty(ReadString(profile, "cultureId", ""), ReadString(profile, "cultureName", "")));
+            DialogueService.AppendPromptLine(builder, "Culture", FirstNonEmpty(ReadString(profile, "cultureId", ""), ReadString(profile, "cultureName", "")));
             AppendPromptSection(builder, "CULTURAL SPEECH - THIS SPEAKER", CulturalVoicePrompt(profile));
             builder.AppendLine();
-            Program.AppendPromptLine(builder, "Clan", FirstNonEmpty(ReadString(profile, "clanName", ""), ReadString(profile, "clanId", "")));
-            Program.AppendPromptLine(builder, "Kingdom", FirstNonEmpty(ReadString(profile, "kingdomName", ""), ReadString(profile, "kingdomId", "")));
+            DialogueService.AppendPromptLine(builder, "Clan", FirstNonEmpty(ReadString(profile, "clanName", ""), ReadString(profile, "clanId", "")));
+            DialogueService.AppendPromptLine(builder, "Kingdom", FirstNonEmpty(ReadString(profile, "kingdomName", ""), ReadString(profile, "kingdomId", "")));
 
             Dictionary<string, object> traits = ReadDictionary(characteristics, "traits") ?? new Dictionary<string, object>();
             Dictionary<string, object> foundations = ReadDictionary(traits, "foundationTraits") ?? ReadDictionary(traits, "hiddenReignTraits") ?? new Dictionary<string, object>();
             string personality = ReadString(traits, "basePersonalitySummary", "");
             if (string.IsNullOrWhiteSpace(personality)) personality = CharactersService.BuildRuleBasedPersonalitySummary(FirstNonEmpty(heroName, heroId), foundations);
             AppendPromptSection(builder, "BASE PERSONALITY", personality);
-            AppendPromptSection(builder, "BACKGROUND", Program.FormatNamedObjectForPrompt(ReadDictionary(characteristics, "background") ?? new Dictionary<string, object>(), new[] { "summary", "encyclopediaText", "origin", "upbringing", "formativeEvents" }));
+            AppendPromptSection(builder, "BACKGROUND", DialogueService.FormatNamedObjectForPrompt(ReadDictionary(characteristics, "background") ?? new Dictionary<string, object>(), new[] { "summary", "encyclopediaText", "origin", "upbringing", "formativeEvents" }));
             AppendPromptSection(builder, "PUBLIC REPUTATION", CharacterFoundationReputation(characteristics));
             AppendPromptSection(builder, "CENTRAL WOUNDS — PRIVATE CHARACTER KNOWLEDGE, NOT AUTOMATIC DISCLOSURE", CharacterFoundationWounds(characteristics));
-            AppendPromptSection(builder, "VOICE AND SOCIAL MASK", Program.FormatNamedObjectForPrompt(ReadDictionary(characteristics, "voice") ?? new Dictionary<string, object>(), new[] { "speechStyle", "socialMask", "tells" }));
+            AppendPromptSection(builder, "VOICE AND SOCIAL MASK", DialogueService.FormatNamedObjectForPrompt(ReadDictionary(characteristics, "voice") ?? new Dictionary<string, object>(), new[] { "speechStyle", "socialMask", "tells" }));
             if (!CharactersService.NarrativeDocumentReady(ReadDictionary(characteristics, "narrative")))
-                AppendPromptSection(builder, "CORE MOTIVATIONS", Program.FormatNamedObjectForPrompt(ReadDictionary(characteristics, "motivations") ?? new Dictionary<string, object>(), new[] { "dreams", "fears", "desires", "linesTheyWillNotCross" }));
+                AppendPromptSection(builder, "CORE MOTIVATIONS", DialogueService.FormatNamedObjectForPrompt(ReadDictionary(characteristics, "motivations") ?? new Dictionary<string, object>(), new[] { "dreams", "fears", "desires", "linesTheyWillNotCross" }));
             AppendPromptSection(builder, "CORE PRACTICED CAPABILITIES", CharactersService.BuildCoreSkillAwarenessPrompt(profile, characteristics));
             AppendPromptSection(builder, "PRIVATE NUMERIC MOTIVE EVIDENCE", BuildStableMotiveVector(characteristics));
             builder.AppendLine(CharactersService.RequiredPoliticalPrompt(heroId, profile, characteristics));
@@ -487,12 +487,12 @@ namespace ReignBetaServer
             StringBuilder builder = new StringBuilder();
             builder.AppendLine("CURRENT CHARACTER STATE - LIVE DATA FOR THIS TURN");
             AppendPromptSection(builder, "PREGNANCY AND KNOWN FAMILY SECRETS", RelationshipsService.BuildPregnancyPrompt(profile));
-            Program.AppendPromptLine(builder, "Current place", FirstNonEmpty(ReadString(profile, "currentSettlementName", ""), ReadString(profile, "currentSettlementId", ""), ReadString(state, "lastKnownSettlementId", "")));
-            Program.AppendPromptLine(builder, "Status", Program.CharacterStatusText(profile));
-            Program.AppendPromptLine(builder, "Player relation", Program.RelationshipDescriptor(ReadInt(profile, "relationToPlayer", 0)));
-            AppendPromptSection(builder, "VISIBLE APPEARANCE AND STATUS", Program.FormatNamedObjectForPrompt(ReadDictionary(characteristics, "appearance") ?? new Dictionary<string, object>(), new[] { "firstView", "visibleStatusLabel", "trueStatusLabel", "presentationEffect", "statusMismatch", "civilianEquipmentValue" }));
-            AppendPromptSection(builder, "WEALTH AND CLAN BACKING", Program.FormatNamedObjectForPrompt(PromptWealthFacts(ReadDictionary(characteristics, "wealth")), PromptWealthKeys));
-            AppendPromptSection(builder, "MOOD, PLAN, AND CRISIS", Program.FormatNamedObjectForPrompt(state, new[] { "mood", "currentPlan", "currentCrisis", "lastKnownSettlementId" }));
+            DialogueService.AppendPromptLine(builder, "Current place", FirstNonEmpty(ReadString(profile, "currentSettlementName", ""), ReadString(profile, "currentSettlementId", ""), ReadString(state, "lastKnownSettlementId", "")));
+            DialogueService.AppendPromptLine(builder, "Status", DialogueService.CharacterStatusText(profile));
+            DialogueService.AppendPromptLine(builder, "Player relation", DialogueService.RelationshipDescriptor(ReadInt(profile, "relationToPlayer", 0)));
+            AppendPromptSection(builder, "VISIBLE APPEARANCE AND STATUS", DialogueService.FormatNamedObjectForPrompt(ReadDictionary(characteristics, "appearance") ?? new Dictionary<string, object>(), new[] { "firstView", "visibleStatusLabel", "trueStatusLabel", "presentationEffect", "statusMismatch", "civilianEquipmentValue" }));
+            AppendPromptSection(builder, "WEALTH AND CLAN BACKING", DialogueService.FormatNamedObjectForPrompt(PromptWealthFacts(ReadDictionary(characteristics, "wealth")), PromptWealthKeys));
+            AppendPromptSection(builder, "MOOD, PLAN, AND CRISIS", DialogueService.FormatNamedObjectForPrompt(state, new[] { "mood", "currentPlan", "currentCrisis", "lastKnownSettlementId" }));
             if (!string.IsNullOrWhiteSpace(ReadString(state, "currentPlan", "")))
                 builder.AppendLine("The stored plan is an intention from prior dialogue, not proof that preparation is still pending. Reconcile it with RECENT SHARED ACTIVITIES AND RESOLVED PLANS and newer accepted intent; completed occurrences stay completed and unrelated concerns remain open.");
             AppendPromptSection(builder, "TRAITS MOST RELEVANT TO THIS TURN", CharactersService.BuildRelevantTraitEmphasis(characteristics, playerText, sceneContext));
@@ -581,7 +581,7 @@ namespace ReignBetaServer
                 ["receivedLetter"] = receivedLetter ?? "",
                 ["characterFoundation"] = character
             };
-            string live = Program.ApplyTemplate(Program.LoadPromptTemplate("correspondence_live_turn_template.txt"), values) + "\n\n" + ReadString(motiveDecision, "prompt", "");
+            string live = DialogueService.ApplyTemplate(Program.LoadPromptTemplate("correspondence_live_turn_template.txt"), values) + "\n\n" + ReadString(motiveDecision, "prompt", "");
             live = RelationshipsService.BuildCurrentPregnancyPrompt(campaignId, ContinuityTimeline(continuityContext), senderId, worldDay, profile) + "\n\n" + live;
             if (UsesStructuredActions(continuityContext)) live = StructuredActionTurnPrompt(continuityContext) + "\n" + live;
             if (!string.IsNullOrWhiteSpace(relevantDynamicCharacteristics))
@@ -641,7 +641,7 @@ namespace ReignBetaServer
                 candidates += "\n\nCURRENT SPEAKER'S SAVED GUEST AGREEMENT\n" + guest;
             if (values.TryGetValue("characterMbti", out string mbti) && !string.IsNullOrWhiteSpace(mbti))
                 candidates += "\n\nDECIDING CHARACTER\n" + mbti;
-            string live = Program.ApplyTemplate(Program.LoadPromptTemplate("action_planner_live_turn_template.txt"), values);
+            string live = DialogueService.ApplyTemplate(Program.LoadPromptTemplate("action_planner_live_turn_template.txt"), values);
             var composition = new Dictionary<string, object>();
             var envelope = CreatePromptEnvelope("action_planner", "candidate-set", global.Render(composition), candidates, live);
             envelope.Diagnostics["composition"] = composition;

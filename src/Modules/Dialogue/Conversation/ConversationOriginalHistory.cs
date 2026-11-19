@@ -18,7 +18,7 @@ namespace ReignBetaServer
             var rows = DialogueStore.SelectConversationTurns26(connection, TestDict("player", player, "session", session, "npc", npc, "limit", Math.Max(1000, Math.Min(10000, limit * 8))));
             bool official = ReadString(payload, "conversationMode", "") == "ambassador_official";
             string posting = ReadString(payload, "postingId", "");
-            var historyAccess = new Program.KnowledgeAccessContext { NpcId = player, TimelineId = timeline,
+            var historyAccess = new DialogueService.KnowledgeAccessContext { NpcId = player, TimelineId = timeline,
                 WorldDay = ReadDouble(payload, "worldDay", double.MaxValue), AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue };
             rows = rows.Where(row => {
                 var meta = TryParseJsonObject(ReadString(row, "payload_json", "{}"));

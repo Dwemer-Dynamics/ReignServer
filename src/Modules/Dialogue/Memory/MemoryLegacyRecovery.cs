@@ -177,7 +177,7 @@ namespace ReignBetaServer
             || BroadRecallLossNarrative(value).Length > 0;
 
         private static bool IsUnsupportedRecallAbsenceDerived(Dictionary<string, object> row,
-            ReignDbConnection connection = null, Program.KnowledgeAccessContext knowledge = null) => row != null
+            ReignDbConnection connection = null, DialogueService.KnowledgeAccessContext knowledge = null) => row != null
             && (row.ContainsKey("memory_id") || row.ContainsKey("belief_id") || row.ContainsKey("comprehension_id")
                 || row.ContainsKey("assertion_id") && IsPrivateMentalLayer(ReadString(row, "assertion_kind", "")))
             && IsUnsupportedRecallAbsenceState(ReadFirstString(row, "claim", "text", "summary"))
@@ -185,7 +185,7 @@ namespace ReignBetaServer
 
         // A derived statement cannot establish its own exception. Read only
         // canonical player sources, with the normal observer and time gates.
-        private static bool HasStoredRecallLossSupport(ReignDbConnection connection, Program.KnowledgeAccessContext knowledge, string claim)
+        private static bool HasStoredRecallLossSupport(ReignDbConnection connection, DialogueService.KnowledgeAccessContext knowledge, string claim)
         {
             string cause = RecallLossCause(claim);
             if (connection == null || knowledge == null || cause.Length == 0) return false;
@@ -197,7 +197,7 @@ namespace ReignBetaServer
                 var name = DialogueStore.SelectConversationTurns67(connection, TestDict("session", ReadString(source, "session_id", ""), "observer", knowledge.NpcId,
                     "day", knowledge.WorldDay, "sequence", knowledge.AsOfAcceptedSequence, "timestamp", knowledge.AsOfTimestamp)).FirstOrDefault();
                 string rendered = "Source session metadata: participants="
-                    + string.Join(", ", Program.TextListFromJson(ReadString(source, "participants_json", "[]"))) + ";\n"
+                    + string.Join(", ", DialogueService.TextListFromJson(ReadString(source, "participants_json", "[]"))) + ";\n"
                     + RenderExactHistoryTurn(source, knowledge);
                 if (HasIndependentRecallLossEvent(rendered, knowledge.NpcId, ReadString(name, "speaker_name", ""), claim)) return true;
             }
@@ -208,7 +208,7 @@ namespace ReignBetaServer
         {
             if (RecallLossCause(claim).Length == 0 || payload == null || string.IsNullOrWhiteSpace(observer)
                 || string.IsNullOrWhiteSpace(campaign)) return false;
-            var access = Program.BuildKnowledgeAccessContext(observer, ReadFirstString(payload, "playerHeroStringId", "playerId"), "", payload);
+            var access = DialogueService.BuildKnowledgeAccessContext(observer, ReadFirstString(payload, "playerHeroStringId", "playerId"), "", payload);
             using var connection = ReignDatabase.OpenCampaignConnection(campaign);
             return HasStoredRecallLossSupport(connection, access, claim);
         }

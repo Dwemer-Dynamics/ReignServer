@@ -411,7 +411,7 @@ namespace ReignBetaServer
             return issues;
         }
 
-        private static Dictionary<string, object> WithDiagnosticTransformation(string title, Dictionary<string, object> input, Func<Dictionary<string, object>> action)
+        internal static Dictionary<string, object> WithDiagnosticTransformation(string title, Dictionary<string, object> input, Func<Dictionary<string, object>> action)
         {
             using var step = new ConversationDiagnosticStep(DiagnosticTrace.Value, "validation", title, new Dictionary<string, object> { ["received"] = ReadString(input, "content", "") });
             string before = ReadString(input, "content", "");

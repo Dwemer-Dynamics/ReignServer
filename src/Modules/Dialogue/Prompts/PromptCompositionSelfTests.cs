@@ -161,7 +161,7 @@ namespace ReignBetaServer
                             ["role"] = "npc", ["speaker"] = "Fixture Speaker", ["speakerHeroStringId"] = id, ["text"] = "NPC_HISTORY_SENTINEL" }
                     };
                     // The duplicated feed repeats durable statements; the shared beat is not a statement ID.
-                    var rows = Program.CanonicalizePromptTranscript(transcriptFixture.Concat(transcriptFixture), 30);
+                    var rows = DialogueService.CanonicalizePromptTranscript(transcriptFixture.Concat(transcriptFixture), 30);
                     snapshot["priorLines"] = rows;
                     var messages = Program.BuildTestMessages(empty, payload, snapshot,
                         new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
@@ -208,10 +208,10 @@ namespace ReignBetaServer
                 ["partyInventoryValue"] = 0, ["visibleWealthTier"] = "destitute", ["personalWealthTier"] = "wealthy", ["clanGold"] = 602877 };
             var facts = PromptWealthFacts(historical);
             add("legacy_no_party_is_not_visible_destitution", !facts.ContainsKey("visibleWealthTier") && !facts.ContainsKey("partyInventoryValue")
-                && ReadString(facts, "personalWealthTier", "") == Program.WealthTier(10000)
+                && ReadString(facts, "personalWealthTier", "") == DialogueService.WealthTier(10000)
                 && ReadString(historical, "visibleWealthTier", "") == "destitute", facts);
             var richDressPoorCash = PromptWealthFacts(new Dictionary<string, object> {
-                ["version"] = 3, ["gold"] = 0, ["personalWealthTier"] = Program.WealthTier(0), ["clanGold"] = 500000,
+                ["version"] = 3, ["gold"] = 0, ["personalWealthTier"] = DialogueService.WealthTier(0), ["clanGold"] = 500000,
                 ["partyInventoryValue"] = null, ["partyInventoryState"] = "not_applicable" });
             add("poor_cash_rich_clan_and_dress_remain_independent", ReadInt(richDressPoorCash, "gold", -1) == 0
                 && ReadInt(richDressPoorCash, "clanGold", 0) == 500000 && !richDressPoorCash.ContainsKey("visibleWealthTier")

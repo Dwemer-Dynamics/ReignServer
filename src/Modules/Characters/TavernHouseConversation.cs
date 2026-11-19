@@ -184,7 +184,7 @@ namespace ReignBetaServer
                     ApplyTavernHouseOpening(state, chat);
                     if (planOnly) return DialogueService.GroupConversationFloorApi(chat);
                     var response = DispatchTavernHouseDialogue(state, requestId, requestHash, chat,
-                        () => Program.PartyChatRespond(chat), pending => RecoverTavernHouseDialogue(state, pending),
+                        () => DialogueService.PartyChatRespond(chat), pending => RecoverTavernHouseDialogue(state, pending),
                         () => SaveTavernHouseSession(path, state));
                     if (!ReadBool(response, "ok", false)) return response;
                     PrepareTavernVisitAction(state, chat, response);

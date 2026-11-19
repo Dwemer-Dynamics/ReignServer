@@ -24,8 +24,8 @@ namespace ReignBetaServer
                     "httpStatusCode", status, "terminal", assembly.Completed && assembly.Status == "failed",
                     "partialOutput", assembly.FirstTextUtc != default(DateTime) || !string.IsNullOrWhiteSpace(assembly.Text),
                     "usageLimitExceeded", exhausted, "retryAfterSeconds", Math.Max(0, ReadInt(error, "retryAfterSeconds", 0)),
-                    "additionalDetails", DiagnosticRedact(LimitText(ReadString(error, "additionalDetails", ""), 1200)),
-                    "message", DiagnosticRedact(LimitText(assembly.Error, 1200)));
+                    "additionalDetails", DiagnosticRedact(DialogueService.LimitText(ReadString(error, "additionalDetails", ""), 1200)),
+                    "message", DiagnosticRedact(DialogueService.LimitText(assembly.Error, 1200)));
                 Data["codexFailure"] = Failure;
             }
         }

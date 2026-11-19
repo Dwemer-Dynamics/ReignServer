@@ -187,7 +187,7 @@ namespace ReignBetaServer
             native["phase"] = "Active";
 
             string campaign = "guest_dialogue_test_" + Guid.NewGuid().ToString("N");
-            Program.UpsertCharacterProfile(campaign, new Dictionary<string, object>(PromptParityProfile()) { ["heroStringId"] = heroId });
+            CharactersService.UpsertCharacterProfile(campaign, new Dictionary<string, object>(PromptParityProfile()) { ["heroStringId"] = heroId });
             var empty = new Dictionary<string, object>();
             var lines = new List<Dictionary<string, object>>();
             var dialogueEnvelope = BuildDialoguePromptEnvelope(campaign, heroId, "Fixture Speaker", "Traveler", "Traveler",

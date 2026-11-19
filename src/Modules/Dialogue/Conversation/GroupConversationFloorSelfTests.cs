@@ -117,7 +117,7 @@ namespace ReignBetaServer
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     var heard = DialogueSelfTestStore.SelectConversationTurns28(connection);
-                    var listener = Program.BuildKnowledgeAccessContext("taren", "player", "", quiet);
+                    var listener = DialogueService.BuildKnowledgeAccessContext("taren", "player", "", quiet);
                     Check("all_quiet_retains_heard_words_without_fabricated_npc", heard.Count == 1
                         && ReadString(heard[0], "role", "") == "player"
                         && ReadString(heard[0], "text", "") == ReadString(quiet, "playerText", "")
@@ -248,7 +248,7 @@ namespace ReignBetaServer
                 var absentVisit = Program.CloneDictionary(tavern); absentVisit["speakerHeroStringId"] = "arven";
                 Check("tavern_roster_card_cannot_create_attendance", !ReadBool(CharactersService.TavernHouseTurnPlanApi(absentVisit), "ok", true));
             }
-            catch (Exception ex) { Check("exception", false, Program.LimitText(ex.ToString(), 2200)); }
+            catch (Exception ex) { Check("exception", false, DialogueService.LimitText(ex.ToString(), 2200)); }
             finally
             {
                 ReignPostgreSqlStorage.DropCampaign(campaign);

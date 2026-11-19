@@ -40,17 +40,17 @@ namespace ReignBetaServer
             var boundedParty = new Dictionary<string, object>
             {
                 ["partyId"] = partyId,
-                ["name"] = Program.LimitText(ReadString(party, "name", "Party"), 120),
+                ["name"] = DialogueService.LimitText(ReadString(party, "name", "Party"), 120),
                 ["planks"] = ReadStringList(party, "planks").Take(4).ToList(),
                 ["seatCount"] = Math.Max(0, ReadInt(party, "seatCount", 0))
             };
             List<object> boundedResolutions = resolutions.Select(row => (object)new Dictionary<string, object>
             {
-                ["title"] = Program.LimitText(ReadString(row, "title", "measurable relief"), 180),
-                ["evidenceTag"] = Program.LimitText(ReadString(row, "evidenceTag", "public concern"), 100),
-                ["firstRoute"] = Program.LimitText(ReadString(row, "firstRoute", ""), 240),
-                ["secondRoute"] = Program.LimitText(ReadString(row, "secondRoute", ""), 240),
-                ["targetName"] = Program.LimitText(ReadString(row, "targetName", ""), 120)
+                ["title"] = DialogueService.LimitText(ReadString(row, "title", "measurable relief"), 180),
+                ["evidenceTag"] = DialogueService.LimitText(ReadString(row, "evidenceTag", "public concern"), 100),
+                ["firstRoute"] = DialogueService.LimitText(ReadString(row, "firstRoute", ""), 240),
+                ["secondRoute"] = DialogueService.LimitText(ReadString(row, "secondRoute", ""), 240),
+                ["targetName"] = DialogueService.LimitText(ReadString(row, "targetName", ""), 120)
             }).ToList();
 
             var prompt = new StringBuilder();
@@ -64,7 +64,7 @@ namespace ReignBetaServer
             prompt.AppendLine("Speaker: " + Json.Serialize(new Dictionary<string, object>
             {
                 ["heroStringId"] = speakerId,
-                ["name"] = Program.LimitText(ReadString(speaker, "name", speakerId), 120),
+                ["name"] = DialogueService.LimitText(ReadString(speaker, "name", speakerId), 120),
                 ["traits"] = ReadDictionary(speaker, "traits") ?? new Dictionary<string, object>(),
                 ["cultureId"] = ReadString(speaker, "cultureId", "")
             }));
@@ -95,7 +95,7 @@ namespace ReignBetaServer
                 };
             Dictionary<string, object> parsed = TryParseJsonObject(ReadString(llm, "content", ""))
                 ?? new Dictionary<string, object>();
-            string reply = Program.LimitText(Program.SanitizeVisibleReply(FirstNonEmpty(
+            string reply = DialogueService.LimitText(Program.SanitizeVisibleReply(FirstNonEmpty(
                 ReadString(parsed, "reply", ""), ReadString(llm, "content", ""))), 1600);
             return new Dictionary<string, object>
             {

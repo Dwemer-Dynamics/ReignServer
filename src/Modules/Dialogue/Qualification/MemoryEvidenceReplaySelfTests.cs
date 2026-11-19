@@ -1192,9 +1192,9 @@ namespace ReignBetaServer
                     Check("published_party_receipt_rejects_" + mutation, refused);
                 }
                 var partyView = ReadPublishedPartyReplayView(detachedBytes, partyCase, partySources, "fixture", "replay_0", id => id);
-                var partyAccess = Program.BuildKnowledgeAccessContext("npc", "player", "", EvidenceReplayMemoryContext(partyCase, "replay_0", "player"));
+                var partyAccess = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", EvidenceReplayMemoryContext(partyCase, "replay_0", "player"));
                 partyView.BindRead("fixture", partyAccess, ReadString(partyCase, "query", ""));
-                var freshAccess = Program.BuildKnowledgeAccessContext("npc", "player", "", EvidenceReplayMemoryContext(partyCase, "replay_0", "player"));
+                var freshAccess = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", EvidenceReplayMemoryContext(partyCase, "replay_0", "player"));
                 bool otherRequestRefused = false;
                 try { partyView.BindRead("fixture", freshAccess, "A later unrelated contribution."); }
                 catch (InvalidOperationException) { otherRequestRefused = true; }
@@ -1348,7 +1348,7 @@ namespace ReignBetaServer
                 Turn("unheard", "player", "player", "The orchard UNHEARD is private.", 6, audience: "[\"player\",\"other\"]");
                 Turn("future_day", "player", "player", "The orchard FUTURE-DAY is closed.", 7, day: 10);
                 var context = TestDict("worldDay", 3d, "timelineId", "branch_a", "playerHeroStringId", "player");
-                var packet = Program.BuildNpcMemoryPacket(campaign, "npc", "player", "", "orchard old mill choice", 4000, context, settings);
+                var packet = DialogueService.BuildNpcMemoryPacket(campaign, "npc", "player", "", "orchard old mill choice", 4000, context, settings);
                 var writerContext = TestDict("worldDay", 3d, "timelineId", "branch_a", "playerHeroStringId", "player",
                     "interactionMode", "dialogue", "memoryAsOfAcceptedSequence", 0L);
                 var writerFixture = TestDict("query", "Yes, the old mill remains my choice.", "route", "dialogue",
@@ -1793,7 +1793,7 @@ namespace ReignBetaServer
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     DialogueSelfTestStore.InsertConversationContinuity3(connection);
-                    var access = Program.BuildKnowledgeAccessContext("npc", "player", "", writerContext);
+                    var access = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", writerContext);
                     var replacementSource = LoadEmbeddingSourceRow(connection, "conversation_turn", "unheard");
                     long sequence = ReadLong(replacementSource, "accepted_sequence", -1);
                     access.AsOfAcceptedSequence = sequence;

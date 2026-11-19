@@ -249,11 +249,11 @@ Treat the name, age, gender, and culture as private generation guidance. They de
                         : (name.IndexOf("portrait", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("image", StringComparison.OrdinalIgnoreCase) >= 0 ? "image" : "general"));
                 catalog.Add(PromptMeta(
                     name,
-                    HumanizeKey(Path.GetFileNameWithoutExtension(name)),
+                    DialogueService.HumanizeKey(Path.GetFileNameWithoutExtension(name)),
                     category,
                     !hidden,
                     category == "action"
-                        ? "Action-specific selector prompt for " + HumanizeKey(Path.GetFileNameWithoutExtension(name).Replace("action_", "")) + "."
+                        ? "Action-specific selector prompt for " + DialogueService.HumanizeKey(Path.GetFileNameWithoutExtension(name).Replace("action_", "")) + "."
                         : "Additional prompt file found in the server prompts folder."));
             }
 

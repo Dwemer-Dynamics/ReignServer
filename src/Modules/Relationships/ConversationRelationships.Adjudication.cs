@@ -261,9 +261,9 @@ namespace ReignBetaServer
                     benefit = null;
                     modifiers.Add("benefit_lineage_participants_mismatch");
                 }
-                double retained = Program.ClampDouble(ReadDouble(assessment, "retainedAppreciation", 1d), 0d, 1d);
+                double retained = DialogueService.ClampDouble(ReadDouble(assessment, "retainedAppreciation", 1d), 0d, 1d);
                 int lost = benefit == null ? 0 : RoundAwayFromZero(ReadInt(benefit, "original_delta", 0) * (1d - retained));
-                int coercion = RoundAwayFromZero(15d * Program.ClampDouble(ReadDouble(assessment, "coercionSeverity", 0d), 0d, 1d));
+                int coercion = RoundAwayFromZero(15d * DialogueService.ClampDouble(ReadDouble(assessment, "coercionSeverity", 0d), 0d, 1d));
                 magnitude = Math.Min(20, Math.Max(1, lost + coercion));
                 valence = "negative";
                 if (benefit == null)
@@ -315,12 +315,12 @@ namespace ReignBetaServer
                     "currentConductQuote", "current_conduct_quote",
                     "evidenceQuote"));
             bool explicitlyInvokesBenefit =
-                Program.ContainsAny(source,
+                DialogueService.ContainsAny(source,
                     "gift", "gave you", "gave the recipient",
                     "home", "house", "deed", "estate", "land",
                     "cup", "gold", "aid", "help i gave",
                     "saved your", "rescued your")
-                && Program.ContainsAny(source,
+                && DialogueService.ContainsAny(source,
                     "invoke", "repay", "owe", "because",
                     "demand", "in return", "return the favor",
                     "leverage", "after i gave", "i just gave");
@@ -614,8 +614,8 @@ namespace ReignBetaServer
             string details = Program.NormalizeLookup(
                 ReadString(evidence, "summary", "") + " "
                 + ReadString(evidence, "payload_json", "{}"));
-            if (Program.ContainsAny(kind, "dialogue", "conversation", "reported speech")
-                && !Program.ContainsAny(kind, "action receipt", "native receipt", "verified event"))
+            if (DialogueService.ContainsAny(kind, "dialogue", "conversation", "reported speech")
+                && !DialogueService.ContainsAny(kind, "action receipt", "native receipt", "verified event"))
                 return false;
             string observerId = ReadFirstString(
                 assessment, "observerHeroStringId", "observerId");
@@ -642,13 +642,13 @@ namespace ReignBetaServer
             }
             if (!pairMatches) return false;
             if ((actKind ?? "").Contains("betray"))
-                return Program.ContainsAny(kind + " " + details,
+                return DialogueService.ContainsAny(kind + " " + details,
                     "betrayal", "betrayed", "treachery", "sold out", "defection");
             if ((actKind ?? "").Contains("humiliat"))
-                return Program.ContainsAny(kind + " " + details,
+                return DialogueService.ContainsAny(kind + " " + details,
                     "humiliation", "humiliated", "public disgrace", "stripped of honor");
             return (actKind ?? "").Contains("grave_abuse")
-                && Program.ContainsAny(kind + " " + details,
+                && DialogueService.ContainsAny(kind + " " + details,
                     "grave abuse", "torture", "enslavement", "abduction", "atrocity");
         }
 
@@ -712,9 +712,9 @@ namespace ReignBetaServer
             bool gift = actKind.Contains("gift");
             if (gift)
             {
-                bool verifiedTransfer = Program.ContainsAny(kind, "gift", "transfer item", "item transfer", "transfer gold", "gold transfer", "property transfer", "property_transfer");
+                bool verifiedTransfer = DialogueService.ContainsAny(kind, "gift", "transfer item", "item transfer", "transfer gold", "gold transfer", "property transfer", "property_transfer");
                 if (!verifiedTransfer) return false;
-                bool transformativeScale = Program.ContainsAny(details,
+                bool transformativeScale = DialogueService.ContainsAny(details,
                     "life changing", "transformative", "valuable home", "new home", "house deed", "estate", "land grant",
                     "fief", "castle", "workshop", "business", "large fortune", "fortune in denars", "paid every debt",
                     "family rescued", "saved the family", "livelihood");
@@ -727,8 +727,8 @@ namespace ReignBetaServer
             }
             bool rescueOrAid = actKind.Contains("rescue") || actKind.Contains("saved") || actKind.Contains("aid");
             return rescueOrAid
-                && Program.ContainsAny(kind, "rescue", "saved", "freed", "liberated", "aid")
-                && Program.ContainsAny(details, "family", "spouse", "husband", "wife", "child", "daughter", "son", "mother", "father", "life", "important");
+                && DialogueService.ContainsAny(kind, "rescue", "saved", "freed", "liberated", "aid")
+                && DialogueService.ContainsAny(details, "family", "spouse", "husband", "wife", "child", "daughter", "son", "mother", "father", "life", "important");
         }
 
         private static string
@@ -865,7 +865,7 @@ namespace ReignBetaServer
             }
             else if (tier == "gift_leverage" && !string.IsNullOrWhiteSpace(benefitId))
             {
-                double retained = Program.ClampDouble(ReadDouble(assessment, "retainedAppreciation", 1d), 0d, 1d);
+                double retained = DialogueService.ClampDouble(ReadDouble(assessment, "retainedAppreciation", 1d), 0d, 1d);
                 RelationshipsStore.UpdateConversationRelationshipBenefits(connection, new Dictionary<string, object> { ["retained"] = retained, ["status"] = retained <= 0.01d ? "repudiated" : retained < 0.999d ? "diminished" : "retained",
                         ["ts"] = ts, ["payload"] = Json.Serialize(assessment), ["id"] = benefitId });
             }

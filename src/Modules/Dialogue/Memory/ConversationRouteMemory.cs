@@ -126,7 +126,7 @@ namespace ReignBetaServer
                 payload["deferContinuityAllocation"] = true;
                 payload["memoryQueryText"] = ReadString(payload, "playerText", "");
                 SetMemoryTranscriptContext(payload, context.Prior);
-                var packet = Program.BuildNpcMemoryPacket(context.Campaign, context.Observer, context.Player,
+                var packet = DialogueService.BuildNpcMemoryPacket(context.Campaign, context.Observer, context.Player,
                     ReadFirstString(payload, "locationId", "currentSettlementId", "settlementId"),
                     ReadString(payload, "playerText", ""), 2500, payload, context.Settings);
                 payload["memoryPrecisionEvidence"] = ReadDictionary(packet, "precisionEvidence");
@@ -176,7 +176,7 @@ namespace ReignBetaServer
                 catch (Exception ex)
                 {
                     context.Result["inputRecovery"] = TestDict("status", "player_input_unavailable",
-                        "coverageGap", Program.LimitText(ex.Message, 500), "npcResponseStored", false);
+                        "coverageGap", DialogueService.LimitText(ex.Message, 500), "npcResponseStored", false);
                 }
                 return context.Result;
             }

@@ -29,16 +29,16 @@ namespace ReignBetaServer
             string timelineId = ReadString(payload, "timelineId", "main");
             string petitionId = ReadString(payload, "petitionId", "");
             string petitionerHeroId = ReadString(payload, "petitionerHeroId", "");
-            string petitionerName = Program.LimitText(ReadString(payload, "petitionerName", "Petitioner"), 120);
-            string kind = Program.LimitText(ReadString(payload, "kind", "petition"), 40);
-            string severity = Program.LimitText(ReadString(payload, "severity", "minor"), 40);
+            string petitionerName = DialogueService.LimitText(ReadString(payload, "petitionerName", "Petitioner"), 120);
+            string kind = DialogueService.LimitText(ReadString(payload, "kind", "petition"), 40);
+            string severity = DialogueService.LimitText(ReadString(payload, "severity", "minor"), 40);
             string playerText = phase == "conversation"
                 ? ReadString(payload, "playerText", "")
                 : string.Empty;
             if (phase == "conversation" && string.IsNullOrWhiteSpace(playerText))
                 return new Dictionary<string, object> { ["ok"] = false,
                     ["error"] = "A ruler message is required for a petition conversation turn." };
-            string outcome = phase == "closing" ? Program.LimitText(ReadString(payload, "outcome", ""), 80) : string.Empty;
+            string outcome = phase == "closing" ? DialogueService.LimitText(ReadString(payload, "outcome", ""), 80) : string.Empty;
             string transcriptId = FirstNonEmpty(ReadString(payload, "transcriptId", ""),
                 "ruler_petition_" + Guid.NewGuid().ToString("N"));
             if (string.IsNullOrWhiteSpace(petitionId) || string.IsNullOrWhiteSpace(petitionerHeroId))
@@ -53,10 +53,10 @@ namespace ReignBetaServer
             var facts = new Dictionary<string, object>
             {
                 ["kind"] = kind, ["severity"] = severity,
-                ["problem"] = Program.LimitText(ReadString(payload, "problem", ""), 600),
-                ["targetSettlement"] = Program.LimitText(ReadString(payload, "targetSettlementName", ""), 120),
-                ["requestTerms"] = Program.LimitText(ReadString(payload, "requestTerms", ""), 400),
-                ["danger"] = Program.LimitText(ReadString(payload, "danger", ""), 120),
+                ["problem"] = DialogueService.LimitText(ReadString(payload, "problem", ""), 600),
+                ["targetSettlement"] = DialogueService.LimitText(ReadString(payload, "targetSettlementName", ""), 120),
+                ["requestTerms"] = DialogueService.LimitText(ReadString(payload, "requestTerms", ""), 400),
+                ["danger"] = DialogueService.LimitText(ReadString(payload, "danger", ""), 120),
                 ["outcome"] = outcome,
                 ["playerText"] = playerText
             };
@@ -291,7 +291,7 @@ namespace ReignBetaServer
         private static bool IsExplicitChancellorOffer(string text)
         {
             string value = (text ?? string.Empty).ToLowerInvariant();
-            return value.Contains("chancellor") && Program.ContainsAny(value,
+            return value.Contains("chancellor") && DialogueService.ContainsAny(value,
                 "appoint", "offer you", "serve as", "be my", "become my",
                 "take the office", "take office");
         }
@@ -299,10 +299,10 @@ namespace ReignBetaServer
         private static bool IsExplicitChancellorAcceptance(string text)
         {
             string value = (text ?? string.Empty).ToLowerInvariant();
-            if (Program.ContainsAny(value, "i refuse", "i decline", "cannot accept",
+            if (DialogueService.ContainsAny(value, "i refuse", "i decline", "cannot accept",
                     "won't accept", "will not accept", "not accept"))
                 return false;
-            return Program.ContainsAny(value, "i accept", "i agree", "i will serve",
+            return DialogueService.ContainsAny(value, "i accept", "i agree", "i will serve",
                 "i'll serve", "i shall serve", "i will be your chancellor",
                 "i'll be your chancellor", "i accept the office",
                 "i take the office");
@@ -311,7 +311,7 @@ namespace ReignBetaServer
         private static bool IsDirectChancellorDismissal(string text)
         {
             string value = (text ?? string.Empty).ToLowerInvariant();
-            return value.Contains("chancellor") && Program.ContainsAny(value,
+            return value.Contains("chancellor") && DialogueService.ContainsAny(value,
                 "dismiss", "remove you", "relieve you", "you are fired",
                 "your service is ended", "your service has ended",
                 "no longer my");
@@ -322,7 +322,7 @@ namespace ReignBetaServer
         {
             string combined = (playerText ?? string.Empty) + " "
                 + (visibleReply ?? string.Empty);
-            if (salary == 0 && Program.ContainsAny(combined.ToLowerInvariant(),
+            if (salary == 0 && DialogueService.ContainsAny(combined.ToLowerInvariant(),
                     "without pay", "no pay", "unpaid", "zero denar", "0 denar"))
                 return true;
             string digits = salary.ToString(CultureInfo.InvariantCulture);

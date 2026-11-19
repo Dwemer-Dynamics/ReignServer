@@ -97,7 +97,7 @@ namespace ReignBetaServer
             return receipts;
         }
 
-        private static bool PerformanceKnownToObserver(Dictionary<string, object> row, Program.KnowledgeAccessContext access, bool publicOnly = false)
+        private static bool PerformanceKnownToObserver(Dictionary<string, object> row, DialogueService.KnowledgeAccessContext access, bool publicOnly = false)
         {
             if (access == null) return true; // Engine metadata, never an NPC prompt.
             var rules = ReadDictionaryList(TestDict("rules", Json.DeserializeObject(ReadString(row, "knowledge_rules_json", "[]"))), "rules");
@@ -108,11 +108,11 @@ namespace ReignBetaServer
         }
 
         private static Dictionary<string, object> ReadPlayerPerformanceCounts(ReignDbConnection connection, string timeline, string player,
-            double day, Program.KnowledgeAccessContext access = null, IEnumerable<Program.KnowledgeAccessContext> additionalObservers = null, bool publicOnly = false)
+            double day, DialogueService.KnowledgeAccessContext access = null, IEnumerable<DialogueService.KnowledgeAccessContext> additionalObservers = null, bool publicOnly = false)
         {
             var rows = WorldSimulationService.TableExists(connection, "character_performance_events") ? DialogueStore.SelectCharacterPerformanceEvents(connection, MemorySourceTimelineSql("character_performance_events"),                TestDict("timeline", timeline, "player", player, "day", day)) : new List<Dictionary<string, object>>();
             var unique = rows.Where(r => PerformanceKnownToObserver(r, access, publicOnly)
-                    && (additionalObservers ?? Enumerable.Empty<Program.KnowledgeAccessContext>()).All(other => PerformanceKnownToObserver(r, other, publicOnly)))
+                    && (additionalObservers ?? Enumerable.Empty<DialogueService.KnowledgeAccessContext>()).All(other => PerformanceKnownToObserver(r, other, publicOnly)))
                 .GroupBy(r => ReadString(r, "kind", "") + ":" + ReadString(r, "competition_id", ""))
                 .Select(g => g.First()).ToList();
             return TestDict("battleWins", unique.Count(r => ReadString(r, "kind", "") == "battle_completed" && ReadString(r, "outcome", "") == "win"),
@@ -152,9 +152,9 @@ namespace ReignBetaServer
             var others = (additionalObservers ?? Enumerable.Empty<string>()).ToList();
             if (others.Any(other => !WorldSimulationService.TableExists(connection, "acquaintances") || !WorldSimulationService.TableExists(connection, "identity_roster")
                 || !CharactersService.IdentityStateVerified(CharactersService.ReadAcquaintance(connection, other, player)))) return "";
-            var access = Program.BuildKnowledgeAccessContext(observer, player, "", payload);
+            var access = DialogueService.BuildKnowledgeAccessContext(observer, player, "", payload);
             var counts = ReadPlayerPerformanceCounts(connection, ContinuityTimeline(payload), player, ReadDouble(payload, "worldDay", 0d), access,
-                others.Select(other => Program.BuildKnowledgeAccessContext(other, player, "", payload)), ReadBool(payload, "officialMemoryFirewall", false));
+                others.Select(other => DialogueService.BuildKnowledgeAccessContext(other, player, "", payload)), ReadBool(payload, "officialMemoryFirewall", false));
             payload["playerPerformanceMetadata"] = TestDict("subjectId", player, "knownOutcomes", counts,
                 "nativeOutcomes", ReadPlayerPerformanceCounts(connection, ContinuityTimeline(payload), player, ReadDouble(payload, "worldDay", 0d)));
             var phrases = new List<string>();

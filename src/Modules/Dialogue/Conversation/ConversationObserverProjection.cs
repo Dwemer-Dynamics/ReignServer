@@ -222,13 +222,13 @@ namespace ReignBetaServer
                     "visibility", "private", "observerScope", "observable_source_spans", "evidenceType", "observation",
                     "sourceValidation", "supported_observable_spans", "observerProjection", TestDict(
                         "player", ProjectConversationNarration(playerText, player, "", true), "npc", ProjectConversationNarration(reply, hero, "")),
-                    "importance", result.Max(r => Program.MemoryImportance01(r, .55d))));
+                    "importance", result.Max(r => DialogueService.MemoryImportance01(r, .55d))));
             }
             return result;
         }
 
         internal static List<Dictionary<string, object>> ProjectRetrievedConversationMemories(ReignDbConnection connection,
-            List<Dictionary<string, object>> rows, Program.KnowledgeAccessContext knowledge)
+            List<Dictionary<string, object>> rows, DialogueService.KnowledgeAccessContext knowledge)
         {
             var result = new List<Dictionary<string, object>>();
             foreach (var row in rows ?? new List<Dictionary<string, object>>())

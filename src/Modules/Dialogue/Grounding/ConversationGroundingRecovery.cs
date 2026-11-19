@@ -33,7 +33,7 @@ namespace ReignBetaServer
             string campaign = ReadString(request, "campaignId", ""), timeline = ReadString(request, "timelineId", "");
             if (campaign.Length == 0 || timeline.Length == 0) throw new InvalidOperationException("Exact campaign and timeline are required.");
             var rows = DialogueStore.SelectConversationTurns43(connection);
-            var access = new Program.KnowledgeAccessContext { TimelineId = timeline, WorldDay = double.MaxValue, AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue };
+            var access = new DialogueService.KnowledgeAccessContext { TimelineId = timeline, WorldDay = double.MaxValue, AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue };
             var sources = rows.Where(r => ReadString(r, "status", "") == "source_only" && MemoryTimeVisible(r, access, connection))
                 .ToDictionary(r => ReadString(r, "turn_id", ""));
             var audit = new List<Dictionary<string, object>>(); var operations = new List<Dictionary<string, object>>();
@@ -99,7 +99,7 @@ namespace ReignBetaServer
             var metadata = TryParseJsonObject(ReadString(turn, "payload_json", "{}"));
             string original = ReadString(capture, "originalText", ""), player = ReadString(turn, "speaker_id", "");
             string sourceTimeline = ReadString(metadata, "timelineId", "");
-            var access = new Program.KnowledgeAccessContext { NpcId = player, TimelineId = timeline, WorldDay = double.MaxValue, AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue };
+            var access = new DialogueService.KnowledgeAccessContext { NpcId = player, TimelineId = timeline, WorldDay = double.MaxValue, AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue };
             if (original.Length == 0 || ReadString(capture, "sourceHash", "") != ConversationExactTextHash(original)
                 || ReadString(capture, "campaignId", "") != ReadString(manifest, "campaignId", "") || ReadString(capture, "timelineId", "") != sourceTimeline
                 || ReadString(capture, "sessionId", "") != ReadString(turn, "session_id", "") || ReadString(capture, "playerId", "") != player

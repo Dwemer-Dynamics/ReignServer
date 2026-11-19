@@ -124,7 +124,7 @@ namespace ReignBetaServer
                 ["worldDay"] = 110d, ["timelineId"] = timelineId,
                 ["identityView"] = new Dictionary<string, object> { ["knowsIdentity"] = true }
             };
-            Program.KnowledgeAccessContext observer = Program.BuildKnowledgeAccessContext("itaria_fixture", "main_hero", "town_phycaon", context);
+            DialogueService.KnowledgeAccessContext observer = DialogueService.BuildKnowledgeAccessContext("itaria_fixture", "main_hero", "town_phycaon", context);
             Func<List<Dictionary<string, object>>, string, bool> has = (rows, id) => rows.Any(r => ReadString(r, "event_id", "") == id);
             var noVectors = new Dictionary<string, object>();
             List<Dictionary<string, object>> sameDay;
@@ -192,7 +192,7 @@ namespace ReignBetaServer
                     && FormatKnownWorldHistoryForDialogue(sameDay, 6000).Contains("a few tournament victories")
                     && !FormatKnownWorldHistoryForDialogue(sameDay, 6000).Contains("4 player tournament victories"));
                 check("noncompetitor_secondhand", ReadString(sameDay.FirstOrDefault(r => ReadString(r, "event_id", "") == "dialogue_win"), "knowledgeBasis", "") == "secondhand");
-                Program.KnowledgeAccessContext teammate = Program.BuildKnowledgeAccessContext("ulagara_fixture", "main_hero", "town_phycaon", context);
+                DialogueService.KnowledgeAccessContext teammate = DialogueService.BuildKnowledgeAccessContext("ulagara_fixture", "main_hero", "town_phycaon", context);
                 var teammateHistory = LoadKnownWorldHistoryForDialogue(connection, timelineId, 110d, teammate,
                     "We won together.", personalRoute, noVectors, true);
                 var sharedWin = teammateHistory.FirstOrDefault(row => ReadString(row, "event_id", "") == "dialogue_team_win");
@@ -259,7 +259,7 @@ namespace ReignBetaServer
             foreach (bool legacyMode in new[] { true, false })
             {
                 var modeSettings = new Dictionary<string, object>(offlineSettings) { ["legacyMemoryMode"] = legacyMode };
-                var packet = Program.BuildNpcMemoryPacket(campaignId, "itaria_fixture", "main_hero", "town_phycaon",
+                var packet = DialogueService.BuildNpcMemoryPacket(campaignId, "itaria_fixture", "main_hero", "town_phycaon",
                     "Lady Itaria, I was disappointed I did not see you compete in the last tournament here. I am Michael of Howarton.", 2500, context, modeSettings);
                 string prompt = ReadString(packet, "memoryPacket", "");
                 var eventIds = ReadStringList(packet, "sourceEventIds");

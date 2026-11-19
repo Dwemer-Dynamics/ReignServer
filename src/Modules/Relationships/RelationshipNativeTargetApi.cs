@@ -120,7 +120,7 @@ namespace ReignBetaServer
                                         .Replace(' ', '_'),
                                     ["observed"] = ReadInt(receipt,
                                         "observedRelation", 0),
-                                    ["error"] = Program.LimitText(ReadString(receipt,
+                                    ["error"] = DialogueService.LimitText(ReadString(receipt,
                                         "error", "Native application failed."), 800)
                                 })
                             .Where(row => !string.IsNullOrWhiteSpace(
@@ -268,7 +268,7 @@ namespace ReignBetaServer
                     RelationshipsStore.UpdateRelationshipNativeTargets8(connection, new Dictionary<string, object>
                         {
                             ["observed"] = observed,
-                            ["error"] = Program.LimitText(ReadString(receipt,
+                            ["error"] = DialogueService.LimitText(ReadString(receipt,
                                 "error", "Native application failed."), 800),
                             ["ts"] = ts,
                             ["pair"] = pairKey,

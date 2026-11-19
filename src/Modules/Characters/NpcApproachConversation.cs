@@ -52,7 +52,7 @@ namespace ReignBetaServer
                             && e.OpeningGeneration == scope.Generation && e.SessionId == scope.Session && e.OpeningDay == scope.Day))
                         return TestDict("ok", false, "status", "superseded");
                 }
-                return Program.RunInteractiveRequest(() => prepare == null ? Program.DialogueRespondCore(payload) : prepare(payload));
+                return Program.RunInteractiveRequest(() => prepare == null ? DialogueService.DialogueRespondCore(payload) : prepare(payload));
             }
             finally { Program.ExitCampaignRequestAccess(access); }
         }

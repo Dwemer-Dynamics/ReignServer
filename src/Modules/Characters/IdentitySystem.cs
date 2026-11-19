@@ -90,14 +90,14 @@ namespace ReignBetaServer
             {
                 string value = ReadString(payload, key, "");
                 if (!string.IsNullOrWhiteSpace(value))
-                    compact[key] = Program.LimitText(value, key.EndsWith("Text", StringComparison.OrdinalIgnoreCase)
+                    compact[key] = DialogueService.LimitText(value, key.EndsWith("Text", StringComparison.OrdinalIgnoreCase)
                         || key == "text" || key == "message" ? 1200 : 160);
             }
             Dictionary<string, object> subject = ReadDictionary(payload, "subject");
             if (subject != null && !string.IsNullOrWhiteSpace(ReadString(subject, "name", "")))
                 compact["subject"] = new Dictionary<string, object>
                 {
-                    ["name"] = Program.LimitText(ReadString(subject, "name", ""), 160)
+                    ["name"] = DialogueService.LimitText(ReadString(subject, "name", ""), 160)
                 };
             foreach (string key in new[] { "groupTranscript", "transcript" })
             {
@@ -113,14 +113,14 @@ namespace ReignBetaServer
                         if (string.IsNullOrWhiteSpace(text)) continue;
                         rows.Add(new Dictionary<string, object>
                         {
-                            ["role"] = Program.LimitText(ReadString(row, "role", ""), 32),
-                            ["text"] = Program.LimitText(text, 1200)
+                            ["role"] = DialogueService.LimitText(ReadString(row, "role", ""), 32),
+                            ["text"] = DialogueService.LimitText(text, 1200)
                         });
                     }
                     else
                     {
                         string text = item?.ToString() ?? "";
-                        if (!string.IsNullOrWhiteSpace(text)) rows.Add(Program.LimitText(text, 1200));
+                        if (!string.IsNullOrWhiteSpace(text)) rows.Add(DialogueService.LimitText(text, 1200));
                     }
                 }
                 if (rows.Count > 12) rows = rows.Skip(rows.Count - 12).ToList();
@@ -501,9 +501,9 @@ namespace ReignBetaServer
             if (string.IsNullOrWhiteSpace(observerId) || string.IsNullOrWhiteSpace(subjectId)
                 || observerId.Equals(subjectId, StringComparison.OrdinalIgnoreCase)) return "";
             HashSet<string> observerFamily = new HashSet<string>(
-                Program.TextListFromJson(ReadString(observer, "family_ids_json", "[]")), StringComparer.OrdinalIgnoreCase);
+                DialogueService.TextListFromJson(ReadString(observer, "family_ids_json", "[]")), StringComparer.OrdinalIgnoreCase);
             HashSet<string> subjectFamily = new HashSet<string>(
-                Program.TextListFromJson(ReadString(subject, "family_ids_json", "[]")), StringComparer.OrdinalIgnoreCase);
+                DialogueService.TextListFromJson(ReadString(subject, "family_ids_json", "[]")), StringComparer.OrdinalIgnoreCase);
             if (observerFamily.Contains(subjectId) || subjectFamily.Contains(observerId)) return "immediate_family";
             string observerClan = ReadString(observer, "clan_id", "");
             if (!string.IsNullOrWhiteSpace(observerClan)
@@ -948,8 +948,8 @@ namespace ReignBetaServer
             string observerId = ReadFirstString(payload, "observerHeroStringId", "observerId");
             string subjectId = ReadFirstString(payload, "subjectHeroStringId", "subjectId");
             string introducerId = ReadFirstString(payload, "introducerHeroStringId", "introducerId");
-            string claimedName = Program.LimitText(ReadFirstString(payload, "claimedName", "name"), 80);
-            string canonicalName = Program.LimitText(ReadString(payload, "canonicalName", ""), 80);
+            string claimedName = DialogueService.LimitText(ReadFirstString(payload, "claimedName", "name"), 80);
+            string canonicalName = DialogueService.LimitText(ReadString(payload, "canonicalName", ""), 80);
             string kind = ReadString(payload, "kind", string.IsNullOrWhiteSpace(introducerId) || string.Equals(introducerId, subjectId, StringComparison.OrdinalIgnoreCase) ? "self" : "third_party");
             string encounterId = ReadFirstString(payload, "encounterId", "conversationSessionId", "eventId");
             double worldDay = ReadDouble(payload, "worldDay", 0d);

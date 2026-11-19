@@ -55,8 +55,8 @@ namespace ReignBetaServer
                 && ReadString(outage, "error", "") == "provider timeout"
                 && ReadInt(ReadDictionary(outage, "conversationRecovery"), "additionalProviderCalls", -1) == 0);
             var limited = TestDict("codexFailure", TestDict("httpStatusCode", 429));
-            Check("codex_rate_limit_is_explained_to_player", Program.LlmFailureForDisplay(limited).Contains("429")
-                && Program.LlmFailureForDisplay(limited).Contains("Retry"));
+            Check("codex_rate_limit_is_explained_to_player", DialogueService.LlmFailureForDisplay(limited).Contains("429")
+                && DialogueService.LlmFailureForDisplay(limited).Contains("Retry"));
             var quiet = TestDict("ok", true, "content", Json.Serialize(TestDict("participation", "quiet", "reply", "")));
             Check("intentional_group_silence_remains_valid", ReadBool(EnsureConversationDelivery(quiet, true), "ok", false)
                 && !ReadBool(EnsureConversationDelivery(quiet), "ok", true));

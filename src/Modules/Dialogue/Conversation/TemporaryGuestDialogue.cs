@@ -70,7 +70,7 @@ namespace ReignBetaServer
                 return null;
             var projected = new Dictionary<string, object>();
             foreach (string key in new[] { "heroId", "agreementId", "purpose", "termKind", "phase", "returnSettlementId", "wageRecipientHeroId", "reviewActionStatus", "reviewActionMessage" })
-                projected[key] = Program.LimitText(ReadString(context, key, ""), key == "purpose" ? 400 : 160);
+                projected[key] = DialogueService.LimitText(ReadString(context, key, ""), key == "purpose" ? 400 : 160);
             foreach (string key in new[] { "inMainParty", "temporarilyExcludedFromBattle", "departureDeferredForChat" })
                 projected[key] = ReadBool(context, key, false);
             foreach (string key in new[] { "startedDay", "reviewDueDay", "agreementRevision", "returnDueDay", "observedWorldDay", "wageGold", "wagePeriodDays", "wageNextDueDay", "wageArrearsGold" })

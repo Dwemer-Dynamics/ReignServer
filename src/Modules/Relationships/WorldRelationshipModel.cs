@@ -371,7 +371,7 @@ namespace ReignBetaServer
             if (observer != null && ReadInt(observer, "is_player", 0) == 0)
                 jealousy = RelationshipTraitPercent(files != null ? files.Document(observerId, "traits.json")
                     : Program.ReadJsonObject(Program.CharacterFile(campaignId, observerId, "traits.json")), "jealousy");
-            double jealousyFactor = 0.5d + Program.ClampDouble(jealousy, 0d, 100d) / 100d;
+            double jealousyFactor = 0.5d + DialogueService.ClampDouble(jealousy, 0d, 100d) / 100d;
             double favorValue = 0d;
             string scope = "foreign";
             if (favorite)
@@ -519,7 +519,7 @@ namespace ReignBetaServer
                         new Dictionary<string, object>
                         {
                             ["campaignId"] = campaignId,
-                            ["error"] = Program.LimitText(ex.Message, 1000)
+                            ["error"] = DialogueService.LimitText(ex.Message, 1000)
                         });
                     if (DatabaseAvailability.Shared.BackingOff) break;
                 }

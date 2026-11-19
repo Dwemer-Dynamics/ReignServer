@@ -54,7 +54,7 @@ namespace ReignBetaServer
             accessSource["identityView"] = CharactersService.DeepCloneProfileDictionary(identity ?? TestDict());
             accessSource["profile"] = CharactersService.DeepCloneProfileDictionary(profile ?? TestDict());
             // Native campaign timeline is separate from the Codex load-generation nonce.
-            var knowledge = Program.BuildKnowledgeAccessContext(observer, ReadFirstString(source, "playerId", "playerHeroStringId", "mainHeroStringId"),
+            var knowledge = DialogueService.BuildKnowledgeAccessContext(observer, ReadFirstString(source, "playerId", "playerHeroStringId", "mainHeroStringId"),
                 ReadFirstString(source, "locationId", "settlementId"), accessSource);
             knowledge.TimelineId = ContinuityTimeline(source);
             knowledge.WorldDay = Math.Min(knowledge.WorldDay, Math.Max(0d, ReadDouble(source, "memoryAsOfWorldDay", knowledge.WorldDay)));
@@ -81,7 +81,7 @@ namespace ReignBetaServer
         {
             internal string Campaign, Observer, TimelineGeneration, CharacterReference;
             internal string ArchiveUnavailableReason;
-            internal Program.KnowledgeAccessContext Knowledge;
+            internal DialogueService.KnowledgeAccessContext Knowledge;
             internal bool Firewall;
             internal List<Dictionary<string, object>> FixtureRecords;
             private readonly object Sync = new object();
@@ -112,9 +112,9 @@ namespace ReignBetaServer
                 if (WorldSimulationService.TableExists(connection, "memories"))
                     foreach (var row in DialogueStore.SelectMemories11(connection))
                     {
-                        if (!Program.KnowledgeRowVisibleToNpc("memories", row, Knowledge, connection)) continue;
+                        if (!DialogueService.KnowledgeRowVisibleToNpc("memories", row, Knowledge, connection)) continue;
                         string text = ReadFirstString(row, "text", "summary", "content");
-                        if (Knowledge.PlayerIdentityUnknown) text = Program.SanitizeUnknownIdentityEvidenceText(text, Knowledge);
+                        if (Knowledge.PlayerIdentityUnknown) text = DialogueService.SanitizeUnknownIdentityEvidenceText(text, Knowledge);
                         Add(result, "memory", ReadString(row, "memory_id", ""), text, ReadString(row, "session_id", ""),
                             ReadDouble(row, "world_day", 0), "attributed_memory");
                     }
@@ -157,7 +157,7 @@ namespace ReignBetaServer
                             Score = terms.Count(term => ReadString(row, "text", "").Contains(term, StringComparison.OrdinalIgnoreCase)) })
                             .Where(item => item.Score > 0).OrderByDescending(item => item.Score).ThenBy(item => item.Order).Take(limit)
                             .Select(item => TestDict("id", ReadString(item.Row, "id", ""), "kind", ReadString(item.Row, "kind", ""),
-                                "worldDay", ReadDouble(item.Row, "worldDay", 0), "excerpt", Program.LimitText(ReadString(item.Row, "text", ""), 1200))).ToList();
+                                "worldDay", ReadDouble(item.Row, "worldDay", 0), "excerpt", DialogueService.LimitText(ReadString(item.Row, "text", ""), 1200))).ToList();
                         return TestDict("records", found, "searchedRecords", records.Count,
                             "coverage", string.IsNullOrEmpty(ArchiveUnavailableReason) ? "full_accessible_record" : "archive_unavailable",
                             "unavailableReason", ArchiveUnavailableReason ?? "",
@@ -218,14 +218,14 @@ namespace ReignBetaServer
                 Dictionary<string, object> output;
                 bool success = true;
                 try { output = access.Execute(ReadString(parameters, "tool", ""), ReadDictionary(parameters, "arguments")); }
-                catch (Exception ex) { success = false; output = TestDict("error", Program.LimitText(ex.Message, 300), "instruction", "Correct arguments within the remaining budget. A rejected call is not evidence of an empty archive."); }
+                catch (Exception ex) { success = false; output = TestDict("error", DialogueService.LimitText(ex.Message, 300), "instruction", "Correct arguments within the remaining budget. A rejected call is not evidence of an empty archive."); }
                 try
                 {
                     Program.WriteCodexMessage(TestDict("id", message["id"], "result", TestDict("success", success,
                         "contentItems", new[] { TestDict("type", "inputText", "text", Json.Serialize(output)) })));
                     if (access.CallCount > 5) Program.InterruptCodexTurn(thread, ReadString(parameters, "turnId", ""), Program.LoadSettings());
                 }
-                catch (Exception ex) { Program.SetCodexError(Program.LimitText(ex.Message, 300)); }
+                catch (Exception ex) { Program.SetCodexError(DialogueService.LimitText(ex.Message, 300)); }
             });
             return true;
         }

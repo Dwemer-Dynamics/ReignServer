@@ -77,7 +77,7 @@ namespace ReignBetaServer
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     stored = DialogueStore.SelectGroupConversationState2(connection, new Dictionary<string, object> { ["id"] = sessionId, ["timeline"] = ContinuityTimeline(payload), ["day"] = ReadDouble(payload, "worldDay", 0d) }).FirstOrDefault() ?? new Dictionary<string, object>();
-                    if (!Program.TextListFromJson(ReadString(stored,"participant_ids_json","[]")).Contains(currentSpeakerId,StringComparer.OrdinalIgnoreCase))
+                    if (!DialogueService.TextListFromJson(ReadString(stored,"participant_ids_json","[]")).Contains(currentSpeakerId,StringComparer.OrdinalIgnoreCase))
                         stored = new Dictionary<string,object>();
                     string beat = ReadFirstString(payload, "sceneTurnId", "exchangeId", "turnId");
                     if (beat.Length > 0)
@@ -125,7 +125,7 @@ namespace ReignBetaServer
                         "Question by " + ReadString(question, "speakerId", "") + " [" + ReadString(question, "id", "")
                         + "]: " + ReadString(question, "quote", "") + " | Player opportunity: " + GroupPlayerAnswerOpportunity(question, payload, newestText)
                         + ". Check linked answer state and the exact intervening dialogue; this inventory does not classify it as unanswered."));
-                List<string> topics = Program.MemoryQueryTerms(ObserverConversationText(ReadString(stored, "last_text", ""), lastSpeakerId, currentSpeakerId));
+                List<string> topics = DialogueService.MemoryQueryTerms(ObserverConversationText(ReadString(stored, "last_text", ""), lastSpeakerId, currentSpeakerId));
                 if (topics.Count > 0) builder.AppendLine("Active topic terms: " + string.Join(", ", topics.Take(8)));
             }
             builder.AppendLine("Only delivered contributions establish who has answered this player turn. Queue position, an empty reply or a pending request never establishes an answer.");
@@ -157,7 +157,7 @@ namespace ReignBetaServer
             if (id.Length == 0 || !IsSharedGroupConversation(payload) || !WorldSimulationService.TableExists(connection, "conversation_turns")) return null;
             var row = DialogueStore.SelectConversationTurns32(connection, TestDict("event", id, "session", GroupConversationSessionId(payload),
                     "beat", ReadFirstString(payload, "sceneTurnId", "exchangeId", "turnId"), "player", player, "text", text)).FirstOrDefault();
-            return row != null && PrecisionTurnVisible(row, observer, Program.BuildKnowledgeAccessContext(observer, player, "", payload), connection) ? row : null;
+            return row != null && PrecisionTurnVisible(row, observer, DialogueService.BuildKnowledgeAccessContext(observer, player, "", payload), connection) ? row : null;
         }
 
         // This frame is derived from stored input and delivered, observer-visible
@@ -210,7 +210,7 @@ namespace ReignBetaServer
             var questionFrames = repairFailed ? new List<Dictionary<string, object>>() : GroupSpokenQuestionFrames(reply, contributionId, npcId, beat, participants);
             List<string> questions = questionFrames.Select(q => ReadString(q, "quote", "")).ToList();
             string observableReply = ObserverConversationText(reply, npcId, "");
-            List<string> topics = Program.MemoryQueryTerms(observableReply).Take(8).ToList();
+            List<string> topics = DialogueService.MemoryQueryTerms(observableReply).Take(8).ToList();
             Dictionary<string, object> snapshot = new Dictionary<string, object>
             {
                 ["lastSpeakerId"] = npcId, ["lastSpeakerName"] = npcName, ["lastText"] = observableReply,

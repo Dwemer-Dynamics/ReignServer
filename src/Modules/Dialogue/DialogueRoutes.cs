@@ -5,10 +5,10 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static class DialogueRoutes
     {
         // HTTP routes owned by the Dialogue module, in their former router order (see RouteTable.cs).
-        private static void RegisterDialogueRoutes(ReignRouteTable routes)
+        internal static void RegisterDialogueRoutes(Program.ReignRouteTable routes)
         {
             routes.Get("/memory/background/status", request => DialogueService.MemoryBackgroundStatusApi(request.Query));
             routes.Get("/llm/prompt-cache/status", request => DialogueService.PromptCacheStatusApi());
@@ -83,9 +83,9 @@ namespace ReignBetaServer
             routes.PostPrefix("/communications/", StringComparison.Ordinal, request => DialogueService.CommunicationApi(request.Path.Substring("/communications/".Length), request.JsonBody));
             routes.Get("/communications/status", request => DialogueService.CommunicationApi("status", request.Query.ToDictionary(pair => pair.Key, pair => (object)pair.Value)));
             routes.Get("/gossip/status", request => DialogueService.PersonalGossipStatusApi(request.Query));
-            routes.Post("/conversation-scene/formal-outfits/scan", request => RunInteractiveRequest(() => DialogueService.ScanFormalOutfitsApi(request.JsonBody)));
+            routes.Post("/conversation-scene/formal-outfits/scan", request => Program.RunInteractiveRequest(() => DialogueService.ScanFormalOutfitsApi(request.JsonBody)));
             routes.PostPrefix("/party-banter/", StringComparison.Ordinal, request => DialogueService.PartyBanterApi(request.Path.Substring("/party-banter/".Length), request.JsonBody));
-            routes.Post("/party-chat/turn-plan", request => RunInteractiveRequest(() => DialogueService.GroupConversationFloorApi(request.JsonBody)));
+            routes.Post("/party-chat/turn-plan", request => Program.RunInteractiveRequest(() => DialogueService.GroupConversationFloorApi(request.JsonBody)));
             routes.Get(Reign.Core.Contracts.Actions.TerminalActionReportProtocol.ProposedRoute, request => DialogueService.TerminalActionReportPreflightApi(request.Query));
             routes.Post(Reign.Core.Contracts.Actions.TerminalActionReportProtocol.ProposedRoute, request => DialogueService.TerminalActionReportApi(request.JsonBody));
             routes.Post(DialogueService.IndividualViewInsertionRoute, request => DialogueService.IndividualViewInsertionApi(request.JsonBody));

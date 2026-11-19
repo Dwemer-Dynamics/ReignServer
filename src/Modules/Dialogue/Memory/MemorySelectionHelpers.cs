@@ -65,7 +65,7 @@ namespace ReignBetaServer
         {
             if (!string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value))
                 return MemorySelectionReplay.Value?.Invoke(request) ?? TestDict("ok", false, "status", "isolated_no_capture");
-            return TryParseJsonObject(Program.PostJsonToUrl(SemanticWorkerUrl(settings, "/memory/selection"), Json.Serialize(request), timeout + 500));
+            return TryParseJsonObject(DialogueService.PostJsonToUrl(SemanticWorkerUrl(settings, "/memory/selection"), Json.Serialize(request), timeout + 500));
         }
 
         private static bool ValidateMemorySelectionResponse(Dictionary<string, object> response, string operation,
@@ -282,7 +282,7 @@ namespace ReignBetaServer
             catch (Exception ex)
             {
                 audit["status"] = ReadBool(audit, "rankApplied", false) ? "ranked_compression_unavailable" : "local_fallback";
-                audit["failure"] = Program.LimitText(ex.Message, 180);
+                audit["failure"] = DialogueService.LimitText(ex.Message, 180);
                 if (!isolated && !ReadBool(audit, "rankApplied", false))
                     Interlocked.Exchange(ref MemorySelectionUnavailableUntilTicks, DateTime.UtcNow.AddSeconds(30).Ticks);
             }

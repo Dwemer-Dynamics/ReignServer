@@ -314,8 +314,8 @@ namespace ReignBetaServer
         internal static List<Dictionary<string, object>> BuildAllowedActionPlannerChoices(Dictionary<string, object> settings, Dictionary<string, object> payload, Dictionary<string, object> hero, Dictionary<string, object> actionGate, string playerText, string visibleReply, int maxCandidates)
         {
             string text = (ReadString(actionGate, "intent", "") + "\n" + playerText + "\n" + visibleReply).Trim();
-            List<string> minimeTopics = TryExtractMinimeTopics(settings, text, ReadInt(settings, "minimeMaxTopics", 5));
-            string retrievalText = AppendMinimeTopics(text, minimeTopics);
+            List<string> minimeTopics = DialogueService.TryExtractMinimeTopics(settings, text, ReadInt(settings, "minimeMaxTopics", 5));
+            string retrievalText = DialogueService.AppendMinimeTopics(text, minimeTopics);
             List<string> domains = ClassifyActionRouterDomains(retrievalText);
             bool testMode = false;
             Dictionary<string, object> scene = ReadDictionary(payload, "sceneContext") ?? new Dictionary<string, object>();
@@ -566,7 +566,7 @@ namespace ReignBetaServer
             return payload == null ? command : DialogueService.ContextualTemporaryGuestCommand(command, actionGate, playerText, payload, hero);
         }
 
-        private static bool IsTemporaryPartyGuestLifecycleConversation(
+        internal static bool IsTemporaryPartyGuestLifecycleConversation(
             Dictionary<string, object> actionGate,
             string playerText,
             IEnumerable<Dictionary<string, object>> queuedActions)
@@ -1001,7 +1001,7 @@ namespace ReignBetaServer
                 ["targetKingdomId"] = speakerKingdomId,
                 ["targetKingdomStringId"] = speakerKingdomId,
                 ["TargetKingdom"] = speakerKingdomId,
-                ["reason"] = FirstNonEmpty(LimitText(intent, 500),
+                ["reason"] = FirstNonEmpty(DialogueService.LimitText(intent, 500),
                     "The sovereign explicitly accepted the player's service request."),
                 ["source"] = "accepted_player_service_fallback",
                 ["requiresAcceptance"] = false
@@ -1112,7 +1112,7 @@ namespace ReignBetaServer
                 ["actorHeroStringId"] = speakerHeroId,
                 ["actorClanId"] = speakerClanId,
                 ["actorClanStringId"] = speakerClanId,
-                ["reason"] = FirstNonEmpty(LimitText(intent, 500),
+                ["reason"] = FirstNonEmpty(DialogueService.LimitText(intent, 500),
                     command == "join_kingdom"
                         ? "The current clan leader explicitly accepted joining the player's kingdom."
                         : "The current clan leader explicitly accepted leaving their kingdom."),
@@ -1179,7 +1179,7 @@ namespace ReignBetaServer
                 ["command"] = command,
                 ["actorHeroId"] = speakerHeroId,
                 ["actorHeroStringId"] = speakerHeroId,
-                ["reason"] = FirstNonEmpty(LimitText(intent, 500),
+                ["reason"] = FirstNonEmpty(DialogueService.LimitText(intent, 500),
                     command == "join_clan"
                         ? "The current speaker explicitly accepted membership in the player's clan."
                         : "The current speaker explicitly accepted leaving their current clan."),
@@ -1254,7 +1254,7 @@ namespace ReignBetaServer
             if (command == "accept_temporary_party_guest"
                 || command == "renew_temporary_party_guest")
             {
-                terms["purpose"] = FirstNonEmpty(LimitText(intent, 400),
+                terms["purpose"] = FirstNonEmpty(DialogueService.LimitText(intent, 400),
                     "Temporary travel requested by the player and explicitly accepted by the current noble.");
                 terms["consentConfirmed"] = true;
                 if (!DialogueService.TryCompleteAcceptedGuestSchedule(terms, payload, acceptedExchange)) return null;
@@ -1289,7 +1289,7 @@ namespace ReignBetaServer
             }
             else if (command == "end_temporary_party_guest")
             {
-                terms["departureReason"] = FirstNonEmpty(LimitText(intent, 400),
+                terms["departureReason"] = FirstNonEmpty(DialogueService.LimitText(intent, 400),
                     "The current guest explicitly accepted departure from the player party.");
             }
 
@@ -1300,7 +1300,7 @@ namespace ReignBetaServer
                 ["actorHeroStringId"] = speakerHeroId,
                 ["actorHeroId"] = speakerHeroId,
                 ["FromHero"] = speakerHeroId,
-                ["reason"] = FirstNonEmpty(LimitText(intent, 500),
+                ["reason"] = FirstNonEmpty(DialogueService.LimitText(intent, 500),
                     "The accepted temporary guest lifecycle decision was recovered after an empty planner result."),
                 ["terms"] = terms,
                 ["source"] = "accepted_temporary_guest_fallback",

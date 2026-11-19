@@ -18,7 +18,7 @@ namespace ReignBetaServer
 
         // Only the isolated evidence reader constructs these bindings. The lookup
         // belongs to one stock precision read's access object, never a payload flag.
-        private static readonly ConditionalWeakTable<Program.KnowledgeAccessContext, PublishedPartyReplayView> PublishedPartyReplayReads = new();
+        private static readonly ConditionalWeakTable<DialogueService.KnowledgeAccessContext, PublishedPartyReplayView> PublishedPartyReplayReads = new();
 
         internal sealed class PublishedPartyReplayView
         {
@@ -52,11 +52,11 @@ namespace ReignBetaServer
                 "sessionId", session, "exchangeId", row.Exchange, "speakerId", row.SpeakerId, "speaker", row.Speaker,
                 "role", row.Role, "text", row.Body)).ToList();
 
-            private bool Matches(Program.KnowledgeAccessContext access) => access != null && access.NpcId == observer
+            private bool Matches(DialogueService.KnowledgeAccessContext access) => access != null && access.NpcId == observer
                 && access.PlayerId == peer && access.TimelineId == timeline && access.AsOfAcceptedSequence == cutoff
                 && access.WorldDay == day && !access.PlayerIdentityUnknown;
 
-            internal void BindRead(string readCampaign, Program.KnowledgeAccessContext access, string readQuery)
+            internal void BindRead(string readCampaign, DialogueService.KnowledgeAccessContext access, string readQuery)
             {
                 if (readCampaign != campaign || readQuery != query || !Matches(access))
                     throw new InvalidOperationException("Published party view does not authorize this precision read.");
@@ -68,13 +68,13 @@ namespace ReignBetaServer
             {
                 if (writerCampaign != campaign || actor != observer || contribution != query
                     || ReadString(payload, "mode", "") != "party_chat"
-                    || !Matches(Program.BuildKnowledgeAccessContext(actor, ReadString(payload, "playerHeroStringId", ""), "", payload))
+                    || !Matches(DialogueService.BuildKnowledgeAccessContext(actor, ReadString(payload, "playerHeroStringId", ""), "", payload))
                     || !sharedAudience.SetEquals(ReadStringList(payload, "participants")))
                     throw new InvalidOperationException("Published party view does not authorize this writer request.");
                 return Transcript();
             }
 
-            internal string ExactBody(Dictionary<string, object> source, Program.KnowledgeAccessContext access)
+            internal string ExactBody(Dictionary<string, object> source, DialogueService.KnowledgeAccessContext access)
             {
                 if (!Matches(access) || !rows.TryGetValue(ReadString(source, "turn_id", ""), out var expected)) return null;
                 if (!PrecisionTurnVisible(source, observer, access) || ReadString(source, "session_id", "") != session
@@ -82,7 +82,7 @@ namespace ReignBetaServer
                     || ReadString(source, "speaker_id", "") != expected.SpeakerId || ReadString(source, "speaker_name", "") != expected.Speaker
                     || ReadString(source, "role", "") != expected.Role || ReadLong(source, "accepted_sequence", -1) != expected.Sequence
                     || ReadDouble(source, "world_day", -1) != expected.Day || ConversationTurnTextForRecall(source) != expected.Body
-                    || !sharedAudience.SetEquals(Program.TextListFromJson(ReadString(source, "participants_json", "[]"))))
+                    || !sharedAudience.SetEquals(DialogueService.TextListFromJson(ReadString(source, "participants_json", "[]"))))
                     throw new InvalidOperationException("Published party view source failed the isolated DB identity, audience or body check.");
                 return expected.Body;
             }
@@ -91,7 +91,7 @@ namespace ReignBetaServer
             {
                 using var connection = ReignDatabase.OpenCampaignConnection(campaign);
                 var stored = DialogueStore.SelectConversationTurns86(connection, TestDict("session", session));
-                var access = Program.BuildKnowledgeAccessContext(observer, peer, "", context);
+                var access = DialogueService.BuildKnowledgeAccessContext(observer, peer, "", context);
                 if (stored.Count != rows.Count || stored.Any(row => ExactBody(row, access) == null))
                     throw new InvalidOperationException("Published party view does not match the seeded source inventory.");
             }

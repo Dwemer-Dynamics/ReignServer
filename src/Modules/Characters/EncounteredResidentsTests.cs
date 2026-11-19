@@ -159,8 +159,8 @@ namespace ReignBetaServer
                 string first = DialogueService.BuildStableCharacterPrompt("commoner-fixture", "Sabina Doria", profile, characteristics);
                 Require(first.Contains(template) && first.Contains("Tavern work") && first.Contains("Patient with children")
                     && first.Contains("Dry wit"), "Role prompting replaced personality or missed native tavern occupation.");
-                string legacy = Program.BuildCharacterFoundationText("verify_commoner", "commoner-fixture", "Sabina Doria", profile, characteristics, new Dictionary<string, object>());
-                string construction = Program.BuildCharacterConstructionPrompt("verify_commoner", "commoner-fixture", profile, traits);
+                string legacy = DialogueService.BuildCharacterFoundationText("verify_commoner", "commoner-fixture", "Sabina Doria", profile, characteristics, new Dictionary<string, object>());
+                string construction = CharactersService.BuildCharacterConstructionPrompt("verify_commoner", "commoner-fixture", profile, traits);
                 Require(legacy.Contains(template) && construction.Contains(template) && DialogueService.NormalizePromptSegment(construction).Contains(DialogueService.NormalizePromptSegment(Program.LoadPromptTemplate("world_tone.txt"))), "Legacy or first-contact construction omitted commoner/world layers.");
                 resident["recruited"] = true;
                 string recruited = DialogueService.BuildStableCharacterPrompt("commoner-fixture", "Sabina Doria", profile, characteristics);

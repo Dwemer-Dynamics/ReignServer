@@ -79,8 +79,8 @@ namespace ReignBetaServer
                     ["text"] = text,
                     ["category"] = category,
                     ["topicKey"] = topicKey,
-                    ["confidence"] = Program.ClampDouble(ReadDouble(item, "confidence", 0.65d), 0.35d, 0.9d),
-                    ["importance"] = Program.ClampDouble(ReadDouble(item, "importance", 0.5d), 0.15d, 0.85d),
+                    ["confidence"] = DialogueService.ClampDouble(ReadDouble(item, "confidence", 0.65d), 0.35d, 0.9d),
+                    ["importance"] = DialogueService.ClampDouble(ReadDouble(item, "importance", 0.5d), 0.15d, 0.85d),
                     ["sourceBasis"] = sourceBasis,
                     ["sourceEvidence"] = evidence,
                     ["narrativeDevelopment"] = development,
@@ -130,7 +130,7 @@ namespace ReignBetaServer
             string name = FirstNonEmpty(ReadString(profile, "name", ""), "The speaking character");
             return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
-                ["text"] = Program.LimitText(name + " " + thirdPersonVerb + " " + detail + ".", 500),
+                ["text"] = DialogueService.LimitText(name + " " + thirdPersonVerb + " " + detail + ".", 500),
                 ["category"] = aversion ? "aversion" : sourceVerb.Equals("value", StringComparison.OrdinalIgnoreCase)
                     || sourceVerb.Equals("admire", StringComparison.OrdinalIgnoreCase) ? "personal_value" : "preference",
                 ["topicKey"] = "",
@@ -161,12 +161,12 @@ namespace ReignBetaServer
                 || Regex.IsMatch(normalized,
                     @"^(?:do|did|feel|find|keep|have|remember|think|believe|want|mean)\s+(?:it|this|that|so)\b",
                     RegexOptions.IgnoreCase)
-                || Program.MemoryQueryTerms(detail).Distinct(StringComparer.OrdinalIgnoreCase).Count() < 2)
+                || DialogueService.MemoryQueryTerms(detail).Distinct(StringComparer.OrdinalIgnoreCase).Count() < 2)
                 return null;
             string name = FirstNonEmpty(ReadString(profile, "name", ""), "The speaking character");
             return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
-                ["text"] = Program.LimitText(name + " " + frequency + " " + detail + ".", 500),
+                ["text"] = DialogueService.LimitText(name + " " + frequency + " " + detail + ".", 500),
                 ["category"] = "habit",
                 ["topicKey"] = "",
                 ["confidence"] = 0.7d,
@@ -201,7 +201,7 @@ namespace ReignBetaServer
                 string normalized = Program.NormalizeLookup(detail);
                 if (detail.Length < 3
                     || DynamicCharacteristicMatchIsMetalinguistic(reply, match, detail)
-                    || Program.MemoryQueryTerms(detail).Distinct(StringComparer.OrdinalIgnoreCase).Count() < 1
+                    || DialogueService.MemoryQueryTerms(detail).Distinct(StringComparer.OrdinalIgnoreCase).Count() < 1
                     || Regex.IsMatch(normalized,
                         @"^(?:record|records|ledger|list|account|accounts|track|watch|guard|troops?|soldiers?|gold|denars?|prisoners?|inventory)\b",
                         RegexOptions.IgnoreCase))
@@ -213,7 +213,7 @@ namespace ReignBetaServer
                     // invention, this lets the normal grounding check prove even a
                     // one-word object ("I keep a die") without depending on the
                     // visible prose to repeat the speaker's full name.
-                    ["text"] = Program.LimitText("I keep " + article + " " + detail + ".", 500),
+                    ["text"] = DialogueService.LimitText("I keep " + article + " " + detail + ".", 500),
                     ["category"] = "personal_history",
                     ["topicKey"] = "",
                     ["confidence"] = 0.7d,
@@ -251,9 +251,9 @@ namespace ReignBetaServer
         private static string NormalizeDynamicTopicKey(string supplied, string category, string text)
         {
             string value = Regex.Replace(Program.NormalizeLookup(supplied), @"[^a-z0-9]+", "_").Trim('_');
-            if (!string.IsNullOrWhiteSpace(value)) return Program.LimitText(value, 80);
-            List<string> terms = Program.MemoryQueryTerms(text).Take(5).ToList();
-            return Program.LimitText((category ?? "personal_history") + "_" + string.Join("_", terms), 80);
+            if (!string.IsNullOrWhiteSpace(value)) return DialogueService.LimitText(value, 80);
+            List<string> terms = DialogueService.MemoryQueryTerms(text).Take(5).ToList();
+            return DialogueService.LimitText((category ?? "personal_history") + "_" + string.Join("_", terms), 80);
         }
 
         internal static string DynamicCharacteristicRejectionReason(string text, string heroId,
@@ -279,7 +279,7 @@ namespace ReignBetaServer
                 || Regex.IsMatch(clean, @"\b[A-Z][\p{L}'-]+(?:'s|\u2019s)\s+(?i:wife|husband|spouse|father|mother|parent|son|daughter|child|brother|sister)\s+(?i:is|was|named|called)\s+(?!(?i:a|an|the)\b)[A-Z][\p{L}'-]+")
                 || Regex.IsMatch(q, @"\b(?:i am|i'm|he is|he's|she is|she's|they are|they're)\s+(?:unmarried|married|widowed)\b", RegexOptions.IgnoreCase))
                 return "family_links_require_native_evidence";
-            if (Program.ContainsAny(q, "conquered ", "captured ", "declared war", "made peace", "became king", "became queen",
+            if (DialogueService.ContainsAny(q, "conquered ", "captured ", "declared war", "made peace", "became king", "became queen",
                     "rules the kingdom", "owns the town", "owns the castle", "murdered ", "assassinated ", "saved your family"))
                 return "externally_verifiable_event_requires_world_history";
             if (Regex.IsMatch(q, @"\b\d+\s+(?:troops|men|soldiers|denars|gold)\b", RegexOptions.IgnoreCase))
@@ -382,7 +382,7 @@ namespace ReignBetaServer
             string sessionId = ReadFirstString(conversationExchange, "sessionId", "session_id");
             string exchangeId = ReadFirstString(conversationExchange, "exchangeId", "exchange_id");
             List<string> turnIds = ReadStringList(conversationExchange, "turnIds");
-            List<string> knownBy = Program.MergeStringLists(audienceIds, new[] { heroId });
+            List<string> knownBy = DialogueService.MergeStringLists(audienceIds, new[] { heroId });
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             lock (NarrativeStateLock)
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
@@ -406,8 +406,8 @@ namespace ReignBetaServer
                     Dictionary<string, object> existing = CharactersStore.SelectDynamicCharacteristics4(connection, new Dictionary<string, object> { ["owner"] = heroId, ["normalized"] = normalized }).FirstOrDefault();
                     if (existing != null)
                     {
-                        knownBy = Program.MergeStringLists(knownBy, Program.TextListFromJson(ReadString(existing, "known_by_json", "[]")));
-                        turnIds = Program.MergeStringLists(turnIds, Program.TextListFromJson(ReadString(existing, "source_turn_ids_json", "[]")));
+                        knownBy = DialogueService.MergeStringLists(knownBy, DialogueService.TextListFromJson(ReadString(existing, "known_by_json", "[]")));
+                        turnIds = DialogueService.MergeStringLists(turnIds, DialogueService.TextListFromJson(ReadString(existing, "source_turn_ids_json", "[]")));
                     }
                     if (existing == null && status.Equals("active", StringComparison.OrdinalIgnoreCase))
                     {
@@ -520,7 +520,7 @@ namespace ReignBetaServer
             string hero = "npc_dynamic";
             Dictionary<string, object> profile = new Dictionary<string, object>
             { ["heroStringId"] = hero, ["name"] = "Purios", ["currentSettlementName"] = "Danustica", ["currentSettlementId"] = "town_ES1" };
-            Program.UpsertCharacterProfile(campaign, profile);
+            CharactersService.UpsertCharacterProfile(campaign, profile);
             Dictionary<string, object> payload = new Dictionary<string, object>
             { ["worldDay"] = 42d, ["playerHeroStringId"] = "main_hero", ["locationId"] = "town_ES1", ["mode"] = "dialogue" };
             Dictionary<string, object> parsed = new Dictionary<string, object>
@@ -581,7 +581,7 @@ namespace ReignBetaServer
             {
                 Dictionary<string, object> duplicate = CharactersStore.SelectDynamicCharacteristics10(connection, new Dictionary<string, object> { ["owner"] = hero }).Single();
                 add("duplicate_is_exactly_once", ReadInt(duplicate, "repeat_count", 0) == 3
-                    && Program.TextListFromJson(ReadString(duplicate, "known_by_json", "[]")).Contains("npc_witness", StringComparer.OrdinalIgnoreCase),
+                    && DialogueService.TextListFromJson(ReadString(duplicate, "known_by_json", "[]")).Contains("npc_witness", StringComparer.OrdinalIgnoreCase),
                     "Repeated details update one record, expand its audience, and never forget an earlier group witness.", duplicate);
             }
             Dictionary<string, object> badParsed = new Dictionary<string, object>

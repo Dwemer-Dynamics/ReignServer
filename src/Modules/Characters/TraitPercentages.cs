@@ -63,7 +63,7 @@ namespace ReignBetaServer
 
         private static void TraitPercentageBand(int modifier, out int minimum, out int maximum)
         {
-            switch (Program.ClampTrait(modifier))
+            switch (CharactersService.ClampTrait(modifier))
             {
                 case -2: minimum=0; maximum=20; break;
                 case -1: minimum=21; maximum=40; break;
@@ -111,10 +111,10 @@ namespace ReignBetaServer
             if(existingVirtues.Count!=CourtVirtueKeys.Length||CourtVirtueKeys.Any(x=>!existingVirtues.ContainsKey(x))||ReadInt(existingVirtueModel,"version",0)!=CourtVirtueModelVersion)changed=true;
             foreach(string key in CoreTraitKeys)
             {
-                int modifier=Program.ClampTrait(Program.TraitInt(foundation,key));
+                int modifier=CharactersService.ClampTrait(CharactersService.TraitInt(foundation,key));
                 TraitPercentageBand(modifier,out int minimum,out int maximum);
                 bool has=percentages.ContainsKey(key);int percentage=ReadInt(percentages,key,int.MinValue);
-                int prior=snapshot.ContainsKey(key)?Program.ClampTrait(ReadInt(snapshot,key,modifier)):modifier;
+                int prior=snapshot.ContainsKey(key)?CharactersService.ClampTrait(ReadInt(snapshot,key,modifier)):modifier;
                 if(!has||percentage==int.MinValue){percentage=StableTraitPercentage(heroId,key,modifier);changed=true;}
                 else if(prior!=modifier){percentage=RemapTraitPercentage(percentage,prior,modifier);changed=true;}
                 else if(percentage<minimum||percentage>maximum){percentage=Math.Max(minimum,Math.Min(maximum,percentage));changed=true;}
@@ -232,7 +232,7 @@ namespace ReignBetaServer
             foreach(string key in CoreTraitKeys)
             {
                 if(!foundation.ContainsKey(key)||!percentages.ContainsKey(key))return false;
-                TraitPercentageBand(Program.TraitInt(foundation,key),out int minimum,out int maximum);int percentage=ReadInt(percentages,key,-1);
+                TraitPercentageBand(CharactersService.TraitInt(foundation,key),out int minimum,out int maximum);int percentage=ReadInt(percentages,key,-1);
                 if(percentage<minimum||percentage>maximum)return false;
             }
             Dictionary<string,object> calculated=CalculateCourtVirtues(percentages);

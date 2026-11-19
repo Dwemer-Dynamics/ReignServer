@@ -183,7 +183,7 @@ namespace ReignBetaServer
                 AddNpcDialogueAssertion(assertions, "party_session_exchange", turns.All(turn => ReadString(turn, "session_id", "") == sessionId && ReadString(turn, "exchange_id", "") == exchangeId), "Every grouped turn shares the requested session and exchange IDs.", sessionId + "," + exchangeId);
                 AddNpcDialogueAssertion(assertions, "party_participants", turns.All(turn =>
                 {
-                    List<string> participants = Program.TextListFromJson(ReadString(turn, "participants_json", "[]"));
+                    List<string> participants = DialogueService.TextListFromJson(ReadString(turn, "participants_json", "[]"));
                     return heroIds.Concat(new[] { playerId }).All(id => participants.Contains(id, StringComparer.OrdinalIgnoreCase));
                 }), "Every turn carries the full group participant set.", string.Join(",", heroIds.Concat(new[] { playerId })));
                 AddNpcDialogueAssertion(assertions, "party_location", turns.All(turn => !string.IsNullOrWhiteSpace(ReadString(turn, "location_id", ""))), "Every grouped turn retains the native location ID.", string.Join(",", turns.Select(turn => ReadString(turn, "location_id", ""))));
@@ -236,7 +236,7 @@ namespace ReignBetaServer
                 AddNpcDialogueAssertion(assertions, "party_memory_lineage", memories.All(memory =>
                     !string.IsNullOrWhiteSpace(ReadString(memory, "event_id", ""))
                     && new[] { "private", "public", "rumor" }.Contains(ReadString(memory, "visibility", ""), StringComparer.OrdinalIgnoreCase)
-                    && Program.TextListFromJson(ReadString(memory, "known_by_json", "[]")).Contains(ReadString(memory, "owner_id", ""), StringComparer.OrdinalIgnoreCase)), "Party memory writes retain source lineage, visibility, and owner knowledge.", string.Join(",", memories.Select(memory => ReadString(memory, "memory_id", ""))));
+                    && DialogueService.TextListFromJson(ReadString(memory, "known_by_json", "[]")).Contains(ReadString(memory, "owner_id", ""), StringComparer.OrdinalIgnoreCase)), "Party memory writes retain source lineage, visibility, and owner knowledge.", string.Join(",", memories.Select(memory => ReadString(memory, "memory_id", ""))));
                 if (recallTokens.Count > 0)
                 {
                     foreach (string token in recallTokens)
@@ -254,7 +254,7 @@ namespace ReignBetaServer
                     ["sceneIndex"] = ReadInt(payload, "sceneIndex", 0),
                     ["sessionId"] = sessionId,
                     ["exchangeId"] = exchangeId,
-                    ["playerText"] = Program.LimitText(playerText, 1600),
+                    ["playerText"] = DialogueService.LimitText(playerText, 1600),
                     ["replies"] = replies,
                     ["selectedContextPulls"] = pullsByHero,
                     ["memoryIds"] = memories.Select(memory => ReadString(memory, "memory_id", "")).ToList(),
@@ -297,7 +297,7 @@ namespace ReignBetaServer
                     fts = ReadInt(DialogueStore.CountSummaryFts(connection, new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault(), "count", 0);
                     embeddingJobs = ReadInt(DialogueStore.CountEmbeddingJobs4(connection, new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault(), "count", 0);
                 }
-                List<string> participants = Program.TextListFromJson(ReadString(summary, "participants_json", "[]"));
+                List<string> participants = DialogueService.TextListFromJson(ReadString(summary, "participants_json", "[]"));
                 AddNpcDialogueAssertion(assertions, "party_scene_closed", session != null && ReadString(session, "status", "") != "open", "Party conversation session is closed.", sessionId);
                 AddNpcDialogueAssertion(assertions, "party_scene_turn_count", turnCount == ReadInt(payload, "expectedTurns", 12), "Party scene contains the expected grouped raw turns.", turnCount.ToString());
                 AddNpcDialogueAssertion(assertions, "party_scene_summary", summary != null && ReadString(summary, "summary_type", "") == "scene", "Party scene summary exists.", ReadString(summary, "summary_id", ""));
@@ -576,9 +576,9 @@ namespace ReignBetaServer
                     && ReadBool(status, "found", false) && File.Exists(ReadString(status, "reportPath", "")),
                     "Cancelled party runs remain available as durable partial reports.");
 
-                List<Dictionary<string, object>> incidentalSellerPulls = Program.DeterministicContextPullSelection(
+                List<Dictionary<string, object>> incidentalSellerPulls = DialogueService.DeterministicContextPullSelection(
                     "party_chat", "A spice seller sneezed twice beside my chipped cup.", "", Program.ContextPullIds.ToList());
-                List<Dictionary<string, object>> explicitTradePulls = Program.DeterministicContextPullSelection(
+                List<Dictionary<string, object>> explicitTradePulls = DialogueService.DeterministicContextPullSelection(
                     "party_chat", "Will you sell me that chipped cup, and how much is it worth?", "", Program.ContextPullIds.ToList());
                 add("commerce_term_boundaries",
                     !incidentalSellerPulls.Any(pull => string.Equals(ReadString(pull, "id", ""), "appraise_trade_offer", StringComparison.OrdinalIgnoreCase))
@@ -610,7 +610,7 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                add("fixture", false, "Party dialogue audit fixture failed: " + Program.LimitText(ex.Message, 400));
+                add("fixture", false, "Party dialogue audit fixture failed: " + DialogueService.LimitText(ex.Message, 400));
             }
             finally
             {

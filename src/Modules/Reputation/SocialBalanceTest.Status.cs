@@ -225,7 +225,7 @@ namespace ReignBetaServer
                 ["timelineId"] = timelineId ?? "main"
             };
             if (string.IsNullOrWhiteSpace(campaignId)
-                || !Program.HasCampaignPostgreSqlStorage(campaignId)) return result;
+                || !DialogueService.HasCampaignPostgreSqlStorage(campaignId)) return result;
             try
             {
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))

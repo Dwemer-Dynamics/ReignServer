@@ -175,7 +175,7 @@ namespace ReignBetaServer
             add("prompt_unidentified_statements_are_not_duplicate_evidence",
                 ReadInt(transcriptDiagnostics, "uniqueLineCount", 0) == 2
                 && ReadInt(transcriptDiagnostics, "duplicateLineCount", -1) == 0
-                && Program.CanonicalizePromptTranscript(unidentified, 30).Count == 2,
+                && DialogueService.CanonicalizePromptTranscript(unidentified, 30).Count == 2,
                 "Equal words in one group beat are retained unless statement identity proves a duplicate.", first.Diagnostics);
             var mixedIdentities = unidentified.Concat(new[]
             {
@@ -184,7 +184,7 @@ namespace ReignBetaServer
             }).ToList();
             AttachPromptSectionDiagnostics(first, new Dictionary<string, string>(), mixedIdentities);
             transcriptDiagnostics = ReadDictionary(first.Diagnostics, "canonicalTranscript");
-            int mixedCanonicalCount = Program.CanonicalizePromptTranscript(mixedIdentities, 30).Count;
+            int mixedCanonicalCount = DialogueService.CanonicalizePromptTranscript(mixedIdentities, 30).Count;
             add("prompt_mixed_identity_diagnostics_match_retained_statements", mixedCanonicalCount == 3
                 && ReadInt(transcriptDiagnostics, "uniqueLineCount", 0) == mixedCanonicalCount
                 && ReadInt(transcriptDiagnostics, "duplicateLineCount", -1) == mixedIdentities.Count - mixedCanonicalCount,
@@ -194,7 +194,7 @@ namespace ReignBetaServer
                 TestDict("turnId", "shared_beat", "sequence", 1, "text", "Agreed.", "role", "npc", "speakerId", "ira"),
                 TestDict("turnId", "shared_beat", "sequence", 1, "text", "Agreed.", "role", "npc", "speakerId", "rhagaea")
             };
-            add("prompt_native_speaker_id_preserves_distinct_authors", Program.CanonicalizePromptTranscript(attributedSequence, 30).Count == 2,
+            add("prompt_native_speaker_id_preserves_distinct_authors", DialogueService.CanonicalizePromptTranscript(attributedSequence, 30).Count == 2,
                 "The native speakerId field participates in identity even when equal words and sequence occur in one beat.", null);
             Dictionary<string, string> oversizedValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {

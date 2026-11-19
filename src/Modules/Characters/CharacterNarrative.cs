@@ -341,10 +341,10 @@ namespace ReignBetaServer
             var life = ReadDictionary(narrative, "life") ?? new Dictionary<string, object>();
             var previousBackground = ReadDictionary(stack, "background") ?? new Dictionary<string, object>();
             stack["background"] = new Dictionary<string, object> {
-                ["version"] = 5, ["summary"] = Program.BuildAroundNativeBackground(ReadString(previousBackground, "nativeEncyclopediaText", ""), ReadString(life, "summary", "")),
+                ["version"] = 5, ["summary"] = CharactersService.BuildAroundNativeBackground(ReadString(previousBackground, "nativeEncyclopediaText", ""), ReadString(life, "summary", "")),
                 ["nativeEncyclopediaText"] = ReadString(previousBackground, "nativeEncyclopediaText", ""),
                 ["nativeTextPreserved"] = !string.IsNullOrWhiteSpace(ReadString(previousBackground, "nativeEncyclopediaText", "")),
-                ["encyclopediaText"] = Program.BuildAroundNativeBackground(ReadString(previousBackground, "nativeEncyclopediaText", ""), ReadString(life, "publicSummary", "")),
+                ["encyclopediaText"] = CharactersService.BuildAroundNativeBackground(ReadString(previousBackground, "nativeEncyclopediaText", ""), ReadString(life, "publicSummary", "")),
                 ["origin"] = ReadString(life, "origin", ""), ["upbringing"] = ReadString(life, "upbringing", ""),
                 ["reputation"] = ReadString(life, "reputation", ""), ["formativeEvents"] = values("formative") };
             stack["voice"] = DeepCloneProfileDictionary(ReadDictionary(narrative, "voice"));

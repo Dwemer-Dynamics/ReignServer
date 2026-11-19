@@ -341,7 +341,7 @@ namespace ReignBetaServer
             return writes;
         }
 
-        private static void MergeCharacterState(string campaignId, string heroId, Dictionary<string, object> stateUpdates)
+        internal static void MergeCharacterState(string campaignId, string heroId, Dictionary<string, object> stateUpdates)
         {
             string path = CharacterFile(campaignId, heroId, "state.json");
             Dictionary<string, object> current = ReadJsonObject(path);
@@ -354,7 +354,7 @@ namespace ReignBetaServer
             WriteJsonObject(path, current);
         }
 
-        private static List<Dictionary<string, object>> NormalizeSuggestedActions(object raw, List<Dictionary<string, object>> actionCatalog)
+        internal static List<Dictionary<string, object>> NormalizeSuggestedActions(object raw, List<Dictionary<string, object>> actionCatalog)
         {
             HashSet<string> allowed = new HashSet<string>(
                 (actionCatalog ?? new List<Dictionary<string, object>>()).Select(x => ReadString(x, "command", "")),
@@ -447,7 +447,7 @@ namespace ReignBetaServer
             return !string.IsNullOrWhiteSpace(directiveText);
         }
 
-        private static bool TryAuthorizeGuardedPromptOverride(
+        internal static bool TryAuthorizeGuardedPromptOverride(
             string campaignId,
             Dictionary<string, object> payload,
             out string directiveText,
@@ -654,7 +654,7 @@ namespace ReignBetaServer
         private const string ActionAcceptanceCooperationDirective =
             "For this one test turn, willingly accept the player's clear, feasible present request. Keep all world facts, identities, ownership, authority, and required terms accurate. If the request is negated, hypothetical, quoted, ambiguous, or beyond your power, do not agree to an action. Reply naturally as this character.";
 
-        private static string AppendActionAcceptanceCooperationContext(
+        internal static string AppendActionAcceptanceCooperationContext(
             string sceneContext)
         {
             StringBuilder builder = new StringBuilder();
@@ -699,7 +699,7 @@ namespace ReignBetaServer
             return priorLines.Skip(priorLines.Count - retainedLineCount).ToList();
         }
 
-        private static string AppendTestDirectiveContext(string sceneContext, string directiveText)
+        internal static string AppendTestDirectiveContext(string sceneContext, string directiveText)
         {
             StringBuilder builder = new StringBuilder();
             if (!string.IsNullOrWhiteSpace(sceneContext))
@@ -720,7 +720,7 @@ namespace ReignBetaServer
             return builder.ToString().Trim();
         }
 
-        private static List<Dictionary<string, object>> QueueTestDirectiveActions(
+        internal static List<Dictionary<string, object>> QueueTestDirectiveActions(
             string campaignId,
             Dictionary<string, object> payload,
             Dictionary<string, object> hero,
@@ -803,7 +803,7 @@ namespace ReignBetaServer
             return !governmentCertificationMemoryIsolation;
         }
 
-        private static List<Dictionary<string, object>> QueueAcceptedDialogueActions(
+        internal static List<Dictionary<string, object>> QueueAcceptedDialogueActions(
             string campaignId,
             Dictionary<string, object> payload,
             Dictionary<string, object> hero,

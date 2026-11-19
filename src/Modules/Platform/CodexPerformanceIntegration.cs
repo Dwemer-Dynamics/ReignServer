@@ -62,7 +62,7 @@ namespace ReignBetaServer
             return Json.Serialize(identity);
         }
 
-        private static void AttachCodexAuthoritativeConversationMetadata(Dictionary<string, object> request, Dictionary<string, object> source,
+        internal static void AttachCodexAuthoritativeConversationMetadata(Dictionary<string, object> request, Dictionary<string, object> source,
             string campaignId, string speakerId, string mode, string sessionId, Dictionary<string, object> identityView,
             Dictionary<string, object> profile, Dictionary<string, object> state, Dictionary<string, object> relationships,
             Dictionary<string, object> summary, Dictionary<string, object> sceneState, object memories, object contextBundles,
@@ -97,7 +97,7 @@ namespace ReignBetaServer
                 ReadString(line, "role", ""), ReadString(line, "speaker", ""), ReadString(line, "text", "") }).ToList()));
         }
 
-        private static Dictionary<string, object> RunCodexConversationScope(Dictionary<string, object> payload, Func<Dictionary<string, object>> generate)
+        internal static Dictionary<string, object> RunCodexConversationScope(Dictionary<string, object> payload, Func<Dictionary<string, object>> generate)
         {
             if (ActiveCodexConversationScope.Value != null) return generate();
             var settings = LoadSettings();
@@ -171,7 +171,7 @@ namespace ReignBetaServer
                     context["acceptedHistorySignature"] = final != null && final.ContainsKey("lines")
                         ? CodexCanonicalHistorySignature(ReadDictionaryList(final, "lines")) : "";
                     try { FinalizeCodexThreadRequest(entry.Item1, context); }
-                    catch (Exception ex) { LogOperational("codex.finalization_cleanup_failed", new Dictionary<string, object> { ["error"] = LimitText(ex.Message, 500) }); }
+                    catch (Exception ex) { LogOperational("codex.finalization_cleanup_failed", new Dictionary<string, object> { ["error"] = DialogueService.LimitText(ex.Message, 500) }); }
                 }
                 if (final != null) final["codexDiagnostics"] = BuildCodexConversationPerformanceDiagnostics(scope, final);
                 }
@@ -188,7 +188,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static void RecordCodexFinalRepairEvidence(Dictionary<string, object> llm)
+        internal static void RecordCodexFinalRepairEvidence(Dictionary<string, object> llm)
         {
             var scope = ActiveCodexConversationScope.Value;
             if (scope == null) return;
@@ -221,7 +221,7 @@ namespace ReignBetaServer
                 && CanonicalJson(finalValue) == CanonicalJson(scope.AcceptedPoliticalConduct);
         }
 
-        private static void RecordCodexFinalizedContract(Dictionary<string, object> parsed, Dictionary<string, object> response)
+        internal static void RecordCodexFinalizedContract(Dictionary<string, object> parsed, Dictionary<string, object> response)
         {
             var scope = ActiveCodexConversationScope.Value;
             if (scope == null || parsed == null) return;

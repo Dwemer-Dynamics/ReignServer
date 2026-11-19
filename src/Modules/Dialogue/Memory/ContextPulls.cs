@@ -19,25 +19,25 @@ using Reign.Core.Contracts.Court;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
-        private static Dictionary<string, object> SelectContextPulls(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> SelectContextPulls(Dictionary<string, object> payload)
         {
             Stopwatch total = Stopwatch.StartNew();
             payload = payload ?? new Dictionary<string, object>();
             string mode = ReadString(payload, "mode", "dialogue");
             string campaignId = ReadString(payload, "campaignId", "default");
-            string correlationId = EnsureCorrelationId(payload);
+            string correlationId = Program.EnsureCorrelationId(payload);
             string heroId = ReadFirstString(payload, "heroStringId", "heroId", "speakerHeroStringId", "characterId");
             string playerText = ReadFirstString(payload, "playerText", "text", "message", "query");
             string sceneContext = ReadString(payload, "sceneContext", "");
             List<string> available = NormalizeContextPullIds(ReadStringList(payload, "availablePullIds"));
             if (available.Count == 0)
             {
-                available = ContextPullIds.ToList();
+                available = Program.ContextPullIds.ToList();
             }
 
-            Dictionary<string, object> settings = LoadSettings();
+            Dictionary<string, object> settings = Program.LoadSettings();
             List<string> minimeTopics = TryExtractMinimeTopics(settings, playerText + "\n" + sceneContext, ReadInt(settings, "minimeMaxTopics", 5));
             string selectorText = AppendMinimeTopics(playerText, minimeTopics);
             Dictionary<string, object> selector = new Dictionary<string, object>
@@ -70,7 +70,7 @@ namespace ReignBetaServer
                 }
             };
 
-            LogOperational("context.select", new Dictionary<string, object>
+            Program.LogOperational("context.select", new Dictionary<string, object>
             {
                 ["mode"] = mode,
                 ["campaignId"] = campaignId,
@@ -84,7 +84,7 @@ namespace ReignBetaServer
                 ["fallbackReason"] = fallbackUsed ? fallbackReason : "",
                 ["timing"] = response["timing"]
             });
-            WriteAudit(campaignId, correlationId, "server", mode, "context.select", heroId, "", "", "completed", total.ElapsedMilliseconds, "Selected context pulls for " + mode + ".", new Dictionary<string, object>
+            Program.WriteAudit(campaignId, correlationId, "server", mode, "context.select", heroId, "", "", "completed", total.ElapsedMilliseconds, "Selected context pulls for " + mode + ".", new Dictionary<string, object>
             {
                 ["playerText"] = playerText,
                 ["sceneContext"] = sceneContext,
@@ -553,7 +553,7 @@ namespace ReignBetaServer
 
         private static List<string> NormalizeContextPullIds(List<string> ids)
         {
-            HashSet<string> allowed = new HashSet<string>(ContextPullIds, StringComparer.OrdinalIgnoreCase);
+            HashSet<string> allowed = new HashSet<string>(Program.ContextPullIds, StringComparer.OrdinalIgnoreCase);
             return (ids ?? new List<string>())
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .Select(x => x.Trim())

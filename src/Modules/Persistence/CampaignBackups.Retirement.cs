@@ -302,7 +302,7 @@ namespace ReignBetaServer
                 request["ids"] = ids.Skip(offset)
                     .Take(CampaignSemanticDeleteBatchSize).ToList();
                 Dictionary<string, object> response = TryParseJsonObject(
-                    Program.PostJsonToUrl(DialogueService.SemanticWorkerUrl(settings, "/vectors/delete"),
+                    DialogueService.PostJsonToUrl(DialogueService.SemanticWorkerUrl(settings, "/vectors/delete"),
                         Json.Serialize(request), CampaignSemanticDeleteTimeoutMs))
                     ?? new Dictionary<string, object>();
                 if (!ReadBool(response, "ok", false))

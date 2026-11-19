@@ -31,7 +31,7 @@ namespace ReignBetaServer
 
         private static double EffectiveStoryIntensity(double intensity, string kind, string route, double lastDay, double day)
         {
-            intensity = Program.ClampDouble(intensity, 0d, 100d);
+            intensity = DialogueService.ClampDouble(intensity, 0d, 100d);
             double age = Math.Max(0d, day - lastDay);
             int periods = 0;
             if (kind == "romance" || kind == "shared_secret" || kind == "favor_debt")
@@ -176,7 +176,7 @@ namespace ReignBetaServer
             if (!RelationshipStoryKinds.Contains(kind, StringComparer.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(subject) || string.IsNullOrWhiteSpace(target)) return;
             Dictionary<string, object> existing = LoadStoryThread(connection, subject, target, kind, day);
             double current = existing.Count == 0 ? 0d : ReadDouble(existing, "effectiveIntensity", ReadDouble(existing, "intensity", 0d));
-            double next = Program.ClampDouble(current + delta, 0d, 100d);
+            double next = DialogueService.ClampDouble(current + delta, 0d, 100d);
             int qualifying = Math.Max(0, ReadInt(existing, "qualifying_events", 0) + qualifyingDelta);
             string status = next <= 0d ? "dormant" : "active";
             Dictionary<string, object> metadata = TryParseJsonObject(ReadString(existing, "payload_json", "{}")) ?? new Dictionary<string, object>();

@@ -5,10 +5,10 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static class DiplomacyRoutes
     {
         // HTTP routes owned by the Diplomacy module, in their former router order (see RouteTable.cs).
-        private static void RegisterDiplomacyRoutes(ReignRouteTable routes)
+        internal static void RegisterDiplomacyRoutes(Program.ReignRouteTable routes)
         {
             routes.Post("/diplomacy/director/evaluate", request => DiplomacyService.EvaluateWorldDiplomacy(request.JsonBody));
             routes.Post("/diplomacy/debug/random-event", request => DiplomacyService.QueueRandomDiplomacyDebugEvent(request.JsonBody));

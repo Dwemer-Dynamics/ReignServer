@@ -19,16 +19,16 @@ using Reign.Core.Contracts.Court;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
-        private static Dictionary<string, object> IngestEvent(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> IngestEvent(Dictionary<string, object> payload)
         {
             string campaignId = ReadString(payload, "campaignId", "default");
             string eventType = ReadString(payload, "eventType", "unknown");
             List<string> actorIds = ReadStringList(payload, "actorIds");
             string locationId = ReadString(payload, "locationId", "");
             string summary = ReadString(payload, "summary", ReadString(payload, "text", ""));
-            List<string> tags = SimpleTags(summary);
+            List<string> tags = Program.SimpleTags(summary);
             long id = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
             Dictionary<string, object> row = new Dictionary<string, object>
@@ -42,7 +42,7 @@ namespace ReignBetaServer
                 ["payload"] = payload
             };
 
-            AppendJsonLineToPath(CampaignFile(campaignId, "world", "events.jsonl"), row);
+            Program.AppendJsonLineToPath(Program.CampaignFile(campaignId, "world", "events.jsonl"), row);
             bool volatileCurrentState =
                 ReadBool(payload, "volatileCurrentState", false)
                 || eventType.Equals(
@@ -63,8 +63,8 @@ namespace ReignBetaServer
             Dictionary<string, object> memoryStore;
             if (volatileCurrentState)
             {
-                WriteJsonObject(
-                    CampaignFile(
+                Program.WriteJsonObject(
+                    Program.CampaignFile(
                         campaignId, "world",
                         "current_native_world_state.json"),
                     memoryPayload);
@@ -98,16 +98,16 @@ namespace ReignBetaServer
                         ["text"] = summary,
                         ["sourceEventId"] = id
                     };
-                    AppendJsonLineToPath(CampaignFile(campaignId, "world", "memories.jsonl"), memoryRow);
+                    Program.AppendJsonLineToPath(Program.CampaignFile(campaignId, "world", "memories.jsonl"), memoryRow);
                     if (!string.IsNullOrWhiteSpace(ownerId))
                     {
-                        AppendJsonLineToPath(CharacterFile(campaignId, ownerId, "memory", "memories.jsonl"), memoryRow);
+                        Program.AppendJsonLineToPath(Program.CharacterFile(campaignId, ownerId, "memory", "memories.jsonl"), memoryRow);
                     }
                 }
             }
 
             Console.WriteLine("Ingested event " + eventType + " campaign=" + campaignId + " tags=" + string.Join(",", tags));
-            LogOperational("event.ingest", new Dictionary<string, object>
+            Program.LogOperational("event.ingest", new Dictionary<string, object>
             {
                 ["eventId"] = id,
                 ["campaignId"] = campaignId,
@@ -119,22 +119,22 @@ namespace ReignBetaServer
             return new Dictionary<string, object> { ["ok"] = true, ["eventId"] = id, ["tags"] = tags, ["memoryStore"] = memoryStore };
         }
 
-        private static Dictionary<string, object> BuildContext(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> BuildContext(Dictionary<string, object> payload)
         {
             string campaignId = ReadString(payload, "campaignId", "default");
             List<string> actorIds = ReadStringList(payload, "actorIds");
             string query = ReadString(payload, "query", "");
             int limit = ReadInt(payload, "limit", 12);
-            List<string> queryTags = SimpleTags(query);
+            List<string> queryTags = Program.SimpleTags(query);
 
-            List<Dictionary<string, object>> memories = ReadCampaignMemoryLines(campaignId, actorIds)
+            List<Dictionary<string, object>> memories = Program.ReadCampaignMemoryLines(campaignId, actorIds)
                 .Where(x => actorIds.Count == 0 || actorIds.Contains(ReadString(x, "ownerId", "")))
                 .Where(x => queryTags.Count == 0 || ReadStringList(x, "tags").Any(queryTags.Contains))
                 .OrderByDescending(x => ReadLong(x, "ts", 0))
                 .Take(limit)
                 .ToList();
 
-            LogOperational("context.build", new Dictionary<string, object>
+            Program.LogOperational("context.build", new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,
                 ["actorIds"] = actorIds,
@@ -150,12 +150,12 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> MemoryEventApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> MemoryEventApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             Dictionary<string, object> stored = StoreWorldMemoryEvent(payload, "memory_event_api");
             string campaignId = ReadString(payload, "campaignId", "default");
-            LogOperational("memory.event", new Dictionary<string, object>
+            Program.LogOperational("memory.event", new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,
                 ["eventId"] = ReadString(stored, "eventId", ""),
@@ -195,13 +195,13 @@ namespace ReignBetaServer
             return stored;
         }
 
-        private static Dictionary<string, object> MemoryActionResultApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> MemoryActionResultApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             return StoreActionResultMemory(payload, "memory_action_result_api");
         }
 
-        private static Dictionary<string, object> MemoryBuildContextApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> MemoryBuildContextApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -219,7 +219,7 @@ namespace ReignBetaServer
             return packet;
         }
 
-        private static Dictionary<string, object> MemoryConsolidateApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> MemoryConsolidateApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -283,7 +283,7 @@ namespace ReignBetaServer
                 aboutEntityIds = MergeStringLists(ReadStringList(payload, "aboutEntityIds"), ReadStringList(payload, "about_entities"));
             }
 
-            List<string> tags = MergeStringLists(ReadStringList(payload, "tags"), SimpleTags(summary + " " + eventType));
+            List<string> tags = MergeStringLists(ReadStringList(payload, "tags"), Program.SimpleTags(summary + " " + eventType));
             string aboutEntitiesJson = aboutEntitiesValue == null || aboutEntityIds.Count > 0 && !(aboutEntitiesValue is ArrayList) ? Json.Serialize(aboutEntityIds) : Json.Serialize(aboutEntitiesValue);
             string eventCategory = DialogueService.ClassifyEventCategory(eventType, payload, summary);
             string eventSubtype = DialogueService.ClassifyEventSubtype(eventType, summary);
@@ -653,7 +653,7 @@ namespace ReignBetaServer
 
         internal static bool IsPracticeDuelActionReport(Dictionary<string, object> payload)
         {
-            return CanonicalCommand(ReadFirstString(payload, "type", "command")) == "duel_player"
+            return Program.CanonicalCommand(ReadFirstString(payload, "type", "command")) == "duel_player"
                 && ReadString(ReadDictionary(payload, "result"), "resultCode", "") == "practice_duel_completed";
         }
 
@@ -809,7 +809,7 @@ namespace ReignBetaServer
                 ["memoryGroupKey"] = memoryGroupKey ?? "",
                 ["visibility"] = "private",
                 ["importance"] = CalculateTurnImportance(memoryWrites, preparedBeliefs, preparedObligations, preparedComprehension),
-                ["tags"] = MergeStringLists(SimpleTags(summary + " " + eventType), new[] { "conversation" }),
+                ["tags"] = MergeStringLists(Program.SimpleTags(summary + " " + eventType), new[] { "conversation" }),
                 // Canonical conversation_turns plus their FTS window preserve the
                 // recent raw exchange. Do not duplicate every low-salience line as
                 // an event-FTS hit and two durable participant memories; explicit
@@ -860,7 +860,7 @@ namespace ReignBetaServer
                     List<string> tags = MergeStringLists(ReadStringList(copy, "tags"), new[] { "conversation" });
                     if (tags.Count == 0)
                     {
-                        tags = SimpleTags(text);
+                        tags = Program.SimpleTags(text);
                     }
 
                     object aboutRaw = copy.ContainsKey("about_entities") ? copy["about_entities"] : copy.ContainsKey("aboutEntities") ? copy["aboutEntities"] : null;
@@ -1054,7 +1054,7 @@ namespace ReignBetaServer
                 return FirstNonEmpty(prefix, "memory") + ":" + explicitId.Trim();
             }
 
-            Dictionary<string, object> settings = LoadSettings();
+            Dictionary<string, object> settings = Program.LoadSettings();
             int windowMinutes = Math.Max(5, Math.Min(240, ReadInt(settings, "memoryConsolidationWindowMinutes", 30)));
             long bucket = Math.Max(0, ts) / (windowMinutes * 60L);
             List<string> actors = MergeStringLists(new[] { npcId, playerId }, new List<string>())
@@ -1119,7 +1119,7 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> ConsolidateNpcMemory(string campaignId, string npcId, bool force, string requestedGroupKey)
         {
-            Dictionary<string, object> settings = LoadSettings();
+            Dictionary<string, object> settings = Program.LoadSettings();
             if (!force && !ReadBool(settings, "enableMemoryConsolidation", true))
             {
                 return new Dictionary<string, object> { ["ok"] = true, ["enabled"] = false, ["summaryCount"] = 0 };
@@ -1261,7 +1261,7 @@ namespace ReignBetaServer
                     publication.Commit();
                 }
 
-                WriteJsonObject(CharacterFile(campaignId, npcId, "memory", "summary.json"), new Dictionary<string, object>
+                Program.WriteJsonObject(Program.CharacterFile(campaignId, npcId, "memory", "summary.json"), new Dictionary<string, object>
                 {
                     ["version"] = 2,
                     ["summaryId"] = summaryId,
@@ -1306,11 +1306,11 @@ namespace ReignBetaServer
             string correlationId = "", Func<Dictionary<string, object>, Dictionary<string, object>> responder = null,
             Action<IReadOnlyList<string>> captureSourceRecords = null, string campaignId = "")
         {
-            if (responder != null && string.IsNullOrWhiteSpace(CampaignsRootOverride.Value))
+            if (responder != null && string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value))
                 throw new InvalidOperationException("Compaction response fixtures require isolated Verification Lab state.");
             bool useLlm = ReadBool(settings, "useMemoryLlmForConsolidation", true);
             if (captureSourceRecords != null && (useLlm || !ReignPostgreSqlStorage.Options.IsValidation
-                || string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)))
+                || string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)))
                 throw new InvalidOperationException("Compaction source capture requires isolated validation with generation disabled.");
             int maxChars = Math.Max(500, Math.Min(5000, ReadInt(settings, "memoryConsolidationMaxSummaryChars", 1800)));
             bool dialogueDerived = (groupKey ?? "").StartsWith("conversation:", StringComparison.OrdinalIgnoreCase)
@@ -1337,7 +1337,7 @@ namespace ReignBetaServer
             if (!useLlm) return DialogueService.MemoryCompactionOutcome(retained, "generation_disabled");
             if (joined != string.Join("\n---\n", sourceText))
                 return DialogueService.MemoryCompactionOutcome(retained, "source_input_exceeds_budget");
-            if (responder == null && !LlmProviderConfigured(settings))
+            if (responder == null && !Program.LlmProviderConfigured(settings))
                 return DialogueService.MemoryCompactionOutcome(retained, "provider_not_configured");
             {
                 var request = new Dictionary<string, object>
@@ -1370,7 +1370,7 @@ namespace ReignBetaServer
                     },
                     ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
                 };
-                var llm = responder == null ? ChatWithLlm(request) : responder(request);
+                var llm = responder == null ? Program.ChatWithLlm(request) : responder(request);
                 return DialogueService.EvaluateMemoryCompactionResponse(llm, rows, sourceText, topics, maxChars, dialogueDerived);
             }
         }
@@ -1383,7 +1383,7 @@ namespace ReignBetaServer
             return value;
         }
 
-        private static string BuildBalancedSummarySource(List<string> sourceText, int maxChars)
+        internal static string BuildBalancedSummarySource(List<string> sourceText, int maxChars)
         {
             sourceText = (sourceText ?? new List<string>())
                 .Where(value => !string.IsNullOrWhiteSpace(value))

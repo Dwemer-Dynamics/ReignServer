@@ -64,7 +64,7 @@ namespace ReignBetaServer
             ChatViewScope(connection, payload);
             string session = ReadString(payload, "sessionId", ""), timeline = ReadString(payload, "timelineId", "");
             string player = ReadString(payload, "playerId", "");
-            var access = new Program.KnowledgeAccessContext { NpcId = player, TimelineId = timeline,
+            var access = new DialogueService.KnowledgeAccessContext { NpcId = player, TimelineId = timeline,
                 WorldDay = ReadDouble(payload, "worldDay", double.MaxValue), AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue };
             // Page by complete exchange identities, never a bounded UI line buffer.
             string through = ReadString(payload, "throughExchangeId", "");
@@ -83,7 +83,7 @@ namespace ReignBetaServer
                 string exchange = ReadString(group, "exchange_id", "");
                 var turns = DialogueStore.SelectConversationTurns3(connection, TestDict("session", session, "exchange", exchange));
                 turns = turns.Where(t => ReadString(t, "frame_json", "").Length > 0 && MemoryTimeVisible(t, access, connection)
-                    && Program.TextListFromJson(ReadString(t, "participants_json", "[]")).Contains(player, StringComparer.OrdinalIgnoreCase)).ToList();
+                    && DialogueService.TextListFromJson(ReadString(t, "participants_json", "[]")).Contains(player, StringComparer.OrdinalIgnoreCase)).ToList();
                 var complete = ChatViewCompleteExchange(turns, player);
                 if (complete.Count == 0) continue;
                 foreach (var line in complete.Where(t => ReadString(t, "role", "") == "player"))
@@ -116,8 +116,8 @@ namespace ReignBetaServer
             if (frozen == null || ReadString(frozen, "role", "") != "npc") return false;
             var source = DialogueStore.SelectConversationTurns5(connection, TestDict("id", selectedId)).SingleOrDefault();
             return source != null && PromptHash(ReadString(source, "text", "")) == ReadString(frozen, "sourceHash", "")
-                && Program.TextListFromJson(ReadString(source, "participants_json", "[]")).Contains(ReadString(request, "playerId", ""), StringComparer.OrdinalIgnoreCase)
-                && MemoryTimeVisible(source, new Program.KnowledgeAccessContext { NpcId = ReadString(request, "playerId", ""),
+                && DialogueService.TextListFromJson(ReadString(source, "participants_json", "[]")).Contains(ReadString(request, "playerId", ""), StringComparer.OrdinalIgnoreCase)
+                && MemoryTimeVisible(source, new DialogueService.KnowledgeAccessContext { NpcId = ReadString(request, "playerId", ""),
                     TimelineId = ReadString(request, "timelineId", ""), WorldDay = ReadDouble(request, "worldDay", double.MaxValue),
                     AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue }, connection);
         }

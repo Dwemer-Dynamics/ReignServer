@@ -390,10 +390,10 @@ namespace ReignBetaServer
                 ["payloadKeys"] = payload.Keys.OrderBy(x => x).ToList()
             });
 
-            List<Dictionary<string, object>> selectedPulls = NormalizeSelectedContextPulls(ReadDictionaryList(payload, "selectedContextPulls"), ContextPullIds.ToList());
+            List<Dictionary<string, object>> selectedPulls = DialogueService.NormalizeSelectedContextPulls(ReadDictionaryList(payload, "selectedContextPulls"), ContextPullIds.ToList());
             if (selectedPulls.Count == 0)
             {
-                selectedPulls = DeterministicContextPullSelection(mode, ReadFirstString(input, "playerText", "text", "message"), ReadString(payload, "sceneContext", ""), ContextPullIds.ToList());
+                selectedPulls = DialogueService.DeterministicContextPullSelection(mode, ReadFirstString(input, "playerText", "text", "message"), ReadString(payload, "sceneContext", ""), ContextPullIds.ToList());
             }
 
             List<Dictionary<string, object>> contextBundles = ReadDictionaryList(payload, "contextBundles");
@@ -585,7 +585,7 @@ namespace ReignBetaServer
             string playerText = ReadFirstString(payload, "playerText", "text", "message");
             string sceneContext = ReadString(payload, "sceneContext", "");
             Dictionary<string, object> profile = ReadDictionary(snapshot, "profile") ?? ReadJsonObject(CharacterFile(campaignId, heroId, "profile.json"));
-            Dictionary<string, object> characteristics = ReadDictionary(snapshot, "characteristics") ?? LoadCharacterStack(campaignId, heroId);
+            Dictionary<string, object> characteristics = ReadDictionary(snapshot, "characteristics") ?? CharactersService.LoadCharacterStack(campaignId, heroId);
             Dictionary<string, object> state = ReadDictionary(snapshot, "state") ?? ReadJsonObject(CharacterFile(campaignId, heroId, "state.json"));
             Dictionary<string, object> relationships = ReadDictionary(snapshot, "relationships") ?? ReadJsonObject(CharacterFile(campaignId, heroId, "memory", "relationships.json"));
             Dictionary<string, object> summary = ReadDictionary(snapshot, "memorySummary") ?? ReadJsonObject(CharacterFile(campaignId, heroId, "memory", "summary.json"));

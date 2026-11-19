@@ -194,13 +194,13 @@ namespace ReignBetaServer
                 }
                 Check("every_cutoff_keeps_only_complete_root_values", allCutoffs, TestDict("cutoffs", full.Length, "durationMs", watch.ElapsedMilliseconds));
                 Check("oversized_recovery_is_bounded", ReadConversationResponseEnvelope("{" + new string(' ', ConversationResponseRecoveryCharacterLimit)).Error == "recovery_size_limit");
-                Check("explicit_larger_token_allowance_retained", StructuredDialogueResponseMaxTokens(TestDict("maxTokens", 32000)) == 32000
-                    && StructuredEventResponseMaxTokens(TestDict("maxTokens", 32000)) == 32000);
+                Check("explicit_larger_token_allowance_retained", DialogueService.StructuredDialogueResponseMaxTokens(TestDict("maxTokens", 32000)) == 32000
+                    && DialogueService.StructuredEventResponseMaxTokens(TestDict("maxTokens", 32000)) == 32000);
                 foreach (bool social in new[] { false, true })
                 {
                     var envelope = new DialogueService.PromptEnvelope { Messages = new List<Dictionary<string, object>> { TestDict("role", "system", "content", "Fixture rules.") },
                         Diagnostics = TestDict("drinkPromptBudget", TestDict("schema", "fixture")) };
-                    var generationRequest = BuildConversationGenerationRequest(TestDict("maxTokens", 900), envelope,
+                    var generationRequest = DialogueService.BuildConversationGenerationRequest(TestDict("maxTokens", 900), envelope,
                         campaign, "budget", "npc", "Hello.", social);
                     generationRequest["hero"] = profile;
                     var body = BuildChatRequestBody(TestDict(), generationRequest, ReadDictionaryList(generationRequest, "messages"), "fixture-model");

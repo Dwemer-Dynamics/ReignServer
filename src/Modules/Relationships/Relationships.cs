@@ -285,10 +285,10 @@ namespace ReignBetaServer
             double subjectPragmatism = RelationshipTraitPercent(subjectTraits, "pragmatism");
             double subjectStatus = RelationshipStatusScore(subject);
             double targetStatus = RelationshipStatusScore(target);
-            double relativeStatus = Program.ClampDouble((targetStatus - subjectStatus) / 50d, -1d, 1d);
+            double relativeStatus = DialogueService.ClampDouble((targetStatus - subjectStatus) / 50d, -1d, 1d);
             double targetAttractiveness = RelationshipVisibleAttractiveness(target, targetTraits);
             double subjectAttractiveness = RelationshipVisibleAttractiveness(subject, subjectTraits);
-            double affinity = Program.ClampDouble(
+            double affinity = DialogueService.ClampDouble(
                 0.25d * (1d - Math.Abs(sociability - targetSociability) / 100d)
                 + 0.20d * (1d - Math.Abs(subjectPragmatism - targetPragmatism) / 100d)
                 + 0.25d * (targetCompassion / 100d) + 0.15d * (targetTact / 100d)
@@ -336,29 +336,29 @@ namespace ReignBetaServer
         {
             Dictionary<string, object> percentages = ReadDictionary(traitDocument, "traitPercentages")
                 ?? ReadDictionary(ReadDictionary(traitDocument, "traits"), "traitPercentages");
-            if (percentages != null && percentages.ContainsKey(key)) return Program.ClampDouble(ReadDouble(percentages, key, 50d), 0d, 100d);
+            if (percentages != null && percentages.ContainsKey(key)) return DialogueService.ClampDouble(ReadDouble(percentages, key, 50d), 0d, 100d);
             Dictionary<string, object> foundation = ReadDictionary(traitDocument, "foundationTraits")
                 ?? ReadDictionary(ReadDictionary(traitDocument, "traits"), "foundationTraits")
                 ?? traitDocument ?? new Dictionary<string, object>();
-            return Program.ClampDouble(50d + 25d * ReadDouble(foundation, key, 0d), 0d, 100d);
+            return DialogueService.ClampDouble(50d + 25d * ReadDouble(foundation, key, 0d), 0d, 100d);
         }
 
         private static double RelationshipVisibleAttractiveness(Dictionary<string, object> data, Dictionary<string, object> traits)
         {
             Dictionary<string, object> appearance = ReadDictionary(data, "appearance") ?? data ?? new Dictionary<string, object>();
             Dictionary<string, object> attractiveness = ReadDictionary(traits, "attractiveness") ?? new Dictionary<string, object>();
-            return Program.ClampDouble(ReadDouble(appearance, "attractiveness",
+            return DialogueService.ClampDouble(ReadDouble(appearance, "attractiveness",
                 ReadDouble(data, "visibleAttractiveness", ReadDouble(attractiveness, "weight", ReadDouble(attractiveness, "build", 50d)))), 0d, 100d);
         }
 
         private static double RelationshipStatusScore(Dictionary<string, object> data)
         {
             data = data ?? new Dictionary<string, object>();
-            double tier = Program.ClampDouble(ReadDouble(data, "clanTier", 0d), 0d, 6d);
+            double tier = DialogueService.ClampDouble(ReadDouble(data, "clanTier", 0d), 0d, 6d);
             double fiefs = Math.Max(0d, ReadDouble(data, "clanFiefCount", ReadDouble(data, "fiefCount", 0d)));
             double renown = Math.Max(0d, ReadDouble(data, "clanRenown", ReadDouble(data, "renown", 0d)));
             double influence = Math.Max(0d, ReadDouble(data, "influence", 0d));
-            return Program.ClampDouble(tier * 9d + Math.Min(20d, fiefs * 6d) + Math.Min(15d, renown / 80d)
+            return DialogueService.ClampDouble(tier * 9d + Math.Min(20d, fiefs * 6d) + Math.Min(15d, renown / 80d)
                 + Math.Min(10d, influence / 150d) + (ReadBool(data, "isRuler", false) ? 15d : 0d), 0d, 100d);
         }
 
@@ -417,13 +417,13 @@ namespace ReignBetaServer
         {
             string text = ((eventType ?? "") + " " + (summary ?? "")).ToLowerInvariant();
             bool registeredStoryEvent = IsRegisteredRelationshipStoryEvent(eventType);
-            bool betrayal = Program.ContainsAny(text, "betray", "lied", "deceiv", "broke oath", "exposed", "revealed my secret");
-            bool humiliation = Program.ContainsAny(text, "mock", "humiliat", "publicly shamed", "disgrace");
-            bool intimacy = Program.ContainsAny(text, "love", "kiss", "intimate", "embrace", "flirt");
-            bool rejection = Program.ContainsAny(text, "reject", "spurn");
-            bool reconciliation = Program.ContainsAny(text, "apolog", "forgive", "reconcile");
-            string impact = Program.ContainsAny(text, "betray", "murder", "saved my child", "saved her child", "saved his child", "life debt") ? "transformative"
-                : Program.ContainsAny(text, "love", "intimate", "kiss", "humiliat", "rescued", "confession", "oath", "threat") ? "major" : "ordinary";
+            bool betrayal = DialogueService.ContainsAny(text, "betray", "lied", "deceiv", "broke oath", "exposed", "revealed my secret");
+            bool humiliation = DialogueService.ContainsAny(text, "mock", "humiliat", "publicly shamed", "disgrace");
+            bool intimacy = DialogueService.ContainsAny(text, "love", "kiss", "intimate", "embrace", "flirt");
+            bool rejection = DialogueService.ContainsAny(text, "reject", "spurn");
+            bool reconciliation = DialogueService.ContainsAny(text, "apolog", "forgive", "reconcile");
+            string impact = DialogueService.ContainsAny(text, "betray", "murder", "saved my child", "saved her child", "saved his child", "life debt") ? "transformative"
+                : DialogueService.ContainsAny(text, "love", "intimate", "kiss", "humiliat", "rescued", "confession", "oath", "threat") ? "major" : "ordinary";
             int unit = impact == "transformative" ? 35 : impact == "major" ? 16 : 4;
             Dictionary<string, object> deltas = RelationshipFacetKeys.ToDictionary(key => key, key => (object)0, StringComparer.OrdinalIgnoreCase);
             Dictionary<string, object> motive = ReadDictionary(payload, "motiveDecision") ?? new Dictionary<string, object>();
@@ -458,13 +458,13 @@ namespace ReignBetaServer
             }
             if (!registeredStoryEvent)
             {
-                if (Program.ContainsAny(text, "thank", "gift", "help", "saved", "rescue", "kindness")) { deltas["trust"] = unit; deltas["affection"] = unit; deltas["loyalty"] = Math.Max(2, unit / 2); }
-                if (Program.ContainsAny(text, "confession", "secret", "trusted you")) { deltas["trust"] = unit; deltas["affection"] = Math.Max(2, unit / 2); }
+                if (DialogueService.ContainsAny(text, "thank", "gift", "help", "saved", "rescue", "kindness")) { deltas["trust"] = unit; deltas["affection"] = unit; deltas["loyalty"] = Math.Max(2, unit / 2); }
+                if (DialogueService.ContainsAny(text, "confession", "secret", "trusted you")) { deltas["trust"] = unit; deltas["affection"] = Math.Max(2, unit / 2); }
                 if (intimacy && calculatedRomance) { deltas["interest_alignment"] = unit; deltas["dependence"] = Math.Max(2, unit / 2); deltas["debt"] = Math.Max(2, unit / 3); }
                 else if (intimacy && !coerciveRomance) { deltas["affection"] = unit; deltas["attraction"] = unit; deltas["loyalty"] = Math.Max(2, unit / 2); }
                 if (rejection || humiliation) { deltas["affection"] = -unit; deltas["respect"] = -unit; deltas["resentment"] = unit; }
                 if (betrayal) { deltas["trust"] = -unit; deltas["loyalty"] = -unit; deltas["resentment"] = unit; deltas["respect"] = -Math.Max(2, unit / 2); }
-                if (Program.ContainsAny(text, "threat", "kill you", "execute")) { deltas["fear"] = unit; deltas["trust"] = -Math.Max(2, unit / 2); deltas["resentment"] = Math.Max(2, unit / 2); }
+                if (DialogueService.ContainsAny(text, "threat", "kill you", "execute")) { deltas["fear"] = unit; deltas["trust"] = -Math.Max(2, unit / 2); deltas["resentment"] = Math.Max(2, unit / 2); }
                 if (reconciliation) { deltas["resentment"] = -unit; deltas["trust"] = Math.Max(2, unit / 2); }
             }
 
@@ -535,17 +535,17 @@ namespace ReignBetaServer
                 string operation = ReadString(item, "operation", "reinforce").ToLowerInvariant();
                 if (!RelationshipPressureKinds.Contains(kind)) continue;
                 Dictionary<string, object> existing = RelationshipsStore.SelectRelationshipPressures2(connection, new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId, ["kind"] = kind }).FirstOrDefault();
-                double delta = Program.ClampDouble(ReadDouble(item, "intensityDelta", operation == "create" ? 25d : operation == "resolve" ? -100d : 10d), -100d, 100d);
+                double delta = DialogueService.ClampDouble(ReadDouble(item, "intensityDelta", operation == "create" ? 25d : operation == "resolve" ? -100d : 10d), -100d, 100d);
                 if (existing == null && operation != "resolve")
                 {
                     string id = "rpr_" + Guid.NewGuid().ToString("N");
-                    double intensity = Program.ClampDouble(Math.Max(0d, delta), 0d, 100d);
-                    RelationshipsStore.InsertRelationshipPressures2(connection, new Dictionary<string, object> { ["id"] = id, ["subject"] = subjectId, ["target"] = targetId, ["kind"] = kind, ["intensity"] = intensity, ["secrecy"] = Program.ClampDouble(ReadDouble(item, "secrecy", 0.5d), 0d, 1d), ["summary"] = ReadString(item, "summary", ""), ["entities"] = Json.Serialize(ReadStringList(item, "relatedEntityIds")), ["trigger"] = Json.Serialize(new Dictionary<string, object> { ["triggered"] = ReadBool(item, "triggered", false) }), ["evidence"] = Json.Serialize(new[] { eventId }), ["day"] = day, ["ts"] = ts, ["payload"] = Json.Serialize(item) });
+                    double intensity = DialogueService.ClampDouble(Math.Max(0d, delta), 0d, 100d);
+                    RelationshipsStore.InsertRelationshipPressures2(connection, new Dictionary<string, object> { ["id"] = id, ["subject"] = subjectId, ["target"] = targetId, ["kind"] = kind, ["intensity"] = intensity, ["secrecy"] = DialogueService.ClampDouble(ReadDouble(item, "secrecy", 0.5d), 0d, 1d), ["summary"] = ReadString(item, "summary", ""), ["entities"] = Json.Serialize(ReadStringList(item, "relatedEntityIds")), ["trigger"] = Json.Serialize(new Dictionary<string, object> { ["triggered"] = ReadBool(item, "triggered", false) }), ["evidence"] = Json.Serialize(new[] { eventId }), ["day"] = day, ["ts"] = ts, ["payload"] = Json.Serialize(item) });
                     results.Add(new Dictionary<string, object> { ["kind"] = kind, ["operation"] = "created", ["intensity"] = intensity, ["pressureId"] = id });
                 }
                 else if (existing != null)
                 {
-                    double intensity = Program.ClampDouble(ReadDouble(existing, "intensity", 0d) + delta, 0d, 100d);
+                    double intensity = DialogueService.ClampDouble(ReadDouble(existing, "intensity", 0d) + delta, 0d, 100d);
                     string status = operation == "resolve" || intensity <= 0d ? "resolved" : "active";
                     RelationshipsStore.UpdateRelationshipPressures(connection, new Dictionary<string, object> { ["status"] = status, ["intensity"] = intensity, ["summary"] = FirstNonEmpty(ReadString(item, "summary", ""), ReadString(existing, "summary", "")), ["day"] = day, ["ts"] = ts, ["payload"] = Json.Serialize(item), ["id"] = ReadString(existing, "pressure_id", "") });
                     results.Add(new Dictionary<string, object> { ["kind"] = kind, ["operation"] = status == "resolved" ? "resolved" : operation, ["intensity"] = intensity, ["pressureId"] = ReadString(existing, "pressure_id", "") });
@@ -641,7 +641,7 @@ namespace ReignBetaServer
         internal static List<Dictionary<string, object>> CompletedActionRelationshipDirections(Dictionary<string, object> payload, string timelineId = null)
         {
             List<Dictionary<string, object>> directions = new List<Dictionary<string, object>>();
-            if (Program.IsPracticeDuelActionReport(payload)) return directions;
+            if (DialogueService.IsPracticeDuelActionReport(payload)) return directions;
             string status = ReadString(payload, "status", "");
             string actorId = ReadFirstString(payload, "actorHeroStringId", "actorHeroId");
             string targetId = ReadFirstString(payload, "targetHeroStringId", "targetHeroId");
@@ -1088,7 +1088,7 @@ namespace ReignBetaServer
                 };
                 Dictionary<string, object> storedMotive = ReadDictionary(storedPayload, "motiveDecision");
                 relationshipPayload["motiveDecision"] = storedMotive ?? DialogueService.BuildConversationDecisionContext(
-                    campaignId, "correspondence", recipientId, recipientProfile, Program.LoadCharacterStack(campaignId, recipientId), new Dictionary<string, object>(),
+                    campaignId, "correspondence", recipientId, recipientProfile, CharactersService.LoadCharacterStack(campaignId, recipientId), new Dictionary<string, object>(),
                     ReadString(letter, "body", ""), "Private written correspondence.",
                     new Dictionary<string, object> { ["playerHeroStringId"] = senderId, ["recipientId"] = senderId, ["worldDay"] = day, ["mode"] = "correspondence", ["sceneOpportunity"] = new Dictionary<string, object> { ["private"] = true, ["exposure"] = 0.08d, ["witnessIds"] = new List<string>() } },
                     new Dictionary<string, object> { ["identityState"] = "known" });
@@ -1260,7 +1260,7 @@ namespace ReignBetaServer
             var settings = Program.LoadSettings();
             Dictionary<string, object> profile = Program.ReadJsonObject(Program.CharacterFile(campaignId, senderId, "profile.json"));
             profile = MergeCorrespondenceRecipientProfile(profile, receivedLetter, senderId);
-            Dictionary<string, object> characteristics = Program.LoadCharacterStack(campaignId, senderId);
+            Dictionary<string, object> characteristics = CharactersService.LoadCharacterStack(campaignId, senderId);
             Dictionary<string, object> relationship = RelationshipContextApi(new Dictionary<string, object> { ["campaignId"] = campaignId, ["subjectId"] = senderId, ["targetId"] = recipientId });
             string senderName = ReadString(profile, "name", senderId);
             string recipientName = ReadString(receivedLetter, "sender_name", recipientId);
@@ -1279,7 +1279,7 @@ namespace ReignBetaServer
                 memoryContextPayload["structuredActionContext"] = ReadDictionary(receivedPayload, "structuredActionContext");
                 memoryContextPayload["speakerHeroStringId"] = senderId;
             }
-            var letterMemoryPacket = Program.BuildNpcMemoryPacket(campaignId, senderId, recipientId, "", letterBody, 1200,
+            var letterMemoryPacket = DialogueService.BuildNpcMemoryPacket(campaignId, senderId, recipientId, "", letterBody, 1200,
                 memoryContextPayload, settings);
             memoryContextPayload["memoryPrecisionEvidence"] = ReadDictionary(letterMemoryPacket, "precisionEvidence");
             string memoryContext = ReadString(letterMemoryPacket, "memoryPacket", "");
@@ -1356,7 +1356,7 @@ namespace ReignBetaServer
             string recipientId = ReadString(letter, "recipient_id", "");
             string npcId = senderId.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? recipientId : senderId;
             if (string.IsNullOrWhiteSpace(npcId)) return;
-            Dictionary<string, object> line = Program.DialogueLine(DateTimeOffset.UtcNow.ToUnixTimeSeconds(), senderId.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? "player" : "npc", ReadString(letter, "sender_name", senderId), ReadString(letter, "body", ""));
+            Dictionary<string, object> line = DialogueService.DialogueLine(DateTimeOffset.UtcNow.ToUnixTimeSeconds(), senderId.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? "player" : "npc", ReadString(letter, "sender_name", senderId), ReadString(letter, "body", ""));
             line["channel"] = "correspondence";
             line["letterId"] = ReadString(letter, "letter_id", "");
             line["threadId"] = ReadString(letter, "thread_id", "");
@@ -1372,7 +1372,7 @@ namespace ReignBetaServer
                     new[] { recipientId }, "delivered_letter:" + ReadString(letter, "letter_id", ""), day);
         }
 
-        private static double ClampRelationship(double value) => Program.ClampDouble(value, -100d, 100d);
+        private static double ClampRelationship(double value) => DialogueService.ClampDouble(value, -100d, 100d);
         private static double ValueAsDouble(object value)
         {
             if (value == null) return 0d;

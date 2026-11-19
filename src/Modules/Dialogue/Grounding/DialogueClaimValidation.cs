@@ -334,7 +334,7 @@ namespace ReignBetaServer
             {
                 settings ??= Program.LoadSettings();
                 var request = TestDict("schema", DialogueClaimSchema, "pairs", pairs, "workBudgetMs", workBudget);
-                var response = DialogueClaimHelperReplay.Value?.Invoke(request) ?? TryParseJsonObject(Program.PostJsonToUrl(
+                var response = DialogueClaimHelperReplay.Value?.Invoke(request) ?? TryParseJsonObject(DialogueService.PostJsonToUrl(
                     SemanticWorkerUrl(settings, "/dialogue/claims/compare"), Json.Serialize(request), callerBudget));
                 var rows = ReadDictionaryList(response, "rows");
                 bool grounding = ReadString(response, "modelHash", "") == DialogueGroundingHash;
@@ -447,7 +447,7 @@ namespace ReignBetaServer
             {
                 string hash = MemorySelectionTextHash(text).ToLowerInvariant();
                 var request = TestDict("sourceId", "draft_" + hash, "text", text, "textHash", hash);
-                var result = DialogueClaimExtractorReplay.Value?.Invoke(request) ?? TryParseJsonObject(Program.PostJsonToUrl(
+                var result = DialogueClaimExtractorReplay.Value?.Invoke(request) ?? TryParseJsonObject(DialogueService.PostJsonToUrl(
                     SemanticWorkerUrl(settings, "/dialogue/claims/extract"), Json.Serialize(request), 2000));
                 var claims = ReadDictionaryList(result, "claims");
                 bool valid = ReadBool(result, "ok", false) && ReadString(result, "schema", "") == "reign-dialogue-claim-extraction-v1"

@@ -151,7 +151,7 @@ namespace ReignBetaServer
                             : ": The previous output had no usable answer. Answer the latest player turn using the original character and scene instructions already supplied above.")
                         + " Return exactly one complete valid JSON object matching the required response schema. Write the complete reply field first, then its grounded private metadata. Do not return an empty object. Do not use Markdown or code fences." + structuredFieldGuidance
                         + "\n\nREJECTED ORIGINAL RESPONSE TO CORRECT:\n"
-                        + LimitText(initialContent, 16000)
+                        + DialogueService.LimitText(initialContent, 16000)
                         + (repeatCharacterContext
                             ? "\n\nCOMPACT CHARACTER AND MOTIVE CONTEXT:\n"
                                 + Json.Serialize(DialogueService.DialogueValidationRepairCharacterContext(request))
@@ -664,7 +664,7 @@ namespace ReignBetaServer
             return true;
         }
 
-        private static string ExtractVisibleReply(string content)
+        internal static string ExtractVisibleReply(string content)
         {
             if (string.IsNullOrWhiteSpace(content))
             {

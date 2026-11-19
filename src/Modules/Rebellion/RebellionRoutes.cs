@@ -5,10 +5,10 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static class RebellionRoutes
     {
         // HTTP routes owned by the Rebellion module, in their former router order (see RouteTable.cs).
-        private static void RegisterRebellionRoutes(ReignRouteTable routes)
+        internal static void RegisterRebellionRoutes(Program.ReignRouteTable routes)
         {
             routes.Post("/rebellions/evaluate", request => RebellionService.EvaluateRebellions(request.JsonBody));
             routes.Get("/rebellions/query", request => RebellionService.RebellionQueryApi(request.Query));

@@ -155,8 +155,8 @@ namespace ReignBetaServer
             {
                 ["ok"] = true, ["mode"] = "family_chambers", ["reply"] = reply,
                 ["privateAudienceHeroStringId"] = ReadBool(payload, "privatePlayerInputForSpeaker", false) ? heroId : "",
-                ["emotion"] = Program.LimitText(ReadString(parsed, "emotion", "engaged"), 40),
-                ["intent"] = Program.LimitText(ReadString(parsed, "intent", "participate"), 80),
+                ["emotion"] = DialogueService.LimitText(ReadString(parsed, "emotion", "engaged"), 40),
+                ["intent"] = DialogueService.LimitText(ReadString(parsed, "intent", "participate"), 80),
                 ["participation"] = "speak", ["relationshipSignal"] = "neutral",
                 ["relationshipAssessments"] = new List<object>(), ["queuedActions"] = new List<object>(),
                 ["memoryWrites"] = new List<object>(),
@@ -177,9 +177,9 @@ namespace ReignBetaServer
             string heroId = Program.CharacterIdFrom(hero);
             if (string.IsNullOrWhiteSpace(heroId) || ReadBool(hero, "isChild", true))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "An adult hero profile is required." };
-            Program.UpsertCharacterProfile(campaignId, hero);
-            Dictionary<string, object> construction = Program.EnsureCharacterConstructed(campaignId, heroId, hero, "childhood_maturity");
-            if (!Program.IsCharacterConstructionReady(construction))
+            CharactersService.UpsertCharacterProfile(campaignId, hero);
+            Dictionary<string, object> construction = CharactersService.EnsureCharacterConstructed(campaignId, heroId, hero, "childhood_maturity");
+            if (!CharactersService.IsCharacterConstructionReady(construction))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Normal adult character construction is not ready.", ["construction"] = construction };
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
@@ -316,7 +316,7 @@ namespace ReignBetaServer
                     PortraitsService.WriteSharedPortraitAtomic(path + ".json", Encoding.UTF8.GetBytes(Json.Serialize(new Dictionary<string, object>
                     { ["heroId"] = id, ["age"] = ReadDouble(profile, "age", 0d), ["worldDay"] = worldDay, ["confidence"] = face.Confidence, ["method"] = "ultraface_fixed_participant_slot", ["updatedUtc"] = DateTime.UtcNow.ToString("O") })));
                 }
-                catch (Exception ex) { Program.LogOperational("family_chambers.child_reference_skipped", new Dictionary<string, object> { ["heroId"] = Program.CharacterIdFrom(profile), ["error"] = Program.LimitText(ex.Message, 300) }); }
+                catch (Exception ex) { Program.LogOperational("family_chambers.child_reference_skipped", new Dictionary<string, object> { ["heroId"] = Program.CharacterIdFrom(profile), ["error"] = DialogueService.LimitText(ex.Message, 300) }); }
             }
         }
     }

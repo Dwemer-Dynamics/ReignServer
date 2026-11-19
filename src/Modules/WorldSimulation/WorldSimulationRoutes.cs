@@ -5,10 +5,10 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static class WorldSimulationRoutes
     {
         // HTTP routes owned by the WorldSimulation module, in their former router order (see RouteTable.cs).
-        private static void RegisterWorldSimulationRoutes(ReignRouteTable routes)
+        internal static void RegisterWorldSimulationRoutes(Program.ReignRouteTable routes)
         {
 #if !REIGN_EXCLUDE_VERIFICATION
             routes.Post("/tests/live/arm", request => WorldSimulationService.LiveTestArmApi(request.JsonBody));
@@ -54,7 +54,7 @@ namespace ReignBetaServer
             routes.Post("/world-test/heartbeat", request => WorldSimulationService.WorldTestHeartbeatApi(request.JsonBody));
             routes.Get("/world-test/campaigns", request => WorldSimulationService.WorldTestCampaignsApi(request.Query));
             {
-                Func<HttpRequest, object> handler = request => WorldSimulationService.WorldTestOverviewApi(request.Query);
+                Func<Program.HttpRequest, object> handler = request => WorldSimulationService.WorldTestOverviewApi(request.Query);
                 routes.Get("/world-test/overview", handler);
                 routes.Get("/world-test/export", handler);
             }
@@ -72,8 +72,8 @@ namespace ReignBetaServer
 #endif
 #endif
             routes.Post("/events/social/approaches/roll", request => WorldSimulationService.SocialEventApproachRollApi(request.JsonBody));
-            routes.Post("/events/social/turn", request => RunInteractiveRequest(() => WorldSimulationService.SocialEventTurnApi(request.JsonBody)));
-            routes.Post("/events/social/turn-plan", request => RunInteractiveRequest(() => WorldSimulationService.SocialEventTurnPlanApi(request.JsonBody)));
+            routes.Post("/events/social/turn", request => Program.RunInteractiveRequest(() => WorldSimulationService.SocialEventTurnApi(request.JsonBody)));
+            routes.Post("/events/social/turn-plan", request => Program.RunInteractiveRequest(() => WorldSimulationService.SocialEventTurnPlanApi(request.JsonBody)));
             routes.Post("/campaign-commands/report", request => WorldSimulationService.CampaignCommandReportApi(request.JsonBody));
             routes.Post("/campaign-commands/judge", request => WorldSimulationService.CampaignCommandJudgeApi(request.JsonBody));
         }

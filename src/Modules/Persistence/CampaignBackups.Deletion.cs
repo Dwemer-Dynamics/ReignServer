@@ -550,7 +550,7 @@ namespace ReignBetaServer
             {
                 try
                 {
-                    Dictionary<string, object> response = TryParseJsonObject(Program.PostJsonToUrl(DialogueService.SemanticWorkerUrl(settings, "/vectors/delete"), Json.Serialize(request), 15000)) ?? new Dictionary<string, object>();
+                    Dictionary<string, object> response = TryParseJsonObject(DialogueService.PostJsonToUrl(DialogueService.SemanticWorkerUrl(settings, "/vectors/delete"), Json.Serialize(request), 15000)) ?? new Dictionary<string, object>();
                     if (!ReadBool(response, "ok", false)) throw new InvalidOperationException(ReadString(response, "error", "Qdrant collection deletion failed."));
                     return;
                 }

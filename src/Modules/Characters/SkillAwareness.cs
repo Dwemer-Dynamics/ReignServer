@@ -410,7 +410,7 @@ namespace ReignBetaServer
             {
                 bool match = entry.Definition.Aliases.Any(alias => ContainsSkillAlias(query, alias));
                 if (entry.Definition.Key.Equals("trade", StringComparison.OrdinalIgnoreCase)
-                    && (Program.IsConversationalTradeUsage(query.ToLowerInvariant()) || Program.NegatesMaterialTradeOffer(query.ToLowerInvariant())))
+                    && (DialogueService.IsConversationalTradeUsage(query.ToLowerInvariant()) || DialogueService.NegatesMaterialTradeOffer(query.ToLowerInvariant())))
                     match = false;
                 if (entry.Definition.Key.Equals("riding", StringComparison.OrdinalIgnoreCase)
                     && Regex.IsMatch(query, @"\briding\s+(?:out\s+)?(?:the\s+)?(?:storm|wave|tide|trouble|crisis)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)

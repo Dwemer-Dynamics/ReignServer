@@ -45,9 +45,9 @@ namespace ReignBetaServer
             {
                 llm["ok"] = false;
                 llm["errorCode"] = "structured_action_decision_incomplete";
-                llm["error"] = "The hidden action decision could not be verified. No conversation effects are authorized. " + Program.LimitText(error, 800);
+                llm["error"] = "The hidden action decision could not be verified. No conversation effects are authorized. " + DialogueService.LimitText(error, 800);
                 diagnostics["completed"] = false;
-                diagnostics["error"] = Program.LimitText(error, 800);
+                diagnostics["error"] = DialogueService.LimitText(error, 800);
                 return llm;
             }
             // Never replace an existing choice or repair its consent identity.
@@ -550,7 +550,7 @@ namespace ReignBetaServer
             }
             catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException || ex is System.Text.Json.JsonException || ex is OverflowException)
             {
-                output["valid"] = false; output["error"] = Program.LimitText(ex.Message, 1000);
+                output["valid"] = false; output["error"] = DialogueService.LimitText(ex.Message, 1000);
             }
             payload["validatedStructuredActionDecision"] = output;
         }

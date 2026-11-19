@@ -323,7 +323,7 @@ namespace ReignBetaServer
                 }
                 catch (Exception ex)
                 {
-                    errors.Add("Could not reconcile authoritative relationship storage: " + Program.LimitText(ex.Message, 400));
+                    errors.Add("Could not reconcile authoritative relationship storage: " + DialogueService.LimitText(ex.Message, 400));
                 }
             }
 
@@ -972,7 +972,7 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                errors.Add("inspection exception: " + Program.LimitText(ex.Message, 600));
+                errors.Add("inspection exception: " + DialogueService.LimitText(ex.Message, 600));
             }
 
             if (expectedMode == "cold" && (providerCalls < 1 || generated + fallback < 1))

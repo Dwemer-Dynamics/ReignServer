@@ -238,7 +238,7 @@ namespace ReignBetaServer
                             ["needle"] = "%" + actionId + "%"
                         });
                     string eventId = "marriage_" + actionId;
-                    Program.DeleteWorldMemoryEventProjection(connection, eventId);
+                    DialogueService.DeleteWorldMemoryEventProjection(connection, eventId);
                     RelationshipsStore.DeleteEvents(connection, new Dictionary<string, object> { ["event"] = eventId });
 
                     string timelineId = FirstNonEmpty(
@@ -580,7 +580,7 @@ namespace ReignBetaServer
                 if(ReadInt(row,"revealed",0)==1)return new Dictionary<string, object>{{"ok",true},{"idempotent",true},{"childId",childId}};
                 RelationshipsStore.UpdateParentage(connection, new Dictionary<string, object>{{"surname",ReadString(payload,"bastardSurname","Baseborn")},{"payload",Json.Serialize(payload)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"child",childId}});
                 QueueDirectorAction(connection,"reveal_parentage",day,childId,ReadString(row,"biological_father_id",""),new Dictionary<string, object>{{"childId",childId},{"biologicalFatherId",ReadString(row,"biological_father_id","")},{"legalFatherId",ReadString(row,"legal_father_id","")},{"bastardSurname",ReadString(payload,"bastardSurname","Baseborn")}});
-                Program.StoreWorldMemoryEvent(new Dictionary<string, object>{{"campaignId",campaignId},{"eventType","parentage_revealed"},{"worldDay",day},{"summary","The concealed biological parentage of "+childId+" was publicly exposed."},{"participants",new[]{childId,ReadString(row,"mother_id",""),ReadString(row,"biological_father_id","")}},{"visibility","public"},{"importance",0.95d}},"parentage_reveal");
+                DialogueService.StoreWorldMemoryEvent(new Dictionary<string, object>{{"campaignId",campaignId},{"eventType","parentage_revealed"},{"worldDay",day},{"summary","The concealed biological parentage of "+childId+" was publicly exposed."},{"participants",new[]{childId,ReadString(row,"mother_id",""),ReadString(row,"biological_father_id","")}},{"visibility","public"},{"importance",0.95d}},"parentage_reveal");
                 return new Dictionary<string, object>{{"ok",true},{"childId",childId},{"queued",true}};
             }
         }
@@ -732,7 +732,7 @@ namespace ReignBetaServer
                 },
                 ["sceneOpportunity"]=new Dictionary<string, object>{{"private",true},{"exposure",0.12d},{"coercive",false},{"witnessIds",new List<string>()}}
             };
-            Dictionary<string, object> context=DialogueService.BuildConversationDecisionContext(campaignId,"autonomous_relationship",actorId,actor,Program.LoadCharacterStack(campaignId,actorId),new Dictionary<string, object>(),"","A private autonomous social opportunity.",payload,new Dictionary<string, object>{{"identityState","known"}});
+            Dictionary<string, object> context=DialogueService.BuildConversationDecisionContext(campaignId,"autonomous_relationship",actorId,actor,CharactersService.LoadCharacterStack(campaignId,actorId),new Dictionary<string, object>(),"","A private autonomous social opportunity.",payload,new Dictionary<string, object>{{"identityState","known"}});
             return ReadDictionary(context,"romance")??new Dictionary<string, object>();
         }
 
@@ -792,31 +792,31 @@ namespace ReignBetaServer
         private static double MarriageUrgency(Dictionary<string, object> clan,Dictionary<string, object> leader,List<Dictionary<string, object>> members)
         {
             int children=members.Sum(x=>ReadInt(x,"childrenCount",0));
-            double agePressure=members.Count==0?0d:members.Average(x=>Program.ClampDouble((ReadDouble(x,"age",18d)-18d)/25d,0d,1d));
-            double succession=Program.ClampDouble((members.Count==1?0.45d:0.15d)+(children==0?0.30d:0d)+0.25d*agePressure,0d,1d);
-            double isolation=Program.ClampDouble(0.55d-ReadDouble(clan,"tier",0d)/12d-ReadDouble(clan,"gold",0d)/1000000d,0d,1d);
+            double agePressure=members.Count==0?0d:members.Average(x=>DialogueService.ClampDouble((ReadDouble(x,"age",18d)-18d)/25d,0d,1d));
+            double succession=DialogueService.ClampDouble((members.Count==1?0.45d:0.15d)+(children==0?0.30d:0d)+0.25d*agePressure,0d,1d);
+            double isolation=DialogueService.ClampDouble(0.55d-ReadDouble(clan,"tier",0d)/12d-ReadDouble(clan,"gold",0d)/1000000d,0d,1d);
             double traits=(Trait01(leader,"ambition")+Trait01(leader,"dutyMotivation")+Trait01(leader,"traditionalism")+Trait01(leader,"familyMotivation")+Trait01(leader,"powerMotivation")+Trait01(leader,"pragmatism")+Trait01(leader,"riskTolerance"))/7d;
-            return Program.ClampDouble(0.45d*succession+0.25d*isolation+0.30d*traits,0d,1d);
+            return DialogueService.ClampDouble(0.45d*succession+0.25d*isolation+0.30d*traits,0d,1d);
         }
 
         private static double DynasticMarriageScore(Dictionary<string, object> own,Dictionary<string, object> other,Dictionary<string, object> leader,Dictionary<string, object> member,Dictionary<string, object> candidate)
         {
-            double standing=Program.ClampDouble(ReadDouble(other,"tier",0d)/6d,0d,1d)*18d+Program.ClampDouble(ReadDouble(other,"renown",0d)/6000d,0d,1d)*10d;
-            double resources=Program.ClampDouble(ReadDouble(other,"gold",0d)/500000d,0d,1d)*10d+Program.ClampDouble(ReadDouble(other,"influence",0d)/1000d,0d,1d)*8d;
+            double standing=DialogueService.ClampDouble(ReadDouble(other,"tier",0d)/6d,0d,1d)*18d+DialogueService.ClampDouble(ReadDouble(other,"renown",0d)/6000d,0d,1d)*10d;
+            double resources=DialogueService.ClampDouble(ReadDouble(other,"gold",0d)/500000d,0d,1d)*10d+DialogueService.ClampDouble(ReadDouble(other,"influence",0d)/1000d,0d,1d)*8d;
             double compatibility=ReadString(own,"kingdomId","")==ReadString(other,"kingdomId","")?14d:8d;
             if(ReadString(own,"cultureId","")==ReadString(other,"cultureId",""))compatibility+=8d;
-            double household=12d*(ReadInt(candidate,"childrenCount",0)==0?1d:0.5d)+8d*(1d-Program.ClampDouble(Math.Abs(ReadDouble(member,"age",25d)-ReadDouble(candidate,"age",25d))/30d,0d,1d));
+            double household=12d*(ReadInt(candidate,"childrenCount",0)==0?1d:0.5d)+8d*(1d-DialogueService.ClampDouble(Math.Abs(ReadDouble(member,"age",25d)-ReadDouble(candidate,"age",25d))/30d,0d,1d));
             double strategy=12d*Trait01(leader,"ambition")+10d*Trait01(leader,"familyMotivation")+8d*Trait01(leader,"pragmatism");
-            return Program.ClampDouble(standing+resources+compatibility+household+strategy,0d,100d);
+            return DialogueService.ClampDouble(standing+resources+compatibility+household+strategy,0d,100d);
         }
 
         private static double ArrangedMarriageResentment(Dictionary<string, object> spouse,Dictionary<string, object> match,Dictionary<string, object> leader,double politicalValue)
         {
             double resistance=0.20d*Trait01(spouse,"assertiveness")+0.16d*Trait01(spouse,"pride")+0.12d*Trait01(spouse,"impulsiveness")+0.12d*(1d-Trait01(spouse,"traditionalism"));
             double acceptance=0.16d*Trait01(spouse,"dutyMotivation")+0.14d*Trait01(spouse,"familyMotivation")+0.10d*Trait01(spouse,"loyalty")+0.10d*Trait01(spouse,"pragmatism")+0.08d*Trait01(spouse,"ambition");
-            double relation=Program.ClampDouble((ReadDouble(spouse,"nativeRelationToLeader",0d)+100d)/200d,0d,1d);
+            double relation=DialogueService.ClampDouble((ReadDouble(spouse,"nativeRelationToLeader",0d)+100d)/200d,0d,1d);
             double personal=0.10d*Trait01(spouse,"attraction")+0.08d*Trait01(spouse,"socialTrust");
-            return Math.Round(Program.ClampDouble(15d+65d*resistance-55d*acceptance-15d*relation-10d*personal-10d*(politicalValue/100d),0d,60d),2);
+            return Math.Round(DialogueService.ClampDouble(15d+65d*resistance-55d*acceptance-15d*relation-10d*personal-10d*(politicalValue/100d),0d,60d),2);
         }
 
         private static bool MarriagePairAlreadyActive(ReignDbConnection connection,string timelineId,string a,string b)
@@ -860,7 +860,7 @@ namespace ReignBetaServer
         {
             double motivation=0.20d*Trait01(mother,"shame")+0.15d*Trait01(mother,"familyMotivation")+0.15d*Trait01(mother,"traditionalism")+0.10d*Trait01(mother,"dutyMotivation")+0.10d*Trait01(mother,"survivalMotivation")+0.10d*Trait01(mother,"religionMotivation")+0.20d*(1d-Trait01(mother,"honesty"));
             double competence=0.25d*Trait01(mother,"tact")+0.20d*Trait01(mother,"discipline")+0.15d*Trait01(mother,"emotionalStability")+0.15d*Trait01(mother,"pragmatism")+0.15d*Trait01(mother,"confidence")+0.10d;
-            return Program.ClampDouble(0.15d+0.35d*motivation+0.40d*competence-0.10d,0.05d,0.95d);
+            return DialogueService.ClampDouble(0.15d+0.35d*motivation+0.40d*competence-0.10d,0.05d,0.95d);
         }
 
         internal static Dictionary<string, object> LoadDirectorHeroProfile(string campaignId,string heroId,Dictionary<string, object> snapshot)

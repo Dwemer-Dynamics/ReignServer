@@ -25,7 +25,7 @@ namespace ReignBetaServer
             if (proposed == null || proposed.Count == 0) return null;
             var result = new Dictionary<string, object>();
             foreach (string key in new[] { "itemId", "description", "personalMeaning", "supportingQuote", "evidenceEventId" })
-                result[key] = Program.LimitText(ReadString(proposed, key, ""), key == "itemId" || key == "evidenceEventId" ? 160 : 600);
+                result[key] = DialogueService.LimitText(ReadString(proposed, key, ""), key == "itemId" || key == "evidenceEventId" ? 160 : 600);
             result["influence"] = ReadInt(proposed, "influence", 0);
             string quote = ReadString(result, "supportingQuote", "");
             result["quoteValidated"] = quote.Length >= 20 && (visibleReply ?? "").IndexOf(quote, StringComparison.Ordinal) >= 0;

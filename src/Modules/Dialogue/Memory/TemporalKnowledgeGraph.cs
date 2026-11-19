@@ -28,7 +28,7 @@ namespace ReignBetaServer
             string objectId = ReadFirstString(item, "objectId", "object_id", "object", "targetId", "target_id");
             string owner = ReadFirstString(item, "believer", "believerId", "believer_id", "ownerId", "owner_id", "heroStringId");
             if (IsPrivateMentalLayer(kind) && IsUnsupportedRecallAbsenceState(claim)
-                && !HasStoredRecallLossSupport(connection, Program.BuildKnowledgeAccessContext(owner, "", "", item), claim)) return "";
+                && !HasStoredRecallLossSupport(connection, DialogueService.BuildKnowledgeAccessContext(owner, "", "", item), claim)) return "";
             string explicitFactKey = ReadFirstString(item, "factKey", "fact_key", "propositionId", "proposition_id");
             if (string.IsNullOrWhiteSpace(claim) && string.IsNullOrWhiteSpace(subject)) return "";
             AcquirePostgreSqlTransactionMutationLock(connection);
@@ -41,7 +41,7 @@ namespace ReignBetaServer
                 ["campaign"] = campaignId ?? "", ["owner"] = owner ?? "", ["fact"] = factKey, ["timeline"] = timeline
             }).FirstOrDefault();
             string previousId = previous == null ? "" : ReadString(previous, "assertion_id", "");
-            double confidence = Program.ClampDouble(ReadDouble(item, "confidence", 0.5d), 0d, 1d);
+            double confidence = DialogueService.ClampDouble(ReadDouble(item, "confidence", 0.5d), 0d, 1d);
             if (item.ContainsKey("expectedRevision") && ReadInt(item, "expectedRevision", 0) != ReadInt(previous, "revision", 0))
                 throw new InvalidOperationException("Memory assertion revision changed.");
             string acceptedText = ReadString(item, "sourceAcceptedText", "");
@@ -65,9 +65,9 @@ namespace ReignBetaServer
                 DialogueStore.UpdateTemporalKnowledgeAssertions2(connection, new Dictionary<string, object> { ["ts"] = ts, ["id"] = previousId, ["day"] = ReadDouble(item, "worldDay", 0d) });
 
             string assertionId = "assert_" + Guid.NewGuid().ToString("N");
-            List<string> knownBy = Program.MergeStringLists(ReadStringList(item, "known_by"), ReadStringList(item, "knownBy"));
+            List<string> knownBy = DialogueService.MergeStringLists(ReadStringList(item, "known_by"), ReadStringList(item, "knownBy"));
             if (knownBy.Count == 0 && !string.IsNullOrWhiteSpace(owner)) knownBy.Add(owner);
-            List<string> hiddenFrom = Program.MergeStringLists(ReadStringList(item, "hidden_from"), ReadStringList(item, "hiddenFrom"));
+            List<string> hiddenFrom = DialogueService.MergeStringLists(ReadStringList(item, "hidden_from"), ReadStringList(item, "hiddenFrom"));
             string truthStatus = IsPrivateMentalLayer(kind)
                 ? (kind == "belief" ? "believed" : "interpretation")
                 : kind; // Dialogue cannot self-certify a native effect or objective truth.
@@ -118,9 +118,9 @@ namespace ReignBetaServer
         }
 
         internal static List<Dictionary<string, object>> LoadTemporalKnowledgeForPrompt(ReignDbConnection connection, string campaignId,
-            Program.KnowledgeAccessContext knowledge, List<string> queryTerms, int limit)
+            DialogueService.KnowledgeAccessContext knowledge, List<string> queryTerms, int limit)
         {
-            knowledge ??= new Program.KnowledgeAccessContext();
+            knowledge ??= new DialogueService.KnowledgeAccessContext();
             var result = new List<Dictionary<string, object>>();
             var resolved = new HashSet<string>(StringComparer.Ordinal);
             const int batch = 128;
@@ -142,14 +142,14 @@ AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(hidden_from_json::jsonb)
 AND (perspective_owner_id=$observer OR lower(visibility) IN ('world','global','common','public','local','nearby','kingdom','clan','settlement','party','army') OR lower(visibility) LIKE 'public_%' OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(known_by_json::jsonb) k(value) WHERE lower(k.value)=lower($observer)))";
             var parameters = TestDict("campaign", campaignId ?? "", "observer", knowledge.NpcId,
                 "timeline", knowledge.TimelineId, "day", knowledge.WorldDay, "asOfTimestamp", knowledge.AsOfTimestamp,
-                "query", Program.BuildFtsQuery(queryTerms ?? new()), "batch", batch);
+                "query", DialogueService.BuildFtsQuery(queryTerms ?? new()), "batch", batch);
             bool Visible(Dictionary<string, object> row) => MemoryTimeVisible(row, knowledge, connection)
-                && !Program.KnowledgeListContains(row, "hidden_from_json", knowledge.NpcId)
+                && !DialogueService.KnowledgeListContains(row, "hidden_from_json", knowledge.NpcId)
                 && (!IsPrivateMentalLayer(ReadString(row, "assertion_kind", ""))
-                    || Program.KnowledgeIdEquals(ReadString(row, "perspective_owner_id", ""), knowledge.NpcId))
-                && (Program.KnowledgeVisibilityAllows(row, knowledge)
-                    || Program.KnowledgeIdEquals(ReadString(row, "perspective_owner_id", ""), knowledge.NpcId)
-                    || Program.KnowledgeListContains(row, "known_by_json", knowledge.NpcId));
+                    || DialogueService.KnowledgeIdEquals(ReadString(row, "perspective_owner_id", ""), knowledge.NpcId))
+                && (DialogueService.KnowledgeVisibilityAllows(row, knowledge)
+                    || DialogueService.KnowledgeIdEquals(ReadString(row, "perspective_owner_id", ""), knowledge.NpcId)
+                    || DialogueService.KnowledgeListContains(row, "known_by_json", knowledge.NpcId));
             for (int offset = 0; result.Count < Math.Max(1, limit); offset += batch)
             {
                 parameters["offset"] = offset;

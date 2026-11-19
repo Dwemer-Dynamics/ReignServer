@@ -19,12 +19,12 @@ using Reign.Core.Contracts.Court;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
-        private static Dictionary<string, object> SocialEventStart(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> SocialEventStart(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string correlationId = EnsureCorrelationId(payload);
+            string correlationId = Program.EnsureCorrelationId(payload);
             string campaignId = ReadString(payload, "campaignId", "default");
             string eventId = ReadFirstString(payload, "eventId", "socialEventId");
             if (string.IsNullOrWhiteSpace(eventId))
@@ -33,25 +33,25 @@ namespace ReignBetaServer
             }
 
             List<Dictionary<string, object>> attendees = ReadDictionaryList(payload, "attendees");
-            SaveTestSnapshotFromPayload(campaignId, correlationId, "social_event", "event.start", payload);
+            Program.SaveTestSnapshotFromPayload(campaignId, correlationId, "social_event", "event.start", payload);
             foreach (Dictionary<string, object> attendee in attendees)
             {
                 if (attendee != null)
                 {
-                    UpsertCharacterProfile(campaignId, attendee);
+                    CharactersService.UpsertCharacterProfile(campaignId, attendee);
                 }
             }
 
             Dictionary<string, object> row = EventTranscriptLine("system", "Event", "Started " + ReadString(payload, "displayName", "social event") + ".", payload);
-            AppendJsonLineToPath(SocialEventTranscriptFile(campaignId, eventId), row);
+            Program.AppendJsonLineToPath(SocialEventTranscriptFile(campaignId, eventId), row);
             AppendEventLineForAttendees(campaignId, attendees, row);
-            WriteAudit(campaignId, correlationId, "game_client", "social_event", "event.start", "", "", eventId, "completed", 0, "Social event started.", new Dictionary<string, object>
+            Program.WriteAudit(campaignId, correlationId, "game_client", "social_event", "event.start", "", "", eventId, "completed", 0, "Social event started.", new Dictionary<string, object>
             {
                 ["event"] = payload,
                 ["attendeeCount"] = attendees.Count,
                 ["transcriptLine"] = row
             });
-            LogOperational("social_event.start", new Dictionary<string, object>
+            Program.LogOperational("social_event.start", new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,
                 ["correlationId"] = correlationId,
@@ -63,10 +63,10 @@ namespace ReignBetaServer
             return new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaignId, ["correlationId"] = correlationId, ["eventId"] = eventId, ["attendeeCount"] = attendees.Count };
         }
 
-        private static Dictionary<string, object> SocialEventResolve(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> SocialEventResolve(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string correlationId = EnsureCorrelationId(payload);
+            string correlationId = Program.EnsureCorrelationId(payload);
             string campaignId = ReadString(payload, "campaignId", "default");
             string eventId = ReadFirstString(payload, "eventId", "socialEventId");
             if (string.IsNullOrWhiteSpace(eventId))
@@ -75,18 +75,18 @@ namespace ReignBetaServer
             }
 
             Dictionary<string, object> row = EventTranscriptLine("system", "Event", "Resolved " + ReadString(payload, "displayName", "social event") + ".", payload);
-            SaveTestSnapshotFromPayload(campaignId, correlationId, "social_event", "event.resolve", payload);
-            AppendJsonLineToPath(SocialEventTranscriptFile(campaignId, eventId), row);
+            Program.SaveTestSnapshotFromPayload(campaignId, correlationId, "social_event", "event.resolve", payload);
+            Program.AppendJsonLineToPath(SocialEventTranscriptFile(campaignId, eventId), row);
             AppendEventLineForAttendees(campaignId, ReadDictionaryList(payload, "attendees"), row);
             string conversationSessionId = "social_event_" + DialogueService.SafeMemoryKey(eventId);
             Dictionary<string, object> conversationFinish = DialogueService.FinishConversationSession(campaignId, conversationSessionId,
                 "social_event_resolved", false, ReadDouble(payload, "worldDay", 0d), DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-            WriteAudit(campaignId, correlationId, "game_client", "social_event", "event.resolve", "", "", eventId, "completed", 0, "Social event resolved.", new Dictionary<string, object>
+            Program.WriteAudit(campaignId, correlationId, "game_client", "social_event", "event.resolve", "", "", eventId, "completed", 0, "Social event resolved.", new Dictionary<string, object>
             {
                 ["event"] = payload,
                 ["transcriptLine"] = row
             });
-            LogOperational("social_event.resolve", new Dictionary<string, object>
+            Program.LogOperational("social_event.resolve", new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,
                 ["correlationId"] = correlationId,
@@ -101,7 +101,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> SocialEventHistory(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> SocialEventHistory(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -112,7 +112,7 @@ namespace ReignBetaServer
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "eventId is required." };
             }
 
-            List<Dictionary<string, object>> all = ReadJsonLinesFromPath(SocialEventTranscriptFile(campaignId, eventId));
+            List<Dictionary<string, object>> all = Program.ReadJsonLinesFromPath(SocialEventTranscriptFile(campaignId, eventId));
             all = DialogueService.ReadOriginalConversationHistory(campaignId, payload, "", "social_event_" + DialogueService.SafeMemoryKey(eventId), limit, all);
             int start = Math.Max(0, all.Count - limit);
             return new Dictionary<string, object>
@@ -124,7 +124,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> PartyChatHistory(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> PartyChatHistory(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -139,7 +139,7 @@ namespace ReignBetaServer
                 };
             }
 
-            List<Dictionary<string, object>> all = ReadJsonLinesFromPath(
+            List<Dictionary<string, object>> all = Program.ReadJsonLinesFromPath(
                 PartyChatSessionTranscriptFile(campaignId, payload));
             all = DialogueService.ReadOriginalConversationHistory(campaignId, payload, "", sessionId, limit, all);
             int start = Math.Max(0, all.Count - limit);
@@ -150,7 +150,7 @@ namespace ReignBetaServer
                 line["sequence"] = index + 1;
                 if (string.Equals(ReadString(line, "role", ""), "npc", StringComparison.OrdinalIgnoreCase))
                 {
-                    line["text"] = SanitizeVisibleReply(ReadString(line, "text", ""));
+                    line["text"] = Program.SanitizeVisibleReply(ReadString(line, "text", ""));
                 }
             }
 
@@ -167,7 +167,7 @@ namespace ReignBetaServer
         {
             payload = payload ?? new Dictionary<string, object>();
             DialogueService.BeginSinglePassConversation(payload);
-            return DialogueService.RunPlayerActionTurn(payload, () => RunCodexConversationScope(payload, () => SocialEventRespondCore(payload)));
+            return DialogueService.RunPlayerActionTurn(payload, () => Program.RunCodexConversationScope(payload, () => SocialEventRespondCore(payload)));
         }
 
         private static Dictionary<string, object> SocialEventRespondCore(Dictionary<string, object> payload)
@@ -186,7 +186,7 @@ namespace ReignBetaServer
                 new Dictionary<string, object>();
             Dictionary<string, object> construction = new Dictionary<string, object>();
             payload = payload ?? new Dictionary<string, object>();
-            string correlationId = EnsureCorrelationId(payload);
+            string correlationId = Program.EnsureCorrelationId(payload);
             Dictionary<string, object> speaker = ReadDictionary(payload, "speaker") ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", ReadString(speaker, "campaignId", "default"));
             string eventId = ReadFirstString(payload, "eventId", "socialEventId");
@@ -196,7 +196,7 @@ namespace ReignBetaServer
             string heroId = ReadFirstString(payload, "speakerHeroStringId", "heroStringId", "heroId", "characterId");
             if (string.IsNullOrWhiteSpace(heroId))
             {
-                heroId = CharacterIdFrom(speaker);
+                heroId = Program.CharacterIdFrom(speaker);
             }
 
             DialogueService.ApplyPlayerInputAudienceToPayload(payload, heroId);
@@ -222,8 +222,8 @@ namespace ReignBetaServer
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "playerText is required." };
             }
 
-            SaveTestSnapshotFromPayload(campaignId, correlationId, auditMode, auditMode + ".request", payload);
-            WriteAudit(campaignId, correlationId, "game_client", auditMode, auditMode + ".request", heroId, "", eventId, "started", 0, "Event response request received.", new Dictionary<string, object>
+            Program.SaveTestSnapshotFromPayload(campaignId, correlationId, auditMode, auditMode + ".request", payload);
+            Program.WriteAudit(campaignId, correlationId, "game_client", auditMode, auditMode + ".request", heroId, "", eventId, "started", 0, "Event response request received.", new Dictionary<string, object>
             {
                 ["speaker"] = speaker,
                 ["playerText"] = playerText,
@@ -243,7 +243,7 @@ namespace ReignBetaServer
             {
                 if (attendee != null)
                 {
-                    UpsertCharacterProfile(campaignId, attendee);
+                    CharactersService.UpsertCharacterProfile(campaignId, attendee);
                 }
             }
 
@@ -254,23 +254,23 @@ namespace ReignBetaServer
                     speaker["heroStringId"] = heroId;
                 }
 
-                UpsertCharacterProfile(campaignId, speaker);
+                CharactersService.UpsertCharacterProfile(campaignId, speaker);
             }
             upsertMs = phaseTimer.ElapsedMilliseconds;
 
             phaseTimer.Restart();
-            construction = EnsureCharacterConstructed(campaignId, heroId, speaker, "social_event");
+            construction = CharactersService.EnsureCharacterConstructed(campaignId, heroId, speaker, "social_event");
             constructionMs = phaseTimer.ElapsedMilliseconds;
-            if (!IsCharacterConstructionReady(construction))
+            if (!CharactersService.IsCharacterConstructionReady(construction))
             {
                 totalTimer.Stop();
                 Dictionary<string, object> failedTiming = DialogueTiming(totalTimer.ElapsedMilliseconds, upsertMs, constructionMs, contextLoadMs, promptBuildMs, llmMs, 0, parseMs, storageMs);
-                Dictionary<string, object> failed = CharacterConstructionFailureResponse("social_event", campaignId, heroId, ReadString(speaker, "name", heroId), construction, failedTiming, new Dictionary<string, object>
+                Dictionary<string, object> failed = CharactersService.CharacterConstructionFailureResponse("social_event", campaignId, heroId, ReadString(speaker, "name", heroId), construction, failedTiming, new Dictionary<string, object>
                 {
                     ["eventId"] = eventId
                 });
-                LogOperational("social_event.character_construction_failed", failed);
-                WriteAudit(campaignId, correlationId, "server", auditMode, "character.construction", heroId, "", eventId, "failed", constructionMs, "Character construction failed before event response.", new Dictionary<string, object>
+                Program.LogOperational("social_event.character_construction_failed", failed);
+                Program.WriteAudit(campaignId, correlationId, "server", auditMode, "character.construction", heroId, "", eventId, "failed", constructionMs, "Character construction failed before event response.", new Dictionary<string, object>
                 {
                     ["construction"] = construction,
                     ["timing"] = failedTiming
@@ -282,34 +282,34 @@ namespace ReignBetaServer
             string heroName = ReadString(speaker, "name", heroId);
             string playerName = ReadString(payload, "playerName", "Player");
             string sceneContext = ReadString(payload, "sceneContext", "");
-            Dictionary<string, object> settings = LoadSettings();
+            Dictionary<string, object> settings = Program.LoadSettings();
             int canonicalTranscriptLimit = Math.Max(2, Math.Min(100, ReadInt(settings, "recentRawConversationTurns", 30)));
             List<Dictionary<string, object>> eventLines = partyChatRequest
                 ? BuildPartyChatPromptTranscript(payload, playerText)
                 : BuildSocialEventPromptTranscript(
-                    ReadJsonLinesFromPath(SocialEventTranscriptFile(campaignId, eventId)),
+                    Program.ReadJsonLinesFromPath(SocialEventTranscriptFile(campaignId, eventId)),
                     canonicalTranscriptLimit);
             eventLines = CanonicalizePromptTranscript(eventLines, canonicalTranscriptLimit);
             Dictionary<string, object> identityView = CharactersService.ResolvePromptIdentity(payload, heroId, auditMode, eventId, eventLines);
             string promptPlayerName = ReadString(identityView, "usableName", "the stranger");
             payload["identityView"] = identityView;
             DialogueService.BindPromptTranscriptSources(campaignId, heroId, payload, eventLines);
-            Dictionary<string, object> profile = ReadJsonObject(CharacterFile(campaignId, heroId, "profile.json"));
-            Dictionary<string, object> characteristics = LoadCharacterStack(campaignId, heroId);
-            Dictionary<string, object> state = ReadJsonObject(CharacterFile(campaignId, heroId, "state.json"));
-            Dictionary<string, object> relationships = ReadJsonObject(CharacterFile(campaignId, heroId, "memory", "relationships.json"));
-            Dictionary<string, object> summary = ReadJsonObject(CharacterFile(campaignId, heroId, "memory", "summary.json"));
-            List<Dictionary<string, object>> memories = ReadJsonLinesFromPath(CharacterFile(campaignId, heroId, "memory", "memories.jsonl"))
-                .Where(DurableDialogueMemoryRowIsUsable)
+            Dictionary<string, object> profile = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json"));
+            Dictionary<string, object> characteristics = CharactersService.LoadCharacterStack(campaignId, heroId);
+            Dictionary<string, object> state = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "state.json"));
+            Dictionary<string, object> relationships = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "memory", "relationships.json"));
+            Dictionary<string, object> summary = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "memory", "summary.json"));
+            List<Dictionary<string, object>> memories = Program.ReadJsonLinesFromPath(Program.CharacterFile(campaignId, heroId, "memory", "memories.jsonl"))
+                .Where(Program.DurableDialogueMemoryRowIsUsable)
                 .OrderByDescending(x => ReadLong(x, "ts", 0))
                 .Take(ReadInt(settings, "maxContextMemories", 12))
                 .Reverse()
                 .ToList();
-            List<Dictionary<string, object>> selectedContextPulls = NormalizeSelectedContextPulls(ReadDictionaryList(payload, "selectedContextPulls"), ContextPullIds.ToList());
+            List<Dictionary<string, object>> selectedContextPulls = NormalizeSelectedContextPulls(ReadDictionaryList(payload, "selectedContextPulls"), Program.ContextPullIds.ToList());
             List<Dictionary<string, object>> contextBundles = ReadDictionaryList(payload, "contextBundles");
-            List<Dictionary<string, object>> compactActionCatalog = DialogueService.UsesStructuredActions(payload) ? new List<Dictionary<string, object>>() : CompactActionCatalog(ActionCatalog());
+            List<Dictionary<string, object>> compactActionCatalog = DialogueService.UsesStructuredActions(payload) ? new List<Dictionary<string, object>>() : Program.CompactActionCatalog(Program.ActionCatalog());
             contextLoadMs = phaseTimer.ElapsedMilliseconds;
-            WriteAudit(campaignId, correlationId, "server", auditMode, "context.loaded", heroId, "", eventId, "completed", contextLoadMs, "Loaded event character stack, transcript, context bundles, and action catalog.", new Dictionary<string, object>
+            Program.WriteAudit(campaignId, correlationId, "server", auditMode, "context.loaded", heroId, "", eventId, "completed", contextLoadMs, "Loaded event character stack, transcript, context bundles, and action catalog.", new Dictionary<string, object>
             {
                 ["profile"] = profile,
                 ["characteristics"] = characteristics,
@@ -325,7 +325,7 @@ namespace ReignBetaServer
             });
 
             phaseTimer.Restart();
-            using (ReignTraceScope relationshipTrace = BeginReignSpan(
+            using (Program.ReignTraceScope relationshipTrace = Program.BeginReignSpan(
                 "relationship.history.resolve",
                 new Dictionary<string, object>
                 {
@@ -343,7 +343,7 @@ namespace ReignBetaServer
             }
             npcRelationshipContextMs = phaseTimer.ElapsedMilliseconds;
             payload["precomputedNpcRelationshipPrompt"] = npcRelationshipPrompt;
-            WriteAudit(campaignId, correlationId, "server", auditMode,
+            Program.WriteAudit(campaignId, correlationId, "server", auditMode,
                 "relationship_history.loaded", heroId, "", eventId, "completed",
                 npcRelationshipContextMs,
                 "Resolved reusable NPC relationship history before local prompt assembly.",
@@ -358,10 +358,10 @@ namespace ReignBetaServer
             Dictionary<string, object> conversationSceneState = DialogueService.PrepareConversationSceneState(
                 campaignId, payload, heroId, promptTurnText, eventLines, ReadString(payload, "mode", "social_event"));
             DialogueService.PromptEnvelope promptEnvelope;
-            using (ReignTraceScope promptTrace = BeginReignSpan("prompt.build", new Dictionary<string, object>
+            using (Program.ReignTraceScope promptTrace = Program.BeginReignSpan("prompt.build", new Dictionary<string, object>
             { ["campaignId"] = campaignId, ["correlationId"] = correlationId, ["mode"] = auditMode, ["heroId"] = heroId, ["eventId"] = eventId }))
             {
-                if (ActiveCodexConversationScope.Value != null) payload["codexParallelPreparation"] = new Dictionary<string, object>
+                if (Program.ActiveCodexConversationScope.Value != null) payload["codexParallelPreparation"] = new Dictionary<string, object>
                 { ["consistentSnapshot"] = true, ["characterInitialized"] = true, ["requiredStateUpdatesComplete"] = true };
                 promptEnvelope = DialogueService.BuildEventPromptEnvelope(campaignId, eventId, heroId, heroName, promptPlayerName, playerName, promptTurnText, sceneContext, payload, profile, characteristics, state, relationships, summary, eventLines, selectedContextPulls, contextBundles, compactActionCatalog, identityView);
                 promptTrace.Set("promptChars", promptEnvelope.TotalChars);
@@ -369,7 +369,7 @@ namespace ReignBetaServer
             Dictionary<string, object> motiveDecision = ReadDictionary(promptEnvelope.Diagnostics, "motiveDecision") ?? new Dictionary<string, object>();
             List<Dictionary<string, object>> messages = promptEnvelope.Messages;
             promptBuildMs = phaseTimer.ElapsedMilliseconds;
-            WriteAudit(campaignId, correlationId, "server", auditMode, "prompt.built", heroId, "", eventId, "completed", promptBuildMs, "Event prompt assembled.", new Dictionary<string, object>
+            Program.WriteAudit(campaignId, correlationId, "server", auditMode, "prompt.built", heroId, "", eventId, "completed", promptBuildMs, "Event prompt assembled.", new Dictionary<string, object>
             {
                 ["messages"] = messages,
                 ["promptChars"] = promptEnvelope.TotalChars,
@@ -381,14 +381,14 @@ namespace ReignBetaServer
             phaseTimer.Restart();
             Dictionary<string, object> eventLlmRequest = BuildConversationGenerationRequest(
                 settings, promptEnvelope, campaignId, correlationId, heroId, playerText, true, eventId);
-            AttachCodexAuthoritativeConversationMetadata(eventLlmRequest, payload, campaignId, heroId, auditMode,
+            Program.AttachCodexAuthoritativeConversationMetadata(eventLlmRequest, payload, campaignId, heroId, auditMode,
                 ReadFirstString(payload, "conversationSessionId", "sessionId", "conversationId"), identityView, profile, state, relationships, summary,
                 conversationSceneState, null, contextBundles, eventLines, promptTurnText);
             DialogueService.AttachStructuredActionResponseContract(eventLlmRequest, payload);
             Dictionary<string, object> llm = DialogueService.GenerateSinglePassConversation(eventLlmRequest, payload, auditMode, allowQuiet: true);
             if (ReadBool(ReadDictionary(llm, "conversationAgency"), "replayed", false)) return DialogueService.ConversationAgencyReplayResponse(llm, heroId);
             DialogueService.PreserveConversationVerification(payload, llm);
-            RecordCodexFinalRepairEvidence(llm);
+            Program.RecordCodexFinalRepairEvidence(llm);
             llmMs = phaseTimer.ElapsedMilliseconds;
             if (!ReadBool(llm, "ok", false))
             {
@@ -402,7 +402,7 @@ namespace ReignBetaServer
                         constructionMs, contextLoadMs, promptBuildMs, llmMs,
                         ReadLong(llm, "durationMs", 0), parseMs, storageMs),
                     npcRelationshipContextMs, npcRelationshipPrompt);
-                LogOperational("social_event.respond_failed", new Dictionary<string, object>
+                Program.LogOperational("social_event.respond_failed", new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["eventId"] = eventId,
@@ -411,7 +411,7 @@ namespace ReignBetaServer
                     ["timing"] = failedTiming,
                     ["llm"] = llm
                 });
-                WriteAudit(campaignId, correlationId, "server", auditMode, auditMode + ".response", heroId, "", eventId, "failed", totalTimer.ElapsedMilliseconds, "Event response failed during LLM call.", new Dictionary<string, object>
+                Program.WriteAudit(campaignId, correlationId, "server", auditMode, auditMode + ".response", heroId, "", eventId, "failed", totalTimer.ElapsedMilliseconds, "Event response failed during LLM call.", new Dictionary<string, object>
                 {
                     ["stage"] = "llm",
                     ["timing"] = failedTiming,
@@ -430,7 +430,7 @@ namespace ReignBetaServer
             string reply = ReadFirstString(parsed, "reply", "response", "text", "content");
             if (string.IsNullOrWhiteSpace(reply) && participation != "quiet")
             {
-                reply = ExtractVisibleReply(content);
+                reply = Program.ExtractVisibleReply(content);
             }
 
             if (string.IsNullOrWhiteSpace(reply) && participation != "quiet")
@@ -441,7 +441,7 @@ namespace ReignBetaServer
             {
                 reply = string.Empty;
             }
-            reply = SanitizeVisibleReply(reply);
+            reply = Program.SanitizeVisibleReply(reply);
             reply = CharactersService.RemoveSpokenNumericSkillLevels(reply, out bool skillNumericRepairApplied);
             reply = CharactersService.SanitizePromptForIdentity(reply, "", playerName, identityView);
             reply = DialogueService.NormalizeUnknownIdentityVisibleAddress(reply, identityView);
@@ -483,11 +483,11 @@ namespace ReignBetaServer
                 parsed["reply"] = "";
             }
             Dictionary<string, object> actionGate = approachOpening
-                ? NormalizeActionGate(null, "", "")
-                : NormalizeActionGate(parsed == null ? null : ReadDictionary(parsed, "actionGate") ?? ReadDictionary(parsed, "action_gate"), playerText, reply);
+                ? Program.NormalizeActionGate(null, "", "")
+                : Program.NormalizeActionGate(parsed == null ? null : ReadDictionary(parsed, "actionGate") ?? ReadDictionary(parsed, "action_gate"), playerText, reply);
             Dictionary<string, object> decisionBrief = DialogueService.AugmentDecisionBriefWithMotiveEvidence(DialogueService.NormalizeDecisionBrief(parsed, intent, actionGate), motiveDecision);
             DialogueService.RemovePrivateReasoningFields(parsed);
-            List<Dictionary<string, object>> memoryWrites = parsed == null ? new List<Dictionary<string, object>>() : NormalizeMemoryWrites(parsed.ContainsKey("memoryWrites") ? parsed["memoryWrites"] : null, campaignId, heroId, ts);
+            List<Dictionary<string, object>> memoryWrites = parsed == null ? new List<Dictionary<string, object>>() : Program.NormalizeMemoryWrites(parsed.ContainsKey("memoryWrites") ? parsed["memoryWrites"] : null, campaignId, heroId, ts);
             List<Dictionary<string, object>> beliefWrites = parsed == null ? new List<Dictionary<string, object>>() : ReadDictionaryList(parsed, "beliefWrites").Concat(ReadDictionaryList(parsed, "belief_writes")).ToList();
             List<Dictionary<string, object>> relationshipUpdates = parsed == null ? new List<Dictionary<string, object>>() : ReadDictionaryList(parsed, "relationshipUpdates").Concat(ReadDictionaryList(parsed, "relationship_updates")).ToList();
             List<Dictionary<string, object>> obligationWrites = parsed == null ? new List<Dictionary<string, object>>() : ReadDictionaryList(parsed, "obligationWrites").Concat(ReadDictionaryList(parsed, "obligation_writes")).ToList();
@@ -495,10 +495,10 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> dynamicCharacteristicWrites = CharactersService.NormalizeDynamicCharacteristicWrites(parsed, heroId, profile, payload, reply);
             if (agencyVisibleFailure || approachOpening || participation == "quiet") dynamicCharacteristicWrites.Clear();
             List<Dictionary<string, object>> roleWriteRejections = new List<Dictionary<string, object>>();
-            memoryWrites = FilterConversationRoleMisattributions(memoryWrites, payload, playerText, "memory", roleWriteRejections);
-            beliefWrites = FilterConversationRoleMisattributions(beliefWrites, payload, playerText, "belief", roleWriteRejections);
-            obligationWrites = FilterConversationRoleMisattributions(obligationWrites, payload, playerText, "obligation", roleWriteRejections);
-            comprehensionWrites = FilterConversationRoleMisattributions(comprehensionWrites, payload, playerText, "comprehension", roleWriteRejections);
+            memoryWrites = Program.FilterConversationRoleMisattributions(memoryWrites, payload, playerText, "memory", roleWriteRejections);
+            beliefWrites = Program.FilterConversationRoleMisattributions(beliefWrites, payload, playerText, "belief", roleWriteRejections);
+            obligationWrites = Program.FilterConversationRoleMisattributions(obligationWrites, payload, playerText, "obligation", roleWriteRejections);
+            comprehensionWrites = Program.FilterConversationRoleMisattributions(comprehensionWrites, payload, playerText, "comprehension", roleWriteRejections);
             memoryWrites = DialogueService.FilterRoleplayFeedbackWrites(memoryWrites, "memory", roleWriteRejections, payload, heroId, campaignId);
             beliefWrites = DialogueService.FilterRoleplayFeedbackWrites(beliefWrites, "belief", roleWriteRejections, payload, heroId, campaignId);
             obligationWrites = DialogueService.FilterRoleplayFeedbackWrites(obligationWrites, "obligation", roleWriteRejections, payload, heroId, campaignId);
@@ -517,7 +517,7 @@ namespace ReignBetaServer
             if (pendingAddressConvention != null
                 && pendingAddressConvention.Count > 0)
                 stateUpdates["politicalAddressConvention"] =
-                    CloneDictionary(pendingAddressConvention);
+                    Program.CloneDictionary(pendingAddressConvention);
             Dictionary<string, object> politicalConduct =
                 ReadDictionary(parsed, "politicalConduct")
                 ?? new Dictionary<string, object>();
@@ -532,7 +532,7 @@ namespace ReignBetaServer
             }
             List<Dictionary<string, object>> suggestedActions = approachOpening || parsed == null
                 ? new List<Dictionary<string, object>>()
-                : NormalizeSuggestedActions(parsed.ContainsKey("suggestedActions") ? parsed["suggestedActions"] : null, compactActionCatalog);
+                : Program.NormalizeSuggestedActions(parsed.ContainsKey("suggestedActions") ? parsed["suggestedActions"] : null, compactActionCatalog);
             if (participation == "quiet")
             {
                 // These also feed file projections and the returned group result,
@@ -540,11 +540,11 @@ namespace ReignBetaServer
                 memoryWrites.Clear(); beliefWrites.Clear(); relationshipUpdates.Clear(); obligationWrites.Clear();
                 comprehensionWrites.Clear(); dynamicCharacteristicWrites.Clear(); stateUpdates.Clear(); suggestedActions.Clear();
                 relationshipSignal = "unchanged"; reactionTargetHeroStringId = "";
-                actionGate = NormalizeActionGate(null, "", "");
+                actionGate = Program.NormalizeActionGate(null, "", "");
             }
             else DialogueService.CaptureStructuredActionDecision(payload, parsed);
             List<Dictionary<string, object>> identityIntroductionResults = new List<Dictionary<string, object>>();
-            WriteAudit(campaignId, correlationId, "server", auditMode, "model.parsed", heroId, "", eventId, parsed == null ? "warning" : "completed", phaseTimer.ElapsedMilliseconds, parsed == null ? "Model response was not valid JSON; visible reply fallback was used." : "Event model JSON parsed.", new Dictionary<string, object>
+            Program.WriteAudit(campaignId, correlationId, "server", auditMode, "model.parsed", heroId, "", eventId, parsed == null ? "warning" : "completed", phaseTimer.ElapsedMilliseconds, parsed == null ? "Model response was not valid JSON; visible reply fallback was used." : "Event model JSON parsed.", new Dictionary<string, object>
             {
                 ["rawContent"] = content,
                 ["parsed"] = parsed ?? new Dictionary<string, object>(),
@@ -579,7 +579,7 @@ namespace ReignBetaServer
             List<string> eventActionErrors = new List<string>();
             List<Dictionary<string, object>> queuedEventActions = approachOpening || agencyVisibleFailure || participation == "quiet"
                 ? new List<Dictionary<string, object>>()
-                : QueueAcceptedDialogueActions(campaignId, payload, profile, playerText, reply, actionGate, suggestedActions, out eventActionErrors);
+                : Program.QueueAcceptedDialogueActions(campaignId, payload, profile, playerText, reply, actionGate, suggestedActions, out eventActionErrors);
             if (queuedEventActions.Count > 0)
             {
                 string statusLine = "[Bannerlord Reign event action queued: " + string.Join(", ", queuedEventActions.Select(x => ReadString(x, "command", "")).Where(x => !string.IsNullOrWhiteSpace(x))) + ".]";
@@ -679,23 +679,23 @@ namespace ReignBetaServer
             AttachAcceptedTranscriptSourceIds(playerLine, npcLine, conversationExchange);
             if (playerLine != null)
             {
-                AppendJsonLineToPath(eventTranscriptPath, playerLine);
-                AppendJsonLineToPath(CharacterFile(campaignId, heroId, "history", "events.jsonl"), playerLine);
+                Program.AppendJsonLineToPath(eventTranscriptPath, playerLine);
+                Program.AppendJsonLineToPath(Program.CharacterFile(campaignId, heroId, "history", "events.jsonl"), playerLine);
             }
             if (npcLine != null)
             {
-                AppendJsonLineToPath(eventTranscriptPath, npcLine);
-                AppendJsonLineToPath(CharacterFile(campaignId, heroId, "history", "events.jsonl"), npcLine);
+                Program.AppendJsonLineToPath(eventTranscriptPath, npcLine);
+                Program.AppendJsonLineToPath(Program.CharacterFile(campaignId, heroId, "history", "events.jsonl"), npcLine);
             }
             foreach (Dictionary<string, object> memoryWrite in memoryWrites)
             {
-                AppendJsonLineToPath(CharacterFile(campaignId, heroId, "memory", "memories.jsonl"), memoryWrite);
+                Program.AppendJsonLineToPath(Program.CharacterFile(campaignId, heroId, "memory", "memories.jsonl"), memoryWrite);
             }
 
             List<string> dynamicCharacteristicAudience = partyChatTurn
                 ? privatePlayerInputForSpeaker ? new List<string> { heroId, socialPlayerId } : sharedParticipants
                 : privatePlayerInputForSpeaker ? new List<string> { heroId, socialPlayerId } : MergeStringLists(
-                    attendees.Select(CharacterIdFrom).Where(x => !string.IsNullOrWhiteSpace(x)),
+                    attendees.Select(Program.CharacterIdFrom).Where(x => !string.IsNullOrWhiteSpace(x)),
                     new[] { heroId, socialPlayerId });
             Dictionary<string, object> dynamicCharacteristicsStore = CharactersService.StoreDynamicCharacteristicWrites(
                 campaignId,
@@ -720,10 +720,10 @@ namespace ReignBetaServer
                 : DialogueService.ApplyConversationMotiveOutcome(campaignId, motiveDecision, payload, reply, intent, decisionId, decisionBrief);
             if (stateUpdates.Count > 0)
             {
-                MergeCharacterState(campaignId, heroId, stateUpdates);
+                Program.MergeCharacterState(campaignId, heroId, stateUpdates);
             }
 
-            AppendJsonLineToPath(CharacterFile(campaignId, heroId, "history", "decisions.jsonl"), new Dictionary<string, object>
+            Program.AppendJsonLineToPath(Program.CharacterFile(campaignId, heroId, "history", "decisions.jsonl"), new Dictionary<string, object>
             {
                 ["id"] = decisionId,
                 ["ts"] = ts,
@@ -778,7 +778,7 @@ namespace ReignBetaServer
             timing["contextBundleCount"] = contextBundles.Count;
             timing["contextBundleChars"] = Json.Serialize(contextBundles).Length;
             timing["selectedContextPullCount"] = selectedContextPulls.Count;
-            string encyclopediaText = BuildEncyclopediaBackstoryText(campaignId, heroId);
+            string encyclopediaText = CharactersService.BuildEncyclopediaBackstoryText(campaignId, heroId);
 
             Dictionary<string, object> response = new Dictionary<string, object>
             {
@@ -822,7 +822,7 @@ namespace ReignBetaServer
                 ["encyclopediaText"] = encyclopediaText,
                 ["timing"] = timing
             };
-            LogOperational("social_event.respond", new Dictionary<string, object>
+            Program.LogOperational("social_event.respond", new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,
                 ["correlationId"] = correlationId,
@@ -849,7 +849,7 @@ namespace ReignBetaServer
                 ["contextBundleChars"] = Json.Serialize(contextBundles).Length,
                 ["timing"] = timing
             });
-            WriteAudit(campaignId, correlationId, "server", auditMode, auditMode + ".response", heroId, "", eventId, "completed", totalTimer.ElapsedMilliseconds, "Event response completed.", new Dictionary<string, object>
+            Program.WriteAudit(campaignId, correlationId, "server", auditMode, auditMode + ".response", heroId, "", eventId, "completed", totalTimer.ElapsedMilliseconds, "Event response completed.", new Dictionary<string, object>
             {
                 ["decisionId"] = decisionId,
                 ["playerLine"] = playerLine,
@@ -871,7 +871,7 @@ namespace ReignBetaServer
             });
             DialogueService.ScheduleReplayCorpusCapture(campaignId, correlationId);
 
-            RecordCodexFinalizedContract(parsed, response);
+            Program.RecordCodexFinalizedContract(parsed, response);
             return response;
         }
 
@@ -929,14 +929,14 @@ namespace ReignBetaServer
                 List<Dictionary<string, object>> children = familyAttendees.Where(item => ReadBool(item, "isChild", false)).ToList();
                 List<Dictionary<string, object>> adults = familyAttendees.Where(item => !ReadBool(item, "isChild", false)).ToList();
                 HashSet<string> childIds = new HashSet<string>(
-                    children.Select(CharacterIdFrom).Where(id => !string.IsNullOrWhiteSpace(id)),
+                    children.Select(Program.CharacterIdFrom).Where(id => !string.IsNullOrWhiteSpace(id)),
                     StringComparer.OrdinalIgnoreCase);
                 payload["attendees"] = adults;
-                payload["activeHeroIds"] = adults.Select(CharacterIdFrom).Where(id => !string.IsNullOrWhiteSpace(id)).ToList();
-                payload["participants"] = adults.Select(CharacterIdFrom).Where(id => !string.IsNullOrWhiteSpace(id))
+                payload["activeHeroIds"] = adults.Select(Program.CharacterIdFrom).Where(id => !string.IsNullOrWhiteSpace(id)).ToList();
+                payload["participants"] = adults.Select(Program.CharacterIdFrom).Where(id => !string.IsNullOrWhiteSpace(id))
                     .Concat(new[] { ReadString(payload, "playerHeroStringId", "") }).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 payload["sceneParticipants"] = ReadDictionaryList(payload, "sceneParticipants")
-                    .Where(item => !ReadBool(item, "isChild", false) && !childIds.Contains(CharacterIdFrom(item))).ToList();
+                    .Where(item => !ReadBool(item, "isChild", false) && !childIds.Contains(Program.CharacterIdFrom(item))).ToList();
                 payload["actionResolutionIndex"] = new Dictionary<string, object>();
                 payload["sceneContext"] = ReadString(payload, "sceneContext", "")
                     + "\nFAMILY CHILD WITNESSES (prompt context only; never upsert, construct, assess, target, or mutate through adult systems): " + Json.Serialize(children)
@@ -1020,21 +1020,21 @@ namespace ReignBetaServer
             return true;
         }
 
-        private static Dictionary<string, object> GeneratedWildernessPlan(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> GeneratedWildernessPlan(Dictionary<string, object> payload)
         {
             Stopwatch totalTimer = Stopwatch.StartNew();
             Stopwatch phaseTimer = Stopwatch.StartNew();
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
-            string correlationId = EnsureCorrelationId(payload);
+            string correlationId = Program.EnsureCorrelationId(payload);
             List<Dictionary<string, object>> participants = ReadDictionaryList(payload, "participants")
-                .Where(participant => !string.IsNullOrWhiteSpace(CharacterIdFrom(participant)) && CharacterIdFrom(participant).Length <= 160)
-                .GroupBy(CharacterIdFrom, StringComparer.Ordinal).Select(group => group.First())
+                .Where(participant => !string.IsNullOrWhiteSpace(Program.CharacterIdFrom(participant)) && Program.CharacterIdFrom(participant).Length <= 160)
+                .GroupBy(Program.CharacterIdFrom, StringComparer.Ordinal).Select(group => group.First())
                 .Take(WorldSimulationService.WildernessParticipantLimit).ToList();
             if (participants.Count == 0)
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "No eligible wilderness participants." };
             string[] direction = WorldSimulationService.SelectWildernessDirection(payload);
-            string initiatorId = CharacterIdFrom(participants[RandomNumberGenerator.GetInt32(participants.Count)]);
+            string initiatorId = Program.CharacterIdFrom(participants[RandomNumberGenerator.GetInt32(participants.Count)]);
             payload["wildernessInitiatorHeroStringId"] = initiatorId;
             // Passive planning cannot materialize or construct a dynamic character.
             // Their first interactive response performs construction synchronously.
@@ -1057,8 +1057,8 @@ namespace ReignBetaServer
                 ["promptCacheEligible"] = true,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
             };
-            Dictionary<string, object> llm = ChatWithLlm(wildernessLlmRequest);
-            llm = WithDiagnosticTransformation("Answer structure and format repair", llm, () => RetryMalformedStructuredResponse(llm, wildernessLlmRequest, campaignId, correlationId, "generated_wilderness_event", "", ""));
+            Dictionary<string, object> llm = Program.ChatWithLlm(wildernessLlmRequest);
+            llm = Program.WithDiagnosticTransformation("Answer structure and format repair", llm, () => Program.RetryMalformedStructuredResponse(llm, wildernessLlmRequest, campaignId, correlationId, "generated_wilderness_event", "", ""));
             long llmMs = phaseTimer.ElapsedMilliseconds;
             if (!ReadBool(llm, "ok", false))
             {
@@ -1071,7 +1071,7 @@ namespace ReignBetaServer
                     ["llmCallMs"] = llmMs,
                     ["llmProviderMs"] = ReadLong(llm, "durationMs", 0)
                 };
-                LogOperational("generated_wilderness.plan_failed", new Dictionary<string, object>
+                Program.LogOperational("generated_wilderness.plan_failed", new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["correlationId"] = correlationId,
@@ -1105,9 +1105,9 @@ namespace ReignBetaServer
 
             if (participantIds.Count == 0)
             {
-                participantIds = participants.Select(CharacterIdFrom).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
+                participantIds = participants.Select(Program.CharacterIdFrom).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
             }
-            participantIds = participantIds.Where(id => participants.Any(participant => CharacterIdFrom(participant) == id)).Distinct().ToList();
+            participantIds = participantIds.Where(id => participants.Any(participant => Program.CharacterIdFrom(participant) == id)).Distinct().ToList();
             // The prompt's selected initiator is authoritative, not a model guess.
             if (!participantIds.Contains(initiatorId)) participantIds.Insert(0, initiatorId);
             // The client supplies authority for any outside participant; a model
@@ -1150,7 +1150,7 @@ namespace ReignBetaServer
             string rejection = WorldSimulationService.WildernessOpeningRejection(response, payload, participants);
             if (!string.IsNullOrEmpty(rejection))
             {
-                LogOperational("generated_wilderness.plan_rejected", new Dictionary<string, object>
+                Program.LogOperational("generated_wilderness.plan_rejected", new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId, ["correlationId"] = correlationId,
                     ["varietyKey"] = direction[0], ["reason"] = rejection, ["timing"] = timing
@@ -1161,7 +1161,7 @@ namespace ReignBetaServer
                     ["errorCode"] = rejection, ["timing"] = timing
                 };
             }
-            LogOperational("generated_wilderness.plan", new Dictionary<string, object>
+            Program.LogOperational("generated_wilderness.plan", new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,
                 ["correlationId"] = correlationId,
@@ -1196,13 +1196,13 @@ namespace ReignBetaServer
             var openingParticipants = (participants ?? new List<Dictionary<string, object>>()).Take(WorldSimulationService.WildernessParticipantLimit).ToList();
             if (openingParticipants.Count > 0)
                 builder.AppendLine("Initiating participant id: " + LimitText(
-                    openingParticipants.Any(p => CharacterIdFrom(p) == ReadString(payload, "wildernessInitiatorHeroStringId", ""))
-                        ? ReadString(payload, "wildernessInitiatorHeroStringId", "") : CharacterIdFrom(openingParticipants[0]), 160)
+                    openingParticipants.Any(p => Program.CharacterIdFrom(p) == ReadString(payload, "wildernessInitiatorHeroStringId", ""))
+                        ? ReadString(payload, "wildernessInitiatorHeroStringId", "") : Program.CharacterIdFrom(openingParticipants[0]), 160)
                     + ". Give this person the initiating action or question; other listed people may react. Adapt the direction to their established character rather than forcing a new trait.");
             builder.AppendLine("Participants:");
             foreach (Dictionary<string, object> participant in openingParticipants)
             {
-                string heroId = CharacterIdFrom(participant);
+                string heroId = Program.CharacterIdFrom(participant);
                 Dictionary<string, object> stack = loadPassiveStack != null
                     ? loadPassiveStack(heroId, participant)
                     : CharactersService.LoadPassiveCharacterStack(campaignId, heroId, participant);

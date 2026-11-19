@@ -73,7 +73,7 @@ namespace ReignBetaServer
                 bool narrativeRequired = ReadInt(snapshotHero, "narrativeVersion", 0) >= 5
                     || ReadString(prepared, "narrativeSchema", "") == CharactersService.NarrativeSchema;
                 if (!CharactersService.LoadCharacterProfileLibrary().ContainsKey(speakerId)
-                    && (!IsCharacterConstructionReady(prepared) || !TraitDocumentReady(traits)
+                    && (!CharactersService.IsCharacterConstructionReady(prepared) || !CharactersService.TraitDocumentReady(traits)
                         || !ReadBool(prepared, "llmUsed", false)
                         || (narrativeRequired && !CharactersService.NarrativeDocumentReady(ReadDictionary(snapshot, "narrative") ?? ReadDictionary(stack, "narrative")))))
                     throw new ArgumentException("Case " + id + " requires a shipped character or an explicitly completed character snapshot with constructed and traits documents; comparison runs do not author fixture personalities.");
@@ -110,7 +110,7 @@ namespace ReignBetaServer
                         payload["hero"] = hero;
                         // Seed each arm independently. This runs beneath Verification Lab's isolated campaign root.
                         if (CharactersService.LoadCharacterProfileLibrary().ContainsKey(heroId)) CharactersService.MaterializeCharacterProfile(campaignId, heroId, hero, false, false);
-                        else ConstructCharacterFiles(campaignId, heroId, hero, true, false, "codex_performance_fixture");
+                        else CharactersService.ConstructCharacterFiles(campaignId, heroId, hero, true, false, "codex_performance_fixture");
                         CharactersService.MarkCharacterConstructionCompletedOnInteraction(campaignId, heroId, "codex_performance_fixture");
                         var characterStack = ReadDictionary(snapshot, "characteristics") ?? snapshot;
                         foreach (var mapping in new[] { new[] { "profile", "profile.json" }, new[] { "state", "state.json" },
@@ -150,7 +150,7 @@ namespace ReignBetaServer
                         int callsBefore = budget.Used;
                         var timer = Stopwatch.StartNew();
                         string mode = ReadString(source, "mode", "dialogue");
-                        Dictionary<string, object> response = mode == "dialogue" ? DialogueRespond(turnPayload) : SocialEventRespond(turnPayload);
+                        Dictionary<string, object> response = mode == "dialogue" ? DialogueService.DialogueRespond(turnPayload) : DialogueService.SocialEventRespond(turnPayload);
                         timer.Stop();
                         var diagnostics = ReadDictionary(response, "codexDiagnostics") ?? new Dictionary<string, object>();
                         var sample = new Dictionary<string, object> {
@@ -460,7 +460,7 @@ namespace ReignBetaServer
                             TestDict("heroStringId", "fixture_player", "name", "Traveler", "role", "player", "nativeLocationDescription", "a quiet roadside") } };
                     var followupPayload = CharactersService.DeepCloneProfileDictionary(dialoguePayload);
                     var accountSwitchPayload = CharactersService.DeepCloneProfileDictionary(dialoguePayload);
-                    var dialogue = DialogueRespond(dialoguePayload);
+                    var dialogue = DialogueService.DialogueRespond(dialoguePayload);
                     var lines = ReadDictionaryList(dialogue, "lines");
                     var diag = ReadDictionary(dialogue, "codexDiagnostics");
                     string finalSession = ReadString(ReadDictionary(dialogue, "conversationExchange"), "sessionId", "");
@@ -498,7 +498,7 @@ namespace ReignBetaServer
                         followup["playerText"] = "How fares your evening?";
                         followup["correlationId"] = "dialogue_fixture_followup";
                         before = calls;
-                        var warm = DialogueRespond(followup);
+                        var warm = DialogueService.DialogueRespond(followup);
                         var warmLines = ReadDictionaryList(warm, "lines").Where(line => ReadString(line, "sessionId", "") == finalSession).ToList();
                         add("dialogue_heading_preserves_warm_thread", ReadBool(warm, "ok", false) && calls - before == 1
                             && turnThreads.Last() == firstThread && finalReply.Contains("\n\n", StringComparison.Ordinal) && warmLines.Count == 4
@@ -516,7 +516,7 @@ namespace ReignBetaServer
                         switched["correlationId"] = "dialogue_fixture_new_account";
                         responseContract["reply"] = "We can continue from there.";
                         before = calls;
-                        var switchedResult = DialogueRespond(switched);
+                        var switchedResult = DialogueService.DialogueRespond(switched);
                         responseContract["reply"] = "Good evening.";
                         add("verified_same_auth_mode_account_switch_uses_fresh_thread",
                             ReadBool(switchedResult, "ok", false) && calls - before == 1 && turnThreads.Last() != firstThread,

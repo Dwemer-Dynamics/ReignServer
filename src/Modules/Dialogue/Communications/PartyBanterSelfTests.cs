@@ -12,7 +12,7 @@ namespace ReignBetaServer
         {
             var results = new List<Dictionary<string, object>>();
             void Check(string id, bool pass, object data = null) => results.Add(TestDict("caseId", "party_banter_" + id, "passed", pass,
-                "summary", !pass && data != null ? id + ": " + Program.LimitText(Json.Serialize(data), 1200) : id, "data", data));
+                "summary", !pass && data != null ? id + ": " + DialogueService.LimitText(Json.Serialize(data), 1200) : id, "data", data));
             Check("eight_hour_boundary", !PartyBanterPolicy.CanStart(true, true, false, false, 2, 10 + 7.99 / 24, 10, 100, 0)
                 && PartyBanterPolicy.CanStart(true, true, false, false, 2, 10 + 8d / 24, 10, 100, 0));
             Check("travel_and_modal_gates", !PartyBanterPolicy.CanStart(true, false, false, false, 2, 20, 10, 100, 0)
@@ -151,8 +151,8 @@ namespace ReignBetaServer
                 Check("atomic_acceptance_and_retry", ReadInt(accepted, "accepted", 0) == 1 && ReadInt(retry, "accepted", 0) == 1
                     && ReadCurrentSessionDialogueLines(campaign, session, 30).Count == 1);
                 Check("no_manufactured_player_source", DialogueSelfTestStore.SelectConversationTurns3(c, TestDict("id", session)).Count == 0);
-                var listener = Program.BuildKnowledgeAccessContext("commoner", "player", "", TestDict("timelineId", "test", "worldDay", 20d));
-                var absent = Program.BuildKnowledgeAccessContext("absent", "player", "", TestDict("timelineId", "test", "worldDay", 20d));
+                var listener = DialogueService.BuildKnowledgeAccessContext("commoner", "player", "", TestDict("timelineId", "test", "worldDay", 20d));
+                var absent = DialogueService.BuildKnowledgeAccessContext("absent", "player", "", TestDict("timelineId", "test", "worldDay", 20d));
                 Check("accepted_words_recalled_by_listener_only", ReadLogicalConversationTurns(c, session, 30, listener).Count == 1
                     && ReadLogicalConversationTurns(c, session, 30, absent).Count == 0);
                 int fixtureOrdinal = 0;

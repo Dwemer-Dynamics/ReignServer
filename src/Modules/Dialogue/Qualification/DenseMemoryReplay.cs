@@ -100,7 +100,7 @@ namespace ReignBetaServer
 
             internal Dictionary<string, object> Post(string path, Dictionary<string, object> body)
             {
-                var result = TryParseJsonObject(Program.PostJsonToUrl(Endpoint + path, Json.Serialize(body), 30000)) ?? TestDict();
+                var result = TryParseJsonObject(DialogueService.PostJsonToUrl(Endpoint + path, Json.Serialize(body), 30000)) ?? TestDict();
                 if (!ReadBool(result, "ok", false)) throw new InvalidOperationException("Isolated dense worker failed: " + ReadString(result, "error", "unknown"));
                 return result;
             }
@@ -123,7 +123,7 @@ namespace ReignBetaServer
                     generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
                     if (string.IsNullOrWhiteSpace(generation))
                         throw new InvalidOperationException("Dense replay requires an initialized source restore generation.");
-                    var access = Program.BuildKnowledgeAccessContext(observer, peer, "", context);
+                    var access = DialogueService.BuildKnowledgeAccessContext(observer, peer, "", context);
                     foreach (var source in sources)
                     {
                         string originalId = caseIndex + ":" + ReadString(source, "sourceId", "");
@@ -134,10 +134,10 @@ namespace ReignBetaServer
                             "worldDay", ReadDouble(source, "worldDay", 0), "sourceTurnIds", new[] { originalId },
                             "sourceSpeakerId", ReadString(original, "speaker_id", ""),
                             "fixtureProjection", "verbatim_original_reported_speech_v1");
-                        var audience = Program.TextListFromJson(ReadString(original, "participants_json", "[]"));
+                        var audience = DialogueService.TextListFromJson(ReadString(original, "participants_json", "[]"));
                         string summary = ReadString(source, "speakerName", "Speaker") + " (reported "
                             + ReadString(source, "role", "speech") + "): " + ReadString(original, "text", "");
-                        Program.InsertMemoryRow(connection, memoryId, originalId, observer, "episodic", ReadLong(source, "sequence", 0),
+                        DialogueService.InsertMemoryRow(connection, memoryId, originalId, observer, "episodic", ReadLong(source, "sequence", 0),
                             ReadDouble(source, "worldDay", 0), "", summary, audience, new(), "[]", audience, new(), new(),
                             "private", .5d, 0d, 1d, new(), "active", "isolated_verbatim_projection", Json.Serialize(payload), "", "not_indexed");
                         var row = LoadEmbeddingSourceRow(connection, "memory", memoryId);

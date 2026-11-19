@@ -11,7 +11,7 @@ namespace ReignBetaServer
         {
             var results = new List<Dictionary<string, object>>();
             void Check(string name, bool passed, object detail = null) => results.Add(TestDict("caseId", "communication_" + name,
-                "passed", passed, "name", name, "summary", passed ? name : name + ": " + Program.LimitText(Json.Serialize(detail), 6500), "detail", detail));
+                "passed", passed, "name", name, "summary", passed ? name : name + ": " + DialogueService.LimitText(Json.Serialize(detail), 6500), "detail", detail));
             Check("explicit_will_and_contraction", CommunicationPromise("I will tell target about the school.") && CommunicationPromise("I'll write to target tomorrow."));
             foreach (string text in new[] { "I might tell target.", "I would ask target.", "I will not tell target.", "If you pay, I will tell target.",
                 "She said I will tell target.", "\"I will tell target\" was her promise.", "*I will tell target.*", "I will ask target only if you pay." })

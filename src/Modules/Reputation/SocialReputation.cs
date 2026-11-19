@@ -283,7 +283,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> SocialCatalogUpdateApi(Dictionary<string, object> payload)
         {
             string campaignId = ReadString(payload, "campaignId", "default");
-            Dictionary<string, object> proposed = Program.DictionaryOrDefault(payload, "catalog", payload);
+            Dictionary<string, object> proposed = CharactersService.DictionaryOrDefault(payload, "catalog", payload);
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureSocialReputationSchema(connection);
@@ -324,7 +324,7 @@ namespace ReignBetaServer
                 int reputationValue = ReadInt(tag, "reputationValue", 0);
                 if (rumorValue < -10 || rumorValue > 10) errors.Add(id + ": Rumor value must be between -10 and 10.");
                 if (reputationValue < -50 || reputationValue > 50) errors.Add(id + ": Reputation value must be between -50 and 50.");
-                foreach (Dictionary<string, object> variant in Program.DictionaryOrDefault(tag, "genderVariants", new Dictionary<string, object>()).Values.OfType<Dictionary<string, object>>())
+                foreach (Dictionary<string, object> variant in CharactersService.DictionaryOrDefault(tag, "genderVariants", new Dictionary<string, object>()).Values.OfType<Dictionary<string, object>>())
                 {
                     int variantValue = ReadInt(variant, "reputationValue", reputationValue);
                     if (variantValue < -50 || variantValue > 50) errors.Add(id + ": gender reputation value must be between -50 and 50.");
@@ -357,7 +357,7 @@ namespace ReignBetaServer
                 if (chance < 0d || chance > 1d) errors.Add(archetypeId + ": exposure chance must be between 0 and 1.");
                 if (duration < 0d) errors.Add(archetypeId + ": duration cannot be negative.");
                 if (promotionWindow < 0d) errors.Add(archetypeId + ": promotion window cannot be negative.");
-                foreach (string tagId in Program.DictionaryOrDefault(archetype, "roleMappings", new Dictionary<string, object>())
+                foreach (string tagId in CharactersService.DictionaryOrDefault(archetype, "roleMappings", new Dictionary<string, object>())
                     .Values.SelectMany(ValueTextList))
                     if (!proposedIds.Contains(tagId)) errors.Add(archetypeId + ": mapped social entry '" + tagId + "' does not exist.");
             }
@@ -365,7 +365,7 @@ namespace ReignBetaServer
                 if (!archetypeIds.Contains(ReadString(builtIn, "id", "")))
                     errors.Add("Built-in producer '" + ReadString(builtIn, "id", "") + "' cannot be deleted.");
 
-            Dictionary<string, object> governance = Program.DictionaryOrDefault(proposed, "governanceSettings", new Dictionary<string, object>());
+            Dictionary<string, object> governance = CharactersService.DictionaryOrDefault(proposed, "governanceSettings", new Dictionary<string, object>());
             foreach (string key in new[] { "accessionGraceDays", "sampleRetentionDays", "postSiegeRecoveryDays", "integrationFirstDay", "integrationHardExitDay" })
                 if (ReadDouble(governance, key, 0d) < 0d) errors.Add("Governance setting '" + key + "' cannot be negative.");
             if (ReadDouble(governance, "sampleRetentionDays", 35d) < 35d)
@@ -380,7 +380,7 @@ namespace ReignBetaServer
                 && ReadDouble(governance, "securityRecovered", 50d) <= ReadDouble(governance, "securityStrong", 60d)))
                 errors.Add("Security thresholds must be ordered critical < low < recovered <= strong.");
 
-            Dictionary<string, object> war = Program.DictionaryOrDefault(proposed, "warScoreSettings", new Dictionary<string, object>());
+            Dictionary<string, object> war = CharactersService.DictionaryOrDefault(proposed, "warScoreSettings", new Dictionary<string, object>());
             foreach (string key in new[] { "townWeight", "castleWeight", "casualtyCap", "siegeWeight", "raidWeight", "raidCap", "rulerCaptureWeight", "tributeWeight" })
                 if (ReadDouble(war, key, 0d) < 0d) errors.Add("War score setting '" + key + "' cannot be negative.");
             if (ReadDouble(war, "victoryMargin", 15d) <= 0d) errors.Add("War victory margin must be greater than zero.");
@@ -564,7 +564,7 @@ namespace ReignBetaServer
             int highestTier = Math.Max(1, Math.Min(6, participants.Max(x => Math.Max(1, ReadInt(x, "clanTier", 0)))));
             double multiplier = highestTier * 0.5d;
             double chance = payload.ContainsKey("exposureChanceOverride")
-                ? Program.ClampDouble(ReadDouble(payload, "exposureChanceOverride", 0d), 0d, 1d)
+                ? DialogueService.ClampDouble(ReadDouble(payload, "exposureChanceOverride", 0d), 0d, 1d)
                 : Math.Min(1d, Math.Max(0d,
                     ReadDouble(archetype, "baseExposureChance", 0d)
                         * multiplier));
@@ -809,7 +809,7 @@ namespace ReignBetaServer
 
         private static List<string> SocialRoleTags(Dictionary<string, object> archetype, string role)
         {
-            Dictionary<string, object> mappings = Program.DictionaryOrDefault(archetype, "roleMappings", new Dictionary<string, object>());
+            Dictionary<string, object> mappings = CharactersService.DictionaryOrDefault(archetype, "roleMappings", new Dictionary<string, object>());
             if (!mappings.TryGetValue(role ?? "", out object value)) return new List<string>();
             if (value is IEnumerable<object> objects)
                 return objects.Select(x => Convert.ToString(x, CultureInfo.InvariantCulture)).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
@@ -832,7 +832,7 @@ namespace ReignBetaServer
         {
             Dictionary<string, object> result = new Dictionary<string, object>(tag, StringComparer.OrdinalIgnoreCase);
             string sex = ReadString(participant, "sex", ReadBool(participant, "isFemale", false) ? "female" : "male").ToLowerInvariant();
-            Dictionary<string, object> variants = Program.DictionaryOrDefault(tag, "genderVariants", new Dictionary<string, object>());
+            Dictionary<string, object> variants = CharactersService.DictionaryOrDefault(tag, "genderVariants", new Dictionary<string, object>());
             if (variants.TryGetValue(sex, out object variantObject) && variantObject is Dictionary<string, object> variant)
                 foreach (KeyValuePair<string, object> pair in variant) result[pair.Key] = pair.Value;
             string linkedHeroId = ReadString(participant, "linkedHeroId", "");
@@ -931,7 +931,7 @@ namespace ReignBetaServer
                     Dictionary<string, object> activationEvidence = TryParseJsonObject(
                         ReadString(reputation, "activation_evidence_json", "{}"))
                         ?? new Dictionary<string, object>();
-                    Dictionary<string, object> dynamicEvidence = Program.DictionaryOrDefault(
+                    Dictionary<string, object> dynamicEvidence = CharactersService.DictionaryOrDefault(
                         activationEvidence, "dynamicEvidence", new Dictionary<string, object>());
                     reputation["activation_source_correlation_id"] = FirstNonEmpty(
                         ReadString(dynamicEvidence, "sourceCorrelationId", ""),
@@ -1139,7 +1139,7 @@ namespace ReignBetaServer
             foreach (Dictionary<string, object> rumor in ReputationStore.SelectRumorSubjectTags18(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["subject"] = subjectId, ["day"] = worldDay }))
             {
                 bool affairCoParticipant = string.Equals(ReadString(rumor, "archetype_id", ""), "affair", StringComparison.OrdinalIgnoreCase)
-                    && Program.TextListFromJson(ReadString(rumor, "co_participants_json", "[]")).Contains(observerId, StringComparer.OrdinalIgnoreCase);
+                    && DialogueService.TextListFromJson(ReadString(rumor, "co_participants_json", "[]")).Contains(observerId, StringComparer.OrdinalIgnoreCase);
                 if (!affairCoParticipant) rumorValues.Add(ReadInt(rumor, "rumor_value", 0));
             }
             List<int> reputationValues = ReputationStore.SelectCharacterReputations38(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["subject"] = subjectId })

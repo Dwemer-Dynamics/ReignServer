@@ -31,7 +31,7 @@ namespace ReignBetaServer
             string targetKingdomId = ReadFirstString(payload, "targetKingdomId", "speakerKingdomId", "npcKingdomId");
             string claim = ReadFirstString(payload, "claim", "claimText", "playerText", "text", "message");
             double worldDay = ReadDouble(payload, "worldDay", ReadDouble(payload, "currentWorldDay", 0d));
-            bool lookupOnly = ReadBool(payload, "lookupOnly", false) || Program.IsWorldHistoryLookupRequest(claim);
+            bool lookupOnly = ReadBool(payload, "lookupOnly", false) || DialogueService.IsWorldHistoryLookupRequest(claim);
             if (string.IsNullOrWhiteSpace(claim) || string.IsNullOrWhiteSpace(targetId) || (!lookupOnly && string.IsNullOrWhiteSpace(claimantId)))
             {
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = lookupOnly ? "claim and targetId are required." : "claim, claimantId, and targetId are required." };
@@ -245,12 +245,12 @@ namespace ReignBetaServer
         {
             string q = Program.NormalizeLookup(claim);
             if (string.IsNullOrWhiteSpace(q)
-                || Program.ContainsAny(q, "if i said", "if i were", "suppose i", "hypothetically", "as an example"))
+                || DialogueService.ContainsAny(q, "if i said", "if i were", "suppose i", "hypothetically", "as an example"))
             {
                 return null;
             }
 
-            bool directAdmission = Program.ContainsExplicitDeceptionAdmission(q) || Program.ContainsAny(q,
+            bool directAdmission = DialogueService.ContainsExplicitDeceptionAdmission(q) || DialogueService.ContainsAny(q,
                 "i know that account is false", "i know this account is false",
                 "i know that claim is false", "i know this claim is false",
                 "what i just said is false", "what i said is false",
@@ -318,11 +318,11 @@ namespace ReignBetaServer
             string q = Program.NormalizeLookup(claim);
             string normalizedSettlement = Program.NormalizeLookup(settlementName);
             if (!ContradictsNativeCurrentSettlement(claim, settlementName)) return null;
-            bool deniedPresent = Program.ContainsAny(q, "i am not presently in", "im not presently in", "i am not currently in", "im not currently in", "i am not in", "im not in",
+            bool deniedPresent = DialogueService.ContainsAny(q, "i am not presently in", "im not presently in", "i am not currently in", "im not currently in", "i am not in", "im not in",
                     "we are not presently in", "were not presently in", "we are not currently in", "were not currently in", "we are not in", "were not in")
                 || q.Contains("not " + normalizedSettlement)
                 || q.Contains("rather than " + normalizedSettlement);
-            bool deniedEver = Program.ContainsAny(q, "i never entered", "i have never entered", "ive never entered", "i never went to", "i have never been to", "ive never been to", "i was never in",
+            bool deniedEver = DialogueService.ContainsAny(q, "i never entered", "i have never entered", "ive never entered", "i never went to", "i have never been to", "ive never been to", "i was never in",
                 "we never entered", "we have never entered", "weve never entered", "we never went to", "we have never been to", "weve never been to", "we were never in");
             if (!deniedPresent && !deniedEver) return null;
             bool deceptiveIntent = ContainsConversationDeceptiveIntentEvidence(claim);
@@ -352,7 +352,7 @@ namespace ReignBetaServer
                 ["objectiveVerdict"] = "contradicted",
                 ["speakerVerdict"] = "contradicted",
                 ["deceptiveIntent"] = deceptiveIntent,
-                ["directAdmission"] = Program.ContainsExplicitDeceptionAdmission(q),
+                ["directAdmission"] = DialogueService.ContainsExplicitDeceptionAdmission(q),
                 ["explanation"] = "The claimant and observer are presently together in " + settlementName + "; this directly contradicts the location denial.",
                 ["evidenceEventIds"] = new List<string> { evidenceId },
                 ["speakerEvidenceEventIds"] = new List<string> { evidenceId },
@@ -386,7 +386,7 @@ namespace ReignBetaServer
             {
                 string q = Program.NormalizeLookup(clause);
                 if (string.IsNullOrWhiteSpace(q) || !Program.ContainsNormalizedPhrase(q, normalizedSettlement)
-                    || Program.ContainsAny(q, "if i said", "if i were", "suppose i", "hypothetically", "as an example"))
+                    || DialogueService.ContainsAny(q, "if i said", "if i were", "suppose i", "hypothetically", "as an example"))
                     continue;
                 string place = Regex.Escape(normalizedSettlement).Replace("\\ ", @"\s+");
                 if (Regex.IsMatch(q,
@@ -409,7 +409,7 @@ namespace ReignBetaServer
         {
             string q = Program.NormalizeLookup(claim);
             if (string.IsNullOrWhiteSpace(q)) return false;
-            return Program.ContainsExplicitDeceptionAdmission(q) || Program.ContainsAny(q,
+            return DialogueService.ContainsExplicitDeceptionAdmission(q) || DialogueService.ContainsAny(q,
                 "i personally verified", "i verified it myself", "i inspected", "i saw it myself", "i witnessed it myself",
                 "i know for a fact", "we know for a fact", "accept my report", "accept what i say", "accept my account",
                 "stop questioning me", "do not question me", "dont question me", "don't question me",
@@ -429,8 +429,8 @@ namespace ReignBetaServer
                 List<Dictionary<string, object>> rows = DialogueStore.SelectWorldHistoryLieChecks4(connection, new Dictionary<string, object> { ["claimant"] = claimantId, ["target"] = targetId, ["limit"] = limit });
                 foreach (Dictionary<string, object> row in rows)
                 {
-                    row["evidenceEventIds"] = Program.TextListFromJson(ReadString(row, "evidence_event_ids_json", "[]"));
-                    row["knownEventIds"] = Program.TextListFromJson(ReadString(row, "known_event_ids_json", "[]"));
+                    row["evidenceEventIds"] = DialogueService.TextListFromJson(ReadString(row, "evidence_event_ids_json", "[]"));
+                    row["knownEventIds"] = DialogueService.TextListFromJson(ReadString(row, "known_event_ids_json", "[]"));
                     row["promptPacket"] = TryParseJsonObject(ReadString(row, "prompt_packet_json", "{}")) ?? new Dictionary<string, object>();
                     row.Remove("prompt_packet_json");
                 }
@@ -519,8 +519,8 @@ namespace ReignBetaServer
         internal static bool IsFirsthandWorldHistoryRole(string eventType, string role)
         {
             string normalized = Program.NormalizeLookup(role);
-            if (string.IsNullOrWhiteSpace(normalized) || Program.ContainsAny(normalized, "mentioned", "affiliate", "kingdom member", "kingdom affiliation", "clan member", "clan affiliation", "settlement", "item", "troop", "casualty")) return false;
-            return Program.ContainsAny(normalized,
+            if (string.IsNullOrWhiteSpace(normalized) || DialogueService.ContainsAny(normalized, "mentioned", "affiliate", "kingdom member", "kingdom affiliation", "clan member", "clan affiliation", "settlement", "item", "troop", "casualty")) return false;
+            return DialogueService.ContainsAny(normalized,
                 "participant", "leader", "commander", "attacker", "defender", "winner", "loser", "raider", "besieger", "conqueror",
                 "rescuer", "rescued", "beneficiary", "captor", "prisoner", "victim", "target", "actor", "decision maker", "signatory",
                 "bride", "groom", "spouse", "mother", "father", "child", "tournament competitor", "governor", "owner hero", "recipient", "payer", "payee");
@@ -543,17 +543,17 @@ namespace ReignBetaServer
 
         private static double HistoricalLieSuccessChance(double claimantAverage, double targetAverage)
         {
-            return Program.ClampDouble(50d + 0.2d * (claimantAverage - targetAverage), 10d, 80d);
+            return DialogueService.ClampDouble(50d + 0.2d * (claimantAverage - targetAverage), 10d, 80d);
         }
 
         private static Dictionary<string, object> SelectLieReaction(ReignDbConnection connection, string campaignId, string claimantId, string targetId, Dictionary<string, object> payload)
         {
             Dictionary<string, object> traitDocument = Program.ReadJsonObject(Program.CharacterFile(campaignId, targetId, "traits.json"));
             Dictionary<string, object> traits = ReadDictionary(traitDocument, "foundationTraits") ?? ReadDictionary(traitDocument, "hiddenReignTraits") ?? traitDocument;
-            int tact = Program.TraitInt(traits, "tact"), pragmatism = Program.TraitInt(traits, "pragmatism"), patience = Program.TraitInt(traits, "patience");
-            int ambition = Program.TraitInt(traits, "ambition"), power = Program.TraitInt(traits, "powerMotivation"), vengeance = Program.TraitInt(traits, "vengefulness");
-            int honesty = Program.TraitInt(traits, "honesty"), assertiveness = Program.TraitInt(traits, "assertiveness"), pride = Program.TraitInt(traits, "pride");
-            int fearfulness = Program.TraitInt(traits, "fearfulness"), curiosity = Program.TraitInt(traits, "curiosity");
+            int tact = CharactersService.TraitInt(traits, "tact"), pragmatism = CharactersService.TraitInt(traits, "pragmatism"), patience = CharactersService.TraitInt(traits, "patience");
+            int ambition = CharactersService.TraitInt(traits, "ambition"), power = CharactersService.TraitInt(traits, "powerMotivation"), vengeance = CharactersService.TraitInt(traits, "vengefulness");
+            int honesty = CharactersService.TraitInt(traits, "honesty"), assertiveness = CharactersService.TraitInt(traits, "assertiveness"), pride = CharactersService.TraitInt(traits, "pride");
+            int fearfulness = CharactersService.TraitInt(traits, "fearfulness"), curiosity = CharactersService.TraitInt(traits, "curiosity");
             Dictionary<string, object> risk = ReadDictionary(payload, "sceneRisk") ?? new Dictionary<string, object>();
             double powerDisadvantage = ReadDouble(risk, "powerDisadvantage", 0d);
             bool unsafeToConfront = powerDisadvantage >= 1d || ReadBool(risk, "targetIsPrisoner", false);
@@ -617,7 +617,7 @@ namespace ReignBetaServer
             if (detected)
             {
                 string summary = claimantId + " made a historical claim that conflicted with evidence " + targetId + " knew.";
-                Program.InsertMemoryRow(connection, "memory_" + lieCheckId, lieCheckId, targetId, "detected_falsehood", ts, worldDay, "", summary,
+                DialogueService.InsertMemoryRow(connection, "memory_" + lieCheckId, lieCheckId, targetId, "detected_falsehood", ts, worldDay, "", summary,
                     new List<string> { claimantId, targetId }, new List<string> { targetId }, Json.Serialize(new List<string> { claimantId, targetId }),
                     new List<string> { targetId }, new List<string>(), reaction == "confront" ? new List<string>() : new List<string> { claimantId },
                     "private", 0.8d, 0.6d, 1d, new List<string> { "historical_claim", "detected_falsehood", reaction }, "active",
@@ -627,12 +627,12 @@ namespace ReignBetaServer
             {
                 Dictionary<string, object> traitDocument = Program.ReadJsonObject(Program.CharacterFile(campaignId, targetId, "traits.json"));
                 Dictionary<string, object> traits = ReadDictionary(traitDocument, "foundationTraits") ?? ReadDictionary(traitDocument, "hiddenReignTraits") ?? traitDocument;
-                double confidence = Program.ClampDouble(0.6d + 0.1d * Program.TraitInt(traits, "socialTrust"), 0.35d, 0.8d);
+                double confidence = DialogueService.ClampDouble(0.6d + 0.1d * CharactersService.TraitInt(traits, "socialTrust"), 0.35d, 0.8d);
                 string beliefId = "whb_" + Guid.NewGuid().ToString("N");
                 DialogueStore.InsertWorldHistoryClaimBeliefs(connection, new Dictionary<string, object> { ["id"] = beliefId, ["lie"] = lieCheckId, ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["believer"] = targetId, ["claimant"] = claimantId, ["claim"] = claim, ["normalized"] = normalizedClaim,
                         ["confidence"] = confidence, ["evidence"] = Json.Serialize(evidenceIds), ["day"] = worldDay, ["ts"] = ts });
-                Program.InsertBelief(connection, lieCheckId, new Dictionary<string, object> { ["believerId"] = targetId, ["claim"] = claim,
+                DialogueService.InsertBelief(connection, lieCheckId, new Dictionary<string, object> { ["believerId"] = targetId, ["claim"] = claim,
                     ["confidence"] = confidence, ["knownBy"] = new List<string> { targetId }, ["aboutEntities"] = new List<string> { claimantId },
                     ["visibility"] = "private", ["state"] = "accepted_unverified", ["lieCheckId"] = lieCheckId }, ts, "world_history_lie_check");
             }
@@ -648,7 +648,7 @@ namespace ReignBetaServer
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             foreach (Dictionary<string, object> row in rows)
             {
-                List<string> linked = Program.TextListFromJson(ReadString(row, "evidence_event_ids_json", "[]"));
+                List<string> linked = DialogueService.TextListFromJson(ReadString(row, "evidence_event_ids_json", "[]"));
                 List<string> discovered = linked.Where(selected.Contains).ToList();
                 if (discovered.Count == 0) continue;
                 string beliefId = ReadString(row, "belief_id", "");
@@ -660,7 +660,7 @@ namespace ReignBetaServer
                 });
                 string claimantId = ReadString(row, "claimant_id", "");
                 string summary = believerId + " later learned that a historical claim from " + claimantId + " conflicted with reliable evidence.";
-                Program.InsertMemoryRow(connection, "memory_discovery_" + beliefId, lieCheckId, believerId, "discovered_falsehood", ts, worldDay, "", summary,
+                DialogueService.InsertMemoryRow(connection, "memory_discovery_" + beliefId, lieCheckId, believerId, "discovered_falsehood", ts, worldDay, "", summary,
                     new List<string> { claimantId, believerId }, new List<string> { believerId }, Json.Serialize(new List<string> { claimantId, believerId }),
                     new List<string> { believerId }, new List<string>(), new List<string> { claimantId }, "private", 0.85d, 0.65d, 1d,
                     new List<string> { "historical_claim", "disproven_belief", "later_discovery" }, "active", "world_history_lie_reconciliation",
@@ -683,8 +683,8 @@ namespace ReignBetaServer
                 ["formulaVersion"] = ReadString(row, "formula_version", LieFormulaVersion), ["successChance"] = ReadNullableDouble(row, "success_chance"),
                 ["roll"] = ReadNullableDouble(row, "roll_value"), ["outcome"] = ReadString(row, "outcome", "not_adjudicable"),
                 ["reactionStrategy"] = ReadString(row, "reaction_strategy", ""), ["exploitOpening"] = ReadInt(row, "exploit_opening", 0) != 0,
-                ["evidenceEventIds"] = Program.TextListFromJson(ReadString(row, "evidence_event_ids_json", "[]")),
-                ["knownEventIds"] = Program.TextListFromJson(ReadString(row, "known_event_ids_json", "[]")), ["promptPacket"] = packet,
+                ["evidenceEventIds"] = DialogueService.TextListFromJson(ReadString(row, "evidence_event_ids_json", "[]")),
+                ["knownEventIds"] = DialogueService.TextListFromJson(ReadString(row, "known_event_ids_json", "[]")), ["promptPacket"] = packet,
                 ["verification"] = verification, ["cached"] = cached
             };
         }

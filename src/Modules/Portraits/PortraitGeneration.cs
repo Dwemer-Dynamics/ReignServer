@@ -98,9 +98,9 @@ namespace ReignBetaServer
                 NanoGptModel = readString("NanoGptImageModel", "gpt-image-1.5"),
                 AtlasModel = readString("AtlasImageModel", name.StartsWith("adult", StringComparison.Ordinal) ? AtlasModelSeedreamV5ProEdit : DefaultAtlasImageModel),
                 AtlasWanNegativePrompt = readString("AtlasWanNegativePrompt", DefaultAtlasWan25NegativePrompt),
-                ImageStrength = Program.ClampDouble(readDouble("ImageStrength", 0.75d), 0.4d, 1d),
+                ImageStrength = DialogueService.ClampDouble(readDouble("ImageStrength", 0.75d), 0.4d, 1d),
                 InferenceSteps = Math.Max(10, Math.Min(50, readInt("InferenceSteps", 28))),
-                GuidanceScale = Program.ClampDouble(readDouble("GuidanceScale", 3.5d), 1d, 10d)
+                GuidanceScale = DialogueService.ClampDouble(readDouble("GuidanceScale", 3.5d), 1d, 10d)
             };
         }
 

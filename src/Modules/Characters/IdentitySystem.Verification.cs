@@ -1147,7 +1147,7 @@ namespace ReignBetaServer
                 List<string> repairedAliases;
                 using (ReignDbConnection identityConnection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    repairedAliases = Program.TextListFromJson(ReadString(ReadStoredAcquaintance(identityConnection, "alias_cleanup_observer", "player"), "aliases_json", "[]"));
+                    repairedAliases = DialogueService.TextListFromJson(ReadString(ReadStoredAcquaintance(identityConnection, "alias_cleanup_observer", "player"), "aliases_json", "[]"));
                 }
                 add("explicit_name_repairs_legacy_address_alias", ReadString(repairedAliasView, "identityState", "") == "verified"
                     && ReadString(repairedAliasView, "usableName", "") == "Aeric"

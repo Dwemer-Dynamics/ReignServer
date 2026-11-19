@@ -461,7 +461,7 @@ namespace ReignBetaServer
         {
             return AmbassadorReferralOnlyActions.Contains(actionId ?? string.Empty, StringComparer.OrdinalIgnoreCase)
                 || string.Equals(actionId, "diplomatic_package", StringComparison.OrdinalIgnoreCase)
-                || Program.ContainsAny(command ?? string.Empty, "declare_war", "make_peace", "alliance", "pact", "settlement", "marriage", "vassal", "terminate");
+                || DialogueService.ContainsAny(command ?? string.Empty, "declare_war", "make_peace", "alliance", "pact", "settlement", "marriage", "vassal", "terminate");
         }
 
         internal static List<Dictionary<string, object>> ReadOfficialAmbassadorArchiveLines(string campaignId, Dictionary<string, object> payload, int limit)
@@ -614,7 +614,7 @@ namespace ReignBetaServer
             {
                 {"processed",true},{"classification",label},{"evidenceTurnIds",evidenceTurnIds},{"requestedPressureDelta",requestedDelta},
                 {"appliedPressureDelta",appliedDelta},{"dailyBefore",priorDaily},{"dailyAfter",afterDaily},{"pressureBefore",pressureBefore},{"pressureAfter",pressureAfter},
-                {"pressureChannel",requestedDelta>0?"treaty_strain":"trade"},{"sceneSummary",Program.LimitText(ReadFirstString(scene,"summary","text","memory"),800)}
+                {"pressureChannel",requestedDelta>0?"treaty_strain":"trade"},{"sceneSummary",DialogueService.LimitText(ReadFirstString(scene,"summary","text","memory"),800)}
             };
         }
 
@@ -622,7 +622,7 @@ namespace ReignBetaServer
         {
             List<Dictionary<string, object>> transcript = (turns ?? new List<Dictionary<string, object>>()).Select(x => new Dictionary<string, object>
             {
-                {"turnId",ReadString(x,"turn_id","")},{"role",ReadString(x,"role","")},{"text",Program.LimitText(ReadString(x,"text",""),1200)}
+                {"turnId",ReadString(x,"turn_id","")},{"role",ReadString(x,"role","")},{"text",DialogueService.LimitText(ReadString(x,"text",""),1200)}
             }).ToList();
             Dictionary<string, object> request = new Dictionary<string, object>
             {
@@ -911,8 +911,8 @@ namespace ReignBetaServer
                 "Daily pressure remains within +/-6 while later conversations can offset an earlier result.",new Dictionary<string,object>());
 
             string rolePrompt = Program.LoadPromptTemplate("ambassador_role.txt");
-            bool roleContract = Program.ContainsAny(rolePrompt,"no off-the-record option") && Program.ContainsAny(rolePrompt,"official diplomatic record")
-                && Program.ContainsAny(rolePrompt,"authoritative successful action receipt") && Program.ContainsAny(rolePrompt,"Private Keep conversations");
+            bool roleContract = DialogueService.ContainsAny(rolePrompt,"no off-the-record option") && DialogueService.ContainsAny(rolePrompt,"official diplomatic record")
+                && DialogueService.ContainsAny(rolePrompt,"authoritative successful action receipt") && DialogueService.ContainsAny(rolePrompt,"Private Keep conversations");
             add("ambassador_non_overridable_role_contract",roleContract,
                 "The dedicated role prompt mandates total relay, exact authority, receipt gating, and the private Keep firewall.",new Dictionary<string,object>{{"promptHash",CourtHash(rolePrompt)}});
 

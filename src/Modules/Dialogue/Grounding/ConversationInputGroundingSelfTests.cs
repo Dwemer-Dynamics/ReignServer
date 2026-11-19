@@ -608,7 +608,7 @@ namespace ReignBetaServer
                     BindRecoveredMemorySources(connection, "parent", "child", 8L, "saved_head");
                     var accepted = DialogueSelfTestStore.SelectConversationTurns48(connection).Single();
                     string acceptedHash = MemorySpecialistSourceHash(accepted);
-                    var access = Program.BuildKnowledgeAccessContext("npc", "player", "", payload);
+                    var access = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", payload);
                     check("recovery_inherited_source_has_snapshot_proof", PrecisionTurnVisible(accepted, "npc", access, connection), null);
                     var capture = TestDict("turnId", "past_player", "campaignId", campaign, "timelineId", "parent", "sessionId", "past",
                         "playerId", "player", "originalText", originalText, "sourceHash", ConversationExactTextHash(originalText),

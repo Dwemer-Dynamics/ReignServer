@@ -124,7 +124,7 @@ namespace ReignBetaServer
             lock (bySection) expected = bySection.Values.SelectMany(v => v).Where(r =>
                 ReadString(r, "kind", "") == "reference_graph_exchange" && ReadString(r, "observer", "") == observer).ToList();
             if (expected.Count == 0) return result;
-            var access = Program.BuildKnowledgeAccessContext(observer, ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"),
+            var access = DialogueService.BuildKnowledgeAccessContext(observer, ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"),
                 ReadFirstString(payload, "locationId", "settlementId"), payload);
             using var connection = ReignDatabase.OpenCampaignConnection(ReadString(payload, "campaignId", ""));
             foreach (var record in expected)
@@ -207,7 +207,7 @@ namespace ReignBetaServer
             string campaign = ReadString(payload, "campaignId", "");
             if (campaign.Length == 0) return Unbound("no_campaign");
             offer.Campaign = campaign;
-            var access = Program.BuildKnowledgeAccessContext(observer, ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"),
+            var access = DialogueService.BuildKnowledgeAccessContext(observer, ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"),
                 ReadFirstString(payload, "locationId", "settlementId"), payload);
             using var connection = ReignDatabase.OpenCampaignConnection(campaign);
             offer.Generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
@@ -286,7 +286,7 @@ namespace ReignBetaServer
         }
 
         private static ConversationReferenceSource ResolveConversationReferenceSource(ReignDbConnection connection,
-            string type, string id, Program.KnowledgeAccessContext access)
+            string type, string id, DialogueService.KnowledgeAccessContext access)
         {
             if (access == null || access.NpcId.Length == 0 || id.Length is < 1 or > 512) return null;
             Dictionary<string, object> row;
@@ -297,7 +297,7 @@ namespace ReignBetaServer
                 string original = ReadString(row, "text", "");
                 string view = ObserverConversationText(ConversationTurnTextForRecall(row), ReadString(row, "speaker_id", ""),
                     access.NpcId, ReadString(row, "role", "") == "player");
-                view = NormalizePromptSegment(Program.SanitizeUnknownIdentityEvidenceText(view, access));
+                view = NormalizePromptSegment(DialogueService.SanitizeUnknownIdentityEvidenceText(view, access));
                 if (view.Length == 0) return null;
                 return new ConversationReferenceSource { Type = type, Id = id, Row = row, View = view,
                     Hash = PromptHash(CanonicalJson(TestDict("id", id, "speaker", ReadString(row, "speaker_id", ""),
@@ -307,7 +307,7 @@ namespace ReignBetaServer
             if (type != "letter" || !WorldSimulationService.TableExists(connection, "letters")) return null;
             row = DialogueStore.SelectLetters2(connection, TestDict("id", id)).SingleOrDefault();
             if (!LetterVisibleToObserver(connection, row, access.NpcId, access, out double learned)) return null;
-            string letterView = NormalizePromptSegment(Program.SanitizeUnknownIdentityEvidenceText(ReadString(row, "body", ""), access));
+            string letterView = NormalizePromptSegment(DialogueService.SanitizeUnknownIdentityEvidenceText(ReadString(row, "body", ""), access));
             return letterView.Length == 0 ? null : new ConversationReferenceSource { Type = type, Id = id, Row = row,
                 View = letterView, Hash = LetterContentHash(row), Speaker = ReadString(row, "sender_id", ""), Day = learned,
                 Sequence = ReadLong(row, "dispatch_sequence", 0), Timestamp = ReadLong(row, "created_ts", 0) };
@@ -371,7 +371,7 @@ namespace ReignBetaServer
             if (proposals.Count > 8) return TestDict("status", "too_many_proposals", "stored", 0);
             if (proposals.Count == 0) return TestDict("status", "no_references", "stored", 0);
             EnsureConversationReferenceGraphSchema(connection);
-            var access = Program.BuildKnowledgeAccessContext(unit.Hero, unit.Player, unit.Location, unit.Payload);
+            var access = DialogueService.BuildKnowledgeAccessContext(unit.Hero, unit.Player, unit.Location, unit.Payload);
             var stored = new List<string>(); var rejected = new List<Dictionary<string, object>>();
             int normalizedTargetTypeProposals = 0;
             foreach (var proposal in proposals)
@@ -388,7 +388,7 @@ namespace ReignBetaServer
                         && ReadString(row, "role", "") == (player ? "player" : "npc")
                         && ReadString(row, "speaker_id", "") == (player ? unit.Player : unit.Hero)
                         && PrecisionTurnVisible(row, unit.Hero, null, connection))
-                    .FirstOrDefault(row => NormalizePromptSegment(Program.SanitizeUnknownIdentityEvidenceText(ObserverConversationText(ConversationTurnTextForRecall(row),
+                    .FirstOrDefault(row => NormalizePromptSegment(DialogueService.SanitizeUnknownIdentityEvidenceText(ObserverConversationText(ConversationTurnTextForRecall(row),
                         ReadString(row, "speaker_id", ""), unit.Hero, player), access)).Contains(quote, StringComparison.Ordinal));
                 string error = ConversationReferenceProposalError(proposal, player ? unit.PlayerText : unit.Reply, offered, target);
                 if (error == "reference_source_not_offered" && offerError.Length > 0) error = offerError;
@@ -426,7 +426,7 @@ namespace ReignBetaServer
         }
 
         private static List<ConversationReferenceSource> ExpandConversationReferences(ReignDbConnection connection,
-            List<(string Type, string Id)> seeds, Program.KnowledgeAccessContext access, string generation,
+            List<(string Type, string Id)> seeds, DialogueService.KnowledgeAccessContext access, string generation,
             int maximumHops, int maximumNodes, Dictionary<string, object> diagnostics)
         {
             var result = new List<ConversationReferenceSource>();
@@ -541,7 +541,7 @@ namespace ReignBetaServer
             foreach (var edge in DialogueStore.SelectConversationReferenceEdges2(connection, TestDict("generation", generation, "day", day)))
             {
                 string owner = ReadString(edge, "owner_id", "");
-                var access = new Program.KnowledgeAccessContext { NpcId = owner, TimelineId = timeline, WorldDay = day };
+                var access = new DialogueService.KnowledgeAccessContext { NpcId = owner, TimelineId = timeline, WorldDay = day };
                 ConversationReferenceSource Resolve(string type, string id)
                 {
                     string key = owner + ":" + ConversationReferenceKey(type, id);
@@ -593,7 +593,7 @@ namespace ReignBetaServer
                 || ReadBool(payload, "officialMemoryFirewall", false)) return "";
             var settings = settingsOverride ?? Program.LoadSettings();
             var plan = PlanMemoryQuery(observer, ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"), query, payload);
-            var access = Program.BuildKnowledgeAccessContext(observer, plan.Peer, ReadFirstString(payload, "locationId", "settlementId"), payload);
+            var access = DialogueService.BuildKnowledgeAccessContext(observer, plan.Peer, ReadFirstString(payload, "locationId", "settlementId"), payload);
             access.WorldDay = plan.WorldDay;
             var seeds = new List<(string Type, string Id)>();
             foreach (var row in (priorLines ?? new()).TakeLast(2))
@@ -641,7 +641,7 @@ namespace ReignBetaServer
                 string text = "A proposed reference led here. This graph-only source cannot supply new reference proposals. The edge is not corroboration or proof of a changed agreement. "
                     + "Use the original speaker, source date and current correction ledger; do not fill missing links.\n" + evidence.Text;
                 string block = RenderContinuityRecord(evidence.SourceId, source.Type == "letter" ? "reference_graph_letter" : "reference_graph_exchange",
-                    observer, evidence.Session, evidence.Day, 10, false, Program.SanitizeUnknownIdentityEvidenceText(text, access));
+                    observer, evidence.Session, evidence.Day, 10, false, DialogueService.SanitizeUnknownIdentityEvidenceText(text, access));
                 if (used + block.Length + 2 > allowance) { rejected++; rejectedIds.Add(evidence.SourceId); continue; }
                 used += block.Length + 2; blocks.Add((source, block)); visible += "\n\n" + NormalizePromptSegment(evidence.Text);
             }

@@ -21,10 +21,10 @@ namespace ReignBetaServer
                 ["eventType"] = "dialogue_turn",
                 ["memoryGroupKey"] = "test:" + eventId
             };
-            Program.InsertMemoryRow(connection, memoryId, eventId, ownerId, "episodic", ts, 10d, "", summary,
+            DialogueService.InsertMemoryRow(connection, memoryId, eventId, ownerId, "episodic", ts, 10d, "", summary,
                 participants, witnesses, Json.Serialize(participants), new List<string> { ownerId }, heardAsRumorBy,
                 new List<string>(), "private", importance, 0.5d, confidence,
-                Program.MergeStringLists(Program.SimpleTags(summary), new[] { "conversation" }), "active", "categorized_memory_test",
+                DialogueService.MergeStringLists(Program.SimpleTags(summary), new[] { "conversation" }), "active", "categorized_memory_test",
                 Json.Serialize(payload), "", "not_indexed");
             DialogueStore.UpdateMemories(connection, new Dictionary<string, object> { ["domain"] = domain, ["id"] = memoryId });
         }
@@ -127,7 +127,7 @@ namespace ReignBetaServer
                 && ReadString(ReadDictionary(compactTurnPayload, "identityView"), "identityState", "") == "claimed",
                 "Raw dialogue and structured columns remain authoritative while turn metadata preserves compact identity and lineage without duplicating the native action index.");
             add("stored_summary_work_inherits_turn_correlation",
-                Program.StoredConversationArtifactCorrelationId(
+                DialogueService.StoredConversationArtifactCorrelationId(
                     new Dictionary<string, object>
                     {
                         ["payload_json"] = compactTurnJson
@@ -137,7 +137,7 @@ namespace ReignBetaServer
             string campaignId = "categorized_memory_test_" + Guid.NewGuid().ToString("N");
             try
             {
-                Dictionary<string, object> stored = Program.StoreWorldMemoryEvent(new Dictionary<string, object>
+                Dictionary<string, object> stored = DialogueService.StoreWorldMemoryEvent(new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId, ["eventId"] = "tournament_test", ["eventType"] = "tournament_result",
                     ["summary"] = "Lady Mira won the tournament.", ["participants"] = new List<string> { "npc_a", "npc_b" },
@@ -154,7 +154,7 @@ namespace ReignBetaServer
                 }
 
                 const string privatePromiseMarker = "SABLE_MEMORY_SELFTEST_4817";
-                Program.StoreWorldMemoryEvent(new Dictionary<string, object>
+                DialogueService.StoreWorldMemoryEvent(new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId, ["eventId"] = "private_promise_test", ["eventType"] = "private_promise",
                     ["summary"] = "The player promised npc_a to guard the phrase " + privatePromiseMarker + ".",
@@ -162,8 +162,8 @@ namespace ReignBetaServer
                     ["about_entities"] = new List<string> { "npc_a" }, ["visibility"] = "private",
                     ["worldDay"] = 13d, ["ts"] = 1300L, ["importance"] = 0.9d
                 }, "categorized_memory_test");
-                Dictionary<string, object> authorizedPromisePacket = Program.BuildNpcMemoryPacket(campaignId, "npc_a", "player", "", "SABLE memory promise", 2500, datedContext, legacySettings);
-                Dictionary<string, object> unauthorizedPromisePacket = Program.BuildNpcMemoryPacket(campaignId, "npc_c", "player", "", "SABLE memory promise", 2500, datedContext, legacySettings);
+                Dictionary<string, object> authorizedPromisePacket = DialogueService.BuildNpcMemoryPacket(campaignId, "npc_a", "player", "", "SABLE memory promise", 2500, datedContext, legacySettings);
+                Dictionary<string, object> unauthorizedPromisePacket = DialogueService.BuildNpcMemoryPacket(campaignId, "npc_c", "player", "", "SABLE memory promise", 2500, datedContext, legacySettings);
                 string authorizedPromiseText = ReadString(authorizedPromisePacket, "memoryPacket", "");
                 string unauthorizedPromiseText = ReadString(unauthorizedPromisePacket, "memoryPacket", "");
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
@@ -173,11 +173,11 @@ namespace ReignBetaServer
                         commitmentRows == 1 && authorizedPromiseText.Contains(privatePromiseMarker) && !unauthorizedPromiseText.Contains(privatePromiseMarker),
                         "Private promises route through commitments, remain retrievable by their owner, and do not leak to uninvolved NPCs.");
                 }
-                string precisePromise = ReadString(Program.BuildNpcMemoryPacket(campaignId, "npc_a", "player", "", "SABLE memory promise", 2500, datedContext, precisionSettings), "memoryPacket", "");
-                string preciseStranger = ReadString(Program.BuildNpcMemoryPacket(campaignId, "npc_c", "player", "", "SABLE memory promise", 2500, datedContext, precisionSettings), "memoryPacket", "");
+                string precisePromise = ReadString(DialogueService.BuildNpcMemoryPacket(campaignId, "npc_a", "player", "", "SABLE memory promise", 2500, datedContext, precisionSettings), "memoryPacket", "");
+                string preciseStranger = ReadString(DialogueService.BuildNpcMemoryPacket(campaignId, "npc_c", "player", "", "SABLE memory promise", 2500, datedContext, precisionSettings), "memoryPacket", "");
                 add("precision_private_promise_retrieval", precisePromise.Contains(privatePromiseMarker) && !preciseStranger.Contains(privatePromiseMarker),
                     "Dated precision retrieval preserves an owner's private promise without disclosing it to an uninvolved NPC; owner=" + precisePromise.Contains(privatePromiseMarker) + ", stranger=" + preciseStranger.Contains(privatePromiseMarker) + ".");
-                string undatedPromise = ReadString(Program.BuildNpcMemoryPacket(campaignId, "npc_a", "player", "", "SABLE memory promise", 2500, null, precisionSettings), "memoryPacket", "");
+                string undatedPromise = ReadString(DialogueService.BuildNpcMemoryPacket(campaignId, "npc_a", "player", "", "SABLE memory promise", 2500, null, precisionSettings), "memoryPacket", "");
                 add("precision_missing_date_withholds_later_memory", !undatedPromise.Contains(privatePromiseMarker),
                     "An undated caller cannot disclose a memory later than the conservative day-zero boundary.");
 
@@ -195,16 +195,16 @@ namespace ReignBetaServer
                             3000L + index, 0.2d, 0.7d, "interpersonal_history",
                             new List<string> { "npc_a", "player" }, new List<string> { "npc_a" }, new List<string>());
                     }
-                    HashSet<string> ftsIds = Program.SearchMemoryFts(connection, Program.MemoryQueryTerms(oldArchiveMarker), 80);
-                    List<Dictionary<string, object>> materialized = Program.LoadFtsRows(connection, "memories", "memory_id", ftsIds,
-                        new Program.KnowledgeAccessContext { NpcId = "npc_a", PlayerId = "player" });
+                    HashSet<string> ftsIds = DialogueService.SearchMemoryFts(connection, DialogueService.MemoryQueryTerms(oldArchiveMarker), 80);
+                    List<Dictionary<string, object>> materialized = DialogueService.LoadFtsRows(connection, "memories", "memory_id", ftsIds,
+                        new DialogueService.KnowledgeAccessContext { NpcId = "npc_a", PlayerId = "player" });
                     add("fts_full_archive_materialization",
                         ftsIds.Contains("old_archive_memory") && materialized.Any(row => ReadString(row, "memory_id", "") == "old_archive_memory"),
                         "Full-archive FTS hits are materialized by id instead of being discarded outside the newest-memory window.");
                 }
-                Dictionary<string, object> oldArchivePacket = Program.BuildNpcMemoryPacket(campaignId, "npc_a", "player", "",
+                Dictionary<string, object> oldArchivePacket = DialogueService.BuildNpcMemoryPacket(campaignId, "npc_a", "player", "",
                     "What exactly do you remember about " + oldArchiveMarker + "?", 2500, datedContext, legacySettings);
-                Dictionary<string, object> oldArchiveStrangerPacket = Program.BuildNpcMemoryPacket(campaignId, "npc_c", "player", "",
+                Dictionary<string, object> oldArchiveStrangerPacket = DialogueService.BuildNpcMemoryPacket(campaignId, "npc_c", "player", "",
                     "What exactly do you remember about " + oldArchiveMarker + "?", 2500, datedContext, legacySettings);
                 string oldArchiveText = ReadString(oldArchivePacket, "memoryPacket", "");
                 bool oldArchiveRecall = oldArchiveText.Contains(oldArchiveMarker)
@@ -222,9 +222,9 @@ namespace ReignBetaServer
                     ["selectedMemoryCount"] = selectedMemoryCount,
                     ["precisionAtPacket"] = selectedMemoryCount <= 0 ? 0d : (oldArchiveText.Contains(oldArchiveMarker) ? 1d : 0d) / selectedMemoryCount
                 };
-                string preciseArchive = ReadString(Program.BuildNpcMemoryPacket(campaignId, "npc_a", "player", "",
+                string preciseArchive = ReadString(DialogueService.BuildNpcMemoryPacket(campaignId, "npc_a", "player", "",
                     "What exactly do you remember about " + oldArchiveMarker + "?", 2500, datedContext, precisionSettings), "memoryPacket", "");
-                string preciseArchiveStranger = ReadString(Program.BuildNpcMemoryPacket(campaignId, "npc_c", "player", "",
+                string preciseArchiveStranger = ReadString(DialogueService.BuildNpcMemoryPacket(campaignId, "npc_c", "player", "",
                     "What exactly do you remember about " + oldArchiveMarker + "?", 2500, datedContext, precisionSettings), "memoryPacket", "");
                 add("precision_long_archive_recall", preciseArchive.Contains(oldArchiveMarker)
                     && preciseArchive.Contains("Legacy recollection; original evidence unavailable")
@@ -241,7 +241,7 @@ namespace ReignBetaServer
                         contradictionMarker + ": court gossip claims Duke Orman died in the ambush.", 1470L, 0.6d, 0.40d,
                         "beliefs_and_rumors", new List<string> { "player" }, new List<string>(), new List<string> { "npc_a" });
                 }
-                Dictionary<string, object> contradictionPacket = Program.BuildNpcMemoryPacket(campaignId, "npc_a", "player", "",
+                Dictionary<string, object> contradictionPacket = DialogueService.BuildNpcMemoryPacket(campaignId, "npc_a", "player", "",
                     "What rumor or claim have you heard about " + contradictionMarker + "?", 2500, datedContext, legacySettings);
                 string contradictionText = ReadString(contradictionPacket, "memoryPacket", "");
                 add("contradictory_recollections",
@@ -249,7 +249,7 @@ namespace ReignBetaServer
                     && contradictionText.Contains("firsthand witness") && contradictionText.Contains("secondhand rumor")
                     && contradictionText.Contains("confidence 0.85") && contradictionText.Contains("confidence 0.40"),
                     "Conflicting recollections remain distinct and carry enough provenance for the dialogue model to preserve uncertainty.");
-                string preciseContradictions = ReadString(Program.BuildNpcMemoryPacket(campaignId, "npc_a", "player", "",
+                string preciseContradictions = ReadString(DialogueService.BuildNpcMemoryPacket(campaignId, "npc_a", "player", "",
                     "What rumor or claim have you heard about " + contradictionMarker + "?", 2500, datedContext, precisionSettings), "memoryPacket", "");
                 add("precision_contradictory_recollections", preciseContradictions.Contains("survived the ambush")
                     && preciseContradictions.Contains("died in the ambush")
@@ -279,7 +279,7 @@ namespace ReignBetaServer
                         }
                     };
                     List<Dictionary<string, object>> semanticRows = LoadSemanticRows(connection, "memories", "memory_id", "memory",
-                        fakeSemanticSearch, new Program.KnowledgeAccessContext { NpcId = "npc_a", PlayerId = "player" });
+                        fakeSemanticSearch, new DialogueService.KnowledgeAccessContext { NpcId = "npc_a", PlayerId = "player" });
                     add("consolidated_semantic_filter",
                         !EmbeddingRowActive("memory", consolidated) && semanticRows.Count == 0,
                         "Consolidated source memories are removed from the semantic index contract and rejected during row materialization.");
@@ -293,7 +293,7 @@ namespace ReignBetaServer
                         ["personal_state"] = 55, ["interpersonal_history"] = 25, ["beliefs_and_rumors"] = 20
                     }
                 };
-                Dictionary<string, int> allocation = Program.AllocateMemoryLaneCharacters(
+                Dictionary<string, int> allocation = DialogueService.AllocateMemoryLaneCharacters(
                     new List<string> { "personal_state", "interpersonal_history", "beliefs_and_rumors" },
                     new Dictionary<string, string>
                     {
@@ -358,13 +358,13 @@ namespace ReignBetaServer
                     int partySourceLinks = ReadInt(DialogueStore.CountMemorySources(connection, new Dictionary<string, object> { ["id"] = partySummaryId }).FirstOrDefault(), "count", 0);
                     bool partyParticipantsComplete = partyTurns.All(turn =>
                     {
-                        List<string> ids = Program.TextListFromJson(ReadString(turn, "participants_json", "[]"));
+                        List<string> ids = DialogueService.TextListFromJson(ReadString(turn, "participants_json", "[]"));
                         return ids.Contains("npc_a", StringComparer.OrdinalIgnoreCase)
                             && ids.Contains("npc_b", StringComparer.OrdinalIgnoreCase)
                             && ids.Contains("player", StringComparer.OrdinalIgnoreCase);
                     });
-                    List<string> summaryKnownBy = Program.TextListFromJson(ReadString(partySummary, "known_by_json", "[]"));
-                    List<string> summarySourceEvents = Program.TextListFromJson(ReadString(partySummary, "source_events_json", "[]"));
+                    List<string> summaryKnownBy = DialogueService.TextListFromJson(ReadString(partySummary, "known_by_json", "[]"));
+                    List<string> summarySourceEvents = DialogueService.TextListFromJson(ReadString(partySummary, "source_events_json", "[]"));
                     add("party_chat_group_session",
                         ReadString(partySession, "channel", "") == "party_chat"
                         && partyTurns.Count == 3
@@ -468,14 +468,14 @@ namespace ReignBetaServer
                         new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
                         false, new Dictionary<string, object>(datedContext), "dialogue", precomputedMemoryPacket: preparedMemory);
                     string exactQuery = "For a simple memory check, what did I say about the obsidian compass in our first conversation?";
-                    string legacyExactMemory = ReadString(Program.BuildNpcMemoryPacket(campaignId, "npc_a", "player", "", exactQuery,
+                    string legacyExactMemory = ReadString(DialogueService.BuildNpcMemoryPacket(campaignId, "npc_a", "player", "", exactQuery,
                         2500, datedContext, legacySettings), "memoryPacket", "");
                     string livePromptContext = FixturePromptContext(exactQuery, legacyExactMemory);
                     add("exact_live_prompt_context",
                         livePromptContext.Contains("Exact conversation source") && livePromptContext.Contains("obsidian compass"),
                         "The production dialogue prompt context includes the exact-history section and its matched evidence.");
                     string ordinaryQuery = "Paraphrase the obsidian-compass fact without losing its exact description.";
-                    string legacyOrdinaryMemory = ReadString(Program.BuildNpcMemoryPacket(campaignId, "npc_a", "player", "", ordinaryQuery,
+                    string legacyOrdinaryMemory = ReadString(DialogueService.BuildNpcMemoryPacket(campaignId, "npc_a", "player", "", ordinaryQuery,
                         2500, datedContext, legacySettings), "memoryPacket", "");
                     string ordinaryContinuityContext = FixturePromptContext(ordinaryQuery, legacyOrdinaryMemory);
                     add("recent_raw_window_without_recall_keywords",
@@ -503,7 +503,7 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                add("integration_fixture", false, "Categorized memory fixture failed: " + Program.LimitText(ex.Message, 400));
+                add("integration_fixture", false, "Categorized memory fixture failed: " + DialogueService.LimitText(ex.Message, 400));
             }
             finally
             {

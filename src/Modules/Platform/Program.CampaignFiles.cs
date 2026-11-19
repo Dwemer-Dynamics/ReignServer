@@ -201,7 +201,7 @@ namespace ReignBetaServer
             return latest == null ? "default" : latest.Name;
         }
 
-        private static List<Dictionary<string, object>> ReadCampaignMemoryLines(string campaignId, List<string> actorIds)
+        internal static List<Dictionary<string, object>> ReadCampaignMemoryLines(string campaignId, List<string> actorIds)
         {
             Dictionary<string, Dictionary<string, object>> byId = new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
             AddMemoryRows(byId, ReadJsonLinesFromPath(CampaignFile(campaignId, "world", "memories.jsonl")));
@@ -233,7 +233,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static bool DurableDialogueMemoryRowIsUsable(Dictionary<string, object> row)
+        internal static bool DurableDialogueMemoryRowIsUsable(Dictionary<string, object> row)
         {
             if (row == null)
                 return false;
@@ -277,7 +277,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> DefaultCharacteristics(Dictionary<string, object> hero)
+        internal static Dictionary<string, object> DefaultCharacteristics(Dictionary<string, object> hero)
         {
             return new Dictionary<string, object>
             {
@@ -293,7 +293,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> DefaultInventory(Dictionary<string, object> hero)
+        internal static Dictionary<string, object> DefaultInventory(Dictionary<string, object> hero)
         {
             return new Dictionary<string, object>
             {
@@ -311,7 +311,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> DefaultAppearance(Dictionary<string, object> hero)
+        internal static Dictionary<string, object> DefaultAppearance(Dictionary<string, object> hero)
         {
             string trueStatus = ReadBool(hero, "isLord", false)
                 ? "noble or very wealthy"
@@ -336,7 +336,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> DefaultCharacterState(Dictionary<string, object> hero)
+        internal static Dictionary<string, object> DefaultCharacterState(Dictionary<string, object> hero)
         {
             return new Dictionary<string, object>
             {
@@ -516,7 +516,7 @@ namespace ReignBetaServer
             PersistenceService.MarkSaveSyncActiveStateDirtyForPath(path);
         }
 
-        private static void EnsureJsonObjectFile(string path, Dictionary<string, object> fallback)
+        internal static void EnsureJsonObjectFile(string path, Dictionary<string, object> fallback)
         {
             PersistenceService.ThrowIfCampaignRequestReplaced();
             lock (FileLock)

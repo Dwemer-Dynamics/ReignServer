@@ -93,12 +93,12 @@ namespace ReignBetaServer
                     ?? new Dictionary<string, object>();
                 if (flirtatiousness < 0 && foundation.ContainsKey("flirtatiousness"))
                 {
-                    flirtatiousness = CharactersService.StableTraitPercentage(heroId, "flirtatiousness", Program.TraitInt(foundation, "flirtatiousness"));
+                    flirtatiousness = CharactersService.StableTraitPercentage(heroId, "flirtatiousness", CharactersService.TraitInt(foundation, "flirtatiousness"));
                     source += "+stable_percentage_fallback";
                 }
                 if (confidence < 0 && foundation.ContainsKey("confidence"))
                 {
-                    confidence = CharactersService.StableTraitPercentage(heroId, "confidence", Program.TraitInt(foundation, "confidence"));
+                    confidence = CharactersService.StableTraitPercentage(heroId, "confidence", CharactersService.TraitInt(foundation, "confidence"));
                     source += "+stable_percentage_fallback";
                 }
             }

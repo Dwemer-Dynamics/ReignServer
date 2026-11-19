@@ -42,11 +42,11 @@ namespace ReignBetaServer
             Dictionary<string, object> scene = ReadDictionary(context, "scene") ?? new Dictionary<string, object>();
             List<string> witnesses = ReadStringList(scene, "witnessIds");
             Dictionary<string, object> scores = ReadDictionary(context, "highlightedScores") ?? new Dictionary<string, object>();
-            double exposureRisk = Program.ClampDouble(ReadDouble(scene, "exposure", 0d) * (0.50d + 0.20d * (1d - ReadDouble(scores, "tact", 50d) / 100d) + 0.20d * (1d - ReadDouble(scores, "judgment", 50d) / 100d) + 0.20d * ReadDouble(scores, "impulsiveness", 50d) / 100d), 0d, 1d);
+            double exposureRisk = DialogueService.ClampDouble(ReadDouble(scene, "exposure", 0d) * (0.50d + 0.20d * (1d - ReadDouble(scores, "tact", 50d) / 100d) + 0.20d * (1d - ReadDouble(scores, "judgment", 50d) / 100d) + 0.20d * ReadDouble(scores, "impulsiveness", 50d) / 100d), 0d, 1d);
             bool exposed = actedRomantically && witnesses.Count > 0 && RelationshipsService.StableUnit((decisionId ?? "") + "|exposure") < exposureRisk;
             if (exposed)
             {
-                Program.StoreWorldMemoryEvent(new Dictionary<string, object> { ["campaignId"] = campaignId, ["eventId"] = "romance_exposure_" + decisionId, ["eventType"] = "romantic_attempt_witnessed", ["worldDay"] = day, ["summary"] = "Witnesses observed a potentially compromising romantic exchange.", ["participants"] = new List<string> { subjectId, targetId }, ["known_by"] = witnesses, ["visibility"] = "witnessed_private", ["importance"] = 0.65d, ["source"] = "motive_aware_conversation" }, "motive_aware_conversation");
+                DialogueService.StoreWorldMemoryEvent(new Dictionary<string, object> { ["campaignId"] = campaignId, ["eventId"] = "romance_exposure_" + decisionId, ["eventType"] = "romantic_attempt_witnessed", ["worldDay"] = day, ["summary"] = "Witnesses observed a potentially compromising romantic exchange.", ["participants"] = new List<string> { subjectId, targetId }, ["known_by"] = witnesses, ["visibility"] = "witnessed_private", ["importance"] = 0.65d, ["source"] = "motive_aware_conversation" }, "motive_aware_conversation");
             }
             Dictionary<string, object> scheme = CourtService.PersistCourtCharacterSchemeFromOutcome(
                 campaignId, context, payload, visibleReply, decisionBrief, decisionId, actedRomantically, calculated);
@@ -85,7 +85,7 @@ namespace ReignBetaServer
             brief["modelConstraints"] = modelConstraints;
             if (modelGoals.Count == 0)
             {
-                string decision = Program.LimitText(ReadString(brief, "decision", ""), 240);
+                string decision = DialogueService.LimitText(ReadString(brief, "decision", ""), 240);
                 brief["goals"] = new List<string>
                 {
                     string.IsNullOrWhiteSpace(decision)
@@ -271,7 +271,7 @@ namespace ReignBetaServer
                             ReadDictionary(motive, "politicalRiskPosture"),
                             "immediateLethalDanger", false)
                     },
-                ["characterFoundation"] = Program.LimitText(characterFoundation, 8000)
+                ["characterFoundation"] = DialogueService.LimitText(characterFoundation, 8000)
             };
         }
 
@@ -1246,7 +1246,7 @@ namespace ReignBetaServer
             // summaries routinely use phrases such as "physical threat" or
             // "physical confrontation", which are not romantic authorization
             // and must not trigger a costly full-prompt safety repair.
-            return Program.ContainsAny(
+            return DialogueService.ContainsAny(
                 (text ?? "").ToLowerInvariant(),
                 "kiss",
                 "sexual",

@@ -115,7 +115,7 @@ namespace ReignBetaServer
                     int delaySeconds = PersonalGossipCompositionDelaySeconds(data);
                     if (delaySeconds > 0) Thread.Sleep(delaySeconds * 1000);
                 }
-                catch (Exception ex) { result = GossipFields("error", Program.LimitText(ex.Message, 500)); }
+                catch (Exception ex) { result = GossipFields("error", DialogueService.LimitText(ex.Message, 500)); }
                 Program.CampaignDataGate.EnterReadLock();
                 try
                 {

@@ -19,7 +19,7 @@ using Reign.Core.Contracts.Court;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         internal static string BuildEventJsonForPrompt(Dictionary<string, object> payload)
         {
@@ -48,7 +48,7 @@ namespace ReignBetaServer
             HashSet<string> activeHeroIds = new HashSet<string>(ReadStringList(payload, "activeHeroIds"), StringComparer.OrdinalIgnoreCase);
             List<Dictionary<string, object>> promptAttendees = ReadDictionaryList(payload, "attendees")
                 .Select((attendee, index) => new { Attendee = attendee, Index = index })
-                .OrderByDescending(x => activeHeroIds.Contains(CharacterIdFrom(x.Attendee)))
+                .OrderByDescending(x => activeHeroIds.Contains(Program.CharacterIdFrom(x.Attendee)))
                 .ThenBy(x => x.Index)
                 .Select(x => x.Attendee)
                 .Take(25)
@@ -80,7 +80,7 @@ namespace ReignBetaServer
                         StringComparer.OrdinalIgnoreCase);
             foreach (Dictionary<string, object> attendee in promptAttendees)
             {
-                string attendeeId = CharacterIdFrom(attendee);
+                string attendeeId = Program.CharacterIdFrom(attendee);
                 bool self = attendeeId.Equals(
                     currentSpeakerId,
                     StringComparison.OrdinalIgnoreCase);
@@ -213,17 +213,17 @@ namespace ReignBetaServer
 
         internal static string SocialEventTranscriptFile(string campaignId, string eventId)
         {
-            return Path.Combine(CampaignDirectory(campaignId), "events", "social", SafePathSegment(eventId, "unknown"), "transcript.jsonl");
+            return Path.Combine(Program.CampaignDirectory(campaignId), "events", "social", Program.SafePathSegment(eventId, "unknown"), "transcript.jsonl");
         }
 
-        private static string PartyChatSessionTranscriptFile(string campaignId, Dictionary<string, object> payload)
+        internal static string PartyChatSessionTranscriptFile(string campaignId, Dictionary<string, object> payload)
         {
             string sessionId = ReadFirstString(payload, "conversationSessionId", "sessionId");
-            return Path.Combine(CampaignDirectory(campaignId), "events", "party_chat",
-                SafePathSegment(sessionId, "unknown_session"), "transcript.jsonl");
+            return Path.Combine(Program.CampaignDirectory(campaignId), "events", "party_chat",
+                Program.SafePathSegment(sessionId, "unknown_session"), "transcript.jsonl");
         }
 
-        private static void AttachAcceptedTranscriptSourceIds(
+        internal static void AttachAcceptedTranscriptSourceIds(
             Dictionary<string, object> playerLine, Dictionary<string, object> npcLine,
             Dictionary<string, object> acceptedExchange)
         {
@@ -263,7 +263,7 @@ namespace ReignBetaServer
                     : string.Equals(role, "npc", StringComparison.OrdinalIgnoreCase)
                         ? ReadFirstString(payload, "speakerHeroStringId", "heroStringId")
                         : "",
-                ["text"] = string.Equals(role, "npc", StringComparison.OrdinalIgnoreCase) ? SanitizeVisibleReply(text ?? "") : (text ?? ""),
+                ["text"] = string.Equals(role, "npc", StringComparison.OrdinalIgnoreCase) ? Program.SanitizeVisibleReply(text ?? "") : (text ?? ""),
                 ["eventId"] = ReadFirstString(payload, "eventId", "socialEventId"),
                 ["templateId"] = ReadString(payload, "templateId", ""),
                 ["phaseId"] = ReadString(payload, "phaseId", ""),
@@ -278,10 +278,10 @@ namespace ReignBetaServer
         {
             foreach (Dictionary<string, object> attendee in attendees ?? new List<Dictionary<string, object>>())
             {
-                string heroId = CharacterIdFrom(attendee);
+                string heroId = Program.CharacterIdFrom(attendee);
                 if (!string.IsNullOrWhiteSpace(heroId))
                 {
-                    AppendJsonLineToPath(CharacterFile(campaignId, heroId, "history", "events.jsonl"), row);
+                    Program.AppendJsonLineToPath(Program.CharacterFile(campaignId, heroId, "history", "events.jsonl"), row);
                 }
             }
         }
@@ -371,7 +371,7 @@ namespace ReignBetaServer
             }
 
             List<Dictionary<string, object>> ordered = result.OrderBy(row => ReadInt(row, "sequence", 0)).ToList();
-            int limit = Math.Max(2, Math.Min(100, ReadInt(LoadSettings(), "recentRawConversationTurns", 30)));
+            int limit = Math.Max(2, Math.Min(100, ReadInt(Program.LoadSettings(), "recentRawConversationTurns", 30)));
             return CanonicalizePromptTranscript(ordered, limit);
         }
 
@@ -420,24 +420,24 @@ namespace ReignBetaServer
                 return string.Empty;
             }
 
-            ArrayList index = ReadJsonArray(Path.Combine(CampaignDirectory(campaignId), "characters", "index.json"));
+            ArrayList index = Program.ReadJsonArray(Path.Combine(Program.CampaignDirectory(campaignId), "characters", "index.json"));
             foreach (object item in index)
             {
                 Dictionary<string, object> entry = item as Dictionary<string, object>;
-                string heroId = CharacterIdFrom(entry);
+                string heroId = Program.CharacterIdFrom(entry);
                 if (string.IsNullOrWhiteSpace(heroId))
                 {
                     continue;
                 }
 
-                Dictionary<string, object> profile = ReadJsonObject(CharacterFile(campaignId, heroId, "profile.json"));
+                Dictionary<string, object> profile = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json"));
                 if (string.Equals(ReadString(profile, "characterObjectId", ""), characterObjectId, StringComparison.OrdinalIgnoreCase))
                 {
                     return heroId;
                 }
             }
 
-            string charactersDir = Path.Combine(CampaignDirectory(campaignId), "characters");
+            string charactersDir = Path.Combine(Program.CampaignDirectory(campaignId), "characters");
             if (!Directory.Exists(charactersDir))
             {
                 return string.Empty;
@@ -445,10 +445,10 @@ namespace ReignBetaServer
 
             foreach (string dir in Directory.GetDirectories(charactersDir))
             {
-                Dictionary<string, object> profile = ReadJsonObject(Path.Combine(dir, "profile.json"));
+                Dictionary<string, object> profile = Program.ReadJsonObject(Path.Combine(dir, "profile.json"));
                 if (string.Equals(ReadString(profile, "characterObjectId", ""), characterObjectId, StringComparison.OrdinalIgnoreCase))
                 {
-                    return CharacterIdFrom(profile);
+                    return Program.CharacterIdFrom(profile);
                 }
             }
 
@@ -492,7 +492,7 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                LogOperational("memory.packet_prompt_failed", new Dictionary<string, object>
+                Program.LogOperational("memory.packet_prompt_failed", new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["heroStringId"] = heroId,
@@ -509,7 +509,7 @@ namespace ReignBetaServer
                 return string.Empty;
             }
 
-            string prompt = LoadPromptTemplate("noble_prompt.txt").Trim();
+            string prompt = Program.LoadPromptTemplate("noble_prompt.txt").Trim();
             return string.IsNullOrWhiteSpace(prompt)
                 ? string.Empty
                 : "NOBLE PROMPT - CONDITIONAL CHARACTER LAYER\n" + prompt;
@@ -527,7 +527,7 @@ namespace ReignBetaServer
             builder.AppendLine();
             builder.AppendLine("Identity and position:");
             AppendPromptLine(builder, "Name", FirstNonEmpty(ReadString(profile, "name", ""), heroName, ReadString(profile, "heroStringId", "")));
-            AppendPromptLine(builder, "Role", FirstNonEmpty(ReadString(profile, "occupation", ""), CharacterArchetype(profile)));
+            AppendPromptLine(builder, "Role", FirstNonEmpty(ReadString(profile, "occupation", ""), CharactersService.CharacterArchetype(profile)));
             AppendPromptLine(builder, "Culture", FirstNonEmpty(ReadString(profile, "cultureName", ""), ReadString(profile, "cultureId", "")));
             AppendPromptLine(builder, "Clan", FirstNonEmpty(ReadString(profile, "clanName", ""), ReadString(profile, "clanId", "")));
             AppendPromptLine(builder, "Kingdom", FirstNonEmpty(ReadString(profile, "kingdomName", ""), ReadString(profile, "kingdomId", "")));
@@ -635,7 +635,7 @@ namespace ReignBetaServer
             summary = summary ?? new Dictionary<string, object>();
             memories = memories ?? new List<Dictionary<string, object>>();
             recentLines = recentLines ?? new List<Dictionary<string, object>>();
-            selectedPulls = NormalizeSelectedContextPulls(selectedPulls ?? new List<Dictionary<string, object>>(), ContextPullIds.ToList());
+            selectedPulls = NormalizeSelectedContextPulls(selectedPulls ?? new List<Dictionary<string, object>>(), Program.ContextPullIds.ToList());
             contextBundles = contextBundles ?? new List<Dictionary<string, object>>();
 
             Dictionary<string, List<Dictionary<string, object>>> bundlesById = new Dictionary<string, List<Dictionary<string, object>>>(StringComparer.OrdinalIgnoreCase);
@@ -905,7 +905,7 @@ namespace ReignBetaServer
         {
             if (CharactersService.TraitSentenceDescriptors().TryGetValue(key, out string[] descriptors))
             {
-                int index = ClampTrait(value) + 2;
+                int index = CharactersService.ClampTrait(value) + 2;
                 if (index >= 0 && index < descriptors.Length)
                 {
                     return descriptors[index];
@@ -1167,7 +1167,7 @@ namespace ReignBetaServer
             object rawItems;
             if (inventory.TryGetValue("topItems", out rawItems))
             {
-                foreach (object raw in ObjectsFromValue(rawItems).Take(10))
+                foreach (object raw in Program.ObjectsFromValue(rawItems).Take(10))
                 {
                     Dictionary<string, object> item = raw as Dictionary<string, object>;
                     if (item == null)
@@ -1309,7 +1309,7 @@ namespace ReignBetaServer
                 return new List<Dictionary<string, object>>();
             }
 
-            List<string> queryTags = SimpleTags(query ?? "");
+            List<string> queryTags = Program.SimpleTags(query ?? "");
             IEnumerable<Dictionary<string, object>> ranked = memories
                 .Select(memory => new Dictionary<string, object>
                 {
@@ -1414,21 +1414,21 @@ namespace ReignBetaServer
                 ["role"] = role ?? "",
                 ["speaker"] = speaker ?? "",
                 ["channel"] = "in_person",
-                ["text"] = string.Equals(role, "npc", StringComparison.OrdinalIgnoreCase) ? SanitizeVisibleReply(text ?? "") : (text ?? "")
+                ["text"] = string.Equals(role, "npc", StringComparison.OrdinalIgnoreCase) ? Program.SanitizeVisibleReply(text ?? "") : (text ?? "")
             };
         }
 
-        private static List<Dictionary<string, object>> ReadDialogueLines(string campaignId, string heroId, int limit)
+        internal static List<Dictionary<string, object>> ReadDialogueLines(string campaignId, string heroId, int limit)
         {
-            string path = CharacterFile(campaignId, heroId, "history", "dialogue.jsonl");
-            List<Dictionary<string, object>> all = ReadJsonLinesFromPath(path);
+            string path = Program.CharacterFile(campaignId, heroId, "history", "dialogue.jsonl");
+            List<Dictionary<string, object>> all = Program.ReadJsonLinesFromPath(path);
             int start = Math.Max(0, all.Count - Math.Max(1, limit));
             List<Dictionary<string, object>> lines = all.Skip(start).ToList();
             foreach (Dictionary<string, object> line in lines)
             {
                 if (string.Equals(ReadString(line, "role", ""), "npc", StringComparison.OrdinalIgnoreCase))
                 {
-                    line["text"] = SanitizeVisibleReply(ReadString(line, "text", ""));
+                    line["text"] = Program.SanitizeVisibleReply(ReadString(line, "text", ""));
                 }
             }
 

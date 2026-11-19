@@ -125,7 +125,7 @@ namespace ReignBetaServer
                 payload == null ? "" : Json.Serialize(payload)
             }));
             if (EphemeralWorldHistoryTypes.Contains(normalizedType)
-                || Program.ContainsAny(context, "native relation projection", "relationship sync",
+                || DialogueService.ContainsAny(context, "native relation projection", "relationship sync",
                     "trait synchronization", "telemetry heartbeat", "polling receipt"))
                 return "ephemeral";
             if (ConsequentialWorldHistoryTypes.Contains(normalizedType))
@@ -138,25 +138,25 @@ namespace ReignBetaServer
             // merely because they mention the lasting event that surrounded them.
             if (RoutineWorldHistoryTypes.Contains(normalizedType))
                 return "routine";
-            if (Program.ContainsAny(context,
+            if (DialogueService.ContainsAny(context,
                     "hero prisoner taken", "hero prisoner released", "hero escaped",
                     "hero rescued", "noble captured", "noble capture",
                     "noble released", "noble escaped", "noble rescue", "hero wounded",
                     "noble wounded", "noble wound"))
                 return "consequential";
-            if (Program.ContainsAny(context,
+            if (DialogueService.ContainsAny(context,
                     "marriage attempt", "romantic attempt", "arranged marriage",
                     "diplomatic proposal", "diplomacy proposal", "diplomatic attempt")
-                && Program.ContainsAny(context,
+                && DialogueService.ContainsAny(context,
                     "accepted", "completed", "successful", "failed", "refused",
                     "rejected", "abandoned", "invalid", "countered", "overdue"))
                 return "consequential";
-            if (Program.ContainsAny(context, "romance", "lover", "affair", "betrayal",
+            if (DialogueService.ContainsAny(context, "romance", "lover", "affair", "betrayal",
                     "parentage", "divorce", "marriage")
-                && Program.ContainsAny(context, "started", "ended", "attempt", "proposal",
+                && DialogueService.ContainsAny(context, "started", "ended", "attempt", "proposal",
                     "accepted", "failed", "refused", "abandoned", "discovered"))
                 return "consequential";
-            if (Program.ContainsAny(context, "war declared", "peace made", "treaty",
+            if (DialogueService.ContainsAny(context, "war declared", "peace made", "treaty",
                     "alliance", "tribute", "guarantee", "rebellion", "civil war",
                     "kingdom created", "kingdom destroyed", "ruling clan",
                     "settlement owner"))

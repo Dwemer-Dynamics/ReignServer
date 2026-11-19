@@ -120,7 +120,7 @@ namespace ReignBetaServer
             var firstWrite = normalize(hobbyA, "wooden_horses");
             var secondWrite = normalize(hobbyB, "evening_carving");
             string campaign = "naturalness_test_" + Guid.NewGuid().ToString("N");
-            Program.UpsertCharacterProfile(campaign, profile);
+            CharactersService.UpsertCharacterProfile(campaign, profile);
             CharactersService.StoreDynamicCharacteristicWrites(campaign, "fixture_gavene", firstWrite, payload, TestDict("exchangeId", "original"), "event_original", "dialogue", "", 1, new[] { "fixture_gavene" });
             var duplicateStore = CharactersService.StoreDynamicCharacteristicWrites(campaign, "fixture_gavene", secondWrite, payload, TestDict("exchangeId", "paraphrase"), "event_paraphrase", "dialogue", "", 2, new[] { "fixture_gavene" });
             var persisted = Program.ReadJsonObject(Program.CharacterFile(campaign, "fixture_gavene", "dynamic_characteristics.json"));

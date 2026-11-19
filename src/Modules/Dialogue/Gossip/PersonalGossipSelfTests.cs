@@ -31,7 +31,7 @@ namespace ReignBetaServer
         {
             var results = new List<Dictionary<string, object>>();
             Action<string, bool, object> check = (id, passed, detail) => results.Add(GossipFields("ok", true, "passed", passed,
-                "suite", "personal_gossip", "caseId", id, "name", id, "summary", passed || detail == null ? id : id + ": " + Program.LimitText(Json.Serialize(detail), 6000), "detail", detail, "durationMs", 0));
+                "suite", "personal_gossip", "caseId", id, "name", id, "summary", passed || detail == null ? id : id + ": " + DialogueService.LimitText(Json.Serialize(detail), 6000), "detail", detail, "durationMs", 0));
             var policy = DefaultPersonalGossipSettings();
             var leaseNow = new DateTimeOffset(2026, 10, 21, 12, 0, 0, TimeSpan.Zero);
             (Dictionary<string, object> Run, Dictionary<string, object> Runtime) ConversationLeaseFixture()
@@ -643,7 +643,7 @@ namespace ReignBetaServer
                     PromptEnvelope IdentityEnvelope(Dictionary<string, object> context, string observer, string suppliedContext, bool eventMode = false, bool finalize = true)
                     {
                         var rows = new List<Dictionary<string, object>>();
-                        string canonical = FormatContinuityTranscript(rows, Program.FormatDialogueForPrompt);
+                        string canonical = FormatContinuityTranscript(rows, DialogueService.FormatDialogueForPrompt);
                         var slots = CreateConversationTemplateSlots("{context}\n{priorDialogueText}\n{playerText}", "priorDialogueText");
                         const string latest = "How credible is that story?";
                         slots.MarkedLiveTurn = RenderConversationTemplate(slots.Template, new Dictionary<string, string> {
@@ -652,7 +652,7 @@ namespace ReignBetaServer
                             "Current engine identity controls narration; memories remain fallible attributed records.", "Known character", slots.WithoutMarkers(slots.MarkedLiveTurn));
                         AttachPersonalGossipIdentityPrompt(envelope, campaign, observer, context);
                         AttachPersonalGossipIdentityPrompt(envelope, campaign, observer, context);
-                        StructureConversationMessages(envelope, slots, canonical, rows, Program.FormatDialogueForPrompt, observer, "Traveler", latest, eventMode, null);
+                        StructureConversationMessages(envelope, slots, canonical, rows, DialogueService.FormatDialogueForPrompt, observer, "Traveler", latest, eventMode, null);
                         if (finalize) FinalizeContinuityPromptBudget(envelope, context, GossipFields("inputAllowance", 1000000, "outputFits", true));
                         return envelope;
                     }
@@ -1089,9 +1089,9 @@ namespace ReignBetaServer
                         ApplyPersonalGossipTraitProfile(editedTraits, profile);
                         var expected = new Dictionary<string, object>(ReadDictionary(editedTraits, "traitPercentages"));
                         SavePersonalGossipTraitProfile(c, campaign, editedHero, editedTraits);
-                        var ready = Program.EnsureCharacterConstructed(campaign, editedHero, editorRuntime, "gossip_fixture_first_contact_test");
+                        var ready = CharactersService.EnsureCharacterConstructed(campaign, editedHero, editorRuntime, "gossip_fixture_first_contact_test");
                         var afterContact = Program.ReadJsonObject(Program.CharacterFile(campaign, editedHero, "traits.json"));
-                        check("fixed_profile_full_first_contact_ready_" + profile, Program.IsCharacterConstructionReady(ready)
+                        check("fixed_profile_full_first_contact_ready_" + profile, CharactersService.IsCharacterConstructionReady(ready)
                             && CharactersService.NarrativeDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaign, editedHero, "narrative.json")))
                             && expected.All(p => ReadInt(ReadDictionary(afterContact, "traitPercentages"), p.Key, -1) == Convert.ToInt32(p.Value))
                             && DialogueSelfTestStore.SelectCharacterEditorNativeCommands2(c, GossipFields("hero", editedHero)).Count == 0, ready);

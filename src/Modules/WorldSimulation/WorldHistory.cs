@@ -359,7 +359,7 @@ namespace ReignBetaServer
                     "social_outcome", StringComparison.OrdinalIgnoreCase))
                 .Where(item =>
                 {
-                    Dictionary<string, object> outcome = Program.DictionaryOrDefault(
+                    Dictionary<string, object> outcome = CharactersService.DictionaryOrDefault(
                         item, "payload", item);
                     return !string.IsNullOrWhiteSpace(ReadString(outcome,
                                "dynamicReputationTagId", ""))
@@ -387,7 +387,7 @@ namespace ReignBetaServer
                         eventId, ex, connection);
                     errors.Add("Direct social outcome " + eventId
                         + " failed before acknowledgment: "
-                        + Program.LimitText(ex.Message, 500));
+                        + DialogueService.LimitText(ex.Message, 500));
                 }
             }
             return acknowledged;
@@ -587,7 +587,7 @@ namespace ReignBetaServer
             {
                 EnsureWorldHistorySchema(connection);
                 timelineId = FirstNonEmpty(timelineId, ActiveWorldHistoryTimeline(connection));
-                List<string> terms = Program.MemoryQueryTerms(text).Take(16).ToList();
+                List<string> terms = DialogueService.MemoryQueryTerms(text).Take(16).ToList();
                 List<Dictionary<string, object>> rows = WorldSimulationStore.SelectWorldHistoryEvents6(connection, new Dictionary<string, object> { ["timeline"] = timelineId, ["entity"] = entityId, ["type"] = type, ["from"] = fromDay, ["to"] = toDay, ["limit"] = Math.Max(limit, terms.Count > 0 ? Math.Min(500, limit * 5) : limit) });
                 if (terms.Count > 0)
                 {
@@ -792,8 +792,8 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> rows = string.IsNullOrWhiteSpace(claimantId)
                 ? WorldSimulationStore.SelectWorldHistoryEvents9(connection, parameters)
                 : WorldSimulationStore.SelectWorldHistoryEntities(connection, parameters);
-            List<string> ftsTerms = Program.MemoryQueryTerms(claim).Where(x => x.Length > 2).Take(16).ToList();
-            string ftsQuery = Program.BuildFtsQuery(ftsTerms);
+            List<string> ftsTerms = DialogueService.MemoryQueryTerms(claim).Where(x => x.Length > 2).Take(16).ToList();
+            string ftsQuery = DialogueService.BuildFtsQuery(ftsTerms);
             if (!string.IsNullOrWhiteSpace(ftsQuery))
             {
                 try
@@ -804,7 +804,7 @@ namespace ReignBetaServer
                 }
                 catch { }
             }
-            List<string> terms = Program.MemoryQueryTerms(claim).Concat(FamilyTerms(family)).Distinct(StringComparer.OrdinalIgnoreCase).Take(24).ToList();
+            List<string> terms = DialogueService.MemoryQueryTerms(claim).Concat(FamilyTerms(family)).Distinct(StringComparer.OrdinalIgnoreCase).Take(24).ToList();
             foreach (Dictionary<string, object> row in rows)
             {
                 List<Dictionary<string, object>> entities = QueryWorldHistoryEntities(connection, ReadString(row, "event_id", ""));
@@ -864,7 +864,7 @@ namespace ReignBetaServer
                 bool direct = claimantMatches.Any(x => HasHistoryRole(x, claimantId, "direct_rescuer", "rescuer", "releaser"));
                 bool assisted = claimantMatches.Any(x => HasHistoryRole(x, claimantId, "assisting_rescuer", "rescuing_side_participant", "participant"));
                 int beneficiaries = claimantMatches.SelectMany(x => ReadDictionaryList(x, "entities")).Where(x => RoleContains(ReadString(x, "role", ""), "beneficiary", "rescued_prisoner", "released_prisoner")).Select(x => ReadString(x, "entity_id", "")).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Count();
-                bool severalClaim = Program.ContainsAny(Program.NormalizeLookup(claim), "several", "many", "multiple", "three", "four", "five");
+                bool severalClaim = DialogueService.ContainsAny(Program.NormalizeLookup(claim), "several", "many", "multiple", "three", "four", "five");
                 verdict = direct && (!severalClaim || beneficiaries >= 3) ? "verified" : direct || assisted ? "partially_verified" : familyMatches.All(HistoryEventRosterComplete) ? "contradicted" : "insufficient_evidence";
                 explanation = direct ? "The claimant is connected to a direct release; beneficiary quantity was checked." : assisted ? "The claimant assisted the rescuing side but is not the direct recorded rescuer." : "No complete matching event credits the claimant with the rescue.";
                 if (direct || assisted) matched.Add("rescue participation");
@@ -923,9 +923,9 @@ namespace ReignBetaServer
             {
                 List<Dictionary<string, object>> candidates = WorldHistoryPurposes.Select(x => new Dictionary<string, object> { ["id"] = "purpose:" + x, ["text"] = PurposeDescription(x) })
                     .Concat(WorldHistoryFamilies.Select(x => new Dictionary<string, object> { ["id"] = "family:" + x, ["text"] = FamilyDescription(x) })).ToList();
-                string raw = Program.PostJsonToUrl(ReadString(settings, "minimeRerankUrl", "http://127.0.0.1:8082/rerank"), Json.Serialize(new Dictionary<string, object>
+                string raw = DialogueService.PostJsonToUrl(ReadString(settings, "minimeRerankUrl", "http://127.0.0.1:8082/rerank"), Json.Serialize(new Dictionary<string, object>
                 {
-                    ["query"] = Program.LimitText(claim, 1800), ["candidates"] = candidates, ["top_k"] = candidates.Count
+                    ["query"] = DialogueService.LimitText(claim, 1800), ["candidates"] = candidates, ["top_k"] = candidates.Count
                 }), Math.Max(250, Math.Min(1500, ReadInt(settings, "minimeRerankTimeoutMs", 1500))));
                 Dictionary<string, object> decoded = TryParseJsonObject(raw);
                 List<Dictionary<string, object>> results = ReadDictionaryList(decoded, "results").Concat(ReadDictionaryList(decoded, "ranked")).Concat(ReadDictionaryList(decoded, "items")).ToList();
@@ -959,7 +959,7 @@ namespace ReignBetaServer
                 status["method"] = ReadBool(status, "applied", false) ? "minime_generic_assist" : "deterministic_authoritative";
                 status["results"] = results.Take(12).ToList();
             }
-            catch (Exception ex) { status["error"] = Program.LimitText(ex.Message, 500); }
+            catch (Exception ex) { status["error"] = DialogueService.LimitText(ex.Message, 500); }
             return status;
         }
 
@@ -972,12 +972,12 @@ namespace ReignBetaServer
             {
                 List<Dictionary<string, object>> outbound = candidates.Take(64).Select(x => new Dictionary<string, object>
                 {
-                    ["id"] = ReadString(x, "event_id", ""), ["text"] = Program.LimitText(ReadString(x, "semantic_text", ReadString(x, "summary", "")), 1800)
+                    ["id"] = ReadString(x, "event_id", ""), ["text"] = DialogueService.LimitText(ReadString(x, "semantic_text", ReadString(x, "summary", "")), 1800)
                 }).ToList();
                 string query = "Purpose: " + purpose + ". Claim family: " + family + ". Find canonical evidence for: " + claim;
-                string raw = Program.PostJsonToUrl(ReadString(settings, "minimeRerankUrl", "http://127.0.0.1:8082/rerank"), Json.Serialize(new Dictionary<string, object>
+                string raw = DialogueService.PostJsonToUrl(ReadString(settings, "minimeRerankUrl", "http://127.0.0.1:8082/rerank"), Json.Serialize(new Dictionary<string, object>
                 {
-                    ["query"] = Program.LimitText(query, 1800), ["candidates"] = outbound, ["top_k"] = outbound.Count
+                    ["query"] = DialogueService.LimitText(query, 1800), ["candidates"] = outbound, ["top_k"] = outbound.Count
                 }), Math.Max(250, Math.Min(1500, ReadInt(settings, "minimeRerankTimeoutMs", 1500))));
                 Dictionary<string, object> decoded = TryParseJsonObject(raw);
                 List<Dictionary<string, object>> results = ReadDictionaryList(decoded, "results").Concat(ReadDictionaryList(decoded, "ranked")).Concat(ReadDictionaryList(decoded, "items")).ToList();
@@ -985,11 +985,11 @@ namespace ReignBetaServer
                 foreach (Dictionary<string, object> result in results)
                 {
                     string id = ReadFirstString(result, "id", "candidate_id", "candidateId");
-                    if (!string.IsNullOrWhiteSpace(id)) scores[id] = Program.ClampDouble(ReadDouble(result, "score", ReadDouble(result, "similarity", 0d)), -1d, 1d);
+                    if (!string.IsNullOrWhiteSpace(id)) scores[id] = DialogueService.ClampDouble(ReadDouble(result, "score", ReadDouble(result, "similarity", 0d)), -1d, 1d);
                 }
                 status["applied"] = scores.Count > 0; status["scores"] = scores; status["results"] = results.Take(64).ToList();
             }
-            catch (Exception ex) { status["error"] = Program.LimitText(ex.Message, 500); }
+            catch (Exception ex) { status["error"] = DialogueService.LimitText(ex.Message, 500); }
             return status;
         }
 
@@ -1042,22 +1042,22 @@ namespace ReignBetaServer
             string roles = string.Join("; ", (entities ?? new List<Dictionary<string, object>>()).Take(80).Select(x =>
                 FirstNonEmpty(ReadFirstString(x, "name", "nameSnapshot", "entityId", "id"), "unknown") + " was " + ReadString(x, "role", "participant") +
                 (string.IsNullOrWhiteSpace(ReadString(x, "side", "")) ? "" : " on " + ReadString(x, "side", "") + " side")));
-            return Program.LimitText(eventType + " " + phase + " at " + location + ". " + summary + " Roles: " + roles, 12000);
+            return DialogueService.LimitText(eventType + " " + phase + " at " + location + ". " + summary + " Roles: " + roles, 12000);
         }
 
         internal static string ClassifyWorldHistoryCategory(string eventType)
         {
             string q = Program.NormalizeLookup(eventType);
-            if (Program.ContainsAny(q, "battle", "raid", "siege", "war", "army", "prisoner", "wounded", "killed")) return "warfare";
-            if (Program.ContainsAny(q, "marriage", "birth", "child", "relation", "clan")) return "personal_and_clan";
-            if (Program.ContainsAny(q, "trade", "item", "gold", "workshop", "caravan")) return "economy";
-            if (Program.ContainsAny(q, "settlement", "village", "governor", "building")) return "settlement";
+            if (DialogueService.ContainsAny(q, "battle", "raid", "siege", "war", "army", "prisoner", "wounded", "killed")) return "warfare";
+            if (DialogueService.ContainsAny(q, "marriage", "birth", "child", "relation", "clan")) return "personal_and_clan";
+            if (DialogueService.ContainsAny(q, "trade", "item", "gold", "workshop", "caravan")) return "economy";
+            if (DialogueService.ContainsAny(q, "settlement", "village", "governor", "building")) return "settlement";
             return "campaign";
         }
 
         internal static bool IsMajorWorldHistoryEvent(string eventType)
         {
-            return Program.ContainsAny(Program.NormalizeLookup(eventType), "war declared", "make peace", "alliance", "kingdom created", "kingdom destroyed", "ruling clan", "settlement owner", "marriage", "given birth", "hero killed", "rebellion");
+            return DialogueService.ContainsAny(Program.NormalizeLookup(eventType), "war declared", "make peace", "alliance", "kingdom created", "kingdom destroyed", "ruling clan", "settlement owner", "marriage", "given birth", "hero killed", "rebellion");
         }
 
         internal static bool EventMatchesFamily(string eventType, List<Dictionary<string, object>> entities, string family)
@@ -1065,22 +1065,22 @@ namespace ReignBetaServer
             string q = Program.NormalizeLookup(eventType + " " + string.Join(" ", (entities ?? new List<Dictionary<string, object>>()).Select(x => ReadString(x, "role", ""))));
             switch (family)
             {
-                case "presence": case "leadership": case "victory": case "defeat": return Program.ContainsAny(q, "battle", "raid", "siege", "hideout", "blockade");
-                case "rescue": return Program.ContainsAny(q, "rescue", "released prisoner", "direct rescuer", "assisting rescuer");
-                case "release": return Program.ContainsAny(q, "release", "freed");
-                case "capture": return Program.ContainsAny(q, "prisoner taken", "capture", "captor");
-                case "killing": return Program.ContainsAny(q, "killed", "killer", "execution");
-                case "wounding": return Program.ContainsAny(q, "wounded", "wound");
-                case "raid": return Program.ContainsAny(q, "raid", "village looted");
-                case "siege": case "conquest": case "defense": return Program.ContainsAny(q, "siege", "settlement owner", "conquest");
-                case "ownership": return Program.ContainsAny(q, "owner", "ownership", "workshop");
-                case "marriage": return Program.ContainsAny(q, "marriage", "married");
-                case "diplomacy": return Program.ContainsAny(q, "war declared", "peace", "alliance", "diplomacy", "treaty");
-                case "payment": return Program.ContainsAny(q, "gold", "payment", "paid");
-                case "trade": return Program.ContainsAny(q, "trade", "item sold", "barter");
-                case "tournament": return Program.ContainsAny(q, "tournament");
-                case "travel": return Program.ContainsAny(q, "settlement entered", "settlement left", "travel");
-                case "meeting": return Program.ContainsAny(q, "met", "conversation", "meeting");
+                case "presence": case "leadership": case "victory": case "defeat": return DialogueService.ContainsAny(q, "battle", "raid", "siege", "hideout", "blockade");
+                case "rescue": return DialogueService.ContainsAny(q, "rescue", "released prisoner", "direct rescuer", "assisting rescuer");
+                case "release": return DialogueService.ContainsAny(q, "release", "freed");
+                case "capture": return DialogueService.ContainsAny(q, "prisoner taken", "capture", "captor");
+                case "killing": return DialogueService.ContainsAny(q, "killed", "killer", "execution");
+                case "wounding": return DialogueService.ContainsAny(q, "wounded", "wound");
+                case "raid": return DialogueService.ContainsAny(q, "raid", "village looted");
+                case "siege": case "conquest": case "defense": return DialogueService.ContainsAny(q, "siege", "settlement owner", "conquest");
+                case "ownership": return DialogueService.ContainsAny(q, "owner", "ownership", "workshop");
+                case "marriage": return DialogueService.ContainsAny(q, "marriage", "married");
+                case "diplomacy": return DialogueService.ContainsAny(q, "war declared", "peace", "alliance", "diplomacy", "treaty");
+                case "payment": return DialogueService.ContainsAny(q, "gold", "payment", "paid");
+                case "trade": return DialogueService.ContainsAny(q, "trade", "item sold", "barter");
+                case "tournament": return DialogueService.ContainsAny(q, "tournament");
+                case "travel": return DialogueService.ContainsAny(q, "settlement entered", "settlement left", "travel");
+                case "meeting": return DialogueService.ContainsAny(q, "met", "conversation", "meeting");
                 default: return true;
             }
         }

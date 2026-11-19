@@ -45,7 +45,7 @@ namespace ReignBetaServer
                 string source = ReadString(row, "summary", "");
                 string body = MemoryTopicSourceText(source);
                 bool hasProvenanceNotice = MemoryTopicProvenanceNotices.Any(notice => source.Contains(notice, StringComparison.OrdinalIgnoreCase));
-                var tags = Program.TextListFromJson(ReadString(row, "tags_json", "[]"))
+                var tags = DialogueService.TextListFromJson(ReadString(row, "tags_json", "[]"))
                     .Concat(ReadStringList(row, "tags"))
                     .Select(NormalizeMemoryTopic).Where(IsUsefulMemoryTopic)
                     // Older summaries extracted their tags from the generated
@@ -72,7 +72,7 @@ namespace ReignBetaServer
                     return "not_" + word;
                 }, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
                 int termRank = 0;
-                foreach (string term in Program.MemoryQueryTerms(body).Select(NormalizeMemoryTopic)
+                foreach (string term in DialogueService.MemoryQueryTerms(body).Select(NormalizeMemoryTopic)
                     .Where(t => IsUsefulMemoryTopic(t) && !negated.Contains(t)).Distinct(StringComparer.OrdinalIgnoreCase))
                 {
                     textCounts[term] = textCounts.GetValueOrDefault(term) + 1;

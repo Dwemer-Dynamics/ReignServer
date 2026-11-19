@@ -32,8 +32,8 @@ namespace ReignBetaServer
             double day = ReadDouble(context, "worldDay", double.NaN);
             if (string.IsNullOrWhiteSpace(observer) || string.IsNullOrWhiteSpace(peer) || !double.IsFinite(day) || day < 0)
                 return new List<Dictionary<string, object>>();
-            var access = Program.BuildKnowledgeAccessContext(observer, peer, "", context);
-            var otherAccess = Program.BuildKnowledgeAccessContext(peer, observer, "", context);
+            var access = DialogueService.BuildKnowledgeAccessContext(observer, peer, "", context);
+            var otherAccess = DialogueService.BuildKnowledgeAccessContext(peer, observer, "", context);
             string query = ReadString(context, "playerText", "") + " " + peer
                 + " relationship marriage spouse partner affection disagreement promise letter";
             var plan = DialogueService.PlanMemoryQuery(observer, peer, query, context);

@@ -178,7 +178,7 @@ namespace ReignBetaServer
             foreach (Dictionary<string, object> archetype in ReadDictionaryList(catalog, "archetypes")
                 .Where(item => ReadBool(item, "enabled", true) && !ReadBool(item, "directReputation", false)))
             {
-                foreach (KeyValuePair<string, object> role in Program.DictionaryOrDefault(archetype, "roleMappings", new Dictionary<string, object>()))
+                foreach (KeyValuePair<string, object> role in CharactersService.DictionaryOrDefault(archetype, "roleMappings", new Dictionary<string, object>()))
                 {
                     List<Dictionary<string, object>> mapped = ValueTextList(role.Value)
                         .Where(byId.ContainsKey).Select(id => byId[id])

@@ -64,7 +64,7 @@ namespace ReignBetaServer
             DialogueStore.InsertOrIgnoreConversationSessions4(connection, TestDict("session", session, "campaign", campaign, "npc", observer, "player", player,
                     "channel", ReadString(payload, "channel", "in_person"), "now", now, "day", ReadDouble(payload, "worldDay", 0d),
                     "location", ReadFirstString(payload, "locationId", "currentSettlementId"),
-                    "audience", Json.Serialize(Program.MergeStringLists(ReadStringList(payload, "participants"), new[] { player, observer })),
+                    "audience", Json.Serialize(DialogueService.MergeStringLists(ReadStringList(payload, "participants"), new[] { player, observer })),
                     "payload", SerializeConversationTurnStoragePayload(payload)));
             var sessionRow = DialogueStore.SelectConversationSessions7(connection, TestDict("session", session)).Single();
             string sessionTimeline = ReadString(TryParseJsonObject(ReadString(sessionRow, "payload_json", "{}")), "timelineId", "");

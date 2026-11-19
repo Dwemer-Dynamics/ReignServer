@@ -29,7 +29,7 @@ namespace ReignBetaServer
             EnsureConversationContinuitySchema(connection);
             var snapshot = new ContinuityReadSnapshot { Timeline = ContinuityTimeline(payload) };
             string peer = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
-            var access = Program.BuildKnowledgeAccessContext(owner, peer, "", payload);
+            var access = DialogueService.BuildKnowledgeAccessContext(owner, peer, "", payload);
             foreach (var row in DialogueStore.SelectConversationContinuity5(connection, MemorySourceTimelineSql("conversation_continuity", access: access),new Dictionary<string, object> {
                 ["timeline"] = snapshot.Timeline, ["owner"] = owner, ["peer"] = peer }))
             {
@@ -121,7 +121,7 @@ namespace ReignBetaServer
             if (snapshot == null || !WorldSimulationService.TableExists(connection, "conversation_turns")) return "";
             snapshot.DeliveredPending.Clear();
             var text = new StringBuilder();
-            var access = Program.BuildKnowledgeAccessContext(owner, peer, "", payload);
+            var access = DialogueService.BuildKnowledgeAccessContext(owner, peer, "", payload);
             var rows = DialogueStore.SelectConversationContinuityPending(connection, TestDict("timeline", ContinuityTimeline(payload), "owner", owner,
                 "peer", peer, "day", access.WorldDay, "asof", access.AsOfTimestamp, "sequence", access.AsOfAcceptedSequence));
             var gaps = new List<string>();

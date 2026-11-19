@@ -226,9 +226,9 @@ namespace ReignBetaServer
                     "effectiveAttitude", 0d);
                 string command = ReadString(candidate, "command", "");
                 double factor = IsDirectorPeaceCommand(command) ? 0.15d
-                    : Program.ContainsAny(command, "exchange_prisoners", "ransom_package",
+                    : DialogueService.ContainsAny(command, "exchange_prisoners", "ransom_package",
                         "loan_or_subsidy", "supply_agreement") ? 0.10d
-                    : Program.ContainsAny(command, "demand_", "war_indemnity",
+                    : DialogueService.ContainsAny(command, "demand_", "war_indemnity",
                         "protectorate", "vassalage", "demilitarized") ? 0.08d
                     : 0.20d;
                 double cap = IsDirectorPeaceCommand(command) ? 15d
@@ -432,7 +432,7 @@ namespace ReignBetaServer
             }
             if (command == "ransom_package" && ReadInt(terms, "gold", 0) <= 0)
                 errors.Add("ransom package requires positive gold");
-            if (Program.ContainsAny(command, "sign_trade_agreement",
+            if (DialogueService.ContainsAny(command, "sign_trade_agreement",
                     "sign_non_aggression_pact", "sign_alliance",
                     "sign_defensive_pact", "demilitarized_border")
                 && ReadInt(terms, "durationDays", 0) <= 0)

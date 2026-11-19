@@ -1,9 +1,9 @@
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static class SpymasterRoutes
     {
         // HTTP routes owned by the Spymaster module, in their former router order (see RouteTable.cs).
-        private static void RegisterSpymasterRoutes(ReignRouteTable routes)
+        internal static void RegisterSpymasterRoutes(Program.ReignRouteTable routes)
         {
             routes.Post("/court/spymaster/memory", request => CourtService.CapitalCourtApi(request.JsonBody, SpymasterService.SpymasterMemoryApi));
             routes.Post("/court/spymaster/social/status", request => CourtService.CapitalCourtApi(request.JsonBody, SpymasterService.SpymasterSocialStatusApi));

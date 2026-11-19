@@ -223,7 +223,7 @@ namespace ReignBetaServer
                 if (!used.Add(signature)) continue;
                 entries.Add(TestDict("recurringTerms", pair.Key, "evidence", indices.Select(i => TestDict(
                     "turnId", ReadString(rows[i].Row, "turn_id", ""),
-                    "quote", Program.LimitText(ConversationSpeech(ReadString(rows[i].Row, "text", "")).Trim(), 220))).ToList()));
+                    "quote", DialogueService.LimitText(ConversationSpeech(ReadString(rows[i].Row, "text", "")).Trim(), 220))).ToList()));
                 if (entries.Count == 3) break;
             }
             if (entries.Count == 0) return "";

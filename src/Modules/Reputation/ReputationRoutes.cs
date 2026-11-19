@@ -3,10 +3,10 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static class ReputationRoutes
     {
         // HTTP routes owned by the Reputation module, in their former router order (see RouteTable.cs).
-        private static void RegisterReputationRoutes(ReignRouteTable routes)
+        internal static void RegisterReputationRoutes(Program.ReignRouteTable routes)
         {
 #if !REIGN_EXCLUDE_VERIFICATION
             routes.Get("/tests/social-balance/manifest", request => ReputationService.SocialBalanceManifestApi(request.Query));

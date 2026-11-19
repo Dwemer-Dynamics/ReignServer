@@ -153,7 +153,7 @@ namespace ReignBetaServer
                         bool nativePreserved = string.IsNullOrWhiteSpace(nativeText)
                             || (ReadString(migratedBackground, "summary", "").StartsWith(nativeText, StringComparison.Ordinal)
                                 && ReadString(migratedBackground, "encyclopediaText", "").StartsWith(nativeText, StringComparison.Ordinal));
-                        bool ready = Program.TraitDocumentReady(migratedTraits) && nativePreserved;
+                        bool ready = CharactersService.TraitDocumentReady(migratedTraits) && nativePreserved;
                         if (!ready) failedCount++; else migratedCount++;
                         results.Add(new Dictionary<string, object>
                         {
@@ -225,7 +225,7 @@ namespace ReignBetaServer
             bool editorOwned = CharacterHasEditorCorrections(campaignId, heroId);
             bool current = string.Equals(ReadString(currentMetadata, "packVersion", ""), packVersion, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(ReadString(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json")), "status", ""), "canonical_ready", StringComparison.OrdinalIgnoreCase)
-                && Program.TraitDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json")))
+                && CharactersService.TraitDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json")))
                 && (!richNarrative || NarrativeDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "narrative.json"))));
 
             if (editorOwned && !forceCanonical)
@@ -273,7 +273,7 @@ namespace ReignBetaServer
                 };
             }
             Dictionary<string, object> background = DeepCloneProfileDictionary(ReadDictionary(shipped, "background"));
-            Program.EnsureEncyclopediaText(background, runtimeProfile, traits);
+            CharactersService.EnsureEncyclopediaText(background, runtimeProfile, traits);
             Dictionary<string, object> voice = DeepCloneProfileDictionary(ReadDictionary(shipped, "voice"));
             Dictionary<string, object> motivations = DeepCloneProfileDictionary(ReadDictionary(shipped, "motivations"));
             Dictionary<string, object> template = DeepCloneProfileDictionary(ReadDictionary(shipped, "template"));
@@ -380,10 +380,10 @@ namespace ReignBetaServer
             bool generatedByLlm = ReadBool(constructed, "llmUsed", false)
                 && (string.Equals(status, "ready", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(status, "enriched", StringComparison.OrdinalIgnoreCase));
-            if ((!Program.IsUsableCharacterStatus(status) && !string.Equals(status, "first_contact_pending", StringComparison.OrdinalIgnoreCase))
-                || !Program.TraitDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"))))
+            if ((!CharactersService.IsUsableCharacterStatus(status) && !string.Equals(status, "first_contact_pending", StringComparison.OrdinalIgnoreCase))
+                || !CharactersService.TraitDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"))))
             {
-                constructed = Program.ConstructCharacterFiles(campaignId, heroId, runtimeProfile, true, false, "deterministic_baseline");
+                constructed = CharactersService.ConstructCharacterFiles(campaignId, heroId, runtimeProfile, true, false, "deterministic_baseline");
                 constructed["ok"] = true;
                 constructed["status"] = "first_contact_pending";
                 constructed["source"] = "deterministic_baseline";
@@ -458,7 +458,7 @@ namespace ReignBetaServer
             };
             List<Dictionary<string, object>> pressureProfiles = ReadDictionaryList(pools, "pressureProfiles");
             overlay["pressure"] = pressureProfiles.Count == 0
-                ? Program.DefaultPressure(ReadDictionary(shipped, "sourceFacts"))
+                ? CharactersService.DefaultPressure(ReadDictionary(shipped, "sourceFacts"))
                 : DeepCloneProfileDictionary(pressureProfiles[StableIndex(campaignId + "|" + heroId + "|pressure|" + nonce, pressureProfiles.Count)]);
             Program.WriteJsonObject(path, overlay);
             return overlay;
@@ -502,8 +502,8 @@ namespace ReignBetaServer
                 case "reapply_canonical": return MaterializeCharacterProfile(campaignId, heroId, profile, true, false);
                 case "reroll_hooks": return MaterializeCharacterProfile(campaignId, heroId, profile, true, true);
                 case "request_enrichment":
-                    Dictionary<string, object> generated = Program.ConstructCharacterFiles(campaignId, heroId, profile, true, true, "manual_character_editor");
-                    if (Program.IsCharacterConstructionReady(generated)) MarkCharacterConstructionCompletedOnInteraction(campaignId, heroId, "manual_character_editor");
+                    Dictionary<string, object> generated = CharactersService.ConstructCharacterFiles(campaignId, heroId, profile, true, true, "manual_character_editor");
+                    if (CharactersService.IsCharacterConstructionReady(generated)) MarkCharacterConstructionCompletedOnInteraction(campaignId, heroId, "manual_character_editor");
                     return generated;
                 default: return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Unknown profile-library action." };
             }
@@ -605,7 +605,7 @@ namespace ReignBetaServer
                 && (File.Exists(Program.CharacterFile(campaignId, heroId, "constructed.json"))
                     || File.Exists(Program.CharacterFile(campaignId, heroId, "profile.json"))))
             {
-                return Program.LoadCharacterStack(campaignId, heroId);
+                return CharactersService.LoadCharacterStack(campaignId, heroId);
             }
 
             Dictionary<string, Dictionary<string, object>> library = CharacterProfileLibraryFor(runtimeProfile);
@@ -672,7 +672,7 @@ namespace ReignBetaServer
                 ["backgroundWorkerStarted"] = TownProfiles.Count > 0,
                 ["automaticProfileUploadsEnabled"] = false,
                 ["legacyQueueStatuses"] = statuses,
-                ["pendingBackgroundCalls"] = Program.PendingCharacterEnrichmentCount()
+                ["pendingBackgroundCalls"] = CharactersService.PendingCharacterEnrichmentCount()
             };
         }
 
@@ -739,9 +739,9 @@ namespace ReignBetaServer
                     if(score!=ReadInt(calculatedVirtues,virtue,int.MinValue))errors.Add(pair.Key+" has a stale or incorrect "+virtue+" court virtue score.");
                 }
                 Dictionary<string, object> native = ReadDictionary(ReadDictionary(pair.Value, "sourceFacts"), "traits") ?? new Dictionary<string, object>();
-                if (Program.TraitInt(traits, "courage") != (int)NativeFoundationSignalVNext(Program.TraitInt(native, "valor"))) errors.Add(pair.Key + " does not expand native Valor into Courage.");
-                if (Program.TraitInt(traits, "mercy") != (int)NativeFoundationSignalVNext(Program.TraitInt(native, "mercy"))) errors.Add(pair.Key + " does not expand native Mercy.");
-                if (Program.TraitInt(traits, "generosity") != (int)NativeFoundationSignalVNext(Program.TraitInt(native, "generosity"))) errors.Add(pair.Key + " does not expand native Generosity.");
+                if (CharactersService.TraitInt(traits, "courage") != (int)NativeFoundationSignalVNext(CharactersService.TraitInt(native, "valor"))) errors.Add(pair.Key + " does not expand native Valor into Courage.");
+                if (CharactersService.TraitInt(traits, "mercy") != (int)NativeFoundationSignalVNext(CharactersService.TraitInt(native, "mercy"))) errors.Add(pair.Key + " does not expand native Mercy.");
+                if (CharactersService.TraitInt(traits, "generosity") != (int)NativeFoundationSignalVNext(CharactersService.TraitInt(native, "generosity"))) errors.Add(pair.Key + " does not expand native Generosity.");
                 if (!FoundationTraitModelCurrent(traitDocument)) errors.Add(pair.Key + " does not use the active foundation trait model.");
                 Dictionary<string,object> percentageModel=ReadDictionary(traitDocument,"traitPercentageModel")??new Dictionary<string,object>();
                 if(ReadInt(percentageModel,"version",0)!=TraitPercentageModelVersion) errors.Add(pair.Key+" does not use trait percentage model v"+TraitPercentageModelVersion+".");

@@ -279,7 +279,7 @@ namespace ReignBetaServer
                 ["observer"] = observer ?? "", ["target"] = target ?? "", ["event"] = eventType ?? "",
                 ["polarity"] = polarity ?? "", ["status"] = status ?? "", ["threshold"] = threshold,
                 ["before"] = before, ["after"] = after, ["roll"] = roll, ["chance"] = chance,
-                ["action"] = actionId ?? "", ["correlation"] = correlationId ?? "", ["reason"] = Program.LimitText(reason ?? "", 500),
+                ["action"] = actionId ?? "", ["correlation"] = correlationId ?? "", ["reason"] = DialogueService.LimitText(reason ?? "", 500),
                 ["payload"] = Json.Serialize(payload ?? new Dictionary<string, object>()), ["ts"] = ts
             });
         }
@@ -348,7 +348,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> queued = opportunityRows.FirstOrDefault(row =>
                     ReadString(row, "observer_id", "").Equals(observer, StringComparison.OrdinalIgnoreCase)
                     && ReadString(row, "target_id", "").Equals(target, StringComparison.OrdinalIgnoreCase)
-                    && Program.ContainsAny(ReadString(row, "status", ""), "queued", "waiting_cooldown"));
+                    && DialogueService.ContainsAny(ReadString(row, "status", ""), "queued", "waiting_cooldown"));
                 Dictionary<string, object> lastActivity = DiplomacyStore.SelectRulerDiplomacyActivity2(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["observer"] = observer, ["target"] = target }).FirstOrDefault() ?? new Dictionary<string, object>();
                 int effective = ReadInt(attitude, "effectiveAttitude", 0);
@@ -391,7 +391,7 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> anomalies = new List<Dictionary<string, object>>();
             if (missing > 0) anomalies.Add(new Dictionary<string, object> { ["code"] = "missing_directional_rolls", ["count"] = missing, ["severity"] = "warning" });
             if (provenanceMissing > 0) anomalies.Add(new Dictionary<string, object> { ["code"] = "missing_ruler_diplomacy_contact", ["count"] = provenanceMissing, ["severity"] = "error" });
-            int stale = opportunityRows.Count(row => Program.ContainsAny(ReadString(row, "status", ""), "queued", "waiting_cooldown")
+            int stale = opportunityRows.Count(row => DialogueService.ContainsAny(ReadString(row, "status", ""), "queued", "waiting_cooldown")
                 && ReadDouble(row, "expiry_day", latestDay) < latestDay);
             if (stale > 0) anomalies.Add(new Dictionary<string, object> { ["code"] = "stale_opportunities", ["count"] = stale, ["severity"] = "error" });
             HashSet<string> playerRulerIds = new HashSet<string>(rulers
@@ -627,13 +627,13 @@ namespace ReignBetaServer
                 || ReadBool(terms, "militaryCommitment", false)
                 || ReadBool(terms, "releasePrisoners", false)
                 || ReadInt(terms, "loanGold", 0) > 0
-                || Program.ContainsAny(ReadString(terms, "treatyKind", ""), "alliance", "trade", "pact", "guarantee", "aid");
+                || DialogueService.ContainsAny(ReadString(terms, "treatyKind", ""), "alliance", "trade", "pact", "guarantee", "aid");
             bool hasNegative = ReadInt(terms, "reparationsGold", 0) > 0
                 || ReadInt(terms, "indemnityGold", 0) > 0
                 || ReadBool(terms, "submission", false)
                 || ReadBool(terms, "demilitarize", false)
                 || ReadStringList(terms, "settlementIds").Count > 0
-                || Program.ContainsAny(ReadString(terms, "treatyKind", ""), "surrender", "vassal", "indemnity", "punitive");
+                || DialogueService.ContainsAny(ReadString(terms, "treatyKind", ""), "surrender", "vassal", "indemnity", "punitive");
             return hasPositive == hasNegative ? "ambiguous" : hasPositive ? "positive" : "negative";
         }
 
@@ -684,9 +684,9 @@ namespace ReignBetaServer
                 actorTowardTarget = targetTowardActor = 25;
             else if (command.Equals("guarantee_independence", StringComparison.OrdinalIgnoreCase))
                 actorTowardTarget = targetTowardActor = 15;
-            else if (Program.ContainsAny(command, "make_peace", "offer_tribute_peace", "exchange_prisoners", "ransom_package"))
+            else if (DialogueService.ContainsAny(command, "make_peace", "offer_tribute_peace", "exchange_prisoners", "ransom_package"))
                 actorTowardTarget = targetTowardActor = 5;
-            else if (Program.ContainsAny(command, "loan_or_subsidy", "supply_agreement", "return_occupied_settlement"))
+            else if (DialogueService.ContainsAny(command, "loan_or_subsidy", "supply_agreement", "return_occupied_settlement"))
                 targetTowardActor = 10;
             else if (command.Equals("diplomatic_package", StringComparison.OrdinalIgnoreCase))
             {
@@ -695,11 +695,11 @@ namespace ReignBetaServer
                     || ReadInt(terms, "indemnityGold", 0) > 0
                     || ReadStringList(terms, "settlementIds").Count > 0
                     || ReadBool(terms, "submission", false)
-                    || Program.ContainsAny(ReadString(terms, "treatyKind", ""), "surrender", "punitive", "vassal");
+                    || DialogueService.ContainsAny(ReadString(terms, "treatyKind", ""), "surrender", "punitive", "vassal");
                 if (punitive) targetTowardActor = -30;
                 else actorTowardTarget = targetTowardActor = 5;
             }
-            else if (Program.ContainsAny(command, "demand_surrender", "demand_settlement", "demand_reparations", "war_indemnity", "protectorate", "vassalage"))
+            else if (DialogueService.ContainsAny(command, "demand_surrender", "demand_settlement", "demand_reparations", "war_indemnity", "protectorate", "vassalage"))
                 targetTowardActor = -30;
             // War and treaty breach consequences are ingested from authoritative native records.
             if (actorTowardTarget == 0 && targetTowardActor == 0) return;
@@ -722,7 +722,7 @@ namespace ReignBetaServer
             { ["command"] = command, ["terms"] = ReadDictionary(diplomaticEvent, "terms") ?? new Dictionary<string, object>() };
             int delta = command.Equals("sign_alliance", StringComparison.OrdinalIgnoreCase)
                 || IsDirectorAllianceProposal(refusalCandidate) ? -25
-                : Program.ContainsAny(command, "sign_trade", "non_aggression", "defensive_pact",
+                : DialogueService.ContainsAny(command, "sign_trade", "non_aggression", "defensive_pact",
                     "guarantee_independence", "make_peace", "offer_tribute_peace",
                     "exchange_prisoners", "ransom_package", "loan_or_subsidy", "supply_agreement") ? -20 : 0;
             if (delta == 0) return;

@@ -80,7 +80,7 @@ namespace ReignBetaServer
             catch (Exception ex)
             {
                 return PortraitImageCallResult.Fail(CodexImageProvider, CodexImageModel,
-                    "Codex image generation failed: " + Program.LimitText(ex.Message, 1200), timer.ElapsedMilliseconds, prompt.Length);
+                    "Codex image generation failed: " + DialogueService.LimitText(ex.Message, 1200), timer.ElapsedMilliseconds, prompt.Length);
             }
             finally
             {
@@ -89,7 +89,7 @@ namespace ReignBetaServer
                 if (stopped && !string.IsNullOrEmpty(job))
                 {
                     try { DeleteCodexImageJob(job); }
-                    catch (Exception ex) { Program.LogOperational("portrait.codex_cleanup_failed", new Dictionary<string, object> { ["job"] = job, ["error"] = Program.LimitText(ex.Message, 300) }); }
+                    catch (Exception ex) { Program.LogOperational("portrait.codex_cleanup_failed", new Dictionary<string, object> { ["job"] = job, ["error"] = DialogueService.LimitText(ex.Message, 300) }); }
                 }
                 if (stopped) CodexImageGate.Release();
                 else Program.LogOperational("portrait.codex_stop_failed", new Dictionary<string, object> { ["job"] = job,
@@ -229,7 +229,7 @@ namespace ReignBetaServer
         private static string CodexImageRefusalText(Dictionary<string, object> item)
         {
             string text = ReadString(item, "text", "");
-            return ReadString(item, "type", "") == "agentMessage" && PortraitContentRefusal(text) ? Program.LimitText(text, 1000) : "";
+            return ReadString(item, "type", "") == "agentMessage" && PortraitContentRefusal(text) ? DialogueService.LimitText(text, 1000) : "";
         }
 
         private static Dictionary<string, object> CompleteCodexImageTurn(Dictionary<string, object> turn,
@@ -438,7 +438,7 @@ namespace ReignBetaServer
                         }
                     }
                 }
-                catch (Exception ex) { lock (sync) failure = Program.LimitText(ex.Message, 600); changed.Set(); }
+                catch (Exception ex) { lock (sync) failure = DialogueService.LimitText(ex.Message, 600); changed.Set(); }
             }
 
             public bool Stop()

@@ -19,7 +19,7 @@ using Reign.Core.Contracts.Court;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         internal static Dictionary<string, object> UpsertCharacterProfile(string campaignId, Dictionary<string, object> hero)
         {
@@ -28,20 +28,20 @@ namespace ReignBetaServer
                 throw new InvalidOperationException("Hero profile is empty.");
             }
 
-            string heroId = CharacterIdFrom(hero);
+            string heroId = Program.CharacterIdFrom(hero);
             if (string.IsNullOrWhiteSpace(heroId))
             {
                 throw new InvalidOperationException("heroStringId is required.");
             }
 
-            string dir = CharacterDirectory(campaignId, heroId);
+            string dir = Program.CharacterDirectory(campaignId, heroId);
             Directory.CreateDirectory(dir);
             Directory.CreateDirectory(Path.Combine(dir, "memory"));
             Directory.CreateDirectory(Path.Combine(dir, "history"));
             Directory.CreateDirectory(Path.Combine(dir, "portraits"));
             string profilePath = Path.Combine(dir, "profile.json");
             bool created = !File.Exists(profilePath);
-            Dictionary<string, object> existingProfile = created ? new Dictionary<string, object>() : ReadJsonObject(profilePath);
+            Dictionary<string, object> existingProfile = created ? new Dictionary<string, object>() : Program.ReadJsonObject(profilePath);
             Dictionary<string, object> profile = new Dictionary<string, object>(hero, StringComparer.OrdinalIgnoreCase)
             {
                 ["campaignId"] = campaignId,
@@ -70,50 +70,50 @@ namespace ReignBetaServer
                 profile["narrativeVersion"] = existingProfile["narrativeVersion"];
             profile = CharactersService.WithNarrativeCampaignVersion(campaignId, profile);
             CharactersService.PreserveWandererIdentity(profile, existingProfile);
-            lock (FileLock)
+            lock (Program.FileLock)
             {
                 PortraitsService.PreserveConfirmedOutfit(campaignId, heroId, profile);
-                WriteJsonObject(profilePath, profile);
+                Program.WriteJsonObject(profilePath, profile);
             }
-            WriteCampaignMetadata(campaignId, profile);
-            EnsureJsonObjectFile(Path.Combine(dir, "template.json"), LoadCharacterTemplate(heroId, profile));
-            EnsureJsonObjectFile(Path.Combine(dir, "characteristics.json"), DefaultCharacteristics(hero));
+            Program.WriteCampaignMetadata(campaignId, profile);
+            Program.EnsureJsonObjectFile(Path.Combine(dir, "template.json"), LoadCharacterTemplate(heroId, profile));
+            Program.EnsureJsonObjectFile(Path.Combine(dir, "characteristics.json"), Program.DefaultCharacteristics(hero));
             Dictionary<string, object> suppliedWealth = ReadDictionary(profile, "wealth");
             string wealthPath = Path.Combine(dir, "wealth.json");
             if (suppliedWealth != null && suppliedWealth.Count > 0)
             {
-                WriteJsonObject(wealthPath, CharactersService.NormalizeObservedWealth(suppliedWealth));
+                Program.WriteJsonObject(wealthPath, CharactersService.NormalizeObservedWealth(suppliedWealth));
             }
             else
             {
-                Dictionary<string, object> existingWealth = ReadJsonObject(wealthPath);
+                Dictionary<string, object> existingWealth = Program.ReadJsonObject(wealthPath);
                 if (!CharactersService.IsObservedWealth(existingWealth))
-                    WriteJsonObject(wealthPath, CharactersService.UnknownWealth(hero));
+                    Program.WriteJsonObject(wealthPath, CharactersService.UnknownWealth(hero));
             }
-            WriteJsonObject(Path.Combine(dir, "inventory.json"), DictionaryOrDefault(profile, "inventory", DefaultInventory(hero)));
-            WriteJsonObject(Path.Combine(dir, "appearance.json"), DictionaryOrDefault(profile, "appearance", DefaultAppearance(hero)));
-            EnsureJsonObjectFile(Path.Combine(dir, "motivations.json"), DefaultMotivations(hero));
-            EnsureJsonObjectFile(Path.Combine(dir, "secrets.json"), DefaultSecrets(hero));
-            EnsureJsonObjectFile(Path.Combine(dir, "state.json"), DefaultCharacterState(hero));
-            EnsureJsonObjectFile(Path.Combine(dir, "pressure.json"), DefaultPressure(hero));
-            EnsureJsonObjectFile(Path.Combine(dir, "memory", "summary.json"), new Dictionary<string, object>
+            Program.WriteJsonObject(Path.Combine(dir, "inventory.json"), DictionaryOrDefault(profile, "inventory", Program.DefaultInventory(hero)));
+            Program.WriteJsonObject(Path.Combine(dir, "appearance.json"), DictionaryOrDefault(profile, "appearance", Program.DefaultAppearance(hero)));
+            Program.EnsureJsonObjectFile(Path.Combine(dir, "motivations.json"), DefaultMotivations(hero));
+            Program.EnsureJsonObjectFile(Path.Combine(dir, "secrets.json"), DefaultSecrets(hero));
+            Program.EnsureJsonObjectFile(Path.Combine(dir, "state.json"), Program.DefaultCharacterState(hero));
+            Program.EnsureJsonObjectFile(Path.Combine(dir, "pressure.json"), DefaultPressure(hero));
+            Program.EnsureJsonObjectFile(Path.Combine(dir, "memory", "summary.json"), new Dictionary<string, object>
             {
                 ["version"] = 1,
                 ["summary"] = "",
                 ["updatedUtc"] = ""
             });
-            EnsureJsonObjectFile(Path.Combine(dir, "portraits", "portrait_meta.json"), new Dictionary<string, object>
+            Program.EnsureJsonObjectFile(Path.Combine(dir, "portraits", "portrait_meta.json"), new Dictionary<string, object>
             {
                 ["version"] = 1,
                 ["status"] = "not_generated"
             });
-            EnsureFile(Path.Combine(dir, "memory", "memories.jsonl"));
-            EnsureJsonObjectFile(Path.Combine(dir, "memory", "relationships.json"), new Dictionary<string, object> { ["version"] = 1 });
-            EnsureFile(Path.Combine(dir, "history", "dialogue.jsonl"));
-            EnsureFile(Path.Combine(dir, "history", "events.jsonl"));
-            EnsureFile(Path.Combine(dir, "history", "decisions.jsonl"));
-            WriteJsonObject(Path.Combine(dir, "schema_manifest.json"), CharacterSchemaManifest(campaignId, heroId, profile));
-            UpdateCharacterIndex(campaignId, profile);
+            Program.EnsureFile(Path.Combine(dir, "memory", "memories.jsonl"));
+            Program.EnsureJsonObjectFile(Path.Combine(dir, "memory", "relationships.json"), new Dictionary<string, object> { ["version"] = 1 });
+            Program.EnsureFile(Path.Combine(dir, "history", "dialogue.jsonl"));
+            Program.EnsureFile(Path.Combine(dir, "history", "events.jsonl"));
+            Program.EnsureFile(Path.Combine(dir, "history", "decisions.jsonl"));
+            Program.WriteJsonObject(Path.Combine(dir, "schema_manifest.json"), CharacterSchemaManifest(campaignId, heroId, profile));
+            Program.UpdateCharacterIndex(campaignId, profile);
             Dictionary<string, object> foundation = CharactersService.MaterializeCharacterProfile(campaignId, heroId, profile, false, false);
 
             return new Dictionary<string, object>
@@ -127,12 +127,12 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> CharacterSchemaApi()
+        internal static Dictionary<string, object> CharacterSchemaApi()
         {
             return new Dictionary<string, object>
             {
                 ["ok"] = true,
-                ["schemaVersion"] = CharacterSchemaVersion,
+                ["schemaVersion"] = Program.CharacterSchemaVersion,
                 ["scale"] = new Dictionary<string, object>
                 {
                     ["range"] = "-2..2",
@@ -181,7 +181,7 @@ namespace ReignBetaServer
         {
             return new Dictionary<string, object>
             {
-                ["schemaVersion"] = CharacterSchemaVersion,
+                ["schemaVersion"] = Program.CharacterSchemaVersion,
                 ["campaignId"] = campaignId,
                 ["heroStringId"] = heroId,
                 ["updatedUtc"] = DateTime.UtcNow.ToString("o"),
@@ -248,15 +248,15 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> CharacterStructureDiagnostics(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> CharacterStructureDiagnostics(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
             string heroId = FirstNonEmpty(ReadString(payload, "heroStringId", ""), ReadString(payload, "heroId", ""));
             if (!string.IsNullOrWhiteSpace(heroId))
             {
                 Dictionary<string, object> hero = DiagnoseCharacterFolder(campaignId, heroId);
-                LogOperational("characters.diagnose_hero", new Dictionary<string, object>
+                Program.LogOperational("characters.diagnose_hero", new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["heroStringId"] = heroId,
@@ -266,13 +266,13 @@ namespace ReignBetaServer
             }
 
             Dictionary<string, object> campaign = DiagnoseCampaignCharacters(campaignId);
-            LogOperational("characters.diagnose_campaign", campaign);
+            Program.LogOperational("characters.diagnose_campaign", campaign);
             return campaign;
         }
 
         private static Dictionary<string, object> DiagnoseCampaignCharacters(string campaignId)
         {
-            string charactersDir = Path.Combine(CampaignDirectory(campaignId), "characters");
+            string charactersDir = Path.Combine(Program.CampaignDirectory(campaignId), "characters");
             List<Dictionary<string, object>> problemCharacters = new List<Dictionary<string, object>>();
             Dictionary<string, int> statuses = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             int total = 0;
@@ -327,7 +327,7 @@ namespace ReignBetaServer
             return new Dictionary<string, object>
             {
                 ["ok"] = true,
-                ["schemaVersion"] = CharacterSchemaVersion,
+                ["schemaVersion"] = Program.CharacterSchemaVersion,
                 ["campaignId"] = campaignId,
                 ["charactersDir"] = charactersDir,
                 ["charactersDirExists"] = Directory.Exists(charactersDir),
@@ -342,21 +342,21 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> DiagnoseCharacterFolder(string campaignId, string heroId)
         {
-            string dir = CharacterDirectory(campaignId, heroId);
-            Dictionary<string, object> profile = ReadJsonObject(Path.Combine(dir, "profile.json"));
-            Dictionary<string, object> wealth = ReadJsonObject(Path.Combine(dir, "wealth.json"));
-            Dictionary<string, object> inventory = ReadJsonObject(Path.Combine(dir, "inventory.json"));
-            Dictionary<string, object> appearance = ReadJsonObject(Path.Combine(dir, "appearance.json"));
-            Dictionary<string, object> traits = ReadJsonObject(Path.Combine(dir, "traits.json"));
-            Dictionary<string, object> background = ReadJsonObject(Path.Combine(dir, "background.json"));
-            Dictionary<string, object> voice = ReadJsonObject(Path.Combine(dir, "voice.json"));
-            Dictionary<string, object> motivations = ReadJsonObject(Path.Combine(dir, "motivations.json"));
-            Dictionary<string, object> saveQuirks = ReadJsonObject(Path.Combine(dir, "save_quirks.json"));
-            Dictionary<string, object> hiddenHistory = ReadJsonObject(Path.Combine(dir, "hidden_history.json"));
-            Dictionary<string, object> secrets = ReadJsonObject(Path.Combine(dir, "secrets.json"));
-            Dictionary<string, object> pressure = ReadJsonObject(Path.Combine(dir, "pressure.json"));
-            Dictionary<string, object> state = ReadJsonObject(Path.Combine(dir, "state.json"));
-            Dictionary<string, object> constructed = ReadJsonObject(Path.Combine(dir, "constructed.json"));
+            string dir = Program.CharacterDirectory(campaignId, heroId);
+            Dictionary<string, object> profile = Program.ReadJsonObject(Path.Combine(dir, "profile.json"));
+            Dictionary<string, object> wealth = Program.ReadJsonObject(Path.Combine(dir, "wealth.json"));
+            Dictionary<string, object> inventory = Program.ReadJsonObject(Path.Combine(dir, "inventory.json"));
+            Dictionary<string, object> appearance = Program.ReadJsonObject(Path.Combine(dir, "appearance.json"));
+            Dictionary<string, object> traits = Program.ReadJsonObject(Path.Combine(dir, "traits.json"));
+            Dictionary<string, object> background = Program.ReadJsonObject(Path.Combine(dir, "background.json"));
+            Dictionary<string, object> voice = Program.ReadJsonObject(Path.Combine(dir, "voice.json"));
+            Dictionary<string, object> motivations = Program.ReadJsonObject(Path.Combine(dir, "motivations.json"));
+            Dictionary<string, object> saveQuirks = Program.ReadJsonObject(Path.Combine(dir, "save_quirks.json"));
+            Dictionary<string, object> hiddenHistory = Program.ReadJsonObject(Path.Combine(dir, "hidden_history.json"));
+            Dictionary<string, object> secrets = Program.ReadJsonObject(Path.Combine(dir, "secrets.json"));
+            Dictionary<string, object> pressure = Program.ReadJsonObject(Path.Combine(dir, "pressure.json"));
+            Dictionary<string, object> state = Program.ReadJsonObject(Path.Combine(dir, "state.json"));
+            Dictionary<string, object> constructed = Program.ReadJsonObject(Path.Combine(dir, "constructed.json"));
 
             List<Dictionary<string, object>> files = new List<Dictionary<string, object>>();
             ArrayList issues = new ArrayList();
@@ -373,7 +373,7 @@ namespace ReignBetaServer
                 long rows = 0;
                 if (exists && type == "json")
                 {
-                    valid = ReadJsonObject(path).Count > 0 || bytes == 0;
+                    valid = Program.ReadJsonObject(path).Count > 0 || bytes == 0;
                 }
                 else if (exists && type == "jsonl")
                 {
@@ -402,7 +402,7 @@ namespace ReignBetaServer
                 });
             }
 
-            bool profileReady = profile.Count > 0 && !string.IsNullOrWhiteSpace(CharacterIdFrom(profile));
+            bool profileReady = profile.Count > 0 && !string.IsNullOrWhiteSpace(Program.CharacterIdFrom(profile));
             bool wealthReady = wealth.Count > 0;
             bool inventoryReady = inventory.Count > 0;
             bool appearanceReady = appearance.Count > 0 && !string.IsNullOrWhiteSpace(ReadString(appearance, "firstView", ""));
@@ -414,7 +414,7 @@ namespace ReignBetaServer
             bool saveQuirksReady = ObjectHasAnyContent(saveQuirks, "secretInterest", "jealousyTargetType", "currentTemptation");
             bool secretsReady = ObjectHasAnyContent(secrets, "rumors", "privateTruths");
             bool requiresNarrative = ReadInt(profile, "narrativeVersion", 0) >= 5;
-            var narrative = ReadJsonObject(CharacterFile(campaignId, heroId, "narrative.json"));
+            var narrative = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "narrative.json"));
             bool narrativeReady = ReadString(narrative, "status", "") == "ready" && CharactersService.ValidateCharacterNarrative(narrative, true).Count == 0;
             if (requiresNarrative && !narrativeReady) issues.Add("Expanded narrative is not complete.");
             if (narrativeReady) { saveQuirksReady = true; secretsReady = true; }
@@ -439,7 +439,7 @@ namespace ReignBetaServer
             if (!stateReady) issues.Add("State file is missing or empty.");
             if (string.Equals(constructedStatus, "failed", StringComparison.OrdinalIgnoreCase))
             {
-                issues.Add("Character construction failed: " + LimitText(ReadString(constructed, "diagnostic", ReadString(constructed, "error", "")), 500));
+                issues.Add("Character construction failed: " + DialogueService.LimitText(ReadString(constructed, "diagnostic", ReadString(constructed, "error", "")), 500));
             }
             else if (!constructedReady)
             {
@@ -451,7 +451,7 @@ namespace ReignBetaServer
             return new Dictionary<string, object>
             {
                 ["ok"] = true,
-                ["schemaVersion"] = CharacterSchemaVersion,
+                ["schemaVersion"] = Program.CharacterSchemaVersion,
                 ["campaignId"] = campaignId,
                 ["heroStringId"] = heroId,
                 ["characterDir"] = dir,
@@ -459,7 +459,7 @@ namespace ReignBetaServer
                 ["profile"] = new Dictionary<string, object>
                 {
                     ["name"] = ReadString(profile, "name", heroId),
-                    ["heroStringId"] = CharacterIdFrom(profile),
+                    ["heroStringId"] = Program.CharacterIdFrom(profile),
                     ["archetype"] = CharacterArchetype(profile),
                     ["clanId"] = ReadString(profile, "clanId", ""),
                     ["kingdomId"] = ReadString(profile, "kingdomId", "")
@@ -574,7 +574,7 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> MergeProfileForConstruction(string campaignId, string heroId, Dictionary<string, object> hero)
         {
-            Dictionary<string, object> profile = ReadJsonObject(CharacterFile(campaignId, heroId, "profile.json"));
+            Dictionary<string, object> profile = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json"));
             foreach (KeyValuePair<string, object> pair in hero ?? new Dictionary<string, object>())
             {
                 profile[pair.Key] = pair.Value;
@@ -587,12 +587,12 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> LoadCharacterTemplate(string heroId, Dictionary<string, object> profile)
         {
-            string heroFile = Path.Combine(CharacterTemplatesDir, SafePathSegment(heroId, "unknown") + ".json");
-            string heroDirFile = Path.Combine(CharacterTemplatesDir, SafePathSegment(heroId, "unknown"), "template.json");
-            Dictionary<string, object> template = ReadJsonObject(heroFile);
+            string heroFile = Path.Combine(Program.CharacterTemplatesDir, Program.SafePathSegment(heroId, "unknown") + ".json");
+            string heroDirFile = Path.Combine(Program.CharacterTemplatesDir, Program.SafePathSegment(heroId, "unknown"), "template.json");
+            Dictionary<string, object> template = Program.ReadJsonObject(heroFile);
             if (template.Count == 0)
             {
-                template = ReadJsonObject(heroDirFile);
+                template = Program.ReadJsonObject(heroDirFile);
             }
 
             if (template.Count == 0)
@@ -658,9 +658,9 @@ namespace ReignBetaServer
 
         internal static string BuildCharacterConstructionPrompt(string campaignId, string heroId, Dictionary<string, object> hero, Dictionary<string, object> traits)
         {
-            string noblePromptBlock = BuildNoblePromptBlock(hero);
+            string noblePromptBlock = DialogueService.BuildNoblePromptBlock(hero);
             if (CharactersService.UsesCommonerRolePrompt(hero))
-                noblePromptBlock = "WORLD TONE\n" + LoadPromptTemplate("world_tone.txt") + "\n\n" + CharactersService.BuildCommonerPromptBlock(hero);
+                noblePromptBlock = "WORLD TONE\n" + Program.LoadPromptTemplate("world_tone.txt") + "\n\n" + CharactersService.BuildCommonerPromptBlock(hero);
             bool notableMbti = ReadBool(hero, "isNotable", false)
                 && ReadString(ReadDictionary(traits, "mbtiProfile"), "source", "")
                     .Equals("notable_mbti_template", StringComparison.OrdinalIgnoreCase);
@@ -788,7 +788,7 @@ Return exactly this JSON shape:
 
         private static Dictionary<string, object> DefaultBackground(Dictionary<string, object> hero, Dictionary<string, object> traits)
         {
-            string name = ReadString(hero, "name", CharacterIdFrom(hero));
+            string name = ReadString(hero, "name", Program.CharacterIdFrom(hero));
             string role = CharacterArchetype(hero);
             string culture = ReadString(hero, "cultureId", "unknown culture");
             string text = name + " is a " + role + " shaped by " + culture + " customs, current loyalties, and the pressures of this campaign. " + ReadString(traits, "basePersonalitySummary", "Their behavior remains grounded in the native profile available to Reign.") + " This deterministic foundation is replaced by a complete campaign profile before the character's first interactive response.";
@@ -928,39 +928,39 @@ Return exactly this JSON shape:
             return generatedText.Substring(nativeText.Length).TrimStart('\r', '\n', ' ');
         }
 
-        private static string BuildEncyclopediaBackstoryText(string campaignId, string heroId)
+        internal static string BuildEncyclopediaBackstoryText(string campaignId, string heroId)
         {
-            Dictionary<string, object> background = ReadJsonObject(CharacterFile(campaignId, heroId, "background.json"));
+            Dictionary<string, object> background = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "background.json"));
             return ReadString(background, "encyclopediaText", ReadString(background, "summary", ""));
         }
 
         internal static Dictionary<string, object> LoadCharacterStack(string campaignId, string heroId)
         {
-            Dictionary<string, object> stack = ReadJsonObject(CharacterFile(campaignId, heroId, "characteristics.json"));
-            Dictionary<string, object> profile = ReadJsonObject(CharacterFile(campaignId, heroId, "profile.json"));
-            Dictionary<string, object> traits = ReadJsonObject(CharacterFile(campaignId, heroId, "traits.json"));
+            Dictionary<string, object> stack = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "characteristics.json"));
+            Dictionary<string, object> profile = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json"));
+            Dictionary<string, object> traits = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"));
             if (traits.Count > 0)
             {
                 bool changed = CharactersService.EnsureTraitPercentageData(traits, heroId);
                 changed = CourtService.EnsureCourtCharacterData(traits, profile, heroId) || changed;
-                if (changed) WriteJsonObject(CharacterFile(campaignId, heroId, "traits.json"), traits);
+                if (changed) Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"), traits);
             }
             stack["traits"] = traits;
             if (profile.Count > 0) stack["politicalProfile"] = TryParseJsonObject(System.Text.Json.JsonSerializer.Serialize(CharactersService.EnsurePoliticalProfile(campaignId, heroId, profile, traits)));
             stack["wealth"] = CharactersService.ResolveWealthDocument(campaignId, heroId, profile);
-            stack["inventory"] = ReadJsonObject(CharacterFile(campaignId, heroId, "inventory.json"));
-            stack["appearance"] = ReadJsonObject(CharacterFile(campaignId, heroId, "appearance.json"));
-            stack["background"] = ReadJsonObject(CharacterFile(campaignId, heroId, "background.json"));
-            stack["voice"] = ReadJsonObject(CharacterFile(campaignId, heroId, "voice.json"));
-            stack["motivations"] = ReadJsonObject(CharacterFile(campaignId, heroId, "motivations.json"));
-            stack["saveQuirks"] = ReadJsonObject(CharacterFile(campaignId, heroId, "save_quirks.json"));
-            stack["hiddenHistory"] = ReadJsonObject(CharacterFile(campaignId, heroId, "hidden_history.json"));
-            stack["secrets"] = ReadJsonObject(CharacterFile(campaignId, heroId, "secrets.json"));
-            stack["pressure"] = ReadJsonObject(CharacterFile(campaignId, heroId, "pressure.json"));
-            stack["dynamicCharacteristics"] = ReadJsonObject(CharacterFile(campaignId, heroId, "dynamic_characteristics.json"));
-            stack["narrative"] = ReadJsonObject(CharacterFile(campaignId, heroId, "narrative.json"));
+            stack["inventory"] = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "inventory.json"));
+            stack["appearance"] = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "appearance.json"));
+            stack["background"] = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "background.json"));
+            stack["voice"] = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "voice.json"));
+            stack["motivations"] = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "motivations.json"));
+            stack["saveQuirks"] = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "save_quirks.json"));
+            stack["hiddenHistory"] = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "hidden_history.json"));
+            stack["secrets"] = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "secrets.json"));
+            stack["pressure"] = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "pressure.json"));
+            stack["dynamicCharacteristics"] = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "dynamic_characteristics.json"));
+            stack["narrative"] = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "narrative.json"));
             CharactersService.ApplyNarrativePromptProjection(stack);
-            stack["constructed"] = ReadJsonObject(CharacterFile(campaignId, heroId, "constructed.json"));
+            stack["constructed"] = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"));
             return stack;
         }
 

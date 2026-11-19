@@ -150,7 +150,7 @@ Use only supplied heroStringId values.";
                                         ["targetName"] = targetName,
                                         ["claimedRelation"] = claimed,
                                         ["authoritativeRelation"] = actual,
-                                        ["matchedText"] = Program.LimitText(match.Value, 240)
+                                        ["matchedText"] = DialogueService.LimitText(match.Value, 240)
                                     };
                                 }
                             }
@@ -588,11 +588,11 @@ Use only supplied heroStringId values.";
                 ["heroStringId"] = id,
                 ["name"] = ReadString(participant, "name", id),
                 ["role"] = ReadString(participant, "role", "npc"),
-                ["location"] = Program.LimitText(location, 500),
+                ["location"] = DialogueService.LimitText(location, 500),
                 ["locationClass"] = locationClass,
                 ["hasNarrativeLocation"] = narrativeLocation.Length > 0,
                 ["acceptedPrivateScene"] = ReadBool(stored, "acceptedPrivateScene", false),
-                ["clothing"] = Program.LimitText(clothing, clothingSource == "confirmed_outfit_change" ? 4000 : 900),
+                ["clothing"] = DialogueService.LimitText(clothing, clothingSource == "confirmed_outfit_change" ? 4000 : 900),
                 ["clothingSource"] = clothingSource,
                 ["revision"] = ReadLong(stored, "revision", 0)
             };
@@ -661,7 +661,7 @@ Use only supplied heroStringId values.";
                 ReadString(participant, "travelClothingDescription", ""));
             if (!string.IsNullOrWhiteSpace(observed))
             {
-                return Program.LimitText(
+                return DialogueService.LimitText(
                     Regex.Replace(observed, @"\s+", " ").Trim(), 900);
             }
 
@@ -886,7 +886,7 @@ Use only supplied heroStringId values.";
                         denied.Add(TestDict("heroStringId", subject, "reason", "unaccepted_or_other_speaker_scene_update"));
                         continue;
                     }
-                    string location = Program.LimitText(ReadString(update, "location", ""), 500);
+                    string location = DialogueService.LimitText(ReadString(update, "location", ""), 500);
                     // A writer-authored location is not movement authority. Only the
                     // source-bound proposal above can replace a narrative venue.
                     if (location.Length > 0 && !AcceptedSpeakerMovement(update, speakerId, reply)
@@ -895,7 +895,7 @@ Use only supplied heroStringId values.";
                         && !SceneProposalRefused(p, parsedResponse, reply)))
                     { denied.Add(TestDict("heroStringId", subject, "reason", "location_without_source_bound_transition")); location = ""; }
                     string locationClass = string.IsNullOrWhiteSpace(location) ? "" : FirstNonEmpty(ReadString(update, "locationClass", ""), InferLocationClass(location));
-                    string clothing = UsesCastleRoomAttireContext(payload) ? "" : Program.LimitText(ReadString(update, "clothing", ""), 900);
+                    string clothing = UsesCastleRoomAttireContext(payload) ? "" : DialogueService.LimitText(ReadString(update, "clothing", ""), 900);
                     if (string.IsNullOrWhiteSpace(location) && string.IsNullOrWhiteSpace(clothing)) continue;
                     UpsertConversationSceneOverride(connection, subject, location, locationClass, clothing, sceneTurnId, mode, hour, ts);
                     applied.Add(new Dictionary<string, object> { ["heroStringId"] = subject, ["location"] = location, ["clothing"] = clothing, ["source"] = "npc_reply" });
@@ -1014,7 +1014,7 @@ Use only supplied heroStringId values.";
                 }
             });
             Dictionary<string, object> parsed = TryParseJsonObject(ReadString(llm, "content", "")) ?? new Dictionary<string, object>();
-            string visionDescription = Program.LimitText(ReadString(parsed, "description", ""), 900);
+            string visionDescription = DialogueService.LimitText(ReadString(parsed, "description", ""), 900);
             bool visionCompleted = !string.IsNullOrWhiteSpace(visionDescription);
             string description = visionCompleted ? visionDescription : FormalOutfitPromptFallback(candidate);
             Dictionary<string, object> record = new Dictionary<string, object>
@@ -1073,7 +1073,7 @@ Use only supplied heroStringId values.";
                         .Take(3));
                 }
             }
-            guidance = Program.LimitText(Regex.Replace(guidance ?? "", @"\s+", " ").Trim(), 900);
+            guidance = DialogueService.LimitText(Regex.Replace(guidance ?? "", @"\s+", " ").Trim(), 900);
             if (!string.IsNullOrWhiteSpace(guidance)) return guidance;
             string culture = FirstNonEmpty(ReadFirstString(metadata, "cultureName", "cultureId"), "their culture");
             string station = FirstNonEmpty(ReadString(metadata, "socialStation", ""), "station");

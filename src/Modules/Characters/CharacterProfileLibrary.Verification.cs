@@ -80,8 +80,8 @@ namespace ReignBetaServer
                 ["skills"] = new Dictionary<string, object> { ["charm"] = 100, ["leadership"] = 120, ["steward"] = 100 }
             };
             Dictionary<string, object> baselineTraits = BuildTraitDocument(unknown);
-            Dictionary<string, object> baselineGenerated = Program.DefaultGeneratedCharacter(unknown, baselineTraits);
-            bool baselineReady = Program.TraitDocumentReady(baselineTraits)
+            Dictionary<string, object> baselineGenerated = CharactersService.DefaultGeneratedCharacter(unknown, baselineTraits);
+            bool baselineReady = CharactersService.TraitDocumentReady(baselineTraits)
                 && ReadObjectList(ReadDictionary(baselineGenerated, "motivations"), "dreams").Count > 0
                 && !string.IsNullOrWhiteSpace(ReadString(ReadDictionary(baselineGenerated, "hiddenHistory"), "privateBackstory", ""))
                 && PersonalityPortraitReady(baselineTraits);
@@ -134,9 +134,9 @@ namespace ReignBetaServer
                         ["enrichmentStatus"] = ReadString(canonicalEnrichment, "status", "")
                     }));
 
-                Dictionary<string, object> scaffold = Program.ConstructCharacterFiles(policyCampaign, dynamicHeroId, unknown, true, false, "background_enrichment");
+                Dictionary<string, object> scaffold = CharactersService.ConstructCharacterFiles(policyCampaign, dynamicHeroId, unknown, true, false, "background_enrichment");
                 results.Add(ProfileSelfTest("background_enrichment_fallback_safe",
-                    Program.IsCharacterConstructionReady(scaffold) && !ReadBool(scaffold, "llmUsed", true),
+                    CharactersService.IsCharacterConstructionReady(scaffold) && !ReadBool(scaffold, "llmUsed", true),
                     "Background enrichment retains a usable deterministic scaffold when no provider result is available.", scaffold));
             }
             finally
@@ -157,25 +157,25 @@ namespace ReignBetaServer
             {
                 ["heroStringId"] = "profile_self_test_sparse", ["name"] = "Sparse Native Profile"
             });
-            results.Add(ProfileSelfTest("sparse_native_traits_readiness", Program.TraitDocumentReady(sparseNativeTraits),
+            results.Add(ProfileSelfTest("sparse_native_traits_readiness", CharactersService.TraitDocumentReady(sparseNativeTraits),
                 "Characters whose native trait payload is unavailable still become stable after their complete 43-trait foundation is built.", null));
 
             Dictionary<string, object> settings = Program.DefaultSettings();
             settings["dialogueModel"] = "dialogue-test-model";
             settings["characterConstructionModel"] = "construction-test-model";
             results.Add(ProfileSelfTest("dedicated_construction_model", Program.ModelForRequest(settings, "character_construction") == "construction-test-model", "First-contact character construction routes through the dedicated construction model setting.", null));
-            bool adaptiveRetryBudget = Program.CharacterConstructionMaxTokensForAttempt(3600, 1) == 3600
-                && Program.CharacterConstructionMaxTokensForAttempt(3600, 2) == 7200
-                && Program.CharacterConstructionMaxTokensForAttempt(30000, 2) == 50000
-                && Program.CharacterConstructionMaxTokensForAttempt(50000, 1) == 50000
-                && Program.CharacterConstructionMaxTokensForAttempt(int.MaxValue, 2) == 50000
+            bool adaptiveRetryBudget = CharactersService.CharacterConstructionMaxTokensForAttempt(3600, 1) == 3600
+                && CharactersService.CharacterConstructionMaxTokensForAttempt(3600, 2) == 7200
+                && CharactersService.CharacterConstructionMaxTokensForAttempt(30000, 2) == 50000
+                && CharactersService.CharacterConstructionMaxTokensForAttempt(50000, 1) == 50000
+                && CharactersService.CharacterConstructionMaxTokensForAttempt(int.MaxValue, 2) == 50000
                 && ReadInt(Program.DefaultSettings(), "characterConstructionMaxTokens", 0) == 50000;
             results.Add(ProfileSelfTest("adaptive_construction_token_retry", adaptiveRetryBudget,
                 "Construction defaults to a 50,000-token ceiling; a deliberately smaller setting can grow on retry but never exceeds 50,000.",
                 new Dictionary<string, object>
                 {
-                    ["firstAttemptTokens"] = Program.CharacterConstructionMaxTokensForAttempt(3600, 1),
-                    ["retryTokens"] = Program.CharacterConstructionMaxTokensForAttempt(3600, 2)
+                    ["firstAttemptTokens"] = CharactersService.CharacterConstructionMaxTokensForAttempt(3600, 1),
+                    ["retryTokens"] = CharactersService.CharacterConstructionMaxTokensForAttempt(3600, 2)
                 }));
 
             var oldBudget = new Dictionary<string, object> { ["characterConstructionMaxTokens"] = 3600, ["maxTokens"] = 1200 };
@@ -191,7 +191,7 @@ namespace ReignBetaServer
                 && ReadInt(oldBudget, "characterConstructionMaxTokens", 0) == 50000 && ReadInt(oldBudget, "maxTokens", 0) == 1200,
                 "Existing small construction budgets migrate once to 50,000; later explicit lower choices and unrelated dialogue limits are preserved, and larger values are capped.", null));
 
-            string compactRetryPrompt = Program.BuildCharacterConstructionPromptForAttempt("campaign", "hero", unknown, baselineTraits, 2);
+            string compactRetryPrompt = CharactersService.BuildCharacterConstructionPromptForAttempt("campaign", "hero", unknown, baselineTraits, 2);
             results.Add(ProfileSelfTest("compact_construction_retry_prompt",
                 compactRetryPrompt.Contains("no more than 12,000 characters total")
                     && compactRetryPrompt.Contains("Close every object and array"),
@@ -207,7 +207,7 @@ namespace ReignBetaServer
                 }
             };
             results.Add(ProfileSelfTest("construction_token_limit_diagnostic",
-                Program.LikelyCharacterConstructionIssue("Character construction response hit the max token limit before valid JSON completed.", lengthAttempts)
+                CharactersService.LikelyCharacterConstructionIssue("Character construction response hit the max token limit before valid JSON completed.", lengthAttempts)
                     .Contains("cut off by the character construction token limit"),
                 "A local output-budget cutoff is diagnosed as token truncation rather than provider rate limiting.", null));
 
@@ -221,7 +221,7 @@ namespace ReignBetaServer
                 ["failedUtc"] = DateTime.UtcNow.AddMinutes(5).ToString("o")
             };
             results.Add(ProfileSelfTest("legacy_truncation_auto_retry",
-                Program.ShouldRetryFailedConstruction(legacyParseFailure, settings),
+                CharactersService.ShouldRetryFailedConstruction(legacyParseFailure, settings),
                 "A construction that failed under the pre-adaptive engine is retried once without requiring a settings edit.", null));
             var exhaustedBudget = DeepCloneProfileDictionary(legacyParseFailure);
             exhaustedBudget["failureKind"] = "output_limit";
@@ -229,8 +229,8 @@ namespace ReignBetaServer
             var changedBudgetSettings = DeepCloneProfileDictionary(settings);
             changedBudgetSettings["characterConstructionMaxTokens"] = 42000;
             results.Add(ProfileSelfTest("construction_output_limit_retry_policy",
-                !Program.ShouldRetryFailedConstruction(exhaustedBudget, settings)
-                    && Program.ShouldRetryFailedConstruction(exhaustedBudget, changedBudgetSettings),
+                !CharactersService.ShouldRetryFailedConstruction(exhaustedBudget, settings)
+                    && CharactersService.ShouldRetryFailedConstruction(exhaustedBudget, changedBudgetSettings),
                 "An exhausted current creation budget does not trigger another automatic charge; a deliberate configuration change permits retry.", null));
             results.Add(ProfileSelfTest("background_character_worker_disabled", !ReadBool(settings, "backgroundCharacterEnrichmentEnabled", true), "Automatic background character construction is disabled by default.", null));
             results.AddRange(RunTownNotableProfileSelfTests());

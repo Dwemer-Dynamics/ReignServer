@@ -95,11 +95,11 @@ namespace ReignBetaServer
                     string description = RedactSupportText(ReadString(payload, "description", "").Trim());
                     string report = "Reign Alpha issue report\nCaptured UTC: " + capturedUtc.ToString("o")
                         + "\nCampaign ID: " + campaignId + "\n\nIssue\n" + description
-                        + "\n\nSteps to reproduce\n" + RedactSupportText(LimitText(ReadString(payload, "steps", ""), 4000))
-                        + "\n\nExpected result\n" + RedactSupportText(LimitText(ReadString(payload, "expected", ""), 2000))
-                        + "\n\nActual result\n" + RedactSupportText(LimitText(ReadString(payload, "actual", ""), 2000))
-                        + "\n\nApproximate occurrence time\n" + RedactSupportText(LimitText(ReadString(payload, "occurredAt", ""), 120))
-                        + "\n\nNotes\n" + RedactSupportText(LimitText(ReadString(payload, "notes", ""), 2000)) + "\n";
+                        + "\n\nSteps to reproduce\n" + RedactSupportText(DialogueService.LimitText(ReadString(payload, "steps", ""), 4000))
+                        + "\n\nExpected result\n" + RedactSupportText(DialogueService.LimitText(ReadString(payload, "expected", ""), 2000))
+                        + "\n\nActual result\n" + RedactSupportText(DialogueService.LimitText(ReadString(payload, "actual", ""), 2000))
+                        + "\n\nApproximate occurrence time\n" + RedactSupportText(DialogueService.LimitText(ReadString(payload, "occurredAt", ""), 120))
+                        + "\n\nNotes\n" + RedactSupportText(DialogueService.LimitText(ReadString(payload, "notes", ""), 2000)) + "\n";
                     AddSupportEntry(zip, "issue-report.txt", Encoding.UTF8.GetBytes(report), files, "generated", false);
                     AddSupportScreenshots(zip, payload, files, ref collectedBytes);
                     Dictionary<string, object> settings = LoadSettings();

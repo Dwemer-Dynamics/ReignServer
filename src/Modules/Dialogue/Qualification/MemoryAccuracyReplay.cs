@@ -103,18 +103,18 @@ namespace ReignBetaServer
                             ordinal++;
                         }
                     }
-                    var transcript = Program.CanonicalizePromptTranscript(ReadCurrentSessionDialogueLines(campaign, session, 30), 30);
+                    var transcript = DialogueService.CanonicalizePromptTranscript(ReadCurrentSessionDialogueLines(campaign, session, 30), 30);
                     SetMemoryTranscriptContext(context, transcript);
                     var settings = TestDict("useMemoryLlmForConsolidation", false, "enableSemanticMemory", false,
                         "memoryPrecisionMode", "legacy", "enableMemoryPrecisionCrossEncoder", false,
                         "highMemoryMode", false, "memoryPrecisionOrdinaryTokens", 4000);
                     var timer = Stopwatch.StartNew();
-                    var legacy = Program.BuildNpcMemoryPacket(campaign, npc, player, "", query, 6000, context, settings);
+                    var legacy = DialogueService.BuildNpcMemoryPacket(campaign, npc, player, "", query, 6000, context, settings);
                     long legacyMs = timer.ElapsedMilliseconds;
                     timer.Restart();
                     var precision = BuildPrecisionMemoryPacket(campaign, npc, player, "", query, context, settings, true);
                     long precisionMs = timer.ElapsedMilliseconds;
-                    string common = "CURRENT PLAYER [speakerId=player]: " + current + "\nRECENT DIALOGUE:\n" + Program.FormatEventLinesForPrompt(transcript);
+                    string common = "CURRENT PLAYER [speakerId=player]: " + current + "\nRECENT DIALOGUE:\n" + DialogueService.FormatEventLinesForPrompt(transcript);
                     string legacyText = ReadString(legacy, "memoryPacket", ""), precisionText = ReadString(precision, "memoryPacket", "");
                     results.Add(TestDict("caseId", ReadString(item, "caseId", ""), "legacyPacket", legacyText,
                         "precisionPacket", precisionText, "commonTranscript", common, "precisionEvidence", ReadDictionary(precision, "precisionEvidence"),

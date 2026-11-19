@@ -159,8 +159,8 @@ namespace ReignBetaServer
             string routeText = BuildRouterResolutionText(playerText, npcReply);
             Dictionary<string, object> settings = LoadSettings();
             int maxCandidates = Math.Max(3, ReadInt(settings, "actionRouterCandidateCount", 10));
-            List<string> minimeTopics = TryExtractMinimeTopics(settings, routeText, ReadInt(settings, "minimeMaxTopics", 5));
-            string retrievalText = AppendMinimeTopics(routeText, minimeTopics);
+            List<string> minimeTopics = DialogueService.TryExtractMinimeTopics(settings, routeText, ReadInt(settings, "minimeMaxTopics", 5));
+            string retrievalText = DialogueService.AppendMinimeTopics(routeText, minimeTopics);
             List<string> domains = ClassifyActionRouterDomains(retrievalText);
             List<Dictionary<string, object>> retrieved = RetrieveActionRouterCommands(retrievalText, domains, maxCandidates);
             List<Dictionary<string, object>> candidates = new List<Dictionary<string, object>>();
@@ -494,7 +494,7 @@ namespace ReignBetaServer
                 };
                 if (string.IsNullOrWhiteSpace(ReadString(copy, "reason", "")))
                 {
-                    copy["reason"] = (string.IsNullOrWhiteSpace(reasonPrefix) ? "Action router" : reasonPrefix) + ": " + LimitText(routeText, 700);
+                    copy["reason"] = (string.IsNullOrWhiteSpace(reasonPrefix) ? "Action router" : reasonPrefix) + ": " + DialogueService.LimitText(routeText, 700);
                 }
 
                 ApplyRouterArguments(copy, ReadDictionary(action, "arguments") ?? ReadDictionary(action, "args") ?? new Dictionary<string, object>(), command);
@@ -716,7 +716,7 @@ namespace ReignBetaServer
             return "validation_failed";
         }
 
-        private static string BuildActionShadowPreview(List<Dictionary<string, object>> queuedTestDirectiveActions, List<Dictionary<string, object>> queuedDialogueActions, List<string> testDirectiveErrors, List<string> dialogueActionErrors)
+        internal static string BuildActionShadowPreview(List<Dictionary<string, object>> queuedTestDirectiveActions, List<Dictionary<string, object>> queuedDialogueActions, List<string> testDirectiveErrors, List<string> dialogueActionErrors)
         {
             Dictionary<string, object> queued = (queuedTestDirectiveActions ?? new List<Dictionary<string, object>>()).Concat(queuedDialogueActions ?? new List<Dictionary<string, object>>()).FirstOrDefault();
             if (queued != null)

@@ -243,7 +243,7 @@ namespace ReignBetaServer
                         endpoint, "gpt-capacity-fixture"), "fits", true), null);
                     add("codex_capacity_assembly_matches_provider_" + context,
                         CanonicalJson(ResolveConversationPromptCapacity(TestDict(), "dialogue", settings)) ==
-                        CanonicalJson(ResolveConversationCapacity(settings, TestDict("max_tokens", Program.StructuredDialogueResponseMaxTokens(settings)), endpoint, "gpt-capacity-fixture")), null);
+                        CanonicalJson(ResolveConversationCapacity(settings, TestDict("max_tokens", DialogueService.StructuredDialogueResponseMaxTokens(settings)), endpoint, "gpt-capacity-fixture")), null);
                 }
                 var smallBody = TestDict("messages", new[] { TestDict("role", "user", "content", new string('x', 300000)) }, "max_tokens", 8000);
                 foreach (string metadata in new[] { "{", "null", Catalog(0), Catalog(500000, 101), Catalog(500000, 0),
@@ -275,19 +275,19 @@ namespace ReignBetaServer
             results.AddRange(RunPromptEvidenceAllocationAssertions());
             Action<string, bool, object> add = (id, pass, data) => results.Add(TestDict(
                 "caseId", "continuity_" + id, "passed", pass, "summary", id, "data", data));
-            var observer = new Program.KnowledgeAccessContext { NpcId = "npc_b" };
+            var observer = new DialogueService.KnowledgeAccessContext { NpcId = "npc_b" };
             var legacyBelief = TestDict("believer_id", "npc_a", "known_by_json", "[\"npc_a\",\"npc_b\"]", "visibility", "public");
-            add("foreign_private_belief_stays_private", !Program.KnowledgeRowVisibleToNpc("beliefs", legacyBelief, observer), null);
+            add("foreign_private_belief_stays_private", !DialogueService.KnowledgeRowVisibleToNpc("beliefs", legacyBelief, observer), null);
             var legacyThought = TestDict("owner_id", "npc_a", "known_by_json", "[\"npc_a\",\"npc_b\"]");
-            add("foreign_comprehension_stays_private", !Program.KnowledgeRowVisibleToNpc("comprehension", legacyThought, observer), null);
+            add("foreign_comprehension_stays_private", !DialogueService.KnowledgeRowVisibleToNpc("comprehension", legacyThought, observer), null);
             legacyThought["owner_id"] = "npc_b";
-            add("own_comprehension_retained", Program.KnowledgeRowVisibleToNpc("comprehension", legacyThought, observer), null);
+            add("own_comprehension_retained", DialogueService.KnowledgeRowVisibleToNpc("comprehension", legacyThought, observer), null);
             add("legacy_interpretation_is_private_mental_state", IsPrivateMentalLayer("interpretation"), null);
             var naturalIdentity = TestDict("canonicalNameAllowed", true, "authorityView", TestDict("currentSettlementName", "Akkalat"));
             var meaningfulState = TestDict("currentCrisis", "A father's silence — acknowledged aloud but not resolved");
             var preservedState = SanitizeConversationStateForVerifiedIdentity(meaningfulState, naturalIdentity, TestDict());
             add("crisis_dash_is_not_a_scene_heading", ReadString(preservedState, "currentCrisis", "") == ReadString(meaningfulState, "currentCrisis", ""), preservedState);
-            var authored = Program.PrepareStructuredWrites(new List<Dictionary<string, object>> { TestDict("claim", "I am worried.",
+            var authored = DialogueService.PrepareStructuredWrites(new List<Dictionary<string, object>> { TestDict("claim", "I am worried.",
                 "believer", "npc_b", "known_by", new[] { "npc_b", "player" }, "visibility", "public") },
                 "npc_a", "player", "town", "dialogue", "belief", new List<string> { "npc_b" }).Single();
             add("speaker_owns_hidden_metadata", ReadString(authored, "believer", "") == "npc_a"
@@ -459,15 +459,15 @@ namespace ReignBetaServer
                     "I defeated the Khan in the last tournament and shared drinks with him afterward.", "in_person", 19d, 1, "town_a", new List<string> { "npc_a", "player" }, TestDict());
                 InsertConversationTurn(connection, "victory_answer", "old_tournament", "victory_event", 1, "victory_exchange", "npc", "npc_a", "Speaker",
                     "You already told me that you won. I heard the story; I was not there.", "in_person", 19d, 2, "town_a", new List<string> { "npc_a", "player" }, TestDict());
-                var retrieved = SearchExactConversationHistory(connection, "npc_a", "I fought a Khan.", TestDict(), 24000, null, "current_session", 30, new Program.KnowledgeAccessContext { NpcId = "npc_a" });
+                var retrieved = SearchExactConversationHistory(connection, "npc_a", "I fought a Khan.", TestDict(), 24000, null, "current_session", 30, new DialogueService.KnowledgeAccessContext { NpcId = "npc_a" });
                 add("ordinary_khan_reference_retrieves_full_outcome_and_reply", ReadString(retrieved, "text", "").Contains("shared drinks with him afterward")
                     && ReadString(retrieved, "text", "").Contains("I was not there") && ReadStringList(retrieved, "expandedTurnIds").Count == 2, retrieved);
                 var longWords=Enumerable.Range(0,90).Select(i=>"roadword"+i).ToList();
                 foreach(int position in new[] {0,45,90}) {
                     var words=new List<string>(longWords); words.Insert(position,"khan");
                     string longInput=string.Join(" ",words);
-                    var longRecall=SearchExactConversationHistory(connection,"npc_a",longInput,TestDict(),24000,null,"current_session",30,new Program.KnowledgeAccessContext {NpcId="npc_a"});
-                    add("lowercase_title_survives_long_input_position_"+position,Program.MemoryQueryTerms(longInput).Contains("khan")
+                    var longRecall=SearchExactConversationHistory(connection,"npc_a",longInput,TestDict(),24000,null,"current_session",30,new DialogueService.KnowledgeAccessContext {NpcId="npc_a"});
+                    add("lowercase_title_survives_long_input_position_"+position,DialogueService.MemoryQueryTerms(longInput).Contains("khan")
                         && ReadString(longRecall,"text","").Contains("shared drinks with him afterward") && ReadString(longRecall,"text","").Contains("I was not there"),null);
                 }
                 InsertConversationTurn(connection, "father_source", "old_tournament", "father_event", 2, "father_exchange", "npc", "npc_a", "Speaker", quote,
@@ -556,7 +556,7 @@ namespace ReignBetaServer
             Save("episode_narrated", narrated);
             Save("episode_settled", settled);
             context.Remove("conversationSessionId");
-            var access = Program.BuildKnowledgeAccessContext(owner, peer, "", context);
+            var access = DialogueService.BuildKnowledgeAccessContext(owner, peer, "", context);
             List<MemoryEvidence> Precision(Dictionary<string, object> request) =>
                 LoadPrecisionFoundation(connection, campaign, PlanMemoryQuery(owner, peer, "Earlier preparations", request),
                     request, access).Where(item => item.Kind == "episode").ToList();
@@ -586,8 +586,8 @@ namespace ReignBetaServer
             var episode = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
             var altered = Program.CloneDictionary(episode);
             ReadDictionary(altered, "sourceEvidence")["sourceHash"] = "changed";
-            var foreign = Program.BuildKnowledgeAccessContext("someone_else", peer, "", context);
-            var earlier = Program.BuildKnowledgeAccessContext(owner, peer, "", TestDict("timelineId", "episode_timeline", "worldDay", 19d));
+            var foreign = DialogueService.BuildKnowledgeAccessContext("someone_else", peer, "", context);
+            var earlier = DialogueService.BuildKnowledgeAccessContext(owner, peer, "", TestDict("timelineId", "episode_timeline", "worldDay", 19d));
             add("episode_excerpt_rejects_stale_foreign_and_future_source",
                 RenderContinuityEpisodeEvidence(connection, row, altered, source, access).Length == 0
                 && RenderContinuityEpisodeEvidence(connection, row, episode, source, foreign).Length == 0
@@ -723,7 +723,7 @@ namespace ReignBetaServer
             AddMemory("pair_memory_private_lineage", "scope_current", timeline, 8);
             DialogueSelfTestStore.InsertMemorySources(connection);
 
-            var access = new Program.KnowledgeAccessContext { NpcId = observer, TimelineId = timeline, WorldDay = 20d,
+            var access = new DialogueService.KnowledgeAccessContext { NpcId = observer, TimelineId = timeline, WorldDay = 20d,
                 AsOfAcceptedSequence = 200, AsOfTimestamp = 10 };
             (string Text, List<string> Ids) Build()
             {
@@ -932,13 +932,13 @@ namespace ReignBetaServer
                 var lines = new List<Dictionary<string,object>>();
                 for(int i=0;i<count;i++) { lines.Add(TestDict("id","p"+i,"exchangeId","e"+i,"role","player","speaker","Traveler","text","Question "+i));
                     lines.Add(TestDict("id","n"+i,"exchangeId","e"+i,"role","npc","speaker","Speaker","text","Answer "+i+"\n\nComplete second paragraph.")); }
-                string transcript=FormatContinuityTranscript(lines,Program.FormatDialogueForPrompt);
+                string transcript=FormatContinuityTranscript(lines,DialogueService.FormatDialogueForPrompt);
                 var decisions=new List<object>();
                 string selected=SelectWholeContinuityRecords(transcript,1200,true,decisions,"test_transcript");
                 add("whole_recent_exchange_survives_"+count,selected.Contains("Question "+(count-1)) && selected.Contains("Answer "+(count-1))
                     && selected.Contains("Complete second paragraph.") && decisions.OfType<Dictionary<string,object>>().Any(d=>ReadBool(d,"required",false)&&ReadBool(d,"retained",false)),decisions);
                 add("latest_thirty_messages_survive_compaction_"+count, lines.TakeLast(30).All(line =>
-                    selected.Contains(Program.FormatDialogueForPrompt(new List<Dictionary<string, object>> { line })))
+                    selected.Contains(DialogueService.FormatDialogueForPrompt(new List<Dictionary<string, object>> { line })))
                     && ContinuityPromptRecords(transcript, true).Count(record => record.Required) == Math.Min(count, 15), decisions);
                 var transcriptContext = TestDict();
                 SetMemoryTranscriptContext(transcriptContext, lines);
@@ -951,7 +951,7 @@ namespace ReignBetaServer
             var boundaryLines = Enumerable.Range(0, 35).Select(i => TestDict("id", "boundary_"+i,
                 "exchangeId", "boundary_exchange_"+(i/2), "role", i%2==0 ? "player" : "npc",
                 "speaker", i%2==0 ? "Traveler" : "Speaker", "text", "Complete boundary message " + i + ".")).ToList();
-            string boundaryTranscript = FormatContinuityTranscript(boundaryLines, Program.FormatDialogueForPrompt);
+            string boundaryTranscript = FormatContinuityTranscript(boundaryLines, DialogueService.FormatDialogueForPrompt);
             var boundaryRecords = ContinuityPromptRecords(boundaryTranscript, true).Where(record => record.Required).ToList();
             add("recent_window_keeps_whole_exchange_at_thirtieth_message", boundaryRecords.Count == 16
                 && boundaryRecords.First().SourceId == "boundary_4,boundary_5"

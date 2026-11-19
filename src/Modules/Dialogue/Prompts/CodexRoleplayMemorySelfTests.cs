@@ -116,7 +116,7 @@ namespace ReignBetaServer
                 Check("missing_time_is_unavailable", ReadString(Program.ActiveCodexConversationScope.Value.MemoryAccess.Execute("search_character_record", TestDict("query", "amber")), "coverage", "") == "archive_unavailable",
                     "Missing campaign time reports unavailable archive coverage rather than exposing future records.");
             }
-            catch (Exception ex) { Check("suite_exception", false, Program.LimitText(ex.ToString(), 1800)); }
+            catch (Exception ex) { Check("suite_exception", false, DialogueService.LimitText(ex.ToString(), 1800)); }
             finally
             {
                 Program.ActiveCodexConversationScope.Value = previousScope;
@@ -179,7 +179,7 @@ namespace ReignBetaServer
                     && captured[3].Contains("Full current game foundation 3") && captured[3].Contains("Full accepted canonical transcript 3");
                 summary = "Production adapter retained a 40k-token foundation, sent current context on the warm turn, and rebuilt the latest full prompt after compaction and an expired resume, with nested usage receipts.";
             }
-            catch (Exception ex) { summary = Program.LimitText(ex.ToString(), 1800); }
+            catch (Exception ex) { summary = DialogueService.LimitText(ex.ToString(), 1800); }
             finally
             {
                 foreach (string id in Program.CodexRuntimeThreads.InvalidateAll()) { }
@@ -264,7 +264,7 @@ namespace ReignBetaServer
                 }
                 summary = "Checked " + calls + " injected production turns: every effort, model capability shape and disabled-reasoning fallback reached turn/start with its exact resolved model/effort. No provider calls.";
             }
-            catch (Exception ex) { passed = false; summary = Program.LimitText(ex.ToString(), 1800); }
+            catch (Exception ex) { passed = false; summary = DialogueService.LimitText(ex.ToString(), 1800); }
             finally
             {
                 Program.CodexRpcTransportOverride = previousTransport;

@@ -106,7 +106,7 @@ namespace ReignBetaServer
             var watch = System.Diagnostics.Stopwatch.StartNew();
             var review = ReadDictionary(item, "reviewedFactReplay");
             var facts = ReadDictionaryList(review, "facts");
-            var access = Program.BuildKnowledgeAccessContext(observer, peer, "", context);
+            var access = DialogueService.BuildKnowledgeAccessContext(observer, peer, "", context);
             var pins = new List<Dictionary<string, object>>();
             var keptFacts = new List<Dictionary<string, object>>();
             bool bindWriterPlan = !followUp && review.ContainsKey("writerPlan");
@@ -127,7 +127,7 @@ namespace ReignBetaServer
                     if (publishedParty != null) throw new InvalidOperationException("Reviewed fact source is outside the published party view.");
                     projected = ReplayReviewedSourceBody(row, observer);
                 }
-                var audience = Program.TextListFromJson(ReadString(row, "participants_json", "[]"));
+                var audience = DialogueService.TextListFromJson(ReadString(row, "participants_json", "[]"));
                 long sequence = ReadLong(row, "accepted_sequence", -1);
                 string digest = ConversationExactTextHash(projected);
                 if (!audience.Contains(observer) || !audience.Contains(peer) || speaker != mapSourceId(ReadString(fact, "speakerId", ""))

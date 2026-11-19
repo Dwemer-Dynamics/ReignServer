@@ -97,7 +97,7 @@ namespace ReignBetaServer
                     boundary?.Invoke("after_effects");
                     string session = ReadString(source, "sessionId", "");
                     var audience = unit.PrivateWhisper ? new[] { unit.Hero, unit.Player }
-                        : Program.TextListFromJson(ReadString(sourceRows.LastOrDefault(row => ReadString(row, "speaker_id", "") == unit.Hero),
+                        : DialogueService.TextListFromJson(ReadString(sourceRows.LastOrDefault(row => ReadString(row, "speaker_id", "") == unit.Hero),
                             "participants_json", "[]")).ToArray();
                     var scene = unit.PublishScene && !suppressReplyEffects
                         ? FinalizeConversationSceneState(unit.Campaign, unit.Payload, unit.Hero, unit.PlayerText,
@@ -122,14 +122,14 @@ namespace ReignBetaServer
                     boundary?.Invoke("after_context_effects");
                     string group = unit.GroupConversation || unit.EventType == "dialogue_turn"
                         ? "conversation:" + session
-                        : Program.BuildMemoryGroupKey(unit.Payload, unit.Hero, unit.Player, unit.Location, "social_event", unit.Timestamp);
+                        : DialogueService.BuildMemoryGroupKey(unit.Payload, unit.Hero, unit.Player, unit.Location, "social_event", unit.Timestamp);
                     var personalState = CharactersService.ReadNpcLives(connection, unit.Campaign, ContinuityTimeline(unit.Payload));
                     bool personalMatter = CharactersService.NpcLivesOwnsRelationshipReward(personalState, unit.Hero, unit.Payload);
                     if (personalMatter) unit.Relationships = new List<Dictionary<string, object>>();
                     // A quiet turn preserves the player's sources and an idempotent
                     // receipt, but supplies no NPC speech or attention evidence.
                     var memory = suppressReplyEffects ? TestDict("status", excludedStatus, "continuity", TestDict("status", "complete"))
-                        : Program.StoreTurnMemoryLayers(unit.Campaign, unit.EventId, unit.EventType,
+                        : DialogueService.StoreTurnMemoryLayers(unit.Campaign, unit.EventId, unit.EventType,
                         unit.Hero, unit.Player, unit.Location, unit.PlayerText, unit.Reply,
                         (unit.Memories ?? new List<Dictionary<string, object>>()).Select(Program.CloneDictionary).ToList(),
                         unit.Beliefs, unit.Relationships, unit.Obligations, unit.Comprehensions, group, unit.Timestamp,
@@ -240,7 +240,7 @@ namespace ReignBetaServer
                 && ReadString(row, "speaker_id", "") == unit.Hero).ToList();
             if (matches.Count != 1) return null;
             var row = matches[0];
-            var audience = Program.TextListFromJson(ReadString(row, "participants_json", "[]"));
+            var audience = DialogueService.TextListFromJson(ReadString(row, "participants_json", "[]"));
             string turn = ReadString(row, "turn_id", "");
             if (ReadString(row, "text", "") != reply || ReadString(row, "status", "") != "active"
                 || ReadString(row, "session_id", "") != session || ReadString(row, "event_id", "") != unit.EventId
@@ -308,7 +308,7 @@ namespace ReignBetaServer
                 || ReadString(receipt, "restoreGeneration", "") != ack["restoreGeneration"])
                 return Reply("conflict", "identity_mismatch");
             if (current != ack["restoreGeneration"]) return Reply("stale", "restore_generation_changed");
-            var audience = Program.TextListFromJson(ReadString(source, "participants_json", "[]"));
+            var audience = DialogueService.TextListFromJson(ReadString(source, "participants_json", "[]"));
             if (source == null || ReadString(source, "role", "") != "npc" || ReadString(source, "status", "") != "active"
                 || ReadString(source, "speaker_id", "") != ack["speakerHeroStringId"]
                 || ReadString(source, "session_id", "") != ack["sessionId"] || ReadString(source, "event_id", "") != ack["unitId"]

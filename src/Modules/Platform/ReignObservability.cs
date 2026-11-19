@@ -17,7 +17,7 @@ namespace ReignBetaServer
         private static TracerProvider ReignTracerProvider;
         private static bool ReignTelemetryInitialized;
 
-        private sealed class ReignTraceScope : IDisposable
+        internal sealed class ReignTraceScope : IDisposable
         {
             private readonly Activity _activity;
             private readonly Stopwatch _timer;
@@ -47,10 +47,10 @@ namespace ReignBetaServer
             public void Fail(Exception exception)
             {
                 if (exception == null) return;
-                _fields["error"] = LimitText(exception.Message, 1000);
+                _fields["error"] = DialogueService.LimitText(exception.Message, 1000);
                 _activity?.SetStatus(ActivityStatusCode.Error, exception.Message);
                 _activity?.SetTag("error.type", exception.GetType().FullName);
-                _activity?.SetTag("error.message", LimitText(exception.Message, 1000));
+                _activity?.SetTag("error.message", DialogueService.LimitText(exception.Message, 1000));
             }
 
             public void Dispose()
@@ -91,7 +91,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static ReignTraceScope BeginReignSpan(string name, Dictionary<string, object> fields = null)
+        internal static ReignTraceScope BeginReignSpan(string name, Dictionary<string, object> fields = null)
         {
             if (!ReignTelemetryInitialized) InitializeReignTelemetry(LoadSettings());
             return new ReignTraceScope(name, fields);

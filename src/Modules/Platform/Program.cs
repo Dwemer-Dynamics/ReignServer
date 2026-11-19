@@ -35,7 +35,7 @@ namespace ReignBetaServer
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
         internal static readonly string LogsDir = Path.Combine(DataDir, "logs");
         internal static readonly string PromptsDir = Path.Combine(DataDir, "prompts");
-        private static readonly string CharacterTemplatesDir = Path.Combine(DataDir, "character_templates");
+        internal static readonly string CharacterTemplatesDir = Path.Combine(DataDir, "character_templates");
         internal static readonly string TestsDir = Path.Combine(DataDir, "tests");
         internal static readonly string SettingsPath = Path.Combine(DataDir, "settings.json");
         private static readonly Lazy<NativeProviderTestGuard> NativeProviderTestGuardInstance =
@@ -83,8 +83,8 @@ namespace ReignBetaServer
         internal static readonly AsyncLocal<string> CampaignsRootOverride = new AsyncLocal<string>();
         internal static int InteractiveRequestCount;
         internal static long LastInteractiveRequestCompletedUtcTicks;
-        private static readonly object CharacterEnrichmentLock = new object();
-        private static readonly HashSet<string> PendingCharacterEnrichments =
+        internal static readonly object CharacterEnrichmentLock = new object();
+        internal static readonly HashSet<string> PendingCharacterEnrichments =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static TcpListener ActiveListener;
         private static readonly string[] ActionPromptFileNames =
@@ -234,8 +234,8 @@ namespace ReignBetaServer
             var failed = rows.Where(row => !CheckPassed(row)).ToList();
             return TestDict("schema", "reign-motive-cli-summary-v1", "ok", ReadBool(result, "ok", false) && rows.Count > 0 && failed.Count == 0,
                 "passedCount", rows.Count - failed.Count, "failedCount", failed.Count, "totalCount", rows.Count,
-                "failures", failed.Take(32).Select(row => TestDict("caseId", LimitText(ReadFirstString(row, "caseId", "id", "name"), 160),
-                    "summary", LimitText(ReadFirstString(row, "summary", "error", "message"), 512))).ToList(),
+                "failures", failed.Take(32).Select(row => TestDict("caseId", DialogueService.LimitText(ReadFirstString(row, "caseId", "id", "name"), 160),
+                    "summary", DialogueService.LimitText(ReadFirstString(row, "summary", "error", "message"), 512))).ToList(),
                 "failureDetailsLimited", failed.Count > 32, "resultsPath", path,
                 "resultsSha256", Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(fullJson))).ToLowerInvariant());
         }
@@ -1094,7 +1094,7 @@ namespace ReignBetaServer
                     LogOperational(ex.Status == 403 ? "http.forbidden" : "http.rejected", new Dictionary<string, object>
                     {
                         ["status"] = ex.Status,
-                        ["path"] = LimitText(ex.RequestPath, 200),
+                        ["path"] = DialogueService.LimitText(ex.RequestPath, 200),
                         ["reason"] = ex.Reason
                     });
                     WriteIngressRejection(client, stream, ex.Status, ex.Message);
@@ -1246,7 +1246,7 @@ namespace ReignBetaServer
             return elapsedTicks >= 0 && elapsedTicks < TimeSpan.FromMilliseconds(Math.Max(0, quietPeriodMilliseconds)).Ticks;
         }
 
-        private static void WaitForInteractiveRequests()
+        internal static void WaitForInteractiveRequests()
         {
             bool announced = false;
             while (Volatile.Read(ref InteractiveRequestCount) > 0)

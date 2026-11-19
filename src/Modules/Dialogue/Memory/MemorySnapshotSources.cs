@@ -47,7 +47,7 @@ namespace ReignBetaServer
                 + " AND ms.content_hash=" + SnapshotSourceHashSql(alias) + ")";
         }
 
-        internal static string MemorySourceTimelineSql(string table, string alias = null, string timeline = "$timeline", Program.KnowledgeAccessContext access = null)
+        internal static string MemorySourceTimelineSql(string table, string alias = null, string timeline = "$timeline", DialogueService.KnowledgeAccessContext access = null)
         {
             alias ??= table;
             return "((" + timeline + "='' OR " + SnapshotSourceTimelineSql(alias) + " IN (''," + timeline + ") OR "
@@ -55,9 +55,9 @@ namespace ReignBetaServer
                 + (table == "conversation_continuity" ? " AND NOT " + VisibleContinuityReplacementSql(alias, timeline, access) : "") + ")";
         }
 
-        private static string VisibleContinuityReplacementSql(string alias, string timeline, Program.KnowledgeAccessContext access)
+        private static string VisibleContinuityReplacementSql(string alias, string timeline, DialogueService.KnowledgeAccessContext access)
         {
-            access ??= new Program.KnowledgeAccessContext();
+            access ??= new DialogueService.KnowledgeAccessContext();
             return "EXISTS (SELECT 1 FROM memory_continuity_branches cb JOIN conversation_continuity replacement ON replacement.record_id=cb.record_id"
                 + " WHERE cb.timeline_id=" + timeline + " AND cb.owner_id=" + alias + ".owner_id AND cb.source_record_id=" + alias + ".record_id"
                 + " AND replacement.updated_ts<=" + access.AsOfTimestamp.ToString(CultureInfo.InvariantCulture)
@@ -66,7 +66,7 @@ namespace ReignBetaServer
                 + " AND rt.accepted_sequence<=" + access.AsOfAcceptedSequence.ToString(CultureInfo.InvariantCulture) + ")))";
         }
 
-        private static bool ContinuityReplacedAsOf(ReignDbConnection connection, Dictionary<string, object> row, Program.KnowledgeAccessContext access) =>
+        private static bool ContinuityReplacedAsOf(ReignDbConnection connection, Dictionary<string, object> row, DialogueService.KnowledgeAccessContext access) =>
             DialogueStore.SelectConversationContinuity11(connection, VisibleContinuityReplacementSql("original", "$timeline", access),                TestDict("id", ReadString(row, "record_id", ""), "timeline", access.TimelineId)).Count > 0;
 
         // Called only by exact Save Sync restore (before advancing its generation),

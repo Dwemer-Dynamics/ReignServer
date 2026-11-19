@@ -21,7 +21,7 @@ namespace ReignBetaServer
                 "worldHistorySequence", 8L, "worldHistoryHeadEventId", "saved_head");
             var context = TestDict("timelineId", "branch", "worldDay", 20d, "playerHeroStringId", "player",
                 "conversationSessionId", "current", "playerText", answer);
-            var access = Program.BuildKnowledgeAccessContext("npc", "player", "", context);
+            var access = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", context);
             var settings = TestDict("enableSemanticMemory", false, "minimeEnabled", false, "memoryPrecisionMode", "precision",
                 "useMemoryLlmForConsolidation", false);
             try
@@ -66,14 +66,14 @@ namespace ReignBetaServer
                     Check("later_same_day_removed_by_actual_restore", DialogueSelfTestStore.SelectConversationTurns75(connection).Count == 0);
                     var sibling = DialogueSelfTestStore.SelectConversationTurns76(connection).Single();
                     Check("retained_sibling_not_promoted_by_snapshot_presence", !PrecisionTurnVisible(sibling, "npc", access, connection));
-                    var otherAccess = Program.BuildKnowledgeAccessContext("listener", "player", "", context);
+                    var otherAccess = DialogueService.BuildKnowledgeAccessContext("listener", "player", "", context);
                     var secret = DialogueSelfTestStore.SelectConversationTurns63(connection).Single();
                     Check("group_listener_knows_question_but_not_whisper", PrecisionTurnVisible(original, "listener", otherAccess, connection)
                         && !PrecisionTurnVisible(secret, "listener", otherAccess, connection));
                     var belief = DialogueSelfTestStore.SelectBeliefs2(connection).Single();
-                    Check("private_belief_ownership_survives_restore", Program.KnowledgeRowVisibleToNpc("beliefs", belief, access, connection)
-                        && !Program.KnowledgeRowVisibleToNpc("beliefs", belief, otherAccess, connection));
-                    var tooEarly = Program.BuildKnowledgeAccessContext("npc", "player", "", context);
+                    Check("private_belief_ownership_survives_restore", DialogueService.KnowledgeRowVisibleToNpc("beliefs", belief, access, connection)
+                        && !DialogueService.KnowledgeRowVisibleToNpc("beliefs", belief, otherAccess, connection));
+                    var tooEarly = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", context);
                     tooEarly.AsOfAcceptedSequence = ReadLong(original, "accepted_sequence", 0);
                     var answerRow = DialogueSelfTestStore.SelectConversationTurns34(connection).Single();
                     Check("same_day_answer_cutoff_preserved", !PrecisionTurnVisible(answerRow, "npc", tooEarly, connection));
@@ -99,7 +99,7 @@ namespace ReignBetaServer
                     foreach (bool useLegacy in new[] { false, true, false })
                     {
                         defaultReader["legacyMemoryMode"] = useLegacy;
-                        var defaultPacket = Program.BuildNpcMemoryPacket(campaign, "npc", "player", "", "caravan price", 4000, context, defaultReader);
+                        var defaultPacket = DialogueService.BuildNpcMemoryPacket(campaign, "npc", "player", "", "caravan price", 4000, context, defaultReader);
                         string delivered = ReadString(defaultPacket, "memoryPacket", "");
                         Check("global_toggle_on_old_snapshot_" + (useLegacy ? "legacy" : "new") + "_" + results.Count,
                             delivered.Contains(question) && delivered.Contains(answer) && delivered.Contains(acknowledgment)
@@ -116,7 +116,7 @@ namespace ReignBetaServer
                         var payload = PromptParityPayload(mode, false);
                         foreach (var field in context) payload[field.Key] = field.Value;
                         payload["officialMemoryFirewall"] = false; payload["mode"] = mode;
-                        var packet = Program.BuildNpcMemoryPacket(campaign, "npc", "player", "", "caravan price", 4000, payload, modeSettings);
+                        var packet = DialogueService.BuildNpcMemoryPacket(campaign, "npc", "player", "", "caravan price", 4000, payload, modeSettings);
                         string memory = ReadString(packet, "memoryPacket", "");
                         if (memoryMode == "precision") payload["memoryPrecisionEvidence"] = ReadDictionary(packet, "precisionEvidence");
                         var profile = PromptParityProfile(); profile["heroStringId"] = "npc";
@@ -152,7 +152,7 @@ namespace ReignBetaServer
                     Check("next_read_preserves_answer_without_reopening_original", next.Contains(answer) && next.Contains("answered")
                         && promptIds.Contains(branchId) && !promptIds.Contains("old_question"), next);
                     var beforeAnswer = new Dictionary<string, object>(context) { ["memoryAsOfTimestamp"] = 9L };
-                    var oldAccess = Program.BuildKnowledgeAccessContext("npc", "player", "", beforeAnswer);
+                    var oldAccess = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", beforeAnswer);
                     oldAccess.AsOfTimestamp = 9L;
                     Check("later_revision_does_not_hide_original_in_earlier_replay", MemoryTimeVisible(oldContinuity, oldAccess, connection)
                         && DialogueSelfTestStore.SelectConversationContinuity11(connection, MemorySourceTimelineSql("conversation_continuity", access: oldAccess),                            TestDict("timeline", "branch")).Any(r => ReadString(r, "record_id", "") == "old_question"));
@@ -169,7 +169,7 @@ namespace ReignBetaServer
                 {
                     BindRecoveredMemorySources(connection, "branch", "third", 9, "next_head");
                     var third = new Dictionary<string, object>(context) { ["timelineId"] = "third" };
-                    var thirdAccess = Program.BuildKnowledgeAccessContext("npc", "player", "", third);
+                    var thirdAccess = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", third);
                     Check("second_restore_preserves_transitive_original", PrecisionTurnVisible(DialogueSelfTestStore.SelectConversationTurns33(connection).Single(), "npc", thirdAccess, connection));
                     var ids = new List<string>();
                     string text = BuildQuestionContinuityPrompt(connection, third, "npc", "player", ids);
@@ -179,7 +179,7 @@ namespace ReignBetaServer
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     BindRecoveredMemorySources(connection, "branch", "verified_noop", 9, "next_head");
-                    var noOpAccess = Program.BuildKnowledgeAccessContext("npc", "player", "", new Dictionary<string, object>(context) { ["timelineId"] = "verified_noop" });
+                    var noOpAccess = DialogueService.BuildKnowledgeAccessContext("npc", "player", "", new Dictionary<string, object>(context) { ["timelineId"] = "verified_noop" });
                     Check("verified_noop_retains_existing_chain", PrecisionTurnVisible(DialogueSelfTestStore.SelectConversationTurns33(connection).Single(), "npc", noOpAccess, connection));
                     DialogueSelfTestStore.UpdateConversationTurns58(connection);
                 }
@@ -192,8 +192,8 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                Check("suite_exception", false, Program.LimitText(ex.ToString(), 2400));
-                results.Last()["summary"] = "Snapshot source contract exception: " + Program.LimitText(ex.ToString(), 2200);
+                Check("suite_exception", false, DialogueService.LimitText(ex.ToString(), 2400));
+                results.Last()["summary"] = "Snapshot source contract exception: " + DialogueService.LimitText(ex.ToString(), 2200);
             }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             results.AddRange(RunLegacyMemoryRecoveryAssertions());

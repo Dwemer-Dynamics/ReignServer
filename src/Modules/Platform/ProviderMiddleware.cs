@@ -101,7 +101,7 @@ namespace ReignBetaServer
                 RecordProviderTimings(diagnostics, queueMs, callTimer.ElapsedMilliseconds, "failed");
                 lock (ProviderMiddlewareLock)
                 {
-                    state.Failures++; state.ConsecutiveFailures++; state.TotalDurationMs += timer.ElapsedMilliseconds; state.LastError = LimitText(ex.Message, 800);
+                    state.Failures++; state.ConsecutiveFailures++; state.TotalDurationMs += timer.ElapsedMilliseconds; state.LastError = DialogueService.LimitText(ex.Message, 800);
                     int threshold = Math.Max(2, ReadInt(settings, "providerCircuitFailureThreshold", 4));
                     if (state.ConsecutiveFailures >= threshold)
                         state.CircuitOpenUntilUtc = DateTime.UtcNow.AddSeconds(Math.Max(5, ReadInt(settings, "providerCircuitBreakSeconds", 30)));

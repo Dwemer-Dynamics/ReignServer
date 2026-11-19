@@ -147,7 +147,7 @@ namespace ReignBetaServer
                     Key = TownProfileKey(generation, campaign, heroId), SettingsHash = settingsHash,
                     CapturedUtc = captured, Hero = DeepCloneProfileDictionary(hero) };
                 string result = TownProfiles.Enqueue(work, concurrency, RunTownProfileWork,
-                    ex => Program.LogOperational("notable_prewarm.failed", TestDict("campaignId", campaign, "error", Program.LimitText(ex.Message, 500))));
+                    ex => Program.LogOperational("notable_prewarm.failed", TestDict("campaignId", campaign, "error", DialogueService.LimitText(ex.Message, 500))));
                 counts[result] = ReadInt(counts, result, 0) + 1;
             }
             var response = TestDict("ok", true, "schema", "reign-town-notable-prewarm-v1", "generation", generation,
@@ -163,8 +163,8 @@ namespace ReignBetaServer
 
         private static bool RunTownProfileWork(TownProfileWork work)
             => RunTownProfileWorkCore(work, (campaign, heroId, hero) => ReadInt(hero, "narrativeVersion", 0) >= 5
-                ? Program.EnsureCharacterConstructed(campaign, heroId, hero, TownNotableProfileSource)
-                : Program.ConstructCharacterFiles(campaign, heroId, hero, true, true, TownNotableProfileSource));
+                ? CharactersService.EnsureCharacterConstructed(campaign, heroId, hero, TownNotableProfileSource)
+                : CharactersService.ConstructCharacterFiles(campaign, heroId, hero, true, true, TownNotableProfileSource));
 
         private static bool RunTownProfileWorkCore(TownProfileWork work,
             Func<string, string, Dictionary<string, object>, Dictionary<string, object>> construct)
@@ -181,7 +181,7 @@ namespace ReignBetaServer
                 {
                     PersistenceService.ThrowIfCampaignRequestReplaced();
                     var latest = Program.ReadJsonObject(Program.CharacterFile(work.Campaign, work.HeroId, "profile.json"));
-                    var hero = Program.MergeProfileForConstruction(work.Campaign, work.HeroId, work.Hero);
+                    var hero = CharactersService.MergeProfileForConstruction(work.Campaign, work.HeroId, work.Hero);
                     if (DateTime.TryParse(ReadString(latest, "updatedUtc", ""), System.Globalization.CultureInfo.InvariantCulture,
                         System.Globalization.DateTimeStyles.RoundtripKind, out var updated) && updated.ToUniversalTime() > work.CapturedUtc)
                         foreach (var pair in latest) hero[pair.Key] = pair.Value;
@@ -191,7 +191,7 @@ namespace ReignBetaServer
                     lock (NarrativeStateLock)
                     {
                         if (CharacterHasEditorCorrections(work.Campaign, work.HeroId)) return true;
-                        Program.UpsertCharacterProfile(work.Campaign, hero);
+                        CharactersService.UpsertCharacterProfile(work.Campaign, hero);
                     }
                     bool ok = RunSpeculativeTownProfile(work.Campaign, work.HeroId, () => construct(work.Campaign, work.HeroId, hero),
                         () => TownNotableProfileComplete(work.Campaign, work.HeroId, hero));
@@ -213,7 +213,7 @@ namespace ReignBetaServer
             catch (Exception ex)
             {
                 Program.LogOperational("notable_prewarm.failed", TestDict("campaignId", work.Campaign,
-                    "heroStringId", work.HeroId, "error", Program.LimitText(ex.Message, 500)));
+                    "heroStringId", work.HeroId, "error", DialogueService.LimitText(ex.Message, 500)));
                 return false;
             }
             finally { CurrentTownProfileWork = null; Program.ExitCampaignRequestAccess(access); }
@@ -222,7 +222,7 @@ namespace ReignBetaServer
         private static bool TownNotableProfileComplete(string campaign, string hero, Dictionary<string, object> profile)
         {
             var status = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "constructed.json"));
-            return Program.IsCharacterConstructionReady(status) && (ReadInt(profile, "narrativeVersion", 0) >= 5
+            return CharactersService.IsCharacterConstructionReady(status) && (ReadInt(profile, "narrativeVersion", 0) >= 5
                 ? NarrativeDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "narrative.json")))
                 : ReadBool(status, "llmUsed", false));
         }
@@ -241,7 +241,7 @@ namespace ReignBetaServer
                 string path = Program.CharacterFile(campaign, hero, "constructed.json");
                 byte[] previous = File.Exists(path) ? File.ReadAllBytes(path) : null;
                 bool succeeded = false, replaced = false;
-                try { succeeded = Program.IsCharacterConstructionReady(construct()) && (complete?.Invoke() ?? true); return succeeded; }
+                try { succeeded = CharactersService.IsCharacterConstructionReady(construct()) && (complete?.Invoke() ?? true); return succeeded; }
                 catch (PersistenceService.CampaignRequestReplacedException) { replaced = true; throw; }
                 finally
                 {

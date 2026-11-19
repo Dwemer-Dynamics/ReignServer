@@ -172,7 +172,7 @@ namespace ReignBetaServer
             catch (Exception ex)
             {
                 Program.LogOperational("conversation.unanswered_input_incomplete", TestDict("campaignId", campaign,
-                    "heroStringId", hero, "error", Program.LimitText(ex.Message, 500)));
+                    "heroStringId", hero, "error", DialogueService.LimitText(ex.Message, 500)));
                 return TestDict("status", "player_input_unavailable", "coverageGap", "Player input could not be persisted.",
                     "npcResponseStored", false, "effectsConfirmed", false);
             }

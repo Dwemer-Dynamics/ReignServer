@@ -94,7 +94,7 @@ namespace ReignBetaServer
                 topics.AddRange(ReadStringList(extraction, "topics").Where(MemorySpecialistTopics.ContainsKey));
             }
             return TestDict("schema", MemorySpecialistSchema, "sourceId", id, "sourceHash", MemorySpecialistSourceHash(source),
-                "textHash", SemanticSha256Hex(text), "speakerId", speaker, "audienceIds", Program.TextListFromJson(ReadString(source, "participants_json", "[]")),
+                "textHash", SemanticSha256Hex(text), "speakerId", speaker, "audienceIds", DialogueService.TextListFromJson(ReadString(source, "participants_json", "[]")),
                 "actorIds", new string[0], "addresseeIds", new string[0], "entities", entities,
                 "topics", topics.Distinct(StringComparer.Ordinal).OrderBy(x => x).ToList(), "authority", "retrieval_candidates_only",
                 "extractorStatus", extraction == null ? "local_metadata" : valid ? "source_bound_candidates" : "rejected_source_identity",
@@ -167,7 +167,7 @@ namespace ReignBetaServer
                 {
                     string text = ConversationTurnTextForRecall(source);
                     string outcome = "timeout_or_unavailable";
-                    try { extraction = TryParseJsonObject(Program.PostJsonToUrl(SemanticWorkerUrl(settings, "/memory/extract"),
+                    try { extraction = TryParseJsonObject(DialogueService.PostJsonToUrl(SemanticWorkerUrl(settings, "/memory/extract"),
                         Json.Serialize(TestDict("sourceId", ReadString(source, "turn_id", ""), "text", text, "textHash", SemanticSha256Hex(text))), 5000)); }
                     catch { /* A background specialist cannot reject accepted dialogue. */ }
                     if (extraction != null) outcome = ReadString(extraction, "status", ReadBool(extraction, "ok", false) ? "returned_candidates" : "invalid_response");
@@ -189,7 +189,7 @@ namespace ReignBetaServer
         }
 
         private static List<Dictionary<string, object>> FindMemorySpecialistTurns(ReignDbConnection connection, MemoryQueryPlan plan,
-            Program.KnowledgeAccessContext access, int limit, int maximumPages, bool requirePlayerSource)
+            DialogueService.KnowledgeAccessContext access, int limit, int maximumPages, bool requirePlayerSource)
         {
             if (!WorldSimulationService.TableExists(connection, "memory_specialist_sources")) return new List<Dictionary<string, object>>();
             var topics = MemorySpecialistQueryTopics(plan.Query);
@@ -264,7 +264,7 @@ namespace ReignBetaServer
                     {
                         if (Program.PriorityBackgroundWorkShouldYield()) break;
                         string owner = ReadString(row, "speaker_id", "");
-                        CharactersService.RefreshCharacterLifeProjection(campaign, owner, new Program.KnowledgeAccessContext { NpcId = owner, TimelineId = timeline,
+                        CharactersService.RefreshCharacterLifeProjection(campaign, owner, new DialogueService.KnowledgeAccessContext { NpcId = owner, TimelineId = timeline,
                             WorldDay = Math.Max(ReadDouble(row, "day", 0), ReadDouble(native, "day", 0)), AsOfTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                     }
                 }

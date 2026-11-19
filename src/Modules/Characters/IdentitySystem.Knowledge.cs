@@ -75,7 +75,7 @@ namespace ReignBetaServer
             Dictionary<string, object> existing = ReadStoredAcquaintance(connection, observerId, subjectId);
             string result = existing == null ? "created" : IdentityStateVerified(existing) ? "unchanged" : "upgraded";
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            List<string> aliases = existing == null ? new List<string>() : Program.TextListFromJson(ReadString(existing, "aliases_json", "[]"));
+            List<string> aliases = existing == null ? new List<string>() : DialogueService.TextListFromJson(ReadString(existing, "aliases_json", "[]"));
             string claimed = existing == null ? "" : ReadString(existing, "claimed_name", "");
             if (!string.IsNullOrWhiteSpace(claimed) && !aliases.Contains(claimed, StringComparer.OrdinalIgnoreCase)) aliases.Add(claimed);
             CharactersStore.UpsertAcquaintances2(connection, new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId, ["canonical"] = canonicalName, ["claimed"] = claimed, ["aliases"] = Json.Serialize(aliases), ["source"] = source ?? "", ["sourceEntity"] = sourceEntityId ?? "", ["day"] = worldDay, ["ts"] = ts });
@@ -95,7 +95,7 @@ namespace ReignBetaServer
                 }
                 return;
             }
-            List<string> aliases = existing == null ? new List<string>() : Program.TextListFromJson(ReadString(existing, "aliases_json", "[]"));
+            List<string> aliases = existing == null ? new List<string>() : DialogueService.TextListFromJson(ReadString(existing, "aliases_json", "[]"));
             string prior = existing == null ? "" : ReadString(existing, "claimed_name", "");
             if (!string.IsNullOrWhiteSpace(prior) && !aliases.Contains(prior, StringComparer.OrdinalIgnoreCase)) aliases.Add(prior);
             if (!aliases.Contains(claimedName, StringComparer.OrdinalIgnoreCase)) aliases.Add(claimedName);
@@ -651,7 +651,7 @@ namespace ReignBetaServer
         private static string DeriveSceneIdentityLabel(Dictionary<string, object> context)
         {
             string supplied = ReadFirstString(context, "visibleLabel", "sceneLabel", "unknownLabel");
-            if (!string.IsNullOrWhiteSpace(supplied)) return Program.LimitText(supplied, 80);
+            if (!string.IsNullOrWhiteSpace(supplied)) return DialogueService.LimitText(supplied, 80);
             Dictionary<string, object> appearance = ReadDictionary(context, "appearance") ?? ReadDictionary(ReadDictionary(context, "subject"), "appearance") ?? new Dictionary<string, object>();
             string status = ReadString(appearance, "visibleStatusLabel", "").ToLowerInvariant();
             string mode = ReadString(context, "mode", "").ToLowerInvariant();
@@ -687,7 +687,7 @@ namespace ReignBetaServer
             }
 
             string latestNpcLine = candidateNpcLines.LastOrDefault() ?? "";
-            return Program.ContainsAny(latestNpcLine.ToLowerInvariant(),
+            return DialogueService.ContainsAny(latestNpcLine.ToLowerInvariant(),
                 "what is your name", "what's your name", "who are you", "what are you called",
                 "tell me your name", "give me your name", "state your name", "introduce yourself",
                 "not introduced yourself", "not yet introduced yourself", "not yet introduced themselves",

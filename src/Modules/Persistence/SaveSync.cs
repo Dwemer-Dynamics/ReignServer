@@ -271,7 +271,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> point = SaveSyncPoint(ledger, savePointId);
                 if (point == null) return SaveSyncMissingFinalizeResult(campaignId, savePointId);
                 bool successful = ReadBool(payload, "successful", false);
-                point["nativeSaveName"] = Program.LimitText(ReadString(payload, "nativeSaveName", ReadString(point, "nativeSaveName", "")), 240);
+                point["nativeSaveName"] = DialogueService.LimitText(ReadString(payload, "nativeSaveName", ReadString(point, "nativeSaveName", "")), 240);
                 point["saveFinalizedUtc"] = DateTime.UtcNow.ToString("o");
                 point["status"] = successful ? "ready" : "save_failed";
                 if (!successful)

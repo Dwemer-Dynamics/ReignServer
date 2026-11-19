@@ -66,7 +66,7 @@ namespace ReignBetaServer
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
-            List<string> heroIds = Program.MergeStringLists(
+            List<string> heroIds = DialogueService.MergeStringLists(
                 ReadStringList(payload, "heroIds"),
                 ReadStringList(payload, "participantHeroIds"))
                 .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -377,7 +377,7 @@ namespace ReignBetaServer
                 ["fatherId"] = ReadString(profile, "fatherId", ""),
                 ["motherId"] = ReadString(profile, "motherId", ""),
                 ["mbti"] = ReadString(mbti, "type", "XXXX"),
-                ["personality"] = Program.LimitText(FirstNonEmpty(
+                ["personality"] = DialogueService.LimitText(FirstNonEmpty(
                     ReadString(traits, "basePersonalitySummary", ""),
                     string.Join(" ", portrait.Values.Select(Convert.ToString))), 1200)
             };

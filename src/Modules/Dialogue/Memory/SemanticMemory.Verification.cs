@@ -57,7 +57,7 @@ namespace ReignBetaServer
             add("world_history_candidate_dedupe",
                 deduplicatedCandidates.Count == 1 && Math.Abs(ReadDouble(deduplicatedCandidates[0], "deterministicScore", 0d) - 7d) < 0.001d,
                 "Duplicate deterministic world-history candidates merge safely before semantic scoring.");
-            add("privacy_contract", typeof(Program.KnowledgeAccessContext) != null, "Semantic rows still pass through the canonical knowledge-access context.");
+            add("privacy_contract", typeof(DialogueService.KnowledgeAccessContext) != null, "Semantic rows still pass through the canonical knowledge-access context.");
             add("world_history_significance_filter",
                 !WorldHistoryEventEmbeddingEligible(new Dictionary<string, object> { ["event_type"] = "settlement_entered", ["dissemination_class"] = "ordinary" })
                 && WorldHistoryEventEmbeddingEligible(new Dictionary<string, object> { ["event_type"] = "siege_completed", ["dissemination_class"] = "ordinary" })
@@ -108,7 +108,7 @@ namespace ReignBetaServer
             string campaignId = "semantic_memory_test_" + Guid.NewGuid().ToString("N");
             try
             {
-                Program.StoreWorldMemoryEvent(new Dictionary<string, object>
+                DialogueService.StoreWorldMemoryEvent(new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId, ["eventId"] = "semantic_private_event", ["eventType"] = "personal_revelation",
                     ["summary"] = "Aldric abandoned his ally and broke his promise.", ["participants"] = new List<string> { "npc_owner" },
@@ -120,8 +120,8 @@ namespace ReignBetaServer
                     int triggerCount = ReadInt(DialogueStore.CountSqliteMaster(connection).FirstOrDefault(), "count", 0);
                     int queued = ReadInt(DialogueStore.CountEmbeddingJobs(connection).FirstOrDefault(), "count", 0);
                     Dictionary<string, object> memory = DialogueStore.SelectMemories9(connection).FirstOrDefault();
-                    bool ownerAllowed = Program.KnowledgeRowVisibleToNpc("memories", memory, new Program.KnowledgeAccessContext { NpcId = "npc_owner" });
-                    bool strangerDenied = !Program.KnowledgeRowVisibleToNpc("memories", memory, new Program.KnowledgeAccessContext { NpcId = "npc_stranger" });
+                    bool ownerAllowed = DialogueService.KnowledgeRowVisibleToNpc("memories", memory, new DialogueService.KnowledgeAccessContext { NpcId = "npc_owner" });
+                    bool strangerDenied = !DialogueService.KnowledgeRowVisibleToNpc("memories", memory, new DialogueService.KnowledgeAccessContext { NpcId = "npc_stranger" });
                     EmbeddingSourceDocument document = BuildEmbeddingDocument(campaignId, "memory", ReadString(memory, "memory_id", ""), memory,
                         BuildCanonicalEmbeddingText("memory", memory), new Dictionary<string, object> { ["vectorProvider"] = "local" });
                     string payload = Json.Serialize(document.Payload);

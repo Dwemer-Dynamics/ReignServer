@@ -135,13 +135,13 @@ namespace ReignBetaServer
             result.Add(new Dictionary<string, object>
             {
                 ["type"] = echoes.Count > 0 ? "group_conversation_accounting_echo" : "repeated_conversation_accounting",
-                ["match"] = Program.LimitText(ConversationSpeech(reply).Trim(), 700),
+                ["match"] = DialogueService.LimitText(ConversationSpeech(reply).Trim(), 700),
                 ["detail"] = "The reply repeats a recent conversational tally or debt/payment metaphor. Answer the current message plainly in this character's voice, respecting received answers, corrections and any separate unresolved request. Preserve legitimate refusal and actual financial facts; remove the repeated framing rather than merely changing its words.",
                 ["priorEvidence"] = repeated.Concat(echoes).Take(3).Select(row => new Dictionary<string, object>
                 {
                     ["speaker"] = ReadFirstString(row, "speaker", "speaker_name"),
                     ["turnId"] = ReadFirstString(row, "turn_id", "turnId", "id"),
-                    ["text"] = Program.LimitText(ConversationSpeech(ReadString(row, "text", "")).Trim(), 1100)
+                    ["text"] = DialogueService.LimitText(ConversationSpeech(ReadString(row, "text", "")).Trim(), 1100)
                 }).ToList()
             });
             return result;

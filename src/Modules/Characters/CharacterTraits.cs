@@ -44,7 +44,7 @@ namespace ReignBetaServer
             Dictionary<string, object> native = ReadDictionary(hero, "traits") ?? new Dictionary<string, object>();
             Dictionary<string, object> skills = ReadDictionary(hero, "skills") ?? new Dictionary<string, object>();
             Dictionary<string, object> foundation = CalculateFoundationTraitsVNext(hero);
-            Dictionary<string, object> attractiveness = Program.BuildAttractiveness(hero);
+            Dictionary<string, object> attractiveness = CharactersService.BuildAttractiveness(hero);
 
             Dictionary<string, object> document = new Dictionary<string, object>
             {
@@ -219,10 +219,10 @@ namespace ReignBetaServer
                 foreach (Dictionary<string, object> assignment in ReadDictionaryList(generated, "traitAssignments").Take(12))
                 {
                     string key = ReadFirstString(assignment, "trait", "key", "id");
-                    string evidence = Program.LimitText(ReadFirstString(assignment, "evidence", "reason"), 300);
+                    string evidence = DialogueService.LimitText(ReadFirstString(assignment, "evidence", "reason"), 300);
                     if (!foundation.ContainsKey(key) || NativeLockedCoreTraits.Contains(key) || string.IsNullOrWhiteSpace(evidence)) continue;
-                    int prior = Program.TraitInt(foundation, key);
-                    int assigned = Program.ClampTrait(ReadInt(assignment, "value", prior));
+                    int prior = CharactersService.TraitInt(foundation, key);
+                    int assigned = CharactersService.ClampTrait(ReadInt(assignment, "value", prior));
                     foundation[key] = assigned;
                     applied.Add(new Dictionary<string, object> { ["trait"] = key, ["prior"] = prior, ["value"] = assigned, ["evidence"] = evidence, ["source"] = "native_description" });
                 }
@@ -332,10 +332,10 @@ namespace ReignBetaServer
         {
             List<string> selected = (keys ?? new string[0])
                 .Where(key => traits.ContainsKey(key))
-                .OrderByDescending(key => Math.Abs(Program.TraitInt(traits, key)))
+                .OrderByDescending(key => Math.Abs(CharactersService.TraitInt(traits, key)))
                 .ThenByDescending(key => PersonalityTraitPercentage(document, key))
                 .Take(2)
-                .Select(key => Program.TraitValueDescriptor(key, Program.TraitInt(traits, key)))
+                .Select(key => DialogueService.TraitValueDescriptor(key, CharactersService.TraitInt(traits, key)))
                 .Where(value => !string.IsNullOrWhiteSpace(value))
                 .ToList();
             return selected.Count == 0 ? "Their behavior in this area remains balanced and depends heavily on circumstance." : string.Join(" ", selected);
@@ -398,7 +398,7 @@ namespace ReignBetaServer
         {
             Dictionary<string, object> percentages = ReadDictionary(traits, "traitPercentages") ?? new Dictionary<string, object>();
             if (percentages.ContainsKey(key)) return Math.Max(0, Math.Min(100, ReadInt(percentages, key, 50)));
-            int modifier = Program.TraitInt(ReadDictionary(traits, "foundationTraits") ?? traits, key);
+            int modifier = CharactersService.TraitInt(ReadDictionary(traits, "foundationTraits") ?? traits, key);
             TraitPercentageBand(modifier, out int minimum, out int maximum);
             return (minimum + maximum) / 2;
         }
@@ -407,7 +407,7 @@ namespace ReignBetaServer
         {
             Dictionary<string, object> foundation = ReadDictionary(traits, "foundationTraits") ?? ReadDictionary(traits, "hiddenReignTraits") ?? new Dictionary<string, object>();
             Dictionary<string, object> percentages = ReadDictionary(traits, "traitPercentages") ?? new Dictionary<string, object>();
-            string material = string.Join("|", CoreTraitKeys.Select(key => key + ":" + Program.TraitInt(foundation, key).ToString(CultureInfo.InvariantCulture) + ":" + ReadInt(percentages, key, -1).ToString(CultureInfo.InvariantCulture)));
+            string material = string.Join("|", CoreTraitKeys.Select(key => key + ":" + CharactersService.TraitInt(foundation, key).ToString(CultureInfo.InvariantCulture) + ":" + ReadInt(percentages, key, -1).ToString(CultureInfo.InvariantCulture)));
             unchecked
             {
                 uint hash = 2166136261;
@@ -429,7 +429,7 @@ namespace ReignBetaServer
                 .SelectMany(domain => domain.TraitKeys)
                 .Where(key => traits.ContainsKey(key))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderByDescending(key => Math.Abs(Program.TraitInt(traits, key)))
+                .OrderByDescending(key => Math.Abs(CharactersService.TraitInt(traits, key)))
                 .ThenBy(key => Array.IndexOf(CoreTraitKeys, key))
                 .Take(5)
                 .ToList();
@@ -439,7 +439,7 @@ namespace ReignBetaServer
             builder.AppendLine("RELEVANT PERSONALITY EMPHASIS");
             builder.AppendLine("Deterministic motive routing selected these traits as relevant to this exchange. Give them extra weight without replacing the complete base personality.");
             foreach (string key in selected)
-                builder.AppendLine("- " + Program.HumanizeKey(key) + ": " + Program.TraitValueDescriptor(key, Program.TraitInt(traits, key)));
+                builder.AppendLine("- " + DialogueService.HumanizeKey(key) + ": " + DialogueService.TraitValueDescriptor(key, CharactersService.TraitInt(traits, key)));
             return builder.ToString().TrimEnd();
         }
     }

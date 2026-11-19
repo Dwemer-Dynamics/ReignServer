@@ -132,7 +132,7 @@ namespace ReignBetaServer
                 return new Dictionary<string, object> { ["conversationKey"] = g.Key, ["campaignId"] = ReadString(last, "campaignId", ""),
                     ["title"] = FirstNonEmpty(ReadString(last, "heroName", ""), ReadString(last, "heroId", ""), "Other LLM activity"),
                     ["mode"] = ReadString(last, "mode", ""), ["lastUtc"] = ReadString(last, "startedUtc", ""), ["responseCount"] = g.Count(),
-                    ["preview"] = LimitText(FirstNonEmpty(ReadString(last, "reply", ""), ReadString(last, "playerText", "")), 160) };
+                    ["preview"] = DialogueService.LimitText(FirstNonEmpty(ReadString(last, "reply", ""), ReadString(last, "playerText", "")), 160) };
             }).OrderByDescending(x => ReadString(x, "lastUtc", ""), StringComparer.Ordinal).ToList();
             return new Dictionary<string, object> { ["ok"] = true, ["schema"] = ConversationDiagnosticSchema,
                 ["conversations"] = conversations.Skip(offset).Take(limit).ToList(), ["conversationCount"] = conversations.Count,

@@ -72,7 +72,7 @@ namespace ReignBetaServer
                 .Where(id => id.Length > 0).Distinct().ToList();
             if (PlayerInputSources.TryGetValue(context, out var input) && input.SourceId.Length > 0) ids.Add(input.SourceId);
             using var connection = ReignDatabase.OpenCampaignConnection(campaign);
-            var access = Program.BuildKnowledgeAccessContext(observer, ReadFirstString(context, "playerHeroStringId", "mainHeroStringId", "playerId"), "", context);
+            var access = DialogueService.BuildKnowledgeAccessContext(observer, ReadFirstString(context, "playerHeroStringId", "mainHeroStringId", "playerId"), "", context);
             if (access.PlayerIdentityUnknown || ReadBool(context, "officialMemoryFirewall", false)) return;
             var candidates = DialogueStore.SelectConversationTurns65(connection, TestDict("ids", Json.Serialize(ids), "exchanges", Json.Serialize(exchanges)))
                 .Where(row => PrecisionTurnVisible(row, observer, access, connection)).ToList();
@@ -118,7 +118,7 @@ namespace ReignBetaServer
                 statements.Add(TestDict("turnId", ReadString(row, "turn_id", ""), "speakerId", ReadString(row, "speaker_id", ""),
                     "eventId", ReadString(row, "event_id", ""), "originalSourceHash", PromptHash(ConversationTurnTextForRecall(row)),
                     "timestamp", ReadLong(row, "ts", 0), "acceptedSequence", ReadLong(row, "accepted_sequence", 0),
-                    "text", Program.SanitizeUnknownIdentityEvidenceText(CommitmentVisibleSourceText(row, access), access)));
+                    "text", DialogueService.SanitizeUnknownIdentityEvidenceText(CommitmentVisibleSourceText(row, access), access)));
             }
             catch (Exception error)
             {
@@ -130,7 +130,7 @@ namespace ReignBetaServer
             finally { SetMemoryTranscriptContext(context, lines); }
         }
 
-        private static string MemoryProjectedTranscriptHash(Dictionary<string, object> row, Program.KnowledgeAccessContext knowledge)
+        private static string MemoryProjectedTranscriptHash(Dictionary<string, object> row, DialogueService.KnowledgeAccessContext knowledge)
         {
             string rendered = RenderExactHistoryTurn(row, knowledge);
             int boundary = rendered.IndexOf(": ", StringComparison.Ordinal);

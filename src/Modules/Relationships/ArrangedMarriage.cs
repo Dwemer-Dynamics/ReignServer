@@ -64,7 +64,7 @@ namespace ReignBetaServer
                 if(RelationshipsStore.SelectMarriageLeaderRolls(c, new Dictionary<string,object>{{"t",timeline},{"p",period},{"l",leaderId}}).Any())continue;
                 var leader=nobles.FirstOrDefault(x=>ReadString(x,"heroStringId","")==leaderId)??new Dictionary<string,object>();
                 var members=nobles.Where(x=>ReadString(x,"clanId","")==clanId&&ReadString(x,"spouseId","")=="").ToList();
-                double urgency=MarriageUrgency(clan,leader,members),chance=Program.ClampDouble(.01+.04*urgency,.01,.05);
+                double urgency=MarriageUrgency(clan,leader,members),chance=DialogueService.ClampDouble(.01+.04*urgency,.01,.05);
                 double roll=StableUnit(campaign+"|"+timeline+"|marriage|"+period+"|"+leaderId);
                 string rollStatus=members.Count==0?"no_member":roll<chance?"passed":"failed";
                 RelationshipsStore.InsertMarriageLeaderRolls(c, new Dictionary<string,object>{{"id","marriage_roll_"+Guid.NewGuid().ToString("N")},{"t",timeline},{"p",period},{"l",leaderId},{"clan",clanId},{"day",day},{"chance",chance},{"roll",roll},{"u",urgency},{"status",rollStatus},{"ts",ts}});
@@ -434,7 +434,7 @@ namespace ReignBetaServer
 
 
             }
-            catch(Exception ex){results.Add(TestDict("caseId","arranged_suite_exception","passed",false,"summary",Program.LimitText(ex.ToString(),2000)));}
+            catch(Exception ex){results.Add(TestDict("caseId","arranged_suite_exception","passed",false,"summary",DialogueService.LimitText(ex.ToString(),2000)));}
             finally {ReignPostgreSqlStorage.DropCampaign(campaign);}
             return results;
         }

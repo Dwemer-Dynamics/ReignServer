@@ -19,7 +19,7 @@ namespace ReignBetaServer
         }
 
         internal static List<MemoryEvidence> LoadRecentConversationWindow(ReignDbConnection connection,
-            MemoryQueryPlan plan, Dictionary<string, object> context, Program.KnowledgeAccessContext knowledge,
+            MemoryQueryPlan plan, Dictionary<string, object> context, DialogueService.KnowledgeAccessContext knowledge,
             Dictionary<string, object> settings, Dictionary<string, object> diagnostics)
         {
             const int summaryLimit = 30;
@@ -75,7 +75,7 @@ namespace ReignBetaServer
                 var page = DialogueStore.SelectSummaries5(connection, MemoryEligibilitySql("summaries"), MemorySourceTimelineSql("summaries"),parameters);
                 foreach (var original in page)
                 {
-                    if (!Program.KnowledgeRowVisibleToNpc("summaries", original, knowledge, connection)
+                    if (!DialogueService.KnowledgeRowVisibleToNpc("summaries", original, knowledge, connection)
                         || ReadLong(original, "end_ts", 0) > knowledge.AsOfTimestamp)
                     { withheld++; continue; }
                     var row = ProjectRetrievedConversationMemories(connection,
@@ -87,7 +87,7 @@ namespace ReignBetaServer
                     string scope = ReadString(row, "scope", "");
                     string session = ReadFirstString(payload, "sessionId", "conversationSessionId");
                     if (session.Length == 0 && scope.StartsWith("scene:", StringComparison.Ordinal)) session = scope.Substring(6);
-                    var events = Program.TextListFromJson(ReadString(row, "source_events_json", "[]"))
+                    var events = DialogueService.TextListFromJson(ReadString(row, "source_events_json", "[]"))
                         .Distinct(StringComparer.Ordinal).OrderBy(id => id, StringComparer.Ordinal).ToList();
                     string identity = session.Length > 0 ? "session:" + session
                         : events.Count > 0 ? "events:" + PromptHash(Json.Serialize(events)) : "id:" + ReadString(row, "summary_id", "");
@@ -128,7 +128,7 @@ namespace ReignBetaServer
 
 
         private static List<MemoryEvidence> LoadPrecisionFoundation(ReignDbConnection connection, string campaign,
-            MemoryQueryPlan plan, Dictionary<string, object> context, Program.KnowledgeAccessContext knowledge)
+            MemoryQueryPlan plan, Dictionary<string, object> context, DialogueService.KnowledgeAccessContext knowledge)
         {
             var evidence = new List<MemoryEvidence>();
             if (plan.Session.Length > 0)
@@ -202,7 +202,7 @@ namespace ReignBetaServer
             // Existing campaigns can lack structured milestones. Recover only
             // this pair's actual attributed words, keeping refusals/negation.
             var pairTurns = DialogueStore.SelectConversationTurns60(connection, parameters).Where(r => MemoryTimeVisible(r, knowledge, connection)
-                    && Program.TextListFromJson(ReadString(r, "participants_json", "[]")).Contains(plan.Peer, StringComparer.OrdinalIgnoreCase)).ToList();
+                    && DialogueService.TextListFromJson(ReadString(r, "participants_json", "[]")).Contains(plan.Peer, StringComparer.OrdinalIgnoreCase)).ToList();
             foreach (var row in pairTurns.Where(r => PairHistoryDimension(ReadString(r, "text", "")).Length > 0)
                 .GroupBy(r => PairHistoryDimension(ReadString(r, "text", ""))).SelectMany(g => g.Take(1).Concat(g.TakeLast(1)))
                 .GroupBy(r => ReadString(r, "turn_id", "")).Select(g => g.First()))
@@ -216,7 +216,7 @@ namespace ReignBetaServer
         }
 
         private static List<MemoryEvidence> LoadPrecisionFoundationProjection(ReignDbConnection connection, string campaign,
-            MemoryQueryPlan plan, Dictionary<string, object> context, Program.KnowledgeAccessContext knowledge, bool shadow, Dictionary<string, object> audit)
+            MemoryQueryPlan plan, Dictionary<string, object> context, DialogueService.KnowledgeAccessContext knowledge, bool shadow, Dictionary<string, object> audit)
         {
             // Include the knowledge and opportunity context in the cache key.
             // Source revision is conservative across the campaign; no stale pair
@@ -259,13 +259,13 @@ namespace ReignBetaServer
         }
 
         private static MemoryEvidence PrecisionExchangeEvidence(ReignDbConnection connection, Dictionary<string, object> anchor,
-            Program.KnowledgeAccessContext knowledge, bool required, double score, bool compactAdjacentContext = false, bool preserveRecallContext = false)
+            DialogueService.KnowledgeAccessContext knowledge, bool required, double score, bool compactAdjacentContext = false, bool preserveRecallContext = false)
         {
             string exchange = ReadString(anchor, "exchange_id", ""), session = ReadString(anchor, "session_id", "");
             var rows = exchange.Length == 0 ? new List<Dictionary<string, object>> { anchor }
                 : DialogueStore.SelectConversationTurns12(connection, new Dictionary<string, object> { ["session"] = session, ["exchange"] = exchange });
             rows = rows.Where(r => MemoryTimeVisible(r, knowledge, connection) && (ReadString(r, "speaker_id", "") == knowledge.NpcId
-                || Program.TextListFromJson(ReadString(r, "participants_json", "[]")).Contains(knowledge.NpcId, StringComparer.OrdinalIgnoreCase))).ToList();
+                || DialogueService.TextListFromJson(ReadString(r, "participants_json", "[]")).Contains(knowledge.NpcId, StringComparer.OrdinalIgnoreCase))).ToList();
             if (rows.Count == 0) return null;
             var recallContext = preserveRecallContext ? ExpandMemoryRecallPrecedingTurn(connection, rows, knowledge) : new List<Dictionary<string, object>>();
             rows = compactAdjacentContext ? ExpandPrecisionQuestionContext(connection, rows, knowledge)
@@ -294,10 +294,10 @@ namespace ReignBetaServer
         }
 
         internal static List<MemoryEvidence> FindPrecisionExchanges(ReignDbConnection connection, MemoryQueryPlan plan,
-            Program.KnowledgeAccessContext knowledge, int limit, int maximumCandidatePages = int.MaxValue, bool requirePlayerSource = true,
+            DialogueService.KnowledgeAccessContext knowledge, int limit, int maximumCandidatePages = int.MaxValue, bool requirePlayerSource = true,
             bool compactAdjacentContext = true, bool includeRecentFloor = true)
         {
-            var parameters = new Dictionary<string, object> { ["query"] = Program.BuildFtsQuery(plan.Terms), ["npc"] = plan.Observer,
+            var parameters = new Dictionary<string, object> { ["query"] = DialogueService.BuildFtsQuery(plan.Terms), ["npc"] = plan.Observer,
                 ["session"] = plan.Session, ["day"] = plan.WorldDay, ["timeline"] = plan.Timeline, ["limit"] = limit,
                 ["asOfSequence"] = knowledge.AsOfAcceptedSequence, ["asOfTimestamp"] = knowledge.AsOfTimestamp };
             string eligible = MemorySessionObserverSql("s", "t")
@@ -328,7 +328,7 @@ namespace ReignBetaServer
         }
 
         private static List<Dictionary<string,object>> QuerySourceBearingPrecisionTurns(ReignDbConnection connection,
-            string orderedSql, Dictionary<string,object> parameters, Program.KnowledgeAccessContext knowledge, int limit,
+            string orderedSql, Dictionary<string,object> parameters, DialogueService.KnowledgeAccessContext knowledge, int limit,
             Dictionary<string, string> suppliedSources = null, int maximumCandidatePages = int.MaxValue, bool requirePlayerSource = true,
             Func<Dictionary<string, object>, bool> candidateEligible = null)
         {
@@ -548,7 +548,7 @@ namespace ReignBetaServer
         }
 
         private static List<MemoryEvidence> ExpandPrecisionSource(ReignDbConnection connection, string table,
-            Dictionary<string, object> row, MemoryQueryPlan plan, Program.KnowledgeAccessContext knowledge, double score)
+            Dictionary<string, object> row, MemoryQueryPlan plan, DialogueService.KnowledgeAccessContext knowledge, double score)
         {
             string key = table == "summaries" ? "summary_id" : table == "memories" ? "memory_id" : table == "beliefs" ? "belief_id" : "comprehension_id";
             var originals = ReadConversationDerivativeOriginals(connection, table, row);

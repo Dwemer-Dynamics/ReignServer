@@ -314,7 +314,7 @@ namespace ReignBetaServer
             string marker = "\n[Reign compacted older/lower-priority " + label
                 + " evidence to preserve the live prompt budget. Retained excerpts keep their original attribution and provenance.]\n";
             if (marker.Length >= maximum)
-                return Program.LimitText(marker.Trim(), maximum);
+                return DialogueService.LimitText(marker.Trim(), maximum);
 
             string normalized = text.Replace("\r\n", "\n");
             var starts = Regex.Matches(normalized, @"(?m)^- \[[^\]\r\n]+\]\s+").Cast<Match>()
@@ -344,7 +344,7 @@ namespace ReignBetaServer
                 int firstLine = tail.IndexOf('\n');
                 if (firstLine >= 0 && firstLine < Math.Min(500, tail.Length - 1))
                     tail = tail.Substring(firstLine + 1);
-                return Program.LimitText(marker.TrimStart() + tail, maximum);
+                return DialogueService.LimitText(marker.TrimStart() + tail, maximum);
             }
 
             int available = maximum - marker.Length;
@@ -358,7 +358,7 @@ namespace ReignBetaServer
             int tailLine = tailBalanced.IndexOf('\n');
             if (tailLine >= 0 && tailLine < Math.Min(500, tailBalanced.Length - 1))
                 tailBalanced = tailBalanced.Substring(tailLine + 1);
-            return Program.LimitText(head.TrimEnd() + marker + tailBalanced.TrimStart(), maximum);
+            return DialogueService.LimitText(head.TrimEnd() + marker + tailBalanced.TrimStart(), maximum);
         }
 
         private static string BuildCurrentSceneProgressPrompt(List<Dictionary<string, object>> lines)
@@ -426,9 +426,9 @@ namespace ReignBetaServer
                 relationships = new Dictionary<string, object>();
                 summary = new Dictionary<string, object>();
                 selectedContextPulls = (selectedContextPulls ?? new List<Dictionary<string, object>>())
-                    .Where(x => !Program.ContainsAny(ReadFirstString(x, "id", "pullId"), "relevant_memory", "relationship_history")).ToList();
+                    .Where(x => !DialogueService.ContainsAny(ReadFirstString(x, "id", "pullId"), "relevant_memory", "relationship_history")).ToList();
                 contextBundles = (contextBundles ?? new List<Dictionary<string, object>>())
-                    .Where(x => !Program.ContainsAny(ReadFirstString(x, "id", "pullId", "type"), "relevant_memory", "relationship_history", "private_conversation")).ToList();
+                    .Where(x => !DialogueService.ContainsAny(ReadFirstString(x, "id", "pullId", "type"), "relevant_memory", "relationship_history", "private_conversation")).ToList();
             }
             Dictionary<string, object> promptPhaseTiming = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             Stopwatch promptPhaseTimer = Stopwatch.StartNew();
@@ -464,7 +464,7 @@ namespace ReignBetaServer
             liveState += CourtService.BuildCourtLifeResolutionContinuityPrompt(campaignId, heroId, turnPayload);
             liveState += BuildCurrentSceneProgressPrompt(priorLines);
             string canonicalTranscript = parallelPieces == null
-                ? FormatContinuityTranscript(priorLines, Program.FormatDialogueForPrompt)
+                ? FormatContinuityTranscript(priorLines, DialogueService.FormatDialogueForPrompt)
                 : parallelPieces.Transcript;
             promptPhaseTiming["characterAndLiveStateMs"] = promptPhaseTimer.ElapsedMilliseconds;
             if (parallelPieces != null)
@@ -495,7 +495,7 @@ namespace ReignBetaServer
                 ["worldTone"] = Program.LoadPromptTemplate("world_tone.txt"),
                 ["globalResponseOverride"] = Program.LoadPromptTemplate("global_response_override.txt"),
                 ["characterFoundationText"] = characterPrefix + "\n\n" + liveState,
-                ["noblePromptBlock"] = Program.BuildNoblePromptBlock(profile),
+                ["noblePromptBlock"] = DialogueService.BuildNoblePromptBlock(profile),
                 ["actionCatalogJson"] = CanonicalActionCatalogJson(actionCatalog),
                 ["actionSuggestionRules"] = Program.LoadPromptTemplate("action_suggestion_rules.txt"),
                 ["memoryWriteRules"] = LoadSourceScopedMemoryWriteRules(),
@@ -569,7 +569,7 @@ namespace ReignBetaServer
             AttachConversationDrinkPrompt(envelope, campaignId, heroId, turnPayload, profile, characteristics);
             AttachPersonalGossipIdentityPrompt(envelope, campaignId, heroId, turnPayload);
             StructureConversationMessages(envelope, budgeted.Structure, canonicalTranscript, priorLines,
-                Program.FormatDialogueForPrompt, heroId, playerName, playerText, false,
+                DialogueService.FormatDialogueForPrompt, heroId, playerName, playerText, false,
                 text => CharactersService.SanitizePromptForIdentity(text, playerText, canonicalPlayerName, identityView),
                 BuildConfiguredObservedGroupTurnStage(campaignId, turnPayload, heroId, playerText));
             FinalizeContinuityPromptBudget(envelope, turnPayload, capacity);
@@ -707,14 +707,14 @@ namespace ReignBetaServer
                 ["playerText"] = playerText ?? "",
                 ["identityPromptBlock"] = CharactersService.BuildIdentityPromptBlock(identityView),
                 ["sceneContext"] = StructuredActionWriterScene(string.IsNullOrWhiteSpace(sceneContext) ? "No scene context was provided." : sceneContext, eventPayload),
-                ["eventJson"] = Program.BuildEventJsonForPrompt(eventPayload),
+                ["eventJson"] = DialogueService.BuildEventJsonForPrompt(eventPayload),
                 ["characterLiveStateText"] = liveState,
                 ["contextPullText"] = contextPullText,
                 ["eventHistoryText"] = canonicalTranscript,
                 ["worldTone"] = Program.LoadPromptTemplate("world_tone.txt"),
                 ["globalResponseOverride"] = Program.LoadPromptTemplate("global_response_override.txt"),
                 ["characterFoundationText"] = characterPrefix + "\n\n" + liveState,
-                ["noblePromptBlock"] = Program.BuildNoblePromptBlock(profile),
+                ["noblePromptBlock"] = DialogueService.BuildNoblePromptBlock(profile),
                 ["actionCatalogJson"] = CanonicalActionCatalogJson(actionCatalog),
                 ["actionSuggestionRules"] = Program.LoadPromptTemplate("action_suggestion_rules.txt"),
                 ["memoryWriteRules"] = LoadSourceScopedMemoryWriteRules(),

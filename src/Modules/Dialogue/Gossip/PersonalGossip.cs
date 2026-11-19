@@ -252,7 +252,7 @@ namespace ReignBetaServer
                 }
                 SchedulePersonalGossip(campaign);
             }
-            catch (Exception ex) { Program.LogOperational("gossip.accept_failed", GossipFields("campaignId", campaign, "error", Program.LimitText(ex.Message, 500))); }
+            catch (Exception ex) { Program.LogOperational("gossip.accept_failed", GossipFields("campaignId", campaign, "error", DialogueService.LimitText(ex.Message, 500))); }
         }
 
         private static int PersonalGossipSourceStrength(Dictionary<string, object> topic)
@@ -343,7 +343,7 @@ namespace ReignBetaServer
                 }
                 SchedulePersonalGossip(campaign);
             }
-            catch (Exception ex) { Program.LogOperational("gossip.relationship_failed", GossipFields("campaignId", campaign, "error", Program.LimitText(ex.Message, 500))); }
+            catch (Exception ex) { Program.LogOperational("gossip.relationship_failed", GossipFields("campaignId", campaign, "error", DialogueService.LimitText(ex.Message, 500))); }
         }
 
         private static List<GossipCandidate> BuildPersonalGossipCandidates(ReignDbConnection c, Dictionary<string, object> topic,

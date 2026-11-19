@@ -429,7 +429,7 @@ namespace ReignBetaServer
                     }
                     catch (Exception ex)
                     {
-                        errors.Add(pairKey + ": " + Program.LimitText(ex.Message, 300));
+                        errors.Add(pairKey + ": " + DialogueService.LimitText(ex.Message, 300));
                     }
                 }
             }
@@ -500,7 +500,7 @@ namespace ReignBetaServer
 
             string playerId = ReadFirstString(
                 payload, "playerHeroId", "subjectHeroId");
-            string playerName = Program.LimitText(
+            string playerName = DialogueService.LimitText(
                 ReadString(payload, "playerName", ""), 80);
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             List<string> targetIds = ReadStringList(payload, "targetHeroIds")
@@ -1007,7 +1007,7 @@ namespace ReignBetaServer
                     catch (Exception ex)
                     {
                         errors.Add(observer + "->" + subject + ": "
-                            + Program.LimitText(ex.Message, 300));
+                            + DialogueService.LimitText(ex.Message, 300));
                     }
                 }
             }

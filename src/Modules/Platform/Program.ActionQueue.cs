@@ -99,7 +99,7 @@ namespace ReignBetaServer
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
-            Dictionary<string, object> context = BuildContext(payload);
+            Dictionary<string, object> context = DialogueService.BuildContext(payload);
             object memories = context.ContainsKey("memories") ? context["memories"] : new List<object>();
             object worldState = payload.ContainsKey("worldState") ? payload["worldState"] : payload;
             string requestType = ReadString(payload, "requestType", "strategy");
@@ -481,7 +481,7 @@ namespace ReignBetaServer
             }
             if (found) DialogueService.RecordSharedActionReceipt(campaignId, payload, matchedRecord, authoritativeStatus);
             if(found)RelationshipsService.FinalizeDiplomaticMarriageEffects(campaignId,id,authoritativeStatus,matchedRecord,payload);
-            Dictionary<string, object> memoryStore = StoreActionResultMemory(payload, "actions_report");
+            Dictionary<string, object> memoryStore = DialogueService.StoreActionResultMemory(payload, "actions_report");
             List<Dictionary<string, object>> nativeRelationChanges = RelationshipsService.EvaluateCompletedActionRelationships(payload);
             DiplomacyService.UpdateDiplomaticEventForAction(campaignId, id, status, payload);
             RebellionService.UpdateNegotiationFromActionReport(campaignId, id, status, payload);

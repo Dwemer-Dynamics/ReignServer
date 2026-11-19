@@ -271,7 +271,7 @@ namespace ReignBetaServer
                     // Mentioning both roles does not split their identity. In particular,
                     // a spouse may ask for private time with a husband rather than a king.
                     if (explicitlySeparated || (conflictingDecisions && !explicitlyUnified))
-                        result.Add(new Dictionary<string, object> { ["type"] = "same_person_roles_separated", ["text"] = Program.LimitText(text, 360) });
+                        result.Add(new Dictionary<string, object> { ["type"] = "same_person_roles_separated", ["text"] = DialogueService.LimitText(text, 360) });
                 }
                 if (ReadBool(speaker, "isFemale", false))
                 {
@@ -279,7 +279,7 @@ namespace ReignBetaServer
                         @"\b(?:I\s+am|I'm|she\s+is)\s+not\s+(?:a\s+|the\s+)?queen\b|\bwill\s+not\s+claim\s+(?:a\s+)?crown\s+by\s+marriage\b|\bno\s+supplied\s+(?:fact|evidence).{0,100}\bqueen\b",
                         RegexOptions.IgnoreCase | RegexOptions.Singleline)))
                     {
-                        result.Add(new Dictionary<string, object> { ["type"] = "sovereign_spouse_consort_status_denied", ["text"] = Program.LimitText(text, 360) });
+                        result.Add(new Dictionary<string, object> { ["type"] = "sovereign_spouse_consort_status_denied", ["text"] = DialogueService.LimitText(text, 360) });
                     }
                 }
             }

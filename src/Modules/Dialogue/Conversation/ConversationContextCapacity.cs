@@ -104,7 +104,7 @@ namespace ReignBetaServer
                     Program.EnsureCodexAppServer(settings);
                     Program.CodexRpc("model/list", TestDict("includeHidden", true), Math.Min(15000, Program.CodexRpcTimeout(settings)));
                 }
-                catch (Exception ex) { Program.LogOperational("codex.capacity_discovery_unavailable", TestDict("error", Program.LimitText(ex.Message, 300))); }
+                catch (Exception ex) { Program.LogOperational("codex.capacity_discovery_unavailable", TestDict("error", DialogueService.LimitText(ex.Message, 300))); }
                 return ParseCodexCapacityCertificate(ReadMetadata(), model, DateTimeOffset.UtcNow);
             }
         }
@@ -266,7 +266,7 @@ namespace ReignBetaServer
             string model = Program.ModelForRequest(settings, requestType);
             string endpoint = Program.UsesCodexSubscription(settings) ? "codex-app-server://local" : Program.LlmApiUrl(settings);
             int output = ReadInt(payload, "continuityOutputReserve", requestType == "social_event"
-                ? Program.StructuredEventResponseMaxTokens(settings) : Program.StructuredDialogueResponseMaxTokens(settings));
+                ? DialogueService.StructuredEventResponseMaxTokens(settings) : DialogueService.StructuredDialogueResponseMaxTokens(settings));
             var request = new Dictionary<string, object> { ["maxTokens"] = output, ["requestType"] = requestType };
             var body = Program.BuildChatRequestBody(settings, request, new List<Dictionary<string, object>>(), model);
             ConfigurePromptCacheRouting(settings, request, body, endpoint, model, requestType);

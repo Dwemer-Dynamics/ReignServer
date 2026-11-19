@@ -222,7 +222,7 @@ namespace ReignBetaServer
                 }
                 var candidate = TestDict("command", intent.Command, "actionId", id, "source", "dialogue_player_action",
                     "FromHero", player, "ToHero", recipient, "terms", terms, "requiresAcceptance", false,
-                    "reason", "Player initiated a current handover: " + Program.LimitText(intent.Quote, 400));
+                    "reason", "Player initiated a current handover: " + DialogueService.LimitText(intent.Quote, 400));
                 if (intent.Command == "transfer_item")
                 {
                     var copies = MentionedActionItems(ReadDictionary(payload, "actionResolutionIndex"), intent.Asset)
@@ -1116,7 +1116,7 @@ namespace ReignBetaServer
                         if (!memoryProjected)
                         {
                             // A refused memory write returns ok=false without throwing; disposal rolls back.
-                            var memory = Program.StoreActionResultMemory(report, "actions_report", connection);
+                            var memory = DialogueService.StoreActionResultMemory(report, "actions_report", connection);
                             if (!ReadBool(memory, "ok", false))
                             {
                                 deferredPending = "memory_store_refused";

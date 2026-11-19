@@ -21,7 +21,7 @@ namespace ReignBetaServer
         {
             bool initialized = ReadBool(settings, "characterConstructionBudgetInitialized", false);
             int previous = ReadInt(settings, "characterConstructionMaxTokens", Program.CharacterConstructionTokenCeiling);
-            int maximum = initialized ? Program.CharacterConstructionMaxTokensForAttempt(previous, 1) : Program.CharacterConstructionTokenCeiling;
+            int maximum = initialized ? CharactersService.CharacterConstructionMaxTokensForAttempt(previous, 1) : Program.CharacterConstructionTokenCeiling;
             settings["characterConstructionMaxTokens"] = maximum;
             settings["characterConstructionBudgetInitialized"] = true;
             return !initialized || maximum != previous;
@@ -74,7 +74,7 @@ namespace ReignBetaServer
             Dictionary<string, object> checkpoint = null, Action<Dictionary<string, object>> saveCheckpoint = null,
             int maxTokens = Program.CharacterConstructionTokenCeiling)
         {
-            maxTokens = Program.CharacterConstructionMaxTokensForAttempt(maxTokens, 1);
+            maxTokens = CharactersService.CharacterConstructionMaxTokensForAttempt(maxTokens, 1);
             var blueprint = BuildNarrativeBlueprint(hero, seed, traits);
             string inputFingerprint = NarrativeAuthoringFingerprint(hero, traits, seed, blueprint);
             var document = checkpoint != null && ReadString(checkpoint, "inputFingerprint", "") == inputFingerprint
@@ -179,7 +179,7 @@ namespace ReignBetaServer
                 if (!accepted) document["status"] = "blueprint";
                 attempts.Add(new Dictionary<string, object> { ["stage"] = "single_call", ["attempt"] = attempt,
                     ["ok"] = accepted, ["errors"] = errors.Distinct().ToList(), ["provider"] = ReadString(response, "provider", ""),
-                    ["providerError"] = Program.LimitText(ReadString(response, "error", ""), 1200),
+                    ["providerError"] = DialogueService.LimitText(ReadString(response, "error", ""), 1200),
                     ["model"] = ReadString(response, "model", ""), ["finishReason"] = ReadString(response, "finishReason", ""),
                     ["durationMs"] = timer.ElapsedMilliseconds, ["maxTokens"] = maxTokens,
                     ["requestCharacters"] = NarrativeAuthorPolicy.Length + userPrompt.Length,
@@ -189,7 +189,7 @@ namespace ReignBetaServer
                 document["authoringMethod"] = "single_call_v1";
                 if (accepted) document["authoring"] = "library_plus_character_construction_provider";
                 saveCheckpoint?.Invoke(document);
-                if (!ReadBool(response, "ok", false)) throw new InvalidOperationException("Narrative provider request failed: " + Program.LimitText(ReadString(response, "error", "Provider unavailable."), 1200));
+                if (!ReadBool(response, "ok", false)) throw new InvalidOperationException("Narrative provider request failed: " + DialogueService.LimitText(ReadString(response, "error", "Provider unavailable."), 1200));
                 if (accepted) return document;
                 var remainingLifeErrors = NarrativeLifeErrors(document);
                 int incompleteSectionsAfter = ReadDictionaryList(document, "items").Count(item => !NarrativeItemTextReady(item))
@@ -248,7 +248,7 @@ namespace ReignBetaServer
             string path = Program.CharacterFile(campaignId, heroId, "narrative.json");
             var existing = Program.ReadJsonObject(path);
             var traits = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"));
-            if (!Program.TraitDocumentReady(traits)) traits = BuildTraitDocument(hero);
+            if (!CharactersService.TraitDocumentReady(traits)) traits = BuildTraitDocument(hero);
             string stagedPath = Program.CharacterFile(campaignId, heroId, "narrative_authoring.json");
             var settings = Program.LoadSettings();
             try
@@ -284,7 +284,7 @@ namespace ReignBetaServer
                 if (ex is PersistenceService.CampaignRequestReplacedException) throw;
                 var failure = new Dictionary<string, object> { ["ok"] = false, ["status"] = "failed",
                     ["error"] = ex.Message, ["failureKind"] = ex is NarrativeOutputLimitException ? "output_limit"
-                        : ex.Message.StartsWith("Narrative provider request failed") ? Program.CharacterFailureKindFromText(ex.Message) : "parse",
+                        : ex.Message.StartsWith("Narrative provider request failed") ? CharactersService.CharacterFailureKindFromText(ex.Message) : "parse",
                     ["settingsRevision"] = ReadString(settings, "settingsRevision", ""), ["settingsFingerprint"] = Program.SettingsFingerprint(settings),
                     ["constructionEngineVersion"] = Program.CharacterConstructionEngineVersion, ["failedUtc"] = DateTime.UtcNow.ToString("o") };
                 if (ReadString(existing, "status", "") != "ready") Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"), failure);
@@ -307,14 +307,14 @@ namespace ReignBetaServer
                 }
                 var existing = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"));
                 bool complete = NarrativeDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "narrative.json")));
-                if (complete && ReadString(existing, "narrativeSchema", "") == NarrativeSchema && Program.IsCharacterConstructionReady(existing))
+                if (complete && ReadString(existing, "narrativeSchema", "") == NarrativeSchema && CharactersService.IsCharacterConstructionReady(existing))
                 { existing["alreadyReady"] = true; return existing; }
-                if (!complete && ReadString(existing, "status", "") == "failed" && !Program.ShouldRetryFailedConstruction(existing, Program.LoadSettings()))
+                if (!complete && ReadString(existing, "status", "") == "failed" && !CharactersService.ShouldRetryFailedConstruction(existing, Program.LoadSettings()))
                 { existing["ok"] = false; existing["alreadyFailed"] = true; return existing; }
                 // New characters have their full story before speaking. A partial stage
                 // stays in its checkpoint and cannot be presented as a completed profile.
                 var result = ConstructNarrativeCharacter(campaignId, heroId, hero, false, source);
-                if (Program.IsCharacterConstructionReady(result) && source != TownNotableProfileSource)
+                if (CharactersService.IsCharacterConstructionReady(result) && source != TownNotableProfileSource)
                     MarkCharacterConstructionCompletedOnInteraction(campaignId, heroId, source);
                 return result;
             }

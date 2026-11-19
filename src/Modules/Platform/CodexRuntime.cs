@@ -690,14 +690,14 @@ namespace ReignBetaServer
                         throw new TimeoutException("The Codex schema generator timed out after 10000 ms.");
                     }
                     if (process.ExitCode != 0)
-                        throw new InvalidOperationException("Codex schema generation failed with exit code " + process.ExitCode + ": " + LimitText(error, 600));
+                        throw new InvalidOperationException("Codex schema generation failed with exit code " + process.ExitCode + ": " + DialogueService.LimitText(error, 600));
                     generated = File.Exists(Path.Combine(schemaDirectory, "v2", "TurnStartParams.json"));
                     if (!generated) throw new InvalidOperationException("Codex schema generation completed without TurnStartParams.json.");
                 }
             }
             catch (Exception ex)
             {
-                schemaError = LimitText(ex.Message, 1200);
+                schemaError = DialogueService.LimitText(ex.Message, 1200);
                 // A previously generated schema is still useful as protocol evidence, but the
                 // status remains explicit so the UI can distinguish it from a fresh inspection.
                 generated = File.Exists(Path.Combine(schemaDirectory, "v2", "TurnStartParams.json"));
@@ -825,7 +825,7 @@ namespace ReignBetaServer
                     if (!process.Start()) return "";
                     string output = process.StandardOutput.ReadToEnd();
                     if (!process.WaitForExit(5000)) { try { process.Kill(); } catch { } return ""; }
-                    return LimitText(output, 120).Trim();
+                    return DialogueService.LimitText(output, 120).Trim();
                 }
             }
             catch { return ""; }
@@ -869,7 +869,7 @@ namespace ReignBetaServer
             lock (CodexRuntimeStateLock)
             {
                 CodexRuntimeCatalog.DiscoveryState = timeout ? "timeout" : "error";
-                CodexRuntimeCatalog.DiscoveryError = LimitText(error, 1200);
+                CodexRuntimeCatalog.DiscoveryError = DialogueService.LimitText(error, 1200);
                 CodexRuntimeCatalog.Freshness = CodexRuntimeCatalog.RefreshedUtc == default(DateTime) ? "unknown" : "stale";
             }
         }

@@ -174,19 +174,19 @@ AND COALESCE({PromptObligationPayloadSql}->'sourceEvidence'->>'evidenceType','')
             string requiredTranscript = "")
         {
             if (!WorldSimulationService.TableExists(connection, "obligations")) return "";
-            var access = Program.BuildKnowledgeAccessContext(observer, peer, "", payload);
+            var access = DialogueService.BuildKnowledgeAccessContext(observer, peer, "", payload);
             var rows = DialogueStore.SelectObligations(connection, PromptActiveObligationSql, MemoryEligibilitySql("obligations"), MemorySourceTimelineSql("obligations", access: access),                new Dictionary<string, object> { ["observer"] = observer, ["timeline"] = access.TimelineId });
             var text = new StringBuilder("ACTIVE PROMISES, REQUESTS AND PREFERENCES — source-bound dialogue interpretations\n");
             text.AppendLine("Authorship is verified; meaning, acceptance and lifecycle remain interpretations. Native facts and original wording take precedence. Preserve conditions, corrections and refusals; a known preference is not an obligation automatically inherited by every listener.");
             int included = 0;
             var eligible = new List<Dictionary<string, object>>();
             var audience = new[] { access }.Concat((additionalObservers ?? Enumerable.Empty<string>())
-                .Distinct().Where(other => other != observer).Select(other => Program.BuildKnowledgeAccessContext(other, peer, "", payload))).ToList();
+                .Distinct().Where(other => other != observer).Select(other => DialogueService.BuildKnowledgeAccessContext(other, peer, "", payload))).ToList();
             foreach (var row in rows)
             {
-                if (!Program.KnowledgeRowVisibleToNpc("obligations", row, access, connection)) continue;
-                if ((additionalObservers ?? Enumerable.Empty<string>()).Any(other => !Program.KnowledgeRowVisibleToNpc("obligations", row,
-                    Program.BuildKnowledgeAccessContext(other, peer, "", payload), connection))) continue;
+                if (!DialogueService.KnowledgeRowVisibleToNpc("obligations", row, access, connection)) continue;
+                if ((additionalObservers ?? Enumerable.Empty<string>()).Any(other => !DialogueService.KnowledgeRowVisibleToNpc("obligations", row,
+                    DialogueService.BuildKnowledgeAccessContext(other, peer, "", payload), connection))) continue;
                 if (ReadBool(payload, "officialMemoryFirewall", false)
                     && !new[] { "world", "global", "common", "public" }.Contains(ReadString(row, "visibility", "").ToLowerInvariant())) continue;
                 var value = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
@@ -282,7 +282,7 @@ AND COALESCE({PromptObligationPayloadSql}->'sourceEvidence'->>'evidenceType','')
                 && ReadString(previous, "owed_to", "") == ReadFirstString(item, "owed_to", "owedTo")
                 && ReadString(old, "recordKind", "promise") == ReadString(item, "recordKind", "promise")
                 && ReadString(old, "scope", "") == ReadString(item, "scope", "")
-                && Program.TextListFromJson(ReadString(previous, "known_by_json", "[]")).OrderBy(x => x)
+                && DialogueService.TextListFromJson(ReadString(previous, "known_by_json", "[]")).OrderBy(x => x)
                     .SequenceEqual(ReadStringList(item, "known_by").OrderBy(x => x));
         }
 
@@ -316,7 +316,7 @@ AND COALESCE({PromptObligationPayloadSql}->'sourceEvidence'->>'evidenceType','')
         }
 
         private static bool CommitmentSourceTurnVisible(ReignDbConnection connection, Dictionary<string, object> turn,
-            Program.KnowledgeAccessContext access)
+            DialogueService.KnowledgeAccessContext access)
         {
             if (!PrecisionTurnVisible(turn, access.NpcId, access, connection)) return false;
             if (!new[] { "letter", "correspondence" }.Contains(ReadString(turn, "channel", ""))) return true;
@@ -328,7 +328,7 @@ AND COALESCE({PromptObligationPayloadSql}->'sourceEvidence'->>'evidenceType','')
             return LetterVisibleToObserver(connection, letter, access.NpcId, access, out _);
         }
 
-        private static string CommitmentVisibleSourceText(Dictionary<string, object> turn, Program.KnowledgeAccessContext access)
+        private static string CommitmentVisibleSourceText(Dictionary<string, object> turn, DialogueService.KnowledgeAccessContext access)
         {
             if (HasValidatedPlayerSourceProjection(turn)) return ObserverConversationSourceText(turn, access.NpcId);
             string body = ConversationTurnTextForRecall(turn);
@@ -338,7 +338,7 @@ AND COALESCE({PromptObligationPayloadSql}->'sourceEvidence'->>'evidenceType','')
         }
 
         private static Dictionary<string, object> ResolveCommitmentSourceTurn(ReignDbConnection connection,
-            Dictionary<string, object> reference, List<Program.KnowledgeAccessContext> audience)
+            Dictionary<string, object> reference, List<DialogueService.KnowledgeAccessContext> audience)
         {
             if (!WorldSimulationService.TableExists(connection, "conversation_turns")) return null;
             string id = ReadString(reference, "turnId", ""), sourceEvent = ReadString(reference, "sourceEventId", "");
@@ -353,16 +353,16 @@ AND COALESCE({PromptObligationPayloadSql}->'sourceEvidence'->>'evidenceType','')
         }
 
         private static string BuildRelevantCommitmentContext(ReignDbConnection connection, List<Dictionary<string, object>> commitments,
-            Dictionary<string, object> payload, List<Program.KnowledgeAccessContext> audience, List<string> sources,
+            Dictionary<string, object> payload, List<DialogueService.KnowledgeAccessContext> audience, List<string> sources,
             List<Dictionary<string, object>> diagnostics, string requiredTranscript = "")
         {
             if (ReadBool(payload, "officialMemoryFirewall", false)) return "";
             string query = ReadFirstString(payload, "playerText", "text", "message") + " " + ReadString(payload, "memoryActiveTopic", "");
             // Player query is intact narrative context; no inferred-thought projection.
-            var terms = Program.MemoryQueryTerms(query).Where(t => !ExactRecallStopWords.Contains(t, StringComparer.OrdinalIgnoreCase)
+            var terms = DialogueService.MemoryQueryTerms(query).Where(t => !ExactRecallStopWords.Contains(t, StringComparer.OrdinalIgnoreCase)
                 && !new[] { "promise", "promises", "promised", "commitment", "commitments", "word", "give", "shall" }.Contains(t)).ToHashSet(StringComparer.OrdinalIgnoreCase);
             bool recall = Regex.IsMatch(query, @"\b(?:promis(?:e|es|ed)|commitments?|pledge[ds]?|oaths?|swore|sworn|agreed|(?:my|your|his|her|our|their|one['â€™]s)\s+word)\b", RegexOptions.IgnoreCase);
-            var ranked = commitments.Select(row => new { Row = row, Score = Program.MemoryQueryTerms(ReadString(row, "description", ""))
+            var ranked = commitments.Select(row => new { Row = row, Score = DialogueService.MemoryQueryTerms(ReadString(row, "description", ""))
                 .Count(t => terms.Contains(t)) + (recall ? 1 : 0) }).Where(x => x.Score > 0)
                 .OrderByDescending(x => x.Score).ThenByDescending(x => ReadDouble(x.Row, "created_day", 0d)).ThenBy(x => ReadString(x.Row, "obligation_id", "")).Take(8);
             var text = new StringBuilder(); var seen = new HashSet<string>(); int exchanges = 0;
@@ -412,7 +412,7 @@ AND COALESCE({PromptObligationPayloadSql}->'sourceEvidence'->>'evidenceType','')
             return text.ToString();
         }
 
-        private static string CommitmentContextTurn(Dictionary<string, object> row, Program.KnowledgeAccessContext observer, string transcript,
+        private static string CommitmentContextTurn(Dictionary<string, object> row, DialogueService.KnowledgeAccessContext observer, string transcript,
             Dictionary<string, string> supplied = null)
         {
             string id = ReadString(row, "turn_id", "");
@@ -450,7 +450,7 @@ AND COALESCE({PromptObligationPayloadSql}->'sourceEvidence'->>'evidenceType','')
             var rows = DialogueStore.SelectConversationTurns13(connection);
             foreach (var row in rows)
             {
-                var participants = Program.TextListFromJson(ReadString(row, "participants_json", "[]"));
+                var participants = DialogueService.TextListFromJson(ReadString(row, "participants_json", "[]"));
                 if (participants.Count != 2) continue;
                 string speaker = ReadString(row, "speaker_id", ""), peer = ReadString(row, "player_id", "");
                 if (!participants.Contains(speaker) || !participants.Contains(peer)) continue;
@@ -470,7 +470,7 @@ AND COALESCE({PromptObligationPayloadSql}->'sourceEvidence'->>'evidenceType','')
                         "worldDay", ReadDouble(row, "world_day", 0d), "created_day", ReadDouble(row, "world_day", 0d), "sourceAcceptedText", original,
                         "sourceEvidence", TestDict("turnId", turn, "speakerId", speaker, "evidenceType", "future_intention", "quote", clause));
                     AttachConversationWriteEvidence(new[] { write }, new List<Dictionary<string, object>> { TestDict("turnId", turn, "speakerId", speaker, "text", original) }, speaker, turn);
-                    if (ReadString(write, "sourceValidation", "") == "supported_span") Program.InsertObligation(connection, turn, write, ReadLong(row, "ts", 0), "accepted_commitment_bootstrap");
+                    if (ReadString(write, "sourceValidation", "") == "supported_span") DialogueService.InsertObligation(connection, turn, write, ReadLong(row, "ts", 0), "accepted_commitment_bootstrap");
                 }
             }
             DialogueStore.UpsertSchemaMeta(connection, TestDict("key", marker));

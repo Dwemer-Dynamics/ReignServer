@@ -78,7 +78,7 @@ namespace ReignBetaServer
                 ["passed"] = ReadBool(payload, "passed", false),
                 ["saveName"] = ReadString(payload, "saveName", ""),
                 ["gameInstanceId"] = ReadString(payload, "gameInstanceId", ""),
-                ["evidence"] = Program.LimitText(ReadString(payload, "evidence", ""), 2000),
+                ["evidence"] = DialogueService.LimitText(ReadString(payload, "evidence", ""), 2000),
                 ["utc"] = DateTimeOffset.UtcNow.ToString("o")
             });
             state["markers"] = markers;
@@ -174,7 +174,7 @@ namespace ReignBetaServer
                 ["requestedSupersededRunIds"] =
                     requestedRunIds.OrderBy(value => value).ToList(),
                 ["supersededRunIds"] = newlySuperseded,
-                ["reason"] = Program.LimitText(ReadString(payload, "reason", ""), 2000),
+                ["reason"] = DialogueService.LimitText(ReadString(payload, "reason", ""), 2000),
                 ["utc"] = DateTimeOffset.UtcNow.ToString("o")
             });
             state["buildVersion"] = currentBuildVersion;

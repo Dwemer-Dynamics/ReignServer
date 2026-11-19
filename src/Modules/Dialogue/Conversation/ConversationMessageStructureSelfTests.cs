@@ -28,7 +28,7 @@ namespace ReignBetaServer
                 Func<string, string> projection = null, Dictionary<string, object> stage = null)
             {
                 Func<List<Dictionary<string, object>>, string> render = eventMode
-                    ? group => CharactersService.FormatEventLinesForObserver(group, eventPayload, "npc", identity) : Program.FormatDialogueForPrompt;
+                    ? group => CharactersService.FormatEventLinesForObserver(group, eventPayload, "npc", identity) : DialogueService.FormatDialogueForPrompt;
                 string transcript = FormatContinuityTranscript(rows, render);
                 var slots = CreateConversationTemplateSlots(sourceTemplate, "history");
                 var values = new Dictionary<string, string> { ["scene"] = "The stables. Not the tavern. Town resident is not a party member.",
@@ -74,7 +74,7 @@ namespace ReignBetaServer
                 Check("no_old_mechanical_output_replayed_" + route, history.All(m => !ReadString(m, "content", "").Contains("memoryWrites"))
                     && Content(envelope).Contains("NEXT response must obey the complete current JSON output contract"));
                 var payload = new Dictionary<string, object>();
-                string transcript = FormatContinuityTranscript(lines, eventMode ? group => CharactersService.FormatEventLinesForObserver(group, eventPayload, "npc", identity) : Program.FormatDialogueForPrompt);
+                string transcript = FormatContinuityTranscript(lines, eventMode ? group => CharactersService.FormatEventLinesForObserver(group, eventPayload, "npc", identity) : DialogueService.FormatDialogueForPrompt);
                 CaptureRequiredPromptEvidence(payload, "canonicalTranscript", transcript);
                 payload["continuityEvidence"] = TestDict("sourceIds", new[] { "p1", "n1", "n2", "p2" }, "requiredContent", CapturedRequiredPromptEvidence(payload));
                 FinalizeContinuityPromptBudget(envelope, payload);
@@ -149,7 +149,7 @@ namespace ReignBetaServer
             var boundaryEnvelope = Build(boundaryLines, false);
             var boundaryWindow = RecallRepairAuthoredWindow(TestDict("promptEnvelope", boundaryEnvelope.Diagnostics,
                 "messages", boundaryEnvelope.Messages), out var boundaryExchanges);
-            string boundaryTranscript = FormatContinuityTranscript(boundaryLines, Program.FormatDialogueForPrompt);
+            string boundaryTranscript = FormatContinuityTranscript(boundaryLines, DialogueService.FormatDialogueForPrompt);
             var boundaryPayload = TestDict();
             CaptureRequiredPromptEvidence(boundaryPayload, "canonicalTranscript", boundaryTranscript);
             BindDeliveredMemoryRecallEvidence(boundaryPayload, "npc", boundaryEnvelope.Messages, "Ingeiyna", boundaryLines, null, boundaryEnvelope.Diagnostics);
@@ -222,7 +222,7 @@ namespace ReignBetaServer
                     TestDict("id", "protected_continuity_content", "text", protectedBlock, "hash", "invalid") })), native);
                 Check("invalid_protected_hash_cannot_preserve_reference_" + route, !PreserveProtectedGossipIdentityReference(envelope, PromptHash(native)));
                 RegisterProtectedGossipIdentityReference(envelope, request, native);
-                StructureConversationMessages(envelope, slots, "none", new(), Program.FormatDialogueForPrompt,
+                StructureConversationMessages(envelope, slots, "none", new(), DialogueService.FormatDialogueForPrompt,
                     "npc", "Player", "Hello.", eventMode, null);
                 FinalizeContinuityPromptBudget(envelope, request, TestDict("inputAllowance", 1000000, "outputFits", true));
                 bool Complete(List<Dictionary<string, object>> messages) => ReadBool(BuildContinuityProviderPreflight(new(),

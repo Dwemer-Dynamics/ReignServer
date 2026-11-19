@@ -82,7 +82,7 @@ namespace ReignBetaServer
         }
 
         private static List<Dictionary<string, object>> ReadLogicalConversationTurns(ReignDbConnection connection, string sessionId,
-            int limit, Program.KnowledgeAccessContext knowledge = null)
+            int limit, DialogueService.KnowledgeAccessContext knowledge = null)
         {
             var sessions = LogicalConversationAncestors(connection, sessionId);
             if (sessions.Count == 0) return new List<Dictionary<string, object>>();

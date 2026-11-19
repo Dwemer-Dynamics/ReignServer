@@ -84,7 +84,7 @@ namespace ReignBetaServer
                     var source = originals.Single();
                     string id = ReadString(source, "turn_id", ""), original = originalInputs[value.Payload];
                     var metadata = TryParseJsonObject(ReadString(source, "payload_json", "{}"));
-                    var authors = Program.TextListFromJson(ReadString(source, "participants_json", "[]"));
+                    var authors = DialogueService.TextListFromJson(ReadString(source, "participants_json", "[]"));
                     return id == captured.SourceId && captured.Original == original && ReadString(source, "text", "") == original
                         && ReadString(source, "role", "") == "player_source" && ReadString(source, "channel", "") == "player_input_source"
                         && ReadString(source, "speaker_id", "") == value.Player && ReadInt(source, "turn_order", 0) < 0
@@ -93,7 +93,7 @@ namespace ReignBetaServer
                         && ReadString(metadata, "exactTextHash", "") == ConversationExactTextHash(original)
                         && ReadString(metadata, "evidenceType", "") == "original_player_input" && !ReadBool(metadata, "retrievalEligible", true)
                         && new[] { value.Hero, "listener" }.All(observer => !PrecisionTurnVisible(source, observer,
-                            Program.BuildKnowledgeAccessContext(observer, value.Player, value.Location, value.Payload), connection))
+                            DialogueService.BuildKnowledgeAccessContext(observer, value.Player, value.Location, value.Payload), connection))
                         && DialogueSelfTestStore.SelectConversationTurnFts(connection, TestDict("id", id)).Count == 0;
                 }
                 var unit = Unit("atomic", effects: true);
@@ -193,7 +193,7 @@ namespace ReignBetaServer
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     var rows = DialogueSelfTestStore.SelectConversationTurns7(connection, TestDict("id", privateUnit.EventId));
-                    var access = Program.BuildKnowledgeAccessContext("listener", "player", "", privateUnit.Payload);
+                    var access = DialogueService.BuildKnowledgeAccessContext("listener", "player", "", privateUnit.Payload);
                     Check("whisper_accepts_both_projections_without_private_leak", AcceptedSourcesMatch(privateUnit, 4)
                         && ReadDictionary(ReadDictionary(whisper, "acceptedUnit"), "privateExchange").Count > 0
                         && rows.Where(r => PrecisionTurnVisible(r, "listener", access)).All(r => !ReadString(r, "text", "").Contains("SECRET-ORCHARD-901")));

@@ -98,9 +98,9 @@ namespace ReignBetaServer
                 StoreGroupedConversationExchange(campaign, groupPayload, "npc", "player", "Player", "Mira", "A later private question.",
                     "An answer after the visitor left.", "later_event", 103, "party_chat", "source_session");
                 Check("former_participant_does_not_inherit_later_speech",
-                    !Program.TextListFromJson(Stored("conversation_turns", "group_after_departure_npc_npc", "participants_json")).Contains("visitor")
-                    && !Program.TextListFromJson(Stored("conversation_turns", "group_after_departure_player", "participants_json")).Contains("visitor")
-                    && Program.TextListFromJson(Stored("conversation_turns", "group_with_visitor_player", "participants_json")).Contains("visitor"));
+                    !DialogueService.TextListFromJson(Stored("conversation_turns", "group_after_departure_npc_npc", "participants_json")).Contains("visitor")
+                    && !DialogueService.TextListFromJson(Stored("conversation_turns", "group_after_departure_player", "participants_json")).Contains("visitor")
+                    && DialogueService.TextListFromJson(Stored("conversation_turns", "group_with_visitor_player", "participants_json")).Contains("visitor"));
                 var secondSpeaker = Program.CloneDictionary(groupPayload);
                 secondSpeaker["sceneTurnId"] = "group_with_visitor";
                 secondSpeaker["participants"] = new[] { "player", "npc", "visitor" };

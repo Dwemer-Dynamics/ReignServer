@@ -22,16 +22,16 @@ namespace ReignBetaServer
             {
                 ["campaignId"] = ReadString(payload, "campaignId", ""), ["savePointId"] = ReadString(payload, "savePointId", ""),
                 ["savePointKind"] = ReadString(payload, "savePointKind", "native_save"),
-                ["campaignLabel"] = Program.LimitText(ReadString(payload, "campaignLabel", ""), 500),
+                ["campaignLabel"] = DialogueService.LimitText(ReadString(payload, "campaignLabel", ""), 500),
                 ["campaignTimeDays"] = ReadDouble(payload, "campaignTimeDays", 0d),
                 ["campaignTimeMilliseconds"] = ReadDouble(payload, "campaignTimeMilliseconds", 0d),
                 ["capturedUtc"] = ReadString(payload, "capturedUtc", DateTime.UtcNow.ToString("o")),
-                ["nativeSaveName"] = Program.LimitText(ReadString(payload, "nativeSaveName", ""), 240),
-                ["nativeCreationUtc"] = Program.LimitText(ReadString(payload, "nativeCreationUtc", ""), 100),
-                ["timelineId"] = Program.LimitText(ReadString(payload, "timelineId", ""), 160),
+                ["nativeSaveName"] = DialogueService.LimitText(ReadString(payload, "nativeSaveName", ""), 240),
+                ["nativeCreationUtc"] = DialogueService.LimitText(ReadString(payload, "nativeCreationUtc", ""), 100),
+                ["timelineId"] = DialogueService.LimitText(ReadString(payload, "timelineId", ""), 160),
                 ["worldHistorySequence"] = ReadLong(payload, "worldHistorySequence", 0),
-                ["worldHistoryHeadEventId"] = Program.LimitText(ReadString(payload, "worldHistoryHeadEventId", ""), 200),
-                ["clientVersion"] = Program.LimitText(ReadString(payload, "clientVersion", ""), 100)
+                ["worldHistoryHeadEventId"] = DialogueService.LimitText(ReadString(payload, "worldHistoryHeadEventId", ""), 200),
+                ["clientVersion"] = DialogueService.LimitText(ReadString(payload, "clientVersion", ""), 100)
             };
         }
 
@@ -411,7 +411,7 @@ namespace ReignBetaServer
                 ["recordsRolledBack"] = ReadLong(result, "recordsRolledBack", 0), ["recordsRestored"] = ReadLong(result, "recordsRestored", 0),
                 ["changedFiles"] = ReadInt(result, "changedFiles", 0),
                 ["countsBySubsystem"] = ReadDictionary(result, "countsBySubsystem") ?? new Dictionary<string, object>(),
-                ["error"] = Program.LimitText(ReadString(result, "error", ""), 2000), ["backupId"] = backupId ?? ""
+                ["error"] = DialogueService.LimitText(ReadString(result, "error", ""), 2000), ["backupId"] = backupId ?? ""
             };
             ledger["lastBackupId"] = backupId ?? "";
             ledger["updatedUtc"] = DateTime.UtcNow.ToString("o");
@@ -431,7 +431,7 @@ namespace ReignBetaServer
                     ["durationMs"] = ReadLong(data, "durationMs", 0), ["recordsRolledBack"] = ReadLong(data, "recordsRolledBack", 0),
                     ["recordsRestored"] = ReadLong(data, "recordsRestored", 0), ["changedFiles"] = ReadInt(data, "changedFiles", 0),
                     ["backupId"] = ReadString(data, "backupId", ""), ["countsBySubsystem"] = ReadDictionary(data, "countsBySubsystem") ?? new Dictionary<string, object>(),
-                    ["error"] = Program.LimitText(ReadString(data, "error", ""), 4000)
+                    ["error"] = DialogueService.LimitText(ReadString(data, "error", ""), 4000)
                 };
                 Program.AppendBoundedJsonLineToPath(path, row, 4L * 1024L * 1024L, 2L * 1024L * 1024L);
                 Program.LogOperational("save_sync." + eventType, row);

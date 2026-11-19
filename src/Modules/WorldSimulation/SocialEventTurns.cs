@@ -17,7 +17,7 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> SocialEventTurnApi(Dictionary<string, object> payload)
         {
-            return SocialEventTurnWithResponder(payload, Program.SocialEventRespond);
+            return SocialEventTurnWithResponder(payload, DialogueService.SocialEventRespond);
         }
 
         internal static Dictionary<string, object> SocialEventTurnPlanApi(Dictionary<string, object> payload)
@@ -294,7 +294,7 @@ namespace ReignBetaServer
             Dictionary<string, object> payload,
             List<Dictionary<string, object>> activeProfiles)
         {
-            bool alreadyStored = Program.ReadJsonLinesFromPath(Program.SocialEventTranscriptFile(campaignId, eventId)).Any(x =>
+            bool alreadyStored = Program.ReadJsonLinesFromPath(DialogueService.SocialEventTranscriptFile(campaignId, eventId)).Any(x =>
                 ReadString(x, "turnId", "").Equals(turnId, StringComparison.OrdinalIgnoreCase)
                 && ReadString(x, "role", "").Equals("player", StringComparison.OrdinalIgnoreCase));
             if (alreadyStored)
@@ -302,9 +302,9 @@ namespace ReignBetaServer
                 return;
             }
 
-            Dictionary<string, object> row = Program.EventTranscriptLine("player", ReadString(payload, "playerName", "Player"), ReadString(payload, "playerText", ""), payload);
-            Program.AppendJsonLineToPath(Program.SocialEventTranscriptFile(campaignId, eventId), row);
-            Program.AppendEventLineForAttendees(campaignId, activeProfiles, row);
+            Dictionary<string, object> row = DialogueService.EventTranscriptLine("player", ReadString(payload, "playerName", "Player"), ReadString(payload, "playerText", ""), payload);
+            Program.AppendJsonLineToPath(DialogueService.SocialEventTranscriptFile(campaignId, eventId), row);
+            DialogueService.AppendEventLineForAttendees(campaignId, activeProfiles, row);
         }
 
         private static List<Reign.Core.Contracts.Dialogue.GroupTurnParticipant> SocialTurnParticipants(List<Dictionary<string, object>> profiles) =>
@@ -399,7 +399,7 @@ namespace ReignBetaServer
                 ["participation"] = ReadString(result, "participation", ""),
                 ["reactionTargetHeroStringId"] = ReadString(result, "reactionTargetHeroStringId", ""),
                 ["groundingStatus"] = ReadString(ReadDictionary(result, "conversationGrounding"), "status", "unknown"),
-                ["reply"] = Program.LimitText(ReadString(result, "reply", ""), 1000)
+                ["reply"] = DialogueService.LimitText(ReadString(result, "reply", ""), 1000)
             };
         }
 
@@ -571,7 +571,7 @@ namespace ReignBetaServer
                     string targetId = ReadFirstString(staged, "targetHeroStringId", "targetId");
                     if (string.IsNullOrWhiteSpace(ReadString(staged, "sourceText", ""))
                         && contributionText.TryGetValue(targetId, out string targetContribution))
-                        staged["sourceText"] = Program.LimitText(targetContribution, 4000);
+                        staged["sourceText"] = DialogueService.LimitText(targetContribution, 4000);
                     assessments.Add(staged);
                 }
                 if (!string.IsNullOrWhiteSpace(speakerId))
@@ -584,7 +584,7 @@ namespace ReignBetaServer
             {
                 ["campaignId"] = campaignId, ["exchangeId"] = turnId, ["mode"] = "social_event",
                 ["playerHeroStringId"] = playerId, ["worldDay"] = ReadDouble(payload, "worldDay", 0d),
-                ["participants"] = Program.MergeStringLists(activeIds, new[] { playerId }), ["assessments"] = assessments,
+                ["participants"] = DialogueService.MergeStringLists(activeIds, new[] { playerId }), ["assessments"] = assessments,
                 ["relationshipPairs"] = ReadDictionaryList(payload, "relationshipPairs"),
                 ["nativeReceiptProtocol"] = ReadString(payload, "nativeReceiptProtocol", ""),
                 ["correlationId"] = ReadString(payload, "correlationId", "")

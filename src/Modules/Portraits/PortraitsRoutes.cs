@@ -5,13 +5,13 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static class PortraitsRoutes
     {
         // HTTP routes owned by the Portraits module, in their former router order (see RouteTable.cs).
-        private static void RegisterPortraitsRoutes(ReignRouteTable routes)
+        internal static void RegisterPortraitsRoutes(Program.ReignRouteTable routes)
         {
             routes.PostPrefix("/chat-view/", StringComparison.Ordinal, request => PortraitsService.ChatViewApi(request.JsonBody, request.Path.Substring("/chat-view/".Length)));
-            routes.Post("/tavern-house/scene", request => RunInteractiveRequest(() => PortraitsService.TavernHouseGenerateScene(request.JsonBody)));
+            routes.Post("/tavern-house/scene", request => Program.RunInteractiveRequest(() => PortraitsService.TavernHouseGenerateScene(request.JsonBody)));
             routes.Get("/portraits/vision/models", request => PortraitsService.PortraitVisionModelCatalog(request.Query.TryGetValue("provider", out string visionProvider) ? visionProvider : "Codex"));
             routes.PostPrefix("/portraits/outfit/", StringComparison.Ordinal, request => PortraitsService.OutfitChangeApi(request.JsonBody, request.Path.Substring("/portraits/outfit/".Length)));
             routes.Post("/portraits/generate", request => PortraitsService.PortraitGenerate(request.JsonBody));

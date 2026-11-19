@@ -10,7 +10,7 @@ namespace ReignBetaServer
     internal static partial class Program
     {
         private const int ConversationResponseRecoveryCharacterLimit = 1024 * 1024;
-        private const string DialogueActionQueuedNoticePrefix = "[Bannerlord Reign action queued:";
+        internal const string DialogueActionQueuedNoticePrefix = "[Bannerlord Reign action queued:";
         internal const string DialogueActionFailureNotice = "[Reign could not carry out the agreed action. No game action was queued.]";
         private static readonly Regex EmbeddedProviderDialogueMetadata = new Regex(
             @"\{\s*""(?:decision_?brief|structuredActionDecision|stateUpdates|suggestedActions|drinkActions|(?:memory|belief|obligation|comprehension|continuity|dynamicCharacteristic)Writes)""\s*:\s*[\[{]",

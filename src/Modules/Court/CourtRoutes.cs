@@ -5,10 +5,10 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static class CourtRoutes
     {
         // HTTP routes owned by the Court module, in their former router order (see RouteTable.cs).
-        private static void RegisterCourtRoutes(ReignRouteTable routes)
+        internal static void RegisterCourtRoutes(Program.ReignRouteTable routes)
         {
             routes.Post("/court/session/open", request => CourtService.CourtSessionOpenApi(request.JsonBody));
             routes.Post("/court/session/tick", request => CourtService.CourtSessionTickApi(request.JsonBody));
@@ -21,12 +21,12 @@ namespace ReignBetaServer
             routes.Post("/court/matter/resolve", request => CourtService.CourtMatterResolveApi(request.JsonBody));
             routes.Post("/court/offices/assign", request => CourtService.CapitalCourtApi(request.JsonBody, CourtService.CourtOfficeAssignApi));
             routes.Post("/court/offices/dismiss", request => CourtService.CapitalCourtApi(request.JsonBody, CourtService.CourtOfficeDismissApi));
-            routes.Post("/court/royal-council/respond", request => CourtService.CapitalCourtApi(request.JsonBody, body => RunInteractiveRequest(() => CourtService.RoyalCouncilRespond(body))));
-            routes.Post("/court/ruler-petition/respond", request => CourtService.CapitalCourtApi(request.JsonBody, body => RunInteractiveRequest(() => CourtService.RulerPetitionRespond(body))));
-            routes.Post("/court/life/scene", request => CourtService.CapitalCourtApi(request.JsonBody, body => RunInteractiveRequest(() => CourtService.CourtLifeScene(body))));
-            routes.Post("/court/life/respond", request => CourtService.CapitalCourtApi(request.JsonBody, body => RunInteractiveRequest(() => CourtService.CourtLifeRespond(body))));
+            routes.Post("/court/royal-council/respond", request => CourtService.CapitalCourtApi(request.JsonBody, body => Program.RunInteractiveRequest(() => CourtService.RoyalCouncilRespond(body))));
+            routes.Post("/court/ruler-petition/respond", request => CourtService.CapitalCourtApi(request.JsonBody, body => Program.RunInteractiveRequest(() => CourtService.RulerPetitionRespond(body))));
+            routes.Post("/court/life/scene", request => CourtService.CapitalCourtApi(request.JsonBody, body => Program.RunInteractiveRequest(() => CourtService.CourtLifeScene(body))));
+            routes.Post("/court/life/respond", request => CourtService.CapitalCourtApi(request.JsonBody, body => Program.RunInteractiveRequest(() => CourtService.CourtLifeRespond(body))));
             routes.Get("/court/patronage/public-history", request => CourtService.PatronagePublicHistoryApi(request.Query));
-            routes.Post("/court/life/interpret", request => CourtService.CapitalCourtApi(request.JsonBody, body => RunInteractiveRequest(() => CourtService.CourtLifeInterpret(body))));
+            routes.Post("/court/life/interpret", request => CourtService.CapitalCourtApi(request.JsonBody, body => Program.RunInteractiveRequest(() => CourtService.CourtLifeInterpret(body))));
             routes.Post("/court/life/family", request => CourtService.FamilyVisitDispatch(request.JsonBody));
             routes.Post("/court/life/international/pending", request => CourtService.CapitalCourtApi(request.JsonBody, CourtService.InternationalCourtPendingApi));
             routes.Post("/court/life/international/resolve", request => CourtService.CapitalCourtApi(request.JsonBody, CourtService.InternationalCourtResolutionApi));

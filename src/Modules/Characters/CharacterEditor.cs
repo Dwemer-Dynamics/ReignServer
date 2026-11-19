@@ -61,7 +61,7 @@ namespace ReignBetaServer
             if(shippedProfiles.TryGetValue(hero,out Dictionary<string,object> shipped))
             {
                 runtimeProfile=BuildCharacterEditorCanonicalProfile(shipped,runtimeProfile,hero);
-                Program.UpsertCharacterProfile(campaign,runtimeProfile);
+                CharactersService.UpsertCharacterProfile(campaign,runtimeProfile);
             }
             else if(runtimeProfile.Count>0)MaterializeCharacterProfile(campaign,hero,runtimeProfile,false,false);
             using(ReignDbConnection c=ReignDatabase.OpenCampaignConnection(campaign))
@@ -92,7 +92,7 @@ namespace ReignBetaServer
             Dictionary<string, object> profile = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "profile.json"));
             if (profile.Count == 0) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The game profile has not been captured for this character." };
 
-            Dictionary<string, object> result = Program.ConstructCharacterFiles(
+            Dictionary<string, object> result = CharactersService.ConstructCharacterFiles(
                 campaign,
                 hero,
                 profile,
@@ -111,20 +111,20 @@ namespace ReignBetaServer
             string dir=Program.CharacterDirectory(campaign,hero);Dictionary<string, object> profileDocument=Program.ReadJsonObject(Path.Combine(dir,"profile.json"));Dictionary<string, object> traitDocument=Program.ReadJsonObject(Path.Combine(dir,"traits.json"));if(traitDocument.Count>0){bool changed=EnsureTraitPercentageData(traitDocument,hero);changed=CourtService.EnsureCourtCharacterData(traitDocument,profileDocument,hero)||changed;changed=EnsurePersonalityPortraitData(traitDocument,ReadString(profileDocument,"name",hero),false)||changed;if(changed)Program.WriteJsonObject(Path.Combine(dir,"traits.json"),traitDocument);}Dictionary<string, object> documents=new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);foreach(string name in EditorDocumentNames)documents[name]=name=="traits"?traitDocument:name=="profile"?profileDocument:name=="wealth"?ResolveWealthDocument(campaign,hero,profileDocument):Program.ReadJsonObject(Path.Combine(dir,name+".json"));
             Dictionary<string, object> history=new Dictionary<string, object>{{"dialogue",Program.ReadJsonLinesFromPath(Path.Combine(dir,"history","dialogue.jsonl"))},{"events",Program.ReadJsonLinesFromPath(Path.Combine(dir,"history","events.jsonl"))},{"decisions",Program.ReadJsonLinesFromPath(Path.Combine(dir,"history","decisions.jsonl"))}};
             Dictionary<string, object> memoryFiles=new Dictionary<string, object>{{"summary",Program.ReadJsonObject(Path.Combine(dir,"memory","summary.json"))},{"relationships",Program.ReadJsonObject(Path.Combine(dir,"memory","relationships.json"))},{"memories",Program.ReadJsonLinesFromPath(Path.Combine(dir,"memory","memories.jsonl"))}};
-            Dictionary<string, object> profile=ReadDictionary(documents,"profile")??new Dictionary<string, object>();Program.KnowledgeAccessContext knowledge=Program.BuildKnowledgeAccessContext(hero,ReadFirstString(profile,"mainHeroStringId","playerHeroStringId"),ReadFirstString(profile,"currentSettlementId","settlementId"),profile);
+            Dictionary<string, object> profile=ReadDictionary(documents,"profile")??new Dictionary<string, object>();DialogueService.KnowledgeAccessContext knowledge=DialogueService.BuildKnowledgeAccessContext(hero,ReadFirstString(profile,"mainHeroStringId","playerHeroStringId"),ReadFirstString(profile,"currentSettlementId","settlementId"),profile);
             List<Dictionary<string, object>> relationshipNetwork=BuildCharacterEditorRelationshipNetwork(campaign,hero,c,profile);
             Dictionary<string, object> records=new Dictionary<string, object>
             {
-                ["worldEvents"]=Program.QueryKnownRows(c,"events",knowledge,"",1000),
+                ["worldEvents"]=DialogueService.QueryKnownRows(c,"events",knowledge,"",1000),
                 ["knowledgeReceipts"]=CharactersStore.SelectKnowledgeReceipts(c, EditorIdParams(hero)),
                 ["conversationSessions"]=CharactersStore.SelectConversationSessions(c, EditorIdParams(hero)),
                 ["conversationTurns"]=CharactersStore.SelectConversationTurns(c, EditorIdParams(hero)),
                 ["memorySources"]=CharactersStore.SelectMemorySources(c, EditorIdParams(hero)),
-                ["memories"]=Program.QueryKnownRows(c,"memories",knowledge,"status='active'",1000),
-                ["summaries"]=Program.QueryKnownRows(c,"summaries",knowledge,"status='active'",500),
-                ["beliefs"]=Program.QueryKnownRows(c,"beliefs",knowledge,"",500),
-                ["comprehension"]=Program.QueryKnownRows(c,"comprehension",knowledge,"",500),
-                ["obligations"]=Program.QueryKnownRows(c,"obligations",knowledge,"",500),
+                ["memories"]=DialogueService.QueryKnownRows(c,"memories",knowledge,"status='active'",1000),
+                ["summaries"]=DialogueService.QueryKnownRows(c,"summaries",knowledge,"status='active'",500),
+                ["beliefs"]=DialogueService.QueryKnownRows(c,"beliefs",knowledge,"",500),
+                ["comprehension"]=DialogueService.QueryKnownRows(c,"comprehension",knowledge,"",500),
+                ["obligations"]=DialogueService.QueryKnownRows(c,"obligations",knowledge,"",500),
                 ["dynamicCharacteristics"]=CharactersStore.SelectDynamicCharacteristics(c, EditorIdParams(hero)),
                 ["relationshipNetwork"]=relationshipNetwork,
                 ["sharedRelationshipHistory"]=RelationshipsService.SharedRelationshipHistoryForCharacter(campaign,hero,c),
@@ -321,7 +321,7 @@ namespace ReignBetaServer
             DialogueService.RebuildCategorizedSearchIndexes(c);
         }
         private static void ApplyEditableRecordRows(ReignDbConnection c,string group,string table,string key,Dictionary<string, object> records){List<Dictionary<string, object>> rows=ReadDictionaryList(records,group);foreach(Dictionary<string, object> row in rows){string id=ReadString(row,key,"");if(string.IsNullOrWhiteSpace(id))continue;Dictionary<string, object> existing=CharactersStore.SelectDynamic(c, table, key,new Dictionary<string, object>{{"id",id}}).FirstOrDefault();if(existing==null)continue;List<string> columns=row.Keys.Where(x=>existing.ContainsKey(x)&&x!=key&&System.Text.RegularExpressions.Regex.IsMatch(x,"^[A-Za-z_][A-Za-z0-9_]*$")).ToList();if(columns.Count==0)continue;Dictionary<string, object> args=new Dictionary<string, object>{{"id",id}};foreach(string column in columns)args[column]=row[column];CharactersStore.UpdateDynamic(c, table, string.Join(",",columns.Select(x=>x+"=$"+x)), key,args);}}
-        private static void ReconcileCharacterEditor(string campaign,string hero,ReignDbConnection c,string section,string job,string revision){long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();CharactersStore.InsertCharacterEditorReconciliation(c, new Dictionary<string, object>{{"job",job},{"revision",revision},{"hero",hero},{"section",section},{"ts",ts}});try{DialogueService.RebuildCategorizedSearchIndexes(c);CharactersStore.DeleteSummaryFts(c);foreach(Dictionary<string, object> row in CharactersStore.SelectSummaries(c))Program.InsertSummaryFts(c,ReadString(row,"summary_id",""),ReadString(row,"summary",""),Program.TextListFromJson(ReadString(row,"tags_json","[]")),Program.ExtractEntityIdsFromJson(ReadString(row,"about_entities_json","[]")));CharactersStore.UpdateCharacterEditorReconciliation(c, new Dictionary<string, object>{{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"job",job}});}catch(Exception ex){CharactersStore.UpdateCharacterEditorReconciliation2(c, new Dictionary<string, object>{{"summary",ex.Message},{"result",Json.Serialize(new Dictionary<string, object>{{"error",ex.Message}})},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"job",job}});}}
+        private static void ReconcileCharacterEditor(string campaign,string hero,ReignDbConnection c,string section,string job,string revision){long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();CharactersStore.InsertCharacterEditorReconciliation(c, new Dictionary<string, object>{{"job",job},{"revision",revision},{"hero",hero},{"section",section},{"ts",ts}});try{DialogueService.RebuildCategorizedSearchIndexes(c);CharactersStore.DeleteSummaryFts(c);foreach(Dictionary<string, object> row in CharactersStore.SelectSummaries(c))DialogueService.InsertSummaryFts(c,ReadString(row,"summary_id",""),ReadString(row,"summary",""),DialogueService.TextListFromJson(ReadString(row,"tags_json","[]")),DialogueService.ExtractEntityIdsFromJson(ReadString(row,"about_entities_json","[]")));CharactersStore.UpdateCharacterEditorReconciliation(c, new Dictionary<string, object>{{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"job",job}});}catch(Exception ex){CharactersStore.UpdateCharacterEditorReconciliation2(c, new Dictionary<string, object>{{"summary",ex.Message},{"result",Json.Serialize(new Dictionary<string, object>{{"error",ex.Message}})},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"job",job}});}}
         private static void ApplyEditorSnapshot(string campaign,string hero,ReignDbConnection c,Dictionary<string, object> snapshot){ApplyEditorDocuments(campaign,hero,ReadDictionary(snapshot,"documents"));ApplyEditorHistory(campaign,hero,ReadDictionary(snapshot,"history"));ApplyEditorRecords(c,hero,ReadDictionary(snapshot,"records"));}
 
         private static Dictionary<string, object> BuildNativeInverse(Dictionary<string, object> before,Dictionary<string, object> changes)
@@ -344,7 +344,7 @@ namespace ReignBetaServer
             foreach(long ts in timestamps)
             {
                 List<string> eventIds=CharactersStore.SelectEvents(c, new Dictionary<string, object>{{"ts",ts}}).Select(x=>ReadString(x,"event_id","")).Where(x=>!string.IsNullOrWhiteSpace(x)).ToList();foreach(string eventId in eventIds)CharactersStore.UpdateMemories(c, new Dictionary<string, object>{{"event",eventId}});
-                List<Dictionary<string, object>> lines=ReadDictionaryList(history,"dialogue").Concat(ReadDictionaryList(history,"events")).Where(x=>ReadLong(x,"ts",0)==ts).ToList();if(lines.Count==0)continue;string summary=string.Join("\n",lines.Select(x=>ReadString(x,"speaker",ReadString(x,"role",""))+": "+ReadString(x,"text","")));Dictionary<string, object> profile=Program.ReadJsonObject(Program.CharacterFile(campaign,hero,"profile.json"));Program.StoreWorldMemoryEvent(new Dictionary<string, object>{{"campaignId",campaign},{"eventId","editor_history_"+hero+"_"+ts},{"ts",ts},{"eventType","edited_conversation"},{"summary",summary},{"participants",new[]{hero,ReadFirstString(profile,"mainHeroStringId","playerHeroStringId") }},{"known_by",new[]{hero,ReadFirstString(profile,"mainHeroStringId","playerHeroStringId") }},{"visibility","private"},{"importance",0.6d},{"source","character_editor_rebuild"}},"character_editor_rebuild");
+                List<Dictionary<string, object>> lines=ReadDictionaryList(history,"dialogue").Concat(ReadDictionaryList(history,"events")).Where(x=>ReadLong(x,"ts",0)==ts).ToList();if(lines.Count==0)continue;string summary=string.Join("\n",lines.Select(x=>ReadString(x,"speaker",ReadString(x,"role",""))+": "+ReadString(x,"text","")));Dictionary<string, object> profile=Program.ReadJsonObject(Program.CharacterFile(campaign,hero,"profile.json"));DialogueService.StoreWorldMemoryEvent(new Dictionary<string, object>{{"campaignId",campaign},{"eventId","editor_history_"+hero+"_"+ts},{"ts",ts},{"eventType","edited_conversation"},{"summary",summary},{"participants",new[]{hero,ReadFirstString(profile,"mainHeroStringId","playerHeroStringId") }},{"known_by",new[]{hero,ReadFirstString(profile,"mainHeroStringId","playerHeroStringId") }},{"visibility","private"},{"importance",0.6d},{"source","character_editor_rebuild"}},"character_editor_rebuild");
             }
         }
 
@@ -577,7 +577,7 @@ namespace ReignBetaServer
                 ["clanTier"] = clanTier,
                 ["clanRenown"] = Math.Round(clanRenown, 2),
                 ["clanFiefCount"] = clanFiefCount,
-                ["clanSocialCredit"] = Program.ClanSocialCredit(0, clanTier, clanRenown, clanFiefCount, isLord),
+                ["clanSocialCredit"] = DialogueService.ClanSocialCredit(0, clanTier, clanRenown, clanFiefCount, isLord),
                 ["canLeanOnClanReputation"] = clanTier >= 3 || clanRenown >= 200d || clanFiefCount > 0 || isLord,
                 ["economicCapacityKnown"] = false,
                 ["wealthEvidenceBasis"] = "not_captured",

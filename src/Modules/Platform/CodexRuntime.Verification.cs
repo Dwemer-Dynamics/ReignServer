@@ -378,7 +378,7 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                summary = "Catalog boundary selftest failed: " + LimitText(ex.Message, 500);
+                summary = "Catalog boundary selftest failed: " + DialogueService.LimitText(ex.Message, 500);
             }
             finally
             {
@@ -547,7 +547,7 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                summary = "Injected adapter transport contract failed: " + LimitText(ex.Message, 500);
+                summary = "Injected adapter transport contract failed: " + DialogueService.LimitText(ex.Message, 500);
             }
             finally
             {

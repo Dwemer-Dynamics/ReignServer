@@ -285,7 +285,7 @@ namespace ReignBetaServer
                 "The character's current court standing changed through recorded campaign facts.");
             bool changed = SetCourtDynamicReputation(connection, campaignId, timelineId, subjectId,
                 tagId, active, value, worldDay, eventId, description, incident,
-                Program.DictionaryOrDefault(payload, "dynamicEvidence", payload),
+                CharactersService.DictionaryOrDefault(payload, "dynamicEvidence", payload),
                 socialCatalog, directProducer);
             result = new Dictionary<string, object>
             {

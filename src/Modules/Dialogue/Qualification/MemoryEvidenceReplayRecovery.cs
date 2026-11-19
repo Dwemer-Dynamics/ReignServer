@@ -47,7 +47,7 @@ namespace ReignBetaServer
                 && (LooksLikeMostRecentConversationRecall(speech) || LooksLikeExactFactRestatement(speech));
         }
 
-        private static bool ReviewedRecoverySourceSuperseded(ReignDbConnection connection, Program.KnowledgeAccessContext access, string turnId)
+        private static bool ReviewedRecoverySourceSuperseded(ReignDbConnection connection, DialogueService.KnowledgeAccessContext access, string turnId)
         {
             // Check a replacement's existence without admitting its possibly private text to the prompt.
             return DialogueStore.SelectConversationContinuityVersions(connection, TestDict("observer", access.NpcId, "timeline", access.TimelineId, "time", access.AsOfTimestamp,
@@ -58,7 +58,7 @@ namespace ReignBetaServer
             Dictionary<string, object> item, Dictionary<string, object> context, List<Dictionary<string, object>> transcript,
             Dictionary<string, object> projection)
         {
-            var access = Program.BuildKnowledgeAccessContext(observer, peer, "", context);
+            var access = DialogueService.BuildKnowledgeAccessContext(observer, peer, "", context);
             var plan = PlanMemoryQuery(observer, peer, ReadString(item, "query", ""), context);
             var recent = transcript.ToDictionary(row => ReadString(row, "turnId", ""), MemoryTranscriptSourceHash, StringComparer.Ordinal);
             foreach (var pair in recent) plan.SuppliedSources[pair.Key] = pair.Value;
@@ -91,7 +91,7 @@ namespace ReignBetaServer
                 string id = ReadString(row, "turn_id", ""), speaker = ReadString(row, "speaker_id", ""), name = ReadString(row, "speaker_name", "");
                 string role = ReadString(row, "role", ""), body = ReplayReviewedSourceBody(row, observer);
                 long sequence = ReadLong(row, "accepted_sequence", -1);
-                var listeners = Program.TextListFromJson(ReadString(row, "participants_json", "[]"));
+                var listeners = DialogueService.TextListFromJson(ReadString(row, "participants_json", "[]"));
                 if (recent.ContainsKey(id) || sequence < 1 || sequence >= oldestRecent || !PrecisionTurnVisible(row, observer, access, connection)
                     || !audience.All(listeners.Contains) || !listeners.Contains(speaker) || role is not ("player" or "npc")
                     || name.Length == 0 || name.Any(char.IsControl) || body.Trim().Length == 0

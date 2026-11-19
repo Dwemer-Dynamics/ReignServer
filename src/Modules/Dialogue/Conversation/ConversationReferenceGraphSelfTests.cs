@@ -219,7 +219,7 @@ namespace ReignBetaServer
                     foreach (var target in targets)
                     {
                         var source = ResolveConversationReferenceSource(c, "turn", target.Id,
-                            new Program.KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "main", WorldDay = 21 });
+                            new DialogueService.KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "main", WorldDay = 21 });
                         string role = ReadString(source.Row, "role", "");
                         packets.Add(RenderContinuityRecord(target.Id, "targeted_historical_exchange", "npc", ReadString(source.Row, "session_id", ""),
                             source.Day, 95, true, "- [Day 20] [source=" + target.Id + " role=" + role + "] "
@@ -232,7 +232,7 @@ namespace ReignBetaServer
                 }
                 using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var access = new Program.KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "main", WorldDay = 21 };
+                    var access = new DialogueService.KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "main", WorldDay = 21 };
                     var chainRows = DialogueSelfTestStore.SelectConversationTurns22(c, TestDict("id", chain.EventId));
                     var seeds = chainRows.Select(r => ("turn", ReadString(r, "turn_id", ""))).ToList();
                     var one = ExpandConversationReferences(c, seeds, access, generation, 1, 12, TestDict());
@@ -258,7 +258,7 @@ namespace ReignBetaServer
                 string diamond = LinkedInput("diamond_callback", (third, "red flag condition"), (sibling, "red flag condition"));
                 using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var access = new Program.KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "main", WorldDay = 21 };
+                    var access = new DialogueService.KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "main", WorldDay = 21 };
                     var deepAudit = TestDict();
                     var deep = ExpandConversationReferences(c, new() { ("turn", fourth) }, access, generation, 64, 64, deepAudit);
                     Check("growing_chain_recovers_four_prior_levels", new[] { third, chainPlayerId, firstPlayerId, "old_npc" }.All(id => deep.Any(s => s.Id == id)), deepAudit);
@@ -401,7 +401,7 @@ namespace ReignBetaServer
                     string id = ReadString(RelationshipsService.InsertLetter(c, "npc", "Mira", "player", "Player", "I moved the plant into a pot beside the stone wall.",
                         "npc_initiated", "plant", "", "a", "b", 10d, 15d, TestDict()), "letterId", "");
                     linkedLetterId = id;
-                    var access = new Program.KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "main", WorldDay = 20 };
+                    var access = new DialogueService.KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "main", WorldDay = 20 };
                     Check("letter_author_knows_own_sent_source", ResolveConversationReferenceSource(c, "letter", id, access) != null);
                     access.NpcId = "player";
                     Check("unread_letter_is_not_granted_to_recipient", ResolveConversationReferenceSource(c, "letter", id, access) == null);

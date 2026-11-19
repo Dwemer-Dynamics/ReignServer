@@ -5,10 +5,10 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static class RelationshipsRoutes
     {
         // HTTP routes owned by the Relationships module, in their former router order (see RouteTable.cs).
-        private static void RegisterRelationshipsRoutes(ReignRouteTable routes)
+        internal static void RegisterRelationshipsRoutes(Program.ReignRouteTable routes)
         {
             routes.Post("/political-pressure/evaluate", request => RelationshipsService.EvaluatePoliticalIncidentsCombined(request.JsonBody));
             routes.Get("/clan-conflicts/notices", request => RelationshipsService.NextClanConflictNotices(request.Query));
@@ -21,7 +21,7 @@ namespace ReignBetaServer
             routes.Post("/relationships/effective/batch", request => RelationshipsService.EffectiveAttitudeBatchApi(request.JsonBody));
             routes.Post("/relationships/history/ensure", request => RelationshipsService.SharedRelationshipHistoryEnsureApi(request.JsonBody));
             {
-                Func<HttpRequest, object> handler = request => RelationshipsService.SharedRelationshipHistoryQueryApi(
+                Func<Program.HttpRequest, object> handler = request => RelationshipsService.SharedRelationshipHistoryQueryApi(
                     request.Method == "POST"
                         ? request.JsonBody
                         : request.Query.ToDictionary(
@@ -44,7 +44,7 @@ namespace ReignBetaServer
             routes.Post("/relationships/ambient/native_sync/pull", request => RelationshipsService.RelationshipNativeTargetPullApi(request.JsonBody));
             routes.Post("/relationships/ambient/native_sync/receipts", request => RelationshipsService.RelationshipNativeTargetReceiptsApi(request.JsonBody));
             {
-                Func<HttpRequest, object> handler = request => RelationshipsService.MbtiRelationshipStatusApi(RelationshipStatusPayload(request));
+                Func<Program.HttpRequest, object> handler = request => RelationshipsService.MbtiRelationshipStatusApi(Program.RelationshipStatusPayload(request));
                 routes.Get("/relationships/ambient/status", handler);
                 routes.Post("/relationships/ambient/status", handler);
             }

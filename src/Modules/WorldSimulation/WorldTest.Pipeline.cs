@@ -534,7 +534,7 @@ namespace ReignBetaServer
         internal static bool IsTerminalFailureStatus(string status)
         {
             string value = Program.NormalizeLookup(status);
-            return Program.ContainsAny(value, "failed", "blocked", "expired", "validation_failed");
+            return DialogueService.ContainsAny(value, "failed", "blocked", "expired", "validation_failed");
         }
 
         private static double WorldTestWeddingEndDay(Dictionary<string, object> action)
@@ -561,7 +561,7 @@ namespace ReignBetaServer
         private static bool IsPendingStatus(string status)
         {
             string value = Program.NormalizeLookup(status);
-            return Program.ContainsAny(value, "queued", "pending", "delivered", "executing", "retry", "proposed");
+            return DialogueService.ContainsAny(value, "queued", "pending", "delivered", "executing", "retry", "proposed");
         }
 
         private static string WorstWorldTestStatus(IEnumerable<string> statuses)

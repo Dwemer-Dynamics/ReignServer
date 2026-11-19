@@ -106,7 +106,7 @@ namespace ReignBetaServer
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             int desiredDelta = Clamp(ReadInt(payload, "relationshipDelta", 0), -100, 100);
             int reputationValue = Clamp(ReadInt(payload, "reputationValue", 0), -100, 100);
-            string description = Program.LimitText(ReadString(payload, "description", ""), 1000);
+            string description = DialogueService.LimitText(ReadString(payload, "description", ""), 1000);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
@@ -309,7 +309,7 @@ namespace ReignBetaServer
                 ["severity"] = severity,
                 ["chargeCategory"] = category,
                 ["surrenderAccepted"] = !partyEncounter || ArrestReplyAccepts(visibleReply),
-                ["reactionSnapshot"] = Program.LimitText(visibleReply ?? string.Empty, 1000)
+                ["reactionSnapshot"] = DialogueService.LimitText(visibleReply ?? string.Empty, 1000)
             };
             results.Add(prepare);
             return results;
@@ -468,7 +468,7 @@ namespace ReignBetaServer
                 if (index >= 0)
                 {
                     string reason = text.Substring(index + marker.Length).Trim(' ', '.', ',', ';', ':', '!', '?');
-                    if (reason.Length >= 3) return Program.LimitText(reason, 500);
+                    if (reason.Length >= 3) return DialogueService.LimitText(reason, 500);
                 }
             }
             foreach (string charge in new[]
@@ -480,7 +480,7 @@ namespace ReignBetaServer
             {
                 int index = lower.IndexOf(charge, StringComparison.Ordinal);
                 if (index >= 0)
-                    return Program.LimitText(text.Substring(index).Trim(' ', '.', ',', ';', ':', '!', '?'), 500);
+                    return DialogueService.LimitText(text.Substring(index).Trim(' ', '.', ',', ';', ':', '!', '?'), 500);
             }
             return string.Empty;
         }

@@ -156,7 +156,7 @@ namespace ReignBetaServer
                 string key = name.Replace("portrait_clothing_", "").Replace(".txt", "");
                 yield return Program.PromptMeta(
                     name,
-                    "Portrait Clothing - " + Program.HumanizeKey(key),
+                    "Portrait Clothing - " + DialogueService.HumanizeKey(key),
                     "image",
                     true,
                     key.EndsWith("_merchant") || key.EndsWith("_artisan") || key.EndsWith("_gang_leader") || key.EndsWith("_headman") || key.EndsWith("_rural_notable")

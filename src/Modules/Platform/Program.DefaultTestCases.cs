@@ -73,7 +73,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static void SaveTestSnapshotFromPayload(string campaignId, string correlationId, string mode, string phase, Dictionary<string, object> payload)
+        internal static void SaveTestSnapshotFromPayload(string campaignId, string correlationId, string mode, string phase, Dictionary<string, object> payload)
         {
             if (string.IsNullOrWhiteSpace(correlationId) || payload == null)
             {

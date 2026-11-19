@@ -193,7 +193,7 @@ namespace ReignBetaServer
                     DialogueService.StartReasoningFallbackCooldown(settings, apiUrl, model);
                     reasoningRouting["fallbackUsed"] = true;
                     reasoningRouting["attemptCount"] = 2;
-                    reasoningRouting["fallbackError"] = LimitText(reasoningException.Message, 1200);
+                    reasoningRouting["fallbackError"] = DialogueService.LimitText(reasoningException.Message, 1200);
                     reasoningRouting["cooldownUntilUtc"] = DialogueService.ReasoningFallbackCooldownUntil(DialogueService.ReasoningRouteKey(apiUrl, model)).ToString("o");
                     requestBody.Remove("reasoning");
                     requestBody.Remove("reasoning_effort");
@@ -207,7 +207,7 @@ namespace ReignBetaServer
                     DialogueService.StartPromptCacheCooldown(settings, apiUrl, model);
                     cacheRouting["fallbackUsed"] = true;
                     cacheRouting["attemptCount"] = 2;
-                    cacheRouting["cacheRouteError"] = LimitText(cacheRouteException.Message, 1200);
+                    cacheRouting["cacheRouteError"] = DialogueService.LimitText(cacheRouteException.Message, 1200);
                     cacheRouting["cooldownUntilUtc"] = DialogueService.PromptCacheCooldownUntil(DialogueService.PromptCacheRouteKey(apiUrl, model)).ToString("o");
                     requestBody.Remove("caching");
                     requestBody.Remove("stickyprovider");
@@ -223,7 +223,7 @@ namespace ReignBetaServer
                         DialogueService.StartReasoningFallbackCooldown(settings, apiUrl, model);
                         reasoningRouting["fallbackUsed"] = true;
                         reasoningRouting["attemptCount"] = 2;
-                        reasoningRouting["fallbackError"] = LimitText(reasoningException.Message, 1200);
+                        reasoningRouting["fallbackError"] = DialogueService.LimitText(reasoningException.Message, 1200);
                         reasoningRouting["cooldownUntilUtc"] = DialogueService.ReasoningFallbackCooldownUntil(DialogueService.ReasoningRouteKey(apiUrl, model)).ToString("o");
                         requestBody.Remove("reasoning");
                         requestBody.Remove("reasoning_effort");
@@ -411,7 +411,7 @@ namespace ReignBetaServer
                     FinalConversationGauntletProviderBudget
                         .CompleteRegisteredPhysicalDispatch(
                             reservation, false, ex.Message);
-                    retryErrors.Add(LimitText(ex.Message, 600));
+                    retryErrors.Add(DialogueService.LimitText(ex.Message, 600));
                     if (diagnostics != null)
                     {
                         diagnostics["transientRetryCount"] = retryErrors.Count;

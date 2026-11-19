@@ -470,7 +470,7 @@ namespace ReignBetaServer
         {
             if (string.IsNullOrWhiteSpace(heroId))
             {
-                heroId = Program.ResolveHeroIdByCharacterObjectId(campaignId, characterObjectId);
+                heroId = DialogueService.ResolveHeroIdByCharacterObjectId(campaignId, characterObjectId);
             }
 
             if (string.IsNullOrWhiteSpace(heroId))

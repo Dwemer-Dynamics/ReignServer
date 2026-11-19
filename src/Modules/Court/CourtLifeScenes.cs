@@ -58,7 +58,7 @@ namespace ReignBetaServer
                 ["requestType"] = "ruler_petition_reaction", ["campaignId"] = campaign, ["correlationId"] = Program.EnsureCorrelationId(payload),
                 ["messages"] = DialogueService.BuildSimplePromptEnvelope("court_life_scene", "preparation", "Prepare one consistent disputed case without executing actions.", prompt).Messages,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" } });
-            if (!ReadBool(llm, "ok", false)) return CourtLifeSceneError(Program.LlmFailureForDisplay(llm));
+            if (!ReadBool(llm, "ok", false)) return CourtLifeSceneError(DialogueService.LlmFailureForDisplay(llm));
             var scene = NormalizeCourtLifeScene(TryParseJsonObject(ReadString(llm, "content", "")));
             if (scene == null) return CourtLifeSceneError("The hearing's shared account was incomplete. Return and retry the audience.");
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))

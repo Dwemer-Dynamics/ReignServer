@@ -294,7 +294,7 @@ namespace ReignBetaServer
             PreparePersonalGossipReply(c, campaign, row, context);
             string owner = ReadString(context, "speakerId", ""), peer = ReadString(row, "speaker_id", "");
             var scope = Program.CloneDictionary(context); scope["worldDay"] = ReadDouble(context, "currentDay", 0);
-            var access = Program.BuildKnowledgeAccessContext(owner, ReadString(context, "playerId", ""), "", scope);
+            var access = DialogueService.BuildKnowledgeAccessContext(owner, ReadString(context, "playerId", ""), "", scope);
             // Only correspondence already exchanged with this addressee belongs
             // in this reply. Another NPC's private letters grant no disclosure.
             var acquired = DialogueStore.SelectCommunicationHistory3(c, TestDict("owner", owner, "peer", peer, "timeline", ReadString(context, "timelineId", "main"), "day", ReadDouble(context, "currentDay", 0),
@@ -360,7 +360,7 @@ namespace ReignBetaServer
             {
                 string session = ReadString(evidence, "sourceRootId", "").Replace("conversation:", "");
                 var sources = DialogueStore.SelectConversationTurns9(c, TestDict("id", session));
-                if (sources.Any(s => Program.TextListFromJson(ReadString(s, "participants_json", "[]")).Contains(receiver, StringComparer.OrdinalIgnoreCase))) continue;
+                if (sources.Any(s => DialogueService.TextListFromJson(ReadString(s, "participants_json", "[]")).Contains(receiver, StringComparer.OrdinalIgnoreCase))) continue;
                 if (sources.Any(s => System.Text.RegularExpressions.Regex.IsMatch(ReadString(s, "text", ""),
                     @"\b(?:keep\s+(?:this|that|it)\s+between\s+us|(?:do\s+not|don't)\s+tell|keep\s+.{0,40}\bsecret|promise\s+.{0,30}\bnot\s+to\s+tell)\b",
                     System.Text.RegularExpressions.RegexOptions.IgnoreCase))) return false;

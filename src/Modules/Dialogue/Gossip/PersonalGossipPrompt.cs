@@ -176,7 +176,7 @@ with the exact words of this reply. Do not mark something raised merely because 
             }
             catch (Exception ex)
             {
-                Program.LogOperational("gossip.prompt_failed", GossipFields("campaignId", campaign, "error", Program.LimitText(ex.Message, 500)));
+                Program.LogOperational("gossip.prompt_failed", GossipFields("campaignId", campaign, "error", DialogueService.LimitText(ex.Message, 500)));
                 return "";
             }
         }

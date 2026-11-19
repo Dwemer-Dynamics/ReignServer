@@ -809,8 +809,8 @@ namespace ReignBetaServer
                     - (0.5d + ReadDouble(highObserver, "jealousy", 50d) / 100d)) < 0.0000001d
                 && ReadInt(lowView, "favoring", int.MinValue) == expected(lowView)
                 && ReadInt(highView, "favoring", int.MinValue) == expected(highView);
-            bool factorBoundaries = Math.Abs((0.5d + Program.ClampDouble(0d, 0d, 100d) / 100d) - 0.5d) < 0.0000001d
-                && Math.Abs((0.5d + Program.ClampDouble(100d, 0d, 100d) / 100d) - 1.5d) < 0.0000001d;
+            bool factorBoundaries = Math.Abs((0.5d + DialogueService.ClampDouble(0d, 0d, 100d) / 100d) - 0.5d) < 0.0000001d
+                && Math.Abs((0.5d + DialogueService.ClampDouble(100d, 0d, 100d) / 100d) - 1.5d) < 0.0000001d;
             bool charmMath = Math.Abs(ReadDouble(lowView, "charmMitigation", -1d)
                     - charmMitigation) < 0.0000001d
                 && Math.Abs(ReadDouble(highView, "charmMitigation", -1d)

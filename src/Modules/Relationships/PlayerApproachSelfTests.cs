@@ -83,7 +83,7 @@ namespace ReignBetaServer
             Check("repair_delivers_explicit_hidden_output_contract", repairContractDelivered && ReadBool(contractRepair, "ok", false),
                 "The one repair receives the complete opening instructions and exact additional top-level evidence shape.");
             Check("exhausted_repair_retains_actual_rejection_reasons", ReadStringList(failed, "approachOpeningViolations").Count >= 2
-                && Program.LlmFailureForDisplay(failed).Contains("NPC's approach") && !Program.LlmFailureForDisplay(failed).Contains("provider"),
+                && DialogueService.LlmFailureForDisplay(failed).Contains("NPC's approach") && !DialogueService.LlmFailureForDisplay(failed).Contains("provider"),
                 "Operational failure retains specific approach violations instead of losing the reason behind a generic provider message.");
             var unsafeRepair = EnforceApproachOpening(TestDict("ok", true, "content", Json.Serialize(missingProof)), TestDict(), opening,
                 _ => TestDict("ok", true, "content", Json.Serialize(valid)), _ => false);
@@ -132,7 +132,7 @@ namespace ReignBetaServer
                             ["priorDialogueText"] = "" }, "Current camp.", "Speak for yourself.", "", "Rules.", "Profile.",
                         targetOverride: 1000, capacity: TestDict("inputAllowance", 990976, "outputFits", true, "capacityVerified", true));
                     var packedEnvelope = DialogueService.CreatePromptEnvelope("dialogue", "test", "Rules.", "Profile.", packed.LiveTurn);
-                    DialogueService.StructureConversationMessages(packedEnvelope, packed.Structure, "", new(), Program.FormatDialogueForPrompt,
+                    DialogueService.StructureConversationMessages(packedEnvelope, packed.Structure, "", new(), DialogueService.FormatDialogueForPrompt,
                         "npc", "Player", emptyOriginal, false, text => text);
                     string outbound = string.Join("\n", packedEnvelope.Messages.Select(message => ReadString(message, "content", "")));
                     Check("saved_brief_and_cue_survive_empty_original_and_budget_pressure", emptyOriginal == ""
@@ -192,7 +192,7 @@ namespace ReignBetaServer
                     Check("daily_observer_deduplication", RelationshipsSelfTestStore.SelectPlayerAttentionEvents(c).Count == 1,
                         "Two successful conversations create one generic event for the present observer and none for the absent observer.");
                     var historyInput = TestDict("campaignId", campaign, "timelineId", "attention_test", "playerId", "player", "heroStringId", "observer");
-                    var visibleHistory = Program.DialogueHistory(historyInput);
+                    var visibleHistory = DialogueService.DialogueHistory(historyInput);
                     Check("saved_attention_never_appears_in_visible_conversation_history", PlayerAttentionHistory(campaign, "observer", historyInput).Count == 1
                         && ReadDictionaryList(visibleHistory, "lines").All(line => ReadString(line, "channel", "") != "witnessed_player_attention")
                         && PlayerAttentionPrompt(campaign, "observer", Unit("observer", "prompt", 10).Payload).Contains("spent time talking"),

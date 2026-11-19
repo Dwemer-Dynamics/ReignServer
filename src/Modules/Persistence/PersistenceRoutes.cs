@@ -5,22 +5,22 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static class PersistenceRoutes
     {
         // HTTP routes owned by the Persistence module, in their former router order (see RouteTable.cs).
-        private static void RegisterPersistenceRoutes(ReignRouteTable routes)
+        internal static void RegisterPersistenceRoutes(Program.ReignRouteTable routes)
         {
             // Save Sync replaces campaign data and takes the campaign gate itself.
             routes.CampaignGateExemptArea("/save-sync/");
             routes.CampaignGateExemptArea("/api/save-sync/");
-            routes.Get("/api/campaigns", request => ListCampaigns());
+            routes.Get("/api/campaigns", request => Program.ListCampaigns());
             routes.Get("/api/campaigns/storage-audit", request => PersistenceService.CampaignStorageAuditApi());
             // Campaign backup export, import and deletion take the campaign gate themselves.
             routes.Get("/api/campaigns/export", (request, route) =>
             {
                 PersistenceService.WriteCampaignBackupDownload(route.Stream, request.Query);
-                LogRequest(request, 200);
-                return RouteResponseWritten;
+                Program.LogRequest(request, 200);
+                return Program.RouteResponseWritten;
             }).WithoutCampaignGate();
             routes.Post("/api/campaigns/import", request => PersistenceService.ImportCampaignBackup(request.UploadFilePath, request.Query)).WithoutCampaignGate();
             routes.Post("/api/campaigns/delete", request => PersistenceService.DeleteCampaignBackupData(request.JsonBody)).WithoutCampaignGate();

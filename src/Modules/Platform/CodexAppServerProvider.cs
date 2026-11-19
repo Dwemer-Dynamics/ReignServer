@@ -169,7 +169,7 @@ namespace ReignBetaServer
             return NormalizeLlmProvider(ReadString(settings, "llmProvider", OpenAiCompatibleProvider)) == CodexSubscriptionProvider;
         }
 
-        private static bool LlmProviderConfigured(Dictionary<string, object> settings)
+        internal static bool LlmProviderConfigured(Dictionary<string, object> settings)
         {
             settings = settings ?? new Dictionary<string, object>();
             if (UsesCodexSubscription(settings))
@@ -212,9 +212,9 @@ namespace ReignBetaServer
                     ["capabilityStatus"] = CodexCapabilityStatusSnapshot(),
                     ["threadReuse"] = CodexRuntimeThreads.Diagnostics(),
                     ["threadCleanup"] = CodexRuntimeCleanup.Diagnostics(),
-                    ["lastError"] = LimitText(CodexLastError, 1200),
+                    ["lastError"] = DialogueService.LimitText(CodexLastError, 1200),
                     ["generationFailure"] = CodexFailureStatus(),
-                    ["lastStderr"] = LimitText(CodexLastStderr, 1200),
+                    ["lastStderr"] = DialogueService.LimitText(CodexLastStderr, 1200),
                     ["transport"] = new Dictionary<string, object>
                     {
                         ["framing"] = "ndjson_ascii_safe_utf8_read",
@@ -861,7 +861,7 @@ namespace ReignBetaServer
                 while ((line = process.StandardError.ReadLine()) != null)
                 {
                     if (string.IsNullOrWhiteSpace(line)) continue;
-                    lock (CodexStateLock) CodexLastStderr = LimitText(line, 1200);
+                    lock (CodexStateLock) CodexLastStderr = DialogueService.LimitText(line, 1200);
                 }
             }
             catch { }
@@ -1039,7 +1039,7 @@ namespace ReignBetaServer
             List<CodexTurnWaiter> turns;
             lock (CodexStateLock)
             {
-                CodexLastError = LimitText(error, 1200);
+                CodexLastError = DialogueService.LimitText(error, 1200);
                 pending = CodexPending.Values.ToList();
                 turns = CodexTurns.Values.ToList();
             }
@@ -1065,7 +1065,7 @@ namespace ReignBetaServer
 
         internal static void SetCodexError(string error)
         {
-            lock (CodexStateLock) CodexLastError = LimitText(error, 1200);
+            lock (CodexStateLock) CodexLastError = DialogueService.LimitText(error, 1200);
         }
 
         internal static CodexTurnWaiter GetOrCreateCodexTurn(string turnId, string threadId = "")

@@ -66,7 +66,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> ListCampaigns()
+        internal static Dictionary<string, object> ListCampaigns()
         {
             return PersistenceService.CampaignListApi();
         }
@@ -221,7 +221,7 @@ namespace ReignBetaServer
                 ["eventId"] = eventId ?? "",
                 ["status"] = status ?? "info",
                 ["durationMs"] = durationMs,
-                ["summary"] = LimitText(summary ?? "", 1200),
+                ["summary"] = DialogueService.LimitText(summary ?? "", 1200),
                 ["data"] = SanitizeAuditValue(DialogueService.WithoutConversationReferenceMetadata(data ?? new Dictionary<string, object>()), 0)
             };
 
@@ -459,7 +459,7 @@ namespace ReignBetaServer
             return Path.Combine(LogsDir, "server-log.jsonl");
         }
 
-        private static void LogRequest(HttpRequest request, int status)
+        internal static void LogRequest(HttpRequest request, int status)
         {
             Dictionary<string, object> settings = LoadSettings();
             if (!ReadBool(settings, "enableRequestLogging", true))

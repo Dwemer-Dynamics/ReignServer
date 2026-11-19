@@ -269,7 +269,7 @@ namespace ReignBetaServer
                     && Json.Serialize(ReadDictionary(malformedCheckpoint, "life")) == Json.Serialize(fixtureLife),
                     "Malformed items fail completeness checks and retain valid sections for a bounded repair instead of crashing or publishing a partial profile.");
             }
-            check("prior_parse_failure_retries_after_engine_fix", Program.ShouldRetryFailedConstruction(TestDict("status", "failed",
+            check("prior_parse_failure_retries_after_engine_fix", CharactersService.ShouldRetryFailedConstruction(TestDict("status", "failed",
                 "failureKind", "parse", "constructionEngineVersion", 4), Program.DefaultSettings()),
                 "Profiles blocked by the earlier parser can resume after the engine fix without editing campaign data or settings.");
             var interrupted = DeepCloneProfileDictionary(written); interrupted["status"] = "blueprint";

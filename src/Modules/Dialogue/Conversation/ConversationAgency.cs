@@ -94,7 +94,7 @@ namespace ReignBetaServer
                     if (ReadBool(opportunity, "targetClanTierKnown", false))
                     {
                         var publicHistory = LoadKnownWorldHistoryForDialogue(connection, ContinuityTimeline(payload),
-                            ReadDouble(payload, "worldDay", 0d), Program.BuildKnowledgeAccessContext(owner, peer,
+                            ReadDouble(payload, "worldDay", 0d), DialogueService.BuildKnowledgeAccessContext(owner, peer,
                                 ReadFirstString(payload, "locationId", "settlementId"), payload), "", null, null, true);
                         facts["player.knownTournamentWins"] = publicHistory.Select(row => ReadInt(row, "documentedPlayerTournamentWins", 0)).DefaultIfEmpty(0).Max();
                     }
@@ -107,15 +107,15 @@ namespace ReignBetaServer
                     if (Regex.IsMatch(ReadString(context, "playerText", ""), @"\b(?:blackmail|expose|secret|evidence|scandal|betray|affair)\b", RegexOptions.IgnoreCase)
                         && WorldSimulationService.TableExists(connection, "memories"))
                     {
-                        var knowledge = Program.BuildKnowledgeAccessContext(owner, peer, ReadFirstString(payload, "locationId", "settlementId"), payload);
+                        var knowledge = DialogueService.BuildKnowledgeAccessContext(owner, peer, ReadFirstString(payload, "locationId", "settlementId"), payload);
                         var memories = DialogueStore.SelectMemories(connection, new Dictionary<string, object> { ["owner"] = owner, ["day"] = ReadDouble(payload, "worldDay", 0d) });
-                        foreach (var memory in memories.Where(m => Program.KnowledgeRowVisibleToNpc("memories", m, knowledge, connection))
+                        foreach (var memory in memories.Where(m => DialogueService.KnowledgeRowVisibleToNpc("memories", m, knowledge, connection))
                             .Where(m => Regex.IsMatch(ReadString(m, "summary", ""), @"\b(?:secret|scandal|betray|affair|bribe|crime|murder|treason)\w*\b", RegexOptions.IgnoreCase)).Take(4))
                         {
                             var source = TryParseJsonObject(ReadString(memory, "payload_json", "{}"));
                             if (ReadString(source, "timelineId", ContinuityTimeline(payload)) != ContinuityTimeline(payload)) continue;
                             facts["evidence." + ReadString(memory, "memory_id", "")] = new Dictionary<string, object>
-                            { ["summary"] = Program.LimitText(ReadString(memory, "summary", ""), 350), ["confidence"] = ReadDouble(memory, "confidence", 0.5d),
+                            { ["summary"] = DialogueService.LimitText(ReadString(memory, "summary", ""), 350), ["confidence"] = ReadDouble(memory, "confidence", 0.5d),
                                 ["source"] = ReadString(memory, "source", ""), ["worldDay"] = ReadDouble(memory, "world_day", 0d) };
                         }
                     }
@@ -228,8 +228,8 @@ namespace ReignBetaServer
                 ["gold"] = Math.Max(0d, ReadDouble(terms, "gold", 0d)),
                 ["durationDays"] = Math.Max(0d, ReadDouble(terms, "durationDays", 0d)),
                 ["paymentDeferred"] = ReadBool(terms, "paymentDeferred", false),
-                ["benefit"] = Program.LimitText(ReadString(terms, "benefit", ""), 400),
-                ["conditions"] = Program.LimitText(ReadString(terms, "conditions", ""), 400)
+                ["benefit"] = DialogueService.LimitText(ReadString(terms, "benefit", ""), 400),
+                ["conditions"] = DialogueService.LimitText(ReadString(terms, "conditions", ""), 400)
             };
         }
 
@@ -374,7 +374,7 @@ namespace ReignBetaServer
                 var unsupportedKeys = ReadStringList(proposal, "evidenceKeys").Where(k => !facts.ContainsKey(k)).ToList();
                 if (unsupportedKeys.Count > 0)
                 { issues.Add("Decision evidence must refer to supplied facts; unsupported evidenceKeys: "
-                    + string.Join(", ", unsupportedKeys.Take(8).Select(k => Program.LimitText(k, 160))) + "."); continue; }
+                    + string.Join(", ", unsupportedKeys.Take(8).Select(k => DialogueService.LimitText(k, 160))) + "."); continue; }
                 if (AgencyRefused(disposition) && (objections.Count == 0 || string.IsNullOrWhiteSpace(ReadString(proposal, "reason", ""))))
                 { issues.Add("Record the actual decisive objection and reason for a refusal."); continue; }
                 if (ReadDouble(ReadDictionary(proposal, "terms"), "gold", 0d) < 0d
@@ -419,12 +419,12 @@ namespace ReignBetaServer
                 // Never lower the rejected price/scope baseline by submitting trivial or worse offers.
                 if (previous == null || material || !priorRefusal)
                 {
-                    next["subject"] = Program.LimitText(ReadString(proposal, "subject", topic), 160);
+                    next["subject"] = DialogueService.LimitText(ReadString(proposal, "subject", topic), 160);
                     next["tactic"] = ReadString(proposal, "tactic", "appeal");
                     next["disposition"] = disposition; next["terms"] = terms;
                     next["objections"] = objections.Distinct().ToList();
-                    next["reason"] = Program.LimitText(ReadString(proposal, "reason", ""), 500);
-                    next["reconsideration"] = Program.LimitText(ReadString(proposal, "reconsideration", ""), 500);
+                    next["reason"] = DialogueService.LimitText(ReadString(proposal, "reason", ""), 500);
+                    next["reconsideration"] = DialogueService.LimitText(ReadString(proposal, "reconsideration", ""), 500);
                     next["facts"] = new Dictionary<string, object>(facts);
                     next["stakes"] = ReadString(proposal, "stakes", "ordinary");
                 }
@@ -646,7 +646,7 @@ namespace ReignBetaServer
             pending["subject"] = ReadString(previous, "subject", "");
             pending["terms"] = Program.CloneDictionary(ReadDictionary(previous, "terms"));
             pending["objections"] = ReadStringList(previous, "objections");
-            pending["reason"] = Program.LimitText(ReadString(previous, "reason", "")
+            pending["reason"] = DialogueService.LimitText(ReadString(previous, "reason", "")
                 + " The latest statement was acknowledged; the other recorded conditions remain pending.", 500);
             pending["reconsideration"] = ReadString(previous, "reconsideration", "");
             pending["evidenceKeys"] = supported;

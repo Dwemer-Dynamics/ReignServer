@@ -834,12 +834,12 @@ namespace ReignBetaServer
                     string type = Program.NormalizeLookup(ReadString(fact, "event_type", ""));
                     double decay = Clamp(0d, 1d, 1d - (worldDay - ReadDouble(fact, "world_day", worldDay)) / 126d);
                     double modifier = 0d;
-                    if (Program.ContainsAny(type, "execution", "hero killed", "family punishment")) modifier = 18d;
-                    else if (Program.ContainsAny(type, "confisc", "settlement owner changed")) modifier = 12d;
-                    else if (Program.ContainsAny(type, "exile", "clan exiled")) modifier = 16d;
-                    else if (Program.ContainsAny(type, "support claimant")) modifier = 15d;
-                    else if (Program.ContainsAny(type, "battle completed", "siege completed", "military disaster")) modifier = 6d;
-                    else if (Program.ContainsAny(type, "reward", "fief granted", "reconciliation", "promise fulfilled")) modifier = -12d;
+                    if (DialogueService.ContainsAny(type, "execution", "hero killed", "family punishment")) modifier = 18d;
+                    else if (DialogueService.ContainsAny(type, "confisc", "settlement owner changed")) modifier = 12d;
+                    else if (DialogueService.ContainsAny(type, "exile", "clan exiled")) modifier = 16d;
+                    else if (DialogueService.ContainsAny(type, "support claimant")) modifier = 15d;
+                    else if (DialogueService.ContainsAny(type, "battle completed", "siege completed", "military disaster")) modifier = 6d;
+                    else if (DialogueService.ContainsAny(type, "reward", "fief granted", "reconciliation", "promise fulfilled")) modifier = -12d;
                     score += modifier * decay;
                 }
                 int claimantSupport = RebellionStore.CountEvents(connection, new Dictionary<string, object> { ["clan"] = "%" + clanId + "%" }).Select(x => ReadInt(x, "count", 0)).FirstOrDefault();

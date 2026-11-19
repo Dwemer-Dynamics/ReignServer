@@ -847,7 +847,7 @@ namespace ReignBetaServer
                                 ["version"] = OpeningRelationshipSeedVersion,
                                 ["failed"] = failed, ["missing"] = missingMbti,
                                 ["duration"] = timer.ElapsedMilliseconds,
-                                ["error"] = Program.LimitText(ex.Message, 1000),
+                                ["error"] = DialogueService.LimitText(ex.Message, 1000),
                                 ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                             });
                     }

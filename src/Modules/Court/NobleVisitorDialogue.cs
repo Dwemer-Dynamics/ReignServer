@@ -37,7 +37,7 @@ namespace ReignBetaServer
             bool privateInitiative = romantic && permittedInitiators.Count > 0;
             var prompt = new StringBuilder();
             prompt.AppendLine("CURRENT NOBLE VISIT: You are a real visiting noble, with your ordinary personality, knowledge, relationships, and agency intact.");
-            prompt.AppendLine("Visit purpose: " + Program.LimitText(ReadString(context, "purpose", ""), 600));
+            prompt.AppendLine("Visit purpose: " + DialogueService.LimitText(ReadString(context, "purpose", ""), 600));
             prompt.AppendLine("During introductions, naturally state the planned stay of " + ReadInt(context, "stayDays", 3) + " days. The stay is temporary; later conversation remains possible while you are resident.");
             prompt.AppendLine("Your household role: " + role + ". Present household: " + Json.Serialize(members));
             if (romantic && matchmaking)

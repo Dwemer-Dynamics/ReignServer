@@ -19,9 +19,9 @@ using Reign.Core.Contracts.Court;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
-        private static Dictionary<string, object> PortraitRegister(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> PortraitRegister(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -32,7 +32,7 @@ namespace ReignBetaServer
             string source = ReadString(payload, "source", "game");
             if (string.IsNullOrWhiteSpace(heroId))
             {
-                heroId = ResolveHeroIdByCharacterObjectId(campaignId, characterObjectId);
+                heroId = DialogueService.ResolveHeroIdByCharacterObjectId(campaignId, characterObjectId);
             }
 
             if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
@@ -45,14 +45,14 @@ namespace ReignBetaServer
             bool resolved = !string.IsNullOrWhiteSpace(heroId);
             if (resolved)
             {
-                destination = CharacterFile(campaignId, heroId, "portraits", safeFileName);
+                destination = Program.CharacterFile(campaignId, heroId, "portraits", safeFileName);
             }
             else
             {
-                destination = Path.Combine(CampaignDirectory(campaignId), "portraits", "unresolved", SafePathSegment(cacheKey, "unknown"), safeFileName);
+                destination = Path.Combine(Program.CampaignDirectory(campaignId), "portraits", "unresolved", Program.SafePathSegment(cacheKey, "unknown"), safeFileName);
             }
 
-            lock (FileLock)
+            lock (Program.FileLock)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(destination));
                 File.Copy(filePath, destination, true);
@@ -72,14 +72,14 @@ namespace ReignBetaServer
 
             if (resolved)
             {
-                WriteJsonObject(CharacterFile(campaignId, heroId, "portraits", "portrait.json"), meta);
+                Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "portraits", "portrait.json"), meta);
             }
             else
             {
-                WriteJsonObject(Path.Combine(Path.GetDirectoryName(destination), "portrait.json"), meta);
+                Program.WriteJsonObject(Path.Combine(Path.GetDirectoryName(destination), "portrait.json"), meta);
             }
 
-            LogOperational("portrait.register", meta);
+            Program.LogOperational("portrait.register", meta);
             return new Dictionary<string, object>
             {
                 ["ok"] = true,
@@ -90,7 +90,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> PortraitStatus(Dictionary<string, object> payload, Dictionary<string, string> query)
+        internal static Dictionary<string, object> PortraitStatus(Dictionary<string, object> payload, Dictionary<string, string> query)
         {
             payload = payload ?? new Dictionary<string, object>();
             query = query ?? new Dictionary<string, string>();
@@ -106,8 +106,8 @@ namespace ReignBetaServer
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "heroStringId is required." };
             }
 
-            string portraitPath = CharacterFile(campaignId, heroId, "portraits", "portrait.png");
-            string metaPath = CharacterFile(campaignId, heroId, "portraits", "portrait.json");
+            string portraitPath = Program.CharacterFile(campaignId, heroId, "portraits", "portrait.png");
+            string metaPath = Program.CharacterFile(campaignId, heroId, "portraits", "portrait.json");
             return new Dictionary<string, object>
             {
                 ["ok"] = true,
@@ -115,23 +115,23 @@ namespace ReignBetaServer
                 ["heroStringId"] = heroId,
                 ["exists"] = File.Exists(portraitPath),
                 ["portraitPath"] = portraitPath,
-                ["metadata"] = ReadJsonObject(metaPath)
+                ["metadata"] = Program.ReadJsonObject(metaPath)
             };
         }
 
-        private static Dictionary<string, object> PortraitDiagnose(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> PortraitDiagnose(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
             string heroId = ReadFirstString(payload, "heroStringId", "heroId", "characterId");
             string characterObjectId = ReadString(payload, "characterObjectId", "");
             string cacheKey = ReadString(payload, "cacheKey", "");
             if (string.IsNullOrWhiteSpace(heroId))
             {
-                heroId = ResolveHeroIdByCharacterObjectId(campaignId, characterObjectId);
+                heroId = DialogueService.ResolveHeroIdByCharacterObjectId(campaignId, characterObjectId);
             }
 
-            string characterDir = string.IsNullOrWhiteSpace(heroId) ? "" : CharacterDirectory(campaignId, heroId);
+            string characterDir = string.IsNullOrWhiteSpace(heroId) ? "" : Program.CharacterDirectory(campaignId, heroId);
             string portraitDir = string.IsNullOrWhiteSpace(characterDir) ? "" : Path.Combine(characterDir, "portraits");
             string customPath = string.IsNullOrWhiteSpace(portraitDir) ? "" : Path.Combine(portraitDir, "custom.png");
             string portraitPath = string.IsNullOrWhiteSpace(portraitDir) ? "" : Path.Combine(portraitDir, "portrait.png");
@@ -182,7 +182,7 @@ namespace ReignBetaServer
                 ["heroStringId"] = heroId ?? "",
                 ["characterObjectId"] = characterObjectId ?? "",
                 ["cacheKey"] = cacheKey ?? "",
-                ["dataDir"] = DataDir,
+                ["dataDir"] = Program.DataDir,
                 ["moduleDir"] = Reign.Core.Contracts.Platform.ReignInstallation.TryLoadCurrent()?.ModuleRoot ?? "",
                 ["cacheCampaignDir"] = cacheCampaignDir,
                 ["cacheCampaignDirExists"] = !string.IsNullOrWhiteSpace(cacheCampaignDir) && Directory.Exists(cacheCampaignDir),
@@ -214,14 +214,14 @@ namespace ReignBetaServer
                 ["portraitExists"] = !string.IsNullOrWhiteSpace(portraitPath) && File.Exists(portraitPath),
                 ["sourcePath"] = sourcePath,
                 ["sourceExists"] = !string.IsNullOrWhiteSpace(sourcePath) && File.Exists(sourcePath),
-                ["profile"] = string.IsNullOrWhiteSpace(characterDir) ? new Dictionary<string, object>() : ReadJsonObject(Path.Combine(characterDir, "profile.json")),
-                ["metadata"] = string.IsNullOrWhiteSpace(portraitDir) ? new Dictionary<string, object>() : ReadJsonObject(Path.Combine(portraitDir, "portrait.json"))
+                ["profile"] = string.IsNullOrWhiteSpace(characterDir) ? new Dictionary<string, object>() : Program.ReadJsonObject(Path.Combine(characterDir, "profile.json")),
+                ["metadata"] = string.IsNullOrWhiteSpace(portraitDir) ? new Dictionary<string, object>() : Program.ReadJsonObject(Path.Combine(portraitDir, "portrait.json"))
             };
-            LogOperational("portrait.diagnose", response);
+            Program.LogOperational("portrait.diagnose", response);
             return response;
         }
 
-        private static Dictionary<string, object> PortraitRequest(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> PortraitRequest(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -236,8 +236,8 @@ namespace ReignBetaServer
                 ["cacheKey"] = cacheKey,
                 ["payload"] = payload
             };
-            AppendJsonLineToPath(Path.Combine(CampaignDirectory(campaignId), "portraits", "requests.jsonl"), row);
-            LogOperational("portrait.request", row);
+            Program.AppendJsonLineToPath(Path.Combine(Program.CampaignDirectory(campaignId), "portraits", "requests.jsonl"), row);
+            Program.LogOperational("portrait.request", row);
             return new Dictionary<string, object> { ["ok"] = true, ["request"] = row };
         }
     }

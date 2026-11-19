@@ -128,7 +128,7 @@ namespace ReignBetaServer
                 using var reopened = ReignDatabase.OpenCampaignConnection(campaign);
                 Check("notice_survives_connection_reload", RelationshipsStore.SelectLetters15(reopened).Count == 1);
             }
-            catch (Exception ex) { results.Add(TestDict("caseId", "spouse_letter_suite_exception", "passed", false, "summary", Program.LimitText(ex.ToString(), 2000))); }
+            catch (Exception ex) { results.Add(TestDict("caseId", "spouse_letter_suite_exception", "passed", false, "summary", DialogueService.LimitText(ex.ToString(), 2000))); }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             return results;
         }

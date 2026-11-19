@@ -337,7 +337,7 @@ namespace ReignBetaServer
             string campaign, string observer, string peer, Dictionary<string, object> context,
             Dictionary<string, object> settings, IEnumerable<string> sourceIds)
         {
-            var access = Program.BuildKnowledgeAccessContext(observer, peer, "", context);
+            var access = DialogueService.BuildKnowledgeAccessContext(observer, peer, "", context);
             var result = new List<Dictionary<string, object>>();
             foreach (string id in sourceIds)
             {
@@ -633,7 +633,7 @@ namespace ReignBetaServer
                 turn["memoryPrecisionEvidence"] = memoryEvidence == null ? null : Program.CloneDictionary(memoryEvidence);
                 string memoryText = ReadString(memory, "memoryPacket", "");
                 if (!string.IsNullOrWhiteSpace(memoryText)) memoryText = "REIGN KNOWLEDGE PACKET\n" + memoryText;
-                turn["continuityOutputReserve"] = socialEvent ? Program.StructuredEventResponseMaxTokens(writerSettings) : Program.StructuredDialogueResponseMaxTokens(writerSettings);
+                turn["continuityOutputReserve"] = socialEvent ? DialogueService.StructuredEventResponseMaxTokens(writerSettings) : DialogueService.StructuredDialogueResponseMaxTokens(writerSettings);
                 var priorSettings = Program.CodexPerformanceSettings.Value;
                 try
                 {
@@ -651,7 +651,7 @@ namespace ReignBetaServer
                     // remains advisory here just as at real provider dispatch.
                     if (!ConversationProviderPreflightAllowsDispatch(ReadDictionary(envelope.Diagnostics, "continuityPreflight")))
                         throw new InvalidOperationException("Captured writer context is missing required original evidence.");
-                    var prepared = Program.BuildConversationGenerationRequest(writerSettings, envelope, campaign, "", observer,
+                    var prepared = DialogueService.BuildConversationGenerationRequest(writerSettings, envelope, campaign, "", observer,
                         contribution, socialEvent, observer + ":event");
                     // The non-listening fixture has no native profile file. Bind its
                     // mapped profile as the ordinary wire builder expects, retaining
@@ -949,7 +949,7 @@ namespace ReignBetaServer
             nextTranscript = nextTranscript.TakeLast(30).ToList();
             SetMemoryTranscriptContext(next, nextTranscript);
             {
-                var nextPacket = Program.BuildNpcMemoryPacket(campaign, observer, peer, "", ReadString(next, "playerText", ""), 4000, next, settings);
+                var nextPacket = DialogueService.BuildNpcMemoryPacket(campaign, observer, peer, "", ReadString(next, "playerText", ""), 4000, next, settings);
                 result["nextPacket"] = nextPacket;
                 try
                 {
@@ -1203,7 +1203,7 @@ namespace ReignBetaServer
                                     {
                                         var stored = DialogueStore.SelectMemorySpecialistSources2(connection, TestDict("id", id)).Single();
                                         indexed["document"] = TryParseJsonObject(ReadString(stored, "payload_json", "{}"));
-                                        indexed["publicTopics"] = Program.TextListFromJson(ReadString(stored, "public_topics_json", "[]"));
+                                        indexed["publicTopics"] = DialogueService.TextListFromJson(ReadString(stored, "public_topics_json", "[]"));
                                         indexed["publicEntitiesJson"] = ReadString(stored, "public_entities_json", "[]");
                                         indexed["captureSha256"] = PromptHash(CanonicalJson(captured));
                                         indexed["captureOk"] = ReadBool(extraction, "ok", false);
@@ -1285,7 +1285,7 @@ namespace ReignBetaServer
                     {
                         var queryClock = System.Diagnostics.Stopwatch.StartNew();
                         string query = ReadString(item, "query", "");
-                        var roundPacket = publishedParty == null ? Program.BuildNpcMemoryPacket(campaign, observer, peer, "", query, 4000, context, settings)
+                        var roundPacket = publishedParty == null ? DialogueService.BuildNpcMemoryPacket(campaign, observer, peer, "", query, 4000, context, settings)
                             : BuildPrecisionMemoryPacket(campaign, observer, peer, "", query, context, settings, false, publishedParty);
                         long packetMs = queryClock.ElapsedMilliseconds;
                         var writerPacket = item.ContainsKey("reviewedFactReplay")
@@ -1321,7 +1321,7 @@ namespace ReignBetaServer
                         "semanticDocuments", semanticDocuments,
                         "lateInteractionReplay",lateCaptures,"lateInteractionAudit",LateInteractionReplayAudit.Value,"precisionMode",precisionMode,
                         "memorySelectionReplay", selectionCaptures, "memoryPrecisionOrdinaryTokens", ordinaryTokens,
-                        "commonTranscript", "CURRENT CONTRIBUTION: " + ReadString(item, "query", "") + "\nRECENT DIALOGUE:\n" + Program.FormatEventLinesForPrompt(transcript),
+                        "commonTranscript", "CURRENT CONTRIBUTION: " + ReadString(item, "query", "") + "\nRECENT DIALOGUE:\n" + DialogueService.FormatEventLinesForPrompt(transcript),
                         "recentTranscriptSourceIds", transcript.Select(t => ReadString(t, "turnId", "")).ToList(),
                         "sourceSetHash", PromptHash(CanonicalJson(sources)), "pendingResponses", pending,
                         "densePipeline", denseWorker == null ? null : TestDict("index", denseIndex, "rounds", denseRounds),

@@ -95,7 +95,7 @@ namespace ReignBetaServer
                     RelationshipsStore.UpdateRelationshipNativeTargets2(connection, new Dictionary<string, object>
                         {
                             ["pair"] = pairKey,
-                            ["error"] = Program.LimitText(ReadString(failure, "error", "Native relation projection failed."), 500),
+                            ["error"] = DialogueService.LimitText(ReadString(failure, "error", "Native relation projection failed."), 500),
                             ["ts"] = ts
                         });
                 }
@@ -131,7 +131,7 @@ namespace ReignBetaServer
                             {
                                 ["pair"] = pairKey,
                                 ["day"] = batchDay,
-                                ["error"] = Program.LimitText(ReadString(failure, "error",
+                                ["error"] = DialogueService.LimitText(ReadString(failure, "error",
                                     "Native relation projection failed."), 500),
                                 ["ts"] = ts
                             });
@@ -154,7 +154,7 @@ namespace ReignBetaServer
                         ["duration"] = Math.Max(0, ReadInt(payload, "durationMs", 0)),
                         ["day"] = ReadDouble(payload, "worldDay", ReadDouble(batch, "world_day", 0d)),
                         ["ts"] = ts,
-                        ["error"] = Program.LimitText(ReadString(payload, "lastError", ""), 1000),
+                        ["error"] = DialogueService.LimitText(ReadString(payload, "lastError", ""), 1000),
                         ["plan"] = planId,
                         ["timeline"] = timelineId
                     });
@@ -249,15 +249,15 @@ namespace ReignBetaServer
                 sum += signed * weights[i];
                 denominator += Math.Abs(weights[i]);
             }
-            return denominator <= 0d ? 0d : Program.ClampDouble(sum / denominator, -1d, 1d);
+            return denominator <= 0d ? 0d : DialogueService.ClampDouble(sum / denominator, -1d, 1d);
         }
 
         private static double MbtiTraitPercent(Dictionary<string, object> profile, string key)
         {
             Dictionary<string, object> percentages = ReadDictionary(profile, "traitPercentages") ?? new Dictionary<string, object>();
-            if (percentages.ContainsKey(key)) return Program.ClampDouble(ReadDouble(percentages, key, 50d), 0d, 100d);
+            if (percentages.ContainsKey(key)) return DialogueService.ClampDouble(ReadDouble(percentages, key, 50d), 0d, 100d);
             Dictionary<string, object> foundation = ReadDictionary(profile, "foundationTraits") ?? new Dictionary<string, object>();
-            return Program.ClampDouble(50d + 20d * ReadDouble(foundation, key, 0d), 0d, 100d);
+            return DialogueService.ClampDouble(50d + 20d * ReadDouble(foundation, key, 0d), 0d, 100d);
         }
 
         private static int MbtiCompatibility(string observerType, string targetType)
@@ -313,7 +313,7 @@ namespace ReignBetaServer
         private static int StableDieFromUnit(double unit, int sides)
         {
             return Clamp(1 + (int)Math.Floor(
-                Program.ClampDouble(unit, 0d, 0.9999999999999999d) * sides),
+                DialogueService.ClampDouble(unit, 0d, 0.9999999999999999d) * sides),
                 1, Math.Max(1, sides));
         }
 

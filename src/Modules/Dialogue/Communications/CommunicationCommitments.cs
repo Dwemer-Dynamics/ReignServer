@@ -311,7 +311,7 @@ The pending commitments below are your own private dispatch ledger. Mention a pa
             var sources = ReadLogicalConversationTurns(c, session, 100).Concat(current)
                 .GroupBy(r => ReadString(r, "turn_id", "")).Select(g => g.Last()).ToList();
             var result = new List<Dictionary<string, object>>();
-            var access = Program.BuildKnowledgeAccessContext(speaker, ReadFirstString(payload, "playerHeroStringId", "playerId"), "", payload);
+            var access = DialogueService.BuildKnowledgeAccessContext(speaker, ReadFirstString(payload, "playerHeroStringId", "playerId"), "", payload);
             foreach (var item in supplied.Take(13))
             {
                 if (result.Count == 12) return new List<Dictionary<string, object>>();
@@ -472,7 +472,7 @@ The pending commitments below are your own private dispatch ledger. Mention a pa
             if (ReadBool(payload, "officialMemoryFirewall", false)) return "";
             EnsureCommunicationSchema(c);
             var text = new StringBuilder(CommunicationContract);
-            var access = Program.BuildKnowledgeAccessContext(hero, ReadFirstString(payload, "playerHeroStringId", "playerId"), "", payload);
+            var access = DialogueService.BuildKnowledgeAccessContext(hero, ReadFirstString(payload, "playerHeroStringId", "playerId"), "", payload);
             var people = ReadDictionaryList(ReadDictionary(payload, "gossipPresence"), "people");
             var self = people.FirstOrDefault(p => GossipHeroId(p) == hero);
             var player = people.FirstOrDefault(p => GossipHeroId(p) == ReadFirstString(payload, "playerHeroStringId", "playerId"));
@@ -508,7 +508,7 @@ The pending commitments below are your own private dispatch ledger. Mention a pa
         internal static bool CommunicationReplyKnown(ReignDbConnection c, string id, string hero, Dictionary<string, object> payload)
         {
             if (c == null || !WorldSimulationService.TableExists(c, "communication_history")) return false;
-            var access = Program.BuildKnowledgeAccessContext(hero, ReadFirstString(payload, "playerHeroStringId", "playerId"), "", payload);
+            var access = DialogueService.BuildKnowledgeAccessContext(hero, ReadFirstString(payload, "playerHeroStringId", "playerId"), "", payload);
             return DialogueStore.SelectCommunicationHistory2(c, TestDict("id", id + "_reply", "timeline", ContinuityTimeline(payload), "hero", hero,
                     "day", ReadDouble(payload, "worldDay", 0), "ts", access.AsOfTimestamp, "sequence", access.AsOfAcceptedSequence)).Count > 0;
         }

@@ -111,7 +111,7 @@ namespace ReignBetaServer
                 var replayRequest = Program.CloneDictionary(request); replayRequest["operation"] = path;
                 return LateInteractionReplay.Value(replayRequest);
             }
-            return TryParseJsonObject(Program.PostJsonToUrl(endpoint + path, Json.Serialize(request), timeout));
+            return TryParseJsonObject(DialogueService.PostJsonToUrl(endpoint + path, Json.Serialize(request), timeout));
         }
 
         private static void DeferLateInteractionIndex(string campaign, LateInteractionIndexRecovery recovery,
@@ -248,7 +248,7 @@ namespace ReignBetaServer
         }
 
         private static List<Dictionary<string, object>> FindLateInteractionTurns(ReignDbConnection connection,
-            MemoryQueryPlan plan, Program.KnowledgeAccessContext knowledge, int limit, bool requirePlayerSource = true)
+            MemoryQueryPlan plan, DialogueService.KnowledgeAccessContext knowledge, int limit, bool requirePlayerSource = true)
         {
             var empty = new List<Dictionary<string, object>>();
             bool isolated = !string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value);
@@ -299,7 +299,7 @@ AND t.world_day<=$day AND t.accepted_sequence<=$asOfSequence AND t.ts<=$asOfTime
                 request["eligible"] = candidates.Select(r => TestDict("sourceId", ReadString(r, "turn_id", ""),
                     "sourceHash", ReadString(r, "source_hash", ""), "textHash", ReadString(r, "text_hash", ""), "view", ReadString(r, "view", ""))).ToList();
                 var response = isolated ? LateInteractionReplay.Value(request)
-                    : TryParseJsonObject(Program.PostJsonToUrl(SemanticWorkerUrl(settings, "/memory/late/search"), Json.Serialize(request), 4000));
+                    : TryParseJsonObject(DialogueService.PostJsonToUrl(SemanticWorkerUrl(settings, "/memory/late/search"), Json.Serialize(request), 4000));
                 audit["status"] = ReadString(response, "status", "invalid_response");
                 audit["workerTiming"] = ReadDictionary(response, "timing");
                 audit["workerIndexedOriginals"] = ReadInt(response, "indexedCount", 0);

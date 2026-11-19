@@ -114,7 +114,7 @@ namespace ReignBetaServer
                     return response;
                 }
             }
-            catch (Exception ex) { return ChatViewError(Program.LimitText(ex.Message, 1200)); }
+            catch (Exception ex) { return ChatViewError(DialogueService.LimitText(ex.Message, 1200)); }
         }
 
         private static Dictionary<string, object> ChatViewDialogueOptions(Dictionary<string, object> settings) => settings
@@ -146,7 +146,7 @@ namespace ReignBetaServer
                         using var c = ReignDatabase.OpenCampaignConnection(campaign);
                         SaveChatViewJob(c, job);
                     }
-                    catch (Exception ex) { job["status"] = "failed"; job["error"] = Program.LimitText(ex.Message, 1200); }
+                    catch (Exception ex) { job["status"] = "failed"; job["error"] = DialogueService.LimitText(ex.Message, 1200); }
                     status = ReadString(job, "status", "failed");
                 }
             }
@@ -254,7 +254,7 @@ namespace ReignBetaServer
             {
                 job["status"] = ReadBool(job, "imageAttempted", false) && !ReadBool(job, "imageReturned", false)
                     || ReadBool(job, "selectionAttempted", false) && !ReadBool(job, "selectionReturned", false) ? "uncertain" : "failed";
-                job["error"] = Program.LimitText(ex.Message, 1200);
+                job["error"] = DialogueService.LimitText(ex.Message, 1200);
                 try { persist(); } catch { /* A changed/restored campaign owns its own records. */ }
                 Program.LogOperational("chat_view.failed", TestDict("campaignId", campaign, "jobId", id, "status", job["status"], "error", job["error"]));
             }

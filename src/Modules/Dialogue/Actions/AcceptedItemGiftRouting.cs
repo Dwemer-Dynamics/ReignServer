@@ -11,7 +11,7 @@ namespace ReignBetaServer
             if (!ReadBool(gate, "needed", false)
                 || !string.Equals(ReadString(gate, "commitment", ""), "accepted", StringComparison.OrdinalIgnoreCase)) return false;
             // An item within a priced/compound exchange must stay inside its atomic package.
-            if (Program.ContainsAny(existingCommand ?? "", "trade_package", "ransom_package", "diplomatic_package")) return false;
+            if (DialogueService.ContainsAny(existingCommand ?? "", "trade_package", "ransom_package", "diplomatic_package")) return false;
             string intent = ReadString(gate, "intent", "");
             if (Program.LooksLikeGiveGoldDirective(playerText + " " + intent)
                 && !Program.LooksLikeGiveItemDirective(playerText + " " + intent)) return false;
