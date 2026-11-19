@@ -39,10 +39,7 @@ namespace ReignBetaServer
             if (worldDay < 0) return profile;
             using var connection = ReignDatabase.OpenCampaignConnection(campaign);
             DialogueService.EnsureAcceptedConversationUnitSchema(connection);
-            var receipts = ReignDatabase.QuerySql(connection, @"SELECT receipt_json FROM conversation_accepted_units
-WHERE receipt_json::jsonb->'politicalReflection'->>'heroId'=$hero
-AND receipt_json::jsonb->'politicalReflection'->>'timelineId'=$timeline
-ORDER BY created_ts,unit_id;", TestDict("hero", hero, "timeline", profile.TimelineId));
+            var receipts = CharactersStore.SelectConversationAcceptedUnits(connection, TestDict("hero", hero, "timeline", profile.TimelineId));
             var revised = JsonSerializer.Deserialize<GovernmentPoliticalProfile>(JsonSerializer.Serialize(profile));
             foreach (var row in receipts)
             {

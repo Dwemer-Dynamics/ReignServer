@@ -44,8 +44,7 @@ namespace ReignBetaServer
                 using (ReignDbConnection isolationConnection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureIdentitySchema(isolationConnection);
-                    int priorRosterRows = ReadInt(ReignDatabase.QuerySql(isolationConnection,
-                        "SELECT COUNT(*) AS count FROM identity_roster;").FirstOrDefault(), "count", -1);
+                    int priorRosterRows = ReadInt(CharactersStore.CountIdentityRoster(isolationConnection).FirstOrDefault(), "count", -1);
                     add("court_audience_fixture_isolated", priorRosterRows == 0,
                         "The persisted court prompt fixture leaves the separate roster campaign empty.",
                         new Dictionary<string, object> { ["priorRosterRows"] = priorRosterRows });
@@ -129,16 +128,13 @@ namespace ReignBetaServer
                 add("synchronization_idempotent", ReadBool(sync, "rosterChanged", false) && !ReadBool(secondSync, "rosterChanged", true), "An unchanged roster fingerprint does not rebuild the network.", secondSync);
                 using (ReignDbConnection storageConnection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    int storedSyntheticPairs = ReadInt(ReignDatabase.QuerySql(storageConnection,
-                        "SELECT COUNT(*) AS count FROM acquaintances WHERE verification_source IN ('same_clan','immediate_family','same_kingdom_nobility','ruler_network');").FirstOrDefault(), "count", -1);
-                    int rosterRows = ReadInt(ReignDatabase.QuerySql(storageConnection,
-                        "SELECT COUNT(*) AS count FROM identity_roster;").FirstOrDefault(), "count", -1);
+                    int storedSyntheticPairs = ReadInt(CharactersStore.CountAcquaintances(storageConnection).FirstOrDefault(), "count", -1);
+                    int rosterRows = ReadInt(CharactersStore.CountIdentityRoster(storageConnection).FirstOrDefault(), "count", -1);
                     add("compact_roster_storage", storedSyntheticPairs == 0 && rosterRows == roster.Count,
                         "Automatic clan and immediate-family knowledge is derived from one roster row per hero instead of an O(N-squared) pair matrix.",
                         new Dictionary<string, object> { ["storedSyntheticPairs"] = storedSyntheticPairs, ["rosterRows"] = rosterRows });
                     HashSet<string> chemistryIndexes = new HashSet<string>(
-                        ReignDatabase.QuerySql(storageConnection,
-                            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='relationship_pair_chemistry';")
+                        CharactersStore.SelectSqliteMaster(storageConnection)
                             .Select(row => ReadString(row, "name", "")),
                         StringComparer.OrdinalIgnoreCase);
                     add("court_popularity_uses_directional_pair_indexes",
@@ -531,8 +527,7 @@ namespace ReignBetaServer
                     add("qualified_claim_reconciliation_persists", IdentityStateVerified(savedIntroduction)
                         && ReadString(savedIntroduction, "verification_source", "") == "authoritative_qualified_self_introduction_reconciled",
                         "An evidence-backed legacy introduction is verified on encounter and survives a fresh database connection.", reconciledEncounter);
-                    add("qualified_claim_keeps_original_evidence", ReignDatabase.QuerySql(reopenedIntroductionConnection,
-                        "SELECT evidence_id FROM identity_evidence WHERE observer_id='ochivos' AND subject_id='main_hero' AND source='self_introduction';").Count > 0,
+                    add("qualified_claim_keeps_original_evidence", CharactersStore.SelectIdentityEvidence4(reopenedIntroductionConnection).Count > 0,
                         "Reconciliation appends verification without deleting the original claim evidence.", null);
                 }
                 add("marvonara_false_claims_are_rejected",

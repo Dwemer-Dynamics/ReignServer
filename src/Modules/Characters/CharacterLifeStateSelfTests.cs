@@ -29,9 +29,7 @@ namespace ReignBetaServer
                 "terms",TestDict("conditions","Buy land peacefully; keep caravans neutral.","durationDays",0d),
                 "reason","I share that goal.","objections",new[]{"risk"},"reconsideration","I may leave if we conquer unwilling people.",
                 "playerQuote","Would you follow me in building an independent nation?","reply",words,"replyQuote",words);
-            void Receipt(ReignDbConnection connection,string turn,Dictionary<string,object> decision,string owner="npc",string commit="committed")=>ReignDatabase.ExecuteSql(connection,
-                "INSERT INTO conversation_negotiation_turns(receipt_id,timeline_id,owner_id,peer_id,turn_id,payload_json) VALUES($id,'main',$owner,'player',$turn,$payload);",
-                TestDict("id","receipt_"+turn+owner,"owner",owner,"turn",turn,"payload",Json.Serialize(TestDict("ok",true,"commitState",commit,"updates",new[]{decision}))));
+            void Receipt(ReignDbConnection connection,string turn,Dictionary<string,object> decision,string owner="npc",string commit="committed")=>CharactersSelfTestStore.InsertConversationNegotiationTurns(connection, TestDict("id","receipt_"+turn+owner,"owner",owner,"turn",turn,"payload",Json.Serialize(TestDict("ok",true,"commitState",commit,"updates",new[]{decision}))));
             try
             {
                 using(var connection=ReignDatabase.OpenCampaignConnection(campaign))
@@ -45,7 +43,7 @@ namespace ReignBetaServer
                     string prompt=BuildCharacterLifeStatePrompt(connection,"npc","player",context,new());
                     Check("unrelated_turn_retains_plan_conditions_and_autonomy",prompt.Contains("independent nation")&&prompt.Contains("keep caravans neutral")
                         &&prompt.Contains("conquer unwilling people")&&prompt.Contains("right to disagree"));
-                    Check("prompt_read_has_no_projection_write",ReadInt(ReignDatabase.QuerySql(connection,"SELECT COUNT(*) n FROM dynamic_characteristics WHERE category='life_transition';").Single(),"n",-1)==0);
+                    Check("prompt_read_has_no_projection_write",ReadInt(CharactersSelfTestStore.CountDynamicCharacteristics(connection).Single(),"n",-1)==0);
                     Check("ordinary_favor_is_not_life_change",!IsLastingCharacterDecision(TestDict("topic","favor","stakes","ordinary","disposition","accepted")));
                     Check("ordinary_intimacy_is_not_permanent_relationship",!IsLastingCharacterDecision(TestDict("topic","intimacy","stakes","ordinary","disposition","accepted")));
                     Check("explicit_life_change_not_limited_to_allegiance",IsLastingCharacterDecision(TestDict("topic","travel","stakes","life_changing","disposition","accepted")));
@@ -81,27 +79,24 @@ namespace ReignBetaServer
                     // Confirmed personal events are retained separately from any
                     // emotional interpretation or generated relationship history.
                     WorldSimulationService.EnsureWorldHistorySchema(connection);
-                    ReignDatabase.ExecuteSql(connection,@"INSERT INTO world_history_events(event_id,campaign_id,timeline_id,sequence,world_day,event_type,summary,source,created_utc)
-VALUES('marriage',$campaign,'main',1,9,'heroes_married','Ira married Maxax.','bannerlord_native','1970-01-01T00:00:09Z');
-INSERT INTO world_history_entities(event_id,ordinal,entity_id,entity_type,role) VALUES('marriage',0,'npc','hero','spouse');
-INSERT INTO world_history_knowledge_rules(rule_id,event_id,audience_type,audience_id,available_day) VALUES('marriage_npc','marriage','entity','npc',9);",TestDict("campaign",campaign));
+                    CharactersSelfTestStore.InsertWorldHistoryEvents(connection, TestDict("campaign",campaign));
                     var native=ReadCharacterNativeLifeTransitions(connection,"npc",access);
                     Check("native_marriage_is_personal_history_without_invented_love",native.Count==1&&ReadBool(native[0],"executionConfirmed",false)
                         &&ReadString(native[0],"personalMeaning","")=="not_inferred"&&!FormatCharacterLifeTransition(native[0]).Contains("in love"));
                     Check("native_same_day_later_ingest_not_visible",ReadCharacterNativeLifeTransitions(connection,"npc",
                         new Program.KnowledgeAccessContext{NpcId="npc",TimelineId="main",WorldDay=30,AsOfTimestamp=8}).Count==0);
                     Check("native_event_does_not_become_listeners_life",ReadCharacterNativeLifeTransitions(connection,"listener",access).Count==0);
-                    ReignDatabase.ExecuteSql(connection,"UPDATE world_history_entities SET role='observer' WHERE event_id='marriage';");
+                    CharactersSelfTestStore.UpdateWorldHistoryEntities(connection);
                     Check("witness_is_not_a_party_to_native_life_change",ReadCharacterNativeLifeTransitions(connection,"npc",access).Count==0);
-                    ReignDatabase.ExecuteSql(connection,"UPDATE world_history_entities SET role='' WHERE event_id='marriage';");
+                    CharactersSelfTestStore.UpdateWorldHistoryEntities2(connection);
                     Check("missing_native_actor_role_does_not_guess",ReadCharacterNativeLifeTransitions(connection,"npc",access).Count==0);
-                    ReignDatabase.ExecuteSql(connection,"UPDATE world_history_entities SET role='spouse' WHERE event_id='marriage';");
+                    CharactersSelfTestStore.UpdateWorldHistoryEntities3(connection);
                 }
                 RefreshCharacterLifeProjection(campaign,"npc",access);
                 using(var reopened=ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    Check("source_projection_survives_connection_reload",ReignDatabase.QuerySql(reopened,"SELECT * FROM dynamic_characteristics WHERE owner_id='npc' AND category='life_transition';").Count>=3);
-                    Check("historical_acceptance_marked_superseded",ReadString(ReignDatabase.QuerySql(reopened,"SELECT * FROM dynamic_characteristics WHERE source_event_id='pledge_npc';").Single(),"status","")=="superseded");
+                    Check("source_projection_survives_connection_reload",CharactersSelfTestStore.SelectDynamicCharacteristics(reopened).Count>=3);
+                    Check("historical_acceptance_marked_superseded",ReadString(CharactersSelfTestStore.SelectDynamicCharacteristics2(reopened).Single(),"status","")=="superseded");
                     var dynamics=TestDict("active",new[]{TestDict("category","life_transition","text",reply,"status","active"),
                         TestDict("category","preference","text","I like quiet gardens.","status","active")});
                     Check("life_state_does_not_crowd_out_soft_traits",DialogueService.SelectNaturalDynamicCharacteristics(dynamics,"").Count==1);

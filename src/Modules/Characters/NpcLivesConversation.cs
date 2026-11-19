@@ -95,10 +95,7 @@ namespace ReignBetaServer
             // from letters, failed drafts or a wall-clock timestamp.
             if (!encounter.LastAcceptedDay.HasValue && encounter.ContextKey == "in_person")
             {
-                var last = ReignDatabase.QuerySql(c, @"SELECT t.world_day FROM conversation_turns t WHERE t.speaker_id=$hero AND t.role='npc'
-AND t.status='active' AND t.world_day<=$day AND t.channel IN ('in_person','dialogue','individual') AND jsonb_array_length(t.participants_json::jsonb)=2
-AND t.participants_json::jsonb @> $player::jsonb AND t.payload_json::jsonb->>'timelineId'=$timeline
-ORDER BY t.world_day DESC LIMIT 1;", TestDict("hero", hero, "day", day, "player", Json.Serialize(new[] { player }), "timeline", timeline)).FirstOrDefault();
+                var last = CharactersStore.SelectConversationTurns5(c, TestDict("hero", hero, "day", day, "player", Json.Serialize(new[] { player }), "timeline", timeline)).FirstOrDefault();
                 if (last != null) encounter.LastAcceptedDay = ReadDouble(last, "world_day", day);
             }
             if (encounter.OpeningPending)
@@ -111,10 +108,7 @@ ORDER BY t.world_day DESC LIMIT 1;", TestDict("hero", hero, "day", day, "player"
                 return TestDict("ok", true, "status", "resume", "generation", generation, "sessionId", encounter.SessionId);
             string session = ReadFirstString(p, "conversationSessionId", "sessionId");
             var audience = ReadStringList(p, "npcLifeAudienceIds").Concat(new[] { player, hero }).Distinct(StringComparer.Ordinal).OrderBy(s => s, StringComparer.Ordinal).ToList();
-            if (session.Length == 0 || !ReignDatabase.QuerySql(c, @"SELECT session_id FROM conversation_sessions WHERE session_id=$id AND player_id=$player
-AND participants_json::jsonb @> $audience::jsonb AND $audience::jsonb @> participants_json::jsonb
-AND payload_json::jsonb->>'timelineId'=$timeline;",
-                TestDict("id", session, "audience", Json.Serialize(audience), "player", player, "timeline", timeline)).Any()) return TestDict("ok", false, "error", "The Approach audience or timeline has changed. Reopen the matching conversation.");
+            if (session.Length == 0 || !CharactersStore.SelectConversationSessions3(c, TestDict("id", session, "audience", Json.Serialize(audience), "player", player, "timeline", timeline)).Any()) return TestDict("ok", false, "error", "The Approach audience or timeline has changed. Reopen the matching conversation.");
             string id = "opening_" + Guid.NewGuid().ToString("N");
             if (!encounter.BeginOpening(id, day, options.Number("npcLivesResumeHours"), freshInvitation)) return TestDict("ok", true, "status", "resume");
             encounter.SessionId = session; encounter.OpeningDay = day; encounter.OpeningGeneration = generation;
@@ -210,10 +204,7 @@ AND payload_json::jsonb->>'timelineId'=$timeline;",
                 return;
             }
             var audience = ReadStringList(p, "npcLifeAudienceIds").Concat(new[] { player, hero }).Distinct(StringComparer.Ordinal).ToList();
-            if (!ReignDatabase.QuerySql(c, @"SELECT session_id FROM conversation_sessions WHERE session_id=$id AND player_id=$player
-AND participants_json::jsonb @> $audience::jsonb AND $audience::jsonb @> participants_json::jsonb
-AND payload_json::jsonb->>'timelineId'=$timeline;",
-                TestDict("id", encounter.SessionId, "player", player, "audience", Json.Serialize(audience), "timeline", state.TimelineId)).Any())
+            if (!CharactersStore.SelectConversationSessions3(c, TestDict("id", encounter.SessionId, "player", player, "audience", Json.Serialize(audience), "timeline", state.TimelineId)).Any())
             {
                 FailNpcOpening(c, state, encounter);
                 return;
@@ -224,8 +215,7 @@ AND payload_json::jsonb->>'timelineId'=$timeline;",
             encounter.Receptiveness = new[] { "busy", "neutral", "receptive", "needs_help" }.Contains(ReadString(draft, "receptiveness", ""))
                 ? ReadString(draft, "receptiveness", "") : "neutral";
             string source = encounter.OpeningOperationId + "_npc";
-            int ordinal = ReadInt(ReignDatabase.QuerySql(c, "SELECT COALESCE(MAX(turn_order),-1)+1 AS n FROM conversation_turns WHERE session_id=$id;",
-                TestDict("id", encounter.SessionId)).First(), "n", 0);
+            int ordinal = ReadInt(CharactersStore.SelectConversationTurns6(c, TestDict("id", encounter.SessionId)).First(), "n", 0);
             DialogueService.InsertConversationTurn(c, source, encounter.SessionId, encounter.OpeningOperationId, ordinal, encounter.OpeningOperationId,
                 "npc", hero, ReadString(p, "heroName", hero), reply, encounter.ContextKey == "in_person" ? "in_person" : "party_chat", encounter.OpeningDay, DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                 ReadString(p, "locationId", ""), audience, p);

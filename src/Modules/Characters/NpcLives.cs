@@ -8,14 +8,12 @@ namespace ReignBetaServer
 {
     internal static partial class CharactersService
     {
-        private static void EnsureNpcLivesSchema(ReignDbConnection c) => ReignDatabase.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS character_npc_lives_state(
-timeline_id TEXT PRIMARY KEY, value_json TEXT NOT NULL);");
+        private static void EnsureNpcLivesSchema(ReignDbConnection c) => CharactersSchema.CreateCharacterNpcLivesState(c);
 
         internal static NpcLivesState ReadNpcLives(ReignDbConnection c, string campaign, string timeline)
         {
             EnsureNpcLivesSchema(c);
-            string json = ReadString(ReignDatabase.QuerySql(c, "SELECT value_json FROM character_npc_lives_state WHERE timeline_id=$timeline;",
-                TestDict("timeline", timeline)).FirstOrDefault(), "value_json", "");
+            string json = ReadString(CharactersStore.SelectCharacterNpcLivesState(c, TestDict("timeline", timeline)).FirstOrDefault(), "value_json", "");
             var state = json.Length == 0 ? new NpcLivesState { CampaignId = campaign, TimelineId = timeline } : Json.Deserialize<NpcLivesState>(json);
             if (state.Version != 1 || state.CampaignId != campaign || state.TimelineId != timeline)
                 throw new InvalidOperationException("The saved NPC Lives state does not match this campaign and timeline.");
@@ -24,15 +22,13 @@ timeline_id TEXT PRIMARY KEY, value_json TEXT NOT NULL);");
         private static void WriteNpcLives(ReignDbConnection c, NpcLivesState state)
         {
             state.Revision++;
-            ReignDatabase.ExecuteSql(c, @"INSERT INTO character_npc_lives_state(timeline_id,value_json) VALUES($timeline,$json)
-ON CONFLICT(timeline_id) DO UPDATE SET value_json=EXCLUDED.value_json;", TestDict("timeline", state.TimelineId, "json", Json.Serialize(state)));
+            CharactersStore.UpsertCharacterNpcLivesState(c, TestDict("timeline", state.TimelineId, "json", Json.Serialize(state)));
         }
         internal static string NpcLivesGeneration(ReignDbConnection c) => ReadString(DialogueService.ReadMemoryPrecisionState(c), "restore_generation", "");
         private static int NpcLivesAffinity(ReignDbConnection c, string hero, string player, int native = 0)
         {
             RelationshipsService.EnsureMbtiRelationshipSchema(c);
-            var pair = ReignDatabase.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;",
-                TestDict("pair", RelationshipsService.AmbientPairKey(hero, player))).FirstOrDefault();
+            var pair = CharactersStore.SelectRelationshipPairChemistry4(c, TestDict("pair", RelationshipsService.AmbientPairKey(hero, player))).FirstOrDefault();
             return pair == null ? native : ReputationService.EffectiveDirectionalAffinity(pair, ReadString(pair, "hero_a_id", "") == hero, native);
         }
         private static Dictionary<string, object> NpcLivesSnapshot(ReignDbConnection c, NpcLivesState state, string invitation = "") =>
@@ -153,10 +149,7 @@ ON CONFLICT(timeline_id) DO UPDATE SET value_json=EXCLUDED.value_json;", TestDic
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             // One canonical player source, with an explicit audience. No dialogue,
             // social evaluator, agency evaluator, reward or provider fan-out runs.
-            ReignDatabase.ExecuteSql(c, @"INSERT INTO conversation_sessions
-(session_id,campaign_id,npc_id,player_id,channel,status,start_ts,end_ts,start_world_day,end_world_day,location_id,participants_json,payload_json)
-VALUES($session,$campaign,'',$player,'party_announcement','closed',$ts,$ts,$day,$day,$location,$audience,$payload);",
-                TestDict("session", id, "campaign", state.CampaignId, "player", player, "ts", ts, "day", day, "location", announcement.LocationId,
+            CharactersStore.InsertConversationSessions(c, TestDict("session", id, "campaign", state.CampaignId, "player", player, "ts", ts, "day", day, "location", announcement.LocationId,
                     "audience", Json.Serialize(audience), "payload", DialogueService.SerializeConversationTurnStoragePayload(p)));
             DialogueService.InsertConversationTurn(c, id + "_source", id, id, 0, id, "player", player, ReadString(p, "playerName", "Player"),
                 text, "party_announcement", day, ts, announcement.LocationId, audience, p);
@@ -179,12 +172,9 @@ VALUES($session,$campaign,'',$player,'party_announcement','closed',$ts,$ts,$day,
             DialogueService.PreservePlayerInputSource(c, p, announcement.Id, announcement.Id, announcement.Id, announcement.PlayerId,
                 ReadString(p, "playerName", "Player"), announcement.WorldDay, now, announcement.LocationId);
             DialogueService.BindAcceptedInputSource(c, p, announcement.Id, announcement.Id, new[] { announcement.Id + "_source" });
-            ReignDatabase.ExecuteSql(c, @"INSERT INTO conversation_input_receipts
-(input_id,timeline_id,session_id,player_id,source_turn_id,source_hash,restore_generation,status,created_ts,updated_ts)
-VALUES($id,$timeline,$session,$player,$source,$hash,$generation,'received',$now,$now) ON CONFLICT(input_id) DO NOTHING;",
-                TestDict("id", input, "timeline", state.TimelineId, "session", announcement.Id, "player", announcement.PlayerId,
+            CharactersStore.InsertOrIgnoreConversationInputReceipts(c, TestDict("id", input, "timeline", state.TimelineId, "session", announcement.Id, "player", announcement.PlayerId,
                     "source", source, "hash", hash, "generation", generation, "now", now));
-            var saved = ReignDatabase.QuerySql(c, "SELECT source_hash,source_turn_id FROM conversation_input_receipts WHERE input_id=$id;", TestDict("id", input)).Single();
+            var saved = CharactersStore.SelectConversationInputReceipts(c, TestDict("id", input)).Single();
             if (ReadString(saved, "source_hash", "") != hash || ReadString(saved, "source_turn_id", "") != source)
                 throw new InvalidOperationException("The original announcement receipt failed its identity check.");
             return TestDict("schema", DialogueService.ConversationInputSchema, "contributionId", announcement.Id, "inputId", input,

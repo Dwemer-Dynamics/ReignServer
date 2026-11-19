@@ -96,8 +96,7 @@ namespace ReignBetaServer
             using (var connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 var stored = ReadStoredAcquaintance(connection, "contextual_observer_constalia", "contextual_player");
-                var evidence = ReignDatabase.QuerySql(connection, "SELECT payload_json FROM identity_evidence WHERE observer_id=$observer AND evidence_type='contextual_self_introduction';",
-                    new Dictionary<string, object> { ["observer"] = "contextual_observer_constalia" });
+                var evidence = CharactersSelfTestStore.SelectIdentityEvidence(connection, new Dictionary<string, object> { ["observer"] = "contextual_observer_constalia" });
                 add("contextual_introduction_persists_with_evidence", IdentityStateVerified(stored)
                     && ReadString(stored, "verification_source", "") == "authoritative_qualified_self_introduction_contextual"
                     && evidence.Count == 1 && ReadString(TryParseJsonObject(ReadString(evidence[0], "payload_json", "")), "playerText", "") == exactQuote,

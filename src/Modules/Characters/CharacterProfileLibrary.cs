@@ -520,7 +520,7 @@ namespace ReignBetaServer
                     try
                     {
                         using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
-                            foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection, "SELECT DISTINCT hero_id FROM character_editor_revisions;"))
+                            foreach (Dictionary<string, object> row in CharactersStore.SelectCharacterEditorRevisions3(connection))
                                 corrected.Add(ReadString(row, "hero_id", ""));
                     }
                     catch { }

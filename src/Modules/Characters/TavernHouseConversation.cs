@@ -291,9 +291,7 @@ namespace ReignBetaServer
                 throw new InvalidDataException("The saved pending dialogue does not match this exact phase and revision.");
             using (var connection = ReignDatabase.OpenCampaignConnection(ReadString(state, "campaignId", "")))
             {
-                var row = ReignDatabase.QuerySql(connection, @"SELECT text,payload_json,event_id FROM conversation_turns
-WHERE session_id=$session AND exchange_id=$exchange AND speaker_id=$speaker AND role='npc' AND turn_id=$turn LIMIT 1;",
-                    new Dictionary<string, object> { ["session"] = phaseSession, ["exchange"] = turn, ["speaker"] = speaker,
+                var row = CharactersStore.SelectConversationTurns8(connection, new Dictionary<string, object> { ["session"] = phaseSession, ["exchange"] = turn, ["speaker"] = speaker,
                         ["turn"] = turn + "_npc_" + DialogueService.SafeMemoryKey(speaker) }).FirstOrDefault();
                 return RecoverTavernHouseDialogueRow(state, pending, row);
             }
