@@ -1,8 +1,9 @@
 # Rebellion module (server)
 
 The rebellion director: rebellion movements, memberships, backing requests and recognition, and the negotiated
-action drafts and approvals used by rebellion negotiations. One file, `RebellionDirector.cs`, which holds
-`internal static partial class RebellionService` (not a `Program` partial; it calls `Program` members with an explicit
+action drafts and approvals used by rebellion negotiations. `RebellionDirector.cs` and its partial files
+`RebellionDirector.Negotiation.cs` (queries, negotiations and preparation-dialogue classifiers) and
+`RebellionDirector.Verification.cs` (self-tests) hold `internal static partial class RebellionService` (not a `Program` partial; it calls `Program` members with an explicit
 `Program.` qualifier). `Program.RebellionRoutes.cs` stays part of `Program` and registers the service handlers.
 `Program` calls `RebellionService.UpdateNegotiationFromActionReport` and `UpdateRebellionBackingFromActionReport` from
 action reports, and the dialogue pipeline uses its rebellion classifiers.
