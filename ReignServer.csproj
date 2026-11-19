@@ -66,7 +66,7 @@
     <Compile Remove="src\Modules\Platform\CodexPerformanceVerification.cs" />
     <Compile Remove="src\Modules\Court\CapitalAmbassadorTestSystem.cs" />
     <Compile Remove="src\Modules\Portraits\BackgroundPortraitContracts.cs" />
-    <Compile Remove="src\Modules\Dialogue\PersonalGossipCompositionProbe.cs" />
+    <Compile Remove="src\Modules\Dialogue\Gossip\PersonalGossipCompositionProbe.cs" />
   </ItemGroup>
 
   <ItemGroup>

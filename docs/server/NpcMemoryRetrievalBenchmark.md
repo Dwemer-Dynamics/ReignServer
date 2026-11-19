@@ -93,7 +93,7 @@ could not be read; the public primary release is the supporting source.
 ## Reign's actual baseline and candidate approaches
 
 Current source: `services/vector-worker/worker.py`,
-`src/Modules/Dialogue/SemanticMemory.cs`, `MemoryContextV2.cs`,
+`src/Modules/Dialogue/Memory/SemanticMemory.cs`, `MemoryContextV2.cs`,
 `docs/server/MemoryPrecision.md`, and `release/embedding-model.lock.json`.
 Reign uses BGE-small-en-v1.5, a pinned quantized ONNX model through FastEmbed,
 384-dimensional cosine vectors, persistent local Qdrant with a compact float32

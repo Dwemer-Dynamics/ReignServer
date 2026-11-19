@@ -4,7 +4,7 @@ The conversation pipeline and memory: conversation sessions and continuity, prom
 structured actions in dialogue, grounding and claim validation, categorized, semantic and specialist memory, group
 and party conversation, drinking and intoxication, personal gossip, communications, temporary guests, and the final
 conversation gauntlet qualification system. The main turn handlers (`/dialogue/respond`, `/party-chat/respond`,
-`/memory/build_context`, `/context/*`) are `Program` partial files in this folder (`Program.<Area>.cs`) and call into this module.
+`/memory/build_context`, `/context/*`) are `Program` partial files at this folder's root (`Program.<Area>.cs`) and call into this module.
 
 > Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) describes the whole server
 > and the restructuring direction. Feature docs in [docs/server](../../../docs/server/README.md), for example
@@ -23,21 +23,32 @@ in the `Program.<Area>.cs` partial files here (split from `Platform/Program.cs`)
 caches, the conversation turn dispatch gate, the capacity catalog and late-interaction recovery) lives in
 `DialogueService`.
 
-## Main areas (204 files)
+## Folders
 
-- Conversation state: `Conversation*.cs`, `LogicalConversation.cs`, `SinglePassConversation.cs`,
-  `RoleplayContinuity.cs`, `GroupConversation*.cs`, `TemporaryGuestDialogue.cs`, `MotiveAwareConversation.cs`.
-- Prompts and providers: `Prompt*.cs`, `ProviderResponseRecovery.cs`, `RetiredPromptMigration.cs`,
-  `Codex*Conversation*.cs`, `CodexRoleplayMemory.cs`, `CultureVoice.cs`.
-- Actions and claims: `StructuredActions.cs`, `PlayerActionIntents.cs`, `DialogueAction*.cs`, `DialogueClaim*.cs`,
-  `DialogueAccuracy.cs`, `DialogueAnswerSupport.cs`, `AcceptedItemGiftRouting.cs`.
-- Memory: `CategorizedMemory.cs`, `SemanticMemory.cs` (also starts and supervises the vector worker),
+The module's files are grouped into feature folders (namespaces are unchanged; the handler files
+`Program.<Area>.cs` and `Program.DialogueRoutes.cs` stay at the module root):
+
+- `Conversation/`: conversation state and continuity, `Conversation*.cs`, `LogicalConversation.cs`,
+  `SinglePassConversation.cs`, `RoleplayContinuity.cs`, `GroupConversation*.cs`, `TemporaryGuestDialogue.cs`,
+  `MotiveAwareConversation*.cs`, `CharacterCommitments.cs`, `PlayerInputAudience.cs`, `PlayerPerformanceContext.cs`,
+  `PoliticalDangerPosture.cs`.
+- `Drinking/`: `ConversationBeverages.cs`, `ConversationDrink*.cs`, `ConversationIntoxication*.cs`.
+- `Prompts/`: `Prompt*.cs`, `ProviderResponseRecovery.cs`, `RetiredPromptMigration.cs`, `Codex*.cs`, `CultureVoice.cs`.
+- `Actions/`: `StructuredActions.cs`, `PlayerActionIntents.cs`, `DialogueAction*.cs`, `DialogueAgencyEvidence.cs`,
+  `ConversationEffectAcceptance.cs`, `AcceptedItemGiftRouting.cs`.
+- `Grounding/`: `DialogueClaim*.cs`, `DialogueAccuracy.cs`, `DialogueAnswerSupport.cs`, `DialogueIntegrity.cs`,
+  `DialogueQuestionCoverage.cs`, `ConversationGrounding*.cs`, `ConversationInputGrounding.cs`, `ConversationEvidence.cs`.
+- `Memory/`: `CategorizedMemory*.cs`, `SemanticMemory*.cs` (also starts and supervises the vector worker),
   `Memory*.cs`, `LateInteractionMemory.cs`, `TemporalKnowledgeGraph.cs`, `SharedActivityMemory.cs`,
-  `CorrespondenceMemory.cs`, `WorldHistoryDialogueMemory.cs`, `LieDetection.cs`.
-- Social features: `PersonalGossip*.cs`, `PartyBanter.cs`, `Communication*.cs`, `ChatViewSources.cs`.
-- Qualification: `FinalConversationGauntlet*.cs`, `NpcDialogueAudit.cs`, `PartyDialogueAudit.cs`,
-  `ConversationReadiness*.cs`, `ConversationQualificationFixtures.cs`, `InteractionReplayCorpus.cs`, the `*Replay.cs`
-  files and `SovereignDemeanorQualification.cs`.
+  `WorldHistoryDialogueMemory.cs`, `ConversationRouteMemory.cs`, `LieDetection.cs`.
+- `Gossip/`: `PersonalGossip*.cs`.
+- `Communications/`: `Communication*.cs`, `CorrespondenceMemory.cs`, `PartyBanter.cs`, `ChatViewSources.cs`.
+- `Qualification/`: `NpcDialogueAudit.cs`, `PartyDialogueAudit.cs`, `ConversationReadiness*.cs`,
+  `ConversationQualificationFixtures.cs`, `InteractionReplayCorpus.cs`, the `*Replay*.cs` files and
+  `SovereignDemeanorQualification.cs`.
+- `FinalGauntlet/`: `FinalConversationGauntlet*.cs` (the final conversation gauntlet controller, catalog and evaluation).
+
+Self-test files sit beside the code they test, and split partial files (`Name.*.cs`) stay in the same folder as `Name.cs`.
 
 ## Routes
 
