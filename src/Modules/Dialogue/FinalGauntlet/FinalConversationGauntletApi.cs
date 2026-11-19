@@ -366,11 +366,8 @@ namespace ReignBetaServer
                 {
                     string instanceId =
                         ReadString(leased, "caseInstanceId", "");
-                    leased["case"] = ReignDatabase.QuerySql(
-                        connection,
-                        @"SELECT * FROM final_gauntlet_cases
-WHERE run_id=$run AND case_instance_id=$case LIMIT 1;",
-                        new Dictionary<string, object>
+                    leased["case"] = DialogueStore.SelectFinalGauntletCases(
+                        connection, new Dictionary<string, object>
                         {
                             ["run"] = ReadString(payload, "runId", ""),
                             ["case"] = instanceId
@@ -503,16 +500,8 @@ WHERE run_id=$run AND case_instance_id=$case LIMIT 1;",
             if (liveRun.Count > 0)
                 evidence["sourceAuditEntries"] =
                     WorldSimulationService.CollectLiveTestAuditEvidence(liveRun);
-            ReignDatabase.ExecuteSql(
-                connection,
-                @"INSERT INTO final_gauntlet_evidence(
-run_id,case_instance_id,evidence_key,schema_version,payload_json,created_ts)
-VALUES($run,$case,'production_result',4,$payload,$ts)
-ON CONFLICT(run_id,case_instance_id,evidence_key) DO UPDATE SET
-schema_version=excluded.schema_version,
-payload_json=excluded.payload_json,
-created_ts=excluded.created_ts;",
-                new Dictionary<string, object>
+            DialogueStore.UpsertFinalGauntletEvidence(
+                connection, new Dictionary<string, object>
                 {
                     ["run"] = runId,
                     ["case"] = caseInstanceId,
@@ -645,22 +634,12 @@ created_ts=excluded.created_ts;",
                 stored["ok"] = true;
                 if (includeReport)
                 {
-                    stored["attempts"] = ReignDatabase.QuerySql(
-                        connection,
-                        @"SELECT * FROM final_gauntlet_attempts
-WHERE run_id=$run ORDER BY case_instance_id,attempt_number;",
-                        new Dictionary<string, object> { ["run"] = runId });
-                    stored["assertions"] = ReignDatabase.QuerySql(
-                        connection,
-                        @"SELECT * FROM final_gauntlet_assertions
-WHERE run_id=$run ORDER BY case_instance_id,assertion_id;",
-                        new Dictionary<string, object> { ["run"] = runId });
-                    stored["evidence"] = ReignDatabase.QuerySql(
-                        connection,
-                        @"SELECT run_id,case_instance_id,evidence_key,
-schema_version,created_ts FROM final_gauntlet_evidence
-WHERE run_id=$run ORDER BY case_instance_id,evidence_key;",
-                        new Dictionary<string, object> { ["run"] = runId });
+                    stored["attempts"] = DialogueStore.SelectFinalGauntletAttempts(
+                        connection, new Dictionary<string, object> { ["run"] = runId });
+                    stored["assertions"] = DialogueStore.SelectFinalGauntletAssertions(
+                        connection, new Dictionary<string, object> { ["run"] = runId });
+                    stored["evidence"] = DialogueStore.SelectFinalGauntletEvidence(
+                        connection, new Dictionary<string, object> { ["run"] = runId });
                     stored["artifacts"] = ExportFinalGauntletReport(
                         connection, campaignId, runId);
                 }
@@ -682,13 +661,8 @@ WHERE run_id=$run ORDER BY case_instance_id,evidence_key;",
             using (ReignDbConnection connection =
                 FinalGauntletStore.OpenControlConnection())
             {
-                List<Dictionary<string, object>> items = ReignDatabase.QuerySql(
-                    connection,
-                    @"SELECT review_id,case_instance_id,
-blinded_payload_json,created_ts
-FROM final_gauntlet_review_items WHERE run_id=$run
-ORDER BY review_id;",
-                    new Dictionary<string, object> { ["run"] = runId });
+                List<Dictionary<string, object>> items = DialogueStore.SelectFinalGauntletReviewItems(
+                    connection, new Dictionary<string, object> { ["run"] = runId });
                 if (items.Count == 0)
                     ExportFinalGauntletReport(
                         connection, campaignId, runId);
@@ -696,13 +670,8 @@ ORDER BY review_id;",
                 {
                     ["ok"] = true,
                     ["runId"] = runId,
-                    ["items"] = ReignDatabase.QuerySql(
-                        connection,
-                        @"SELECT review_id,case_instance_id,
-blinded_payload_json,created_ts
-FROM final_gauntlet_review_items WHERE run_id=$run
-ORDER BY review_id;",
-                        new Dictionary<string, object> { ["run"] = runId })
+                    ["items"] = DialogueStore.SelectFinalGauntletReviewItems(
+                        connection, new Dictionary<string, object> { ["run"] = runId })
                 };
             }
         }

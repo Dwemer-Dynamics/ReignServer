@@ -89,8 +89,7 @@ namespace ReignBetaServer
                     "Missing native timeline means main, never all branches; the supplied memory time fence remains authoritative.");
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,channel,status,start_ts,participants_json,payload_json)
-VALUES('direct-session',$campaign,'npc','player','in_person','closed',10,'[""npc"",""player""]','{""timelineId"":""main""}');", TestDict("campaign", campaign));
+                    DialogueSelfTestStore.InsertConversationSessions26(connection, TestDict("campaign", campaign));
                     void Turn(string id, int index, string text, double day, List<string> audience, string timeline) =>
                         InsertConversationTurn(connection, id, "direct-session", id, index, id, "player", "player", "Player", text,
                             "in_person", day, 10L + index, "", audience, TestDict("timelineId", timeline));

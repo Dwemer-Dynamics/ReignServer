@@ -137,12 +137,12 @@ namespace ReignBetaServer
                     Program.InsertObligation(connection, "promise_event", write, 100, "dialogue");
                     Program.InsertObligation(connection, "promise_event", write, 100, "dialogue");
                 }
-                Check("accepted_retry_does_not_duplicate_debt", ReignDatabase.QuerySql(connection, "SELECT * FROM obligations;").Count == 2);
-                Check("accepted_promise_persists_canonical_timeline", ReignDatabase.QuerySql(connection, "SELECT * FROM obligations;").All(row => ReadString(row, "timeline_id", "") == "promise_branch"));
-                ReignDatabase.ExecuteSql(connection, "UPDATE obligations SET timeline_id='main'; DELETE FROM schema_meta WHERE key='character_commitment_timeline_v1';");
+                Check("accepted_retry_does_not_duplicate_debt", DialogueSelfTestStore.SelectObligations(connection).Count == 2);
+                Check("accepted_promise_persists_canonical_timeline", DialogueSelfTestStore.SelectObligations(connection).All(row => ReadString(row, "timeline_id", "") == "promise_branch"));
+                DialogueSelfTestStore.UpdateObligations(connection);
                 EnsureCharacterCommitmentTimeline(connection);
                 EnsureCharacterCommitmentTimeline(connection);
-                Check("legacy_supported_default_timeline_repaired_once", ReignDatabase.QuerySql(connection, "SELECT * FROM obligations;").All(row => ReadString(row, "timeline_id", "") == "promise_branch"));
+                Check("legacy_supported_default_timeline_repaired_once", DialogueSelfTestStore.SelectObligations(connection).All(row => ReadString(row, "timeline_id", "") == "promise_branch"));
                 foreach (string guard in new[] { "unsupported", "edited", "foreign", "missing" })
                 {
                     var guarded = Program.CloneDictionary(fallback[0]);
@@ -150,20 +150,19 @@ namespace ReignBetaServer
                     if (guard == "unsupported") guarded["sourceValidation"] = "incomplete";
                     if (guard == "missing") guarded.Remove("timelineId");
                     Program.InsertObligation(connection, "promise_event", guarded, 100, "dialogue");
-                    ReignDatabase.ExecuteSql(connection, "UPDATE obligations SET timeline_id=$timeline,revision=$revision WHERE obligation_id=$id;",
-                        TestDict("id", "migration_" + guard, "timeline", guard == "foreign" ? "other" : "main", "revision", guard == "edited" ? 1 : 0));
+                    DialogueSelfTestStore.UpdateObligations2(connection, TestDict("id", "migration_" + guard, "timeline", guard == "foreign" ? "other" : "main", "revision", guard == "edited" ? 1 : 0));
                 }
-                ReignDatabase.ExecuteSql(connection, "DELETE FROM schema_meta WHERE key='character_commitment_timeline_v1';");
+                DialogueSelfTestStore.DeleteSchemaMeta(connection);
                 EnsureCharacterCommitmentTimeline(connection);
-                Check("timeline_migration_preserves_unverified_revised_foreign_and_missing_rows", ReignDatabase.QuerySql(connection, "SELECT * FROM obligations WHERE obligation_id LIKE 'migration_%';")
+                Check("timeline_migration_preserves_unverified_revised_foreign_and_missing_rows", DialogueSelfTestStore.SelectObligations2(connection)
                     .All(row => ReadString(row, "timeline_id", "") == (ReadString(row, "obligation_id", "") == "migration_foreign" ? "other" : "main")));
                 var ids = new List<string>();
                 string prompt = BuildCharacterCommitmentPrompt(connection, "npc", "player", context, ids);
                 Check("unrelated_topic_keeps_both_protected_promises", prompt.Contains(clauses[0]) && prompt.Contains(clauses[1]) && ids.Count == 2,
-                    TestDict("prompt", prompt, "evidence", ReadDictionary(context, "characterCommitmentEvidence"), "rows", ReignDatabase.QuerySql(connection, "SELECT * FROM obligations;").Select(row =>
+                    TestDict("prompt", prompt, "evidence", ReadDictionary(context, "characterCommitmentEvidence"), "rows", DialogueSelfTestStore.SelectObligations(connection).Select(row =>
                         TestDict("id", ReadString(row, "obligation_id", ""), "payload", TryParseJsonObject(ReadString(row, "payload_json", "{}")),
                             "visible", Program.KnowledgeRowVisibleToNpc("obligations", row, Program.BuildKnowledgeAccessContext("npc", "player", "", context), connection))).ToList(),
-                        "eligible", ReignDatabase.QuerySql(connection, "SELECT obligation_id FROM obligations WHERE " + MemoryEligibilitySql("obligations") + " AND " + MemorySourceTimelineSql("obligations") + ";", TestDict("observer", "npc", "timeline", "promise_branch")).Count));
+                        "eligible", DialogueSelfTestStore.SelectObligations3(connection, MemoryEligibilitySql("obligations"), MemorySourceTimelineSql("obligations"),TestDict("observer", "npc", "timeline", "promise_branch")).Count));
                 Check("joint_prompt_does_not_share_owner_only_commitment", BuildCharacterCommitmentPrompt(connection, "npc", "player", context, new List<string>(), new[] { "stranger" }).Length == 0
                     && BuildCharacterCommitmentPrompt(connection, "npc", "player", context, new List<string>(), new[] { "player" }).Contains(clauses[0]));
                 var banterHero = TestDict("heroStringId", "npc", "name", "Corein", "age", 30);
@@ -177,23 +176,22 @@ namespace ReignBetaServer
                 Check("future_promise_cannot_leak", BuildCharacterCommitmentPrompt(connection, "npc", "player", new Dictionary<string, object>(context) { ["worldDay"] = 19d }, new List<string>()).Length == 0);
                 Check("wrong_timeline_cannot_leak", BuildCharacterCommitmentPrompt(connection, "npc", "player", new Dictionary<string, object>(context) { ["timelineId"] = "other" }, new List<string>()).Length == 0);
                 Check("official_channel_preserves_private_firewall", BuildCharacterCommitmentPrompt(connection, "npc", "player", new Dictionary<string, object>(context) { ["officialMemoryFirewall"] = true }, new List<string>()).Length == 0);
-                ReignDatabase.ExecuteSql(connection, "UPDATE obligations SET status='fulfilled' WHERE description=$description;", TestDict("description", clauses[0]));
+                DialogueSelfTestStore.UpdateObligations3(connection, TestDict("description", clauses[0]));
                 string partlyFulfilled = BuildCharacterCommitmentPrompt(connection, "npc", "player", context, new List<string>());
                 Check("closing_one_promise_keeps_the_other_active", !partlyFulfilled.Contains(clauses[0]) && partlyFulfilled.Contains(clauses[1]));
-                ReignDatabase.ExecuteSql(connection, "UPDATE obligations SET status='fulfilled';");
+                DialogueSelfTestStore.UpdateObligations4(connection);
                 Check("fulfilled_promise_does_not_reappear_active", BuildCharacterCommitmentPrompt(connection, "npc", "player", context, new List<string>()).Length == 0);
 
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""player"",""bootstrap_npc""]','{""timelineId"":""promise_branch""}');", TestDict("campaign", campaign));
+                DialogueSelfTestStore.InsertConversationSessions(connection, TestDict("campaign", campaign));
                 var bootstrapContext = new Dictionary<string, object>(context) { ["conversationSessionId"] = "promise_bootstrap", ["participants"] = new[] { "player", "bootstrap_npc" } };
                 StoreConversationExchange(campaign, bootstrapContext, "bootstrap_npc", "player", "Michael", "Corein", "What can you promise?", corein, "bootstrap_accepted", 200);
-                ReignDatabase.ExecuteSql(connection, "DELETE FROM schema_meta WHERE key='explicit_accepted_commitment_bootstrap_v1';");
+                DialogueSelfTestStore.DeleteSchemaMeta2(connection);
                 EnsureLatestAcceptedCommitments(connection);
                 EnsureLatestAcceptedCommitments(connection);
                 string bootstrapped = BuildCharacterCommitmentPrompt(connection, "bootstrap_npc", "player", bootstrapContext, new List<string>());
                 Check("latest_accepted_private_source_bootstrapped_once", bootstrapped.Contains(clauses[0]) && bootstrapped.Contains(clauses[1])
-                    && ReignDatabase.QuerySql(connection, "SELECT * FROM obligations WHERE owed_by='bootstrap_npc';").Count == 2,
-                    TestDict("prompt", bootstrapped, "rows", ReignDatabase.QuerySql(connection, "SELECT * FROM obligations WHERE owed_by='bootstrap_npc';")));
+                    && DialogueSelfTestStore.SelectObligations4(connection).Count == 2,
+                    TestDict("prompt", bootstrapped, "rows", DialogueSelfTestStore.SelectObligations4(connection)));
 
                 WorldSimulationService.EnsureWorldHistorySchema(connection);
                 EnsurePlayerPerformanceSchema(connection);
@@ -246,8 +244,8 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                 Check("duel_native_ids_not_prose", NativePerformanceOutcome("social_outcome", TestDict("sourceEventId", "duel|action|winner", "winnerHeroId", "player", "loserHeroId", "npc"), TestDict("entity_id", "player")) == "win"
                     && NativePerformanceOutcome("social_outcome", TestDict("sourceEventId", "rumor|duel", "winnerHeroId", "player", "loserHeroId", "npc"), TestDict("entity_id", "player")) == "");
                 ReputationService.EnsureSocialReputationSchema(connection);
-                int rumorsBeforePractice = ReignDatabase.QuerySql(connection, "SELECT * FROM rumor_occurrences;").Count;
-                int reputationsBeforePractice = ReignDatabase.QuerySql(connection, "SELECT * FROM character_reputations;").Count;
+                int rumorsBeforePractice = DialogueSelfTestStore.SelectRumorOccurrences(connection).Count;
+                int reputationsBeforePractice = DialogueSelfTestStore.SelectCharacterReputations2(connection).Count;
                 foreach (bool playerWon in new[] { true, false })
                 {
                     string action = "private_practice_" + playerWon;
@@ -263,8 +261,8 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                     Program.StoreActionResultMemory(pending, "fixture");
                     var report = Program.ReportAction(practice);
                     var replay = Program.ReportAction(practice);
-                    var memories = ReignDatabase.QuerySql(connection, "SELECT * FROM memories WHERE event_id=$event;", TestDict("event", "action_" + action));
-                    var evt = ReignDatabase.QuerySql(connection, "SELECT * FROM events WHERE event_id=$event;", TestDict("event", "action_" + action)).Single();
+                    var memories = DialogueSelfTestStore.SelectMemories(connection, TestDict("event", "action_" + action));
+                    var evt = DialogueSelfTestStore.SelectEvents(connection, TestDict("event", "action_" + action)).Single();
                     Check("practice_remembers_result_for_opponent_" + playerWon, ReadBool(report, "ok", false) && ReadBool(report, "found", false)
                         && ReadBool(ReadDictionary(report, "memoryStore"), "ok", false) && ReadBool(replay, "ok", false)
                         && memories.Count == 1 && ReadString(memories[0], "owner_id", "") == "npc"
@@ -276,25 +274,25 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                         && !Program.KnowledgeRowVisibleToNpc("events", evt, privateAccess, connection)
                         && ReadDouble(evt, "world_day", 0d) == 20d, evt);
                     string receipt = "action_receipt_" + PromptHash("promise_branch|" + action + "|completed").Substring(0, 32);
-                    var observers = ReignDatabase.QuerySql(connection, "SELECT * FROM shared_activity_observers WHERE activity_id=$id;", TestDict("id", receipt));
+                    var observers = DialogueSelfTestStore.SelectSharedActivityObservers(connection, TestDict("id", receipt));
                     Check("practice_action_receipt_has_no_other_npc_" + playerWon,
-                        ReignDatabase.QuerySql(connection, "SELECT * FROM shared_activity_events WHERE activity_id=$id;", TestDict("id", receipt)).Count == 1
+                        DialogueSelfTestStore.SelectSharedActivityEvents(connection, TestDict("id", receipt)).Count == 1
                         && observers.Any(row => ReadString(row, "owner_id", "") == "npc")
                         && observers.All(row => new[] { "npc", "player" }.Contains(ReadString(row, "owner_id", ""))), observers);
                     Check("practice_has_no_automatic_relationship_effect_" + playerWon,
                         ReadDictionaryList(report, "nativeRelationChanges").Count == 0
                         && RelationshipsService.EvaluateCompletedActionRelationships(practice).Count == 0);
                     Check("practice_creates_no_public_or_social_history_" + playerWon,
-                        ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_events WHERE correlation_id=$action;", TestDict("action", action)).Count == 0
-                        && ReignDatabase.QuerySql(connection, "SELECT * FROM character_performance_events WHERE event_id=$event;", TestDict("event", "action_" + action)).Count == 0);
+                        DialogueSelfTestStore.SelectWorldHistoryEvents(connection, TestDict("action", action)).Count == 0
+                        && DialogueSelfTestStore.SelectCharacterPerformanceEvents(connection, TestDict("event", "action_" + action)).Count == 0);
                     var malformed = Program.CloneDictionary(practice); malformed["actionId"] = action + "_missing"; malformed.Remove("actorHeroStringId");
                     Check("practice_missing_identity_never_becomes_public_" + playerWon,
                         !ReadBool(Program.StoreActionResultMemory(malformed, "fixture"), "ok", true)
-                        && ReignDatabase.QuerySql(connection, "SELECT * FROM events WHERE event_id=$event;", TestDict("event", "action_" + action + "_missing")).Count == 0);
+                        && DialogueSelfTestStore.SelectEvents(connection, TestDict("event", "action_" + action + "_missing")).Count == 0);
                 }
                 Check("practice_leaves_rumors_and_reputations_unchanged",
-                    ReignDatabase.QuerySql(connection, "SELECT * FROM rumor_occurrences;").Count == rumorsBeforePractice
-                    && ReignDatabase.QuerySql(connection, "SELECT * FROM character_reputations;").Count == reputationsBeforePractice);
+                    DialogueSelfTestStore.SelectRumorOccurrences(connection).Count == rumorsBeforePractice
+                    && DialogueSelfTestStore.SelectCharacterReputations2(connection).Count == reputationsBeforePractice);
                 Check("practice_report_detection_preserves_other_duels", !Program.IsPracticeDuelActionReport(TestDict("type", "RegularDuelPlayer",
                     "result", TestDict("resultCode", "training_duel_completed")))
                     && !Program.IsPracticeDuelActionReport(TestDict("type", "RegularDuelPlayer", "result", TestDict("resultCode", "lethal_duel_completed")))
@@ -308,13 +306,13 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                     && Program.InferDuelModeFromDirective("A sparse crowd watched the duel.") != "practice" && !Program.IsLethalDuelMode("practice"));
                 Check("one_and_zero_are_not_false_lifetime_claims", RoughPerformanceCount(0) == "no documented results" && RoughPerformanceCount(1) == "one recorded result");
                 Check("hundred_boundary_conservative", RoughPerformanceCount(100) == "around a hundred" && RoughPerformanceCount(101) == "over a hundred" && RoughPerformanceCount(200) == "hundreds");
-                ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_events;");
+                DialogueSelfTestStore.DeleteWorldHistoryEvents(connection);
                 Check("retained_receipts_survive_lossy_history", ReadInt(ReadPlayerPerformanceCounts(connection, "promise_branch", "player", 20d, access), "battleWins", 0) == 107);
                 string generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
                 CaptureRestoredMemorySources(connection, TestDict("savePointId", "fixture_point", "timelineId", "promise_branch", "campaignTimeDays", 20d, "worldHistorySequence", 1L, "worldHistoryHeadEventId", "fixture_head"), generation);
                 BindRecoveredMemorySources(connection, "promise_branch", "recovered", 1L, "fixture_head");
                 Check("verified_restored_receipts_follow_recovered_branch", ReadInt(ReadPlayerPerformanceCounts(connection, "recovered", "player", 20d, access), "battleWins", 0) == 107);
-                ReignDatabase.ExecuteSql(connection, "UPDATE character_performance_events SET source_hash='changed' WHERE competition_id='battle_0';");
+                DialogueSelfTestStore.UpdateCharacterPerformanceEvents(connection);
                 Check("changed_or_foreign_receipt_cannot_borrow_snapshot_proof", ReadInt(ReadPlayerPerformanceCounts(connection, "recovered", "player", 20d, access), "battleWins", 0) == 106
                     && ReadInt(ReadPlayerPerformanceCounts(connection, "unrelated_branch", "player", 20d, access), "battleWins", 0) == 0);
                 Program.InsertObligation(connection, "native_fixture", TestDict("obligation_id", "native_protected", "description", "Native confirmed terms.",
@@ -328,10 +326,10 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                     Program.InsertObligation(connection, "proposal_event", Program.CloneDictionary(proposal), 200, "dialogue");
                     Program.InsertObligation(connection, "proposal_event", Program.CloneDictionary(proposal), 200, "dialogue");
                 }
-                var proposals = ReignDatabase.QuerySql(connection, "SELECT * FROM obligations WHERE payload_json::jsonb->>'proposedRevisionOf'='native_protected';");
+                var proposals = DialogueSelfTestStore.SelectObligations5(connection);
                 Check("incompatible_proposal_replay_is_idempotent_and_observer_scoped", proposals.Count == 2
                     && proposals.Select(row => ReadString(row, "known_by_json", "")).Distinct().Count() == 2
-                    && ReadString(ReignDatabase.QuerySql(connection, "SELECT description FROM obligations WHERE obligation_id='native_protected';").Single(), "description", "") == "Native confirmed terms.");
+                    && ReadString(DialogueSelfTestStore.SelectObligations6(connection).Single(), "description", "") == "Native confirmed terms.");
                 var revision = Program.CloneDictionary(reportedOffer); revision["timelineId"] = "revision_fixture";
                 revision["description"] = "An unresolved interpreted request.";
                 ReadDictionary(revision, "sourceEvidence")["timestamp"] = 200L;
@@ -341,13 +339,12 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                 revision["obligation_id"] = revisionId; revision["description"] = "The model interprets the newer statement as fulfillment.";
                 revision["status"] = "fulfilled"; ReadDictionary(revision, "sourceEvidence")["timestamp"] = 300L;
                 Program.InsertObligation(connection, "revision_event_later", Program.CloneDictionary(revision), 300, "dialogue");
-                var revised = ReignDatabase.QuerySql(connection, "SELECT * FROM obligations WHERE obligation_id=$id;", TestDict("id", revisionId)).Single();
+                var revised = DialogueSelfTestStore.SelectObligations7(connection, TestDict("id", revisionId)).Single();
                 Check("newer_bound_revision_persists_source_and_history", ReadString(revised, "status", "") == "fulfilled"
                     && ReadDictionaryList(TryParseJsonObject(ReadString(revised, "payload_json", "{}")), "interpretationHistory").Count == 1);
                 revision["status"] = "active"; ReadDictionary(revision, "sourceEvidence")["timestamp"] = 400L;
                 Program.InsertObligation(connection, "revival_event", revision, 400, "dialogue");
-                Check("inferred_revival_does_not_overwrite_closed_record", ReadString(ReignDatabase.QuerySql(connection,
-                    "SELECT status FROM obligations WHERE obligation_id=$id;", TestDict("id", revisionId)).Single(), "status", "") == "fulfilled");
+                Check("inferred_revival_does_not_overwrite_closed_record", ReadString(DialogueSelfTestStore.SelectObligations8(connection, TestDict("id", revisionId)).Single(), "status", "") == "fulfilled");
             }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             results.AddRange(RunCommitmentSourceContextAssertions());
@@ -378,7 +375,7 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                     write["timelineId"] = timeline; write["worldDay"] = day; write["created_day"] = day;
                     if (obligation.Length > 0) write["obligation_id"] = obligation;
                     Program.InsertObligation(c, id, write, (long)(day * 10), "dialogue");
-                    return ReignDatabase.QuerySql(c, "SELECT * FROM obligations WHERE event_id=$event;", TestDict("event", id)).Single();
+                    return DialogueSelfTestStore.SelectObligations9(c, TestDict("event", id)).Single();
                 }
                 var first = Save("original", originalQuestion, promise);
                 string obligationId = ReadString(first, "obligation_id", "");
@@ -395,8 +392,7 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                     var legacyPayload = Program.CloneDictionary(storedPayload);
                     if (legacyShape == "missing") legacyPayload.Remove("commitmentOriginalSource");
                     else legacyPayload["commitmentOriginalSource"] = legacyShape == "null" ? null : "legacy value";
-                    ReignDatabase.ExecuteSql(c, "UPDATE obligations SET payload_json=$payload WHERE obligation_id=$id;",
-                        TestDict("payload", Json.Serialize(legacyPayload), "id", obligationId));
+                    DialogueSelfTestStore.UpdateObligations5(c, TestDict("payload", Json.Serialize(legacyPayload), "id", obligationId));
                     string legacyPrompt = Build();
                     Check("legacy_original_" + legacyShape + "_uses_verified_current_source",
                         legacyPrompt.Contains(originalQuestion) && legacyPrompt.Contains(promise)
@@ -414,8 +410,7 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                     context, new List<Program.KnowledgeAccessContext> { Program.BuildKnowledgeAccessContext("npc", "player", "", context) },
                     unreferencedSources, new List<Dictionary<string, object>>());
                 Check("missing_both_references_does_not_invent_source_context", unreferencedContext.Length == 0 && unreferencedSources.Count == 0);
-                ReignDatabase.ExecuteSql(c, "UPDATE obligations SET payload_json=$payload WHERE obligation_id=$id;",
-                    TestDict("payload", Json.Serialize(storedPayload), "id", obligationId));
+                DialogueSelfTestStore.UpdateObligations5(c, TestDict("payload", Json.Serialize(storedPayload), "id", obligationId));
                 string unrelated = Build(new Dictionary<string, object>(context) { ["playerText"] = "The weather is pleasant today." });
                 Check("unrelated_topic_keeps_ledger_without_expansion", unrelated.Contains(promise) && !unrelated.Contains(originalQuestion));
                 var topic = new Dictionary<string, object>(context) { ["playerText"] = "", ["memoryActiveTopic"] = "father" };
@@ -424,46 +419,43 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                 var forged = TryParseJsonObject(ReadString(first, "payload_json", "{}"));
                 forged["commitmentOriginalSource"] = TestDict("sourceEventId", "forged", "quote", "an invented unrelated conversation");
                 Program.InsertObligation(c, "original", forged, 200, "dialogue");
-                Check("model_cannot_replace_original_source_reference", ReadString(ReadDictionary(TryParseJsonObject(ReadString(ReignDatabase.QuerySql(c,
-                    "SELECT * FROM obligations WHERE obligation_id=$id;", TestDict("id", obligationId)).Single(), "payload_json", "{}")), "commitmentOriginalSource"), "sourceEventId", "") == "original");
+                Check("model_cannot_replace_original_source_reference", ReadString(ReadDictionary(TryParseJsonObject(ReadString(DialogueSelfTestStore.SelectObligations7(c, TestDict("id", obligationId)).Single(), "payload_json", "{}")), "commitmentOriginalSource"), "sourceEventId", "") == "original");
                 const string revised = "I promise to speak to my father after the harvest instead.";
                 Save("revision", "Please wait until the harvest before speaking to your father.", revised, 21d, obligationId);
                 string revision = Build();
                 Check("revision_keeps_original_and_latest_exchange", revision.Contains(originalQuestion) && revision.Contains(promise)
                     && revision.Contains("turn_id=revision_npc") && revision.Contains(revised) && revision.Contains("current ledger controls status"));
-                Check("revision_retains_first_source_reference", ReadString(ReadDictionary(TryParseJsonObject(ReadString(ReignDatabase.QuerySql(c,
-                    "SELECT * FROM obligations WHERE obligation_id=$id;", TestDict("id", obligationId)).Single(), "payload_json", "{}")), "commitmentOriginalSource"), "sourceEventId", "") == "original");
+                Check("revision_retains_first_source_reference", ReadString(ReadDictionary(TryParseJsonObject(ReadString(DialogueSelfTestStore.SelectObligations7(c, TestDict("id", obligationId)).Single(), "payload_json", "{}")), "commitmentOriginalSource"), "sourceEventId", "") == "original");
                 Check("future_source_cannot_leak", !Build(new Dictionary<string, object>(context) { ["worldDay"] = 20d }).Contains(revised));
                 Check("sequence_cutoff_cannot_leak", !Build(new Dictionary<string, object>(context) { ["memoryAsOfAcceptedSequence"] = 0L }).Contains(originalQuestion));
                 Check("timestamp_cutoff_cannot_leak", !Build(new Dictionary<string, object>(context) { ["memoryAsOfTimestamp"] = 199L }).Contains(originalQuestion));
                 Check("official_channel_does_not_expand_private_source", Build(new Dictionary<string, object>(context) { ["officialMemoryFirewall"] = true }).Length == 0);
                 Check("new_observer_has_no_private_context", Build(null, "stranger").Length == 0);
-                ReignDatabase.ExecuteSql(c, "UPDATE conversation_turns SET text='Changed accepted wording.' WHERE turn_id='original_npc';");
+                DialogueSelfTestStore.UpdateConversationTurns3(c);
                 string changed = Build();
                 Check("changed_hash_rejects_original_keeps_current", !changed.Contains(originalQuestion) && changed.Contains(revised));
-                ReignDatabase.ExecuteSql(c, "UPDATE conversation_turns SET text=$text WHERE turn_id='original_npc';", TestDict("text", promise));
-                var beforeRead = ReignDatabase.QuerySql(c, "SELECT turn_id,text,payload_json FROM conversation_turns ORDER BY turn_id;");
+                DialogueSelfTestStore.UpdateConversationTurns4(c, TestDict("text", promise));
+                var beforeRead = DialogueSelfTestStore.SelectConversationTurns4(c);
                 Build();
-                Check("reading_context_preserves_transcript_bytes", Json.Serialize(beforeRead) == Json.Serialize(ReignDatabase.QuerySql(c, "SELECT turn_id,text,payload_json FROM conversation_turns ORDER BY turn_id;")));
-                var source = ReignDatabase.QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id='revision_npc';").Single();
+                Check("reading_context_preserves_transcript_bytes", Json.Serialize(beforeRead) == Json.Serialize(DialogueSelfTestStore.SelectConversationTurns4(c)));
+                var source = DialogueSelfTestStore.SelectConversationTurns5(c).Single();
                 InsertConversationTurn(c, "ambiguous_revision", ReadString(source, "session_id", ""), "revision", 99,
                     ReadString(source, "exchange_id", ""), "npc", "npc", "Corein", revised, "in_person", 21d, 210,
                     "", new List<string> { "npc", "player" }, new Dictionary<string, object>(context) { ["worldDay"] = 21d });
                 string ambiguous = Build();
                 Check("ambiguous_exact_sources_do_not_become_invented_context", !ambiguous.Contains("turn_id=revision_npc") && ambiguous.Contains(revised));
-                ReignDatabase.ExecuteSql(c, "DELETE FROM conversation_turns WHERE event_id IN ('original','revision');");
+                DialogueSelfTestStore.DeleteConversationTurns(c);
                 string missing = Build();
                 Check("missing_originals_keep_protected_ledger_without_reconstruction", missing.Contains(revised) && !missing.Contains("EXACT ACCEPTED COMMITMENT CONTEXT"));
-                ReignDatabase.ExecuteSql(c, "UPDATE obligations SET status='fulfilled';");
+                DialogueSelfTestStore.UpdateObligations4(c);
                 Check("closed_commitment_does_not_renew_from_old_context", Build().Length == 0);
 
                 const string shared = "I promise to repair the wagon tomorrow. *I privately remember SECRET-NARRATION-991.*";
                 Save("shared", "Please repair the wagon.", shared, participants: new[] { "npc", "player", "friend" });
-                var sharedRow = ReignDatabase.QuerySql(c, "SELECT * FROM obligations WHERE event_id='shared';").Single();
+                var sharedRow = DialogueSelfTestStore.SelectObligations10(c).Single();
                 var sharedValue = TryParseJsonObject(ReadString(sharedRow, "payload_json", "{}"));
                 sharedValue["known_by"] = new[] { "npc", "player", "friend" };
-                ReignDatabase.ExecuteSql(c, "UPDATE obligations SET known_by_json=$known,payload_json=$payload WHERE event_id='shared';",
-                    TestDict("known", Json.Serialize(new[] { "npc", "player", "friend" }), "payload", Json.Serialize(sharedValue)));
+                DialogueSelfTestStore.UpdateObligations6(c, TestDict("known", Json.Serialize(new[] { "npc", "player", "friend" }), "payload", Json.Serialize(sharedValue)));
                 var sharedContext = new Dictionary<string, object>(context) { ["playerText"] = "How about your promise to repair the wagon?" };
                 string joint = Build(sharedContext, "friend");
                 Check("joint_source_keeps_common_spoken_context", joint.Contains("Please repair the wagon.") && joint.Contains("turn_id=shared_npc"));
@@ -473,17 +465,17 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                     "duty|keeping one's word", TestDict("maxResponses", 2, "maxCharacters", 360), new(),
                     new Dictionary<string, object>(sharedContext) { ["playerText"] = "" }, false);
                 Check("banter_active_topic_follows_common_source_without_private_thoughts", banter.Contains("Please repair the wagon.") && !banter.Contains("SECRET-NARRATION-991"));
-                ReignDatabase.ExecuteSql(c, "UPDATE conversation_turns SET participants_json='[\"npc\",\"player\"]' WHERE turn_id='shared_player';");
+                DialogueSelfTestStore.UpdateConversationTurns5(c);
                 Check("known_promise_does_not_grant_private_question_access", !Build(sharedContext, "friend").Contains("Please repair the wagon."));
-                ReignDatabase.ExecuteSql(c, "UPDATE conversation_turns SET channel='letter' WHERE event_id='shared';");
+                DialogueSelfTestStore.UpdateConversationTurns6(c);
                 Check("letter_without_delivery_receipt_does_not_expand", !Build(sharedContext).Contains("EXACT ACCEPTED COMMITMENT CONTEXT"));
-                ReignDatabase.ExecuteSql(c, "UPDATE obligations SET status='fulfilled';");
+                DialogueSelfTestStore.UpdateObligations4(c);
 
                 Save("oversized", "Explain the archive promise.", "I promise to maintain the archive. " + new string('x', 7000) + " END-OF-LONG-EXCHANGE");
                 string oversized = Build(new Dictionary<string, object>(context) { ["playerText"] = "What did you promise about the archive?" });
                 Check("oversized_exchange_is_not_cut_into_misleading_excerpt", oversized.Contains("I promise to maintain the archive.")
                     && !oversized.Contains("EXACT ACCEPTED COMMITMENT CONTEXT") && !oversized.Contains("END-OF-LONG-EXCHANGE"));
-                ReignDatabase.ExecuteSql(c, "UPDATE obligations SET status='fulfilled';");
+                DialogueSelfTestStore.UpdateObligations4(c);
                 for (int i = 0; i < 5; i++) Save("bounded_" + i, "Will you pay the ransom for prisoner " + i + "?", "I promise to pay the ransom for prisoner " + i + ".");
                 var bounded = new Dictionary<string, object>(context) { ["playerText"] = "What are your promises about ransom?" };
                 string boundedText = Build(bounded);
@@ -497,12 +489,12 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                 var recovered = new Dictionary<string, object>(bounded) { ["timelineId"] = "recovered" };
                 Check("verified_restore_carries_exact_source_context", restoredTurn.Length > 0 && Build(recovered).Contains("turn_id=" + restoredTurn));
                 string originalEvent = restoredTurn.Replace("_npc", "");
-                var restoredPromise = ReignDatabase.QuerySql(c, "SELECT * FROM obligations WHERE event_id=$event;", TestDict("event", originalEvent)).Single();
+                var restoredPromise = DialogueSelfTestStore.SelectObligations9(c, TestDict("event", originalEvent)).Single();
                 Save("recovered_revision", "Please pay this ransom after the harvest.", "I promise to pay this ransom after the harvest.",
                     25d, ReadString(restoredPromise, "obligation_id", ""), timeline: "recovered");
                 Check("recovered_revision_retains_verified_original", Build(recovered).Contains("turn_id=" + restoredTurn)
                     && Build(recovered).Contains("turn_id=recovered_revision_npc"));
-                ReignDatabase.ExecuteSql(c, "UPDATE conversation_turns SET text='tampered source' WHERE turn_id=$turn;", TestDict("turn", restoredTurn));
+                DialogueSelfTestStore.UpdateConversationTurns7(c, TestDict("turn", restoredTurn));
                 Check("tampered_restored_source_cannot_expand", restoredTurn.Length > 0 && !Build(recovered).Contains("turn_id=" + restoredTurn));
                 Check("abandoned_branch_cannot_expand", Build(new Dictionary<string, object>(bounded) { ["timelineId"] = "unrelated" }).Length == 0);
             }

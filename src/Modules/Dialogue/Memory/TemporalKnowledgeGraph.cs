@@ -10,47 +10,12 @@ namespace ReignBetaServer
     {
         internal static void EnsureTemporalKnowledgeGraphSchema(ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS temporal_knowledge_nodes (
-node_id TEXT PRIMARY KEY,
-node_type TEXT NOT NULL,
-label TEXT NOT NULL DEFAULT '',
-payload_json TEXT NOT NULL DEFAULT '{}',
-created_ts INTEGER NOT NULL,
-updated_ts INTEGER NOT NULL);" );
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS temporal_knowledge_assertions (
-assertion_id TEXT PRIMARY KEY,
-campaign_id TEXT NOT NULL,
-fact_key TEXT NOT NULL,
-subject_id TEXT NOT NULL DEFAULT '',
-predicate TEXT NOT NULL DEFAULT '',
-object_id TEXT NOT NULL DEFAULT '',
-claim TEXT NOT NULL DEFAULT '',
-perspective_owner_id TEXT NOT NULL DEFAULT '',
-assertion_kind TEXT NOT NULL DEFAULT 'belief',
-confidence REAL NOT NULL DEFAULT 0.5,
-truth_status TEXT NOT NULL DEFAULT 'believed',
-valid_from_ts INTEGER NOT NULL,
-valid_to_ts INTEGER NULL,
-observed_ts INTEGER NOT NULL,
-supersedes_assertion_id TEXT NOT NULL DEFAULT '',
-source_event_id TEXT NOT NULL DEFAULT '',
-source_record_id TEXT NOT NULL DEFAULT '',
-known_by_json TEXT NOT NULL DEFAULT '[]',
-hidden_from_json TEXT NOT NULL DEFAULT '[]',
-visibility TEXT NOT NULL DEFAULT 'private',
-payload_json TEXT NOT NULL DEFAULT '{}');" );
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_temporal_assertions_current ON temporal_knowledge_assertions(campaign_id,perspective_owner_id,fact_key,valid_to_ts,observed_ts);");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_temporal_assertions_subject ON temporal_knowledge_assertions(subject_id,predicate,object_id,valid_to_ts);");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS temporal_knowledge_edges (
-edge_id TEXT PRIMARY KEY,
-from_node_id TEXT NOT NULL,
-to_node_id TEXT NOT NULL,
-edge_type TEXT NOT NULL,
-assertion_id TEXT NOT NULL,
-valid_from_ts INTEGER NOT NULL,
-valid_to_ts INTEGER NULL,
-payload_json TEXT NOT NULL DEFAULT '{}');" );
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_temporal_edges_nodes ON temporal_knowledge_edges(from_node_id,to_node_id,valid_to_ts);");
+            DialogueSchema.CreateTemporalKnowledgeNodes(connection);
+            DialogueSchema.CreateTemporalKnowledgeAssertions(connection);
+            DialogueSchema.CreateIndexTemporalAssertionsCurrent(connection);
+            DialogueSchema.CreateIndexTemporalAssertionsSubject(connection);
+            DialogueSchema.CreateTemporalKnowledgeEdges(connection);
+            DialogueSchema.CreateIndexTemporalEdgesNodes(connection);
         }
 
         internal static string UpsertTemporalAssertion(ReignDbConnection connection, string campaignId, string sourceEventId,
@@ -71,9 +36,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');" );
             string timeline = ContinuityTimeline(item);
             string identity = StableMemoryFactIdentity(item, subject, predicate, objectId, claim);
             string factKey = "fact_" + PromptHash(identity).Substring(0, 24);
-            Dictionary<string, object> previous = ReignDatabase.QuerySql(connection, @"SELECT * FROM temporal_knowledge_assertions
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND perspective_owner_id=$owner AND fact_key=$fact AND valid_to_ts IS NULL
-ORDER BY revision DESC LIMIT 1 FOR UPDATE;", new Dictionary<string, object>
+            Dictionary<string, object> previous = DialogueStore.SelectTemporalKnowledgeAssertions(connection, new Dictionary<string, object>
             {
                 ["campaign"] = campaignId ?? "", ["owner"] = owner ?? "", ["fact"] = factKey, ["timeline"] = timeline
             }).FirstOrDefault();
@@ -99,8 +62,7 @@ ORDER BY revision DESC LIMIT 1 FOR UPDATE;", new Dictionary<string, object>
             }
 
             if (!string.IsNullOrWhiteSpace(previousId))
-                ReignDatabase.ExecuteSql(connection, "UPDATE temporal_knowledge_assertions SET valid_to_ts=$ts,valid_to_day=$day WHERE assertion_id=$id AND valid_to_ts IS NULL;",
-                    new Dictionary<string, object> { ["ts"] = ts, ["id"] = previousId, ["day"] = ReadDouble(item, "worldDay", 0d) });
+                DialogueStore.UpdateTemporalKnowledgeAssertions2(connection, new Dictionary<string, object> { ["ts"] = ts, ["id"] = previousId, ["day"] = ReadDouble(item, "worldDay", 0d) });
 
             string assertionId = "assert_" + Guid.NewGuid().ToString("N");
             List<string> knownBy = Program.MergeStringLists(ReadStringList(item, "known_by"), ReadStringList(item, "knownBy"));
@@ -110,13 +72,7 @@ ORDER BY revision DESC LIMIT 1 FOR UPDATE;", new Dictionary<string, object>
                 ? (kind == "belief" ? "believed" : "interpretation")
                 : kind; // Dialogue cannot self-certify a native effect or objective truth.
             if (IsPrivateMentalLayer(kind)) knownBy = new List<string> { owner };
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO temporal_knowledge_assertions
-(assertion_id,campaign_id,fact_key,subject_id,predicate,object_id,claim,perspective_owner_id,assertion_kind,confidence,truth_status,
-valid_from_ts,valid_to_ts,observed_ts,supersedes_assertion_id,source_event_id,source_record_id,known_by_json,hidden_from_json,visibility,payload_json,
-timeline_id,revision,source_hash,event_day,learned_day,recorded_ts,cardinality,processing_version)
-VALUES($id,$campaign,$fact,$subject,$predicate,$object,$claim,$owner,$kind,$confidence,$truth,$ts,NULL,$ts,$supersedes,$event,$record,$known,$hidden,$visibility,$payload,
-$timeline,$revision,$hash,$day,$learned,$ts,$cardinality,$version);",
-                new Dictionary<string, object>
+            DialogueStore.InsertTemporalKnowledgeAssertions(connection, new Dictionary<string, object>
                 {
                     ["id"] = assertionId, ["campaign"] = campaignId ?? "", ["fact"] = factKey,
                     ["subject"] = subject ?? "", ["predicate"] = predicate ?? "", ["object"] = objectId ?? "",
@@ -151,16 +107,13 @@ $timeline,$revision,$hash,$day,$learned,$ts,$cardinality,$version);",
 
         private static void EnsureTemporalNode(ReignDbConnection connection, string id, string type, string label, Dictionary<string, object> payload, long ts)
         {
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO temporal_knowledge_nodes(node_id,node_type,label,payload_json,created_ts,updated_ts)
-VALUES($id,$type,$label,$payload,$ts,$ts) ON CONFLICT(node_id) DO UPDATE SET label=$label,updated_ts=$ts;",
-                new Dictionary<string, object> { ["id"] = id, ["type"] = type, ["label"] = label ?? "", ["payload"] = Json.Serialize(payload ?? new Dictionary<string, object>()), ["ts"] = ts });
+            DialogueStore.UpsertTemporalKnowledgeNodes(connection, new Dictionary<string, object> { ["id"] = id, ["type"] = type, ["label"] = label ?? "", ["payload"] = Json.Serialize(payload ?? new Dictionary<string, object>()), ["ts"] = ts });
         }
 
         private static void InsertTemporalEdge(ReignDbConnection connection, string from, string to, string type, string assertionId, long ts)
         {
             string id = "edge_" + PromptHash(from + "|" + to + "|" + type + "|" + assertionId).Substring(0, 24);
-            ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO temporal_knowledge_edges(edge_id,from_node_id,to_node_id,edge_type,assertion_id,valid_from_ts,valid_to_ts,payload_json)
-VALUES($id,$from,$to,$type,$assertion,$ts,NULL,'{}');", new Dictionary<string, object>
+            DialogueStore.InsertOrIgnoreTemporalKnowledgeEdges(connection, new Dictionary<string, object>
             { ["id"] = id, ["from"] = from, ["to"] = to, ["type"] = type, ["assertion"] = assertionId, ["ts"] = ts });
         }
 
@@ -200,9 +153,7 @@ AND (perspective_owner_id=$observer OR lower(visibility) IN ('world','global','c
             for (int offset = 0; result.Count < Math.Max(1, limit); offset += batch)
             {
                 parameters["offset"] = offset;
-                var rows = ReignDatabase.QuerySql(connection, "SELECT * FROM temporal_knowledge_assertions " + eligible + @"
-AND ($query='' OR to_tsvector('simple',claim || ' ' || subject_id || ' ' || predicate || ' ' || object_id) @@ websearch_to_tsquery('simple',$query))
-ORDER BY ts_rank(to_tsvector('simple',claim),websearch_to_tsquery('simple',$query)) DESC,learned_day DESC,revision DESC,assertion_id LIMIT $batch OFFSET $offset;", parameters);
+                var rows = DialogueStore.SelectTemporalKnowledgeAssertions2(connection, eligible,parameters);
                 foreach (var hit in rows)
                 {
                     if (!Visible(hit)) continue;
@@ -214,10 +165,7 @@ ORDER BY ts_rank(to_tsvector('simple',claim),websearch_to_tsquery('simple',$quer
                     for (int revisionOffset = 0; latest == null; revisionOffset += batch)
                     {
                         revisionParameters["offset"] = revisionOffset;
-                        var revisions = ReignDatabase.QuerySql(connection, "SELECT * FROM temporal_knowledge_assertions " + eligible + @"
-AND fact_key=$fact AND perspective_owner_id=$owner
-ORDER BY learned_day DESC,COALESCE(NULLIF(recorded_ts,0),observed_ts) DESC,
-CASE WHEN timeline_id=$timeline THEN 1 ELSE 0 END DESC,revision DESC,assertion_id LIMIT $batch OFFSET $offset;", revisionParameters);
+                        var revisions = DialogueStore.SelectTemporalKnowledgeAssertions3(connection, eligible,revisionParameters);
                         latest = revisions.FirstOrDefault(Visible);
                         if (revisions.Count < batch) break;
                     }

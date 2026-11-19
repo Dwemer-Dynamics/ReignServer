@@ -75,10 +75,8 @@ namespace ReignBetaServer
             double day = ReadDouble(payload, "worldDay", 0);
             using var connection = ReignDatabase.OpenCampaignConnection(campaign);
             using var transaction = connection.BeginTransaction();
-            ReignDatabase.ExecuteSql(connection, "SELECT pg_advisory_xact_lock(hashtextextended($key,0));",
-                TestDict("key", "group_state|" + campaign + "|" + timeline + "|" + session));
-            var row = ReignDatabase.QuerySql(connection, "SELECT * FROM group_conversation_state WHERE session_id=$id AND timeline_id=$timeline AND world_day<=$day;",
-                TestDict("id", session, "timeline", timeline, "day", day)).FirstOrDefault();
+            DialogueStore.SelectStatement6(connection, TestDict("key", "group_state|" + campaign + "|" + timeline + "|" + session));
+            var row = DialogueStore.SelectGroupConversationState(connection, TestDict("id", session, "timeline", timeline, "day", day)).FirstOrDefault();
             var state = TryParseJsonObject(ReadString(row, "state_json", "{}"));
             var plans = ReadDictionaryList(state, "speakingFloorPlans");
             var existing = plans.FirstOrDefault(p => ReadString(p, "turnId", "") == beat);
@@ -91,10 +89,8 @@ namespace ReignBetaServer
                 return replay;
             }
             // Never reroll an old delivered turn after its small plan cache expires.
-            if (ReignDatabase.QuerySql(connection, "SELECT contribution_id FROM group_conversation_contributions WHERE session_id=$session AND timeline_id=$timeline AND scene_turn_id=$beat LIMIT 1;",
-                TestDict("session", session, "timeline", timeline, "beat", beat)).Count > 0
-                || ReignDatabase.QuerySql(connection, "SELECT turn_id FROM conversation_turns WHERE session_id=$session AND exchange_id=$beat AND status='active' LIMIT 1;",
-                    TestDict("session", session, "beat", beat)).Count > 0)
+            if (DialogueStore.SelectGroupConversationContributions(connection, TestDict("session", session, "timeline", timeline, "beat", beat)).Count > 0
+                || DialogueStore.SelectConversationTurns31(connection, TestDict("session", session, "beat", beat)).Count > 0)
                 return TestDict("ok", false, "error", "The speaking plan for this already delivered turn is unavailable; resume with a new player turn.");
 
             var roster = new List<GroupTurnParticipant>();
@@ -139,12 +135,7 @@ namespace ReignBetaServer
                 "providerCalls", 0, "replayed", false);
             plans.Add(plan);
             state["speakingFloorPlans"] = plans.TakeLast(32).ToList();
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO group_conversation_state
-                (session_id,campaign_id,mode,participant_ids_json,state_json,revision,updated_ts,timeline_id,world_day)
-                VALUES($session,$campaign,$mode,$participants,$state,1,$ts,$timeline,$day)
-                ON CONFLICT(session_id) DO UPDATE SET state_json=$state,participant_ids_json=$participants,
-                revision=group_conversation_state.revision+1,updated_ts=$ts,timeline_id=$timeline,world_day=$day;",
-                TestDict("session", session, "campaign", campaign, "mode", ReadString(payload, "mode", "party_chat"),
+            DialogueStore.UpsertGroupConversationState(connection, TestDict("session", session, "campaign", campaign, "mode", ReadString(payload, "mode", "party_chat"),
                     "participants", Json.Serialize(active.Concat(new[] { player }).Where(id => id.Length > 0).Distinct()),
                     "state", Json.Serialize(state), "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds(), "timeline", timeline, "day", day));
             transaction.Commit();

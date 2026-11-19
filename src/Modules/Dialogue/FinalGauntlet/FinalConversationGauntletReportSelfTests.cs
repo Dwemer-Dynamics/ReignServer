@@ -59,36 +59,22 @@ namespace ReignBetaServer
                     connection, runId, "ADV-001",
                     FinalGauntletCaseState.Running,
                     FinalGauntletCaseState.ProviderExhausted);
-                ReignDatabase.ExecuteSql(
-                    connection,
-                    @"INSERT INTO final_gauntlet_assertions(
-run_id,case_instance_id,assertion_id,passed,payload_json,created_ts)
-VALUES($run,'ADV-001','secret_leak',0,'{}',$ts);",
-                    new Dictionary<string, object>
+                DialogueSelfTestStore.InsertFinalGauntletAssertions(
+                    connection, new Dictionary<string, object>
                     {
                         ["run"] = runId,
                         ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                     });
-                ReignDatabase.ExecuteSql(
-                    connection,
-                    @"INSERT INTO final_gauntlet_evidence(
-run_id,case_instance_id,evidence_key,schema_version,payload_json,created_ts)
-VALUES($run,'ADV-001','complete',3,$payload,$ts);",
-                    new Dictionary<string, object>
+                DialogueSelfTestStore.InsertFinalGauntletEvidence(
+                    connection, new Dictionary<string, object>
                     {
                         ["run"] = runId,
                         ["payload"] =
                             "{\"sourceAuditEntries\":[{\"role\":\"player\",\"speaker\":\"Tester\",\"text\":\"Remember the bronze coffer.\"},{\"role\":\"npc\",\"speaker\":\"Witness\",\"text\":\"I heard you mention the bronze coffer.\"}]}",
                         ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                     });
-                ReignDatabase.ExecuteSql(
-                    connection,
-                    @"INSERT INTO final_gauntlet_provider_calls(
-run_id,provider_call_id,case_instance_id,correlation_id,request_type,
-model,physical_attempt,ordinal,status,started_ts,completed_ts,error)
-VALUES($run,'pc-1','ADV-001','corr-1','dialogue','model-a',1,1,
-'completed',$ts,$ts,'');",
-                    new Dictionary<string, object>
+                DialogueSelfTestStore.InsertFinalGauntletProviderCalls(
+                    connection, new Dictionary<string, object>
                     {
                         ["run"] = runId,
                         ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
@@ -121,10 +107,8 @@ VALUES($run,'pc-1','ADV-001','corr-1','dialogue','model-a',1,1,
                         && Directory.Exists(Path.Combine(root, "evidence"))
                         && Directory.Exists(Path.Combine(root, "replays")),
                     "The campaign test-data export contains every required report artifact.");
-                List<Dictionary<string, object>> reviewRows = ReignDatabase.QuerySql(
-                    connection,
-                    "SELECT review_id FROM final_gauntlet_review_items WHERE run_id=$run;",
-                    new Dictionary<string, object> { ["run"] = runId });
+                List<Dictionary<string, object>> reviewRows = DialogueSelfTestStore.SelectFinalGauntletReviewItems(
+                    connection, new Dictionary<string, object> { ["run"] = runId });
                 string reviewId = reviewRows.Count == 0
                     ? string.Empty
                     : ReadString(reviewRows[0], "review_id", "");

@@ -130,7 +130,7 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> sameDay;
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('public_world_news_legacy_rules_v1','1');");
+                DialogueSelfTestStore.UpsertSchemaMeta(connection);
                 sameDay = LoadKnownWorldHistoryForDialogue(connection, timelineId, 110d, observer,
                     "I am Michael of Howarton.", personalRoute, noVectors, true);
                 var publicOnly = LoadKnownWorldHistoryForDialogue(connection, timelineId, 110, observer,
@@ -181,12 +181,10 @@ namespace ReignBetaServer
                 check("public_news_obeys_native_sequence_boundary", has(sequenceBounded, "public_fixture_0") && !has(sequenceBounded, "public_fixture_1"));
                 observer.AsOfWorldHistorySequence = long.MaxValue;
                 string childTimeline = "public_news_verified_child";
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_timelines(timeline_id,campaign_id,parent_timeline_id,fork_event_id,head_sequence,head_event_id,is_active,created_utc,updated_utc)
-VALUES($child,$campaign,$parent,'dialogue_win',100,'dialogue_win',0,$now,$now);",
-                    TestDict("child", childTimeline, "campaign", campaignId, "parent", timelineId, "now", DateTimeOffset.UtcNow.ToString("O")));
+                DialogueSelfTestStore.InsertWorldHistoryTimelines2(connection, TestDict("child", childTimeline, "campaign", campaignId, "parent", timelineId, "now", DateTimeOffset.UtcNow.ToString("O")));
                 var inherited = LoadPublicWorldNews(connection, childTimeline, 110, observer, "PublicNoble_0 PublicNoble_1");
                 check("verified_fork_inherits_only_public_prefix", has(inherited, "public_fixture_0") && !has(inherited, "public_fixture_1"));
-                ReignDatabase.ExecuteSql(connection, "UPDATE world_history_timelines SET fork_event_id='unproved_fork' WHERE timeline_id=$child;", TestDict("child", childTimeline));
+                DialogueSelfTestStore.UpdateWorldHistoryTimelines2(connection, TestDict("child", childTimeline));
                 check("unverified_parent_link_grants_no_public_history", !has(LoadPublicWorldNews(connection, childTimeline, 110, observer, "PublicNoble_0"), "public_fixture_0"));
                 check("introduction_recognizes_without_keyword_or_vectors", has(sameDay, "dialogue_win"));
                 check("legacy_float_precision_does_not_hide_immediate_result", has(sameDay, "dialogue_legacy_precision"));
@@ -236,16 +234,15 @@ VALUES($child,$campaign,$parent,'dialogue_win',100,'dialogue_win',0,$now,$now);"
 
                 // Recreate a pre-fix access-rule set around the exact existing
                 // victory, then exercise the same idempotent schema migration.
-                ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_knowledge_rules WHERE event_id='dialogue_win' AND audience_type='global';");
-                ReignDatabase.ExecuteSql(connection, "UPDATE world_history_knowledge_rules SET available_day=113 WHERE event_id='dialogue_win' AND audience_type='kingdom';");
-                ReignDatabase.ExecuteSql(connection, "DELETE FROM schema_meta WHERE key='world_history_immediate_tournament_news_v1';");
+                DialogueSelfTestStore.DeleteWorldHistoryKnowledgeRules(connection);
+                DialogueSelfTestStore.UpdateWorldHistoryKnowledgeRules(connection);
+                DialogueSelfTestStore.DeleteSchemaMeta3(connection);
                 EnsureImmediateTournamentKnowledge(connection);
                 EnsureImmediateTournamentKnowledge(connection);
                 var migrated = DetermineWorldHistoryKnowledge(connection, new List<string> { "dialogue_win" }, observer.NpcId, "foreign_kingdom", 110d);
                 check("legacy_victory_available_immediately", ReadString(migrated, "basis", "") == "secondhand");
-                check("migration_idempotent_without_duplicate_event", ReadInt(ReignDatabase.QuerySql(connection,
-                    "SELECT COUNT(*) count FROM world_history_events WHERE event_id='dialogue_win';").FirstOrDefault(), "count", 0) == 1
-                    && ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM world_history_knowledge_rules WHERE event_id='dialogue_win' AND audience_type='global';").FirstOrDefault(), "count", 0) == 1);
+                check("migration_idempotent_without_duplicate_event", ReadInt(DialogueSelfTestStore.CountWorldHistoryEvents(connection).FirstOrDefault(), "count", 0) == 1
+                    && ReadInt(DialogueSelfTestStore.CountWorldHistoryKnowledgeRules(connection).FirstOrDefault(), "count", 0) == 1);
                 check("migration_keeps_private_tournament_private", ReadString(DetermineWorldHistoryKnowledge(connection,
                     new List<string> { "dialogue_private" }, observer.NpcId, "foreign_kingdom", 110d), "basis", "") == "none");
                 check("migration_keeps_other_delay", ReadString(DetermineWorldHistoryKnowledge(connection,

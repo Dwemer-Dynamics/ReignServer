@@ -32,32 +32,9 @@ Use only supplied heroStringId values.";
 
         private static void EnsureConversationSceneStateSchema(ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_scene_state (
-hero_id TEXT PRIMARY KEY,
-location_override TEXT NOT NULL DEFAULT '',
-location_class TEXT NOT NULL DEFAULT '',
-clothing_override TEXT NOT NULL DEFAULT '',
-source_turn_id TEXT NOT NULL DEFAULT '',
-source_mode TEXT NOT NULL DEFAULT '',
-world_hour INTEGER NOT NULL DEFAULT -1,
-expires_world_hour INTEGER NOT NULL DEFAULT -1,
-revision INTEGER NOT NULL DEFAULT 0,
-updated_ts INTEGER NOT NULL);");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_scene_proposals (
-proposal_id TEXT PRIMARY KEY,
-scene_turn_id TEXT NOT NULL,
-subject_id TEXT NOT NULL,
-speaker_id TEXT NOT NULL DEFAULT '',
-location_value TEXT NOT NULL DEFAULT '',
-location_class TEXT NOT NULL DEFAULT '',
-clothing_value TEXT NOT NULL DEFAULT '',
-linked_player INTEGER NOT NULL DEFAULT 0,
-status TEXT NOT NULL DEFAULT 'pending',
-world_hour INTEGER NOT NULL,
-payload_json TEXT NOT NULL DEFAULT '{}',
-created_ts INTEGER NOT NULL,
-updated_ts INTEGER NOT NULL);");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_scene_proposals_turn_subject ON conversation_scene_proposals(scene_turn_id,subject_id,status);");
+            DialogueSchema.CreateConversationSceneState(connection);
+            DialogueSchema.CreateConversationSceneProposals(connection);
+            DialogueSchema.CreateIndexSceneProposalsTurnSubject(connection);
         }
 
         private static long ConversationWorldHour(Dictionary<string, object> payload)
@@ -294,13 +271,9 @@ updated_ts INTEGER NOT NULL);");
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureConversationSceneStateSchema(connection);
-                expired = ReadInt(ReignDatabase.QuerySql(connection,
-                    "SELECT COUNT(*) AS count FROM conversation_scene_state WHERE expires_world_hour<=$hour;",
-                    new Dictionary<string, object> { ["hour"] = hour }).FirstOrDefault(), "count", 0);
-                ReignDatabase.ExecuteSql(connection, "DELETE FROM conversation_scene_state WHERE expires_world_hour<=$hour;",
-                    new Dictionary<string, object> { ["hour"] = hour });
-                ReignDatabase.ExecuteSql(connection, "DELETE FROM conversation_scene_proposals WHERE world_hour<$hour;",
-                    new Dictionary<string, object> { ["hour"] = hour });
+                expired = ReadInt(DialogueStore.CountConversationSceneState(connection, new Dictionary<string, object> { ["hour"] = hour }).FirstOrDefault(), "count", 0);
+                DialogueStore.DeleteConversationSceneState2(connection, new Dictionary<string, object> { ["hour"] = hour });
+                DialogueStore.DeleteConversationSceneProposals(connection, new Dictionary<string, object> { ["hour"] = hour });
             }
             return new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaignId, ["worldHour"] = hour, ["expired"] = expired };
         }
@@ -366,14 +339,11 @@ updated_ts INTEGER NOT NULL);");
             {
                 EnsureConversationSceneStateSchema(connection);
                 EnsureConversationContinuitySchema(connection);
-                ReignDatabase.ExecuteSql(connection, "DELETE FROM conversation_scene_state WHERE expires_world_hour<=$hour;",
-                    new Dictionary<string, object> { ["hour"] = hour });
+                DialogueStore.DeleteConversationSceneState2(connection, new Dictionary<string, object> { ["hour"] = hour });
                 foreach (Dictionary<string, object> participant in participants)
                 {
                     string id = ReadString(participant, "heroStringId", "");
-                    Dictionary<string, object> row = ReignDatabase.QuerySql(connection,
-                        "SELECT * FROM conversation_scene_state WHERE hero_id=$id AND expires_world_hour>$hour LIMIT 1;",
-                        new Dictionary<string, object> { ["id"] = id, ["hour"] = hour }).FirstOrDefault();
+                    Dictionary<string, object> row = DialogueStore.SelectConversationSceneState2(connection, new Dictionary<string, object> { ["id"] = id, ["hour"] = hour }).FirstOrDefault();
                     // Narrative location survives an hourly legacy cache expiry or
                     // session reload until native movement/room/timeline changes.
                     row = LoadSceneContinuityHandoff(connection, payload, participant) ?? row;
@@ -879,7 +849,7 @@ updated_ts INTEGER NOT NULL);");
                     bool isPlayer = string.Equals(ReadString(participants.FirstOrDefault(x => ReadString(x, "role", "") == "player"), "heroStringId", ""), subject, StringComparison.OrdinalIgnoreCase);
                     if (!isSpeaker && !isPlayer) continue;
                     var before = ReadDictionaryList(prepared, "current").FirstOrDefault(s => ReadString(s, "heroStringId", "") == subject);
-                    var latest = ReignDatabase.QuerySql(connection, "SELECT revision,source_turn_id FROM conversation_scene_state WHERE hero_id=$id FOR UPDATE;", TestDict("id", subject)).SingleOrDefault();
+                    var latest = DialogueStore.SelectConversationSceneState3(connection, TestDict("id", subject)).SingleOrDefault();
                     if (latest != null && ReadString(latest, "source_turn_id", "") != sceneTurnId
                         && ReadLong(latest, "revision", 0) != ReadLong(before, "revision", 0))
                         throw new InvalidOperationException("The scene changed while this response was being written; the submitted original remains saved.");
@@ -898,8 +868,7 @@ updated_ts INTEGER NOT NULL);");
                         UpsertConversationSceneOverride(connection, subject, location, locationClass, clothing, sceneTurnId, mode, hour, ts);
                         applied.Add(new Dictionary<string, object> { ["heroStringId"] = subject, ["location"] = location, ["clothing"] = clothing });
                     }
-                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_scene_proposals SET status=$status,updated_ts=$ts WHERE proposal_id=$id;",
-                        new Dictionary<string, object> { ["status"] = locationDenied || clothingDenied ? "denied_or_partial" : "applied", ["ts"] = ts, ["id"] = ReadString(proposal, "proposal_id", "") });
+                    DialogueStore.UpdateConversationSceneProposals(connection, new Dictionary<string, object> { ["status"] = locationDenied || clothingDenied ? "denied_or_partial" : "applied", ["ts"] = ts, ["id"] = ReadString(proposal, "proposal_id", "") });
                 }
                 foreach (Dictionary<string, object> update in npcUpdates)
                 {
@@ -940,15 +909,11 @@ updated_ts INTEGER NOT NULL);");
         private static void UpsertConversationSceneOverride(ReignDbConnection connection, string heroId, string location, string locationClass,
             string clothing, string turnId, string mode, long hour, long ts)
         {
-            Dictionary<string, object> existing = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_scene_state WHERE hero_id=$id LIMIT 1;",
-                new Dictionary<string, object> { ["id"] = heroId }).FirstOrDefault();
+            Dictionary<string, object> existing = DialogueStore.SelectConversationSceneState4(connection, new Dictionary<string, object> { ["id"] = heroId }).FirstOrDefault();
             if (string.IsNullOrWhiteSpace(location)) location = ReadString(existing, "location_override", "");
             if (string.IsNullOrWhiteSpace(locationClass)) locationClass = ReadString(existing, "location_class", "");
             if (string.IsNullOrWhiteSpace(clothing)) clothing = ReadString(existing, "clothing_override", "");
-            ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO conversation_scene_state
-(hero_id,location_override,location_class,clothing_override,source_turn_id,source_mode,world_hour,expires_world_hour,revision,updated_ts)
-VALUES($id,$location,$class,$clothing,$turn,$mode,$hour,$expires,$revision,$ts);",
-                new Dictionary<string, object>
+            DialogueStore.UpsertConversationSceneState(connection, new Dictionary<string, object>
                 {
                     ["id"] = heroId, ["location"] = location, ["class"] = locationClass, ["clothing"] = clothing,
                     ["turn"] = turnId, ["mode"] = mode, ["hour"] = hour, ["expires"] = hour + 1,

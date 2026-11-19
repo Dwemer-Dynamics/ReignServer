@@ -13,12 +13,10 @@ namespace ReignBetaServer
             audience ??= new[] { "npc", "player", "listener" };
             session = FirstNonEmpty(session, "session_" + id);
             var payload = new Dictionary<string, object>(extra ?? TestDict()) { ["timelineId"] = timeline, ["playerHeroStringId"] = "player", ["playerName"] = "Michael" };
-            ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-VALUES($session,$campaign,'npc','player','closed',1,$ts,$audience,$payload);",
-                TestDict("session", session, "campaign", campaign, "ts", ts, "audience", Json.Serialize(audience), "payload", Json.Serialize(payload)));
+            DialogueSelfTestStore.InsertOrIgnoreConversationSessions3(connection, TestDict("session", session, "campaign", campaign, "ts", ts, "audience", Json.Serialize(audience), "payload", Json.Serialize(payload)));
             InsertConversationTurn(connection, id, session, id, (int)ts, id, role, speaker, speaker == "npc" ? "Ira" : speaker,
                 text, "in_person", day, ts, "", audience.ToList(), payload);
-            return ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).Single();
+            return DialogueSelfTestStore.SelectConversationTurns(connection, TestDict("id", id)).Single();
         }
 
         private static List<Dictionary<string, object>> RunMemorySpecialistIndexSelfTests()
@@ -83,8 +81,7 @@ VALUES($session,$campaign,'npc','player','closed',1,$ts,$audience,$payload);",
                     && ReadString(BuildMemorySpecialistDocument(source, RebindMemoryExtractionReplay(capture, "source", modelHash)), "extractorStatus", "") == "local_metadata");
                 capture["result"] = extraction;
                 StoreMemorySpecialistDocument(connection, source, extraction);
-                var storedExtraction = TryParseJsonObject(ReadString(ReignDatabase.QuerySql(connection,
-                    "SELECT payload_json FROM memory_specialist_sources WHERE turn_id='source';").Single(), "payload_json", "{}"));
+                var storedExtraction = TryParseJsonObject(ReadString(DialogueSelfTestStore.SelectMemorySpecialistSources4(connection).Single(), "payload_json", "{}"));
                 Check("captured_extraction_uses_production_acceptance_and_storage", ReadString(storedExtraction, "extractorStatus", "") == "source_bound_candidates"
                     && ReadInt(storedExtraction, "rejectedSpans", 0) == 1 && ReadStringList(storedExtraction, "actorIds").Count == 0
                     && ReadString(storedExtraction, "speakerId", "") == "npc"
@@ -131,7 +128,7 @@ VALUES($session,$campaign,'npc','player','closed',1,$ts,$audience,$payload);",
                 var beforeClarification = new Program.KnowledgeAccessContext { NpcId="npc",PlayerId="player",TimelineId="main",WorldDay=20,AsOfTimestamp=41 };
                 Check("future_clarification_is_not_leaked", !ExpandPrecisionQuestionContext(connection,new(){assumption},beforeClarification)
                     .Any(r=>ReadString(r,"turn_id","")=="clarification"));
-                ReignDatabase.ExecuteSql(connection,"UPDATE conversation_turns SET participants_json='[\"player\",\"outsider\"]' WHERE turn_id='clarification';");
+                DialogueSelfTestStore.UpdateConversationTurns59(connection);
                 Check("hidden_correction_cannot_be_skipped_to_retrieve_ack", !ExpandPrecisionQuestionContext(connection,new(){assumption},knowledge)
                     .Any(r=>ReadString(r,"turn_id","")=="clarified_response"));
                 var early = new Program.KnowledgeAccessContext { NpcId="npc", PlayerId="player", TimelineId="main", WorldDay=9 };
@@ -145,10 +142,9 @@ VALUES($session,$campaign,'npc','player','closed',1,$ts,$audience,$payload);",
                 var publicPlan = new MemoryQueryPlan { Observer="listener", Query="botany", Timeline="main", WorldDay=20 };
                 Check("private_thought_tags_do_not_influence_listener_search", !FindMemorySpecialistTurns(connection,publicPlan,listener,8,32,false).Any(r=>ReadString(r,"turn_id","")=="private"));
                 Check("own_private_memory_remains_searchable", FindMemorySpecialistTurns(connection,plan,knowledge,8,32,false).Any(r=>ReadString(r,"turn_id","")=="private"));
-                ReignDatabase.ExecuteSql(connection,"UPDATE conversation_turns SET text='The weather is cold.' WHERE turn_id='private';");
+                DialogueSelfTestStore.UpdateConversationTurns60(connection);
                 Check("changed_original_invalidates_derived_tags", !FindMemorySpecialistTurns(connection,plan,knowledge,8,32,false).Any(r=>ReadString(r,"turn_id","")=="private"));
-                Check("changed_source_is_detected_for_background_reindex", ReignDatabase.QuerySql(connection,@"SELECT t.turn_id FROM conversation_turns t
-JOIN memory_specialist_sources i ON i.turn_id=t.turn_id WHERE t.turn_id='private' AND i.source_revision<>t.xmin::text;").Count==1);
+                Check("changed_source_is_detected_for_background_reindex", DialogueSelfTestStore.SelectConversationTurns77(connection).Count==1);
                 Check("missing_index_does_not_filter_lexical_candidates", FuseMemorySpecialistRanks(new(){source},new(),1).Count==1);
                 Check("rank_fusion_deduplicates_source",FuseMemorySpecialistRanks(new(){source},new(){source},4).Count==1);
             }

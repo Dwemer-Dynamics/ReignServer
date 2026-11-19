@@ -31,10 +31,7 @@ namespace ReignBetaServer
                     "The final gauntlet baseline must be the protected ConvTest save.");
             string active = ScalarText(
                 connection,
-                @"SELECT run_id FROM final_gauntlet_schedule
-WHERE campaign_id=$campaign AND state IN(
-'running_stage_a','awaiting_stage_b','running_stage_b','interrupted')
-LIMIT 1;",
+                DialogueStore.SelectFinalGauntletScheduleSql2,
                 ("$campaign", campaignId));
             if (!string.IsNullOrWhiteSpace(active))
                 return Result(
@@ -56,11 +53,7 @@ LIMIT 1;",
                     : "running_stage_a";
                 Execute(
                     connection,
-                    @"INSERT INTO final_gauntlet_schedule(
-run_id,campaign_id,state,stage_b_scheduled,baseline_save_name,manifest_fingerprint,
-catalog_fingerprint,settings_fingerprint,state_fingerprint,
-created_ts,updated_ts)
-VALUES($run,$campaign,$state,0,$baseline,$manifest,'','',$stateFingerprint,$ts,$ts);",
+                    DialogueStore.InsertFinalGauntletScheduleSql,
                     ("$run", runId),
                     ("$campaign", campaignId),
                     ("$state", initialState),
@@ -70,13 +63,11 @@ VALUES($run,$campaign,$state,0,$baseline,$manifest,'','',$stateFingerprint,$ts,$
                     ("$ts", now));
                 Execute(
                     connection,
-                    @"UPDATE final_gauntlet_runs
-SET state=$state,updated_ts=$ts WHERE run_id=$run;",
+                    DialogueStore.UpdateFinalGauntletRunsSql,
                     ("$run", runId), ("$state", initialState), ("$ts", now));
                 Execute(
                     connection,
-                    @"UPDATE final_gauntlet_cases SET state='Queued',updated_ts=$ts
-WHERE run_id=$run AND state='Planned';",
+                    DialogueStore.UpdateFinalGauntletCasesSql,
                     ("$run", runId), ("$ts", now));
                 return Result(
                     true, "", ("runId", runId),
@@ -98,8 +89,7 @@ WHERE run_id=$run AND state='Planned';",
             EnsureSchema(connection);
             if (ScalarLong(
                 connection,
-                @"SELECT pause_requested FROM final_gauntlet_schedule
-WHERE run_id=$run;",
+                DialogueStore.SelectFinalGauntletScheduleSql3,
                 ("$run", runId)) != 0)
                 return Result(false, "The final gauntlet is paused.");
             if (ReignPostgreSqlDialect.IsPostgreSql(connection))
@@ -107,21 +97,14 @@ WHERE run_id=$run;",
                     connection, runId, controllerId, now, leaseSeconds);
             Dictionary<string, object> expired = QueryOne(
                 connection,
-                @"SELECT l.case_instance_id,l.correlation_ledger_json
-FROM final_gauntlet_leases l
-JOIN final_gauntlet_cases c ON c.run_id=l.run_id
- AND c.case_instance_id=l.case_instance_id
-WHERE l.run_id=$run AND l.expires_ts<=$now
- AND c.state='Running'
-ORDER BY l.expires_ts,l.case_instance_id LIMIT 1;",
+                DialogueStore.SelectFinalGauntletLeasesSql,
                 ("$run", runId), ("$now", now));
             if (expired.Count > 0)
             {
                 string caseId = Text(expired, "case_instance_id");
                 Execute(
                     connection,
-                    @"UPDATE final_gauntlet_leases SET controller_id=$controller,
-leased_ts=$now,expires_ts=$expires WHERE run_id=$run AND case_instance_id=$case;",
+                    DialogueStore.UpdateFinalGauntletLeasesSql,
                     ("$controller", controllerId),
                     ("$now", now),
                     ("$expires", now + Math.Max(1, leaseSeconds)),
@@ -136,9 +119,7 @@ leased_ts=$now,expires_ts=$expires WHERE run_id=$run AND case_instance_id=$case;
             }
             Dictionary<string, object> next = QueryOne(
                 connection,
-                @"SELECT case_instance_id FROM final_gauntlet_cases
-WHERE run_id=$run AND state='Queued'
-ORDER BY created_ts,case_instance_id LIMIT 1;",
+                DialogueStore.SelectFinalGauntletCasesSql,
                 ("$run", runId));
             if (next.Count == 0)
                 return Result(false, "No queued case is available.");
@@ -152,15 +133,7 @@ ORDER BY created_ts,case_instance_id LIMIT 1;",
                 return Result(false, "The queued case was leased concurrently.");
             Execute(
                 connection,
-                @"INSERT INTO final_gauntlet_leases(
-run_id,case_instance_id,controller_id,leased_ts,expires_ts,
-correlation_ledger_json)
-VALUES($run,$case,$controller,$now,$expires,'[]')
-ON CONFLICT(run_id,case_instance_id) DO UPDATE SET
-controller_id=excluded.controller_id,
-leased_ts=excluded.leased_ts,
-expires_ts=excluded.expires_ts,
-correlation_ledger_json=excluded.correlation_ledger_json;",
+                DialogueStore.UpsertFinalGauntletLeasesSql,
                 ("$run", runId), ("$case", nextId),
                 ("$controller", controllerId), ("$now", now),
                 ("$expires", now + Math.Max(1, leaseSeconds)));
@@ -183,14 +156,7 @@ correlation_ledger_json=excluded.correlation_ledger_json;",
                 Dictionary<string, object> expired = QueryOne(
                     connection,
                     transaction,
-                    @"SELECT l.case_instance_id,l.correlation_ledger_json
-FROM final_gauntlet_leases l
-JOIN final_gauntlet_cases c ON c.run_id=l.run_id
- AND c.case_instance_id=l.case_instance_id
-WHERE l.run_id=$run AND l.expires_ts<=$now
- AND c.state='Running'
-ORDER BY l.expires_ts,l.case_instance_id
-LIMIT 1 FOR UPDATE OF l,c SKIP LOCKED;",
+                    DialogueStore.SelectFinalGauntletLeasesSql2,
                     ("$run", runId), ("$now", now));
                 if (expired.Count > 0)
                 {
@@ -199,9 +165,7 @@ LIMIT 1 FOR UPDATE OF l,c SKIP LOCKED;",
                     Execute(
                         connection,
                         transaction,
-                        @"UPDATE final_gauntlet_leases
-SET controller_id=$controller,leased_ts=$now,expires_ts=$expires
-WHERE run_id=$run AND case_instance_id=$case;",
+                        DialogueStore.UpdateFinalGauntletLeasesSql2,
                         ("$controller", controllerId),
                         ("$now", now),
                         ("$expires",
@@ -221,11 +185,7 @@ WHERE run_id=$run AND case_instance_id=$case;",
                 Dictionary<string, object> next = QueryOne(
                     connection,
                     transaction,
-                    @"SELECT case_instance_id
-FROM final_gauntlet_cases
-WHERE run_id=$run AND state='Queued'
-ORDER BY created_ts,case_instance_id
-LIMIT 1 FOR UPDATE SKIP LOCKED;",
+                    DialogueStore.SelectFinalGauntletCasesSql2,
                     ("$run", runId));
                 if (next.Count == 0)
                 {
@@ -237,10 +197,7 @@ LIMIT 1 FOR UPDATE SKIP LOCKED;",
                 int transitioned = ExecuteCount(
                     connection,
                     transaction,
-                    @"UPDATE final_gauntlet_cases
-SET state='Running',updated_ts=$ts
-WHERE run_id=$run AND case_instance_id=$case
- AND state='Queued';",
+                    DialogueStore.UpdateFinalGauntletCasesSql2,
                     ("$ts",
                         DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
                     ("$run", runId), ("$case", nextId));
@@ -254,15 +211,7 @@ WHERE run_id=$run AND case_instance_id=$case
                 Execute(
                     connection,
                     transaction,
-                    @"INSERT INTO final_gauntlet_leases(
-run_id,case_instance_id,controller_id,leased_ts,expires_ts,
-correlation_ledger_json)
-VALUES($run,$case,$controller,$now,$expires,'[]')
-ON CONFLICT(run_id,case_instance_id) DO UPDATE SET
-controller_id=excluded.controller_id,
-leased_ts=excluded.leased_ts,
-expires_ts=excluded.expires_ts,
-correlation_ledger_json=excluded.correlation_ledger_json;",
+                    DialogueStore.UpsertFinalGauntletLeasesSql,
                     ("$run", runId), ("$case", nextId),
                     ("$controller", controllerId), ("$now", now),
                     ("$expires",
@@ -290,8 +239,7 @@ correlation_ledger_json=excluded.correlation_ledger_json;",
                 IsSingleExecutionStageBCase(caseInstanceId);
             int attempt = (int)ScalarLong(
                 connection,
-                @"SELECT COUNT(*) FROM final_gauntlet_attempts
-WHERE run_id=$run AND case_instance_id=$case;",
+                DialogueStore.CountFinalGauntletAttemptsSql,
                 ("$run", runId), ("$case", caseInstanceId)) + 1;
             // Stage B semantic cases still execute once. Their bounded
             // infrastructure-only setup attempts are retained in the same
@@ -324,15 +272,8 @@ WHERE run_id=$run AND case_instance_id=$case;",
             {
                 string appendCorrelationSql =
                     ReignPostgreSqlDialect.IsPostgreSql(connection)
-                        ? @"UPDATE final_gauntlet_leases SET expires_ts=0,
-correlation_ledger_json=(
-COALESCE(NULLIF(correlation_ledger_json,''),'[]')::jsonb
-|| jsonb_build_array($correlation))::text
-WHERE run_id=$run AND case_instance_id=$case;"
-                        : @"UPDATE final_gauntlet_leases SET expires_ts=0,
-correlation_ledger_json=json_insert(
-correlation_ledger_json,'$[#]',$correlation)
-WHERE run_id=$run AND case_instance_id=$case;";
+                        ? DialogueStore.UpdateFinalGauntletLeasesSql3
+                        : DialogueStore.UpdateFinalGauntletLeasesSql4;
                 Execute(
                     connection,
                     appendCorrelationSql,
@@ -356,8 +297,7 @@ WHERE run_id=$run AND case_instance_id=$case;";
                 return Result(false, "The case is no longer running.");
             Execute(
                 connection,
-                @"DELETE FROM final_gauntlet_leases
-WHERE run_id=$run AND case_instance_id=$case;",
+                DialogueStore.DeleteFinalGauntletLeasesSql,
                 ("$run", runId), ("$case", caseInstanceId));
             AdvanceRunIfStageComplete(connection, runId);
             return Result(
@@ -384,7 +324,7 @@ WHERE run_id=$run AND case_instance_id=$case;",
             EnsureSchema(connection);
             string state = ScalarText(
                 connection,
-                "SELECT state FROM final_gauntlet_schedule WHERE run_id=$run;",
+                DialogueStore.SelectFinalGauntletScheduleSql4,
                 ("$run", runId));
             if (state != "awaiting_stage_b"
                 && state != "stage_a_failed")
@@ -394,14 +334,12 @@ WHERE run_id=$run AND case_instance_id=$case;",
                     ("state", state));
             if (ScalarLong(
                 connection,
-                @"SELECT stage_b_scheduled FROM final_gauntlet_schedule
-WHERE run_id=$run;",
+                DialogueStore.SelectFinalGauntletScheduleSql5,
                 ("$run", runId)) != 0)
                 return Result(false, "Stage B was already scheduled.", ("state", state));
             string baselineStateFingerprint = ScalarText(
                 connection,
-                @"SELECT state_fingerprint FROM final_gauntlet_schedule
-WHERE run_id=$run;",
+                DialogueStore.SelectFinalGauntletScheduleSql6,
                 ("$run", runId));
             if (string.IsNullOrWhiteSpace(stateFingerprint)
                 || !string.Equals(
@@ -427,20 +365,14 @@ WHERE run_id=$run;",
                 Execute(
                     connection,
                     transaction,
-                    @"UPDATE final_gauntlet_schedule SET state='running_stage_b',
-stage_b_scheduled=1,catalog_fingerprint=$catalog,
-settings_fingerprint=$settings,updated_ts=$ts
-WHERE run_id=$run AND state IN('awaiting_stage_b','stage_a_failed')
-AND stage_b_scheduled=0;",
+                    DialogueStore.UpdateFinalGauntletScheduleSql,
                     ("$catalog", catalogFingerprint ?? string.Empty),
                     ("$settings", settingsFingerprint ?? string.Empty),
                     ("$ts", now), ("$run", runId));
                 Execute(
                     connection,
                     transaction,
-                    @"UPDATE final_gauntlet_runs
-SET stage='ExhaustiveReview',state='running_stage_b',updated_ts=$ts
-WHERE run_id=$run;",
+                    DialogueStore.UpdateFinalGauntletRunsSql2,
                     ("$ts", now), ("$run", runId));
                 transaction.Commit();
             }
@@ -458,23 +390,19 @@ WHERE run_id=$run;",
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             Execute(
                 connection,
-                @"UPDATE final_gauntlet_schedule SET state='cancelled',updated_ts=$ts
-WHERE run_id=$run AND state NOT IN(
-'completed','completed_with_failures','cancelled','stage_a_failed');",
+                DialogueStore.UpdateFinalGauntletScheduleSql2,
                 ("$ts", now), ("$run", runId));
             Execute(
                 connection,
-                @"UPDATE final_gauntlet_runs SET state='cancelled',updated_ts=$ts
-WHERE run_id=$run;",
+                DialogueStore.UpdateFinalGauntletRunsSql3,
                 ("$ts", now), ("$run", runId));
             Execute(
                 connection,
-                @"UPDATE final_gauntlet_cases SET state='Cancelled',updated_ts=$ts
-WHERE run_id=$run AND state IN('Planned','Queued','Running');",
+                DialogueStore.UpdateFinalGauntletCasesSql3,
                 ("$ts", now), ("$run", runId));
             Execute(
                 connection,
-                "DELETE FROM final_gauntlet_leases WHERE run_id=$run;",
+                DialogueStore.DeleteFinalGauntletLeasesSql2,
                 ("$run", runId));
             return Result(true, "", ("runId", runId), ("state", "cancelled"));
         }
@@ -486,8 +414,7 @@ WHERE run_id=$run AND state IN('Planned','Queued','Running');",
             EnsureSchema(connection);
             Execute(
                 connection,
-                @"UPDATE final_gauntlet_schedule SET state='interrupted'
-WHERE run_id=$run AND state IN('running_stage_a','running_stage_b');",
+                DialogueStore.UpdateFinalGauntletScheduleSql3,
                 ("$run", runId));
             return Result(true, "", ("runId", runId), ("state", "interrupted"));
         }
@@ -499,21 +426,17 @@ WHERE run_id=$run AND state IN('running_stage_a','running_stage_b');",
             EnsureSchema(connection);
             Execute(
                 connection,
-                @"UPDATE final_gauntlet_schedule SET pause_requested=1,
-state='interrupted',updated_ts=$ts WHERE run_id=$run AND state IN(
-'running_stage_a','running_stage_b');",
+                DialogueStore.UpdateFinalGauntletScheduleSql4,
                 ("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
                 ("$run", runId));
             Execute(
                 connection,
-                @"UPDATE final_gauntlet_runs SET state='interrupted',
-updated_ts=$ts WHERE run_id=$run;",
+                DialogueStore.UpdateFinalGauntletRunsSql4,
                 ("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
                 ("$run", runId));
             long running = ScalarLong(
                 connection,
-                @"SELECT COUNT(*) FROM final_gauntlet_cases
-WHERE run_id=$run AND state='Running';",
+                DialogueStore.CountFinalGauntletCasesSql,
                 ("$run", runId));
             return Result(
                 true, "", ("runId", runId),
@@ -530,8 +453,7 @@ WHERE run_id=$run AND state='Running';",
             EnsureSchema(connection);
             string expectedStateFingerprint = ScalarText(
                 connection,
-                @"SELECT state_fingerprint FROM final_gauntlet_schedule
-WHERE run_id=$run;",
+                DialogueStore.SelectFinalGauntletScheduleSql6,
                 ("$run", runId));
             if (string.IsNullOrWhiteSpace(stateFingerprint)
                 || !string.Equals(
@@ -568,42 +490,33 @@ WHERE run_id=$run;",
                     connection, runId);
             string stage = ScalarText(
                 connection,
-                "SELECT stage FROM final_gauntlet_runs WHERE run_id=$run;",
+                DialogueStore.SelectFinalGauntletRunsSql,
                 ("$run", runId));
             string state = stage == FinalGauntletStage.ExhaustiveReview.ToString()
                 ? "running_stage_b"
                 : "running_stage_a";
             long pendingWork = ScalarLong(
                 connection,
-                @"SELECT COUNT(*) FROM final_gauntlet_cases
-WHERE run_id=$run AND state IN('Planned','Queued','Running');",
+                DialogueStore.CountFinalGauntletCasesSql2,
                 ("$run", runId));
             if (pendingWork > 0)
             {
                 Execute(
                     connection,
-                    @"UPDATE final_gauntlet_schedule SET state=$state,
-pause_requested=0,updated_ts=$ts
-WHERE run_id=$run AND state IN(
-'interrupted','completed','completed_with_failures','stage_a_failed',
-'running_stage_a','running_stage_b');",
+                    DialogueStore.UpdateFinalGauntletScheduleSql5,
                     ("$state", state),
                     ("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
                     ("$run", runId));
                 Execute(
                     connection,
-                    @"UPDATE final_gauntlet_runs SET state=$state,updated_ts=$ts
-WHERE run_id=$run AND state IN(
-'interrupted','completed','completed_with_failures','stage_a_failed',
-'running_stage_a','running_stage_b');",
+                    DialogueStore.UpdateFinalGauntletRunsSql5,
                     ("$state", state),
                     ("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
                     ("$run", runId));
             }
             state = ScalarText(
                 connection,
-                @"SELECT state FROM final_gauntlet_schedule
-WHERE run_id=$run;",
+                DialogueStore.SelectFinalGauntletScheduleSql7,
                 ("$run", runId));
             Dictionary<string, object> resumed = Result(
                 true, "", ("runId", runId), ("state", state),
@@ -640,10 +553,7 @@ WHERE run_id=$run;",
 
             List<Dictionary<string, object>> rows = QueryRows(
                 connection,
-                @"SELECT * FROM final_gauntlet_cases
-WHERE run_id=$run AND mode='court_event'
-AND case_instance_id LIKE '%::stage-b'
-ORDER BY case_instance_id;",
+                DialogueStore.SelectFinalGauntletCasesSql3,
                 ("$run", runId));
             int excluded = 0;
             int replacements = 0;
@@ -659,10 +569,7 @@ ORDER BY case_instance_id;",
                 {
                     Execute(
                         connection,
-                        @"UPDATE final_gauntlet_cases
-SET mode=$mode,tags=$tags,updated_ts=$ts
-WHERE run_id=$run AND case_instance_id=$case
-AND state='Queued';",
+                        DialogueStore.UpdateFinalGauntletCasesSql4,
                         ("$mode", fallback),
                         ("$tags", AppendTag(
                             Text(row, "tags"),
@@ -681,9 +588,7 @@ AND state='Queued';",
                     continue;
                 string error = ScalarText(
                     connection,
-                    @"SELECT error FROM final_gauntlet_attempts
-WHERE run_id=$run AND case_instance_id=$case
-ORDER BY attempt_number DESC LIMIT 1;",
+                    DialogueStore.SelectFinalGauntletAttemptsSql,
                     ("$run", runId), ("$case", caseId));
                 if (error.IndexOf(
                         "Unsupported or currently unavailable interaction mode",
@@ -705,10 +610,7 @@ ORDER BY attempt_number DESC LIMIT 1;",
                     Execute(
                         connection,
                         transaction,
-                        @"UPDATE final_gauntlet_cases
-SET state='NotApplicable',tags=$tags,updated_ts=$ts
-WHERE run_id=$run AND case_instance_id=$case
-AND state IN('Failed','ProviderExhausted');",
+                        DialogueStore.UpdateFinalGauntletCasesSql5,
                         ("$tags", AppendTag(
                             Text(row, "tags"),
                             "invalid_fixture:court_event_unimplemented")),
@@ -717,16 +619,7 @@ AND state IN('Failed','ProviderExhausted');",
                     Execute(
                         connection,
                         transaction,
-                        @"INSERT INTO final_gauntlet_cases(
-run_id,case_instance_id,family,evaluation_kind,execution_kind,mode,
-requires_provider,requires_game,requirement_ids,tags,behavioral_requirement,
-hard_prohibitions,prerequisite_capabilities,evidence_needs,state,created_ts,updated_ts)
-SELECT run_id,$replacement,family,evaluation_kind,execution_kind,$mode,
-requires_provider,requires_game,requirement_ids,$tags,behavioral_requirement,
-hard_prohibitions,prerequisite_capabilities,evidence_needs,'Queued',$ts,$ts
-FROM final_gauntlet_cases
-WHERE run_id=$run AND case_instance_id=$case
-ON CONFLICT(run_id,case_instance_id) DO NOTHING;",
+                        DialogueStore.InsertOrIgnoreFinalGauntletCasesSql,
                         ("$replacement", replacementId),
                         ("$mode", fallback),
                         ("$tags", AppendTag(
@@ -754,20 +647,7 @@ ON CONFLICT(run_id,case_instance_id) DO NOTHING;",
         {
             List<Dictionary<string, object>> rows = QueryRows(
                 connection,
-                @"SELECT c.case_instance_id,c.tags,a.error,a.attempt_number,
-COALESCE(e.payload_json,'') AS production_payload
-FROM final_gauntlet_cases c
-JOIN final_gauntlet_attempts a ON a.run_id=c.run_id
- AND a.case_instance_id=c.case_instance_id
-LEFT JOIN final_gauntlet_evidence e ON e.run_id=c.run_id
- AND e.case_instance_id=c.case_instance_id
- AND e.evidence_key='production_result'
-WHERE c.run_id=$run AND c.state='Failed'
-AND c.case_instance_id LIKE '%::stage-b'
-AND a.attempt_number=(SELECT MAX(a2.attempt_number)
- FROM final_gauntlet_attempts a2
- WHERE a2.run_id=c.run_id
- AND a2.case_instance_id=c.case_instance_id);",
+                DialogueStore.SelectFinalGauntletCasesSql4,
                 ("$run", runId));
             int requeued = 0;
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -801,10 +681,7 @@ AND a.attempt_number=(SELECT MAX(a2.attempt_number)
                     continue;
                 Execute(
                     connection,
-                    @"UPDATE final_gauntlet_cases
-SET state='Queued',tags=$tags,updated_ts=$ts
-WHERE run_id=$run AND case_instance_id=$case
-AND state='Failed';",
+                    DialogueStore.UpdateFinalGauntletCasesSql6,
                     ("$tags", AppendTag(
                         tags,
                         "infrastructure_retry_without_production_execution:attempt-"
@@ -866,8 +743,7 @@ AND state='Failed';",
             EnsureSchema(connection);
             return QueryOne(
                 connection,
-                @"SELECT * FROM final_gauntlet_schedule
-WHERE run_id=$run LIMIT 1;",
+                DialogueStore.SelectFinalGauntletScheduleSql8,
                 ("$run", runId ?? string.Empty));
         }
 
@@ -877,13 +753,11 @@ WHERE run_id=$run LIMIT 1;",
         {
             long pauseRequested = ScalarLong(
                 connection,
-                @"SELECT pause_requested FROM final_gauntlet_schedule
-WHERE run_id=$run;",
+                DialogueStore.SelectFinalGauntletScheduleSql3,
                 ("$run", runId));
             long runningCases = ScalarLong(
                 connection,
-                @"SELECT COUNT(*) FROM final_gauntlet_cases
-WHERE run_id=$run AND state='Running';",
+                DialogueStore.CountFinalGauntletCasesSql,
                 ("$run", runId));
             if (pauseRequested != 0 && runningCases == 0)
             {
@@ -892,34 +766,29 @@ WHERE run_id=$run AND state='Running';",
             }
             long remaining = ScalarLong(
                 connection,
-                @"SELECT COUNT(*) FROM final_gauntlet_cases
-WHERE run_id=$run AND state IN('Planned','Queued','Running');",
+                DialogueStore.CountFinalGauntletCasesSql2,
                 ("$run", runId));
             if (remaining != 0) return;
             long failures = ScalarLong(
                 connection,
-                @"SELECT COUNT(*) FROM final_gauntlet_cases
-WHERE run_id=$run AND state IN(
-'Failed','ProviderExhausted','Cancelled','Interrupted');",
+                DialogueStore.CountFinalGauntletCasesSql3,
                 ("$run", runId));
             string current = ScalarText(
                 connection,
-                "SELECT state FROM final_gauntlet_schedule WHERE run_id=$run;",
+                DialogueStore.SelectFinalGauntletScheduleSql4,
                 ("$run", runId));
             string next = current == "running_stage_a"
                 ? failures == 0 ? "awaiting_stage_b" : "stage_a_failed"
                 : failures == 0 ? "completed" : "completed_with_failures";
             Execute(
                 connection,
-                @"UPDATE final_gauntlet_schedule SET state=$state,updated_ts=$ts
-WHERE run_id=$run;",
+                DialogueStore.UpdateFinalGauntletScheduleSql6,
                 ("$state", next),
                 ("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
                 ("$run", runId));
             Execute(
                 connection,
-                @"UPDATE final_gauntlet_runs SET state=$state,updated_ts=$ts
-WHERE run_id=$run;",
+                DialogueStore.UpdateFinalGauntletRunsSql6,
                 ("$state", next),
                 ("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
                 ("$run", runId));
@@ -932,13 +801,11 @@ WHERE run_id=$run;",
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             Execute(
                 connection,
-                @"UPDATE final_gauntlet_schedule SET state='interrupted',
-updated_ts=$ts WHERE run_id=$run;",
+                DialogueStore.UpdateFinalGauntletScheduleSql7,
                 ("$ts", now), ("$run", runId));
             Execute(
                 connection,
-                @"UPDATE final_gauntlet_runs SET state='interrupted',
-updated_ts=$ts WHERE run_id=$run;",
+                DialogueStore.UpdateFinalGauntletRunsSql4,
                 ("$ts", now), ("$run", runId));
         }
 
@@ -947,37 +814,13 @@ updated_ts=$ts WHERE run_id=$run;",
             FinalGauntletStore.EnsureSchema(connection);
             Execute(
                 connection,
-                @"CREATE TABLE IF NOT EXISTS final_gauntlet_schedule(
-run_id TEXT PRIMARY KEY,
-campaign_id TEXT NOT NULL,
-state TEXT NOT NULL,
-stage_b_scheduled INTEGER NOT NULL DEFAULT 0,
-baseline_save_name TEXT NOT NULL DEFAULT '',
-manifest_fingerprint TEXT NOT NULL,
-catalog_fingerprint TEXT NOT NULL,
-settings_fingerprint TEXT NOT NULL,
-state_fingerprint TEXT NOT NULL,
-pause_requested INTEGER NOT NULL DEFAULT 0,
-created_ts INTEGER NOT NULL,
-updated_ts INTEGER NOT NULL);
-CREATE INDEX IF NOT EXISTS idx_final_gauntlet_schedule_campaign
-ON final_gauntlet_schedule(campaign_id,state);
-CREATE TABLE IF NOT EXISTS final_gauntlet_leases(
-run_id TEXT NOT NULL,
-case_instance_id TEXT NOT NULL,
-controller_id TEXT NOT NULL,
-leased_ts INTEGER NOT NULL,
-expires_ts INTEGER NOT NULL,
-correlation_ledger_json TEXT NOT NULL,
-PRIMARY KEY(run_id,case_instance_id));");
+                DialogueSchema.CreateFinalGauntletScheduleSql);
             Execute(
                 connection,
-                @"ALTER TABLE final_gauntlet_schedule
-ADD COLUMN IF NOT EXISTS pause_requested INTEGER NOT NULL DEFAULT 0;");
+                DialogueSchema.AlterFinalGauntletScheduleSql);
             Execute(
                 connection,
-                @"ALTER TABLE final_gauntlet_schedule
-ADD COLUMN IF NOT EXISTS baseline_save_name TEXT NOT NULL DEFAULT '';");
+                DialogueSchema.AlterFinalGauntletScheduleSql2);
         }
 
         private static void InsertStageBCase(
@@ -992,12 +835,7 @@ ADD COLUMN IF NOT EXISTS baseline_save_name TEXT NOT NULL DEFAULT '';");
             Execute(
                 connection,
                 transaction,
-                @"INSERT INTO final_gauntlet_cases(
-run_id,case_instance_id,family,evaluation_kind,execution_kind,mode,
-requires_provider,requires_game,requirement_ids,tags,behavioral_requirement,
-hard_prohibitions,prerequisite_capabilities,evidence_needs,state,created_ts,updated_ts)
-VALUES($run,$case,$family,$evaluation,$execution,$mode,$provider,$game,
-$requirements,$tags,$behavior,$prohibitions,$prerequisites,$evidence,'Queued',$ts,$ts);",
+                DialogueStore.InsertFinalGauntletCasesSql,
                 ("$run", runId), ("$case", stageBInstanceId),
                 ("$family", descriptor.Family),
                 ("$evaluation", descriptor.EvaluationKind),

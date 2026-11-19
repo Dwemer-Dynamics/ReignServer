@@ -85,9 +85,7 @@ namespace ReignBetaServer
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 RelationshipsService.EnsureMbtiRelationshipSchema(connection);
-                before = ReignDatabase.QuerySql(connection,
-                    "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                    new Dictionary<string, object> { ["pair"] = pairKey })
+                before = DialogueSelfTestStore.SelectRelationshipPairChemistry2(connection, new Dictionary<string, object> { ["pair"] = pairKey })
                     .FirstOrDefault();
                 if (ReadBool(payload, "preserveIfExists", false)
                     && before != null)
@@ -146,9 +144,7 @@ namespace ReignBetaServer
                         connection, campaignId, secondId, firstId,
                         secondDelta, worldDay, "qualification_fixture",
                         ReadString(payload, "timelineId", "main"));
-                after = ReignDatabase.QuerySql(connection,
-                    "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                    new Dictionary<string, object> { ["pair"] = pairKey })
+                after = DialogueSelfTestStore.SelectRelationshipPairChemistry2(connection, new Dictionary<string, object> { ["pair"] = pairKey })
                     .FirstOrDefault();
             }
 
@@ -242,11 +238,7 @@ namespace ReignBetaServer
                             ReadString(fixture, "eventId", "");
                         if (!string.IsNullOrWhiteSpace(fixtureEventId))
                         {
-                            ReignDatabase.ExecuteSql(connection,
-                                @"DELETE FROM events
-WHERE event_id=$id
-AND event_type='verified_qualification_property_transfer';",
-                                new Dictionary<string, object>
+                            DialogueSelfTestStore.DeleteEvents(connection, new Dictionary<string, object>
                                 {
                                     ["id"] = fixtureEventId
                                 });
@@ -335,18 +327,7 @@ AND event_type='verified_qualification_property_transfer';",
                 ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 ReignDatabase.EnsureMemorySchema(connection);
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO events(
-event_id,campaign_id,ts,world_day,event_type,summary,participants_json,
-witnesses_json,about_entities_json,known_by_json,visibility,importance,
-source_reliability,confidence,payload_json,embedding_status,created_utc)
-VALUES($id,$campaign,$ts,$day,'verified_qualification_property_transfer',
-$summary,$participants,$participants,$participants,$participants,'private',
-0.95,1,1,$payload,'not_indexed',$utc)
-ON CONFLICT(event_id) DO UPDATE SET
-ts=$ts,world_day=$day,summary=$summary,participants_json=$participants,
-witnesses_json=$participants,about_entities_json=$participants,
-known_by_json=$participants,payload_json=$payload,created_utc=$utc;",
-                    new Dictionary<string, object>
+                DialogueSelfTestStore.UpsertEvents(connection, new Dictionary<string, object>
                     {
                         ["id"] = eventId,
                         ["campaign"] = campaignId,
@@ -407,21 +388,12 @@ known_by_json=$participants,payload_json=$payload,created_utc=$utc;",
                             ?? new Dictionary<string, object>();
                         if (!ReadBool(fixture, "originalExists", false))
                         {
-                            ReignDatabase.ExecuteSql(connection,
-                                "DELETE FROM relationship_native_targets WHERE pair_key=$pair;",
-                                new Dictionary<string, object> { ["pair"] = pairKey });
-                            ReignDatabase.ExecuteSql(connection,
-                                "DELETE FROM relationship_pair_chemistry WHERE pair_key=$pair;",
-                                new Dictionary<string, object> { ["pair"] = pairKey });
+                            DialogueSelfTestStore.DeleteRelationshipNativeTargets(connection, new Dictionary<string, object> { ["pair"] = pairKey });
+                            DialogueSelfTestStore.DeleteRelationshipPairChemistry(connection, new Dictionary<string, object> { ["pair"] = pairKey });
                         }
                         else
                         {
-                            ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
-affinity_a_to_b=$ab,affinity_b_to_a=$ba,tag_a_to_b=$tagAB,tag_b_to_a=$tagBA,
-shared_tag=$shared,projected_native_relation=$projected,
-native_action_pending=1,native_action_id=$action,updated_ts=$ts
-WHERE pair_key=$pair;",
-                                new Dictionary<string, object>
+                            DialogueSelfTestStore.UpdateRelationshipPairChemistry2(connection, new Dictionary<string, object>
                                 {
                                     ["pair"] = pairKey,
                                     ["ab"] = ReadInt(original, "affinity_a_to_b", 0),
@@ -434,17 +406,7 @@ WHERE pair_key=$pair;",
                                     ["action"] = "native_target:" + pairKey,
                                     ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                                 });
-                            ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
-pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,status,world_day,last_sync_day,
-attempt_count,claimed_ts,last_error,updated_ts,revision)
-VALUES($pair,$a,$b,$target,0,'pending',$day,-1000,0,0,'',$ts,1)
-ON CONFLICT(pair_key) DO UPDATE SET
-target_relation=$target,status='pending',world_day=$day,claimed_ts=0,last_error='',
-revision=CASE WHEN relationship_native_targets.target_relation=$target
-THEN relationship_native_targets.revision
-ELSE relationship_native_targets.revision+1 END,
-updated_ts=$ts;",
-                                new Dictionary<string, object>
+                            DialogueSelfTestStore.UpsertRelationshipNativeTargets(connection, new Dictionary<string, object>
                                 {
                                     ["pair"] = pairKey,
                                     ["a"] = ReadString(
@@ -978,10 +940,7 @@ updated_ts=$ts;",
                     string subject = ReadString(fixture, "subjectId", "");
                     try
                     {
-                        ReignDatabase.ExecuteSql(connection, @"DELETE FROM identity_evidence
-WHERE observer_id=$observer AND subject_id=$subject
-AND source='qualification_manipulation_fixture';",
-                            new Dictionary<string, object>
+                        DialogueSelfTestStore.DeleteIdentityEvidence(connection, new Dictionary<string, object>
                             {
                                 ["observer"] = observer,
                                 ["subject"] = subject
@@ -991,9 +950,7 @@ AND source='qualification_manipulation_fixture';",
                             ?? new Dictionary<string, object>();
                         if (!ReadBool(fixture, "originalExists", false))
                         {
-                            ReignDatabase.ExecuteSql(connection, @"DELETE FROM acquaintances
-WHERE observer_id=$observer AND subject_id=$subject;",
-                                new Dictionary<string, object>
+                            DialogueSelfTestStore.DeleteAcquaintances2(connection, new Dictionary<string, object>
                                 {
                                     ["observer"] = observer,
                                     ["subject"] = subject
@@ -1001,15 +958,7 @@ WHERE observer_id=$observer AND subject_id=$subject;",
                         }
                         else
                         {
-                            ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO acquaintances(
-observer_id,subject_id,identity_state,canonical_name,claimed_name,aliases_json,
-verification_source,source_entity_id,confidence,first_met_day,last_met_day,
-encounter_count,last_encounter_id,recognition_attempts,last_recognition_result,
-last_recognition_encounter_id,payload_json,updated_ts)
-VALUES($observer,$subject,$state,$canonical,$claimed,$aliases,$source,$sourceEntity,
-$confidence,$firstDay,$lastDay,$encounters,$lastEncounter,$attempts,$result,
-$resultEncounter,$payload,$updated);",
-                                new Dictionary<string, object>
+                            DialogueSelfTestStore.UpsertAcquaintances(connection, new Dictionary<string, object>
                                 {
                                     ["observer"] = observer,
                                     ["subject"] = subject,

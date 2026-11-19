@@ -40,9 +40,7 @@ namespace ReignBetaServer
             {
                 string session = ReadString(payload, "conversationSessionId", "");
                 double day = ReadDouble(payload, "worldDay", 0);
-                ReignDatabase.ExecuteSql(c, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,channel,status,start_ts,end_ts,start_world_day,end_world_day,participants_json,payload_json)
-VALUES($id,$campaign,'source','player','social_event','closed',1,1,$day,$day,'[""source"",""player""]','{}') ON CONFLICT(session_id) DO NOTHING;",
-                    GossipFields("id", session, "campaign", campaign, "day", day));
+                DialogueSelfTestStore.InsertOrIgnoreConversationSessions2(c, GossipFields("id", session, "campaign", campaign, "day", day));
                 return StoreConversationExchange(campaign, payload, "source", "player", "Traveler", "Source", playerWords, npcWords, id, 1L);
             }
             try
@@ -60,21 +58,19 @@ VALUES($id,$campaign,'source','player','social_event','closed',1,1,$day,$day,'["
                 var exchange = Store(c, publicPayload, "public_exchange");
                 Task.WaitAll(Enumerable.Range(0, 3).Select(_ => Task.Run(() => AcceptPersonalGossip(campaign, publicPayload, Signal(quote), exchange,
                     "source", "player", "Would you care to dance?", quote))).ToArray());
-                var jobs = ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_messages WHERE is_reply=0;");
+                var jobs = DialogueSelfTestStore.SelectPersonalGossipMessages20(c);
                 check("witness_actual_public_source_queues_with_global_cap_and_no_replay", jobs.Count == 2
                     && jobs.All(job => ReadString(GossipJson(job), "sourceOrigin", "") == "public_witness")
                     && jobs.All(job => ReadString(job, "speaker_id", "") != "town_only")
-                    && ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_history;").Count == 0, jobs.Count);
+                    && DialogueSelfTestStore.SelectPersonalGossipHistory2(c).Count == 0, jobs.Count);
                 string queuedBytes = CanonicalJson(jobs);
                 AcceptPersonalGossip(campaign, publicPayload, Signal(quote, 100), exchange,
                     "source", "player", "Would you care to dance?", quote);
-                check("witness_queued_source_and_decision_remain_frozen", CanonicalJson(ReignDatabase.QuerySql(c,
-                    "SELECT * FROM personal_gossip_messages WHERE is_reply=0;")) == queuedBytes, null);
+                check("witness_queued_source_and_decision_remain_frozen", CanonicalJson(DialogueSelfTestStore.SelectPersonalGossipMessages20(c)) == queuedBytes, null);
                 check("gossip_impression_feelings_do_not_supply_detailed_source_strength", PersonalGossipSourceStrength(
                     GossipFields("category", "impression", "signal", GossipFields("curiosity", 75, "excitement", 100))) == 0, null);
                 var first = GossipJson(jobs[0]);
-                var canonical = ReadStringList(first, "sourceTurnIds").SelectMany(id => ReignDatabase.QuerySql(c,
-                    "SELECT turn_id,speaker_id,text FROM conversation_turns WHERE turn_id=$id;", GossipFields("id", id))).ToList();
+                var canonical = ReadStringList(first, "sourceTurnIds").SelectMany(id => DialogueSelfTestStore.SelectConversationTurns32(c, GossipFields("id", id))).ToList();
                 BindPersonalGossipEncounterTurns(first, canonical);
                 var framed = PersonalGossipFramedSource(first);
                 check("witness_frame_preserves_original_author_addressee_and_anonymous_player", framed != null
@@ -118,15 +114,15 @@ VALUES($id,$campaign,'source','player','social_event','closed',1,1,$day,$day,'["
                 clock["gossipClockEpoch"] = ReadString(ready, "clockEpoch", "");
                 clock["gossipReadyNonces"] = ReadStringList(ready, "readyNonces");
                 PersonalGossipTickApi(clock);
-                check("witness_publication_preserves_local_hour", ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_history;").Count == 0, null);
+                check("witness_publication_preserves_local_hour", DialogueSelfTestStore.SelectPersonalGossipHistory2(c).Count == 0, null);
                 var arrival = Payload(20.175, "clock");
                 PersonalGossipTickApi(arrival);
                 check("witness_composition_uses_no_provider_and_publishes_only_after_native_clock", forbiddenCalls == 0
-                    && ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_history WHERE owner_id='target';").Count > 0, forbiddenCalls);
+                    && DialogueSelfTestStore.SelectPersonalGossipHistory4(c).Count > 0, forbiddenCalls);
 
                 // No direct participant, same-town stranger, private scene or
                 // incomplete snapshot can become a witness by mere proximity.
-                long CountJobs() => ReignDatabase.QuerySql(c, "SELECT message_id FROM personal_gossip_messages;").Count;
+                long CountJobs() => DialogueSelfTestStore.SelectPersonalGossipMessages3(c).Count;
                 long before = CountJobs();
                 for (int variation = 0; variation < 13; variation++)
                 {
@@ -177,16 +173,14 @@ VALUES($id,$campaign,'source','player','social_event','closed',1,1,$day,$day,'["
                 AcceptPersonalGossip(campaign, strongPayload, GossipFields("gossipSignals", new[] { strongSignal }), strong,
                     "source", "player", "An important public promise.", "That matters to me.");
                 string topicId = GossipTopicId("main", "source", "player", 50, "politics", "");
-                var originalTopic = GossipJson(ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_topics WHERE topic_id=$id;", GossipFields("id", topicId)).Single());
+                var originalTopic = GossipJson(DialogueSelfTestStore.SelectPersonalGossipTopics4(c, GossipFields("id", topicId)).Single());
                 var sameEpisode = Store(c, strongPayload, "same_episode_weak_exchange", "It is a pleasant evening.", "Indeed it is.");
                 var mildSignal = new Dictionary<string, object>(strongSignal) { ["curiosity"] = 25, ["evidenceQuote"] = "It is a pleasant evening." };
                 AcceptPersonalGossip(campaign, strongPayload, GossipFields("gossipSignals", new[] { mildSignal }), sameEpisode,
                     "source", "player", "It is a pleasant evening.", "Indeed it is.");
-                ReignDatabase.ExecuteSql(c, @"INSERT INTO conversation_relationship_receipts(receipt_id,campaign_id,timeline_id,exchange_id,observer_id,target_id,final_delta,status,native_application_status,created_ts)
-VALUES('retained_source_late_receipt',$campaign,'main',$exchange,'source','player',2,'applied','pending',1);",
-                    GossipFields("campaign", campaign, "exchange", ReadString(sameEpisode, "exchangeId", "")));
+                DialogueSelfTestStore.InsertConversationRelationshipReceipts8(c, GossipFields("campaign", campaign, "exchange", ReadString(sameEpisode, "exchangeId", "")));
                 PersonalGossipRelationshipApplied(campaign, GossipFields("exchangeId", ReadString(sameEpisode, "exchangeId", ""), "worldDay", 50d));
-                var afterReceipt = GossipJson(ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_topics WHERE topic_id=$id;", GossipFields("id", topicId)).Single());
+                var afterReceipt = GossipJson(DialogueSelfTestStore.SelectPersonalGossipTopics4(c, GossipFields("id", topicId)).Single());
                 check("gossip_retained_source_reassesses_late_receipt_in_same_episode", ReadDouble(afterReceipt, "delta", 0) == 2
                     && ReadString(afterReceipt, "sourceQuote", "") == "An important public promise."
                     && ReadString(afterReceipt, "sourceEvidenceExchangeId", "") == ReadString(strong, "exchangeId", ""), afterReceipt);
@@ -195,28 +189,27 @@ VALUES('retained_source_late_receipt',$campaign,'main',$exchange,'source','playe
                 var weakSignal = new Dictionary<string, object>(strongSignal) { ["curiosity"] = 25, ["evidenceQuote"] = "It is a pleasant evening." };
                 AcceptPersonalGossip(campaign, weakPayload, GossipFields("gossipSignals", new[] { weakSignal }), weak,
                     "source", "player", "It is a pleasant evening.", "Indeed it is.");
-                var retained = GossipJson(ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_topics WHERE topic_id=$id;", GossipFields("id", topicId)).Single());
+                var retained = GossipJson(DialogueSelfTestStore.SelectPersonalGossipTopics4(c, GossipFields("id", topicId)).Single());
                 check("gossip_stronger_evidence_bundle_and_episode_survive_weaker_update", ReadString(retained, "sourceQuote", "") == "An important public promise."
                     && ReadString(retained, "sourceSessionId", "") == ReadString(strong, "sessionId", "")
                     && ReadString(retained, "deltaSourceSessionId", "") == ReadString(strong, "sessionId", "")
                     && ReadInt(ReadDictionary(retained, "signal"), "curiosity", 0) == 75
                     && Json.Serialize(ReadDictionary(retained, "savedRolls")) == Json.Serialize(ReadDictionary(originalTopic, "savedRolls")), retained);
-                ReignDatabase.ExecuteSql(c, "UPDATE conversation_turns SET status='inactive' WHERE exchange_id='strong_exchange';");
+                DialogueSelfTestStore.UpdateConversationTurns27(c);
                 AcceptPersonalGossip(campaign, weakPayload, GossipFields("gossipSignals", new[] { weakSignal }), weak,
                     "source", "player", "It is a pleasant evening.", "Indeed it is.");
-                var replaced = GossipJson(ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_topics WHERE topic_id=$id;", GossipFields("id", topicId)).Single());
+                var replaced = GossipJson(DialogueSelfTestStore.SelectPersonalGossipTopics4(c, GossipFields("id", topicId)).Single());
                 check("gossip_inactive_strong_source_does_not_shadow_new_valid_source", ReadString(replaced, "sourceQuote", "") == "It is a pleasant evening.", replaced);
                 var newEpisodePayload = Payload(50, "new_strong_episode");
                 var newEpisode = Store(c, newEpisodePayload, "new_strong_exchange", "A different important promise.", "That is exceptional.");
                 var newEpisodeSignal = new Dictionary<string, object>(strongSignal) { ["curiosity"] = 100, ["evidenceQuote"] = "A different important promise." };
                 AcceptPersonalGossip(campaign, newEpisodePayload, GossipFields("gossipSignals", new[] { newEpisodeSignal }), newEpisode,
                     "source", "player", "A different important promise.", "That is exceptional.");
-                var newEpisodeTopic = GossipJson(ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_topics WHERE topic_id=$id;", GossipFields("id", topicId)).Single());
+                var newEpisodeTopic = GossipJson(DialogueSelfTestStore.SelectPersonalGossipTopics4(c, GossipFields("id", topicId)).Single());
                 check("gossip_new_source_episode_discards_older_reassessment_ids", ReadString(newEpisodeTopic, "sessionId", "") == ReadString(newEpisode, "sessionId", "")
                     && ReadStringList(newEpisodeTopic, "relationshipReassessmentExchangeIds").SequenceEqual(new[] { ReadString(newEpisode, "exchangeId", "") }), newEpisodeTopic);
                 GossipTestPair(c, "witness", "target", 20, -20);
-                ReignDatabase.ExecuteSql(c, "UPDATE relationship_pair_chemistry SET social_modifier_a_to_b=10,social_modifier_b_to_a=-90 WHERE pair_key=$pair;",
-                    GossipFields("pair", RelationshipsService.AmbientPairKey("witness", "target")));
+                DialogueSelfTestStore.UpdateRelationshipPairChemistry(c, GossipFields("pair", RelationshipsService.AmbientPairKey("witness", "target")));
                 check("gossip_effective_directional_affinity_includes_social_modifier_and_clamps", GossipAffinity(c, "witness", "target", witness, target) == 30
                     && GossipAffinity(c, "target", "witness", target, witness) == -100, null);
                 settings["personalGossipShareAdjustment"] = 100;
@@ -225,8 +218,7 @@ VALUES('retained_source_late_receipt',$campaign,'main',$exchange,'source','playe
                 const string namedQuote = "Ask target whether the next dance is theirs.";
                 var namedExchange = Store(c, namedPayload, "named_remote_public_exchange", npcWords: namedQuote);
                 AcceptPersonalGossip(campaign, namedPayload, Signal(namedQuote), namedExchange, "source", "player", "Would you care to dance?", namedQuote);
-                var remoteJobs = ReignDatabase.QuerySql(c, @"SELECT m.* FROM personal_gossip_messages m JOIN personal_gossip_topics t ON t.topic_id=m.topic_id
-WHERE t.session_id='named_remote_public_scene' AND m.is_reply=0;");
+                var remoteJobs = DialogueSelfTestStore.SelectPersonalGossipMessages21(c);
                 check("witness_public_literal_name_preserves_existing_remote_contact_route", remoteJobs.Count == 2
                     && remoteJobs.All(job => ReadString(job, "recipient_id", "") == "target"
                         && ReadStringList(GossipJson(job), "mentionedIds").Contains("target") && !ReadBool(GossipJson(job), "local", true)
@@ -235,8 +227,7 @@ WHERE t.session_id='named_remote_public_scene' AND m.is_reply=0;");
                 const string unnamedQuote = "Another dance would be welcome.";
                 var unnamedExchange = Store(c, unnamedPayload, "unnamed_remote_public_exchange", npcWords: unnamedQuote);
                 AcceptPersonalGossip(campaign, unnamedPayload, Signal(unnamedQuote), unnamedExchange, "source", "player", "Would you care to dance?", unnamedQuote);
-                check("witness_unnamed_remote_friend_does_not_gain_travel_permission", ReignDatabase.QuerySql(c, @"SELECT m.message_id FROM personal_gossip_messages m
-JOIN personal_gossip_topics t ON t.topic_id=m.topic_id WHERE t.session_id='unnamed_remote_public_scene' AND m.is_reply=0;").Count == 0, null);
+                check("witness_unnamed_remote_friend_does_not_gain_travel_permission", DialogueSelfTestStore.SelectPersonalGossipMessages22(c).Count == 0, null);
             }
             catch (Exception ex) { check("witness_fixture_completed", false, ex.ToString()); }
             finally { Program.CodexPerformanceSettings.Value = priorSettings; ReignPostgreSqlStorage.DropCampaign(campaign); }

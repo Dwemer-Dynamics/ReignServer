@@ -110,10 +110,7 @@ namespace ReignBetaServer
                     p["conversationSessionId"] = "drink_scene_session_" + mode;
                     p["playerText"] = "Tell me about your clan.";
                     using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
-                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions
-(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-VALUES($session,$campaign,'mira','player','open',1,1,'[""mira"",""player""]','{""timelineId"":""main""}');",
-                            TestDict("session", ReadString(p, "conversationSessionId", ""), "campaign", campaign));
+                        DialogueSelfTestStore.InsertConversationSessions9(connection, TestDict("session", ReadString(p, "conversationSessionId", ""), "campaign", campaign));
                     string quote = "The server places a full cup of wine beside Mira.";
                     var parsed = TestDict("reply", quote + " I remember your name.", "drinkSceneUpdates", new[] { Update(quote, quantity: "full") },
                         "drinkConsumptions", new[] { TestDict("vesselId", "my_cup", "contentsVersion", 1, "serving", "sip", "count", 1, "completed", true) });
@@ -131,9 +128,8 @@ VALUES($session,$campaign,'mira','player','open',1,1,'[""mira"",""player""]','{"
                     Check(mode + "_accepted_observation_and_hidden_choice", ReadBool(published, "ok", false)
                         && ReadDouble(Own(Scene(p)), "remaining", -1) == .75, published);
                     using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
-                        Check(mode + "_source_and_receipt_published_together", ReignDatabase.QuerySql(connection,
-                            "SELECT turn_id FROM conversation_turns WHERE session_id=$session;", TestDict("session", ReadString(p, "conversationSessionId", ""))).Count == 2
-                            && ReignDatabase.QuerySql(connection, "SELECT unit_id FROM conversation_accepted_units WHERE unit_id=$id;", TestDict("id", unit.EventId)).Count == 1);
+                        Check(mode + "_source_and_receipt_published_together", DialogueSelfTestStore.SelectConversationTurns30(connection, TestDict("session", ReadString(p, "conversationSessionId", ""))).Count == 2
+                            && DialogueSelfTestStore.SelectConversationAcceptedUnits2(connection, TestDict("id", unit.EventId)).Count == 1);
                 }
 
                 payload = Payload("rollback", "rollback-fixture");

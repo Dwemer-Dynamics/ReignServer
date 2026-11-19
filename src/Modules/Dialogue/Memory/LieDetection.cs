@@ -15,22 +15,11 @@ namespace ReignBetaServer
 
         internal static void EnsureWorldHistoryLieDetectionSchema(ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_lie_checks (
-lie_check_id TEXT PRIMARY KEY,episode_key TEXT NOT NULL UNIQUE,claim_check_id TEXT NOT NULL DEFAULT '',campaign_id TEXT NOT NULL,
-timeline_id TEXT NOT NULL,world_day REAL NOT NULL,claimant_id TEXT NOT NULL,target_id TEXT NOT NULL,raw_claim TEXT NOT NULL,
-normalized_claim TEXT NOT NULL,objective_verdict TEXT NOT NULL,knowledge_basis TEXT NOT NULL,claimant_roguery REAL,
-claimant_charm REAL,claimant_average REAL,target_roguery REAL,target_charm REAL,target_average REAL,formula_version TEXT NOT NULL,
-success_chance REAL,roll_value REAL,outcome TEXT NOT NULL,reaction_strategy TEXT NOT NULL DEFAULT '',exploit_opening INTEGER NOT NULL DEFAULT 0,
-evidence_event_ids_json TEXT NOT NULL DEFAULT '[]',known_event_ids_json TEXT NOT NULL DEFAULT '[]',matched_json TEXT NOT NULL DEFAULT '[]',
-mismatched_json TEXT NOT NULL DEFAULT '[]',prompt_packet_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL); ");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_claim_beliefs (
-belief_id TEXT PRIMARY KEY,lie_check_id TEXT NOT NULL,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,believer_id TEXT NOT NULL,
-claimant_id TEXT NOT NULL,raw_claim TEXT NOT NULL,normalized_claim TEXT NOT NULL,state TEXT NOT NULL,confidence REAL NOT NULL,
-evidence_event_ids_json TEXT NOT NULL DEFAULT '[]',created_day REAL NOT NULL,disproven_day REAL NOT NULL DEFAULT -1,
-discovered_event_ids_json TEXT NOT NULL DEFAULT '[]',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL); ");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_lie_participants ON world_history_lie_checks(target_id,claimant_id,world_day DESC);");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_belief_owner_state ON world_history_claim_beliefs(believer_id,state,updated_ts DESC);");
-            ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('world_history_lie_detection_version','1');");
+            DialogueSchema.CreateWorldHistoryLieChecks(connection);
+            DialogueSchema.CreateWorldHistoryClaimBeliefs(connection);
+            DialogueSchema.CreateIndexWhLieParticipants(connection);
+            DialogueSchema.CreateIndexWhBeliefOwnerState(connection);
+            DialogueStore.UpsertSchemaMeta6(connection);
         }
 
         internal static Dictionary<string, object> WorldHistoryLieCheckApi(Dictionary<string, object> payload)
@@ -145,7 +134,7 @@ discovered_event_ids_json TEXT NOT NULL DEFAULT '[]',created_ts INTEGER NOT NULL
                 List<string> knownIds = ReadStringList(knowledge, "eventIds");
                 ReconcileWorldHistoryClaimBeliefs(connection, targetId, knownIds, worldDay);
                 string episodeKey = StableLieEpisodeKey(campaignId, timelineId, claimantId, targetId, normalizedClaim, evidenceIds, knowledgeBasis);
-                Dictionary<string, object> existing = ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_lie_checks WHERE episode_key=$key LIMIT 1;", new Dictionary<string, object> { ["key"] = episodeKey }).FirstOrDefault();
+                Dictionary<string, object> existing = DialogueStore.SelectWorldHistoryLieChecks(connection, new Dictionary<string, object> { ["key"] = episodeKey }).FirstOrDefault();
                 if (existing != null) return BuildLieCheckResponse(existing, verification, true);
 
                 Dictionary<string, object> claimantSkills = ResolveLieSkills(payload, "claimantSkills", campaignId, claimantId);
@@ -192,14 +181,7 @@ discovered_event_ids_json TEXT NOT NULL DEFAULT '[]',created_ts INTEGER NOT NULL
                 Dictionary<string, object> promptPacket = BuildLiePromptPacket(verification, outcome, knowledgeBasis, knownIds, reactionStrategy, exploitOpening);
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_lie_checks(
-lie_check_id,episode_key,claim_check_id,campaign_id,timeline_id,world_day,claimant_id,target_id,raw_claim,normalized_claim,
-objective_verdict,knowledge_basis,claimant_roguery,claimant_charm,claimant_average,target_roguery,target_charm,target_average,
-formula_version,success_chance,roll_value,outcome,reaction_strategy,exploit_opening,evidence_event_ids_json,known_event_ids_json,
-matched_json,mismatched_json,prompt_packet_json,created_ts,updated_ts)
-VALUES($id,$episode,$claimCheck,$campaign,$timeline,$day,$claimant,$target,$claim,$normalized,$verdict,$basis,
-$cr,$cc,$ca,$tr,$tc,$ta,$formula,$chance,$roll,$outcome,$reaction,$exploit,$evidence,$known,$matched,$mismatched,$packet,$ts,$ts);",
-                    new Dictionary<string, object>
+                DialogueStore.InsertWorldHistoryLieChecks(connection, new Dictionary<string, object>
                     {
                         ["id"] = lieCheckId, ["episode"] = episodeKey, ["claimCheck"] = ReadString(verification, "checkId", ""),
                         ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = worldDay, ["claimant"] = claimantId, ["target"] = targetId,
@@ -214,7 +196,7 @@ $cr,$cc,$ca,$tr,$tc,$ta,$formula,$chance,$roll,$outcome,$reaction,$exploit,$evid
 
                 PersistLieConsequence(connection, lieCheckId, campaignId, timelineId, claimantId, targetId, claim, normalizedClaim,
                     objectiveVerdict, outcome, reactionStrategy, exploitOpening, evidenceIds, worldDay, ts);
-                Dictionary<string, object> stored = ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_lie_checks WHERE lie_check_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = lieCheckId }).FirstOrDefault();
+                Dictionary<string, object> stored = DialogueStore.SelectWorldHistoryLieChecks2(connection, new Dictionary<string, object> { ["id"] = lieCheckId }).FirstOrDefault();
                 return BuildLieCheckResponse(stored, verification, false);
             }
         }
@@ -226,43 +208,36 @@ $cr,$cc,$ca,$tr,$tc,$ta,$formula,$chance,$roll,$outcome,$reaction,$exploit,$evid
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureCategorizedMemorySchema(connection);
-                return ReignDatabase.QuerySql(connection, @"SELECT player_id FROM conversation_sessions
-WHERE campaign_id=$campaign AND lower(player_id)=lower($target) AND trim(player_id)<>'' LIMIT 1;",
-                    new Dictionary<string, object>{{"campaign",campaignId},{"target",targetId}}).Any();
+                return DialogueStore.SelectConversationSessions14(connection, new Dictionary<string, object>{{"campaign",campaignId},{"target",targetId}}).Any();
             }
         }
 
         private static void RunPlayerLieDetectionRemovalMigration(ReignDbConnection connection)
         {
             EnsureWorldHistoryLieDetectionSchema(connection);
-            Dictionary<string, object> applied = ReignDatabase.QuerySql(connection,
-                "SELECT value FROM schema_meta WHERE key='player_lie_detection_removed_v1' LIMIT 1;").FirstOrDefault();
+            Dictionary<string, object> applied = DialogueStore.SelectSchemaMeta5(connection).FirstOrDefault();
             if (string.Equals(ReadString(applied, "value", ""), "complete", StringComparison.OrdinalIgnoreCase)) return;
 
             HashSet<string> playerIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "main_hero" };
-            foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection,
-                "SELECT DISTINCT player_id FROM conversation_sessions WHERE trim(player_id)<>'';"))
+            foreach (Dictionary<string, object> row in DialogueStore.SelectConversationSessions15(connection))
             {
                 string playerId = ReadString(row, "player_id", "");
                 if (!string.IsNullOrWhiteSpace(playerId)) playerIds.Add(playerId);
             }
-            List<string> lieCheckIds = ReignDatabase.QuerySql(connection,
-                "SELECT lie_check_id,target_id FROM world_history_lie_checks;")
+            List<string> lieCheckIds = DialogueStore.SelectWorldHistoryLieChecks3(connection)
                 .Where(row => playerIds.Contains(ReadString(row, "target_id", "")))
                 .Select(row => ReadString(row, "lie_check_id", ""))
                 .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             foreach (string lieCheckId in lieCheckIds)
             {
                 Dictionary<string, object> parameters = new Dictionary<string, object> { ["id"] = lieCheckId };
-                ReignDatabase.ExecuteSql(connection, "DELETE FROM memory_fts WHERE memory_id IN (SELECT memory_id FROM memories WHERE event_id=$id OR memory_id=$memory OR memory_id=$discovery);",
-                    new Dictionary<string, object>{{"id",lieCheckId},{"memory","memory_"+lieCheckId},{"discovery","memory_discovery_"+lieCheckId}});
-                ReignDatabase.ExecuteSql(connection, "DELETE FROM memories WHERE event_id=$id OR memory_id=$memory OR memory_id=$discovery;",
-                    new Dictionary<string, object>{{"id",lieCheckId},{"memory","memory_"+lieCheckId},{"discovery","memory_discovery_"+lieCheckId}});
-                ReignDatabase.ExecuteSql(connection, "DELETE FROM beliefs WHERE event_id=$id;", parameters);
-                ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_claim_beliefs WHERE lie_check_id=$id;", parameters);
-                ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_lie_checks WHERE lie_check_id=$id;", parameters);
+                DialogueStore.DeleteMemoryFts2(connection, new Dictionary<string, object>{{"id",lieCheckId},{"memory","memory_"+lieCheckId},{"discovery","memory_discovery_"+lieCheckId}});
+                DialogueStore.DeleteMemories(connection, new Dictionary<string, object>{{"id",lieCheckId},{"memory","memory_"+lieCheckId},{"discovery","memory_discovery_"+lieCheckId}});
+                DialogueStore.DeleteBeliefs(connection, parameters);
+                DialogueStore.DeleteWorldHistoryClaimBeliefs(connection, parameters);
+                DialogueStore.DeleteWorldHistoryLieChecks(connection, parameters);
             }
-            ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('player_lie_detection_removed_v1','complete');");
+            DialogueStore.UpsertSchemaMeta7(connection);
         }
 
         private static Dictionary<string, object> VerifySelfAdmittedFalsehood(
@@ -451,9 +426,7 @@ WHERE campaign_id=$campaign AND lower(player_id)=lower($target) AND trim(player_
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureWorldHistoryLieDetectionSchema(connection);
-                List<Dictionary<string, object>> rows = ReignDatabase.QuerySql(connection, @"SELECT * FROM world_history_lie_checks
-WHERE ($claimant='' OR claimant_id=$claimant) AND ($target='' OR target_id=$target) ORDER BY created_ts DESC LIMIT $limit;",
-                    new Dictionary<string, object> { ["claimant"] = claimantId, ["target"] = targetId, ["limit"] = limit });
+                List<Dictionary<string, object>> rows = DialogueStore.SelectWorldHistoryLieChecks4(connection, new Dictionary<string, object> { ["claimant"] = claimantId, ["target"] = targetId, ["limit"] = limit });
                 foreach (Dictionary<string, object> row in rows)
                 {
                     row["evidenceEventIds"] = Program.TextListFromJson(ReadString(row, "evidence_event_ids_json", "[]"));
@@ -503,11 +476,9 @@ WHERE ($claimant='' OR claimant_id=$claimant) AND ($target='' OR target_id=$targ
             List<string> modes = new List<string>();
             foreach (string eventId in eventIds ?? new List<string>())
             {
-                Dictionary<string, object> evt = ReignDatabase.QuerySql(connection, "SELECT event_type FROM world_history_events WHERE event_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = eventId }).FirstOrDefault();
+                Dictionary<string, object> evt = DialogueStore.SelectWorldHistoryEvents2(connection, new Dictionary<string, object> { ["id"] = eventId }).FirstOrDefault();
                 string eventType = ReadString(evt, "event_type", "");
-                List<Dictionary<string, object>> rules = ReignDatabase.QuerySql(connection, @"SELECT * FROM world_history_knowledge_rules WHERE event_id=$event AND available_day<=$day AND
-((audience_type='entity' AND audience_id=$target) OR (audience_type='kingdom' AND audience_id=$kingdom) OR audience_type='global') ORDER BY available_day;",
-                    new Dictionary<string, object> { ["event"] = eventId, ["day"] = worldDay, ["target"] = targetId ?? "", ["kingdom"] = kingdomId ?? "" });
+                List<Dictionary<string, object>> rules = DialogueStore.SelectWorldHistoryKnowledgeRules2(connection, new Dictionary<string, object> { ["event"] = eventId, ["day"] = worldDay, ["target"] = targetId ?? "", ["kingdom"] = kingdomId ?? "" });
                 bool direct = rules.Any(x => string.Equals(ReadString(x, "audience_type", ""), "entity", StringComparison.OrdinalIgnoreCase)
                     && string.Equals(ReadString(x, "acquisition_mode", ""), "participant", StringComparison.OrdinalIgnoreCase))
                     && WorldSimulationService.QueryWorldHistoryEntities(connection, eventId).Any(x => string.Equals(ReadString(x, "entity_id", ""), targetId, StringComparison.OrdinalIgnoreCase)
@@ -530,8 +501,7 @@ WHERE ($claimant='' OR claimant_id=$claimant) AND ($target='' OR target_id=$targ
             List<Dictionary<string, object>> events = new List<Dictionary<string, object>>();
             foreach (string eventId in visibleIds.Take(8))
             {
-                Dictionary<string, object> row = ReignDatabase.QuerySql(connection, @"SELECT event_id,event_type,category,phase,world_day,location_id,location_name,summary,dissemination_class
-FROM world_history_events WHERE event_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = eventId }).FirstOrDefault();
+                Dictionary<string, object> row = DialogueStore.SelectWorldHistoryEvents3(connection, new Dictionary<string, object> { ["id"] = eventId }).FirstOrDefault();
                 if (row == null) continue;
                 row["entities"] = WorldSimulationService.QueryWorldHistoryEntities(connection, eventId).Take(12).Select(entity => new Dictionary<string, object>
                 {
@@ -659,10 +629,7 @@ FROM world_history_events WHERE event_id=$id LIMIT 1;", new Dictionary<string, o
                 Dictionary<string, object> traits = ReadDictionary(traitDocument, "foundationTraits") ?? ReadDictionary(traitDocument, "hiddenReignTraits") ?? traitDocument;
                 double confidence = Program.ClampDouble(0.6d + 0.1d * Program.TraitInt(traits, "socialTrust"), 0.35d, 0.8d);
                 string beliefId = "whb_" + Guid.NewGuid().ToString("N");
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_claim_beliefs(belief_id,lie_check_id,campaign_id,timeline_id,believer_id,claimant_id,
-raw_claim,normalized_claim,state,confidence,evidence_event_ids_json,created_day,disproven_day,discovered_event_ids_json,created_ts,updated_ts)
-VALUES($id,$lie,$campaign,$timeline,$believer,$claimant,$claim,$normalized,'accepted',$confidence,$evidence,$day,-1,'[]',$ts,$ts);",
-                    new Dictionary<string, object> { ["id"] = beliefId, ["lie"] = lieCheckId, ["campaign"] = campaignId, ["timeline"] = timelineId,
+                DialogueStore.InsertWorldHistoryClaimBeliefs(connection, new Dictionary<string, object> { ["id"] = beliefId, ["lie"] = lieCheckId, ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["believer"] = targetId, ["claimant"] = claimantId, ["claim"] = claim, ["normalized"] = normalizedClaim,
                         ["confidence"] = confidence, ["evidence"] = Json.Serialize(evidenceIds), ["day"] = worldDay, ["ts"] = ts });
                 Program.InsertBelief(connection, lieCheckId, new Dictionary<string, object> { ["believerId"] = targetId, ["claim"] = claim,
@@ -676,7 +643,7 @@ VALUES($id,$lie,$campaign,$timeline,$believer,$claimant,$claim,$normalized,'acce
             EnsureWorldHistoryLieDetectionSchema(connection);
             if (string.IsNullOrWhiteSpace(believerId) || selectedEventIds == null || selectedEventIds.Count == 0) return new List<string>();
             HashSet<string> selected = new HashSet<string>(selectedEventIds, StringComparer.OrdinalIgnoreCase);
-            List<Dictionary<string, object>> rows = ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_claim_beliefs WHERE believer_id=$believer AND state='accepted';", new Dictionary<string, object> { ["believer"] = believerId });
+            List<Dictionary<string, object>> rows = DialogueStore.SelectWorldHistoryClaimBeliefs(connection, new Dictionary<string, object> { ["believer"] = believerId });
             List<string> reconciled = new List<string>();
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             foreach (Dictionary<string, object> row in rows)
@@ -686,9 +653,8 @@ VALUES($id,$lie,$campaign,$timeline,$believer,$claimant,$claim,$normalized,'acce
                 if (discovered.Count == 0) continue;
                 string beliefId = ReadString(row, "belief_id", "");
                 string lieCheckId = ReadString(row, "lie_check_id", "");
-                ReignDatabase.ExecuteSql(connection, "UPDATE world_history_claim_beliefs SET state='disproven',disproven_day=$day,discovered_event_ids_json=$events,updated_ts=$ts WHERE belief_id=$id;",
-                    new Dictionary<string, object> { ["day"] = worldDay, ["events"] = Json.Serialize(discovered), ["ts"] = ts, ["id"] = beliefId });
-                ReignDatabase.ExecuteSql(connection, "UPDATE beliefs SET confidence=0,payload_json=$payload WHERE event_id=$lie;", new Dictionary<string, object>
+                DialogueStore.UpdateWorldHistoryClaimBeliefs(connection, new Dictionary<string, object> { ["day"] = worldDay, ["events"] = Json.Serialize(discovered), ["ts"] = ts, ["id"] = beliefId });
+                DialogueStore.UpdateBeliefs(connection, new Dictionary<string, object>
                 {
                     ["lie"] = lieCheckId, ["payload"] = Json.Serialize(new Dictionary<string, object> { ["state"] = "disproven", ["beliefId"] = beliefId, ["discoveredEventIds"] = discovered })
                 });
@@ -900,7 +866,7 @@ VALUES($id,$lie,$campaign,$timeline,$believer,$claimant,$claim,$normalized,'acce
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureWorldHistoryLieDetectionSchema(connection);
-                Dictionary<string, object> belief = ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_claim_beliefs WHERE believer_id='observer_a' ORDER BY created_ts LIMIT 1;").FirstOrDefault();
+                Dictionary<string, object> belief = DialogueStore.SelectWorldHistoryClaimBeliefs2(connection).FirstOrDefault();
                 add("later_reconciliation", belief != null && ReadString(belief, "state", "") == "disproven" && ReadDouble(belief, "disproven_day", -1d) == 104d,
                     "Relevant regional evidence disproves the earlier accepted claim on retrieval.");
 

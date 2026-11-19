@@ -100,8 +100,7 @@ with the exact words of this reply. Do not mark something raised merely because 
                                     + (GossipLocal(self, contact.Person) ? "; currently in the same settlement or party." : "; not established as nearby."));
                         }
                     }
-                    var history = ReignDatabase.QuerySql(c, @"SELECT * FROM personal_gossip_history WHERE timeline_id=$timeline AND owner_id=$owner
-AND acquired_day<=$day ORDER BY acquired_day DESC,receipt_id DESC LIMIT 12;", GossipFields("timeline", timeline, "owner", hero, "day", day));
+                    var history = DialogueStore.SelectPersonalGossipHistory3(c, GossipFields("timeline", timeline, "owner", hero, "day", day));
                     if (history.Count > 0)
                     {
                         text.AppendLine("RECENT NPC EXCHANGES — current dialogue day " + day.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture) + ":");
@@ -110,9 +109,7 @@ AND acquired_day<=$day ORDER BY acquired_day DESC,receipt_id DESC LIMIT 12;", Go
                         text.AppendLine("The record is the complete evidence for that NPC exchange. Do not add unrecorded remarks, repetitions, actions, reactions, or quantities when recalling it. You may offer your interpretation as an interpretation, but do not turn plausible conversational color into an observed event.");
                         text.AppendLine("Known contact identity hints come from current native profile facts. Use those pronouns instead of guessing from a name or copying an earlier mistaken recollection; when none are supplied, use the person's name. This is identity context, not a newly discovered event.");
                         var nominations = new List<string>();
-                        bool alreadyRaised = session.Length > 0 && ReignDatabase.QuerySql(c,
-                            "SELECT receipt_id FROM personal_gossip_history WHERE timeline_id=$timeline AND owner_id=$owner AND raise_session=$session LIMIT 1;",
-                            GossipFields("timeline", timeline, "owner", hero, "session", session)).Count > 0;
+                        bool alreadyRaised = session.Length > 0 && DialogueStore.SelectPersonalGossipHistory4(c, GossipFields("timeline", timeline, "owner", hero, "session", session)).Count > 0;
                         var traits = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "traits.json"));
                         int used = 0;
                         foreach (var row in history)
@@ -144,8 +141,7 @@ AND acquired_day<=$day ORDER BY acquired_day DESC,receipt_id DESC LIMIT 12;", Go
                             if (!data.ContainsKey("raiseChance"))
                             {
                                 data["raiseChance"] = Program.GossipAdjustedChance(chance, "raise", PersonalGossipSettings());
-                                ReignDatabase.ExecuteSql(c, "UPDATE personal_gossip_history SET payload_json=$json WHERE receipt_id=$id;",
-                                    GossipFields("json", Json.Serialize(data), "id", id));
+                                DialogueStore.UpdatePersonalGossipHistory(c, GossipFields("json", Json.Serialize(data), "id", id));
                             }
                             chance = ReadInt(data, "raiseChance", chance);
                             if (ReadInt(data, "raiseRoll", GossipRoll(ReadString(row, "root_id", "") + "|" + hero, "raise")) <= chance) nominations.Add(id);
@@ -264,12 +260,10 @@ AND acquired_day<=$day ORDER BY acquired_day DESC,receipt_id DESC LIMIT 12;", Go
         {
             if (string.IsNullOrWhiteSpace(session)) return;
             var nominated = ReadStringList(payload, "personalGossipAgenda");
-            if (ReignDatabase.QuerySql(c, "SELECT receipt_id FROM personal_gossip_history WHERE timeline_id=$timeline AND owner_id=$owner AND raise_session=$session LIMIT 1;",
-                GossipFields("timeline", timeline, "owner", hero, "session", session)).Count > 0) return;
+            if (DialogueStore.SelectPersonalGossipHistory4(c, GossipFields("timeline", timeline, "owner", hero, "session", session)).Count > 0) return;
             foreach (var item in ReadDictionaryList(parsed, "raisedGossip").Take(1))
                 if (nominated.Contains(ReadString(item, "receiptId", "")) && GossipQuoteSupported(ReadString(item, "evidenceQuote", ""), reply))
-                    ReignDatabase.ExecuteSql(c, @"UPDATE personal_gossip_history SET raise_session=$session WHERE receipt_id=$id AND timeline_id=$timeline
-AND owner_id=$owner AND raise_session='' AND acquired_day<=$day;", GossipFields("id", ReadString(item, "receiptId", ""), "timeline", timeline,
+                    DialogueStore.UpdatePersonalGossipHistory2(c, GossipFields("id", ReadString(item, "receiptId", ""), "timeline", timeline,
                         "owner", hero, "session", session, "day", ReadDouble(payload, "worldDay", 0)));
         }
 
@@ -283,8 +277,8 @@ AND owner_id=$owner AND raise_session='' AND acquired_day<=$day;", GossipFields(
                 if (request.DeliveryOnly)
                     return PersonalGossipDeliveryReadiness(c, campaign, request);
                 if (!WorldSimulationService.TableExists(c, "personal_gossip_messages")) return GossipStatusResponse.NoSchema().ToDictionary();
-                return GossipStatusResponse.Snapshot(PersonalGossipVersion, ReignDatabase.QuerySql(c, "SELECT message_id,root_id,timeline_id,speaker_id,recipient_id,is_reply,hop,created_day,due_day,expires_day,status,attempts FROM personal_gossip_messages ORDER BY created_day DESC,message_id LIMIT 100;"),
-                    ReignDatabase.QuerySql(c, "SELECT topic_id,speaker_id,created_day,status,payload_json FROM personal_gossip_topics ORDER BY created_day DESC,topic_id LIMIT 30;")
+                return GossipStatusResponse.Snapshot(PersonalGossipVersion, DialogueStore.SelectPersonalGossipMessages9(c),
+                    DialogueStore.SelectPersonalGossipTopics5(c)
                         .Select(row => GossipFields("id", ReadString(row, "topic_id", ""), "speakerId", ReadString(row, "speaker_id", ""),
                             "status", ReadString(row, "status", ""), "shareChance", ReadInt(GossipJson(row), "shareChance", 0),
                             "shareRoll", ReadInt(GossipJson(row), "shareRoll", 0), "candidateAudit", ReadDictionary(GossipJson(row), "candidateAudit"),
@@ -303,14 +297,10 @@ AND owner_id=$owner AND raise_session='' AND acquired_day<=$day;", GossipFields(
             bool schema = WorldSimulationService.TableExists(c, "personal_gossip_messages");
             double day = request.WorldDay.HasValue
                     ? request.WorldDay.Value : schema ? ReadDouble(GossipClock(c, timeline), "world_day", 0) : 0;
-            var counts = schema ? ReignDatabase.QuerySql(c, @"SELECT status,COUNT(*) AS count FROM personal_gossip_messages
-WHERE timeline_id=$timeline AND status IN ('pending','generating','awaiting_native_clock','generation_failed') GROUP BY status;",
-                GossipFields("timeline", timeline)) : new List<Dictionary<string, object>>();
+            var counts = schema ? DialogueStore.SelectPersonalGossipMessages10(c, GossipFields("timeline", timeline)) : new List<Dictionary<string, object>>();
             long Count(string status) => counts.Where(r => ReadString(r, "status", "") == status).Sum(r => (long)ReadInt(r, "count", 0));
-            var next = schema ? ReignDatabase.QuerySql(c, "SELECT MIN(due_day) AS next_day FROM personal_gossip_messages WHERE timeline_id=$timeline AND status='in_transit';",
-                GossipFields("timeline", timeline)).FirstOrDefault() : null;
-            var ready = schema ? ReignDatabase.QuerySql(c, "SELECT payload_json FROM personal_gossip_messages WHERE timeline_id=$timeline AND status='awaiting_native_clock' ORDER BY created_day,message_id LIMIT 32;",
-                GossipFields("timeline", timeline)).Select(r => ReadString(GossipJson(r), "readyNonce", "")).Where(n => n.Length > 0).ToList() : new List<string>();
+            var next = schema ? DialogueStore.SelectPersonalGossipMessages11(c, GossipFields("timeline", timeline)).FirstOrDefault() : null;
+            var ready = schema ? DialogueStore.SelectPersonalGossipMessages12(c, GossipFields("timeline", timeline)).Select(r => ReadString(GossipJson(r), "readyNonce", "")).Where(n => n.Length > 0).ToList() : new List<string>();
             var communications = CommunicationReadiness(c, timeline, day);
             object nextDueDay = next != null && next.TryGetValue("next_day", out object value) && value != null && value != DBNull.Value ? value : null;
             return new GossipDeliveryReadinessResponse
@@ -321,8 +311,7 @@ WHERE timeline_id=$timeline AND status IN ('pending','generating','awaiting_nati
                 AwaitingNativeClock = Count("awaiting_native_clock"),
                 FailedComposition = Count("generation_failed") + ReadLong(communications, "failed", 0), ReadyNonces = ready, Communications = communications,
                 NextDueDay = nextDueDay,
-                DueInTransit = schema ? ReadInt(ReignDatabase.QuerySql(c, "SELECT COUNT(*) AS count FROM personal_gossip_messages WHERE timeline_id=$timeline AND status='in_transit' AND due_day<=$day;",
-                    GossipFields("timeline", timeline, "day", day)).FirstOrDefault(), "count", 0) + ReadLong(communications, "due", 0) : ReadLong(communications, "due", 0)
+                DueInTransit = schema ? ReadInt(DialogueStore.CountPersonalGossipMessages2(c, GossipFields("timeline", timeline, "day", day)).FirstOrDefault(), "count", 0) + ReadLong(communications, "due", 0) : ReadLong(communications, "due", 0)
             }.ToDictionary();
         }
     }

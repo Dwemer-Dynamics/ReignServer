@@ -65,7 +65,7 @@ namespace ReignBetaServer
                     var accepted = StoreAcceptedConversationContinuity(connection, payload, "npc", "player", "answer_event", ack,
                         new List<Dictionary<string, object>> { resolved }, 4L);
                     Check("answered_and_unconvincing_can_both_persist", ReadStringList(accepted, "applied").Contains("question_plan")
-                        && ReadString(ReignDatabase.QuerySql(connection, "SELECT status FROM conversation_continuity WHERE record_id='question_plan';").Single(), "status", "") == "resolved", accepted);
+                        && ReadString(DialogueSelfTestStore.SelectConversationContinuity7(connection).Single(), "status", "") == "resolved", accepted);
                     var next = new Dictionary<string, object>(payload);
                     var required = new List<string>();
                     string prompt = BuildQuestionContinuityPrompt(connection, next, "npc", "player", required);
@@ -147,21 +147,18 @@ namespace ReignBetaServer
                     Check("new_question_does_not_grant_player_a_turn", sameBeat.Contains("none yet") && !sameBeat.Contains("Unresolved questions:"), sameBeat);
                     UpdateSharedGroupConversationState(campaign, group, "npc_b", "Speaker B", "I prefer to listen to that answer first.", "group_questions", 21L, "group_event_2");
                     Check("last_npc_does_not_erase_prior_question", BuildSharedGroupConversationPrompt(campaign, group, "npc", new List<Dictionary<string, object>>(), "I have described our plan.").Contains(question));
-                    long revision = ReadLong(ReignDatabase.QuerySql(connection, "SELECT revision FROM group_conversation_state WHERE session_id='group_questions';").Single(), "revision", 0);
+                    long revision = ReadLong(DialogueSelfTestStore.SelectGroupConversationState(connection).Single(), "revision", 0);
                     UpdateSharedGroupConversationState(campaign, group, "npc", "Speaker A", "A retried response must not replace delivered speech.", "group_questions", 22L, "group_retry");
-                    Check("retry_does_not_add_delivery_or_state_revision", ReadLong(ReignDatabase.QuerySql(connection, "SELECT revision FROM group_conversation_state WHERE session_id='group_questions';").Single(), "revision", 0) == revision
-                        && ReignDatabase.QuerySql(connection, "SELECT * FROM group_conversation_contributions WHERE session_id='group_questions' AND role='npc';").Count == 2);
+                    Check("retry_does_not_add_delivery_or_state_revision", ReadLong(DialogueSelfTestStore.SelectGroupConversationState(connection).Single(), "revision", 0) == revision
+                        && DialogueSelfTestStore.SelectGroupConversationContributions(connection).Count == 2);
                     group["sceneTurnId"] = "group_beat_2";
                     group["repairStatus"] = TestDict("allChecksCleared", false);
                     UpdateSharedGroupConversationState(campaign, group, "npc", "Speaker A", "Plain failed repair without punctuation", "group_questions", 23L, "group_failed");
-                    Check("repeated_player_words_in_new_beat_are_not_deduplicated", ReignDatabase.QuerySql(connection,
-                        "SELECT * FROM group_conversation_contributions WHERE session_id='group_questions' AND role='player';").Count == 2);
-                    Check("structured_repair_failure_is_authority", ReadString(ReignDatabase.QuerySql(connection,
-                        "SELECT validation_status FROM group_conversation_contributions WHERE source_event_id='group_failed';").Single(), "validation_status", "") == "visible_failed_repair");
+                    Check("repeated_player_words_in_new_beat_are_not_deduplicated", DialogueSelfTestStore.SelectGroupConversationContributions2(connection).Count == 2);
+                    Check("structured_repair_failure_is_authority", ReadString(DialogueSelfTestStore.SelectGroupConversationContributions3(connection).Single(), "validation_status", "") == "visible_failed_repair");
                     group["sceneTurnId"] = "group_beat_3"; group["repairStatus"] = TestDict("allChecksCleared", true);
                     UpdateSharedGroupConversationState(campaign, group, "npc", "Speaker A", "A successful structured result.,", "group_questions", 24L, "group_success");
-                    Check("punctuation_cannot_override_structured_success", ReadString(ReignDatabase.QuerySql(connection,
-                        "SELECT validation_status FROM group_conversation_contributions WHERE source_event_id='group_success';").Single(), "validation_status", "") == "accepted_speech");
+                    Check("punctuation_cannot_override_structured_success", ReadString(DialogueSelfTestStore.SelectGroupConversationContributions4(connection).Single(), "validation_status", "") == "accepted_speech");
                     string laterBeat = BuildSharedGroupConversationPrompt(campaign, group, "npc_b", new List<Dictionary<string, object>>(), "I have described our plan.");
                     Check("later_player_opportunity_is_not_evasion_verdict", laterBeat.Contains("later player contribution exists") && laterBeat.Contains("does not classify it as unanswered"), laterBeat);
                     var otherTimeline = new Dictionary<string, object>(group) { ["timelineId"] = "other_branch" };
@@ -193,7 +190,7 @@ namespace ReignBetaServer
                         && requestPrompt.Contains(requestAnswer) && requestPrompt.Contains("direct_information_request") && requestPrompt.Contains("unconvincing"), requestPrompt);
                     var requestLink = TestDict("relatedTurnId", "information_request", "relationKind", "answer", "relatedQuote", request);
                     Check("answer_link_supports_information_requests", ConversationContinuityLinkError(connection, requestLink, "npc", "question_timeline", 5d) == "");
-                    var requestRow = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='information_request';").Single();
+                    var requestRow = DialogueSelfTestStore.SelectConversationTurns17(connection).Single();
                     Check("retrieval_keeps_information_request_with_next_answer", ExpandPrecisionQuestionContext(connection,
                         new[] { requestRow }.ToList(), Program.BuildKnowledgeAccessContext("npc", "player", "", requestPayload))
                         .Any(row => ReadString(row, "turn_id", "") == "information_answer"));
@@ -255,16 +252,16 @@ namespace ReignBetaServer
                     Check("nominal_answer_retained_in_next_read", ReadStringList(nominalAnswered, "applied").Contains("nominal_question_record")
                         && nominalPrompt.Contains(nominalQuestion) && nominalPrompt.Contains(nominalAnswer)
                         && nominalPrompt.Contains("linked answer state=answered"), nominalAnswered);
-                    var nominalRow = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='nominal_question';").Single();
+                    var nominalRow = DialogueSelfTestStore.SelectConversationTurns18(connection).Single();
                     Check("nominal_retrieval_keeps_adjacent_answer", ExpandPrecisionQuestionContext(connection,
                         new[] { nominalRow }.ToList(), Program.BuildKnowledgeAccessContext("npc", "player", "", nominalPayload))
                         .Any(row => ReadString(row, "turn_id", "") == "nominal_answer"));
 
-                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET text='The source was changed.' WHERE turn_id='plan_answer';");
+                    DialogueSelfTestStore.UpdateConversationTurns14(connection);
                     string changed = BuildQuestionContinuityPrompt(connection, next, "npc", "player", new List<string>());
                     Check("changed_source_cannot_certify_old_summary", !changed.Contains(answer)
                         && ReadString(ReadDictionary(next, "questionStateEvidence"), "coverage", "") == "incomplete"
-                        && ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id='question_plan';").Count == 1, changed);
+                        && DialogueSelfTestStore.SelectConversationContinuity8(connection).Count == 1, changed);
                 }
             }
             catch (Exception ex) { Check("suite_exception", false, ex.ToString()); }
@@ -304,7 +301,7 @@ namespace ReignBetaServer
                 var initial = StoreAcceptedConversationContinuity(connection, payload, "npc", "player", "z_original_event", question,
                     new[] { write }.ToList(), 201L);
                 Check("original_published_before_question_write", ReadStringList(initial, "applied").Contains("review_question"), initial);
-                Dictionary<string, object> Row() => ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id='review_question';").Single();
+                Dictionary<string, object> Row() => DialogueSelfTestStore.SelectConversationContinuity9(connection).Single();
                 string before = Json.Serialize(Row());
                 Turn("other_npc", "other", "I am listening.");
                 string npcOnly = BuildQuestionContinuityPrompt(connection, payload, "npc", "player", new());
@@ -317,9 +314,9 @@ namespace ReignBetaServer
                 Turn("foreign_branch", "player", "FOREIGN_BRANCH_SECRET", new Dictionary<string, object>(payload) { ["timelineId"] = "foreign" });
                 Turn("private_turn", "player", "PRIVATE_SECRET", audience: new List<string> { "player", "other" });
                 Turn("future_day", "player", "FUTURE_DAY_SECRET");
-                ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET world_day=6 WHERE turn_id='future_day';");
+                DialogueSelfTestStore.UpdateConversationTurns15(connection);
                 Turn("future_time", "player", "FUTURE_TIME_SECRET");
-                ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET ts=9000 WHERE turn_id='future_time';");
+                DialogueSelfTestStore.UpdateConversationTurns16(connection);
                 payload["memoryAsOfTimestamp"] = 1000L;
                 var omitted = StoreAcceptedConversationContinuity(connection, payload, "npc", "player", "omitted", "Let us walk.", new(), 250L);
                 string prompt = BuildQuestionContinuityPrompt(connection, payload, "npc", "player", new());
@@ -356,11 +353,11 @@ namespace ReignBetaServer
                 Check("exact_visible_exchange_alias_binds_canonical_turn", PrepareQuestionContinuityWrite(connection, eventAlias, payload, "npc", "player", "ack_event", ack) == ""
                     && ReadString(ReadDictionaryList(ReadDictionary(eventAlias, "questionState"), "answers")[0], "turnId", "") == "a_answer");
                 Turn("ambiguous_alias", "player", answer);
-                ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET event_id='a_answer_event' WHERE turn_id='ambiguous_alias';");
+                DialogueSelfTestStore.UpdateConversationTurns17(connection);
                 var ambiguousAlias = Program.CloneDictionary(update);
                 ReadDictionaryList(ReadDictionary(ambiguousAlias, "questionState"), "answers")[0]["turnId"] = "a_answer_event";
                 Check("ambiguous_exchange_alias_still_rejected", PrepareQuestionContinuityWrite(connection, ambiguousAlias, payload, "npc", "player", "ack_event", ack) == "question_answer_source_unverified");
-                ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET status='inactive' WHERE turn_id='ambiguous_alias';");
+                DialogueSelfTestStore.UpdateConversationTurns18(connection);
                 var redundantAnswer = Program.CloneDictionary(update);
                 redundantAnswer["relationKind"] = "answer"; redundantAnswer["relatedTurnId"] = "a_answer"; redundantAnswer["relatedQuote"] = answer;
                 Check("validated_answer_relation_binds_original_question", PrepareQuestionContinuityWrite(connection, redundantAnswer, payload, "npc", "player", "ack_event", ack) == ""
@@ -417,7 +414,7 @@ namespace ReignBetaServer
                 Check("oversized_original_is_disclosed_without_clipping", boundedPrompt.Contains("Original not expanded within the shared review budget: oversized_review")
                     && !boundedPrompt.Contains("OVERSIZED_BEGIN") && !boundedPrompt.Contains("OVERSIZED_END"));
                 Check("shared_review_has_fixed_character_budget", boundedPrompt.Length < 20000);
-                ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET text='Changed source.' WHERE turn_id='z_original';");
+                DialogueSelfTestStore.UpdateConversationTurns19(connection);
                 var withoutOriginal = Program.CloneDictionary(update); ReadDictionary(withoutOriginal, "questionState").Remove("question");
                 Check("bound_update_rechecks_original_hash", PrepareQuestionContinuityWrite(connection, withoutOriginal, payload, "npc", "player", "later_event", ack) == unknownError);
                 foreach (string request in new[] { "Name the thing you would not risk.", "Give me one thing you would not risk for me." })

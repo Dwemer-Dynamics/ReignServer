@@ -27,13 +27,7 @@ namespace ReignBetaServer
 
         internal static void EnsureConversationInputSchema(ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_input_receipts (
-input_id TEXT PRIMARY KEY, timeline_id TEXT NOT NULL, session_id TEXT NOT NULL,
-player_id TEXT NOT NULL, source_turn_id TEXT NOT NULL, source_hash TEXT NOT NULL,
-restore_generation TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'received',
-projection_json TEXT NOT NULL DEFAULT '{}', response_json TEXT NOT NULL DEFAULT '{}',
-created_ts BIGINT NOT NULL, updated_ts BIGINT NOT NULL);
-CREATE INDEX IF NOT EXISTS idx_conversation_input_session ON conversation_input_receipts(session_id,created_ts);");
+            DialogueSchema.CreateConversationInputReceipts(connection);
         }
 
         // Admission is a separate, durable transaction BEFORE interpretation or generation.
@@ -67,19 +61,16 @@ CREATE INDEX IF NOT EXISTS idx_conversation_input_session ON conversation_input_
             string currentGeneration = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
             if (generation.Length > 0 && currentGeneration != generation)
                 throw new InvalidOperationException("The campaign changed before the original message could be saved.");
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions
-(session_id,campaign_id,npc_id,player_id,channel,status,start_ts,end_ts,start_world_day,end_world_day,location_id,participants_json,payload_json)
-VALUES($session,$campaign,$npc,$player,$channel,'open',$now,$now,$day,$day,$location,$audience,$payload) ON CONFLICT(session_id) DO NOTHING;",
-                TestDict("session", session, "campaign", campaign, "npc", observer, "player", player,
+            DialogueStore.InsertOrIgnoreConversationSessions4(connection, TestDict("session", session, "campaign", campaign, "npc", observer, "player", player,
                     "channel", ReadString(payload, "channel", "in_person"), "now", now, "day", ReadDouble(payload, "worldDay", 0d),
                     "location", ReadFirstString(payload, "locationId", "currentSettlementId"),
                     "audience", Json.Serialize(Program.MergeStringLists(ReadStringList(payload, "participants"), new[] { player, observer })),
                     "payload", SerializeConversationTurnStoragePayload(payload)));
-            var sessionRow = ReignDatabase.QuerySql(connection, "SELECT player_id,payload_json FROM conversation_sessions WHERE session_id=$session;", TestDict("session", session)).Single();
+            var sessionRow = DialogueStore.SelectConversationSessions7(connection, TestDict("session", session)).Single();
             string sessionTimeline = ReadString(TryParseJsonObject(ReadString(sessionRow, "payload_json", "{}")), "timelineId", "");
             if (ReadString(sessionRow, "player_id", "") != player || sessionTimeline.Length > 0 && sessionTimeline != ContinuityTimeline(payload))
                 throw new InvalidOperationException("The contribution belongs to a different player or timeline.");
-            var existing = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_input_receipts WHERE input_id=$id;", TestDict("id", inputId)).SingleOrDefault();
+            var existing = DialogueStore.SelectConversationInputReceipts2(connection, TestDict("id", inputId)).SingleOrDefault();
             if (existing != null && (ReadString(existing, "source_hash", "") != hash
                 || ReadString(existing, "restore_generation", "") != currentGeneration))
                 throw new InvalidOperationException("This contribution ID belongs to different text or a previous save. The original was preserved.");
@@ -89,13 +80,9 @@ VALUES($session,$campaign,$npc,$player,$channel,'open',$now,$now,$day,$day,$loca
             PreservePlayerInputSource(connection, payload, session, contribution, contribution, player,
                 ReadString(payload, "playerName", "Player"), ReadDouble(payload, "worldDay", 0d), now,
                 ReadFirstString(payload, "locationId", "currentSettlementId", "settlementId"));
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_input_receipts
-(input_id,timeline_id,session_id,player_id,source_turn_id,source_hash,restore_generation,status,created_ts,updated_ts)
-VALUES($id,$timeline,$session,$player,$source,$hash,$generation,'received',$now,$now) ON CONFLICT(input_id) DO NOTHING;",
-                TestDict("id", inputId, "timeline", ContinuityTimeline(payload), "session", session, "player", player,
+            DialogueStore.InsertOrIgnoreConversationInputReceipts(connection, TestDict("id", inputId, "timeline", ContinuityTimeline(payload), "session", session, "player", player,
                     "source", sourceId, "hash", hash, "generation", currentGeneration, "now", now));
-            var original = ReignDatabase.QuerySql(connection, "SELECT text FROM conversation_turns WHERE turn_id=$id AND status='source_only';",
-                TestDict("id", sourceId)).SingleOrDefault();
+            var original = DialogueStore.SelectConversationTurns46(connection, TestDict("id", sourceId)).SingleOrDefault();
             if (original == null || ReadString(original, "text", "") != source.Original)
                 throw new InvalidOperationException("The saved original message failed its exact-content check.");
             transaction.Commit();
@@ -125,8 +112,7 @@ VALUES($id,$timeline,$session,$player,$source,$hash,$generation,'received',$now,
             EnsureConversationInputSchema(connection);
             if (ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "") != source.Generation)
                 throw new InvalidOperationException("The save changed before this reply could be replayed.");
-            var row = ReignDatabase.QuerySql(connection, "SELECT response_json,restore_generation FROM conversation_input_receipts WHERE input_id=$id;",
-                TestDict("id", source.InputId)).SingleOrDefault();
+            var row = DialogueStore.SelectConversationInputReceipts3(connection, TestDict("id", source.InputId)).SingleOrDefault();
             if (ReadString(row, "restore_generation", "") != source.Generation) return null;
             var responses = TryParseJsonObject(ReadString(row, "response_json", "{}"));
             var response = ReadDictionary(responses, observer);
@@ -149,8 +135,7 @@ VALUES($id,$timeline,$session,$player,$source,$hash,$generation,'received',$now,
             using var transaction = connection.BeginTransaction();
             LockConversationSourcePublication(connection, "input:" + source.InputId);
             string currentGeneration = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
-            var row = ReignDatabase.QuerySql(connection, "SELECT response_json,restore_generation FROM conversation_input_receipts WHERE input_id=$id;",
-                TestDict("id", source.InputId)).SingleOrDefault();
+            var row = DialogueStore.SelectConversationInputReceipts3(connection, TestDict("id", source.InputId)).SingleOrDefault();
             if (ReadString(row, "restore_generation", "") != source.Generation || currentGeneration != source.Generation)
                 throw new InvalidOperationException("The save changed before the message delivery receipt could be committed.");
             var responses = TryParseJsonObject(ReadString(row, "response_json", "{}"));
@@ -161,9 +146,7 @@ VALUES($id,$timeline,$session,$player,$source,$hash,$generation,'received',$now,
                 foreach (string key in new[] { "llm", "prompt", "messages", "promptEnvelope" }) replay.Remove(key);
                 responses[observer] = replay;
             }
-            ReignDatabase.ExecuteSql(connection, @"UPDATE conversation_input_receipts SET response_json=$responses,status=$status,updated_ts=$now
-WHERE input_id=$id AND restore_generation=$generation;",
-                TestDict("responses", Json.Serialize(responses), "status", responses.Count > 0 ? "answered" : "unanswered",
+            DialogueStore.UpdateConversationInputReceipts2(connection, TestDict("responses", Json.Serialize(responses), "status", responses.Count > 0 ? "answered" : "unanswered",
                     "now", DateTimeOffset.UtcNow.ToUnixTimeSeconds(), "id", source.InputId, "generation", source.Generation));
             transaction.Commit();
         }
@@ -175,7 +158,7 @@ WHERE input_id=$id AND restore_generation=$generation;",
             if (captured == null || captured.SourceId.Length == 0) return;
             foreach (string id in turnIds ?? Enumerable.Empty<string>())
             {
-                var row = ReignDatabase.QuerySql(connection, "SELECT payload_json FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).SingleOrDefault();
+                var row = DialogueStore.SelectConversationTurns47(connection, TestDict("id", id)).SingleOrDefault();
                 if (row == null) continue;
                 var metadata = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
                 metadata["inputSourceId"] = captured.SourceId;
@@ -187,8 +170,7 @@ WHERE input_id=$id AND restore_generation=$generation;",
                         "status", ReadString(grounding, "status", ""), "replyHash", ReadString(grounding, "replyHash", ""),
                         "originalSourceId", captured.SourceId,
                         "issueTypes", ReadDictionaryList(grounding, "issues").Select(i => ReadString(i, "type", "")).Distinct().ToList());
-                ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET payload_json=$json WHERE turn_id=$id;",
-                    TestDict("json", Json.Serialize(metadata), "id", id));
+                DialogueStore.UpdateConversationTurns2(connection, TestDict("json", Json.Serialize(metadata), "id", id));
             }
         }
 
@@ -207,10 +189,7 @@ WHERE input_id=$id AND restore_generation=$generation;",
                 "deliveryRecovery", TestDict("status", "accepted_response_recovered", "nativeActionPublication", "not_confirmed"));
             if (unit.GroupConversation || unit.EventType == "social_event_turn")
                 replay["participation"] = WorldSimulationService.NormalizeSocialEventParticipation(unit.Parsed);
-            ReignDatabase.ExecuteSql(connection, @"UPDATE conversation_input_receipts SET
-response_json=((response_json::jsonb)||jsonb_build_object(CAST($observer AS text),CAST($response AS jsonb)))::text,
-status='accepted',updated_ts=$now WHERE input_id=$id AND restore_generation=$generation;",
-                TestDict("observer", unit.Hero, "response", Json.Serialize(replay), "now", unit.Timestamp, "id", source.InputId, "generation", source.Generation));
+            DialogueStore.UpdateConversationInputReceipts3(connection, TestDict("observer", unit.Hero, "response", Json.Serialize(replay), "now", unit.Timestamp, "id", source.InputId, "generation", source.Generation));
         }
     }
 }

@@ -1030,9 +1030,7 @@ namespace ReignBetaServer
                         foreach (string historyId in ReadStringList(
                             target, "sharedRelationshipHistoryIds"))
                         {
-                            Dictionary<string, object> row = ReignDatabase.QuerySql(connection,
-                                "SELECT * FROM shared_relationship_history_chapters WHERE history_id=$id LIMIT 1;",
-                                new Dictionary<string, object> { ["id"] = historyId })
+                            Dictionary<string, object> row = DialogueStore.SelectSharedRelationshipHistoryChapters(connection, new Dictionary<string, object> { ["id"] = historyId })
                                 .FirstOrDefault();
                             if (row == null) continue;
                             bool speakerIsA = ReadString(row, "hero_a_id", "")

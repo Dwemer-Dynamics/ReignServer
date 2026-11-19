@@ -419,29 +419,29 @@ namespace ReignBetaServer
                 {
                     try
                     {
-                        ReignDatabase.ExecuteSql(metadata, "CREATE SCHEMA " + quotedSchema + ";");
-                        ReignDatabase.ExecuteSql(metadata, "CREATE TABLE " + quotedSchema + ".ownership_sentinel(value TEXT NOT NULL);");
-                        ReignDatabase.ExecuteSql(metadata, "INSERT INTO " + quotedSchema + ".ownership_sentinel VALUES('preserve-orphan');");
+                        DialogueSelfTestSchema.CreateStatement(metadata, quotedSchema);
+                        DialogueSelfTestSchema.CreateOwnershipSentinel(metadata, quotedSchema);
+                        DialogueSelfTestStore.InsertOwnershipSentinel(metadata, quotedSchema);
                         bool orphanBlocked = false;
                         try { using var refused = new EvidenceReplayCampaignLease(stableInput); }
                         catch (InvalidOperationException) { orphanBlocked = true; }
                         Check("world_lease_preserves_unregistered_orphan_schema", orphanBlocked
-                            && ReadString(ReignDatabase.QuerySql(metadata, "SELECT value FROM " + quotedSchema + ".ownership_sentinel;").Single(), "value", "") == "preserve-orphan");
+                            && ReadString(DialogueSelfTestStore.SelectOwnershipSentinel(metadata, quotedSchema).Single(), "value", "") == "preserve-orphan");
                     }
-                    finally { ReignDatabase.ExecuteSql(metadata, "DROP SCHEMA IF EXISTS " + quotedSchema + " CASCADE;"); }
+                    finally { DialogueSelfTestSchema.DropStatement(metadata, quotedSchema); }
                 }
                 try
                 {
                     using (var existing = ReignDatabase.OpenCampaignConnection(stableCampaign)) ReadMemoryPrecisionState(existing);
                     using var metadata = ReignPostgreSqlStorage.OpenMetadataConnection();
-                    ReignDatabase.ExecuteSql(metadata, "DROP SCHEMA " + quotedSchema + " CASCADE;");
+                    DialogueSelfTestSchema.DropStatement2(metadata, quotedSchema);
                     var registryParameters = TestDict("campaign", stableCampaign);
-                    const string registrySql = "SELECT to_jsonb(r)::text AS row_json FROM reign_meta.campaign_registry r WHERE campaign_id=$campaign;";
-                    var registryBefore = ReignDatabase.QuerySql(metadata, registrySql, registryParameters);
+                    const string registrySql = DialogueSelfTestStore.SelectCampaignRegistrySql;
+                    var registryBefore = DialogueSelfTestStore.QuerySql(metadata, registrySql, registryParameters);
                     bool registryBlocked = false;
                     try { using var refused = new EvidenceReplayCampaignLease(stableInput); }
                     catch (InvalidOperationException) { registryBlocked = true; }
-                    var registryAfter = ReignDatabase.QuerySql(metadata, registrySql, registryParameters);
+                    var registryAfter = DialogueSelfTestStore.QuerySql(metadata, registrySql, registryParameters);
                     Check("world_lease_preserves_registry_without_namespace", registryBlocked && registryBefore.Count == 1
                         && registryAfter.Count == 1 && CanonicalJson(registryBefore) == CanonicalJson(registryAfter),
                         TestDict("blocked", registryBlocked, "beforeCount", registryBefore.Count, "afterCount", registryAfter.Count));
@@ -1329,16 +1329,13 @@ namespace ReignBetaServer
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     ReadMemoryPrecisionState(connection);
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-VALUES('orchard_history',$campaign,'npc','player','closed',1,10,'[""npc"",""player""]','{""timelineId"":""branch_a""}');", TestDict("campaign", campaign));
+                    DialogueSelfTestStore.InsertConversationSessions27(connection, TestDict("campaign", campaign));
                 }
                 void Turn(string id, string role, string speaker, string words, int order, string timeline = "branch_a",
                     double day = 2d, string audience = "[\"npc\",\"player\"]")
                 {
                     using var connection = ReignDatabase.OpenCampaignConnection(campaign);
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_turns(turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,speaker_name,text,world_day,ts,participants_json,payload_json)
-VALUES($id,'orchard_history',$id,$order,$id,$role,$speaker,$speaker,$text,$day,10,$audience,$payload);",
-                        TestDict("id", id, "order", order, "role", role, "speaker", speaker, "text", words,
+                    DialogueSelfTestStore.InsertConversationTurns11(connection, TestDict("id", id, "order", order, "role", role, "speaker", speaker, "text", words,
                             "day", day, "audience", audience, "payload", Json.Serialize(TestDict("timelineId", timeline))));
                 }
                 const string question = "Which place would you choose beside the orchard?";
@@ -1386,7 +1383,7 @@ VALUES($id,'orchard_history',$id,$order,$id,$role,$speaker,$speaker,$text,$day,1
                 int SourceCount()
                 {
                     using var connection = ReignDatabase.OpenCampaignConnection(campaign);
-                    return ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS n FROM conversation_turns;").Single(), "n", -1);
+                    return ReadInt(DialogueSelfTestStore.CountConversationTurns3(connection).Single(), "n", -1);
                 }
                 int sourcesBeforeWriter = SourceCount();
                 var writerConfiguration = ReadDictionary(writerFixture, "writerReplay");
@@ -1455,7 +1452,7 @@ VALUES($id,'orchard_history',$id,$order,$id,$role,$speaker,$speaker,$text,$day,1
                 int MemoryCount()
                 {
                     using var connection = ReignDatabase.OpenCampaignConnection(campaign);
-                    return ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS n FROM memories;").Single(), "n", -1);
+                    return ReadInt(DialogueSelfTestStore.CountMemories(connection).Single(), "n", -1);
                 }
                 int memoryBeforeBinding = MemoryCount();
                 boundResponse["requestSha256"] = ReadString(pendingWriter, "requestSha256", "");
@@ -1795,11 +1792,7 @@ VALUES($id,'orchard_history',$id,$order,$id,$role,$speaker,$speaker,$text,$day,1
                 }
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_continuity
-(record_id,timeline_id,owner_id,peer_id,kind,status,importance,revision,source_event_id,source_turn_id,updated_ts,payload_json)
-VALUES('private_replacement','branch_a','npc','player','agenda','open',1,2,'unheard','unheard',10,'{""worldDay"":2}');
-INSERT INTO conversation_continuity_versions(version_id,record_id,source_event_id,revision,payload_json,created_ts)
-VALUES('private_replacement_1','private_replacement','answer',1,'{""sourceTurnId"":""answer""}',8);");
+                    DialogueSelfTestStore.InsertConversationContinuity3(connection);
                     var access = Program.BuildKnowledgeAccessContext("npc", "player", "", writerContext);
                     var replacementSource = LoadEmbeddingSourceRow(connection, "conversation_turn", "unheard");
                     long sequence = ReadLong(replacementSource, "accepted_sequence", -1);

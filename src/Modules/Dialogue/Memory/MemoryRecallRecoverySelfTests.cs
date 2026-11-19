@@ -436,8 +436,7 @@ namespace ReignBetaServer
         {
             // Match the automatic production topic index without invoking any
             // model. Raw-only fixtures missed topic-fusion crowding in alpha.
-            foreach (var row in ReignDatabase.QuerySql(connection, @"SELECT t.*,t.xmin::text AS source_revision FROM conversation_turns t
-WHERE t.status='active' AND NOT EXISTS(SELECT 1 FROM memory_specialist_sources i WHERE i.turn_id=t.turn_id);"))
+            foreach (var row in DialogueSelfTestStore.SelectConversationTurns64(connection))
                 IndexMemorySpecialistSource(campaign, row, settings, allowExtraction: false);
         }
 
@@ -454,15 +453,11 @@ WHERE t.status='active' AND NOT EXISTS(SELECT 1 FROM memory_specialist_sources i
                     var sessions = new[] { "alpha", "middle", "zeta" };
                     foreach (string session in reverse ? sessions.Reverse() : sessions)
                     {
-                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-VALUES($id,$campaign,'npc','player','closed',1,10,'[""npc"",""player""]','{""timelineId"":""order_main""}');",
-                            TestDict("id", session, "campaign", campaign));
+                        DialogueSelfTestStore.InsertConversationSessions20(connection, TestDict("id", session, "campaign", campaign));
                         foreach (int order in new[] { 0, 1 })
                         {
                             string id = session + "_" + order;
-                            ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_turns(turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,speaker_name,text,world_day,ts,participants_json,payload_json)
-VALUES($id,$session,$id,$order,$session,$role,$speaker,$name,$text,1,10,'[""npc"",""player""]','{""timelineId"":""order_main""}');",
-                                TestDict("id", id, "session", session, "order", order, "role", order == 0 ? "player" : "npc",
+                            DialogueSelfTestStore.InsertConversationTurns3(connection, TestDict("id", id, "session", session, "order", order, "role", order == 0 ? "player" : "npc",
                                     "speaker", order == 0 ? "player" : "npc", "name", order == 0 ? "Mira" : "Aster",
                                     "text", order == 0 ? "I left the bronze bell at the " + session + " gate." : "I saw the bell beside the " + session + " gate."));
                         }
@@ -478,12 +473,12 @@ VALUES($id,$session,$id,$order,$session,$role,$speaker,$name,$text,1,10,'[""npc"
                         sessions.All(id => completeText.Split(new[] { "[HISTORICAL SOURCE SESSION " + id + "]" }, StringSplitOptions.None).Length == 2)
                         && ReadStringList(complete, "matchedTurnIds").Count == 6, complete);
                     foreach (string session in sessions.Reverse())
-                        ReignDatabase.ExecuteSql(connection, "UPDATE conversation_sessions SET payload_json=payload_json WHERE session_id=$id;", TestDict("id", session));
+                        DialogueSelfTestStore.UpdateConversationSessions4(connection, TestDict("id", session));
                     var afterRowUpdates = Read(2);
                     check("recent_ties_ignore_physical_row_updates_" + reverse,
                         ReadString(bounded, "text", "") == ReadString(afterRowUpdates, "text", "")
                         && ReadStringList(bounded, "matchedTurnIds").SequenceEqual(ReadStringList(afterRowUpdates, "matchedTurnIds")), afterRowUpdates);
-                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_sessions SET end_ts=11 WHERE session_id='alpha';");
+                    DialogueSelfTestStore.UpdateConversationSessions5(connection);
                     var latestIds = ReadStringList(Read(2), "matchedTurnIds");
                     var excludedIds = ReadStringList(Read(2, "alpha"), "matchedTurnIds");
                     check("recent_real_timestamp_precedes_tie_break_" + reverse,
@@ -561,15 +556,9 @@ VALUES($id,$session,$id,$order,$session,$role,$speaker,$name,$text,1,10,'[""npc"
                 Program.WriteJsonObject(Program.CharacterFile(campaign, "npc", "state.json"), state);
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    void Session(string id, long ts) => ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions
-(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-VALUES($id,$campaign,'npc','player','closed',$ts,$ts,'[""npc"",""player""]','{""timelineId"":""recall_main""}');",
-                        TestDict("id", id, "campaign", campaign, "ts", ts));
+                    void Session(string id, long ts) => DialogueSelfTestStore.InsertConversationSessions21(connection, TestDict("id", id, "campaign", campaign, "ts", ts));
                     void Turn(string id, string session, int order, string exchange, string role, string text, double day, long ts,
-                        string timeline = "recall_main", string audience = "[\"npc\",\"player\"]") => ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_turns
-(turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,speaker_name,text,world_day,ts,participants_json,payload_json)
-VALUES($id,$session,$id,$order,$exchange,$role,$speaker,$speaker,$text,$day,$ts,$audience,$payload);",
-                        TestDict("id", id, "session", session, "order", order, "exchange", exchange, "role", role,
+                        string timeline = "recall_main", string audience = "[\"npc\",\"player\"]") => DialogueSelfTestStore.InsertConversationTurns4(connection, TestDict("id", id, "session", session, "order", order, "exchange", exchange, "role", role,
                             "speaker", role == "player" ? "player" : "npc", "text", text, "day", day, "ts", ts, "audience", audience,
                             "payload", Json.Serialize(TestDict("timelineId", timeline))));
                     Session("horses", 10); Session("spring", 20); Session("current", 90);
@@ -619,60 +608,54 @@ VALUES($id,$session,$id,$order,$exchange,$role,$speaker,$speaker,$text,$day,$ts,
                     Session("projection", 97);
                     Turn("projected_player", "projection", 1, "projected", "player", interpretedSpan, 44, 90);
                     Turn("projection_source", "projection", 0, "projected", "player", "Source-only forbidden private bronze bell intention.", 44, 90);
-                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET role='player_source',status='source_only',participants_json='[\"player\"]' WHERE turn_id='projection_source';");
+                    DialogueSelfTestStore.UpdateConversationTurns52(connection);
                     string projectedPayload = Json.Serialize(TestDict("timelineId", "recall_main", "playerNarrationProjectionVersion", 2, "inputSourceId", "projection_source"));
-                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET payload_json=$payload WHERE turn_id IN ('projected_player','private');", TestDict("payload", projectedPayload));
-                    ReignDatabase.ExecuteSql(connection, "INSERT INTO conversation_turn_fts(turn_id,text,speaker,participants,channel) SELECT turn_id,text,speaker_id,participants_json,channel FROM conversation_turns WHERE status='active';");
+                    DialogueSelfTestStore.UpdateConversationTurns53(connection, TestDict("payload", projectedPayload));
+                    DialogueSelfTestStore.InsertConversationTurnFts3(connection);
                     IndexMemoryRecallFixtureSources(campaign, connection, settings);
-                    Check("automatic_topic_index_covers_every_source", ReadLong(ReignDatabase.QuerySql(connection,
-                        "SELECT count(*) AS count FROM memory_specialist_sources;").Single(), "count", 0)
-                        == ReadLong(ReignDatabase.QuerySql(connection, "SELECT count(*) AS count FROM conversation_turns WHERE status='active';").Single(), "count", 0));
+                    Check("automatic_topic_index_covers_every_source", ReadLong(DialogueSelfTestStore.CountMemorySpecialistSources(connection).Single(), "count", 0)
+                        == ReadLong(DialogueSelfTestStore.CountConversationTurns2(connection).Single(), "count", 0));
                     var item = TestDict("ownerId", "npc", "claim", "She values the physical boundary.", "timelineId", "recall_main", "worldDay", 44d);
                     string bad = UpsertTemporalAssertion(connection, campaign, "failed_0_n", "comprehension_fixture", "comprehension", item, 80);
                     // Simulate a pre-fix stored assertion; do not use the guarded writer to seed corruption.
-                    ReignDatabase.ExecuteSql(connection, "UPDATE temporal_knowledge_assertions SET claim=$claim WHERE assertion_id=$id;", TestDict("id", bad, "claim", absence));
+                    DialogueSelfTestStore.UpdateTemporalKnowledgeAssertions(connection, TestDict("id", bad, "claim", absence));
                     var access = Program.BuildKnowledgeAccessContext("npc", "player", "", context);
-                    var projectedPlayer = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='projected_player';").Single();
+                    var projectedPlayer = DialogueSelfTestStore.SelectConversationTurns65(connection).Single();
                     Check("interpreted_player_mid_clause_survives_eligible_recall", PrecisionTurnVisible(projectedPlayer, "npc", access, connection)
                         && RenderExactHistoryTurn(projectedPlayer, access).Contains(interpretedSpan));
-                    Check("interpreted_player_keeps_automatic_public_topic", Program.TextListFromJson(ReadString(ReignDatabase.QuerySql(connection,
-                        "SELECT public_topics_json FROM memory_specialist_sources WHERE turn_id='projected_player';").Single(), "public_topics_json", "[]")).Contains("botany"));
+                    Check("interpreted_player_keeps_automatic_public_topic", Program.TextListFromJson(ReadString(DialogueSelfTestStore.SelectMemorySpecialistSources(connection).Single(), "public_topics_json", "[]")).Contains("botany"));
                     Check("interpreted_player_keeps_late_interaction_public_view", ReadString(LateInteractionView(projectedPlayer, "public"), "text", "").Contains(interpretedSpan));
                     Check("interpreted_player_keeps_commitment_source_words", CommitmentVisibleSourceText(projectedPlayer, access).Contains(interpretedSpan));
-                    var sourceOnly = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='projection_source';").Single();
+                    var sourceOnly = DialogueSelfTestStore.SelectConversationTurns66(connection).Single();
                     Check("source_only_original_has_no_public_or_self_index_view", LateInteractionView(sourceOnly, "public") == null
                         && LateInteractionView(sourceOnly, "self") == null && !HasValidatedPlayerSourceProjection(sourceOnly));
                     Check("inactive_interpreted_source_cannot_bypass_projection", !HasValidatedPlayerSourceProjection(new(projectedPlayer) { ["status"] = "inactive" }));
                     string projectionOriginalHash = MemorySpecialistSourceHash(projectedPlayer);
-                    ReignDatabase.ExecuteSql(connection, "UPDATE memory_specialist_sources SET schema_version=$old,public_topics_json='[]',public_entities_json='[]' WHERE turn_id='projected_player';",
-                        TestDict("old", MemorySpecialistSchema));
+                    DialogueSelfTestStore.UpdateMemorySpecialistSources(connection, TestDict("old", MemorySpecialistSchema));
                     ReconcileMemorySpecialistIndex(campaign);
-                    var rebuiltProjection = ReignDatabase.QuerySql(connection, "SELECT schema_version,public_topics_json FROM memory_specialist_sources WHERE turn_id='projected_player';").Single();
+                    var rebuiltProjection = DialogueSelfTestStore.SelectMemorySpecialistSources2(connection).Single();
                     Check("old_projection_index_automatically_rebuilds_unchanged_original", ReadString(rebuiltProjection, "schema_version", "") == MemorySpecialistIndexSchema
                         && Program.TextListFromJson(ReadString(rebuiltProjection, "public_topics_json", "[]")).Contains("botany")
-                        && MemorySpecialistSourceHash(ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='projected_player';").Single()) == projectionOriginalHash);
+                        && MemorySpecialistSourceHash(DialogueSelfTestStore.SelectConversationTurns65(connection).Single()) == projectionOriginalHash);
                     Check("legacy_player_row_keeps_complete_narration_without_interpretation_binding", RenderExactHistoryTurn(new(projectedPlayer) {
                         ["payload_json"] = Json.Serialize(TestDict("playerNarrationProjectionVersion", 2)) }, access).Contains("balance the bronze bell"));
                     Check("npc_cannot_use_player_projection_bypass", !RenderExactHistoryTurn(new(projectedPlayer) {
                         ["role"] = "npc", ["speaker_id"] = "other", ["text"] = "*I remember the private spring oath.* Hello." }, access).Contains("private spring oath"));
-                    Check("interpreted_player_still_obeys_audience", !PrecisionTurnVisible(ReignDatabase.QuerySql(connection,
-                        "SELECT * FROM conversation_turns WHERE turn_id='private';").Single(), "npc", access, connection));
+                    Check("interpreted_player_still_obeys_audience", !PrecisionTurnVisible(DialogueSelfTestStore.SelectConversationTurns67(connection).Single(), "npc", access, connection));
                     var projectionHits = FindLexicalMemoryRecallTurns(connection,
                         PlanMemoryQuery("npc", "player", "What happened with the bronze bell?", context), access, MemoryRecallLexicalLimit);
                     Check("source_only_original_unindexed_and_unavailable", projectionHits.Any(row => ReadString(row, "turn_id", "") == "projected_player")
                         && projectionHits.All(row => ReadString(row, "turn_id", "") != "projection_source")
-                        && ReignDatabase.QuerySql(connection, "SELECT turn_id FROM memory_specialist_sources WHERE turn_id='projection_source';").Count == 0);
-                    var wholeAnchor = RenderExactConversationAnchor(connection, "npc", ReignDatabase.QuerySql(connection,
-                        "SELECT * FROM conversation_turns WHERE turn_id='horse';").Single(), new() { "Tempest" }, 600, access, true);
+                        && DialogueSelfTestStore.SelectMemorySpecialistSources3(connection).Count == 0);
+                    var wholeAnchor = RenderExactConversationAnchor(connection, "npc", DialogueSelfTestStore.SelectConversationTurns61(connection).Single(), new() { "Tempest" }, 600, access, true);
                     Check("shared_window_budget_keeps_complete_anchor_pair", ReadString(wholeAnchor, "text", "").Contains(horse)
                         && ReadString(wholeAnchor, "text", "").Contains(longReaction), TestDict("horse", ReadString(wholeAnchor, "text", "").Contains(horse),
                             "reaction", ReadString(wholeAnchor, "text", "").Contains(longReaction), "expandedTurnIds", ReadStringList(wholeAnchor, "expandedTurnIds")));
-                    var callback = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='gait_callback';").Single();
+                    var callback = DialogueSelfTestStore.SelectConversationTurns68(connection).Single();
                     var preceding = RenderExactConversationAnchor(connection, "npc", callback, new() { "gait" }, 600, access, true);
                     Check("long_callback_keeps_preceding_npc_observation", ReadString(preceding, "text", "").Contains(longGait));
                     var covered = ReadStringList(preceding, "expandedTurnIds").ToHashSet(StringComparer.Ordinal);
-                    var completedPair = RenderExactConversationAnchor(connection, "npc", ReignDatabase.QuerySql(connection,
-                        "SELECT * FROM conversation_turns WHERE turn_id='gait';").Single(), new() { "gait" }, 600, access, true, covered);
+                    var completedPair = RenderExactConversationAnchor(connection, "npc", DialogueSelfTestStore.SelectConversationTurns69(connection).Single(), new() { "gait" }, 600, access, true, covered);
                     Check("overlapping_anchor_adds_missing_partner_without_duplicate", covered.Contains("gait") && !covered.Contains("gait_question")
                         && ReadString(completedPair, "text", "").Contains("Show me how your mare moves.")
                         && !ReadString(completedPair, "text", "").Contains(longGait));
@@ -681,9 +664,9 @@ VALUES($id,$session,$id,$order,$exchange,$role,$speaker,$speaker,$text,$day,$ts,
                     Session("context_gate", 96);
                     Turn("context_visible", "context_gate", 0, "context_old", "npc", "An older visible observation.", 44, 90);
                     Turn("context_hidden", "context_gate", 1, "context_private", "npc", "An unheard private observation.", 44, 91, audience: "[\"other\",\"player\"]");
-                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET speaker_id='other' WHERE turn_id='context_hidden';");
+                    DialogueSelfTestStore.UpdateConversationTurns54(connection);
                     Turn("context_answer", "context_gate", 2, "context_answer", "player", "I heard that.", 44, 92);
-                    var contextAnswer = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='context_answer';").Single();
+                    var contextAnswer = DialogueSelfTestStore.SelectConversationTurns70(connection).Single();
                     Check("preceding_context_does_not_skip_unheard_neighbor", ExpandMemoryRecallPrecedingTurn(connection, new() { contextAnswer }, access).Count == 1);
                     Check("actual_temporal_loader_rejects_old_absence", !LoadTemporalKnowledgeForPrompt(connection, campaign, access, new() { "Tempest" }, 20).Any(r => ReadString(r, "assertion_id", "") == bad));
                     Check("assertion_writer_rejects_absence", UpsertTemporalAssertion(connection, campaign, "failed_0_n", "new", "interpretation", new(item) { ["claim"] = absence }, 81) == "");
@@ -703,7 +686,7 @@ VALUES($id,$session,$id,$order,$exchange,$role,$speaker,$speaker,$text,$day,$ts,
                     const string lossClaim = "I lost my memories after the blow to my head.";
                     Turn("loss_player", "loss_event", 0, "loss_event", "player", establishedLoss, 43, 82);
                     Turn("loss_npc", "loss_event", 1, "loss_event", "npc", "The physician is attending me.", 43, 83);
-                    string lossBefore = ReadString(ReignDatabase.QuerySql(connection, "SELECT text FROM conversation_turns WHERE turn_id='loss_player';").Single(), "text", "");
+                    string lossBefore = ReadString(DialogueSelfTestStore.SelectConversationTurns71(connection).Single(), "text", "");
                     Check("established_loss_source_preserves_derived_memory", !IsUnsupportedRecallAbsenceDerived(
                         TestDict("memory_id", "supported_loss", "summary", lossClaim), connection, access));
                     Check("established_loss_preserves_state_and_writes", ReadString(WithoutRecallAbsenceState(TestDict("currentCrisis", lossClaim),
@@ -718,10 +701,10 @@ VALUES($id,$session,$id,$order,$exchange,$role,$speaker,$speaker,$text,$day,$ts,
                     foreach (string unsupported in new[] { "Korin lost his memories after a blow to his head.",
                         "Did you lose your memories after a blow to your head?", "You have not lost your memories after a blow to your head." })
                     {
-                        ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET text=$text WHERE turn_id='loss_player';", TestDict("text", unsupported));
+                        DialogueSelfTestStore.UpdateConversationTurns55(connection, TestDict("text", unsupported));
                         Check("unrelated_hypothetical_or_negated_loss_source_" + results.Count, !HasStoredRecallLossSupport(connection, access, lossClaim), unsupported);
                     }
-                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET text=$text WHERE turn_id='loss_player';", TestDict("text", lossBefore));
+                    DialogueSelfTestStore.UpdateConversationTurns55(connection, TestDict("text", lossBefore));
                     var supportedMental = TestDict("ownerId", "npc", "subjectId", "npc", "claim", lossClaim, "worldDay", 45d, "timelineId", "recall_main");
                     Check("established_loss_temporal_write_preserved", UpsertTemporalAssertion(connection, campaign, "loss_player", "loss", "interpretation", supportedMental, 84).Length > 0);
                     var fact = TestDict("ownerId", "npc", "subjectId", "player", "predicate", "stable fee", "cardinality", "one", "timelineId", "recall_main", "worldDay", 10d, "claim", "The stable fee is 20 denars.");
@@ -791,8 +774,8 @@ VALUES($id,$session,$id,$order,$exchange,$role,$speaker,$speaker,$text,$day,$ts,
                 }
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    Check("originals_and_failed_speech_unchanged", ReadString(ReignDatabase.QuerySql(connection, "SELECT text FROM conversation_turns WHERE turn_id='horse';").Single(), "text", "") == horse
-                        && ReadString(ReignDatabase.QuerySql(connection, "SELECT text FROM conversation_turns WHERE turn_id='failed_0_n';").Single(), "text", "").Contains("I don't have the page"));
+                    Check("originals_and_failed_speech_unchanged", ReadString(DialogueSelfTestStore.SelectConversationTurns72(connection).Single(), "text", "") == horse
+                        && ReadString(DialogueSelfTestStore.SelectConversationTurns73(connection).Single(), "text", "").Contains("I don't have the page"));
                 }
                 results.AddRange(RunTemporalRecallRevisionAssertions());
                 results.AddRange(RunMemoryRecallGrowthAssertions());
@@ -827,13 +810,8 @@ VALUES($id,$session,$id,$order,$exchange,$role,$speaker,$speaker,$text,$day,$ts,
             {
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    void Session(string id, int day) => ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions
-(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-VALUES($id,$campaign,'npc','player','closed',$day,$day,'[""npc"",""player""]','{""timelineId"":""growth_main""}');", TestDict("id", id, "campaign", campaign, "day", day));
-                    void Turn(string session, int order, string role, string text, int day) => ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_turns
-(turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,speaker_name,text,world_day,ts,participants_json,payload_json)
-VALUES($id,$session,$id,$order,$exchange,$role,$speaker,$speaker,$text,$day,$day,'[""npc"",""player""]','{""timelineId"":""growth_main""}');",
-                        TestDict("id", session + "_" + order, "session", session, "order", order, "exchange", session + "_e" + order / 2,
+                    void Session(string id, int day) => DialogueSelfTestStore.InsertConversationSessions22(connection, TestDict("id", id, "campaign", campaign, "day", day));
+                    void Turn(string session, int order, string role, string text, int day) => DialogueSelfTestStore.InsertConversationTurns5(connection, TestDict("id", session + "_" + order, "session", session, "order", order, "exchange", session + "_e" + order / 2,
                             "role", role, "speaker", role == "player" ? "player" : "npc", "text", text, "day", day));
                     Session("old", 1);
                     for (int i = 0; i < 80; i++)
@@ -843,7 +821,7 @@ VALUES($id,$session,$id,$order,$exchange,$role,$speaker,$speaker,$text,$day,$day
                             _ => i % 2 == 0 ? "The road west is passable. We spoke about the weather."
                                 : string.Concat(Enumerable.Repeat("I leaned on the wooden rail, thinking about the road and the garrison. The wind caught my cloak. ", 12))
                         }, 1);
-                    string oldHash = MemorySourceHash(ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id='old' ORDER BY turn_id;"));
+                    string oldHash = MemorySourceHash(DialogueSelfTestStore.SelectConversationTurns74(connection));
                     int added = 0;
                     foreach (int historySize in new[] { 0, 40, 160, 400 })
                     {
@@ -890,8 +868,7 @@ VALUES($id,$session,$id,$order,$exchange,$role,$speaker,$speaker,$text,$day,$day
                                     "retainedCandidates", retained, "retrieval", passed ? null : recallAudit)));
                         }
                     }
-                    results.Add(TestDict("caseId", "memory_recall_growth_original_hash_unchanged", "passed", oldHash == MemorySourceHash(ReignDatabase.QuerySql(connection,
-                        "SELECT * FROM conversation_turns WHERE session_id='old' ORDER BY turn_id;")), "summary", "History growth and recall do not rewrite originals."));
+                    results.Add(TestDict("caseId", "memory_recall_growth_original_hash_unchanged", "passed", oldHash == MemorySourceHash(DialogueSelfTestStore.SelectConversationTurns74(connection)), "summary", "History growth and recall do not rewrite originals."));
                 }
             }
             catch (Exception ex) { results.Add(TestDict("caseId", "memory_recall_growth_exception", "passed", false, "summary", Program.LimitText(ex.ToString(), 2200))); }
@@ -912,15 +889,12 @@ VALUES($id,$session,$id,$order,$exchange,$role,$speaker,$speaker,$text,$day,$day
             try
             {
                 void Source(ReignDbConnection connection, string id, string timeline, double day, long ts, long sequence, string audience = "[\"npc\",\"player\"]") =>
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_turns(turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,text,world_day,ts,accepted_sequence,participants_json,payload_json)
-VALUES($id,'history',$id,$sequence,$id,'player','player',$id,$day,$ts,$sequence,$audience,$payload);",
-                        TestDict("id", id, "sequence", sequence, "day", day, "ts", ts, "audience", audience, "payload", Json.Serialize(TestDict("timelineId", timeline))));
+                    DialogueSelfTestStore.InsertConversationTurns6(connection, TestDict("id", id, "sequence", sequence, "day", day, "ts", ts, "audience", audience, "payload", Json.Serialize(TestDict("timelineId", timeline))));
                 Dictionary<string, object> Fact(string claim, string timeline, double day) => TestDict("ownerId", "npc", "subjectId", "player",
                     "predicate", "stable fee", "cardinality", "one", "timelineId", timeline, "worldDay", day, "claim", claim);
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-VALUES('history',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','{""timelineId"":""parent""}');", TestDict("campaign", campaign));
+                    DialogueSelfTestStore.InsertConversationSessions23(connection, TestDict("campaign", campaign));
                     Source(connection, "parent_fact", "parent", 10, 10, 1);
                     Source(connection, "parent_episode", "parent", 11, 11, 2);
                     originalId = UpsertTemporalAssertion(connection, campaign, "parent_fact", "fee", "reported", Fact("The stable fee is twenty denars.", "parent", 10), 10);
@@ -938,7 +912,7 @@ VALUES('history',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','{
                     List<Dictionary<string, object>> Read(string query, Program.KnowledgeAccessContext boundary = null) =>
                         LoadTemporalKnowledgeForPrompt(connection, campaign, boundary ?? access, new() { query }, 20);
                     Check("verified_parent_fact_recalled", Read("stable").Any(r => ReadString(r, "assertion_id", "") == originalId));
-                    var originalRow = ReignDatabase.QuerySql(connection, "SELECT * FROM temporal_knowledge_assertions WHERE assertion_id=$id;", TestDict("id", originalId)).Single();
+                    var originalRow = DialogueSelfTestStore.SelectTemporalKnowledgeAssertions2(connection, TestDict("id", originalId)).Single();
                     string originalHash = MemorySourceHash(new[] { originalRow });
                     Source(connection, "child_fact", "child", 21, 50, 3);
                     string correction = UpsertTemporalAssertion(connection, campaign, "child_fact", "fee", "reported", Fact("The stable fee is fifteen denars.", "child", 21), 50);
@@ -966,8 +940,7 @@ VALUES('history',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','{
                     Source(connection, "private_fact", "child", 24, 63, 7, "[\"player\",\"other\"]");
                     UpsertTemporalAssertion(connection, campaign, "private_fact", "fee", "reported", Fact("The stable fee is secret copper.", "child", 24), 63);
                     Check("source_audience_cannot_leak", Read("stable").All(r => !ReadString(r, "claim", "").Contains("secret copper")));
-                    Check("parent_snapshot_row_unchanged", originalHash == MemorySourceHash(ReignDatabase.QuerySql(connection,
-                        "SELECT * FROM temporal_knowledge_assertions WHERE assertion_id=$id;", TestDict("id", originalId))));
+                    Check("parent_snapshot_row_unchanged", originalHash == MemorySourceHash(DialogueSelfTestStore.SelectTemporalKnowledgeAssertions2(connection, TestDict("id", originalId))));
                 }
             }
             catch (Exception ex) { results.Add(TestDict("caseId", "memory_recall_revision_exception", "passed", false, "summary", Program.LimitText(ex.ToString(), 2200))); }

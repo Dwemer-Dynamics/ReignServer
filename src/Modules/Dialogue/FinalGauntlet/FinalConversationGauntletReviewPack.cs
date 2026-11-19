@@ -89,10 +89,8 @@ namespace ReignBetaServer
                     .Where(candidate => !selected.Contains(candidate))
                     .Take(10 - selected.Count));
 
-            ReignDatabase.ExecuteSql(
-                connection,
-                "DELETE FROM final_gauntlet_review_items WHERE run_id=$run;",
-                new Dictionary<string, object> { ["run"] = runId });
+            DialogueStore.DeleteFinalGauntletReviewItems(
+                connection, new Dictionary<string, object> { ["run"] = runId });
             List<object> blinded = new List<object>();
             List<object> answerKey = new List<object>();
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -141,12 +139,8 @@ namespace ReignBetaServer
                     };
                 blinded.Add(reviewer);
                 answerKey.Add(key);
-                ReignDatabase.ExecuteSql(
-                    connection,
-                    @"INSERT INTO final_gauntlet_review_items(
-run_id,review_id,case_instance_id,blinded_payload_json,answer_key_json,created_ts)
-VALUES($run,$review,$case,$blind,$key,$ts);",
-                    new Dictionary<string, object>
+                DialogueStore.InsertFinalGauntletReviewItems(
+                    connection, new Dictionary<string, object>
                     {
                         ["run"] = runId,
                         ["review"] = reviewId,

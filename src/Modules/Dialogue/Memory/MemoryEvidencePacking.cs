@@ -74,10 +74,7 @@ namespace ReignBetaServer
             using var connection = ReignDatabase.OpenCampaignConnection(campaign);
             var access = Program.BuildKnowledgeAccessContext(observer, ReadFirstString(context, "playerHeroStringId", "mainHeroStringId", "playerId"), "", context);
             if (access.PlayerIdentityUnknown || ReadBool(context, "officialMemoryFirewall", false)) return;
-            var candidates = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_turns WHERE status='active' AND
-(turn_id IN (SELECT jsonb_array_elements_text(CAST($ids AS jsonb)))
-OR exchange_id IN (SELECT jsonb_array_elements_text(CAST($exchanges AS jsonb)))) ORDER BY ts DESC,turn_order DESC LIMIT 512;",
-                TestDict("ids", Json.Serialize(ids), "exchanges", Json.Serialize(exchanges)))
+            var candidates = DialogueStore.SelectConversationTurns65(connection, TestDict("ids", Json.Serialize(ids), "exchanges", Json.Serialize(exchanges)))
                 .Where(row => PrecisionTurnVisible(row, observer, access, connection)).ToList();
             int bound = 0;
             foreach (var line in lines)

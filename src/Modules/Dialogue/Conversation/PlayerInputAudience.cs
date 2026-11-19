@@ -77,7 +77,7 @@ namespace ReignBetaServer
             // distinct negative slots under the publisher's transaction/session lock;
             // active observer turns retain their independent nonnegative sequence.
             LockConversationSourcePublication(connection, sessionId);
-            var existingSource = ReignDatabase.QuerySql(connection, "SELECT text,status,speaker_id FROM conversation_turns WHERE turn_id=$id;", TestDict("id", sourceId)).SingleOrDefault();
+            var existingSource = DialogueStore.SelectConversationTurns34(connection, TestDict("id", sourceId)).SingleOrDefault();
             if (existingSource != null)
             {
                 if (ReadString(existingSource, "text", "") != captured.Original || ReadString(existingSource, "status", "") != "source_only"
@@ -85,13 +85,8 @@ namespace ReignBetaServer
                     throw new InvalidOperationException("The saved original does not match this contribution; no input was replaced.");
                 return;
             }
-            int sourceOrder = ReadInt(ReignDatabase.QuerySql(connection,
-                "SELECT COALESCE(MIN(turn_order),0)-1 AS next_order FROM conversation_turns WHERE session_id=$session AND turn_order<0;",
-                TestDict("session", sessionId)).Single(), "next_order", -1);
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_turns(
-turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,speaker_name,text,channel,world_day,ts,location_id,participants_json,status,payload_json)
-VALUES($id,$session,$event,$order,$exchange,'player_source',$player,$name,$text,'player_input_source',$day,$ts,$location,$participants,'source_only',$payload);",
-                TestDict("id", sourceId, "session", sessionId, "event", eventId, "exchange", exchangeId,
+            int sourceOrder = ReadInt(DialogueStore.SelectConversationTurns35(connection, TestDict("session", sessionId)).Single(), "next_order", -1);
+            DialogueStore.InsertConversationTurns(connection, TestDict("id", sourceId, "session", sessionId, "event", eventId, "exchange", exchangeId,
                     "order", sourceOrder,
                     "player", playerId, "name", playerName, "text", captured.Original, "day", worldDay, "ts", ts,
                     "location", locationId, "participants", Json.Serialize(new[] { playerId }), "payload", Json.Serialize(TestDict(

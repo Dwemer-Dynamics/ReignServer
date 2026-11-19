@@ -18,8 +18,7 @@ namespace ReignBetaServer
             using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 if (WorldSimulationService.ActiveWorldHistoryTimeline(c) != timeline) throw new InvalidOperationException("The active timeline changed.");
-                var row = ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_messages WHERE message_id=$id AND timeline_id=$timeline;",
-                    GossipFields("id", message, "timeline", timeline)).SingleOrDefault();
+                var row = DialogueSelfTestStore.SelectPersonalGossipMessages(c, GossipFields("id", message, "timeline", timeline)).SingleOrDefault();
                 data = PersonalGossipProbeSource(row, actor, timeline);
                 root = ReadString(row, "root_id", ""); topic = ReadString(row, "topic_id", "");
                 before = PersonalGossipProbeState(c, timeline, root, topic);
@@ -68,9 +67,9 @@ namespace ReignBetaServer
         {
             var args = GossipFields("timeline", timeline, "root", root, "topic", topic);
             return CanonicalJson(GossipFields(
-                "topics", ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_topics WHERE timeline_id=$timeline AND topic_id=$topic ORDER BY topic_id;", args),
-                "messages", ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_messages WHERE timeline_id=$timeline AND root_id=$root ORDER BY message_id;", args),
-                "history", ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_history WHERE timeline_id=$timeline AND root_id=$root ORDER BY receipt_id;", args)));
+                "topics", DialogueSelfTestStore.SelectPersonalGossipTopics(c, args),
+                "messages", DialogueSelfTestStore.SelectPersonalGossipMessages2(c, args),
+                "history", DialogueSelfTestStore.SelectPersonalGossipHistory(c, args)));
         }
 
         private static Dictionary<string, object> PersonalGossipProbeDraft(Dictionary<string, object> source,

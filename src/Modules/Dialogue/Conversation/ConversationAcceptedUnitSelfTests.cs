@@ -23,9 +23,7 @@ namespace ReignBetaServer
                     EnsureAcceptedConversationUnitSchema(connection);
                     CharactersService.EnsureIdentitySchema(connection); EnsureConversationSceneStateSchema(connection);
                     ReputationService.EnsureSocialReputationSchema(connection); EnsureConversationContinuitySchema(connection);
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions
-(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""player"",""listener""]','{""timelineId"":""agency_timeline""}');", TestDict("campaign", campaign));
+                    DialogueSelfTestStore.InsertConversationSessions2(connection, TestDict("campaign", campaign));
                 }
                 AcceptedConversationUnit Unit(string turn, bool effects = false, bool group = false, bool whisper = false)
                 {
@@ -71,13 +69,12 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 int Count(string table, string field = "", string id = "")
                 {
                     using var connection = ReignDatabase.OpenCampaignConnection(campaign);
-                    return ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS n FROM " + table + (field.Length == 0 ? "" : " WHERE " + field + "=$id") + ";",
-                        field.Length == 0 ? null : TestDict("id", id)).Single(), "n", 0);
+                    return ReadInt(DialogueSelfTestStore.CountDynamicDynamic(connection, table, field.Length == 0 ? "" : " WHERE " + field + "=$id",                        field.Length == 0 ? null : TestDict("id", id)).Single(), "n", 0);
                 }
                 bool AcceptedSourcesMatch(AcceptedConversationUnit value, int projectionCount = 2)
                 {
                     using var connection = ReignDatabase.OpenCampaignConnection(campaign);
-                    var rows = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$event;", TestDict("event", value.EventId));
+                    var rows = DialogueSelfTestStore.SelectConversationTurns6(connection, TestDict("event", value.EventId));
                     var active = rows.Where(row => ReadString(row, "status", "") == "active").ToList();
                     var originals = rows.Where(row => ReadString(row, "status", "") == "source_only").ToList();
                     if (rows.Count != projectionCount + 1 || active.Count != projectionCount || originals.Count != 1
@@ -97,7 +94,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                         && ReadString(metadata, "evidenceType", "") == "original_player_input" && !ReadBool(metadata, "retrievalEligible", true)
                         && new[] { value.Hero, "listener" }.All(observer => !PrecisionTurnVisible(source, observer,
                             Program.BuildKnowledgeAccessContext(observer, value.Player, value.Location, value.Payload), connection))
-                        && ReignDatabase.QuerySql(connection, "SELECT turn_id FROM conversation_turn_fts WHERE turn_id=$id;", TestDict("id", id)).Count == 0;
+                        && DialogueSelfTestStore.SelectConversationTurnFts(connection, TestDict("id", id)).Count == 0;
                 }
                 var unit = Unit("atomic", effects: true);
                 foreach (string phase in new[] { "after_sources", "after_effects", "after_context_effects", "after_memory", "before_unit_receipt" })
@@ -177,8 +174,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 var mixedRecallReceipt = ReadDictionary(Publish(mixedRecall), "acceptedUnit");
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var report = ReignDatabase.QuerySql(connection, "SELECT * FROM memories WHERE event_id=$event AND source='dialogue_llm' AND status='active';",
-                        TestDict("event", mixedRecall.EventId)).SingleOrDefault();
+                    var report = DialogueSelfTestStore.SelectMemories2(connection, TestDict("event", mixedRecall.EventId)).SingleOrDefault();
                     var reportPayload = TryParseJsonObject(ReadString(report, "payload_json", "{}"));
                     Check("mixed_terms_recall_keeps_exact_current_player_report",
                         !IsPureConversationRecallRequest(mixedRecall.PlayerText)
@@ -196,7 +192,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 var whisper = Publish(privateUnit);
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var rows = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$id;", TestDict("id", privateUnit.EventId));
+                    var rows = DialogueSelfTestStore.SelectConversationTurns7(connection, TestDict("id", privateUnit.EventId));
                     var access = Program.BuildKnowledgeAccessContext("listener", "player", "", privateUnit.Payload);
                     Check("whisper_accepts_both_projections_without_private_leak", AcceptedSourcesMatch(privateUnit, 4)
                         && ReadDictionary(ReadDictionary(whisper, "acceptedUnit"), "privateExchange").Count > 0
@@ -213,7 +209,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     foreach (string id in new[] { "npc", "player", "listener" })
-                        ReignDatabase.ExecuteSql(connection, "INSERT INTO identity_roster(hero_id,canonical_name,is_alive,is_adult) VALUES($id,$id,1,1);", TestDict("id", id));
+                        DialogueSelfTestStore.InsertIdentityRoster(connection, TestDict("id", id));
                     CharactersService.UpsertVerifiedIdentity(connection, TestDict("heroStringId", "npc"), TestDict("heroStringId", "player", "name", "Michael"), "fixture", "", 20d, "");
                     CharactersService.UpsertVerifiedIdentity(connection, TestDict("heroStringId", "npc"), TestDict("heroStringId", "listener", "name", "Listener"), "fixture", "", 20d, "");
                 }
@@ -253,8 +249,8 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 Check("context_effect_replay_does_not_repeat", Count("identity_evidence") == identityBefore + 1 && Count("court_social_signal_evidence") == 1);
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    string listener = ReadString(ReignDatabase.QuerySql(connection, "SELECT payload_json FROM conversation_scene_handoffs WHERE owner_id='listener';").Single(), "payload_json", "");
-                    string author = ReadString(ReignDatabase.QuerySql(connection, "SELECT payload_json FROM conversation_scene_handoffs WHERE owner_id='npc';").Single(), "payload_json", "");
+                    string listener = ReadString(DialogueSelfTestStore.SelectConversationSceneHandoffs(connection).Single(), "payload_json", "");
+                    string author = ReadString(DialogueSelfTestStore.SelectConversationSceneHandoffs2(connection).Single(), "payload_json", "");
                     Check("scene_handoffs_preserve_author_thought_without_broadcasting", !listener.Contains("SECRET-THOUGHT-901")
                         && listener.Contains("courtyard") && author.Contains("SECRET-THOUGHT-901"));
                 }
@@ -263,7 +259,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 var privateContextReceipt = ReadDictionary(Publish(whisperContext), "acceptedUnit");
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    string listener = ReadString(ReignDatabase.QuerySql(connection, "SELECT payload_json FROM conversation_scene_handoffs WHERE owner_id='listener';").Single(), "payload_json", "");
+                    string listener = ReadString(DialogueSelfTestStore.SelectConversationSceneHandoffs(connection).Single(), "payload_json", "");
                     Check("private_handoff_and_introduction_do_not_reach_bystander", !listener.Contains("SECRET-SPOKEN-901")
                         && ReadDictionaryList(privateContextReceipt, "introductions").All(item => !ReadBool(item, "ok", true)));
                     var falseIntroducer = Program.CloneDictionary(contextUnit.Parsed);
@@ -335,7 +331,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                     && Count("conversation_drinking_turns") == effectCount);
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "pending_continuity_checkpoint");
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
-                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_continuity_pending SET status='discarded_test_future';");
+                    DialogueSelfTestStore.UpdateConversationContinuityPending(connection);
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "pending_continuity_checkpoint");
                 AdvanceMemoryRestoreGeneration(campaign);
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
@@ -356,8 +352,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     using var transaction = connection.BeginTransaction();
-                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET text='Changed source must not authorize recovery.' WHERE event_id=$event AND speaker_id='npc';",
-                        TestDict("event", losing.EventId));
+                    DialogueSelfTestStore.UpdateConversationTurns8(connection, TestDict("event", losing.EventId));
                     var changedPayload = Program.CloneDictionary(resolution.Payload);
                     CaptureContinuityReadSnapshot(connection, changedPayload, "npc");
                     string changedPrompt = BuildPendingContinuityPrompt(connection, changedPayload, "npc", "player", new List<string>());
@@ -451,10 +446,9 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                         && ReadString(replayed, "participation", "") == "quiet" && ReadString(replayed, "reply", "missing") == ""
                         && ReadBool(ReadDictionary(Publish(silent), "acceptedUnit"), "idempotentReplay", false));
                     using var connection = ReignDatabase.OpenCampaignConnection(campaign);
-                    var sources = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$event;", TestDict("event", silent.EventId));
+                    var sources = DialogueSelfTestStore.SelectConversationTurns6(connection, TestDict("event", silent.EventId));
                     Check(route + "_silence_has_no_fabricated_npc_source", sources.All(row => ReadString(row, "role", "") != "npc")
-                        && ReadStringList(receipt, "sourceIds").All(id => ReignDatabase.QuerySql(connection,
-                            "SELECT turn_id FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).Count == 1));
+                        && ReadStringList(receipt, "sourceIds").All(id => DialogueSelfTestStore.SelectConversationTurns8(connection, TestDict("id", id)).Count == 1));
                 }
                 var afterSilence = Unit("after_silent_turn", group: true);
                 afterSilence.Payload["playerAttentionPresence"] = new[] {
@@ -513,8 +507,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 string StoredReceipt(string unitId)
                 {
                     using var connection = ReignDatabase.OpenCampaignConnection(campaign);
-                    return ReadString(ReignDatabase.QuerySql(connection, "SELECT receipt_json FROM conversation_accepted_units WHERE unit_id=$unit;",
-                        TestDict("unit", unitId)).Single(), "receipt_json", "");
+                    return ReadString(DialogueSelfTestStore.SelectConversationAcceptedUnits(connection, TestDict("unit", unitId)).Single(), "receipt_json", "");
                 }
                 string beforeAck = StoredReceipt(view.EventId);
                 foreach (var (field, value, disposition) in new[] {
@@ -539,8 +532,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                     int ColdTables()
                     {
                         using var metadata = ReignPostgreSqlStorage.OpenMetadataConnection();
-                        return ReadInt(ReignDatabase.QuerySql(metadata, "SELECT COUNT(*) AS n FROM pg_tables WHERE schemaname=$schema;",
-                            TestDict("schema", ReignPostgreSqlStorage.CampaignSchemaName(coldCampaign))).Single(), "n", -1);
+                        return ReadInt(DialogueSelfTestStore.CountPgTables(metadata, TestDict("schema", ReignPostgreSqlStorage.CampaignSchemaName(coldCampaign))).Single(), "n", -1);
                     }
                     int coldBefore = ColdTables();
                     var coldAck = Ack(viewDescriptor, "campaignId", coldCampaign);
@@ -607,8 +599,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     // The real editor statements; every active npc-session row is listed so only the target text changes.
-                    var rows = ReignDatabase.QuerySql(connection, @"SELECT t.* FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id
-WHERE s.npc_id='npc' AND t.status='active';").Select(row => TestDict("id", ReadString(row, "turn_id", ""),
+                    var rows = DialogueSelfTestStore.SelectConversationTurns9(connection).Select(row => TestDict("id", ReadString(row, "turn_id", ""),
                         "text", ReadString(row, "turn_id", "") == ReadString(editedDescriptor, "sourceTurnId", "")
                             ? ReadString(row, "text", "") + " Edited." : ReadString(row, "text", ""),
                         "speaker", ReadString(row, "speaker_name", ""), "role", ReadString(row, "role", ""),

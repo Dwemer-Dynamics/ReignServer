@@ -38,15 +38,10 @@ namespace ReignBetaServer
 
         private static void EnsureMemorySpecialistSchema(ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS memory_specialist_sources (
-turn_id TEXT PRIMARY KEY,source_hash TEXT NOT NULL,text_hash TEXT NOT NULL,schema_version TEXT NOT NULL,
-speaker_id TEXT NOT NULL,topics_json TEXT NOT NULL,entities_json TEXT NOT NULL,payload_json TEXT NOT NULL,
-updated_ts BIGINT NOT NULL);
-CREATE INDEX IF NOT EXISTS idx_memory_specialist_speaker ON memory_specialist_sources(speaker_id);
-CREATE INDEX IF NOT EXISTS idx_memory_specialist_topics ON memory_specialist_sources USING GIN ((topics_json::jsonb));");
-            ReignDatabase.EnsureDatabaseColumn(connection, "memory_specialist_sources", "public_topics_json", "TEXT NOT NULL DEFAULT '[]'");
-            ReignDatabase.EnsureDatabaseColumn(connection, "memory_specialist_sources", "public_entities_json", "TEXT NOT NULL DEFAULT '[]'");
-            ReignDatabase.EnsureDatabaseColumn(connection, "memory_specialist_sources", "source_revision", "TEXT NOT NULL DEFAULT ''");
+            DialogueSchema.CreateMemorySpecialistSources(connection);
+            DialogueSchema.EnsureColumnMemorySpecialistSourcesPublicTopicsJson(connection);
+            DialogueSchema.EnsureColumnMemorySpecialistSourcesPublicEntitiesJson(connection);
+            DialogueSchema.EnsureColumnMemorySpecialistSourcesSourceRevision(connection);
             EnsureLateInteractionMemorySchema(connection);
         }
 
@@ -110,19 +105,14 @@ CREATE INDEX IF NOT EXISTS idx_memory_specialist_topics ON memory_specialist_sou
             Dictionary<string, object> extraction = null, Dictionary<string, object> attempt = null)
         {
             if (ReadString(source, "status", "active") != "active" || string.IsNullOrWhiteSpace(ConversationTurnTextForRecall(source))) return;
-            var current = ReignDatabase.QuerySql(connection, "SELECT t.*,t.xmin::text AS source_revision FROM conversation_turns t WHERE turn_id=$id;",
-                TestDict("id", ReadString(source, "turn_id", ""))).SingleOrDefault();
+            var current = DialogueStore.SelectConversationTurns77(connection, TestDict("id", ReadString(source, "turn_id", ""))).SingleOrDefault();
             if (current == null || MemorySpecialistSourceHash(current) != MemorySpecialistSourceHash(source)) return;
             var doc = BuildMemorySpecialistDocument(source, extraction);
             foreach (var item in attempt ?? TestDict()) doc[item.Key] = item.Value;
             string visible = ObserverConversationSourceText(source, "__other_observer__");
             var publicTopics = MemorySpecialistQueryTopics(visible);
             var publicEntities = ReadDictionaryList(doc, "entities").Where(e => visible.Contains(ReadString(e, "text", ""), StringComparison.Ordinal)).ToList();
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO memory_specialist_sources
-(turn_id,source_hash,text_hash,schema_version,speaker_id,topics_json,entities_json,payload_json,updated_ts,public_topics_json,public_entities_json,source_revision)
-VALUES($id,$hash,$textHash,$schema,$speaker,$topics,$entities,$payload,$ts,$publicTopics,$publicEntities,$revision)
-ON CONFLICT(turn_id) DO UPDATE SET source_hash=$hash,text_hash=$textHash,schema_version=$schema,speaker_id=$speaker,
-topics_json=$topics,entities_json=$entities,payload_json=$payload,updated_ts=$ts,public_topics_json=$publicTopics,public_entities_json=$publicEntities,source_revision=$revision;", TestDict(
+            DialogueStore.UpsertMemorySpecialistSources(connection, TestDict(
                 "id", ReadString(doc, "sourceId", ""), "hash", ReadString(doc, "sourceHash", ""), "textHash", ReadString(doc, "textHash", ""),
                 "schema", MemorySpecialistIndexSchema, "speaker", ReadString(doc, "speakerId", ""), "topics", Json.Serialize(doc["topics"]),
                 "entities", Json.Serialize(doc["entities"]), "payload", Json.Serialize(doc), "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
@@ -153,7 +143,7 @@ topics_json=$topics,entities_json=$entities,payload_json=$payload,updated_ts=$ts
                 Dictionary<string, object> old;
                 using (var read = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    old = ReignDatabase.QuerySql(read, "SELECT * FROM memory_specialist_sources WHERE turn_id=$id;", TestDict("id", source["turn_id"])).FirstOrDefault();
+                    old = DialogueStore.SelectMemorySpecialistSources(read, TestDict("id", source["turn_id"])).FirstOrDefault();
                 }
                 bool fresh = ReadString(old, "schema_version", "") == MemorySpecialistIndexSchema
                     && ReadString(old, "source_hash", "") == MemorySpecialistSourceHash(source);
@@ -167,9 +157,7 @@ topics_json=$topics,entities_json=$entities,payload_json=$payload,updated_ts=$ts
                     // xmin is only a cheap invalidation hint. The content hash
                     // remains authoritative, including after restore or VACUUM.
                     using var read = ReignDatabase.OpenCampaignConnection(campaign);
-                    ReignDatabase.ExecuteSql(read, @"UPDATE memory_specialist_sources i SET source_revision=t.xmin::text
-FROM conversation_turns t WHERE t.turn_id=i.turn_id AND i.turn_id=$id AND i.source_hash=$hash
-AND t.xmin::text=$revision;", TestDict("id", source["turn_id"], "hash", MemorySpecialistSourceHash(source),
+                    DialogueStore.UpdateMemorySpecialistSources(read, TestDict("id", source["turn_id"], "hash", MemorySpecialistSourceHash(source),
                         "revision", ReadString(source, "source_revision", "")));
                     return;
                 }
@@ -192,7 +180,7 @@ AND t.xmin::text=$revision;", TestDict("id", source["turn_id"], "hash", MemorySp
                 using var connection = ReignDatabase.OpenCampaignConnection(campaign);
                 using var transaction = connection.BeginTransaction();
                 AcquirePostgreSqlTransactionMutationLock(connection);
-                var current = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", source["turn_id"])).SingleOrDefault();
+                var current = DialogueStore.SelectConversationTurns6(connection, TestDict("id", source["turn_id"])).SingleOrDefault();
                 if (current != null && MemorySpecialistSourceHash(current) == MemorySpecialistSourceHash(source))
                     StoreMemorySpecialistDocument(connection, current, extraction, attempt);
                 transaction.Commit();
@@ -223,11 +211,7 @@ AND t.xmin::text=$revision;", TestDict("id", source["turn_id"], "hash", MemorySp
                 matches.Add("(i.speaker_id=$" + key + " OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN i.speaker_id=$npc THEN i.entities_json::jsonb ELSE i.public_entities_json::jsonb END) x WHERE x->>'entityId'=$" + key + "))");
             }
             string score = string.Join("+", matches.Select(m => "CASE WHEN " + m + " THEN 1 ELSE 0 END"));
-            string sql = @"SELECT t.*,i.source_hash AS specialist_source_hash,(" + score + @") AS specialist_score
-FROM memory_specialist_sources i JOIN conversation_turns t ON t.turn_id=i.turn_id
-JOIN conversation_sessions s ON s.session_id=t.session_id WHERE i.schema_version=$schema AND (" + string.Join(" OR ", matches) + ") AND "
-                + MemorySessionObserverSql("s", "t") + " AND t.status='active' AND t.world_day<=$day AND t.accepted_sequence<=$asOfSequence AND t.ts<=$asOfTimestamp AND "
-                + MemorySourceTimelineSql("conversation_turns", "t") + " ORDER BY specialist_score DESC,t.ts DESC,t.turn_order DESC,t.turn_id";
+            string sql = DialogueStore.SelectMemorySpecialistSourcesSql(score, string.Join(" OR ", matches), MemorySessionObserverSql("s", "t"), MemorySourceTimelineSql("conversation_turns", "t"));
             return QuerySourceBearingPrecisionTurns(connection, sql, args, access, limit, plan.SuppliedSources,
                     maximumPages, requirePlayerSource,
                     r => ReadString(r, "specialist_source_hash", "") == MemorySpecialistSourceHash(r));
@@ -244,11 +228,10 @@ JOIN conversation_sessions s ON s.session_id=t.session_id WHERE i.schema_version
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     if (!WorldSimulationService.TableExists(connection, "memory_specialist_sources")) return;
-                    string missing = @"SELECT t.*,t.xmin::text AS source_revision FROM conversation_turns t LEFT JOIN memory_specialist_sources i ON t.turn_id=i.turn_id
-WHERE t.status='active' AND t.text<>'' AND (i.turn_id IS NULL OR i.schema_version<>$schema OR i.source_revision<>t.xmin::text)";
+                    string missing = DialogueStore.SelectConversationTurnsSql5;
                     var args = TestDict("schema", MemorySpecialistIndexSchema, "limit", Math.Max(1, Math.Min(256, limit)));
-                    sources = ReignDatabase.QuerySql(connection, missing + " ORDER BY t.accepted_sequence DESC,t.turn_id LIMIT $limit;", args)
-                        .Concat(ReignDatabase.QuerySql(connection, missing + " ORDER BY t.accepted_sequence,t.turn_id LIMIT $limit;", args))
+                    sources = DialogueStore.Statement3(connection, missing,args)
+                        .Concat(DialogueStore.Statement4(connection, missing,args))
                         .GroupBy(r => ReadString(r, "turn_id", "")).Select(g => g.First()).ToList();
                 }
                 var settings = Program.LoadSettings();
@@ -265,15 +248,7 @@ WHERE t.status='active' AND t.text<>'' AND (i.turn_id IS NULL OR i.schema_versio
                 if (modelHash.Length > 0 && string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value))
                 {
                     using var read = ReignDatabase.OpenCampaignConnection(campaign);
-                    var upgrades = ReignDatabase.QuerySql(read, @"SELECT t.*,t.xmin::text AS source_revision FROM conversation_turns t
-JOIN memory_specialist_sources i ON i.turn_id=t.turn_id WHERE t.status='active' AND i.schema_version=$schema
-AND (COALESCE(i.payload_json::jsonb->>'extractorModelHash','')<>$model
-OR COALESCE(i.payload_json::jsonb->>'extractorStatus','')<>'source_bound_candidates')
-AND (COALESCE(i.payload_json::jsonb->>'extractorExpectedModelHash','')<>$model
-OR (COALESCE((i.payload_json::jsonb->>'extractorAttempts')::int,0)<4
-AND COALESCE((i.payload_json::jsonb->>'extractorNextAttemptTs')::bigint,0)<=$now))
-ORDER BY i.updated_ts,t.accepted_sequence,t.turn_id LIMIT 4;",
-                        TestDict("schema", MemorySpecialistIndexSchema, "model", modelHash, "now", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+                    var upgrades = DialogueStore.SelectConversationTurns78(read, TestDict("schema", MemorySpecialistIndexSchema, "model", modelHash, "now", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
                     foreach (var source in upgrades)
                     {
                         if (Program.PriorityBackgroundWorkShouldYield()) break;
@@ -283,8 +258,8 @@ ORDER BY i.updated_ts,t.accepted_sequence,t.turn_id LIMIT 4;",
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     string timeline = WorldSimulationService.ActiveWorldHistoryTimeline(connection);
-                    var native = ReignDatabase.QuerySql(connection, "SELECT MAX(world_day) AS day FROM world_history_events WHERE timeline_id=$timeline;", TestDict("timeline", timeline)).FirstOrDefault();
-                    var latest = ReignDatabase.QuerySql(connection, "SELECT speaker_id,MAX(world_day) AS day FROM conversation_turns WHERE status='active' AND role='npc' GROUP BY speaker_id ORDER BY MAX(ts) DESC LIMIT 16;");
+                    var native = DialogueStore.SelectWorldHistoryEvents6(connection, TestDict("timeline", timeline)).FirstOrDefault();
+                    var latest = DialogueStore.SelectConversationTurns79(connection);
                     foreach (var row in latest)
                     {
                         if (Program.PriorityBackgroundWorkShouldYield()) break;

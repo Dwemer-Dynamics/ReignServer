@@ -92,9 +92,7 @@ namespace ReignBetaServer
                 ftsMemoryIds = SearchMemoryFts(connection, queryTerms, 80, knowledge);
                 ftsSummaryIds = SearchSummaryFts(connection, queryTerms, 40, knowledge);
                 volatileSnapshotEventIds = new HashSet<string>(
-                    ReignDatabase.QuerySql(connection,
-                            @"SELECT event_id FROM events
-WHERE event_type='daily_world_snapshot';")
+                    DialogueStore.SelectEvents2(connection)
                         .Select(row => ReadString(
                             row, "event_id", ""))
                         .Where(id =>
@@ -103,9 +101,7 @@ WHERE event_type='daily_world_snapshot';")
                 if (!string.IsNullOrWhiteSpace(playerId) || DialogueService.RouteHasLane(retrievalRoute, "interpersonal_history") || DialogueService.RouteHasLane(retrievalRoute, "commitments_and_plots"))
                 {
                     List<string> relationshipTargets = string.IsNullOrWhiteSpace(playerId)
-                        ? ReignDatabase.QuerySql(connection, @"SELECT hero_a_id,hero_b_id FROM relationship_pair_chemistry
-WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
-                            new Dictionary<string, object> { ["npc"] = npcId })
+                        ? DialogueStore.SelectRelationshipPairChemistry4(connection, new Dictionary<string, object> { ["npc"] = npcId })
                             .Select(row => ReadString(row, "hero_a_id", "").Equals(npcId, StringComparison.OrdinalIgnoreCase)
                                 ? ReadString(row, "hero_b_id", "") : ReadString(row, "hero_a_id", ""))
                             .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
@@ -495,9 +491,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
             // toward the candidate limit; unrelated rows cannot exhaust it.
             while (result.Count < Math.Max(1, limit))
             {
-                var rows = ReignDatabase.QuerySql(connection, "SELECT * FROM " + table + " WHERE " + where
-                    + " ORDER BY " + order + " DESC," + key + " LIMIT $batch OFFSET $offset;",
-                    new Dictionary<string, object> { ["observer"] = knowledge?.NpcId ?? "", ["batch"] = batch, ["offset"] = offset,
+                var rows = DialogueStore.SelectDynamic8(connection, table, where, order, key,                    new Dictionary<string, object> { ["observer"] = knowledge?.NpcId ?? "", ["batch"] = batch, ["offset"] = offset,
                         ["query"] = BuildFtsQuery(queryTerms ?? new List<string>()), ["timeline"] = knowledge?.TimelineId ?? "" });
                 result.AddRange(rows.Where(row => KnowledgeRowVisibleToNpc(table, row, knowledge, connection)).Take(Math.Max(1, limit) - result.Count));
                 if (rows.Count < batch) break;
@@ -539,8 +533,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
                 parameters[key] = selectedIds[index];
             }
 
-            return ReignDatabase.QuerySql(connection, "SELECT * FROM " + table + " WHERE status='active' AND " + idColumn
-                    + " IN (" + string.Join(",", placeholders.ToArray()) + ");", parameters)
+            return DialogueStore.SelectDynamic9(connection, table, idColumn, string.Join(",", placeholders.ToArray()),parameters)
                 .Where(row => KnowledgeRowVisibleToNpc(table, row, knowledge, connection))
                 .ToList();
         }

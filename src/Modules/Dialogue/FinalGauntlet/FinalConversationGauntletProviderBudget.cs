@@ -50,12 +50,7 @@ namespace ReignBetaServer
             {
                 Execute(
                     connection,
-                    @"INSERT INTO final_gauntlet_provider_correlations(
-run_id,case_instance_id,correlation_id,created_ts)
-VALUES($run,$case,$correlation,$ts)
-ON CONFLICT(run_id,correlation_id) DO UPDATE SET
-case_instance_id=excluded.case_instance_id,
-created_ts=excluded.created_ts;",
+                    DialogueStore.UpsertFinalGauntletProviderCorrelationsSql,
                     ("$run", runId),
                     ("$case", caseInstanceId),
                     ("$correlation", correlationId),
@@ -105,9 +100,7 @@ created_ts=excluded.created_ts;",
             {
                 Execute(
                     connection,
-                    @"UPDATE final_gauntlet_provider_calls
-SET status=$status,completed_ts=$ts,error=$error
-WHERE provider_call_id=$id;",
+                    DialogueStore.UpdateFinalGauntletProviderCallsSql,
                     ("$status", succeeded ? "completed" : "failed"),
                     ("$ts", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
                     ("$error", error ?? string.Empty),
@@ -210,10 +203,7 @@ WHERE provider_call_id=$id;",
             {
                 command.CommandText = ReignPostgreSqlDialect.Normalize(
                     connection,
-                    @"SELECT case_instance_id,payload_json
-FROM final_gauntlet_evidence
-WHERE run_id=$run AND evidence_key='production_result'
-ORDER BY case_instance_id;");
+                    DialogueStore.SelectFinalGauntletEvidenceSql);
                 command.Parameters.AddWithValue("$run", runId ?? string.Empty);
                 using (ReignDbDataReader reader = command.ExecuteReader())
                     while (reader.Read())
@@ -224,8 +214,7 @@ ORDER BY case_instance_id;");
 
             int before = (int)ScalarLong(
                 connection,
-                @"SELECT COUNT(*) FROM final_gauntlet_provider_calls
-WHERE run_id=$run;",
+                DialogueStore.CountFinalGauntletProviderCallsSql,
                 ("$run", runId ?? string.Empty));
             int denied = 0;
             foreach ((string caseId, string payloadJson) in evidence)
@@ -303,8 +292,7 @@ WHERE run_id=$run;",
             }
             int used = (int)ScalarLong(
                 connection,
-                @"SELECT COUNT(*) FROM final_gauntlet_provider_calls
-WHERE run_id=$run;",
+                DialogueStore.CountFinalGauntletProviderCallsSql,
                 ("$run", runId ?? string.Empty));
             return new Dictionary<string, object>
             {
@@ -377,8 +365,7 @@ WHERE run_id=$run;",
                         physicalAttempt);
                 long used = ScalarLong(
                     connection,
-                    @"SELECT COUNT(*) FROM final_gauntlet_provider_calls
-WHERE run_id=$run;",
+                    DialogueStore.CountFinalGauntletProviderCallsSql,
                     ("$run", scope.RunId));
                 if (used >= MaximumPhysicalCalls)
                     return Result(
@@ -395,11 +382,7 @@ WHERE run_id=$run;",
                 {
                     Execute(
                         connection,
-                        @"INSERT INTO final_gauntlet_provider_calls(
-run_id,provider_call_id,case_instance_id,correlation_id,request_type,
-model,physical_attempt,ordinal,status,started_ts,completed_ts,error)
-VALUES($run,$id,$case,$correlation,$type,$model,$attempt,$ordinal,
-'reserved',$ts,0,'');",
+                        DialogueStore.InsertFinalGauntletProviderCallsSql,
                         ("$run", scope.RunId),
                         ("$id", providerCallId),
                         ("$case", scope.CaseInstanceId),
@@ -415,8 +398,7 @@ VALUES($run,$id,$case,$correlation,$type,$model,$attempt,$ordinal,
                 {
                     Dictionary<string, object> existing = QueryOne(
                         connection,
-                        @"SELECT ordinal FROM final_gauntlet_provider_calls
-WHERE run_id=$run AND provider_call_id=$id LIMIT 1;",
+                        DialogueStore.SelectFinalGauntletProviderCallsSql,
                         ("$run", scope.RunId),
                         ("$id", providerCallId));
                     if (existing.Count == 0) throw;
@@ -452,21 +434,18 @@ WHERE run_id=$run AND provider_call_id=$id LIMIT 1;",
                 Execute(
                     connection,
                     transaction,
-                    @"SELECT pg_advisory_xact_lock(
-hashtextextended($run,4412));",
+                    DialogueStore.SelectSql,
                     ("$run", scope.RunId));
                 Dictionary<string, object> existing = QueryOne(
                     connection,
                     transaction,
-                    @"SELECT ordinal FROM final_gauntlet_provider_calls
-WHERE run_id=$run AND provider_call_id=$id LIMIT 1;",
+                    DialogueStore.SelectFinalGauntletProviderCallsSql,
                     ("$run", scope.RunId),
                     ("$id", providerCallId));
                 long used = ScalarLong(
                     connection,
                     transaction,
-                    @"SELECT COUNT(*) FROM final_gauntlet_provider_calls
-WHERE run_id=$run;",
+                    DialogueStore.CountFinalGauntletProviderCallsSql,
                     ("$run", scope.RunId));
                 if (existing.Count > 0)
                 {
@@ -493,11 +472,7 @@ WHERE run_id=$run;",
                 Execute(
                     connection,
                     transaction,
-                    @"INSERT INTO final_gauntlet_provider_calls(
-run_id,provider_call_id,case_instance_id,correlation_id,request_type,
-model,physical_attempt,ordinal,status,started_ts,completed_ts,error)
-VALUES($run,$id,$case,$correlation,$type,$model,$attempt,$ordinal,
-'reserved',$ts,0,'');",
+                    DialogueStore.InsertFinalGauntletProviderCallsSql,
                     ("$run", scope.RunId),
                     ("$id", providerCallId),
                     ("$case", scope.CaseInstanceId),
@@ -535,8 +510,7 @@ VALUES($run,$id,$case,$correlation,$type,$model,$attempt,$ordinal,
 
                 using (ReignDbCommand command = connection.CreateCommand())
                 {
-                    command.CommandText = @"SELECT run_id,case_instance_id,
-correlation_id FROM final_gauntlet_provider_correlations;";
+                    command.CommandText = DialogueStore.SelectFinalGauntletProviderCorrelationsSql;
                     using (ReignDbDataReader reader = command.ExecuteReader())
                     {
                         while (reader.Read())

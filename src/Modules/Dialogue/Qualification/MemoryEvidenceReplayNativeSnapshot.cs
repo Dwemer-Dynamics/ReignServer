@@ -86,7 +86,7 @@ namespace ReignBetaServer
             bool SchemaExists(string id)
             {
                 using var connection = ReignPostgreSqlStorage.OpenMetadataConnection();
-                using var command = new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname=@schema);", connection);
+                using var command = new NpgsqlCommand(DialogueStore.SelectPgNamespaceSql, connection);
                 command.Parameters.AddWithValue("schema", ReignPostgreSqlStorage.CampaignSchemaName(id));
                 return command.ExecuteScalar() is true;
             }
@@ -94,14 +94,13 @@ namespace ReignBetaServer
             {
                 using (var connection = ReignPostgreSqlStorage.OpenCampaignConnection(campaign))
                 {
-                    Sql(connection, "CREATE TABLE source_probe(id text PRIMARY KEY,body text NOT NULL);");
-                    using var insert = new NpgsqlCommand("INSERT INTO source_probe VALUES('original_turn',@body);", connection);
+                    Sql(connection, DialogueSchema.CreateSourceProbeSql);
+                    using var insert = new NpgsqlCommand(DialogueStore.InsertSourceProbeSql, connection);
                     insert.Parameters.AddWithValue("body", original); insert.ExecuteNonQuery();
-                    Sql(connection, "CREATE FUNCTION source_identity_probe() RETURNS text LANGUAGE sql AS $$ SELECT body FROM "
-                        + schema + ".source_probe WHERE id='original_turn'; $$;");
+                    Sql(connection, DialogueSchema.CreateSql(schema));
                 }
                 using (var connection = ReignPostgreSqlStorage.OpenCampaignConnection(control))
-                    Sql(connection, "CREATE TABLE sentinel(value integer); INSERT INTO sentinel VALUES(99);");
+                    Sql(connection, DialogueSchema.CreateSentinelSql);
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "unselected_snapshot");
                 ReignPostgreSqlStorage.ExportCampaignArchive(campaign, archive);
                 string pin = PersistenceService.FileSha256(archive);
@@ -125,7 +124,7 @@ namespace ReignBetaServer
                     catch (InvalidOperationException ex) { secondRefused = ex.Message.Contains("already owned", StringComparison.Ordinal); }
                     Check("second_session_cannot_claim_active_import", secondRefused);
                     using var connection = ReignPostgreSqlStorage.OpenCampaignConnection(campaign);
-                    using var command = new NpgsqlCommand("SELECT id,body,source_identity_probe() FROM source_probe;", connection);
+                    using var command = new NpgsqlCommand(DialogueStore.SelectSourceProbeSql, connection);
                     using var reader = command.ExecuteReader();
                     bool exact = reader.Read() && reader.GetString(0) == "original_turn" && reader.GetString(1) == original
                         && reader.GetString(2) == original && !reader.Read();
@@ -137,10 +136,10 @@ namespace ReignBetaServer
                 Check("owned_import_removed_after_callback", !Exists(campaign) && !SchemaExists(campaign));
                 using (var connection = ReignPostgreSqlStorage.OpenMetadataConnection())
                 {
-                    using var command = new NpgsqlCommand("SELECT pg_try_advisory_lock(hashtextextended(@key,0));", connection);
+                    using var command = new NpgsqlCommand(DialogueStore.SelectSql2, connection);
                     command.Parameters.AddWithValue("key", "validation-native-archive:" + campaign);
                     bool released = command.ExecuteScalar() is true;
-                    command.CommandText = "SELECT pg_advisory_unlock(hashtextextended(@key,0));";
+                    command.CommandText = DialogueStore.SelectSql3;
                     Check("advisory_lock_released_after_callback", released && command.ExecuteScalar() is true);
                 }
                 bool failed = false;
@@ -158,7 +157,7 @@ namespace ReignBetaServer
                             ownedBackend = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(ReignPostgreSqlStorage.Options.BuildConnectionString())
                                 { Pooling = false, ApplicationName = receipt.ToolApplicationName }.ConnectionString);
                             ownedBackend.Open();
-                            using var pid = new NpgsqlCommand("SELECT pg_backend_pid();", ownedBackend);
+                            using var pid = new NpgsqlCommand(DialogueStore.SelectSql4, ownedBackend);
                             ownedBackendPid = Convert.ToInt32(pid.ExecuteScalar(), CultureInfo.InvariantCulture);
                             throw new InvalidOperationException("injected_native_inspection_failure");
                         });
@@ -171,7 +170,7 @@ namespace ReignBetaServer
                         // Check before client disposal, which would otherwise
                         // make this assertion pass without server quiescence.
                         using var connection = ReignPostgreSqlStorage.OpenMetadataConnection();
-                        using var command = new NpgsqlCommand("SELECT NOT EXISTS(SELECT 1 FROM pg_stat_activity WHERE pid=@pid);", connection);
+                        using var command = new NpgsqlCommand(DialogueStore.SelectPgStatActivitySql, connection);
                         command.Parameters.AddWithValue("pid", ownedBackendPid);
                         ownedBackendWasStopped = ownedBackendPid > 0 && command.ExecuteScalar() is true;
                     }
@@ -179,7 +178,7 @@ namespace ReignBetaServer
                 }
                 Check("failed_inspection_cleans_only_owned_import", failed && !Exists(campaign) && Exists(control));
                 Check("owned_restore_backend_quiesced_before_cleanup", ownedBackendWasStopped);
-                using (var command = new NpgsqlCommand("SELECT 1;", unownedBackend))
+                using (var command = new NpgsqlCommand(DialogueStore.SelectSql5, unownedBackend))
                     Check("unowned_backend_is_preserved", Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture) == 1);
                 string missing = "native_archive_missing_" + Guid.NewGuid().ToString("N");
                 refused = false;
@@ -200,7 +199,7 @@ namespace ReignBetaServer
                     ReignPostgreSqlStorage.WithValidationCampaignArchive<bool>(campaign, archive, pin, _ =>
                     {
                         using var connection = ReignPostgreSqlStorage.OpenCampaignConnection(control);
-                        Sql(connection, "CREATE VIEW foreign_probe AS SELECT body FROM " + schema + ".source_probe;");
+                        Sql(connection, DialogueSchema.CreateSql2(schema));
                         throw new InvalidOperationException("injected_primary_failure_with_foreign_view");
                     });
                 }
@@ -213,10 +212,10 @@ namespace ReignBetaServer
                 Check("foreign_schema_and_registry_preserved_after_refusal", protectedForeign && Exists(campaign) && SchemaExists(campaign));
                 using (var connection = ReignPostgreSqlStorage.OpenCampaignConnection(control))
                 {
-                    using var command = new NpgsqlCommand("SELECT count(*) FROM foreign_probe;", connection);
+                    using var command = new NpgsqlCommand(DialogueStore.CountForeignProbeSql, connection);
                     Check("foreign_dependency_prevents_cascade_cleanup", protectedForeign && Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture) == 1);
-                    Sql(connection, "DROP VIEW foreign_probe;");
-                    using var sentinel = new NpgsqlCommand("SELECT value FROM sentinel;", connection);
+                    Sql(connection, DialogueSchema.DropSql);
+                    using var sentinel = new NpgsqlCommand(DialogueStore.SelectSentinelSql, connection);
                     Check("unrelated_campaign_remains_unchanged", Convert.ToInt32(sentinel.ExecuteScalar(), CultureInfo.InvariantCulture) == 99);
                 }
             }

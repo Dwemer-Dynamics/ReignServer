@@ -72,11 +72,7 @@ namespace ReignBetaServer
                     as Dictionary<string, object>;
                 using (ReignDbCommand command = connection.CreateCommand())
                 {
-                    command.CommandText = @"SELECT COUNT(*)
-FROM information_schema.tables
-WHERE table_schema=current_schema()
-  AND table_type='BASE TABLE'
-  AND table_name='final_gauntlet_schedule';";
+                    command.CommandText = DialogueSelfTestStore.CountTablesSql2;
                     add(
                         "status_read_initializes_scheduler_schema",
                         missingSchedule != null
@@ -390,10 +386,8 @@ WHERE table_schema=current_schema()
             FinalGauntletStore.EnsureSchema(connection);
             foreach (string runId in runIds ?? Array.Empty<string>())
             {
-                ReignDatabase.ExecuteSql(
-                    connection,
-                    "DELETE FROM final_gauntlet_runs WHERE run_id=$run;",
-                    new Dictionary<string, object> { ["run"] = runId });
+                DialogueSelfTestStore.DeleteFinalGauntletRuns2(
+                    connection, new Dictionary<string, object> { ["run"] = runId });
             }
         }
 

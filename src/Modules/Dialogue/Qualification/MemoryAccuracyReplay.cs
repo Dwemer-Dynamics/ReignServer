@@ -89,9 +89,7 @@ namespace ReignBetaServer
                     {
                         // Case-local identities and source IDs prevent a prior replay
                         // from becoming evidence for a later independent case.
-                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,channel,status,
-start_ts,start_world_day,participants_json,payload_json) VALUES($session,$campaign,$npc,$player,'in_person','open',1,1,$participants,$payload);",
-                            TestDict("session", session, "campaign", campaign, "npc", npc, "player", player,
+                        DialogueStore.InsertConversationSessions(connection, TestDict("session", session, "campaign", campaign, "npc", npc, "player", player,
                                 "participants", Json.Serialize(new[] { npc, player }), "payload", Json.Serialize(context)));
                         int ordinal = 0;
                         foreach (var source in sources)

@@ -11,15 +11,7 @@ namespace ReignBetaServer
 
         internal static void EnsureChatViewSchema(ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS chat_view_frames (
-turn_id TEXT PRIMARY KEY,session_id TEXT NOT NULL,exchange_id TEXT NOT NULL,timeline_id TEXT NOT NULL,
-frame_json TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS chat_view_requests (
-request_id TEXT PRIMARY KEY,session_id TEXT NOT NULL,timeline_id TEXT NOT NULL,player_id TEXT NOT NULL,job_id TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS chat_view_jobs (
-job_id TEXT PRIMARY KEY,session_id TEXT NOT NULL,timeline_id TEXT NOT NULL,player_id TEXT NOT NULL,
-created_ts INTEGER NOT NULL,payload_json TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS idx_chat_view_jobs_session ON chat_view_jobs(session_id,timeline_id,created_ts);");
+            DialogueSchema.CreateChatViewFrames(connection);
             PortraitsService.EnsureChatViewWardrobeSchema(connection);
         }
 
@@ -49,8 +41,7 @@ CREATE INDEX IF NOT EXISTS idx_chat_view_jobs_session ON chat_view_jobs(session_
                 "wardrobeScene", PortraitsService.ChatViewWardrobeSceneKey(request));
             string json = Json.Serialize(frame);
             if (json.Length > 65536) return;
-            ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO chat_view_frames(turn_id,session_id,exchange_id,timeline_id,frame_json)
-VALUES($turn,$session,$exchange,$timeline,$frame);", TestDict("turn", turn, "session", session,
+            DialogueStore.InsertOrIgnoreChatViewFrames(connection, TestDict("turn", turn, "session", session,
                 "exchange", exchange, "timeline", ContinuityTimeline(request), "frame", json));
         }
 
@@ -60,8 +51,7 @@ VALUES($turn,$session,$exchange,$timeline,$frame);", TestDict("turn", turn, "ses
             string timeline = ReadString(payload, "timelineId", "");
             if (session.Length == 0 || player.Length == 0 || timeline.Length == 0)
                 throw new InvalidOperationException("A current conversation, player and timeline are required.");
-            var scope = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$session AND player_id=$player;",
-                TestDict("session", session, "player", player)).SingleOrDefault();
+            var scope = DialogueStore.SelectConversationSessions(connection, TestDict("session", session, "player", player)).SingleOrDefault();
             if (scope == null) throw new InvalidOperationException("This conversation does not belong to the current player.");
             string channel = ReadString(scope, "channel", "");
             if (channel == "correspondence" || channel == "social_event" || channel == "wilderness_event")
@@ -81,22 +71,17 @@ VALUES($turn,$session,$exchange,$timeline,$frame);", TestDict("turn", turn, "ses
             int boundary = int.MaxValue;
             if (through.Length > 0)
             {
-                var edge = ReignDatabase.QuerySql(connection, "SELECT MAX(turn_order) AS boundary FROM conversation_turns WHERE session_id=$session AND exchange_id=$exchange AND status='active';",
-                    TestDict("session", session, "exchange", through)).SingleOrDefault();
+                var edge = DialogueStore.SelectConversationTurns(connection, TestDict("session", session, "exchange", through)).SingleOrDefault();
                 if (edge == null || edge["boundary"] == null || edge["boundary"] == DBNull.Value)
                     throw new InvalidOperationException("The selected conversation boundary is no longer available.");
                 boundary = ReadInt(edge, "boundary", -1);
             }
-            var groups = ReignDatabase.QuerySql(connection, @"SELECT exchange_id,MAX(turn_order) AS last_order FROM conversation_turns
-WHERE session_id=$session AND status='active' GROUP BY exchange_id HAVING MAX(turn_order)<=$boundary
-ORDER BY last_order DESC LIMIT 64;", TestDict("session", session, "boundary", boundary));
+            var groups = DialogueStore.SelectConversationTurns2(connection, TestDict("session", session, "boundary", boundary));
             var rows = new List<Dictionary<string, object>>();
             foreach (var group in groups)
             {
                 string exchange = ReadString(group, "exchange_id", "");
-                var turns = ReignDatabase.QuerySql(connection, @"SELECT t.*,f.frame_json,f.timeline_id FROM conversation_turns t
-LEFT JOIN chat_view_frames f ON f.turn_id=t.turn_id WHERE t.session_id=$session AND t.exchange_id=$exchange
-AND t.status='active' ORDER BY t.turn_order;", TestDict("session", session, "exchange", exchange));
+                var turns = DialogueStore.SelectConversationTurns3(connection, TestDict("session", session, "exchange", exchange));
                 turns = turns.Where(t => ReadString(t, "frame_json", "").Length > 0 && MemoryTimeVisible(t, access, connection)
                     && Program.TextListFromJson(ReadString(t, "participants_json", "[]")).Contains(player, StringComparer.OrdinalIgnoreCase)).ToList();
                 var complete = ChatViewCompleteExchange(turns, player);
@@ -107,8 +92,7 @@ AND t.status='active' ORDER BY t.turn_order;", TestDict("session", session, "exc
                     var metadata = TryParseJsonObject(ReadString(projected, "payload_json", "{}"));
                     string originalId = ReadString(metadata, "inputSourceId", "");
                     if (originalId.Length == 0) continue;
-                    var original = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND speaker_id=$player AND status='source_only';",
-                        TestDict("id", originalId, "player", player)).SingleOrDefault();
+                    var original = DialogueStore.SelectConversationTurns4(connection, TestDict("id", originalId, "player", player)).SingleOrDefault();
                     if (original == null || !MemoryTimeVisible(original, access, connection)) throw new InvalidDataException("The original player input is unavailable in this timeline.");
                     OriginalConversationSourceIntegrity(original);
                     line["text"] = ReadString(original, "text", "");
@@ -130,7 +114,7 @@ AND t.status='active' ORDER BY t.turn_order;", TestDict("session", session, "exc
             if (selectedId.Length == 0) selectedId = ReadString(window.LastOrDefault(), "turnId", "");
             var frozen = window.SingleOrDefault(t => ReadString(t, "turnId", "") == selectedId);
             if (frozen == null || ReadString(frozen, "role", "") != "npc") return false;
-            var source = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';", TestDict("id", selectedId)).SingleOrDefault();
+            var source = DialogueStore.SelectConversationTurns5(connection, TestDict("id", selectedId)).SingleOrDefault();
             return source != null && PromptHash(ReadString(source, "text", "")) == ReadString(frozen, "sourceHash", "")
                 && Program.TextListFromJson(ReadString(source, "participants_json", "[]")).Contains(ReadString(request, "playerId", ""), StringComparer.OrdinalIgnoreCase)
                 && MemoryTimeVisible(source, new Program.KnowledgeAccessContext { NpcId = ReadString(request, "playerId", ""),

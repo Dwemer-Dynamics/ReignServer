@@ -13,8 +13,7 @@ namespace ReignBetaServer
             string reason = ReadString(payload, "continuationReason", "");
             string logical = ReadString(payload, "logicalConversationId", "");
             string timeline = ContinuityTimeline(payload);
-            var existing = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id;",
-                new Dictionary<string, object> { ["id"] = session }).FirstOrDefault();
+            var existing = DialogueStore.SelectConversationSessions2(connection, new Dictionary<string, object> { ["id"] = session }).FirstOrDefault();
             bool Owns(Dictionary<string, object> row) => row != null && ReadString(row, "campaign_id", "") == campaign
                 && ReadString(row, "npc_id", "") == npc && ReadString(row, "player_id", "") == player
                 && ContinuityTimeline(TryParseJsonObject(ReadString(row, "payload_json", "{}"))) == timeline;
@@ -27,8 +26,7 @@ namespace ReignBetaServer
             }
             if (parentId.Length > 0)
             {
-                var parent = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id;",
-                    new Dictionary<string, object> { ["id"] = parentId }).FirstOrDefault();
+                var parent = DialogueStore.SelectConversationSessions2(connection, new Dictionary<string, object> { ["id"] = parentId }).FirstOrDefault();
                 if (!Owns(parent) || !new[] { "scene_transition", "transport_reconnect", "ui_continuation", "campaign_reload" }.Contains(reason)
                     || !new[] { "closed", "interrupted" }.Contains(ReadString(parent, "status", ""))
                     || !new[] { "scene_transition", "transport_reconnect", "ui_continuation", "interrupted_by_campaign_reload" }
@@ -38,8 +36,7 @@ namespace ReignBetaServer
                 if (logical.Length > 0 && logical != previousLogical)
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Logical conversation does not match its continuation source." };
                 if (ReadString(parent, "channel", "in_person") != ReadString(payload, "channel", "in_person")
-                    || ReignDatabase.QuerySql(connection, "SELECT session_id FROM conversation_sessions WHERE payload_json::jsonb->>'continuedFromSessionId'=$id LIMIT 1;",
-                        new Dictionary<string, object> { ["id"] = parentId }).Count > 0)
+                    || DialogueStore.SelectConversationSessions5(connection, new Dictionary<string, object> { ["id"] = parentId }).Count > 0)
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Conversation handoff was already consumed or changed channel." };
                 logical = previousLogical;
             }
@@ -47,9 +44,7 @@ namespace ReignBetaServer
             {
                 // A fresh conversation cannot borrow a logical ID merely because
                 // the same people are present. Require the explicit parent chain.
-                if (logical.Length > 0 && ReignDatabase.QuerySql(connection,
-                    "SELECT session_id FROM conversation_sessions WHERE payload_json::jsonb->>'logicalConversationId'=$logical LIMIT 1;",
-                    new Dictionary<string, object> { ["logical"] = logical }).Count > 0)
+                if (logical.Length > 0 && DialogueStore.SelectConversationSessions6(connection, new Dictionary<string, object> { ["logical"] = logical }).Count > 0)
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = "An existing logical conversation requires continuedFromSessionId." };
                 if (logical.Length == 0) logical = "logical_" + session;
                 reason = "new_conversation";
@@ -63,8 +58,7 @@ namespace ReignBetaServer
         private static List<string> LogicalConversationAncestors(ReignDbConnection connection, string sessionId)
         {
             var result = new List<string>();
-            var current = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id;",
-                new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault();
+            var current = DialogueStore.SelectConversationSessions2(connection, new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault();
             if (current == null) return result;
             var identity = current;
             string logical = ReadString(TryParseJsonObject(ReadString(current, "payload_json", "{}")), "logicalConversationId", sessionId);
@@ -82,8 +76,7 @@ namespace ReignBetaServer
                     || ContinuityTimeline(payload) != timeline || ReadString(payload, "logicalConversationId", id) != logical) break;
                 result.Add(id);
                 string parent = ReadString(payload, "continuedFromSessionId", "");
-                current = parent.Length == 0 ? null : ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id;",
-                    new Dictionary<string, object> { ["id"] = parent }).FirstOrDefault();
+                current = parent.Length == 0 ? null : DialogueStore.SelectConversationSessions2(connection, new Dictionary<string, object> { ["id"] = parent }).FirstOrDefault();
             }
             return result;
         }
@@ -107,8 +100,7 @@ namespace ReignBetaServer
             }
             parameters["limit"] = Math.Clamp(limit, 2, 100);
             // Apply as-of and observer filters before the bounded LIMIT.
-            return ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE " + eligible
-                + " ORDER BY accepted_sequence DESC,ts DESC,turn_order DESC,turn_id DESC LIMIT $limit;", parameters)
+            return DialogueStore.SelectConversationTurns33(connection, eligible,parameters)
                 .Where(r => !string.IsNullOrWhiteSpace(ConversationTurnTextForRecall(r)))
                 .Where(r => knowledge == null || PrecisionTurnVisible(r, knowledge.NpcId, knowledge, connection))
                 .OrderBy(r => ReadLong(r, "accepted_sequence", 0)).ThenBy(r => ReadLong(r, "ts", 0))

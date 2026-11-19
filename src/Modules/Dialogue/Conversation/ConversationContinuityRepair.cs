@@ -19,11 +19,9 @@ namespace ReignBetaServer
             string campaign = ReadString(manifest, "campaignId", ""), timeline = ReadString(manifest, "timelineId", "");
             if (campaign.Length == 0 || timeline.Length == 0) throw new InvalidOperationException("Exact campaign and timeline are required.");
             EnsureConversationContinuitySchema(connection);
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_continuity_repairs (
-manifest_hash TEXT PRIMARY KEY, campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,receipt_json TEXT NOT NULL,created_ts INTEGER NOT NULL);");
+            DialogueSchema.CreateConversationContinuityRepairs(connection);
             string hash = PromptHash(CanonicalJson(manifest));
-            var existing = ReignDatabase.QuerySql(connection, "SELECT receipt_json FROM conversation_continuity_repairs WHERE manifest_hash=$hash;",
-                new Dictionary<string, object> { ["hash"] = hash }).FirstOrDefault();
+            var existing = DialogueStore.SelectConversationContinuityRepairs(connection, new Dictionary<string, object> { ["hash"] = hash }).FirstOrDefault();
             if (existing != null) return new Dictionary<string, object> { ["ok"] = true, ["idempotent"] = true, ["manifestHash"] = hash };
             if (manifest.ContainsKey("expectedRestoreGeneration"))
             {
@@ -53,9 +51,8 @@ manifest_hash TEXT PRIMARY KEY, campaign_id TEXT NOT NULL,timeline_id TEXT NOT N
                         throw new InvalidOperationException("Campaign memory state changed; review a fresh mode transition.");
                     string mode = ReadString(operation,"mode","");
                     if (!new[] { "legacy", "shadow", "precision" }.Contains(mode)) throw new InvalidOperationException("Unknown memory mode.");
-                    ReignDatabase.ExecuteSql(connection,"UPDATE memory_precision_state SET mode=$mode,projection_generation=projection_generation+1,updated_ts=$ts WHERE state_id='current';",
-                        TestDict("mode",mode,"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
-                    ReignDatabase.ExecuteSql(connection,"DELETE FROM memory_projections;");
+                    DialogueStore.UpdateMemoryPrecisionState(connection, TestDict("mode",mode,"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+                    DialogueStore.DeleteMemoryProjections(connection);
                     changes.Add(TestDict("kind",kind,"before",beforeState,"after",ReadMemoryPrecisionState(connection),"databaseRewound",false));
                     continue;
                 }
@@ -70,7 +67,7 @@ manifest_hash TEXT PRIMARY KEY, campaign_id TEXT NOT NULL,timeline_id TEXT NOT N
                     case "quarantine_comprehension": table = "comprehension"; key = "comprehension_id"; break;
                     default: throw new InvalidOperationException("Unsupported continuity repair operation.");
                 }
-                var before = ReignDatabase.QuerySql(connection, "SELECT * FROM " + table + " WHERE " + key + "=$id;", TestDict("id", id)).SingleOrDefault();
+                var before = DialogueStore.SelectDynamic2(connection, table, key,TestDict("id", id)).SingleOrDefault();
                 if (before == null) throw new InvalidOperationException("Repair source is missing: " + id);
                 var expected = ReadDictionary(operation, "expected") ?? new Dictionary<string, object>();
                 string requiredText = kind == "recover_agenda" ? "text" : kind == "scope_private_assertion" || kind == "quarantine_belief" ? "claim" : kind == "quarantine_memory" || kind == "quarantine_summary" ? "summary" : "text";
@@ -86,16 +83,14 @@ manifest_hash TEXT PRIMARY KEY, campaign_id TEXT NOT NULL,timeline_id TEXT NOT N
                     string owner = ReadString(before, "perspective_owner_id", ""), mentalKind = ReadString(before, "assertion_kind", "");
                     if (!IsPrivateMentalLayer(mentalKind) || owner.Length == 0 || ReadString(before, "campaign_id", "") != campaign)
                         throw new InvalidOperationException("Only a proven owner's private mental assertion can be re-scoped.");
-                    ReignDatabase.ExecuteSql(connection, "UPDATE temporal_knowledge_assertions SET known_by_json=$known,visibility='private',truth_status=$truth WHERE assertion_id=$id;",
-                        TestDict("known", Json.Serialize(new[] { owner }), "truth", mentalKind == "belief" ? "believed" : "interpretation", "id", id));
+                    DialogueStore.UpdateTemporalKnowledgeAssertions(connection, TestDict("known", Json.Serialize(new[] { owner }), "truth", mentalKind == "belief" ? "believed" : "interpretation", "id", id));
                 }
                 else if (kind == "recover_agenda")
                 {
                     string owner = ReadString(operation, "ownerId", "");
                     if (ReadString(before, "role", "") != "npc" || ReadString(before, "speaker_id", "") != owner || ReadString(before, "status", "") != "active")
                         throw new InvalidOperationException("An agenda can only be recovered from that NPC's own accepted turn.");
-                    string latest = ReadString(ReignDatabase.QuerySql(connection, "SELECT turn_id FROM conversation_turns WHERE speaker_id=$owner AND role='npc' AND status='active' ORDER BY ts DESC,turn_order DESC,turn_id DESC LIMIT 1;",
-                        TestDict("owner", owner)).FirstOrDefault(), "turn_id", "");
+                    string latest = ReadString(DialogueStore.SelectConversationTurns19(connection, TestDict("owner", owner)).FirstOrDefault(), "turn_id", "");
                     if (ReadString(operation, "expectedOwnerLatestTurnId", "") != latest)
                         throw new InvalidOperationException("The NPC has spoken since the agenda review; inspect later resolution or changed intent before repair.");
                     var write = ReadDictionary(operation, "write") ?? new Dictionary<string, object>();
@@ -119,17 +114,16 @@ manifest_hash TEXT PRIMARY KEY, campaign_id TEXT NOT NULL,timeline_id TEXT NOT N
                         "evidenceSourceIds", ReadStringList(operation, "evidenceSourceIds"));
                     if (ReadStringList(operation, "evidenceSourceIds").Count == 0) throw new InvalidOperationException("Quarantine requires reviewed contrary source identifiers.");
                     foreach (string sourceId in ReadStringList(operation, "evidenceSourceIds"))
-                        if (ReignDatabase.QuerySql(connection, "SELECT turn_id FROM conversation_turns WHERE turn_id=$id AND status='active';", TestDict("id", sourceId)).Count == 0)
+                        if (DialogueStore.SelectConversationTurns20(connection, TestDict("id", sourceId)).Count == 0)
                             throw new InvalidOperationException("Quarantine's reviewed accepted source is missing: " + sourceId);
-                    ReignDatabase.ExecuteSql(connection, "UPDATE " + table + " SET payload_json=$payload WHERE " + key + "=$id;", TestDict("payload", Json.Serialize(body), "id", id));
+                    DialogueStore.UpdateDynamic(connection, table, key,TestDict("payload", Json.Serialize(body), "id", id));
                 }
-                var after = ReignDatabase.QuerySql(connection, "SELECT * FROM " + table + " WHERE " + key + "=$id;", TestDict("id", id)).Single();
+                var after = DialogueStore.SelectDynamic2(connection, table, key,TestDict("id", id)).Single();
                 changes.Add(TestDict("kind", kind, "sourceId", id, "before", before, "after", after));
             }
             var result = TestDict("ok", true, "manifestHash", hash, "campaignId", campaign, "timelineId", timeline,
                 "changes", changes, "nativeActionsReplayed", false, "relationshipScoresChanged", false, "transcriptsChanged", false);
-            ReignDatabase.ExecuteSql(connection, "INSERT INTO conversation_continuity_repairs(manifest_hash,campaign_id,timeline_id,receipt_json,created_ts) VALUES($hash,$campaign,$timeline,$receipt,$ts);",
-                TestDict("hash", hash, "campaign", campaign, "timeline", timeline, "receipt", Json.Serialize(result), "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+            DialogueStore.InsertConversationContinuityRepairs(connection, TestDict("hash", hash, "campaign", campaign, "timeline", timeline, "receipt", Json.Serialize(result), "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
             return result;
         }
 
@@ -160,13 +154,13 @@ manifest_hash TEXT PRIMARY KEY, campaign_id TEXT NOT NULL,timeline_id TEXT NOT N
             using (var connection = new Npgsql.NpgsqlConnection(ReignPostgreSqlStorage.Options.BuildConnectionString()))
             {
                 connection.Open();
-                string schema = ReadString(ReignDatabase.QuerySql(connection, "SELECT schema_name FROM reign_meta.campaign_registry WHERE campaign_id=$campaign;", TestDict("campaign", campaign)).SingleOrDefault(), "schema_name", "");
+                string schema = ReadString(DialogueStore.SelectCampaignRegistry(connection, TestDict("campaign", campaign)).SingleOrDefault(), "schema_name", "");
                 if (schema != ReignPostgreSqlStorage.CampaignSchemaName(campaign)) throw new InvalidOperationException("Campaign registration is missing or mismatched.");
                 using (var transaction = connection.BeginTransaction(System.Data.IsolationLevel.Serializable))
                 {
-                    if (Program.HasArg(args, "--stage")) ReignDatabase.ExecuteSql(connection,"SET TRANSACTION READ ONLY;");
-                    ReignDatabase.ExecuteSql(connection, "SET LOCAL search_path TO \"" + schema + "\",reign_meta;");
-                    var active = ReignDatabase.QuerySql(connection, "SELECT timeline_id FROM world_history_timelines WHERE campaign_id=$campaign AND is_active=1;", TestDict("campaign", campaign));
+                    if (Program.HasArg(args, "--stage")) DialogueStore.Set(connection);
+                    DialogueStore.Set2(connection, schema);
+                    var active = DialogueStore.SelectWorldHistoryTimelines(connection, TestDict("campaign", campaign));
                     if (active.Count != 1 || ReadString(active[0], "timeline_id", "") != timeline) throw new InvalidOperationException("Active timeline changed; refresh the reviewed manifest.");
                     bool stage = Program.HasArg(args, "--stage");
                     if (stage && apply) throw new InvalidOperationException("Staging and applying are separate operations.");

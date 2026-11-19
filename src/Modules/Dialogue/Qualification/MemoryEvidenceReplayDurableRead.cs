@@ -45,8 +45,7 @@ namespace ReignBetaServer
             using var connection = ReignDatabase.OpenCampaignConnection(campaign);
             // Replay seeds explicit accepted sequences. The local serial sequence
             // must reach the imported cutoff before any subsequent publication.
-            ReignDatabase.ExecuteSql(connection, @"SELECT setval('memory_accepted_turn_sequence',
-GREATEST((SELECT last_value FROM memory_accepted_turn_sequence),$cutoff),true);", TestDict("cutoff", cutoff));
+            DialogueStore.SelectMemoryAcceptedTurnSequence(connection, TestDict("cutoff", cutoff));
         }
 
         private static bool ValidDurableProjectionText(string text) => text.Length is >= 16 and <= 480
@@ -62,10 +61,7 @@ GREATEST((SELECT last_value FROM memory_accepted_turn_sequence),$cutoff),true);"
         // The read gate asks for canonical occurrence and delivery metadata only.
         // Legacy lexical ranking has its own eligibility checks and row reads.
         private static Dictionary<string, object> ReadDurableSourceMetadata(ReignDbConnection connection, string sourceId) =>
-            ReignDatabase.QuerySql(connection, @"SELECT t.turn_id,t.event_id,t.role,t.speaker_id,t.status,t.accepted_sequence,t.ts,t.world_day,t.participants_json,
-t.payload_json::jsonb->>'timelineId' AS timeline_id,t.xmin::text AS source_revision,s.restore_generation
-FROM conversation_turns t CROSS JOIN memory_precision_state s WHERE t.turn_id=$id AND s.state_id='current';",
-                TestDict("id", sourceId)).SingleOrDefault();
+            DialogueStore.SelectConversationTurns82(connection, TestDict("id", sourceId)).SingleOrDefault();
 
         private static bool DurableSourceIncludesPair(Dictionary<string, object> source, string observer, string peer)
         {
@@ -99,7 +95,7 @@ FROM conversation_turns t CROSS JOIN memory_precision_state s WHERE t.turn_id=$i
                 throw new InvalidOperationException("The reviewed recollection is not pinned to the accepted source.");
             using var connection = ReignDatabase.OpenCampaignConnection(campaign);
             using var transaction = connection.BeginTransaction();
-            var locked = ReignDatabase.QuerySql(connection, "SELECT text FROM conversation_turns WHERE turn_id=$id FOR UPDATE;", TestDict("id", sourceId)).Single();
+            var locked = DialogueStore.SelectConversationTurns83(connection, TestDict("id", sourceId)).Single();
             var source = ReadDurableSourceMetadata(connection, sourceId);
             if (ReadString(locked, "text", "") != original || ReadString(source, "event_id", "") != eventId
                 || ReadString(source, "speaker_id", "") != observer || ReadString(source, "role", "") != "npc"
@@ -108,8 +104,7 @@ FROM conversation_turns t CROSS JOIN memory_precision_state s WHERE t.turn_id=$i
                 || !DurableSourceIncludesPair(source, observer, peer))
                 throw new InvalidOperationException("The accepted source changed before the reviewed projection could be stored.");
             var matches = new List<(Dictionary<string, object> Row, Dictionary<string, object> Payload)>();
-            foreach (var row in ReignDatabase.QuerySql(connection, @"SELECT * FROM memories WHERE event_id=$event AND owner_id=$observer
-AND source='dialogue_llm' AND status='active' FOR UPDATE;", TestDict("event", eventId, "observer", observer)))
+            foreach (var row in DialogueStore.SelectMemories12(connection, TestDict("event", eventId, "observer", observer)))
             {
                 var payload = TryParseJsonObject(ReadString(row, "payload_json", ""));
                 var evidence = ReadDictionary(payload, "sourceEvidence");
@@ -129,8 +124,7 @@ AND source='dialogue_llm' AND status='active' FOR UPDATE;", TestDict("event", ev
             string projectionHash = DurableProjectionHash(projection);
             projection["projectionSha256"] = projectionHash;
             match.Payload[ReviewedDurableProjectionKey] = projection;
-            ReignDatabase.ExecuteSql(connection, "UPDATE memories SET payload_json=$payload WHERE memory_id=$id;",
-                TestDict("payload", Json.Serialize(match.Payload), "id", memoryId));
+            DialogueStore.UpdateMemories8(connection, TestDict("payload", Json.Serialize(match.Payload), "id", memoryId));
             transaction.Commit();
             return TestDict("status", "stored", "memoryId", memoryId, "projectionSha256", projectionHash,
                 "textSha256", ConversationExactTextHash(derived), "sourceRevision", projection["sourceRevision"],
@@ -195,7 +189,7 @@ AND source='dialogue_llm' AND status='active' FOR UPDATE;", TestDict("event", ev
             {
                 if (DiscoveredId.Length == 0) return TestDict();
                 using var connection = ReignDatabase.OpenCampaignConnection(campaign);
-                var row = ReignDatabase.QuerySql(connection, "SELECT * FROM memories WHERE memory_id=$id;", TestDict("id", DiscoveredId)).Single();
+                var row = DialogueStore.SelectMemories13(connection, TestDict("id", DiscoveredId)).Single();
                 var payload = TryParseJsonObject(ReadString(row, "payload_json", ""));
                 var projection = ReadDictionary(payload, ReviewedDurableProjectionKey);
                 var access = Program.BuildKnowledgeAccessContext(observer, peer, "", context);
@@ -233,8 +227,8 @@ AND source='dialogue_llm' AND status='active' FOR UPDATE;", TestDict("event", ev
             string IndexedState()
             {
                 using var connection = ReignDatabase.OpenCampaignConnection(campaign);
-                var record = ReignDatabase.QuerySql(connection, "SELECT * FROM memories WHERE memory_id=$id;", memoryKey).Single();
-                var index = ReignDatabase.QuerySql(connection, "SELECT * FROM memory_fts WHERE memory_id=$id ORDER BY text,tags,entities;", memoryKey);
+                var record = DialogueStore.SelectMemories13(connection, memoryKey).Single();
+                var index = DialogueStore.SelectMemoryFts(connection, memoryKey);
                 if (index.Count == 0) throw new InvalidOperationException("The revocation control needs the original lexical index entry.");
                 return ConversationExactTextHash(CanonicalJson(TestDict("record", record, "index", index)));
             }
@@ -248,10 +242,10 @@ AND source='dialogue_llm' AND status='active' FOR UPDATE;", TestDict("event", ev
                     // The first update leaves every value intact. It distinguishes
                     // the row version gate from the later change to source delivery.
                     string sql = narrowAudience
-                        ? "UPDATE conversation_turns SET participants_json=$audience WHERE turn_id=$id RETURNING text,accepted_sequence,xmin::text AS source_revision;"
-                        : "UPDATE conversation_turns SET status=status WHERE turn_id=$id RETURNING text,accepted_sequence,xmin::text AS source_revision;";
+                        ? DialogueStore.UpdateConversationTurnsSql2
+                        : DialogueStore.UpdateConversationTurnsSql3;
                     var args = narrowAudience ? TestDict("id", sourceId, "audience", Json.Serialize(new[] { observer })) : TestDict("id", sourceId);
-                    changed = ReignDatabase.QuerySql(connection, sql, args).Single();
+                    changed = DialogueStore.QuerySql(connection, sql, args).Single();
                 }
                 string revision = ReadString(changed, "source_revision", "");
                 bool sameOccurrence = ReadString(changed, "text", "") == original && ReadLong(changed, "accepted_sequence", -1) == sequence;
@@ -303,11 +297,8 @@ AND source='dialogue_llm' AND status='active' FOR UPDATE;", TestDict("event", ev
             using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             using (var transaction = connection.BeginTransaction())
             {
-                ReignDatabase.ExecuteSql(connection, "UPDATE conversation_sessions SET status='closed',end_ts=$end WHERE session_id=$prior;",
-                    TestDict("end", ended, "prior", priorSession));
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-VALUES($session,$campaign,$npc,$peer,'active',$start,$end,$audience,$payload);",
-                    TestDict("session", session, "campaign", campaign, "npc", observer, "peer", peer, "start", ended + 1,
+                DialogueStore.UpdateConversationSessions9(connection, TestDict("end", ended, "prior", priorSession));
+                DialogueStore.InsertConversationSessions3(connection, TestDict("session", session, "campaign", campaign, "npc", observer, "peer", peer, "start", ended + 1,
                         "end", ended + authors.Count, "audience", Json.Serialize(audience), "payload", Json.Serialize(context)));
                 for (int i = 0; i < authors.Count; i++)
                 {
@@ -319,8 +310,7 @@ VALUES($session,$campaign,$npc,$peer,'active',$start,$end,$audience,$payload);",
                         ReadString(isPlayer ? player : npc, "speaker_name", ""), ReadString(author, "text", ""), channel,
                         day, ended + i + 1, "", audience, context);
                 }
-                rows = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$session ORDER BY accepted_sequence;",
-                    TestDict("session", session));
+                rows = DialogueStore.SelectConversationTurns84(connection, TestDict("session", session));
                 if (rows.Count != 29 || rows.Any(row => !EvidenceReplayAcceptedTranscriptTurn(row)
                     || ReadLong(row, "accepted_sequence", -1) <= written)
                     || !rows.Select(row => (ReadString(row, "role", ""), ReadString(row, "text", "")))

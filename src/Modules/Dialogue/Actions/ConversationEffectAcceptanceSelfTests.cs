@@ -38,10 +38,9 @@ namespace ReignBetaServer
                     payload, campaign, "atomic_effect_turn", "dialogue", "npc", request => { providerCalls++; throw new InvalidOperationException("No provider expected."); }, persist: false);
                 var prepared = TryParseJsonObject(ReadString(llm, "content", ""));
                 string reply = ApplyLegacyConversationDrinking(campaign, "npc", payload, profile, null, prepared, ReadString(prepared, "reply", ""), persist: false);
-                int Negotiations() { using var c = ReignDatabase.OpenCampaignConnection(campaign); return ReignDatabase.QuerySql(c, "SELECT * FROM conversation_negotiation_turns;").Count; }
-                int Drinks() { using var c = ReignDatabase.OpenCampaignConnection(campaign); return ReignDatabase.QuerySql(c, "SELECT * FROM conversation_drinking_turns;").Count; }
-                double Amount() { using var c = ReignDatabase.OpenCampaignConnection(campaign); return ReadDouble(TryParseJsonObject(ReadString(ReignDatabase.QuerySql(c,
-                    "SELECT state_json FROM conversation_intoxication WHERE hero_id='npc';").SingleOrDefault(), "state_json", "{}")), "drinks", 0); }
+                int Negotiations() { using var c = ReignDatabase.OpenCampaignConnection(campaign); return DialogueSelfTestStore.SelectConversationNegotiationTurns(c).Count; }
+                int Drinks() { using var c = ReignDatabase.OpenCampaignConnection(campaign); return DialogueSelfTestStore.SelectConversationDrinkingTurns(c).Count; }
+                double Amount() { using var c = ReignDatabase.OpenCampaignConnection(campaign); return ReadDouble(TryParseJsonObject(ReadString(DialogueSelfTestStore.SelectConversationIntoxication(c).SingleOrDefault(), "state_json", "{}")), "drinks", 0); }
                 Check("prepare_has_no_negotiation_or_drink_effect", Negotiations() == 0 && Drinks() == 0 && Amount() == 0
                     && ReadString(ReadDictionary(payload, "conversationAgencyReceipt"), "commitState", "") == "prepared");
                 var quietPayload = Program.CloneDictionary(payload);

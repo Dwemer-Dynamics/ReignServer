@@ -221,15 +221,12 @@ namespace ReignBetaServer
 
             using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-VALUES('group_source',$campaign,'npc_a','player','closed',1,10,'[""npc_a"",""npc_b"",""player""]','{""timelineId"":""timeline_a""}');", TestDict("campaign", campaign));
+                DialogueSelfTestStore.InsertConversationSessions14(connection, TestDict("campaign", campaign));
                 string[] texts = { "Would you take 900 denars?", "No. 300 denars only after the caravan arrives.", "I accept 300 denars after arrival. Nothing has been paid." };
                 for (int i = 0; i < texts.Length; i++)
                 {
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_turns(turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,speaker_name,text,world_day,ts,participants_json,payload_json)
-VALUES($id,'group_source',$event,$order,'agreement_exchange',$role,$speaker,$speaker,$text,20,$ts,'[""npc_a"",""npc_b"",""player""]','{""timelineId"":""timeline_a""}');",
-                        TestDict("id", "source_" + i, "event", "event_" + i, "order", i + 1, "role", i == 1 ? "npc" : "player", "speaker", i == 1 ? "npc_b" : "player", "text", texts[i], "ts", i + 1));
-                    ReignDatabase.ExecuteSql(connection, "INSERT INTO conversation_turn_fts(turn_id,text,speaker,participants,channel) VALUES($id,$text,'npc_b','npc_a npc_b player','party_chat');", TestDict("id", "source_" + i, "text", texts[i]));
+                    DialogueSelfTestStore.InsertConversationTurns(connection, TestDict("id", "source_" + i, "event", "event_" + i, "order", i + 1, "role", i == 1 ? "npc" : "player", "speaker", i == 1 ? "npc_b" : "player", "text", texts[i], "ts", i + 1));
+                    DialogueSelfTestStore.InsertConversationTurnFts(connection, TestDict("id", "source_" + i, "text", texts[i]));
                 }
                 var plan = PlanMemoryQuery("npc_b", "player", "What price did we agree for the caravan?", context);
                 var exchanges = FindPrecisionExchanges(connection, plan, observer, 8);
@@ -244,10 +241,7 @@ VALUES($id,'group_source',$event,$order,'agreement_exchange',$role,$speaker,$spe
                 var otherTimeline = PlanMemoryQuery("npc_b", "player", "caravan", TestDict("worldDay", 30d, "timelineId", "timeline_b"));
                 add("other_timeline_unavailable", FindPrecisionExchanges(connection, otherTimeline, new Program.KnowledgeAccessContext { NpcId = "npc_b", WorldDay = 30, TimelineId = "timeline_b" }, 8).Count == 0, null);
 
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO memories(memory_id,owner_id,ts,summary,known_by_json,visibility,status)
-SELECT 'unrelated_' || n,'npc_other',100+n,'caravan unrelated private detail','[""npc_other""]','private','active' FROM generate_series(1,2000) AS n;
-INSERT INTO memories(memory_id,owner_id,ts,summary,known_by_json,visibility,status)
-VALUES('eligible_old','npc_b',1,'300 denars only after arrival','[""npc_b""]','private','active');");
+                DialogueSelfTestStore.InsertMemories4(connection);
                 add("unrelated_rows_cannot_exhaust_candidate_limit", Program.QueryKnownRows(connection, "memories", observer, "status='active'", 4).Any(r => ReadString(r, "memory_id", "") == "eligible_old"), null);
                 using (var obligationFixture = connection.BeginTransaction())
                 {
@@ -288,13 +282,11 @@ VALUES('eligible_old','npc_b',1,'300 denars only after arrival','[""npc_b""]','p
                 add("eligible_ranked_lexical_source_found", Program.SearchMemoryFts(connection, new List<string> { "caravan" }, 1, observer).Contains("eligible_old"), null);
                 using(var fixture=connection.BeginTransaction())
                 {
-                    ReignDatabase.ExecuteSql(connection,@"INSERT INTO beliefs(belief_id,believer_id,claim,ts)
-SELECT 'belief_unrelated_'||n,'npc_b','Unrelated apples and oranges.',100+n FROM generate_series(1,2000) n;
-INSERT INTO beliefs(belief_id,believer_id,claim,ts) VALUES('old_relevant_belief','npc_b','I believe the caravan will arrive late.',1);");
+                    DialogueSelfTestStore.InsertBeliefs(connection);
                     add("owned_belief_relevance_precedes_candidate_limit",ReadString(Program.QueryKnownRows(connection,"beliefs",observer,"",1,new List<string>{"caravan"}).Single(),"belief_id","")=="old_relevant_belief",null);
                     fixture.Rollback();
                 }
-                ReignDatabase.ExecuteSql(connection, "UPDATE memories SET hidden_from_json='[\"npc_b\"]' WHERE memory_id='eligible_old';");
+                DialogueSelfTestStore.UpdateMemories2(connection);
                 add("hidden_overrides_ownership", Program.QueryKnownRows(connection, "memories", observer, "status='active'", 4).Count == 0
                     && Program.SearchMemoryFts(connection, new List<string> { "caravan" }, 1, observer).Count == 0, null);
 
@@ -306,15 +298,14 @@ INSERT INTO beliefs(belief_id,believer_id,claim,ts) VALUES('old_relevant_belief'
                 assertion["objectId"] = "300"; assertion["claim"] = "Caravan price is 300 only after arrival.";
                 assertion["sourceAcceptedText"] = assertion["claim"]; assertion["evidenceQuote"] = "300 only after arrival"; assertion["worldDay"] = 25d;
                 using (var transaction = connection.BeginTransaction()) { second = UpsertTemporalAssertion(connection, campaign, "event_2", "belief_2", "belief", assertion, 200); transaction.Commit(); }
-                add("changed_terms_link_revision", ReadString(ReignDatabase.QuerySql(connection, "SELECT * FROM temporal_knowledge_assertions WHERE assertion_id=$id;", TestDict("id", second)).Single(), "supersedes_assertion_id", "") == first, null);
+                add("changed_terms_link_revision", ReadString(DialogueSelfTestStore.SelectTemporalKnowledgeAssertions2(connection, TestDict("id", second)).Single(), "supersedes_assertion_id", "") == first, null);
                 add("current_terms_select_new_version", LoadTemporalKnowledgeForPrompt(connection, campaign, observer, new List<string> { "caravan" }, 4).Single().TryGetValue("assertion_id", out var latest) && Convert.ToString(latest) == second, null);
                 var pastObserver = new Program.KnowledgeAccessContext { NpcId = "npc_b", TimelineId = "timeline_a", WorldDay = 22 };
                 add("as_of_query_selects_old_terms", ReadString(LoadTemporalKnowledgeForPrompt(connection, campaign, pastObserver, new List<string> { "caravan" }, 4).Single(), "assertion_id", "") == first, null);
                 add("private_belief_never_shared_truth", LoadTemporalKnowledgeForPrompt(connection, campaign, new Program.KnowledgeAccessContext { NpcId = "npc_a", TimelineId = "timeline_a", WorldDay = 30 }, new List<string> { "caravan" }, 4).Count == 0, null);
                 using(var fixture=connection.BeginTransaction())
                 {
-                    ReignDatabase.ExecuteSql(connection,@"INSERT INTO temporal_knowledge_assertions(assertion_id,campaign_id,fact_key,claim,perspective_owner_id,assertion_kind,visibility,payload_json,timeline_id,event_day,learned_day,valid_from_ts,observed_ts)
-SELECT 'regional_'||n,$campaign,'regional_'||n,'caravan caravan caravan caravan','npc_other','reported','public_settlement','{""settlementId"":""other_town""}','timeline_a',20,29,100,100 FROM generate_series(1,200) n;",TestDict("campaign",campaign));
+                    DialogueSelfTestStore.InsertTemporalKnowledgeAssertions2(connection, TestDict("campaign",campaign));
                     add("regional_assertions_cannot_leak_or_displace_known_fact",ReadString(LoadTemporalKnowledgeForPrompt(connection,campaign,observer,new List<string>{"caravan"},1).Single(),"assertion_id","")==second,null);
                     fixture.Rollback();
                 }
@@ -333,9 +324,9 @@ SELECT 'regional_'||n,$campaign,'regional_'||n,'caravan caravan caravan caravan'
                 add("job_second_claim_refused", ClaimMemoryJob(connection, job, "worker_b", now + 1) == null, null);
                 add("job_expired_lease_reclaimed", ClaimMemoryJob(connection, job, "worker_b", now + 121) != null, null);
                 FinishMemoryJob(connection, job, "worker_a", "completed", TestDict());
-                add("stale_worker_cannot_finish", ReadString(ReignDatabase.QuerySql(connection, "SELECT * FROM memory_background_jobs WHERE job_id=$id;", TestDict("id", job)).Single(), "status", "") == "running", null);
+                add("stale_worker_cannot_finish", ReadString(DialogueSelfTestStore.SelectMemoryBackgroundJobs(connection, TestDict("id", job)).Single(), "status", "") == "running", null);
                 RetryMemoryJob(connection, job, "worker_b", 4, "exhausted fixture", TestDict());
-                add("exhaustion_observable_not_completed", ReadString(ReignDatabase.QuerySql(connection, "SELECT * FROM memory_background_jobs WHERE job_id=$id;", TestDict("id", job)).Single(), "status", "") == "incomplete", null);
+                add("exhaustion_observable_not_completed", ReadString(DialogueSelfTestStore.SelectMemoryBackgroundJobs(connection, TestDict("id", job)).Single(), "status", "") == "incomplete", null);
                 add("same_source_job_is_idempotent", job == EnqueueMemoryJob(connection, campaign, "scene_summary", "npc_a", "scene:group_source", "group_source"), null);
                 add("exhausted_source_not_resurrected", ClaimMemoryJob(connection, job, "worker_c", now + 5000) == null, null);
 
@@ -344,7 +335,7 @@ SELECT 'regional_'||n,$campaign,'regional_'||n,'caravan caravan caravan caravan'
                 string stableJob = EnqueueMemoryJob(connection, campaign, "scene_summary", "npc_a", "scene:stable_compaction", "group_source");
                 ClaimMemoryJob(connection, stableJob, "stable_worker", now);
                 CompleteMemoryCompactionJob(connection, stableJob, "stable_worker", 1, "scene_summary", invalidCompaction);
-                var stableRow = ReignDatabase.QuerySql(connection, "SELECT * FROM memory_background_jobs WHERE job_id=$id;", TestDict("id", stableJob)).Single();
+                var stableRow = DialogueSelfTestStore.SelectMemoryBackgroundJobs(connection, TestDict("id", stableJob)).Single();
                 var storedResult = TryParseJsonObject(ReadString(stableRow, "result_json", "{}"));
                 add("compaction_limit_stops_after_first_attempt_with_diagnostic", ReadString(stableRow, "status", "") == "incomplete"
                     && ReadInt(stableRow, "attempt_count", 0) == 1 && ReadString(storedResult, "summary", "") == string.Join("\n---\n", raw)
@@ -355,7 +346,7 @@ SELECT 'regional_'||n,$campaign,'regional_'||n,'caravan caravan caravan caravan'
                 string transientJob = EnqueueMemoryJob(connection, campaign, "scene_summary", "npc_a", "scene:transient_compaction", "group_source");
                 ClaimMemoryJob(connection, transientJob, "transient_worker", now);
                 CompleteMemoryCompactionJob(connection, transientJob, "transient_worker", 1, "scene_summary", transientCompaction);
-                var transientRow = ReignDatabase.QuerySql(connection, "SELECT * FROM memory_background_jobs WHERE job_id=$id;", TestDict("id", transientJob)).Single();
+                var transientRow = DialogueSelfTestStore.SelectMemoryBackgroundJobs(connection, TestDict("id", transientJob)).Single();
                 add("compaction_transport_failure_retains_bounded_backoff", ReadString(transientRow, "status", "") == "failed"
                     && ReadLong(transientRow, "next_attempt_ts", 0) > now
                     && ClaimMemoryJob(connection, transientJob, "early_worker", now + 1) == null, null);
@@ -364,7 +355,7 @@ SELECT 'regional_'||n,$campaign,'regional_'||n,'caravan caravan caravan caravan'
                     var claimed = ClaimMemoryJob(connection, transientJob, "later_worker", now + attempt * 5000);
                     CompleteMemoryCompactionJob(connection, transientJob, "later_worker", ReadInt(claimed, "attempt_count", 0), "scene_summary", transientCompaction);
                 }
-                var exhaustedRow = ReignDatabase.QuerySql(connection, "SELECT * FROM memory_background_jobs WHERE job_id=$id;", TestDict("id", transientJob)).Single();
+                var exhaustedRow = DialogueSelfTestStore.SelectMemoryBackgroundJobs(connection, TestDict("id", transientJob)).Single();
                 add("compaction_transient_exhaustion_remains_incomplete", ReadString(exhaustedRow, "status", "") == "incomplete"
                     && ReadInt(exhaustedRow, "attempt_count", 0) == 4
                     && ClaimMemoryJob(connection, transientJob, "extra_worker", now + 50000) == null, null);
@@ -375,34 +366,31 @@ SELECT 'regional_'||n,$campaign,'regional_'||n,'caravan caravan caravan caravan'
                 using (var preview = connection.BeginTransaction())
                 {
                     var receipt = RepairConversationContinuity(connection, stage);
-                    add("staged_apply_derivatives_only", ReadBool(receipt, "ok", false) && ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns;").Count == 3, receipt);
-                    var published = ReignDatabase.QuerySql(connection, "SELECT * FROM summaries WHERE source='precision_staging';").Single();
-                    string originalTurns = MemorySourceHash(ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns ORDER BY turn_id;"));
+                    add("staged_apply_derivatives_only", ReadBool(receipt, "ok", false) && DialogueSelfTestStore.SelectConversationTurns54(connection).Count == 3, receipt);
+                    var published = DialogueSelfTestStore.SelectSummaries(connection).Single();
+                    string originalTurns = MemorySourceHash(DialogueSelfTestStore.SelectConversationTurns55(connection));
                     var duplicate = RepairConversationContinuity(connection, stage);
                     var freshStage = BuildMemoryStagingManifest(connection, TestDict("campaignId", campaign, "timelineId", "timeline_a"));
                     RepairConversationContinuity(connection, freshStage);
                     add("legacy_staging_repeat_preserves_ids_tags_and_originals", ReadBool(duplicate, "idempotent", false)
-                        && ReignDatabase.QuerySql(connection, "SELECT * FROM summaries WHERE source='precision_staging';").Count == 1
+                        && DialogueSelfTestStore.SelectSummaries(connection).Count == 1
                         && Program.TextListFromJson(ReadString(published, "tags_json", "[]")).Contains("denars")
-                        && ReignDatabase.QuerySql(connection, "SELECT * FROM memory_sources WHERE document_type='summary' AND document_id=$id AND source_type='turn';",
-                            TestDict("id", ReadString(published, "summary_id", ""))).Count == 3
-                        && MemorySourceHash(ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns ORDER BY turn_id;")) == originalTurns, null);
+                        && DialogueSelfTestStore.SelectMemorySources2(connection, TestDict("id", ReadString(published, "summary_id", ""))).Count == 3
+                        && MemorySourceHash(DialogueSelfTestStore.SelectConversationTurns55(connection)) == originalTurns, null);
                     preview.Rollback();
                 }
-                add("preview_rolls_back_publication", ReignDatabase.QuerySql(connection, "SELECT * FROM summaries WHERE source='precision_staging';").Count == 0, null);
+                add("preview_rolls_back_publication", DialogueSelfTestStore.SelectSummaries(connection).Count == 0, null);
                 using (var upgrade = connection.BeginTransaction())
                 {
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO summaries(summary_id,owner_id,summary_type,summary,status,source,updated_ts)
-VALUES('old_staged_scene','npc_a','scene','Earlier derived scene text.','active','precision_staging',1);
-UPDATE conversation_sessions SET scene_summary_id='old_staged_scene' WHERE session_id='group_source';");
+                    DialogueSelfTestStore.InsertSummaries(connection);
                     Program.InsertSummaryFts(connection, "old_staged_scene", "Earlier derived scene text.", new() { "scene" }, new() { "npc_a", "npc_b", "player" });
                     var upgradeStage = BuildMemoryStagingManifest(connection, TestDict("campaignId", campaign, "timelineId", "timeline_a"));
                     RepairConversationContinuity(connection, upgradeStage);
                     var repeatedUpgrade = RepairConversationContinuity(connection, upgradeStage);
                     add("legacy_staging_version_upgrade_supersedes_previous", ReadBool(repeatedUpgrade, "idempotent", false)
-                        && ReignDatabase.QuerySql(connection, "SELECT * FROM summaries WHERE source='precision_staging' AND status='active';").Count == 1
-                        && ReadString(ReignDatabase.QuerySql(connection, "SELECT * FROM summaries WHERE summary_id='old_staged_scene';").Single(), "status", "") == "superseded"
-                        && ReignDatabase.QuerySql(connection, "SELECT f.* FROM summary_fts f JOIN summaries s ON s.summary_id=f.summary_id WHERE s.source='precision_staging' AND s.status='active';").Count == 1, null);
+                        && DialogueSelfTestStore.SelectSummaries2(connection).Count == 1
+                        && ReadString(DialogueSelfTestStore.SelectSummaries3(connection).Single(), "status", "") == "superseded"
+                        && DialogueSelfTestStore.SelectSummaryFts(connection).Count == 1, null);
                     upgrade.Rollback();
                 }
                 var bad = ReadDictionary(ReadDictionaryList(stage, "operations")[0], "prepared");
@@ -413,10 +401,7 @@ UPDATE conversation_sessions SET scene_summary_id='old_staged_scene' WHERE sessi
                 add("staging_rejects_changed_claims", tampered, null);
                 using(var fixture=connection.BeginTransaction())
                 {
-                    ReignDatabase.ExecuteSql(connection,@"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-SELECT 'recall_probe_'||n,$campaign,'npc_b','player','closed',100+n,200+n,'[""npc_b"",""player""]','{""timelineId"":""timeline_a""}' FROM generate_series(1,160) n;
-INSERT INTO conversation_turns(turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,text,world_day,ts,participants_json,payload_json)
-SELECT 'probe_turn_'||n,'recall_probe_'||n,'probe_event_'||n,1,'probe_exchange_'||n,'player','player','Recall our last conversation about the caravan.',21,200+n,'[""npc_b"",""player""]','{""timelineId"":""timeline_a""}' FROM generate_series(1,160) n;",TestDict("campaign",campaign));
+                    DialogueSelfTestStore.InsertConversationSessions15(connection, TestDict("campaign",campaign));
                     var behindProbes=FindPrecisionExchanges(connection,plan,observer,1);
                     add("recall_probes_do_not_exhaust_exchange_limit",behindProbes.Any(e=>e.Text.Contains("Nothing has been paid")),null);
                     fixture.Rollback();
@@ -424,11 +409,7 @@ SELECT 'probe_turn_'||n,'recall_probe_'||n,'probe_event_'||n,1,'probe_exchange_'
 
                 var packet = BuildPrecisionMemoryPacket(campaign,"npc_b","player","","What did we agree for the caravan?",context,settings,false);
                 add("production_packet_exact_terms",ReadString(packet,"memoryPacket","").Contains("300 denars") && ReadString(packet,"memoryPacket","").Contains("Nothing has been paid"),packet);
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-VALUES('foundation_cache_source',$campaign,'npc_b','player','closed',400,401,'[""npc_b"",""player""]','{""timelineId"":""timeline_a""}');
-INSERT INTO conversation_turns(turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,text,world_day,ts,participants_json,payload_json)
-VALUES('foundation_cache_turn','foundation_cache_source','foundation_cache_event',1,'foundation_cache_exchange','npc','npc_b',
-'I trust you. That does not mean I agree to leave my family.',20,401,'[""npc_b"",""player""]','{""timelineId"":""timeline_a""}');", TestDict("campaign", campaign));
+                DialogueSelfTestStore.InsertConversationSessions16(connection, TestDict("campaign", campaign));
                 try
                 {
                     var foundationAudit = TestDict();
@@ -442,33 +423,31 @@ VALUES('foundation_cache_turn','foundation_cache_source','foundation_cache_event
                         && CanonicalJson(rebuiltPair.SourceTurns) == CanonicalJson(cachedPair.SourceTurns), null);
                     add("cached_relationship_foundation_keeps_writer_boundary", SelectPrecisionEvidence(new[] { cachedPair }, 1).Text
                         .Contains("That does not mean I agree to leave my family."), null);
-                    add("foundation_classification_does_not_rewrite_original", ReadString(ReignDatabase.QuerySql(connection,
-                        "SELECT * FROM conversation_turns WHERE turn_id='foundation_cache_turn';").Single(), "text", "")
+                    add("foundation_classification_does_not_rewrite_original", ReadString(DialogueSelfTestStore.SelectConversationTurns56(connection).Single(), "text", "")
                         == "I trust you. That does not mean I agree to leave my family.", null);
                 }
                 finally
                 {
-                    ReignDatabase.ExecuteSql(connection, "DELETE FROM conversation_turns WHERE session_id='foundation_cache_source'; DELETE FROM conversation_sessions WHERE session_id='foundation_cache_source';");
+                    DialogueSelfTestStore.DeleteConversationTurns2(connection);
                 }
                 var cacheAudit = TestDict();
                 LoadPrecisionFoundationProjection(connection,campaign,plan,context,observer,false,cacheAudit);
                 LoadPrecisionFoundationProjection(connection,campaign,plan,context,observer,false,cacheAudit);
                 add("projection_cache_revision_bound",ReadString(cacheAudit,"foundationCache","")=="fresh",cacheAudit);
-                ReignDatabase.ExecuteSql(connection,"UPDATE conversation_turns SET text=text || ' Revised boundary.' WHERE turn_id='source_1';");
+                DialogueSelfTestStore.UpdateConversationTurns46(connection);
                 LoadPrecisionFoundationProjection(connection,campaign,plan,context,observer,false,cacheAudit);
                 add("projection_catches_late_source_revision",ReadString(cacheAudit,"foundationCache","")=="caught_up",cacheAudit);
-                ReignDatabase.ExecuteSql(connection,@"INSERT INTO conversation_turns(turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,text,world_day,ts,participants_json,payload_json)
-VALUES('whisper','group_source','private_event',4,'agreement_exchange','player','player','SECRET_UNHEARD_PRICE',20,4,'[""npc_a"",""player""]','{""timelineId"":""timeline_a""}');");
+                DialogueSelfTestStore.InsertConversationTurns2(connection);
                 using (var privateStage = connection.BeginTransaction())
                 {
                     var whisperedStage = BuildMemoryStagingManifest(connection, TestDict("campaignId", campaign, "timelineId", "timeline_a"));
                     RepairConversationContinuity(connection, whisperedStage);
-                    var whisperedSummary = ReignDatabase.QuerySql(connection, "SELECT * FROM summaries WHERE source='precision_staging' AND status='active';").Single();
+                    var whisperedSummary = DialogueSelfTestStore.SelectSummaries2(connection).Single();
                     add("legacy_staging_whisper_excludes_nonwitness", !Program.TextListFromJson(ReadString(whisperedSummary, "known_by_json", "[]")).Contains("npc_b")
                         && !Program.KnowledgeRowVisibleToNpc("summaries", whisperedSummary, observer, connection), null);
                     privateStage.Rollback();
                 }
-                var privateSafe = PrecisionExchangeEvidence(connection,ReignDatabase.QuerySql(connection,"SELECT * FROM conversation_turns WHERE turn_id='source_1';").Single(),observer,true,100);
+                var privateSafe = PrecisionExchangeEvidence(connection,DialogueSelfTestStore.SelectConversationTurns57(connection).Single(),observer,true,100);
                 add("exchange_expansion_filters_whispers",!privateSafe.Text.Contains("SECRET_UNHEARD_PRICE"),null);
                 var recentSafe=LoadMostRecentClosedConversation(connection,"npc_b","",24000,30,observer);
                 add("recent_history_filters_whispers",!ReadString(recentSafe,"text","").Contains("SECRET_UNHEARD_PRICE"),null);
@@ -489,7 +468,7 @@ VALUES('whisper','group_source','private_event',4,'agreement_exchange','player',
                 string shared=BuildSharedGroupConversationPrompt(campaign,groupPayload,"npc_c",new List<Dictionary<string,object>>(),"What are the terms?");
                 add("same_beat_actual_delivery_order",shared.IndexOf("Initial amount 900.",StringComparison.Ordinal)<shared.IndexOf("Correction: 300 only after arrival.",StringComparison.Ordinal),shared);
                 UpdateSharedGroupConversationState(campaign,groupPayload,"npc_c","Third speaker","","shared_beat",101);
-                add("empty_reply_is_not_delivery",ReignDatabase.QuerySql(connection,"SELECT * FROM group_conversation_contributions WHERE session_id='shared_beat' AND role='npc';").Count==2,null);
+                add("empty_reply_is_not_delivery",DialogueSelfTestStore.SelectGroupConversationContributions5(connection).Count==2,null);
                 groupPayload["participantHeroIds"]=new List<string>{"npc_a","player"};
                 UpdateSharedGroupConversationState(campaign,groupPayload,"npc_a","First speaker","PRIVATE_QUESTION?","shared_beat",102);
                 string privateGroup=BuildSharedGroupConversationPrompt(campaign,groupPayload,"npc_c",new List<Dictionary<string,object>>(),"What are the terms?");
@@ -598,26 +577,25 @@ VALUES('whisper','group_source','private_event',4,'agreement_exchange','player',
                     "participants", new[] { "archive_npc", "archive_player" }));
                 using var c = ReignDatabase.OpenCampaignConnection(campaign);
                 CharactersService.EnsureIdentitySchema(c);
-                ReignDatabase.ExecuteSql(c, @"INSERT INTO acquaintances(observer_id,subject_id,identity_state,canonical_name,verification_source,confidence,updated_ts)
-VALUES('archive_npc','archive_player','verified','Player','fixture',1,1);");
+                DialogueSelfTestStore.InsertAcquaintances2(c);
                 var audience = new List<string> { "archive_npc", "archive_player" };
                 InsertConversationTurn(c, "archive_first", "archive_session", "archive_event", 0, "archive_exchange", "player",
                     "archive_player", "Player", original, "in_person", 1d, 1L, "", audience, context);
                 InsertConversationTurn(c, "archive_last", "archive_session", "archive_event", 1, "archive_exchange", "npc",
                     "archive_npc", "NPC", lastSource, "in_person", 1d, 2L, "", audience, context);
-                var session = ReignDatabase.QuerySql(c, "SELECT * FROM conversation_sessions WHERE session_id='archive_session';").Single();
-                var turns = ReignDatabase.QuerySql(c, "SELECT * FROM conversation_turns WHERE session_id='archive_session' AND status='active' ORDER BY turn_order;");
+                var session = DialogueSelfTestStore.SelectConversationSessions3(c).Single();
+                var turns = DialogueSelfTestStore.SelectConversationTurns58(c);
                 var sources = new List<string>();
                 var result = CreateConversationSceneSummary(campaign, session, turns, 3L,
                     TestDict("useMemoryLlmForConsolidation", false, "enableSemanticMemory", false, "memoryConsolidationMaxSummaryChars", 500),
                     captureSourceRecords: records => sources.AddRange(records));
-                var row = ReignDatabase.QuerySql(c, "SELECT * FROM summaries WHERE summary_id=$id;", TestDict("id", ReadString(result, "summaryId", ""))).Single();
+                var row = DialogueSelfTestStore.SelectSummaries4(c, TestDict("id", ReadString(result, "summaryId", ""))).Single();
                 string stored = ReadString(row, "summary", "");
                 Check("scene_fallback_roundtrips_beyond_old_storage_ceiling", stored.Length > 6200
                     && sources.All(source => stored.Contains(source, StringComparison.Ordinal))
                     && stored.Contains(original, StringComparison.Ordinal) && stored.Contains(lastSource, StringComparison.Ordinal),
                     TestDict("storedCharacters", stored.Length, "sourceCount", sources.Count));
-                Check("canonical_turns_are_unchanged", ReadString(ReignDatabase.QuerySql(c, "SELECT text FROM conversation_turns WHERE turn_id='archive_first';").Single(), "text", "") == original);
+                Check("canonical_turns_are_unchanged", ReadString(DialogueSelfTestStore.SelectConversationTurns59(c).Single(), "text", "") == original);
                 var metadata = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
                 string view = CompactRecentSummaryView(stored, metadata, new[] { "FINAL_ARCHIVE_SOURCE" }, 1800, out _);
                 Check("bounded_view_selects_complete_sources_without_clipping_archive", view.Length <= 1800
@@ -640,9 +618,7 @@ VALUES('archive_npc','archive_player','verified','Player','fixture',1,1);");
             {
                 using var connection = ReignDatabase.OpenCampaignConnection(campaign);
                 var context = TestDict("timelineId", "derivative_branch", "worldDay", 20d);
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-VALUES('source_session',$campaign,'npc','player','closed',100,100,'[""npc"",""player""]',$payload);",
-                    TestDict("campaign", campaign, "payload", Json.Serialize(context)));
+                DialogueSelfTestStore.InsertConversationSessions17(connection, TestDict("campaign", campaign, "payload", Json.Serialize(context)));
                 const string answer = "If we visit the mill, I will inspect the roof. We have not gone there together yet.";
                 InsertConversationTurn(connection, "source_question", "source_session", "source_event", 0, "source_exchange",
                     "player", "player", "Player", "If we visit the mill, who will inspect the roof?", "in_person", 20d, 100L,
@@ -650,7 +626,7 @@ VALUES('source_session',$campaign,'npc','player','closed',100,100,'[""npc"",""pl
                 InsertConversationTurn(connection, "source_answer", "source_session", "source_event", 1, "source_exchange",
                     "npc", "npc", "NPC", answer, "in_person", 20d, 100L,
                     "", new List<string> { "npc", "player" }, context);
-                ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET accepted_sequence=CASE WHEN turn_id='source_question' THEN 10 ELSE 11 END;");
+                DialogueSelfTestStore.UpdateConversationTurns47(connection);
                 Program.KnowledgeAccessContext Access(long cutoff = 11, double day = 20, long timestamp = 100, string branch = "derivative_branch", string npc = "npc") =>
                     new Program.KnowledgeAccessContext { NpcId = npc, PlayerId = "player", TimelineId = branch, WorldDay = day,
                         AsOfAcceptedSequence = cutoff, AsOfTimestamp = timestamp };
@@ -675,8 +651,7 @@ VALUES('source_session',$campaign,'npc','player','closed',100,100,'[""npc"",""pl
                     Check(kind.Item1 + "_read_leaves_record_unchanged", CanonicalJson(row) == before);
                 }
                 var linked = TestDict("summary_id", "linked_summary", "summary", answer, "owner_id", "npc", "ts", 1L);
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO memory_sources(document_type,document_id,source_type,source_id)
-VALUES('summary','linked_summary','memory','intermediate_memory'),('memory','intermediate_memory','event','source_event');");
+                DialogueSelfTestStore.InsertMemorySources2(connection);
                 Check("nested_source_lineage_keeps_accepted_boundary", !MemoryTimeVisible(linked, Access(10), connection)
                     && MemoryTimeVisible(linked, Access(), connection));
                 var legacy = TestDict("memory_id", "legacy_missing", "summary", "Unverified older recollection.", "owner_id", "npc", "ts", 1L);
@@ -684,7 +659,7 @@ VALUES('summary','linked_summary','memory','intermediate_memory'),('memory','int
                     && ExpandPrecisionSource(connection, "memories", legacy, plan, Access(9), 70).Single().Kind == "unverified");
                 var belief = TestDict("belief_id", "private_missing", "claim", "I suspect the old mill is unsafe.", "owner_id", "npc", "ts", 1L);
                 Check("unknown_private_interpretation_emitted_once", ExpandPrecisionSource(connection, "beliefs", belief, plan, Access(), 70).Count == 1);
-                ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET status='inactive' WHERE event_id='source_event';");
+                DialogueSelfTestStore.UpdateConversationTurns48(connection);
                 Check("known_inactive_source_is_not_missing_history", ExpandPrecisionSource(connection, "summaries", linked, plan, Access(), 70).Count == 0);
             }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
@@ -814,23 +789,7 @@ VALUES('summary','linked_summary','memory','intermediate_memory'),('memory','int
             {
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-VALUES('group_window',$campaign,'other','player','closed',1,35,'[""observer"",""other"",""player""]','{""timelineId"":""window_main""}');
-INSERT INTO conversation_turns(turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,speaker_name,text,world_day,ts,participants_json,payload_json)
-SELECT 'window_turn_'||n,'group_window','window_event_'||n,n,'window_exchange_'||n,'player','player','Michael',
-CASE WHEN n=35 THEN 'The price is 300 after arrival; no payment has occurred.' ELSE 'Complete message '||n||': '||repeat('unaltered source words ',40) END,
-20,n,'[""observer"",""other"",""player""]','{""timelineId"":""window_main""}' FROM generate_series(1,35) n;
-INSERT INTO summaries(summary_id,owner_id,scope,summary_type,summary,start_ts,end_ts,updated_ts,known_by_json,payload_json)
-SELECT 'window_summary_'||n,'observer','scene:episode_'||n,'scene',
-'Complete summary '||n||': '||repeat('retained context ',80)||' END-SUMMARY-'||n,n,n,1000-n,'[""observer""]',
-'{""timelineId"":""window_main"",""worldDay"":20}' FROM generate_series(1,40) n;
-INSERT INTO summaries(summary_id,owner_id,scope,summary_type,summary,start_ts,end_ts,updated_ts,known_by_json,payload_json)
-VALUES('duplicate_view','observer','scene:episode_40','middle_term','DUPLICATE-VIEW',40,40,9999,'[""observer""]','{""timelineId"":""window_main""}'),
-('hidden_summary','observer','scene:hidden','scene','HIDDEN-SUMMARY',90,90,90,'[""observer""]','{""timelineId"":""window_main""}'),
-('future_summary','observer','scene:future','scene','FUTURE-SUMMARY',91,91,91,'[""observer""]','{""timelineId"":""window_main"",""worldDay"":60}'),
-('other_branch','observer','scene:branch','scene','OTHER-BRANCH',92,92,92,'[""observer""]','{""timelineId"":""different""}'),
-('unheard_summary','stranger','scene:unheard','scene','UNHEARD-SUMMARY',93,93,93,'[""stranger""]','{""timelineId"":""window_main""}');
-UPDATE summaries SET hidden_from_json='[""observer""]' WHERE summary_id='hidden_summary';", TestDict("campaign", campaign));
+                    DialogueSelfTestStore.InsertConversationSessions18(connection, TestDict("campaign", campaign));
                     var diagnostics = TestDict();
                     var window = LoadRecentConversationWindow(connection, plan, context, knowledge, settings, diagnostics);
                     var raw = window.Where(e => e.Kind == "reported_exchange").ToList();
@@ -902,9 +861,7 @@ UPDATE summaries SET hidden_from_json='[""observer""]' WHERE summary_id='hidden_
                     {
                         string retainedArchive = "Michael: I first suggested 900 for the caravan.\n---\n"
                             + new string('x', 29510) + "\n---\nObserver: 300, only after arrival.\n---\nMichael: I accept 300 only after arrival. No payment has occurred.";
-                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO summaries(summary_id,owner_id,scope,summary_type,summary,start_ts,end_ts,updated_ts,known_by_json,payload_json)
-VALUES('oversized_duplicate','observer','scene:episode_40','scene',$archive,40,40,2000,'[""observer""]','{""timelineId"":""window_main"",""compactionStatus"":""incomplete"",""method"":""extractive_fallback""}'),
-('retained_archive','observer','scene:old_caravan','middle_term',$archive,41,41,2001,'[""observer""]','{""timelineId"":""window_main"",""compactionStatus"":""incomplete"",""method"":""extractive_fallback""}');", TestDict("archive", retainedArchive));
+                        DialogueSelfTestStore.InsertSummaries2(connection, TestDict("archive", retainedArchive));
                         var compactDiagnostics = TestDict();
                         var compactWindow = LoadRecentConversationWindow(connection, plan, context, knowledge, settings, compactDiagnostics);
                         var archived = compactWindow.Single(e => e.SourceId == "retained_archive");
@@ -918,20 +875,13 @@ VALUES('oversized_duplicate','observer','scene:episode_40','scene',$archive,40,4
                         Check("compact_summary_source_view_survives_final_allocation", compactAllocated.Context.Contains(archived.Text)
                             && !compactAllocated.Context.Contains(new string('x', 80))
                             && compactPacket.Selected.All(e => compactAllocated.Context.Contains(e.Text)));
-                        Check("read_time_compaction_never_rewrites_archive", ReadString(ReignDatabase.QuerySql(connection,
-                            "SELECT summary FROM summaries WHERE summary_id='retained_archive';").Single(), "summary", "") == retainedArchive);
+                        Check("read_time_compaction_never_rewrites_archive", ReadString(DialogueSelfTestStore.SelectSummaries5(connection).Single(), "summary", "") == retainedArchive);
 
-                        ReignDatabase.ExecuteSql(connection, @"UPDATE conversation_turns SET exchange_id='old_caravan_terms',
-role=CASE WHEN turn_order=2 THEN 'player' ELSE 'npc' END,
-speaker_id=CASE WHEN turn_order=2 THEN 'player' ELSE 'observer' END,
-speaker_name=CASE WHEN turn_order=2 THEN 'Michael' ELSE 'Observer' END,
-text=CASE turn_order WHEN 1 THEN 'What are the caravan price and payment conditions?'
-WHEN 2 THEN '300 only after arrival. No payment has occurred.' ELSE 'I acknowledge those terms and that no payment has occurred.' END
-WHERE session_id='group_window' AND turn_order<=3;");
+                        DialogueSelfTestStore.UpdateConversationTurns49(connection);
                         for (int i = 1; i <= 3; i++)
                             LinkMemorySource(connection, "summary", "retained_archive", "turn", "window_turn_" + i, i);
                         var oldPlan = PlanMemoryQuery("observer", "player", "What price did we agree for the caravan?", context);
-                        var retainedRow = ReignDatabase.QuerySql(connection, "SELECT * FROM summaries WHERE summary_id='retained_archive';").Single();
+                        var retainedRow = DialogueSelfTestStore.SelectSummaries6(connection).Single();
                         var expanded = ExpandPrecisionSource(connection, "summaries", retainedRow, oldPlan, knowledge, 99);
                         var linkedPacket = SelectPrecisionEvidence(compactWindow.Concat(expanded), 2000);
                         Check("compact_archive_still_resolves_original_old_question_answer_acknowledgment", expanded.Count > 0
@@ -969,7 +919,7 @@ WHERE session_id='group_window' AND turn_order<=3;");
                 }
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var priorLines = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id='group_window' ORDER BY ts,turn_order;")
+                    var priorLines = DialogueSelfTestStore.SelectConversationTurns60(connection)
                         .Select(row => TestDict("turnId", ReadString(row, "turn_id", ""), "exchangeId", ReadString(row, "exchange_id", ""),
                             "speakerId", ReadString(row, "speaker_id", ""), "speaker", ReadString(row, "speaker_name", ""),
                             "role", ReadString(row, "role", ""), "text", ReadString(row, "text", ""))).ToList();
@@ -1021,12 +971,7 @@ WHERE session_id='group_window' AND turn_order<=3;");
                                 "memoryDuplicatesFinalRaw", memoryText.Contains("no payment has occurred")));
                     }
                     using var bindingFixture = connection.BeginTransaction();
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-VALUES('binding_window',$campaign,'observer','player','closed',1,520,'[""observer"",""player""]','{""timelineId"":""window_main""}');
-INSERT INTO conversation_turns(turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,speaker_name,text,world_day,ts,participants_json,payload_json)
-SELECT 'binding_'||n,'binding_window','binding_event',n,'binding_exchange','player','player','Michael','Yes.',20,n,
-'[""observer"",""player""]',CASE WHEN n=520 THEN '{""timelineId"":""window_main"",""inputSourceId"":""input_current""}'
-ELSE '{""timelineId"":""window_main""}' END FROM generate_series(1,520) n;", TestDict("campaign", campaign));
+                    DialogueSelfTestStore.InsertConversationSessions19(connection, TestDict("campaign", campaign));
                     // Bind through a second connection only after publishing the fixture.
                     bindingFixture.Commit();
                     var bindingContext = Program.CloneDictionary(context);
