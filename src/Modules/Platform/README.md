@@ -15,7 +15,7 @@ Characters and Portraits folders.
 - `Program.cs` (about 1.3k lines): core fields, `Main`, `RunServer`, `HandleClient`, `EnterCampaignRequestAccess`,
   `RunInteractiveRequest`, `ControlCenterHtml` and `HttpRequest`.
 - `Program.<Area>.cs` partials (verbatim parts of the former single file): `HttpIngress` (`ReadRequest` and the
-  ingress constants), `CampaignSql` (`OpenCampaignConnection`, `ExecuteSql`, `QuerySql`), `CampaignFiles`,
+  ingress constants), `CampaignFiles`,
   `Settings`, `PromptTemplates`, `DefaultPromptTemplates`, `LlmTransport`, `ConversationResponses`, `LogsAndAudit`,
   `PipelineTestRunner`, `DefaultTestCases`, and the action pipeline (`DialogueActions`, `ActionGates`,
   `ActionPlanner`, `ActionRouter`, `DirectiveTerms`, `DirectivePackages`, `ActionReferences`, `ActionValidation`,
@@ -27,6 +27,9 @@ Characters and Portraits folders.
   `PromptEditorPersistence.cs`, `LinuxJsonSerializer.cs`, and the client option sets (`*Options.cs`).
 - Runtime services: `PriorityBackgroundScheduler.cs`, `ReignObservability.cs`, `ServerActivation.cs`,
   `InitializationReadiness.cs`, `SupportBundle.cs`, `ConversationDiagnostics*.cs`, `ConversationResponseParsing.cs`.
+- Data core: `Data/ReignDatabase.cs` (`ReignDatabase`: `OpenCampaignConnection`, campaign schema caches, `ExecuteSql`,
+  `QuerySql`, `EnsureDatabaseColumn`). Each module keeps its SQL in `Modules/<Module>/Data` (`<Module>Store`,
+  `<Module>Schema`); see [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md).
 - Routing: `RouteTable.cs` (route table, dispatcher, campaign-gate declarations), `Program.PlatformRoutes.cs` (this
   module's registrations; every module has its own `Program.<Module>Routes.cs`) and `RouteTableContractSelfTests.cs`.
 - `Testing/reign-xp-options.js` and the `*-contract.mjs` files are Control Center UI contract scripts.
