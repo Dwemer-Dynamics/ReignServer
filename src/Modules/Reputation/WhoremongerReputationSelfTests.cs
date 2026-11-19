@@ -96,9 +96,9 @@ namespace ReignBetaServer
                 && !ReadBool(latest, "inactivityReset", true),
                 "Visits less than 30 days apart retain all stacks beyond 30 total elapsed days and reach a 100% roll.", latest);
             ExpireWhoremongerActivity(connection, campaignId, timeline, lastDay + 29.999d);
-            var before = ReignDatabase.QuerySql(connection, "SELECT visit_count FROM whoremonger_activity WHERE subject_id='wm_player' AND timeline_id='whoremonger_test';").Single();
+            var before = ReputationSelfTestStore.SelectWhoremongerActivity(connection).Single();
             ExpireWhoremongerActivity(connection, campaignId, timeline, lastDay + 30d);
-            var resetState = ReignDatabase.QuerySql(connection, "SELECT visit_count,last_activity_day FROM whoremonger_activity WHERE subject_id='wm_player' AND timeline_id='whoremonger_test';").Single();
+            var resetState = ReputationSelfTestStore.SelectWhoremongerActivity2(connection).Single();
             var restarted = RegisterWhoremongerVisit(connection, campaignId, timeline, "wm_player", "after_break", "town_b", lastDay + 30d);
             add("whoremonger_exact_reset_preserves_reputation",
                 ReadInt(before, "visit_count", 0) == 13 && ReadInt(resetState, "visit_count", -1) == 0
@@ -161,9 +161,7 @@ namespace ReignBetaServer
             npcPayload["townId"] = "town_a";
             var unavailableNpc = RegisterWhoremongerNpcEntry(connection, campaignId, timeline,
                 "unavailable_npc_entry", "wm_departed", 41d, npcPayload, false);
-            var unavailableReceipt = ReignDatabase.QuerySql(connection, @"SELECT subject_id,world_day,result_json
-FROM whoremonger_event_receipts WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND event_id='entry:unavailable_npc_entry';", new Dictionary<string, object>
+            var unavailableReceipt = ReputationSelfTestStore.SelectWhoremongerEventReceipts(connection, new Dictionary<string, object>
             {
                 ["campaign"] = campaignId, ["timeline"] = timeline
             }).Single();
@@ -201,64 +199,34 @@ AND event_id='entry:unavailable_npc_entry';", new Dictionary<string, object>
             var lateNpc = RegisterWhoremongerNpcEntry(connection, campaignId,
                 lateTimeline, "late_npc_older", "wm_npc", 10d,
                 latePayload, false);
-            var lateState = ReignDatabase.QuerySql(connection, @"SELECT last_event_day FROM whoremonger_activity
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id='wm_npc';",
-                new Dictionary<string, object>
+            var lateState = ReputationSelfTestStore.SelectWhoremongerActivity3(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = lateTimeline
                 }).Single();
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO social_outcome_receipts(
-event_id,campaign_id,timeline_id,subject_id,archetype_id,counter_applied,
-completed,result_json,attempt_count,last_error,updated_ts)
-VALUES('late_npc_recovery',$campaign,$timeline,'','',0,-1,'{}',3,$error,1);",
-                new Dictionary<string, object>
+            ReputationSelfTestStore.InsertSocialOutcomeReceipts(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = lateTimeline,
                     ["error"] = WhoremongerOutOfOrderError
                 });
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO social_outcome_receipts(
-event_id,campaign_id,timeline_id,subject_id,archetype_id,counter_applied,
-completed,result_json,attempt_count,last_error,updated_ts)
-VALUES('departed_npc_recovery',$campaign,$timeline,'','',0,-1,'{}',3,$error,1);",
-                new Dictionary<string, object>
+            ReputationSelfTestStore.InsertSocialOutcomeReceipts2(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = lateTimeline,
                     ["error"] = WhoremongerTemporalIdentityError
                 });
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO social_outcome_receipts(
-event_id,campaign_id,timeline_id,subject_id,archetype_id,counter_applied,
-completed,result_json,attempt_count,last_error,updated_ts)
-VALUES('stalled_npc_recovery',$campaign,$timeline,'','',0,0,'{}',0,'',1);",
-                new Dictionary<string, object>
+            ReputationSelfTestStore.InsertSocialOutcomeReceipts3(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = lateTimeline
                 });
             WorldSimulationService.EnsureWorldHistorySchema(connection);
             EnsureSocialSubjectWorkSchema(connection);
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_events(
-event_id,campaign_id,timeline_id,sequence,world_day,event_type,subject_id,created_utc)
-VALUES('late_npc_recovery',$campaign,$timeline,900001,10,'social_outcome','wm_npc',$utc),
-('departed_npc_recovery',$campaign,$timeline,900002,11,'social_outcome','wm_npc',$utc),
-('stalled_npc_recovery',$campaign,$timeline,900003,12,'social_outcome','wm_npc',$utc);
-UPDATE world_history_events SET correlation_id='whoremonger_town_entry|wm_npc|3|town_a'
-WHERE event_id='stalled_npc_recovery';
-INSERT INTO social_subject_work_queue(campaign_id,timeline_id,subject_id,status,
-first_sequence,pending_count,claim_owner,claim_expires_ts,updated_ts,last_error)
-VALUES($campaign,$timeline,'wm_npc','completed',900001,0,'',0,1,'')
-ON CONFLICT(campaign_id,timeline_id,subject_id) DO UPDATE SET
-status='completed',first_sequence=900001,pending_count=0,claim_owner='',
-claim_expires_ts=0,updated_ts=1,last_error='';", new Dictionary<string, object>
+            ReputationSelfTestStore.UpsertWorldHistoryEvents(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = lateTimeline,
                     ["utc"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture)
                 });
             EnsureWhoremongerSchema(connection);
-            var recovered = ReignDatabase.QuerySql(connection, @"SELECT event_id,completed,attempt_count,last_error
-FROM social_outcome_receipts WHERE event_id IN ('late_npc_recovery','departed_npc_recovery','stalled_npc_recovery')
-ORDER BY event_id;");
-            var recoveredQueue = ReignDatabase.QuerySql(connection, @"SELECT status,first_sequence,pending_count,last_error
-FROM social_subject_work_queue WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND subject_id='wm_npc';", new Dictionary<string, object>
+            var recovered = ReputationSelfTestStore.SelectSocialOutcomeReceipts(connection);
+            var recoveredQueue = ReputationSelfTestStore.SelectSocialSubjectWorkQueue(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = lateTimeline
                 }).Single();
@@ -303,10 +271,8 @@ AND subject_id='wm_npc';", new Dictionary<string, object>
                 aRetry = RegisterWhoremongerVisit(reopened, campaignId, timeline, subject, "late_a_paid10", "town_a", 14d);
             var bReplay = RegisterWhoremongerVisit(connection, campaignId, timeline, subject, "late_b", "town_b", 12d);
             var args = new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timeline, ["subject"] = subject };
-            var activity = ReignDatabase.QuerySql(connection, @"SELECT visit_count,last_event_day,last_activity_day FROM whoremonger_activity
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;", args).Single();
-            var receipts = ReignDatabase.QuerySql(connection, @"SELECT event_id,world_day FROM whoremonger_event_receipts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;", args);
+            var activity = ReputationSelfTestStore.SelectWhoremongerActivity4(connection, args).Single();
+            var receipts = ReputationSelfTestStore.SelectWhoremongerEventReceipts2(connection, args);
             bool oldEventRejected = false, changedTownRejected = false, changedSubjectRejected = false;
             try { RegisterWhoremongerVisit(connection, campaignId, timeline, subject, "new_backdated", "town_c", 11d); }
             catch (InvalidDataException) { oldEventRejected = true; }
@@ -331,11 +297,8 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             var exposed = RegisterWhoremongerVisit(connection, campaignId, exposedTimeline, subject, exposedId, "town_a", 13d);
             var exposedRetry = RegisterWhoremongerVisit(connection, campaignId, exposedTimeline, subject, exposedId, "town_a", 14d);
             args["timeline"] = exposedTimeline;
-            var streak = ReignDatabase.QuerySql(connection, @"SELECT streak_count,last_exposure_day FROM rumor_exposure_streaks
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND archetype_id='whoremonger'
-AND thread_key=$subject||'|whoremonger';", args).Single();
-            activity = ReignDatabase.QuerySql(connection, @"SELECT visit_count,last_activity_day FROM whoremonger_activity
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;", args).Single();
+            var streak = ReputationSelfTestStore.SelectRumorExposureStreaks(connection, args).Single();
+            activity = ReputationSelfTestStore.SelectWhoremongerActivity5(connection, args).Single();
             add("whoremonger_later_day_retry_cannot_stack_or_refresh",
                 ReadBool(exposed, "exposed", false) && Json.Serialize(exposed) == Json.Serialize(exposedRetry)
                 && ReadInt(streak, "streak_count", 0) == 1 && ReadDouble(streak, "last_exposure_day", -1d) == 13d

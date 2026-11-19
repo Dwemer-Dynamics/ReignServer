@@ -38,9 +38,7 @@ namespace ReignBetaServer
 
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                Dictionary<string, object> prior = ReignDatabase.QuerySql(connection,
-                    "SELECT * FROM ambient_relationship_runs WHERE campaign_id=$campaign AND world_day=$day LIMIT 1;",
-                    new Dictionary<string, object> { ["campaign"] = campaignId, ["day"] = day }).FirstOrDefault();
+                Dictionary<string, object> prior = RelationshipsStore.SelectAmbientRelationshipRuns(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["day"] = day }).FirstOrDefault();
                 if (prior != null)
                 {
                     Dictionary<string, object> priorSummary = TryParseJsonObject(ReadString(prior, "summary_json", "{}")) ?? new Dictionary<string, object>();
@@ -62,7 +60,7 @@ namespace ReignBetaServer
                 int changedDirections = 0, nativeQueued = 0, skippedMissing = 0, skippedSameDay = 0;
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-                ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                RelationshipsStore.Begin(connection);
                 try
                 {
                     foreach (AmbientPairContext pair in pairs.Values.OrderBy(x => x.PairKey, StringComparer.OrdinalIgnoreCase))
@@ -76,9 +74,7 @@ namespace ReignBetaServer
                             continue;
                         }
 
-                        Dictionary<string, object> exposure = ReignDatabase.QuerySql(connection,
-                            "SELECT * FROM ambient_relationship_exposure WHERE pair_key=$pair LIMIT 1;",
-                            new Dictionary<string, object> { ["pair"] = pair.PairKey }).FirstOrDefault();
+                        Dictionary<string, object> exposure = RelationshipsStore.SelectAmbientRelationshipExposure(connection, new Dictionary<string, object> { ["pair"] = pair.PairKey }).FirstOrDefault();
                         if (exposure != null && (int)Math.Floor(ReadDouble(exposure, "last_day", -1d) + 0.000001d) == day)
                         {
                             skippedSameDay++;
@@ -129,10 +125,7 @@ namespace ReignBetaServer
                             ["historyBlockedAToB"] = blockedAB,
                             ["historyBlockedBToA"] = blockedBA
                         };
-                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO ambient_relationship_exposure(pair_key,hero_a_id,hero_b_id,first_day,last_day,consecutive_days,weighted_exposure,last_context_kind,last_context_id,compatibility_version,compatibility_json,pending_native_signal,last_native_sync_day,native_action_pending,native_action_id,updated_ts)
-VALUES($pair,$a,$b,$first,$last,$consecutive,$weighted,$kind,$context,$version,$compatibility,$signal,$nativeDay,$pending,$action,$ts)
-ON CONFLICT(pair_key) DO UPDATE SET last_day=$last,consecutive_days=$consecutive,weighted_exposure=$weighted,last_context_kind=$kind,last_context_id=$context,compatibility_version=$version,compatibility_json=$compatibility,pending_native_signal=$signal,native_action_pending=$pending,native_action_id=$action,updated_ts=$ts;",
-                            new Dictionary<string, object>
+                        RelationshipsStore.UpsertAmbientRelationshipExposure(connection, new Dictionary<string, object>
                             {
                                 ["pair"] = pair.PairKey, ["a"] = pair.HeroAId, ["b"] = pair.HeroBId,
                                 ["first"] = exposure == null ? day : ReadDouble(exposure, "first_day", day), ["last"] = day,
@@ -154,23 +147,21 @@ ON CONFLICT(pair_key) DO UPDATE SET last_day=$last,consecutive_days=$consecutive
                         ["skippedReasons"] = new Dictionary<string, object> { ["missing_hero"] = skippedMissing, ["already_processed_day"] = skippedSameDay },
                         ["llmCalls"] = 0, ["noLlmConfirmed"] = true
                     };
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO ambient_relationship_runs(run_id,campaign_id,world_day,status,group_count,pair_count,direction_count,positive_drift,negative_drift,native_changes,duration_ms,summary_json,created_ts)
-VALUES($id,$campaign,$day,'completed',$groups,$pairs,$directions,$positive,$negative,$native,$duration,$summary,$ts);",
-                        new Dictionary<string, object>
+                    RelationshipsStore.InsertAmbientRelationshipRuns(connection, new Dictionary<string, object>
                         {
                             ["id"] = runId, ["campaign"] = campaignId, ["day"] = day, ["groups"] = groups.Count,
                             ["pairs"] = pairs.Count - skippedMissing - skippedSameDay, ["directions"] = changedDirections,
                             ["positive"] = positive, ["negative"] = negative, ["native"] = nativeQueued,
                             ["duration"] = timer.ElapsedMilliseconds, ["summary"] = Json.Serialize(summary), ["ts"] = ts
                         });
-                    ReignDatabase.ExecuteSql(connection, "COMMIT;");
+                    RelationshipsStore.Commit(connection);
                     Program.WriteAudit(campaignId, correlationId, "server", "relationships", "relationships.ambient_daily", "", "", "", "completed",
                         timer.ElapsedMilliseconds, "Deterministic ambient NPC relationship chemistry processed without an LLM call.", summary);
                     return summary;
                 }
                 catch
                 {
-                    try { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { RelationshipsStore.Rollback(connection); } catch { }
                     throw;
                 }
             }
@@ -188,10 +179,10 @@ VALUES($id,$campaign,$day,'completed',$groups,$pairs,$directions,$positive,$nega
                     ["ok"] = true,
                     ["campaignId"] = campaignId,
                     ["noLlmConfirmed"] = true,
-                    ["lastRun"] = ReignDatabase.QuerySql(connection, "SELECT * FROM ambient_relationship_runs ORDER BY world_day DESC LIMIT 1;").FirstOrDefault() ?? new Dictionary<string, object>(),
-                    ["currentPairs"] = ReignDatabase.QuerySql(connection, "SELECT * FROM ambient_relationship_exposure ORDER BY last_day DESC,weighted_exposure DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";"),
-                    ["recentDrift"] = ReignDatabase.QuerySql(connection, "SELECT * FROM ambient_relationship_changes ORDER BY world_day DESC,created_ts DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";"),
-                    ["pendingNativeChanges"] = ReignDatabase.QuerySql(connection, "SELECT pair_key,hero_a_id,hero_b_id,pending_native_signal,native_action_pending,native_action_id,last_native_sync_day FROM ambient_relationship_exposure WHERE ABS(pending_native_signal)>=0.01 OR native_action_pending=1 ORDER BY ABS(pending_native_signal) DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";")
+                    ["lastRun"] = RelationshipsStore.SelectAmbientRelationshipRuns2(connection).FirstOrDefault() ?? new Dictionary<string, object>(),
+                    ["currentPairs"] = RelationshipsStore.SelectAmbientRelationshipExposure2(connection, limit.ToString(CultureInfo.InvariantCulture)),
+                    ["recentDrift"] = RelationshipsStore.SelectAmbientRelationshipChanges(connection, limit.ToString(CultureInfo.InvariantCulture)),
+                    ["pendingNativeChanges"] = RelationshipsStore.SelectAmbientRelationshipExposure3(connection, limit.ToString(CultureInfo.InvariantCulture))
                 };
             }
         }
@@ -448,13 +439,7 @@ VALUES($id,$campaign,$day,'completed',$groups,$pairs,$directions,$positive,$nega
             List<Dictionary<string, object>> rows;
             if (ReignPostgreSqlDialect.IsPostgreSql(connection))
             {
-                rows = ReignDatabase.QuerySql(connection, @"SELECT pairs.pair_key,
-pairs.affinity_a_to_b,pairs.affinity_b_to_a,
-pairs.chance_a_to_b,pairs.chance_b_to_a
-FROM relationship_pair_chemistry pairs
-JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested
-  ON requested.value=pairs.pair_key;",
-                    new Dictionary<string, object>
+                rows = RelationshipsStore.SelectRelationshipPairChemistry(connection, new Dictionary<string, object>
                     {
                         ["pairs"] = Json.Serialize(candidatePairKeys
                             .OrderBy(value => value,
@@ -463,9 +448,7 @@ JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested
             }
             else
             {
-                rows = ReignDatabase.QuerySql(connection, @"SELECT pair_key,
-affinity_a_to_b,affinity_b_to_a,chance_a_to_b,chance_b_to_a
-FROM relationship_pair_chemistry;")
+                rows = RelationshipsStore.SelectRelationshipPairChemistry2(connection)
                     .Where(row => candidatePairKeys.Contains(
                         ReadString(row, "pair_key", ""))).ToList();
             }
@@ -566,15 +549,8 @@ FROM relationship_pair_chemistry;")
                 if (Math.Abs(delta) < 0.00001d) continue;
                 double next = ClampRelationship(current + delta);
                 changes[facet] = delta;
-                ReignDatabase.ExecuteSql(connection, "UPDATE relationships SET " + facet + "=$value,updated_ts=$ts,last_updated_from_json=$source WHERE subject_id=$subject AND target_id=$target;",
-                    new Dictionary<string, object> { ["value"] = next, ["ts"] = ts, ["source"] = Json.Serialize(new[] { "ambient:" + day.ToString(CultureInfo.InvariantCulture) }), ["subject"] = subject, ["target"] = target });
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO ambient_relationship_changes(change_id,run_id,pair_key,subject_id,target_id,facet,old_value,delta,new_value,equilibrium,world_day,context_kind,context_id,compatibility_json,created_ts)
-VALUES($id,$run,$pair,$subject,$target,$facet,$old,$delta,$new,$equilibrium,$day,$kind,$context,'{}',$ts)
-ON CONFLICT(pair_key,subject_id,target_id,facet) DO UPDATE SET
-run_id=excluded.run_id,old_value=excluded.old_value,delta=excluded.delta,new_value=excluded.new_value,
-equilibrium=excluded.equilibrium,world_day=excluded.world_day,context_kind=excluded.context_kind,
-context_id=excluded.context_id,compatibility_json='{}',created_ts=excluded.created_ts;",
-                    new Dictionary<string, object>
+                RelationshipsStore.UpdateRelationships(connection, facet,                    new Dictionary<string, object> { ["value"] = next, ["ts"] = ts, ["source"] = Json.Serialize(new[] { "ambient:" + day.ToString(CultureInfo.InvariantCulture) }), ["subject"] = subject, ["target"] = target });
+                RelationshipsStore.UpsertAmbientRelationshipChanges(connection, new Dictionary<string, object>
                     {
                         ["id"] = "ambient_change_" + Guid.NewGuid().ToString("N"), ["run"] = runId, ["pair"] = pair.PairKey,
                         ["subject"] = subject, ["target"] = target, ["facet"] = facet, ["old"] = current,
@@ -587,12 +563,8 @@ context_id=excluded.context_id,compatibility_json='{}',created_ts=excluded.creat
 
         private static bool HasAmbientHistoryBlock(ReignDbConnection connection, string subject, string target)
         {
-            int milestone = ReadInt(ReignDatabase.QuerySql(connection,
-                "SELECT COUNT(*) AS count FROM relationship_milestones WHERE subject_id=$subject AND target_id=$target AND status='active' AND kind IN ('betrayed','nemesis','estranged','heartbroken');",
-                new Dictionary<string, object> { ["subject"] = subject, ["target"] = target }).FirstOrDefault(), "count", 0);
-            int pressure = ReadInt(ReignDatabase.QuerySql(connection,
-                "SELECT COUNT(*) AS count FROM relationship_pressures WHERE subject_id=$subject AND target_id=$target AND status='active' AND intensity>=50;",
-                new Dictionary<string, object> { ["subject"] = subject, ["target"] = target }).FirstOrDefault(), "count", 0);
+            int milestone = ReadInt(RelationshipsStore.CountRelationshipMilestones(connection, new Dictionary<string, object> { ["subject"] = subject, ["target"] = target }).FirstOrDefault(), "count", 0);
+            int pressure = ReadInt(RelationshipsStore.CountRelationshipPressures(connection, new Dictionary<string, object> { ["subject"] = subject, ["target"] = target }).FirstOrDefault(), "count", 0);
             return milestone > 0 || pressure > 0;
         }
 
@@ -604,9 +576,7 @@ context_id=excluded.context_id,compatibility_json='{}',created_ts=excluded.creat
                 ["delta"] = delta, ["source"] = "ambient_relationship_drift", ["pairKey"] = pair.PairKey,
                 ["sourceSignal"] = sourceSignal, ["silent"] = true
             };
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_director_actions(director_action_id,action_type,status,world_day,actor_id,target_id,payload_json,created_ts)
-VALUES($id,'native_relation','pending',$day,$actor,$target,$payload,$ts);",
-                new Dictionary<string, object> { ["id"] = id, ["day"] = day, ["actor"] = pair.HeroAId, ["target"] = pair.HeroBId, ["payload"] = Json.Serialize(payload), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
+            RelationshipsStore.InsertRelationshipDirectorActions(connection, new Dictionary<string, object> { ["id"] = id, ["day"] = day, ["actor"] = pair.HeroAId, ["target"] = pair.HeroBId, ["payload"] = Json.Serialize(payload), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
             return id;
         }
 
@@ -705,10 +675,9 @@ VALUES($id,'native_relation','pending',$day,$actor,$target,$payload,$ts);",
                 Dictionary<string, object> forbiddenBefore;
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    initialChanges = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS count FROM ambient_relationship_changes;").FirstOrDefault(), "count", 0);
-                    initialMagnitude = ReadDouble(ReignDatabase.QuerySql(connection, "SELECT COALESCE(AVG(ABS(delta)),0) AS value FROM ambient_relationship_changes WHERE world_day=1;").FirstOrDefault(), "value", 0d);
-                    forbiddenBefore = ReignDatabase.QuerySql(connection, "SELECT loyalty,fear,envy,attraction,jealousy,dependence,debt FROM relationships WHERE subject_id=$a AND target_id=$b LIMIT 1;",
-                        new Dictionary<string, object> { ["a"] = heroA, ["b"] = heroB }).FirstOrDefault() ?? new Dictionary<string, object>();
+                    initialChanges = ReadInt(RelationshipsStore.CountAmbientRelationshipChanges(connection).FirstOrDefault(), "count", 0);
+                    initialMagnitude = ReadDouble(RelationshipsStore.SelectAmbientRelationshipChanges2(connection).FirstOrDefault(), "value", 0d);
+                    forbiddenBefore = RelationshipsStore.SelectRelationships(connection, new Dictionary<string, object> { ["a"] = heroA, ["b"] = heroB }).FirstOrDefault() ?? new Dictionary<string, object>();
                 }
                 add("persistence_real_api_drift", ReadBool(first, "noLlmConfirmed", false) && initialChanges > 0,
                     "The real snapshot API persisted directional facet drift and confirmed zero LLM calls.");
@@ -716,7 +685,7 @@ VALUES($id,'native_relation','pending',$day,$actor,$target,$payload,$ts);",
                 Dictionary<string, object> replay = run(1, new List<Dictionary<string, object>> { group("party", "party_test") });
                 int replayChanges;
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
-                    replayChanges = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS count FROM ambient_relationship_changes;").FirstOrDefault(), "count", 0);
+                    replayChanges = ReadInt(RelationshipsStore.CountAmbientRelationshipChanges(connection).FirstOrDefault(), "count", 0);
                 add("persistence_same_day_idempotent", ReadBool(replay, "idempotent", false) && replayChanges == initialChanges,
                     "Replaying the same campaign day returns the stored run without duplicate drift.");
 
@@ -726,9 +695,8 @@ VALUES($id,'native_relation','pending',$day,$actor,$target,$payload,$ts);",
                 int consecutiveDays;
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    settlementMagnitude = ReadDouble(ReignDatabase.QuerySql(connection, "SELECT COALESCE(AVG(ABS(delta)),0) AS value FROM ambient_relationship_changes WHERE world_day=3;").FirstOrDefault(), "value", 0d);
-                    Dictionary<string, object> exposure = ReignDatabase.QuerySql(connection, "SELECT weighted_exposure,consecutive_days FROM ambient_relationship_exposure WHERE pair_key=$pair LIMIT 1;",
-                        new Dictionary<string, object> { ["pair"] = AmbientPairKey(heroA, heroB) }).FirstOrDefault() ?? new Dictionary<string, object>();
+                    settlementMagnitude = ReadDouble(RelationshipsStore.SelectAmbientRelationshipChanges3(connection).FirstOrDefault(), "value", 0d);
+                    Dictionary<string, object> exposure = RelationshipsStore.SelectAmbientRelationshipExposure4(connection, new Dictionary<string, object> { ["pair"] = AmbientPairKey(heroA, heroB) }).FirstOrDefault() ?? new Dictionary<string, object>();
                     weightedExposure = ReadDouble(exposure, "weighted_exposure", 0d);
                     consecutiveDays = ReadInt(exposure, "consecutive_days", 0);
                 }
@@ -740,10 +708,8 @@ VALUES($id,'native_relation','pending',$day,$actor,$target,$payload,$ts);",
                 Dictionary<string, object> forbiddenAfter;
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    nativeActions = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS count FROM relationship_director_actions WHERE action_type='native_relation' AND actor_id=$a AND target_id=$b;",
-                        new Dictionary<string, object> { ["a"] = heroA, ["b"] = heroB }).FirstOrDefault(), "count", 0);
-                    forbiddenAfter = ReignDatabase.QuerySql(connection, "SELECT loyalty,fear,envy,attraction,jealousy,dependence,debt FROM relationships WHERE subject_id=$a AND target_id=$b LIMIT 1;",
-                        new Dictionary<string, object> { ["a"] = heroA, ["b"] = heroB }).FirstOrDefault() ?? new Dictionary<string, object>();
+                    nativeActions = ReadInt(RelationshipsStore.CountRelationshipDirectorActions(connection, new Dictionary<string, object> { ["a"] = heroA, ["b"] = heroB }).FirstOrDefault(), "count", 0);
+                    forbiddenAfter = RelationshipsStore.SelectRelationships(connection, new Dictionary<string, object> { ["a"] = heroA, ["b"] = heroB }).FirstOrDefault() ?? new Dictionary<string, object>();
                 }
                 add("persistence_native_relation_batched", nativeActions == 1,
                     "Sustained exposure queued exactly one silent native-relation update while the first remains pending.");
@@ -755,17 +721,13 @@ VALUES($id,'native_relation','pending',$day,$actor,$target,$payload,$ts);",
                 double trustBeforeBlock;
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    trustBeforeBlock = ReadDouble(ReignDatabase.QuerySql(connection, "SELECT trust FROM relationships WHERE subject_id=$a AND target_id=$b LIMIT 1;",
-                        new Dictionary<string, object> { ["a"] = heroA, ["b"] = heroB }).FirstOrDefault(), "trust", 0d);
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_milestones(milestone_id,subject_id,target_id,kind,status,stability,strength,reason,created_event_id,last_event_id,evidence_json,created_day,last_meaningful_day,updated_ts,payload_json)
-VALUES($id,$a,$b,'betrayed','active',80,80,'ambient self-test','','','[]',18,18,$ts,'{}');",
-                        new Dictionary<string, object> { ["id"] = "ambient_block_" + Guid.NewGuid().ToString("N"), ["a"] = heroA, ["b"] = heroB, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
+                    trustBeforeBlock = ReadDouble(RelationshipsStore.SelectRelationships2(connection, new Dictionary<string, object> { ["a"] = heroA, ["b"] = heroB }).FirstOrDefault(), "trust", 0d);
+                    RelationshipsStore.InsertRelationshipMilestones(connection, new Dictionary<string, object> { ["id"] = "ambient_block_" + Guid.NewGuid().ToString("N"), ["a"] = heroA, ["b"] = heroB, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                 }
                 run(19, new List<Dictionary<string, object>> { group("party", "party_test") });
                 double trustAfterBlock;
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
-                    trustAfterBlock = ReadDouble(ReignDatabase.QuerySql(connection, "SELECT trust FROM relationships WHERE subject_id=$a AND target_id=$b LIMIT 1;",
-                        new Dictionary<string, object> { ["a"] = heroA, ["b"] = heroB }).FirstOrDefault(), "trust", 0d);
+                    trustAfterBlock = ReadDouble(RelationshipsStore.SelectRelationships2(connection, new Dictionary<string, object> { ["a"] = heroA, ["b"] = heroB }).FirstOrDefault(), "trust", 0d);
                 add("persistence_major_history_blocks_healing", Math.Abs(trustAfterBlock - trustBeforeBlock) < 0.000001d,
                     "Active betrayal evidence prevents ordinary proximity from increasing trust.");
                 add("persistence_unconstructed_heroes_stay_transient", !Directory.Exists(Program.CharacterDirectory(campaignId, heroA)) && !Directory.Exists(Program.CharacterDirectory(campaignId, heroB)),

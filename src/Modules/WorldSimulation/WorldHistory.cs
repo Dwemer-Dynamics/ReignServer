@@ -36,44 +36,22 @@ namespace ReignBetaServer
             if (ReignDatabase.IsPostgreSqlComponentSchemaReady(connection, marker,
                 PostgreSqlWorldHistorySchemaRevision))
                 return;
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_timelines (
-timeline_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,parent_timeline_id TEXT NOT NULL DEFAULT '',fork_event_id TEXT NOT NULL DEFAULT '',
-history_complete_from_day REAL NOT NULL DEFAULT 0,head_sequence INTEGER NOT NULL DEFAULT 0,head_event_id TEXT NOT NULL DEFAULT '',
-is_active INTEGER NOT NULL DEFAULT 1,created_utc TEXT NOT NULL,updated_utc TEXT NOT NULL); ");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_events (
-event_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,sequence INTEGER NOT NULL,world_day REAL NOT NULL,
-event_type TEXT NOT NULL,category TEXT NOT NULL DEFAULT '',phase TEXT NOT NULL DEFAULT 'completed',correlation_id TEXT NOT NULL DEFAULT '',
-location_id TEXT NOT NULL DEFAULT '',location_name TEXT NOT NULL DEFAULT '',dissemination_class TEXT NOT NULL DEFAULT 'ordinary',
-summary TEXT NOT NULL DEFAULT '',semantic_text TEXT NOT NULL DEFAULT '',source TEXT NOT NULL DEFAULT 'native',is_complete INTEGER NOT NULL DEFAULT 1,
-checksum TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL DEFAULT '{}',created_utc TEXT NOT NULL); ");
-            ReignDatabase.EnsureDatabaseColumn(connection, "world_history_events", "subject_id",
-                "TEXT NOT NULL DEFAULT ''");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_entities (
-event_id TEXT NOT NULL,ordinal INTEGER NOT NULL,entity_id TEXT NOT NULL DEFAULT '',entity_type TEXT NOT NULL DEFAULT '',
-name_snapshot TEXT NOT NULL DEFAULT '',role TEXT NOT NULL DEFAULT '',side TEXT NOT NULL DEFAULT '',party_id TEXT NOT NULL DEFAULT '',
-clan_id TEXT NOT NULL DEFAULT '',kingdom_id TEXT NOT NULL DEFAULT '',quantity REAL NOT NULL DEFAULT 0,before_json TEXT NOT NULL DEFAULT '{}',
-after_json TEXT NOT NULL DEFAULT '{}',payload_json TEXT NOT NULL DEFAULT '{}',PRIMARY KEY(event_id,ordinal)); ");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_knowledge_rules (
-rule_id TEXT PRIMARY KEY,event_id TEXT NOT NULL,audience_type TEXT NOT NULL,audience_id TEXT NOT NULL DEFAULT '',
-available_day REAL NOT NULL,acquisition_mode TEXT NOT NULL DEFAULT '',confidence REAL NOT NULL DEFAULT 1); ");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_claim_checks (
-check_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,world_day REAL NOT NULL,claimant_id TEXT NOT NULL DEFAULT '',
-speaker_id TEXT NOT NULL DEFAULT '',raw_claim TEXT NOT NULL,purpose TEXT NOT NULL,claim_family TEXT NOT NULL,
-objective_verdict TEXT NOT NULL,speaker_verdict TEXT NOT NULL,explanation TEXT NOT NULL DEFAULT '',constraints_json TEXT NOT NULL DEFAULT '{}',
-evidence_event_ids_json TEXT NOT NULL DEFAULT '[]',speaker_event_ids_json TEXT NOT NULL DEFAULT '[]',minime_json TEXT NOT NULL DEFAULT '{}',
-created_ts INTEGER NOT NULL); ");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_ingest_state (
-client_id TEXT NOT NULL,timeline_id TEXT NOT NULL,last_sequence INTEGER NOT NULL DEFAULT 0,last_event_id TEXT NOT NULL DEFAULT '',
-updated_utc TEXT NOT NULL,PRIMARY KEY(client_id,timeline_id)); ");
+            WorldSimulationSchema.CreateWorldHistoryTimelines(connection);
+            WorldSimulationSchema.CreateWorldHistoryEvents(connection);
+            WorldSimulationSchema.EnsureColumnWorldHistoryEventsSubjectId(connection);
+            WorldSimulationSchema.CreateWorldHistoryEntities(connection);
+            WorldSimulationSchema.CreateWorldHistoryKnowledgeRules(connection);
+            WorldSimulationSchema.CreateWorldHistoryClaimChecks(connection);
+            WorldSimulationSchema.CreateWorldHistoryIngestState(connection);
             bool postgres = ReignPostgreSqlDialect.IsPostgreSql(connection);
             if (!postgres)
-                ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_event_timeline_type_day ON world_history_events(timeline_id,event_type,world_day DESC);");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_event_location_day ON world_history_events(timeline_id,location_id,world_day DESC);");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_event_correlation ON world_history_events(timeline_id,correlation_id,sequence);");
-            ReignDatabase.ExecuteSql(connection, "CREATE UNIQUE INDEX IF NOT EXISTS idx_wh_event_sequence ON world_history_events(timeline_id,sequence,event_id);");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_entity_lookup ON world_history_entities(entity_id,role,event_id);");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_entity_event ON world_history_entities(entity_id,event_id);");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_event_evidence ON world_history_events(timeline_id,event_type,world_day DESC,event_id);");
+                WorldSimulationSchema.CreateIndexWhEventTimelineTypeDay(connection);
+            WorldSimulationSchema.CreateIndexWhEventLocationDay(connection);
+            WorldSimulationSchema.CreateIndexWhEventCorrelation(connection);
+            WorldSimulationSchema.CreateIndexWhEventSequence(connection);
+            WorldSimulationSchema.CreateIndexWhEntityLookup(connection);
+            WorldSimulationSchema.CreateIndexWhEntityEvent(connection);
+            WorldSimulationSchema.CreateIndexWhEventEvidence(connection);
             if (postgres)
             {
                 // idx_wh_event_evidence has the complete prefix used by the
@@ -82,86 +60,60 @@ updated_utc TEXT NOT NULL,PRIMARY KEY(client_id,timeline_id)); ");
                 // These changes preserve every event and every evidence path;
                 // they remove only redundant index maintenance and unrelated
                 // rows from the specialized worker index.
-                ReignDatabase.ExecuteSql(connection, @"DROP INDEX IF EXISTS idx_wh_event_timeline_type_day;
-DROP INDEX IF EXISTS idx_wh_social_subject_sequence;");
-                ReignDatabase.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_wh_social_subject_sequence_v2
-ON world_history_events(timeline_id,subject_id,sequence,event_id)
-WHERE event_type='social_outcome';");
+                WorldSimulationSchema.DropIdxWhEventTimelineTypeDay(connection);
+                WorldSimulationSchema.CreateIndexWhSocialSubjectSequenceV2(connection);
             }
             else
-                ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_social_subject_sequence ON world_history_events(timeline_id,event_type,subject_id,sequence,event_id);");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_entity_kingdom ON world_history_entities(kingdom_id,event_id);");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_rule_event ON world_history_knowledge_rules(event_id,available_day);");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_rule_audience ON world_history_knowledge_rules(audience_type,audience_id,available_day);");
-            ReignDatabase.ExecuteSql(connection, "CREATE VIRTUAL TABLE IF NOT EXISTS world_history_fts USING fts5(event_id UNINDEXED,text,entities,roles,location,event_type);");
+                WorldSimulationSchema.CreateIndexWhSocialSubjectSequence(connection);
+            WorldSimulationSchema.CreateIndexWhEntityKingdom(connection);
+            WorldSimulationSchema.CreateIndexWhRuleEvent(connection);
+            WorldSimulationSchema.CreateIndexWhRuleAudience(connection);
+            WorldSimulationSchema.CreateWorldHistoryFts(connection);
             EnsureWorldHistoryRetentionSchema(connection);
             if (ReignPostgreSqlDialect.IsPostgreSql(connection)
-                && ReadString(ReignDatabase.QuerySql(connection, @"SELECT value FROM schema_meta
-WHERE key='world_history_social_subject_index_v1' LIMIT 1;")
+                && ReadString(WorldSimulationStore.SelectSchemaMeta(connection)
                     .FirstOrDefault(), "value", "") != "1")
             {
-                ReignDatabase.ExecuteSql(connection, @"UPDATE world_history_events
-SET subject_id=COALESCE(CAST(payload_json AS jsonb)->>'subjectId',
-                        CAST(payload_json AS jsonb)->>'heroId','')
-WHERE event_type='social_outcome' AND subject_id='';");
-                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO schema_meta(key,value)
-VALUES('world_history_social_subject_index_v1','1');");
+                WorldSimulationStore.UpdateWorldHistoryEvents(connection);
+                WorldSimulationStore.UpsertSchemaMeta(connection);
             }
-            int historyVersion = ReadInt(ReignDatabase.QuerySql(connection,
-                "SELECT value FROM schema_meta WHERE key='world_history_version' LIMIT 1;").FirstOrDefault(), "value", 0);
+            int historyVersion = ReadInt(WorldSimulationStore.SelectSchemaMeta2(connection).FirstOrDefault(), "value", 0);
             if (historyVersion < 3)
             {
-                ReignDatabase.ExecuteSql(connection, "SAVEPOINT world_history_storage_upgrade;");
+                WorldSimulationStore.Savepoint(connection);
                 try
                 {
-                    ReignDatabase.ExecuteSql(connection, @"CREATE TEMP TABLE IF NOT EXISTS world_history_noise_events(event_id TEXT PRIMARY KEY);");
-                    ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_noise_events;");
-                    ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO world_history_noise_events(event_id)
-SELECT e.event_id FROM world_history_events e
-WHERE e.event_type IN (
-    'ship_owner_changed','ship_created','ship_repaired','ship_destroyed',
-    'settlement_entered','mobile_party_created'
-)
-AND NOT EXISTS (
-    SELECT 1 FROM world_history_entities n
-    WHERE n.event_id=e.event_id AND n.entity_type='hero' AND n.entity_id<>''
-)
-AND NOT EXISTS (
-    SELECT 1 FROM world_history_entities n
-    WHERE n.event_id=e.event_id AND (n.entity_id='main_party' OR n.party_id='main_party')
-);");
-                    ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_fts WHERE event_id IN (SELECT event_id FROM world_history_noise_events);");
-                    ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_knowledge_rules WHERE event_id IN (SELECT event_id FROM world_history_noise_events);");
-                    ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_entities WHERE event_id IN (SELECT event_id FROM world_history_noise_events);");
-                    ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_events WHERE event_id IN (SELECT event_id FROM world_history_noise_events);");
-                    ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_fts WHERE event_id IN (SELECT event_id FROM world_history_events WHERE event_type='unattributed_state_change');");
-                    ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_knowledge_rules WHERE event_id IN (SELECT event_id FROM world_history_events WHERE event_type='unattributed_state_change');");
-                    ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_entities WHERE event_id IN (SELECT event_id FROM world_history_events WHERE event_type='unattributed_state_change');");
-                    ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_events WHERE event_type='unattributed_state_change';");
-                    ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('world_history_version','3');");
-                    ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('campaign_compaction_required','1');");
-                    ReignDatabase.ExecuteSql(connection, "RELEASE world_history_storage_upgrade;");
+                    WorldSimulationSchema.CreateWorldHistoryNoiseEvents(connection);
+                    WorldSimulationStore.DeleteWorldHistoryNoiseEvents(connection);
+                    WorldSimulationStore.InsertOrIgnoreWorldHistoryNoiseEvents(connection);
+                    WorldSimulationStore.DeleteWorldHistoryFts(connection);
+                    WorldSimulationStore.DeleteWorldHistoryKnowledgeRules(connection);
+                    WorldSimulationStore.DeleteWorldHistoryEntities(connection);
+                    WorldSimulationStore.DeleteWorldHistoryEvents(connection);
+                    WorldSimulationStore.DeleteWorldHistoryFts2(connection);
+                    WorldSimulationStore.DeleteWorldHistoryKnowledgeRules2(connection);
+                    WorldSimulationStore.DeleteWorldHistoryEntities2(connection);
+                    WorldSimulationStore.DeleteWorldHistoryEvents2(connection);
+                    WorldSimulationStore.UpsertSchemaMeta2(connection);
+                    WorldSimulationStore.UpsertSchemaMeta3(connection);
+                    WorldSimulationStore.Release(connection);
                 }
                 catch
                 {
-                    try { ReignDatabase.ExecuteSql(connection, "ROLLBACK TO world_history_storage_upgrade;"); } catch { }
-                    try { ReignDatabase.ExecuteSql(connection, "RELEASE world_history_storage_upgrade;"); } catch { }
+                    try { WorldSimulationStore.Rollback2(connection); } catch { }
+                    try { WorldSimulationStore.Release(connection); } catch { }
                     throw;
                 }
             }
-            else ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('world_history_version','3');");
+            else WorldSimulationStore.UpsertSchemaMeta2(connection);
             DialogueService.EnsureImmediateTournamentKnowledge(connection);
             DialogueService.EnsurePlayerPerformanceSchema(connection);
-            string storedCampaignId = ReadString(ReignDatabase.QuerySql(connection,
-                "SELECT campaign_id FROM world_history_events WHERE campaign_id<>'' LIMIT 1;").FirstOrDefault(), "campaign_id", "");
+            string storedCampaignId = ReadString(WorldSimulationStore.SelectWorldHistoryEvents2(connection).FirstOrDefault(), "campaign_id", "");
             if (!string.IsNullOrWhiteSpace(storedCampaignId))
                 PersistenceService.TryDeleteFile(Program.CampaignFile(storedCampaignId, "world", "history.jsonl"));
             if (postgres)
             {
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO schema_meta(key,value)
-VALUES('postgresql_world_history_schema_revision',$revision)
-ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
-                    new Dictionary<string, object>
+                WorldSimulationStore.UpsertSchemaMeta4(connection, new Dictionary<string, object>
                     {
                         ["revision"] = PostgreSqlWorldHistorySchemaRevision
                             .ToString(CultureInfo.InvariantCulture)
@@ -203,10 +155,7 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
                     placeholders.Add("$" + name);
                 }
 
-                foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection,
-                    "SELECT event_id FROM world_history_events WHERE event_id IN ("
-                    + string.Join(",", placeholders) + ");",
-                    parameters, transaction))
+                foreach (Dictionary<string, object> row in WorldSimulationStore.SelectWorldHistoryEvents3(connection, string.Join(",", placeholders),                    parameters,transaction))
                 {
                     string eventId = ReadString(row, "event_id", "");
                     if (!string.IsNullOrWhiteSpace(eventId)) existing.Add(eventId);
@@ -265,23 +214,13 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
                         LoadExistingWorldHistoryEventIds(connection, events,
                             transaction);
                     string now = DateTime.UtcNow.ToString("o");
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_timelines(timeline_id,campaign_id,parent_timeline_id,fork_event_id,history_complete_from_day,head_sequence,head_event_id,is_active,created_utc,updated_utc)
-VALUES($timeline,$campaign,$parent,$fork,$complete,0,'',1,$now,$now)
-ON CONFLICT(timeline_id) DO UPDATE SET
-campaign_id=$campaign,
-history_complete_from_day=CASE
-    WHEN world_history_timelines.history_complete_from_day<=0 THEN $complete
-    ELSE MIN(world_history_timelines.history_complete_from_day,$complete)
-END,
-is_active=1,updated_utc=$now;",
-                    new Dictionary<string, object>
+                    WorldSimulationStore.UpsertWorldHistoryTimelines(connection, new Dictionary<string, object>
                     {
                         ["timeline"] = timelineId, ["campaign"] = campaignId,
                         ["parent"] = ReadFirstString(payload, "parentTimelineId", "parent_timeline_id"),
                         ["fork"] = ReadFirstString(payload, "forkEventId", "fork_event_id"), ["complete"] = completeFrom, ["now"] = now
                     });
-                ReignDatabase.ExecuteSql(connection, "UPDATE world_history_timelines SET is_active=CASE WHEN timeline_id=$timeline THEN 1 ELSE 0 END WHERE campaign_id=$campaign;",
-                    new Dictionary<string, object> { ["timeline"] = timelineId, ["campaign"] = campaignId });
+                WorldSimulationStore.UpdateWorldHistoryTimelines(connection, new Dictionary<string, object> { ["timeline"] = timelineId, ["campaign"] = campaignId });
 
                 List<PersistenceService.PreparedWorldHistoryEvent> preparedEvents =
                     new List<PersistenceService.PreparedWorldHistoryEvent>();
@@ -324,9 +263,7 @@ is_active=1,updated_utc=$now;",
                 {
                     foreach (PersistenceService.PreparedWorldHistoryEvent prepared in preparedEvents)
                     {
-                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_events(event_id,campaign_id,timeline_id,sequence,world_day,event_type,category,phase,correlation_id,location_id,location_name,dissemination_class,retention_class,player_involved,summary,semantic_text,source,is_complete,checksum,payload_json,created_utc,subject_id)
-VALUES($id,$campaign,$timeline,$sequence,$day,$type,$category,$phase,$correlation,$location,$locationName,$dissemination,$retention,$player,$summary,$semantic,$source,$complete,$checksum,$payload,$created,$subject);",
-                            prepared.EventParameters(campaignId, timelineId));
+                        WorldSimulationStore.InsertWorldHistoryEvents(connection, prepared.EventParameters(campaignId, timelineId));
                         StoreWorldHistoryEntities(connection, prepared.EventId,
                             prepared.Entities);
                         StoreWorldHistoryKnowledgeRules(connection,
@@ -341,21 +278,11 @@ VALUES($id,$campaign,$timeline,$sequence,$day,$type,$category,$phase,$correlatio
                     }
                 }
 
-                ReignDatabase.ExecuteSql(connection, @"UPDATE world_history_events
-SET retention_class='consequential'
-WHERE timeline_id=$timeline AND correlation_id<>'' AND correlation_id IN (
-    SELECT correlation_id FROM world_history_events
-    WHERE timeline_id=$timeline AND correlation_id<>'' AND retention_class='consequential'
-)
-AND event_type IN ('battle_completed','raid_completed','siege_completed');",
-                    new Dictionary<string, object> { ["timeline"] = timelineId });
+                WorldSimulationStore.UpdateWorldHistoryEvents2(connection, new Dictionary<string, object> { ["timeline"] = timelineId });
                 if (headSequence > 0)
                 {
-                    ReignDatabase.ExecuteSql(connection, "UPDATE world_history_timelines SET head_sequence=MAX(head_sequence,$sequence),head_event_id=$event,updated_utc=$now WHERE timeline_id=$timeline;",
-                        new Dictionary<string, object> { ["sequence"] = headSequence, ["event"] = headEventId, ["now"] = now, ["timeline"] = timelineId });
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_ingest_state(client_id,timeline_id,last_sequence,last_event_id,updated_utc)
-VALUES($client,$timeline,$sequence,$event,$now) ON CONFLICT(client_id,timeline_id) DO UPDATE SET last_sequence=MAX(world_history_ingest_state.last_sequence,$sequence),last_event_id=$event,updated_utc=$now;",
-                        new Dictionary<string, object> { ["client"] = clientId, ["timeline"] = timelineId, ["sequence"] = headSequence, ["event"] = headEventId, ["now"] = now });
+                    WorldSimulationStore.UpdateWorldHistoryTimelines2(connection, new Dictionary<string, object> { ["sequence"] = headSequence, ["event"] = headEventId, ["now"] = now, ["timeline"] = timelineId });
+                    WorldSimulationStore.UpsertWorldHistoryIngestState(connection, new Dictionary<string, object> { ["client"] = clientId, ["timeline"] = timelineId, ["sequence"] = headSequence, ["event"] = headEventId, ["now"] = now });
                 }
                     // Preserve original native participation before lossy history compaction.
                     foreach (var item in events)
@@ -363,9 +290,7 @@ VALUES($client,$timeline,$sequence,$event,$now) ON CONFLICT(client_id,timeline_i
                         DialogueService.ProjectSharedActivity(connection, timelineId, item);
                         if (hasSpouseLetter)
                         {
-                            foreach (var stored in ReignDatabase.QuerySql(connection,
-                                "SELECT * FROM world_history_events WHERE event_id=$id AND timeline_id=$timeline;",
-                                TestDict("id", ReadFirstString(item, "eventId", "event_id", "id"), "timeline", timelineId)))
+                            foreach (var stored in WorldSimulationStore.SelectWorldHistoryEvents4(connection, TestDict("id", ReadFirstString(item, "eventId", "event_id", "id"), "timeline", timelineId)))
                                 RelationshipsService.ProjectSpouseSeparation(connection, campaignId, timelineId, stored);
                         }
                         string performanceKind = ReadFirstString(item, "eventType", "event_type", "type");
@@ -373,8 +298,7 @@ VALUES($client,$timeline,$sequence,$event,$now) ON CONFLICT(client_id,timeline_i
                             && !(performanceKind == "social_outcome" && ReadString(item, "source", "") == "reign_social"
                                 && (ReadDictionary(item, "payload") ?? TryParseJsonObject(ReadString(item, "payload_json", "{}"))).ContainsKey("duelMode"))) continue;
                         string performanceEventId = ReadFirstString(item, "eventId", "event_id", "id");
-                        foreach (var performanceEvent in ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_events WHERE event_id=$id AND timeline_id=$timeline AND (event_type IN ('battle_completed','tournament_finished') OR (event_type='social_outcome' AND source='reign_social' AND payload_json LIKE '%\"duelMode\"%'));",
-                            TestDict("id", performanceEventId, "timeline", timelineId)))
+                        foreach (var performanceEvent in WorldSimulationStore.SelectWorldHistoryEvents5(connection, TestDict("id", performanceEventId, "timeline", timelineId)))
                             DialogueService.ProjectPlayerPerformanceEvent(connection, performanceEvent);
                     }
                     transaction.Commit();
@@ -485,7 +409,7 @@ VALUES($client,$timeline,$sequence,$event,$now) ON CONFLICT(client_id,timeline_i
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureWorldHistorySchema(connection);
-                Dictionary<string, object> existing = ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_timelines WHERE timeline_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = requested }).FirstOrDefault();
+                Dictionary<string, object> existing = WorldSimulationStore.SelectWorldHistoryTimelines(connection, new Dictionary<string, object> { ["id"] = requested }).FirstOrDefault();
                 long serverHead = ReadLong(existing, "head_sequence", 0);
                 if (existing == null && savedSequence > 0)
                 {
@@ -499,16 +423,13 @@ VALUES($client,$timeline,$sequence,$event,$now) ON CONFLICT(client_id,timeline_i
                     branched = true;
                 }
                 string now = DateTime.UtcNow.ToString("o");
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_timelines(timeline_id,campaign_id,parent_timeline_id,fork_event_id,history_complete_from_day,head_sequence,head_event_id,is_active,created_utc,updated_utc)
-VALUES($id,$campaign,$parent,$fork,$complete,$sequence,$head,1,$now,$now)
-ON CONFLICT(timeline_id) DO UPDATE SET is_active=1,updated_utc=$now;", new Dictionary<string, object>
+                WorldSimulationStore.UpsertWorldHistoryTimelines2(connection, new Dictionary<string, object>
                 {
                     ["id"] = timelineId, ["campaign"] = campaignId, ["parent"] = branched ? requested : ReadString(existing, "parent_timeline_id", ""),
                     ["fork"] = savedHead, ["complete"] = completeFrom, ["sequence"] = branched ? savedSequence : Math.Max(savedSequence, serverHead),
                     ["head"] = savedHead, ["now"] = now
                 });
-                ReignDatabase.ExecuteSql(connection, "UPDATE world_history_timelines SET is_active=CASE WHEN timeline_id=$id THEN 1 ELSE 0 END WHERE campaign_id=$campaign;",
-                    new Dictionary<string, object> { ["id"] = timelineId, ["campaign"] = campaignId });
+                WorldSimulationStore.UpdateWorldHistoryTimelines3(connection, new Dictionary<string, object> { ["id"] = timelineId, ["campaign"] = campaignId });
                 if (historyMissing || branched)
                 {
                     DialogueService.BindRecoveredLetterSources(connection, requested, timelineId, savedSequence, savedHead);
@@ -534,9 +455,7 @@ ON CONFLICT(timeline_id) DO UPDATE SET is_active=1,updated_utc=$now;", new Dicti
             int ordinal = 0;
             foreach (Dictionary<string, object> entity in entities ?? new List<Dictionary<string, object>>())
             {
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_entities(event_id,ordinal,entity_id,entity_type,name_snapshot,role,side,party_id,clan_id,kingdom_id,quantity,before_json,after_json,payload_json)
-VALUES($event,$ordinal,$id,$type,$name,$role,$side,$party,$clan,$kingdom,$quantity,$before,$after,$payload);",
-                    new Dictionary<string, object>
+                WorldSimulationStore.InsertWorldHistoryEntities(connection, new Dictionary<string, object>
                     {
                         ["event"] = eventId, ["ordinal"] = ordinal++, ["id"] = ReadFirstString(entity, "entityId", "entity_id", "id"),
                         ["type"] = ReadFirstString(entity, "entityType", "entity_type", "type"), ["name"] = ReadFirstString(entity, "name", "nameSnapshot", "name_snapshot"),
@@ -629,8 +548,7 @@ VALUES($event,$ordinal,$id,$type,$name,$role,$side,$party,$clan,$kingdom,$quanti
                 string audienceId = ReadFirstString(rule, "audienceId", "audience_id");
                 double available = ReadDouble(rule, "availableDay", ReadDouble(rule, "available_day", day));
                 string ruleId = eventId + ":" + ordinal++ + ":" + audienceType + ":" + audienceId;
-                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO world_history_knowledge_rules(rule_id,event_id,audience_type,audience_id,available_day,acquisition_mode,confidence)
-VALUES($id,$event,$type,$audience,$day,$mode,$confidence);", new Dictionary<string, object>
+                WorldSimulationStore.UpsertWorldHistoryKnowledgeRules(connection, new Dictionary<string, object>
                 {
                     ["id"] = ruleId, ["event"] = eventId, ["type"] = audienceType, ["audience"] = audienceId, ["day"] = available,
                     ["mode"] = ReadFirstString(rule, "acquisitionMode", "acquisition_mode"), ["confidence"] = ReadDouble(rule, "confidence", 1d)
@@ -646,9 +564,8 @@ VALUES($id,$event,$type,$audience,$day,$mode,$confidence);", new Dictionary<stri
 
         private static void InsertWorldHistoryFts(ReignDbConnection connection, string eventId, string text, List<Dictionary<string, object>> entities, string location, string eventType)
         {
-            ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_fts WHERE event_id=$id;", new Dictionary<string, object> { ["id"] = eventId });
-            ReignDatabase.ExecuteSql(connection, "INSERT INTO world_history_fts(event_id,text,entities,roles,location,event_type) VALUES($id,$text,$entities,$roles,$location,$type);",
-                new Dictionary<string, object>
+            WorldSimulationStore.DeleteWorldHistoryFts3(connection, new Dictionary<string, object> { ["id"] = eventId });
+            WorldSimulationStore.InsertWorldHistoryFts(connection, new Dictionary<string, object>
                 {
                     ["id"] = eventId, ["text"] = text ?? "", ["entities"] = string.Join(" ", entities.Select(x => ReadFirstString(x, "entityId", "name", "nameSnapshot"))),
                     ["roles"] = string.Join(" ", entities.Select(x => ReadString(x, "role", ""))), ["location"] = location ?? "", ["type"] = eventType ?? ""
@@ -671,11 +588,7 @@ VALUES($id,$event,$type,$audience,$day,$mode,$confidence);", new Dictionary<stri
                 EnsureWorldHistorySchema(connection);
                 timelineId = FirstNonEmpty(timelineId, ActiveWorldHistoryTimeline(connection));
                 List<string> terms = Program.MemoryQueryTerms(text).Take(16).ToList();
-                List<Dictionary<string, object>> rows = ReignDatabase.QuerySql(connection, @"SELECT DISTINCT e.* FROM world_history_events e
-LEFT JOIN world_history_entities n ON n.event_id=e.event_id
-WHERE e.timeline_id=$timeline AND ($entity='' OR n.entity_id=$entity) AND ($type='' OR e.event_type=$type)
-AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to ORDER BY e.sequence DESC LIMIT $limit;",
-                    new Dictionary<string, object> { ["timeline"] = timelineId, ["entity"] = entityId, ["type"] = type, ["from"] = fromDay, ["to"] = toDay, ["limit"] = Math.Max(limit, terms.Count > 0 ? Math.Min(500, limit * 5) : limit) });
+                List<Dictionary<string, object>> rows = WorldSimulationStore.SelectWorldHistoryEvents6(connection, new Dictionary<string, object> { ["timeline"] = timelineId, ["entity"] = entityId, ["type"] = type, ["from"] = fromDay, ["to"] = toDay, ["limit"] = Math.Max(limit, terms.Count > 0 ? Math.Min(500, limit * 5) : limit) });
                 if (terms.Count > 0)
                 {
                     rows = rows.Where(x => HistoryTermScore(x, terms) > 0d).OrderByDescending(x => HistoryTermScore(x, terms)).ThenByDescending(x => ReadLong(x, "sequence", 0)).Take(limit).ToList();
@@ -691,10 +604,10 @@ AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to ORDER BY e.sequence DES
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureWorldHistorySchema(connection);
-                Dictionary<string, object> row = ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_events WHERE event_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = eventId }).FirstOrDefault();
+                Dictionary<string, object> row = WorldSimulationStore.SelectWorldHistoryEvents7(connection, new Dictionary<string, object> { ["id"] = eventId }).FirstOrDefault();
                 if (row == null) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "World-history event was not found." };
                 row["entities"] = QueryWorldHistoryEntities(connection, eventId);
-                row["knowledgeRules"] = ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_knowledge_rules WHERE event_id=$id ORDER BY available_day;", new Dictionary<string, object> { ["id"] = eventId });
+                row["knowledgeRules"] = WorldSimulationStore.SelectWorldHistoryKnowledgeRules(connection, new Dictionary<string, object> { ["id"] = eventId });
                 return new Dictionary<string, object> { ["ok"] = true, ["event"] = row };
             }
         }
@@ -706,8 +619,7 @@ AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to ORDER BY e.sequence DES
             {
                 EnsureWorldHistorySchema(connection);
                 string timeline = query != null && query.ContainsKey("timelineId") ? query["timelineId"] : ActiveWorldHistoryTimeline(connection);
-                List<Dictionary<string, object>> rows = ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_events WHERE timeline_id=$timeline AND correlation_id=$id ORDER BY sequence;",
-                    new Dictionary<string, object> { ["timeline"] = timeline, ["id"] = correlationId });
+                List<Dictionary<string, object>> rows = WorldSimulationStore.SelectWorldHistoryEvents8(connection, new Dictionary<string, object> { ["timeline"] = timeline, ["id"] = correlationId });
                 foreach (Dictionary<string, object> row in rows) row["entities"] = QueryWorldHistoryEntities(connection, ReadString(row, "event_id", ""));
                 return new Dictionary<string, object> { ["ok"] = true, ["correlationId"] = correlationId, ["events"] = rows };
             }
@@ -730,7 +642,7 @@ AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to ORDER BY e.sequence DES
             {
                 EnsureWorldHistorySchema(connection);
                 string timelineId = FirstNonEmpty(ReadFirstString(payload, "timelineId", "timeline_id"), ActiveWorldHistoryTimeline(connection));
-                Dictionary<string, object> timeline = ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_timelines WHERE timeline_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = timelineId }).FirstOrDefault()
+                Dictionary<string, object> timeline = WorldSimulationStore.SelectWorldHistoryTimelines(connection, new Dictionary<string, object> { ["id"] = timelineId }).FirstOrDefault()
                     ?? new Dictionary<string, object>();
                 long head = ReadLong(timeline, "head_sequence", 0);
                 string cacheKey = "source_claim_v3|" + campaignId + "|" + Program.NormalizeLookup(claim) + "|" + claimantId + "|" + speakerId + "|" + speakerKingdomId + "|" + timelineId + "|" + head
@@ -852,9 +764,7 @@ AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to ORDER BY e.sequence DES
                     ["candidateCount"] = candidates.Count, ["candidateEventIds"] = candidates.Select(x => ReadString(x, "event_id", "")).ToList(),
                     ["durationMs"] = timer.ElapsedMilliseconds, ["cached"] = false
                 };
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_claim_checks(check_id,campaign_id,timeline_id,world_day,claimant_id,speaker_id,raw_claim,purpose,claim_family,objective_verdict,speaker_verdict,explanation,constraints_json,evidence_event_ids_json,speaker_event_ids_json,minime_json,created_ts)
-VALUES($id,$campaign,$timeline,$day,$claimant,$speaker,$claim,$purpose,$family,$objective,$speakerVerdict,$explanation,$constraints,$evidence,$speakerEvidence,$minime,$ts);",
-                    new Dictionary<string, object>
+                WorldSimulationStore.InsertWorldHistoryClaimChecks(connection, new Dictionary<string, object>
                     {
                         ["id"] = checkId, ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = worldDay,
                         ["claimant"] = claimantId, ["speaker"] = speakerId, ["claim"] = claim, ["purpose"] = purpose, ["family"] = family,
@@ -880,22 +790,15 @@ VALUES($id,$campaign,$timeline,$day,$claimant,$speaker,$claim,$purpose,$family,$
                 ["claimant"] = claimantId ?? "", ["limit"] = Math.Max(1, Math.Min(256, limit))
             };
             List<Dictionary<string, object>> rows = string.IsNullOrWhiteSpace(claimantId)
-                ? ReignDatabase.QuerySql(connection, @"SELECT e.* FROM world_history_events e INDEXED BY idx_wh_event_evidence
-WHERE e.timeline_id=$timeline AND ($location='' OR e.location_id=$location) AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to
-ORDER BY e.sequence DESC LIMIT $limit;", parameters)
-                : ReignDatabase.QuerySql(connection, @"SELECT e.* FROM world_history_entities n INDEXED BY idx_wh_entity_event
-JOIN world_history_events e ON e.event_id=n.event_id WHERE n.entity_id=$claimant AND e.timeline_id=$timeline
-AND ($location='' OR e.location_id=$location) AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to
-ORDER BY e.sequence DESC LIMIT $limit;", parameters);
+                ? WorldSimulationStore.SelectWorldHistoryEvents9(connection, parameters)
+                : WorldSimulationStore.SelectWorldHistoryEntities(connection, parameters);
             List<string> ftsTerms = Program.MemoryQueryTerms(claim).Where(x => x.Length > 2).Take(16).ToList();
             string ftsQuery = Program.BuildFtsQuery(ftsTerms);
             if (!string.IsNullOrWhiteSpace(ftsQuery))
             {
                 try
                 {
-                    List<Dictionary<string, object>> semanticRows = ReignDatabase.QuerySql(connection, @"SELECT e.* FROM world_history_fts JOIN world_history_events e ON e.event_id=world_history_fts.event_id
-WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to LIMIT 128;",
-                        new Dictionary<string, object> { ["query"] = ftsQuery, ["timeline"] = timelineId, ["from"] = fromDay, ["to"] = toDay <= 0 ? double.MaxValue : toDay });
+                    List<Dictionary<string, object>> semanticRows = WorldSimulationStore.SelectWorldHistoryFts(connection, new Dictionary<string, object> { ["query"] = ftsQuery, ["timeline"] = timelineId, ["from"] = fromDay, ["to"] = toDay <= 0 ? double.MaxValue : toDay });
                     HashSet<string> seen = new HashSet<string>(rows.Select(x => ReadString(x, "event_id", "")), StringComparer.OrdinalIgnoreCase);
                     rows.AddRange(semanticRows.Where(x => seen.Add(ReadString(x, "event_id", ""))));
                 }
@@ -1116,7 +1019,7 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
             HashSet<string> present = new HashSet<string>(candidates.Select(x => ReadString(x, "event_id", "")), StringComparer.OrdinalIgnoreCase);
             foreach (string correlation in candidates.Select(x => ReadString(x, "correlation_id", "")).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList())
             {
-                foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_events WHERE timeline_id=$timeline AND correlation_id=$correlation ORDER BY sequence;", new Dictionary<string, object> { ["timeline"] = timelineId, ["correlation"] = correlation }))
+                foreach (Dictionary<string, object> row in WorldSimulationStore.SelectWorldHistoryEvents10(connection, new Dictionary<string, object> { ["timeline"] = timelineId, ["correlation"] = correlation }))
                 {
                     string id = ReadString(row, "event_id", "");
                     if (present.Add(id)) { row["entities"] = QueryWorldHistoryEntities(connection, id); row["deterministicScore"] = 1d; row["combinedScore"] = 1d; candidates.Add(row); }
@@ -1126,12 +1029,12 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
 
         internal static List<Dictionary<string, object>> QueryWorldHistoryEntities(ReignDbConnection connection, string eventId)
         {
-            return ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_entities WHERE event_id=$id ORDER BY ordinal;", new Dictionary<string, object> { ["id"] = eventId });
+            return WorldSimulationStore.SelectWorldHistoryEntities2(connection, new Dictionary<string, object> { ["id"] = eventId });
         }
 
         internal static string ActiveWorldHistoryTimeline(ReignDbConnection connection)
         {
-            return ReadString(ReignDatabase.QuerySql(connection, "SELECT timeline_id FROM world_history_timelines WHERE is_active=1 ORDER BY updated_utc DESC LIMIT 1;").FirstOrDefault(), "timeline_id", "main");
+            return ReadString(WorldSimulationStore.SelectWorldHistoryTimelines2(connection).FirstOrDefault(), "timeline_id", "main");
         }
 
         internal static string BuildWorldHistorySemanticText(string eventType, string phase, string summary, List<Dictionary<string, object>> entities, string location)
@@ -1302,8 +1205,7 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureWorldHistorySchema(connection);
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_timelines(timeline_id,campaign_id,history_complete_from_day,head_sequence,head_event_id,is_active,created_utc,updated_utc)
-VALUES($timeline,$campaign,1,$head,'stress_last',1,$now,$now);", new Dictionary<string, object>
+                    WorldSimulationStore.InsertWorldHistoryTimelines(connection, new Dictionary<string, object>
                     {
                         ["timeline"] = timelineId, ["campaign"] = campaignId, ["head"] = rowCount, ["now"] = DateTime.UtcNow.ToString("o")
                     });
@@ -1312,12 +1214,10 @@ VALUES($timeline,$campaign,1,$head,'stress_last',1,$now,$now);", new Dictionary<
                     using (ReignDbCommand entityCommand = connection.CreateCommand())
                     {
                         eventCommand.Transaction = transaction;
-                        eventCommand.CommandText = @"INSERT INTO world_history_events(event_id,campaign_id,timeline_id,sequence,world_day,event_type,category,phase,correlation_id,location_id,location_name,dissemination_class,summary,semantic_text,source,is_complete,checksum,payload_json,created_utc)
-VALUES($id,$campaign,$timeline,$sequence,$day,$type,'warfare','completed',$correlation,$location,$location,'ordinary',$summary,$summary,'stress',1,'','{}',$created);";
+                        eventCommand.CommandText = WorldSimulationStore.InsertWorldHistoryEventsSql;
                         foreach (string name in new[] { "$id", "$campaign", "$timeline", "$sequence", "$day", "$type", "$correlation", "$location", "$summary", "$created" }) eventCommand.Parameters.AddWithValue(name, "");
                         entityCommand.Transaction = transaction;
-                        entityCommand.CommandText = @"INSERT INTO world_history_entities(event_id,ordinal,entity_id,entity_type,name_snapshot,role,side,party_id,clan_id,kingdom_id,quantity,before_json,after_json,payload_json)
-VALUES($event,0,'main_hero','hero','Player','participant winner','attacker','main_party','player_clan','kingdom_a',1,'{}','{}','{}');";
+                        entityCommand.CommandText = WorldSimulationStore.InsertWorldHistoryEntitiesSql;
                         entityCommand.Parameters.AddWithValue("$event", "");
                         string created = DateTime.UtcNow.ToString("o");
                         for (int i = 1; i <= rowCount; i++)
@@ -1343,10 +1243,7 @@ VALUES($event,0,'main_hero','hero','Player','participant winner','attacker','mai
                         transaction.Commit();
                     }
                     Stopwatch queryTimer = Stopwatch.StartNew();
-                    queryCount = ReignDatabase.QuerySql(connection, @"SELECT e.event_id,e.sequence,e.world_day FROM world_history_entities n INDEXED BY idx_wh_entity_event
-JOIN world_history_events e ON e.event_id=n.event_id WHERE n.entity_id='main_hero' AND e.timeline_id=$timeline
-AND e.event_type='battle_completed' AND e.world_day BETWEEN $from AND $to ORDER BY e.world_day DESC LIMIT 256;",
-                        new Dictionary<string, object> { ["timeline"] = timelineId, ["from"] = 5000d, ["to"] = 10001d }).Count;
+                    queryCount = WorldSimulationStore.SelectWorldHistoryEntities3(connection, new Dictionary<string, object> { ["timeline"] = timelineId, ["from"] = 5000d, ["to"] = 10001d }).Count;
                     queryTimer.Stop();
                     queryMs = queryTimer.ElapsedMilliseconds;
                 }

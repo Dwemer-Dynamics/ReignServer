@@ -1749,7 +1749,7 @@ namespace ReignBetaServer
                     "lock (RelationshipsService.CampaignRelationshipWriteLock(campaignId))",
                     StringComparison.Ordinal)
                     < kingdomLeaderDiplomacySource.IndexOf(
-                        "SELECT COUNT(*) AS count FROM ruler_diplomatic_incidents",
+                        "DiplomacyStore.CountRulerDiplomaticIncidents2(connection",
                         StringComparison.Ordinal),
                 "Diplomacy action receipts release FileLock before database activity or relationship feedback, then durably mark feedback after its idempotent incident application.");
             add("notable_initialization_bulk_io",

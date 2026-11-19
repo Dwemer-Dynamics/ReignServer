@@ -56,8 +56,7 @@ namespace ReignBetaServer
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     EnsureConversationRelationshipSchema(connection);
-                    ReignDatabase.ExecuteSql(connection, "UPDATE relationship_pair_chemistry SET affinity_a_to_b=10 WHERE pair_key=$pair;",
-                        new Dictionary<string, object> { ["pair"] = AmbientPairKey("npc_a", "player") });
+                    RelationshipsStore.UpdateRelationshipPairChemistry(connection, new Dictionary<string, object> { ["pair"] = AmbientPairKey("npc_a", "player") });
                 }
                 Dictionary<string, object> band = run("band", 10, assessment("npc_a", "player", 10, "routine", 0.7d, "positive"));
                 add("routine_band_blocks_outward_growth", ReadInt(ReadDictionaryList(band, "receipts").FirstOrDefault(), "finalDelta", 99) == 0,
@@ -131,27 +130,19 @@ namespace ReignBetaServer
                     "A provider cannot justify a higher tier by inventing wording absent from the target's actual contribution.", inventedQuoteResult);
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO events(event_id,campaign_id,ts,world_day,event_type,summary,participants_json,
-known_by_json,created_utc) VALUES('gift_evidence',$campaign,$ts,10,'verified_gift','A valuable home was transferred.',
-'[""player"",""npc_b""]','[""player"",""npc_b""]',$utc);", new Dictionary<string, object>
+                    RelationshipsStore.InsertEvents(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaign, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["utc"] = DateTimeOffset.UtcNow.ToString("o")
                     });
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO events(event_id,campaign_id,ts,world_day,event_type,summary,participants_json,
-known_by_json,created_utc) VALUES('dialogue_gift_claim',$campaign,$ts,10,'dialogue_memory','The player said a fine silver cup was a gift.',
-'[""player"",""npc_c""]','[""player"",""npc_c""]',$utc);", new Dictionary<string, object>
+                    RelationshipsStore.InsertEvents2(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaign, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["utc"] = DateTimeOffset.UtcNow.ToString("o")
                     });
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO events(event_id,campaign_id,ts,world_day,event_type,summary,participants_json,
-known_by_json,created_utc) VALUES('dialogue_betrayal_claim',$campaign,$ts,10,'dialogue_memory','The player claimed to have betrayed the observer.',
-'[""player"",""npc_dialogue_betrayal""]','[""player"",""npc_dialogue_betrayal""]',$utc);", new Dictionary<string, object>
+                    RelationshipsStore.InsertEvents3(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaign, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["utc"] = DateTimeOffset.UtcNow.ToString("o")
                     });
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO events(event_id,campaign_id,ts,world_day,event_type,summary,participants_json,
-known_by_json,created_utc) VALUES('betrayal_evidence',$campaign,$ts,10,'verified_betrayal','A completed action receipt proves the ally sold the observer out to an enemy.',
-'[""player"",""npc_c""]','[""player"",""npc_c""]',$utc);", new Dictionary<string, object>
+                    RelationshipsStore.InsertEvents4(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaign, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["utc"] = DateTimeOffset.UtcNow.ToString("o")
                     });
@@ -273,15 +264,8 @@ known_by_json,created_utc) VALUES('betrayal_evidence',$campaign,$ts,10,'verified
                     ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     int repeatedLineageCount = ReadInt(
-                        ReignDatabase.QuerySql(
-                            connection,
-                            @"SELECT COUNT(*) AS count
-FROM conversation_relationship_benefits
-WHERE campaign_id=$campaign
-AND giver_id='player'
-AND recipient_id='npc_b'
-AND payload_json LIKE '%gift_evidence%';",
-                            new Dictionary<string, object>
+                        RelationshipsStore.CountConversationRelationshipBenefits(
+                            connection, new Dictionary<string, object>
                             {
                                 ["campaign"] = campaign
                             }).FirstOrDefault(),
@@ -365,37 +349,22 @@ AND payload_json LIKE '%gift_evidence%';",
                     "An empathetic witness can be happy for the recipient while receiving only a small normal-scale increase toward the giver.", happyWitness);
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    int benefitCount = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS count FROM conversation_relationship_benefits WHERE source_event_id='gift';").FirstOrDefault(), "count", 0);
+                    int benefitCount = ReadInt(RelationshipsStore.CountConversationRelationshipBenefits2(connection).FirstOrDefault(), "count", 0);
                     add("only_gift_recipient_owns_transformative_benefit", benefitCount == 1,
                         "A group gift creates one durable high-tier benefit for its actual recipient and none for witnesses.", benefitCount);
 
                     Dictionary<string, object> canonical =
-                        ReignDatabase.QuerySql(
-                            connection,
-                            @"SELECT *
-FROM conversation_relationship_benefits
-WHERE benefit_id='home_gift'
-LIMIT 1;")
+                        RelationshipsStore.SelectConversationRelationshipBenefits5(
+                            connection)
                         .FirstOrDefault();
-                    ReignDatabase.ExecuteSql(
-                        connection,
-                        @"DELETE FROM conversation_relationship_benefits
-WHERE campaign_id=$campaign
-AND giver_id='player'
-AND recipient_id='npc_b';",
-                        new Dictionary<string, object>
+                    RelationshipsStore.DeleteConversationRelationshipBenefits(
+                        connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaign
                         });
                     const long tiedBenefitTimestamp = 424242;
-                    ReignDatabase.ExecuteSql(
-                        connection,
-                        @"INSERT INTO conversation_relationship_benefits(
-benefit_id,campaign_id,timeline_id,giver_id,recipient_id,benefit_kind,description,source_event_id,source_turn_id,
-original_delta,retained_appreciation,continued_utility,status,created_ts,updated_ts,payload_json)
-VALUES('benefit_generated_duplicate',$campaign,$timeline,'player','npc_b',$kind,$description,$event,$turn,
-$delta,$retained,$utility,$status,$ts,$ts,$payload);",
-                        new Dictionary<string, object>
+                    RelationshipsStore.InsertConversationRelationshipBenefits(
+                        connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaign,
                             ["timeline"] = ReadString(
@@ -422,14 +391,8 @@ $delta,$retained,$utility,$status,$ts,$ts,$payload);",
                             ["payload"] = ReadString(
                                 canonical, "payload_json", "{}")
                         });
-                    ReignDatabase.ExecuteSql(
-                        connection,
-                        @"INSERT INTO conversation_relationship_benefits(
-benefit_id,campaign_id,timeline_id,giver_id,recipient_id,benefit_kind,description,source_event_id,source_turn_id,
-original_delta,retained_appreciation,continued_utility,status,created_ts,updated_ts,payload_json)
-VALUES('home_gift',$campaign,$timeline,'player','npc_b',$kind,$description,$event,$turn,
-$delta,$retained,$utility,$status,$ts,$ts,$payload);",
-                        new Dictionary<string, object>
+                    RelationshipsStore.InsertConversationRelationshipBenefits2(
+                        connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaign,
                             ["timeline"] = ReadString(
@@ -623,13 +586,7 @@ $delta,$retained,$utility,$status,$ts,$ts,$payload);",
                 {
                     EnsureConversationRelationshipSchema(connection);
                     long lieTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                    ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO world_history_lie_checks(
-lie_check_id,episode_key,campaign_id,timeline_id,world_day,claimant_id,target_id,raw_claim,normalized_claim,
-objective_verdict,knowledge_basis,formula_version,outcome,evidence_event_ids_json,known_event_ids_json,matched_json,
-mismatched_json,prompt_packet_json,created_ts,updated_ts)
-VALUES('caught_lie','caught_lie_episode',$campaign,'main',10,'player','npc_c','false claim','false claim',
-'contradicted','firsthand',$formula,'detected_firsthand','[""evidence_1""]','[""evidence_1""]','[]','[]','{}',$ts,$ts);",
-                        new Dictionary<string, object> { ["campaign"] = campaign, ["formula"] = DialogueService.LieFormulaVersion, ["ts"] = lieTs });
+                    RelationshipsStore.UpsertWorldHistoryLieChecks(connection, new Dictionary<string, object> { ["campaign"] = campaign, ["formula"] = DialogueService.LieFormulaVersion, ["ts"] = lieTs });
                 }
                 foreach (var invalidLie in new[] {
                     TestDict("id", "unknown_verdict", "verdict", "unknown", "basis", "firsthand", "outcome", "detected_firsthand", "claimant", "player", "observer", "npc_c"),
@@ -641,14 +598,7 @@ VALUES('caught_lie','caught_lie_episode',$campaign,'main',10,'player','npc_c','f
                     string invalidId = "lie_control_" + ReadString(invalidLie, "id", "");
                     using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
                     {
-                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_lie_checks(
-lie_check_id,episode_key,campaign_id,timeline_id,world_day,claimant_id,target_id,raw_claim,normalized_claim,
-objective_verdict,knowledge_basis,formula_version,outcome,evidence_event_ids_json,known_event_ids_json,matched_json,
-mismatched_json,prompt_packet_json,created_ts,updated_ts)
-SELECT $id,$id,campaign_id,timeline_id,world_day,$claimant,$observer,raw_claim,normalized_claim,
-$verdict,$basis,formula_version,$outcome,evidence_event_ids_json,known_event_ids_json,matched_json,
-mismatched_json,prompt_packet_json,created_ts,updated_ts FROM world_history_lie_checks WHERE lie_check_id='caught_lie';",
-                            new Dictionary<string, object>(invalidLie) { ["id"] = invalidId });
+                        RelationshipsStore.InsertWorldHistoryLieChecks(connection, new Dictionary<string, object>(invalidLie) { ["id"] = invalidId });
                     }
                     var invalidAssessment = new Dictionary<string, object>(assessment("npc_c", "player", 0, "harmful_lie", 1d, "negative")) {
                         ["lieCheckId"] = invalidId, ["sourceText"] = "I claim the distant caravan arrived yesterday.",
@@ -860,8 +810,7 @@ mismatched_json,prompt_packet_json,created_ts,updated_ts FROM world_history_lie_
                 }, new List<string> { "npc_first", "npc_second" });
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    List<Dictionary<string, object>> fallbackReceipts = ReignDatabase.QuerySql(connection,
-                        "SELECT * FROM conversation_relationship_receipts WHERE exchange_id='missing_reaction_fallback' ORDER BY observer_id,target_id;");
+                    List<Dictionary<string, object>> fallbackReceipts = RelationshipsStore.SelectConversationRelationshipReceipts2(connection);
                     add("missing_direct_npc_reaction_has_no_inferred_delta",
                         fallbackReceipts.Count == 2
                         && fallbackReceipts.Any(x => ReadString(x, "observer_id", "") == "npc_second" && ReadString(x, "target_id", "") == "player" && ReadInt(x, "final_delta", 0) == -1)
@@ -916,13 +865,7 @@ mismatched_json,prompt_packet_json,created_ts,updated_ts FROM world_history_lie_
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     DialogueService.EnsureCategorizedMemorySchema(connection);
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_turns(
-turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,speaker_name,text,channel,world_day,ts,
-location_id,participants_json,status,payload_json)
-VALUES('prior_npc_turn',$session,'',2,'party_prior_session_turn_1','npc','npc_late','Purios',
-'Count seven open conversations on the clay disk, then rest when all seven marks are used.','party_chat',10,$ts,
-'town_danustica','[""player"",""npc_early"",""npc_late""]','active','{}');",
-                        new Dictionary<string, object>
+                    RelationshipsStore.InsertConversationTurns(connection, new Dictionary<string, object>
                         {
                             ["session"] = priorSessionId,
                             ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
@@ -1041,8 +984,7 @@ VALUES('prior_npc_turn',$session,'',2,'party_prior_session_turn_1','npc','npc_la
                 List<Dictionary<string, object>> staleNativeStored;
                 using (ReignDbConnection staleNativeConnection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    staleNativeStored = ReignDatabase.QuerySql(staleNativeConnection,
-                        "SELECT * FROM conversation_relationship_receipts WHERE exchange_id='stale_native_snapshot';");
+                    staleNativeStored = RelationshipsStore.SelectConversationRelationshipReceipts3(staleNativeConnection);
                 }
                 add("native_ack_reconciles_stale_request_snapshot_to_actual_transition",
                     ReadBool(staleNativeAck, "ok", false)
@@ -1089,8 +1031,7 @@ VALUES('prior_npc_turn',$session,'',2,'party_prior_session_turn_1','npc','npc_la
                 using (ReignDbConnection cancellingConnection =
                     ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    cancellingStored = ReignDatabase.QuerySql(cancellingConnection,
-                        "SELECT * FROM conversation_relationship_receipts WHERE exchange_id='cancelling_directions' ORDER BY observer_id;");
+                    cancellingStored = RelationshipsStore.SelectConversationRelationshipReceipts4(cancellingConnection);
                 }
                 add("zero_sum_directional_judgments_still_acknowledge_native_pair",
                     ReadDictionaryList(cancellingDirections, "receipts").Count == 2
@@ -1139,8 +1080,7 @@ VALUES('prior_npc_turn',$session,'',2,'party_prior_session_turn_1','npc','npc_la
                 List<Dictionary<string, object>> bandLimitedStored;
                 using (ReignDbConnection bandLimitedConnection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    bandLimitedStored = ReignDatabase.QuerySql(bandLimitedConnection,
-                        "SELECT * FROM conversation_relationship_receipts WHERE exchange_id='band_limited_reciprocal' ORDER BY observer_id;");
+                    bandLimitedStored = RelationshipsStore.SelectConversationRelationshipReceipts5(bandLimitedConnection);
                 }
                 add("unrelated_new_pair_ignores_native_baseline_and_acks_net_zero",
                     ReadDictionaryList(bandLimitedPair, "receipts").Count == 2

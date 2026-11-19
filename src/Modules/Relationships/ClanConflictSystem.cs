@@ -40,47 +40,15 @@ namespace ReignBetaServer
 
         internal static void EnsureClanConflictSchema(ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS clan_conflict_day_sweeps (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,day_key INTEGER NOT NULL,world_day REAL NOT NULL,
-eligible_kingdoms INTEGER NOT NULL,processed_kingdoms INTEGER NOT NULL,status TEXT NOT NULL,
-eligible_kingdom_ids_json TEXT NOT NULL DEFAULT '[]',
-created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
-PRIMARY KEY(campaign_id,timeline_id,day_key));");
-            ReignDatabase.EnsureDatabaseColumn(connection, "clan_conflict_day_sweeps",
-                "eligible_kingdom_ids_json", "TEXT NOT NULL DEFAULT '[]'");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS clan_conflict_daily_rolls (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,day_key INTEGER NOT NULL,world_day REAL NOT NULL,
-kingdom_id TEXT NOT NULL,kingdom_name TEXT NOT NULL DEFAULT '',ruler_id TEXT NOT NULL DEFAULT '',
-chance INTEGER NOT NULL,roll INTEGER NOT NULL,passed INTEGER NOT NULL,status TEXT NOT NULL,
-incident_id TEXT NOT NULL DEFAULT '',eligible_clan_count INTEGER NOT NULL DEFAULT 0,
-created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
-PRIMARY KEY(campaign_id,timeline_id,day_key,kingdom_id));");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS clan_conflict_incidents (
-incident_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,day_key INTEGER NOT NULL,
-world_day REAL NOT NULL,kingdom_id TEXT NOT NULL,kingdom_name TEXT NOT NULL,ruler_id TEXT NOT NULL,ruler_name TEXT NOT NULL,
-clan_a_id TEXT NOT NULL,clan_a_name TEXT NOT NULL,clan_b_id TEXT NOT NULL,clan_b_name TEXT NOT NULL,
-leader_a_id TEXT NOT NULL,leader_b_id TEXT NOT NULL,involved_a_json TEXT NOT NULL,involved_b_json TEXT NOT NULL,
-involved_a_names_json TEXT NOT NULL DEFAULT '[]',involved_b_names_json TEXT NOT NULL DEFAULT '[]',
-archetype_id TEXT NOT NULL,category TEXT NOT NULL,headline TEXT NOT NULL,narrative TEXT NOT NULL,
-trait_votes_json TEXT NOT NULL,average_relation_a REAL NOT NULL,average_relation_b REAL NOT NULL,
-winning_side TEXT NOT NULL,charm_skill INTEGER NOT NULL,charm_chance_bp INTEGER NOT NULL,charm_roll INTEGER NOT NULL,
-mediation_succeeded INTEGER NOT NULL,relationship_effect_count INTEGER NOT NULL DEFAULT 0,
-notice_status TEXT NOT NULL DEFAULT 'pending',status TEXT NOT NULL DEFAULT 'effects_pending',
-last_error TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
-UNIQUE(campaign_id,timeline_id,day_key,kingdom_id));");
-            ReignDatabase.EnsureDatabaseColumn(connection, "clan_conflict_incidents",
-                "involved_a_names_json", "TEXT NOT NULL DEFAULT '[]'");
-            ReignDatabase.EnsureDatabaseColumn(connection, "clan_conflict_incidents",
-                "involved_b_names_json", "TEXT NOT NULL DEFAULT '[]'");
-            ReignDatabase.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_clan_conflict_incidents_timeline
-ON clan_conflict_incidents(campaign_id,timeline_id,world_day DESC);");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS clan_conflict_relationship_effects (
-effect_id TEXT PRIMARY KEY,incident_id TEXT NOT NULL,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,
-world_day REAL NOT NULL,effect_kind TEXT NOT NULL,observer_id TEXT NOT NULL,target_id TEXT NOT NULL,amount INTEGER NOT NULL,
-before_affinity INTEGER NOT NULL DEFAULT 0,after_affinity INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'pending',
-last_error TEXT NOT NULL DEFAULT '',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);");
-            ReignDatabase.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_clan_conflict_effects_pending
-ON clan_conflict_relationship_effects(campaign_id,timeline_id,status,world_day);");
+            RelationshipsSchema.CreateClanConflictDaySweeps(connection);
+            RelationshipsSchema.EnsureColumnClanConflictDaySweepsEligibleKingdomIdsJson(connection);
+            RelationshipsSchema.CreateClanConflictDailyRolls(connection);
+            RelationshipsSchema.CreateClanConflictIncidents(connection);
+            RelationshipsSchema.EnsureColumnClanConflictIncidentsInvolvedANamesJson(connection);
+            RelationshipsSchema.EnsureColumnClanConflictIncidentsInvolvedBNamesJson(connection);
+            RelationshipsSchema.CreateIndexClanConflictIncidentsTimeline(connection);
+            RelationshipsSchema.CreateClanConflictRelationshipEffects(connection);
+            RelationshipsSchema.CreateIndexClanConflictEffectsPending(connection);
         }
 
         internal static Dictionary<string, object> EvaluatePoliticalIncidentsCombined(
@@ -121,10 +89,7 @@ ON clan_conflict_relationship_effects(campaign_id,timeline_id,status,world_day);
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                lastProcessedDay = ReadInt(ReignDatabase.QuerySql(connection, @"
-SELECT MAX(day_key) AS latest_day FROM clan_conflict_day_sweeps
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='completed';",
-                    new Dictionary<string, object>
+                lastProcessedDay = ReadInt(RelationshipsStore.SelectClanConflictDaySweeps2(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId
                     }).FirstOrDefault(), "latest_day", int.MinValue);
@@ -176,14 +141,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='completed';",
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO clan_conflict_day_sweeps(
-campaign_id,timeline_id,day_key,world_day,eligible_kingdoms,processed_kingdoms,
-eligible_kingdom_ids_json,status,created_ts,updated_ts)
-VALUES($campaign,$timeline,$day,$worldDay,$eligible,0,$eligibleIds,'processing',$ts,$ts)
-ON CONFLICT(campaign_id,timeline_id,day_key) DO UPDATE SET
-world_day=$worldDay,eligible_kingdoms=$eligible,eligible_kingdom_ids_json=$eligibleIds,
-status='processing',updated_ts=$ts;",
-                    new Dictionary<string, object>
+                RelationshipsStore.UpsertClanConflictDaySweeps(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["day"] = day, ["worldDay"] = worldDay,
@@ -204,10 +162,7 @@ status='processing',updated_ts=$ts;",
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                ReignDatabase.ExecuteSql(connection, @"UPDATE clan_conflict_day_sweeps SET
-processed_kingdoms=$processed,status='completed',updated_ts=$ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
-                    new Dictionary<string, object>
+                RelationshipsStore.UpdateClanConflictDaySweeps(connection, new Dictionary<string, object>
                     {
                         ["processed"] = kingdoms.Count,
                         ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
@@ -231,9 +186,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                existing = ReignDatabase.QuerySql(connection, @"SELECT * FROM clan_conflict_daily_rolls
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND kingdom_id=$kingdom LIMIT 1;",
-                    new Dictionary<string, object>
+                existing = RelationshipsStore.SelectClanConflictDailyRolls3(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["day"] = day, ["kingdom"] = kingdomId
@@ -284,12 +237,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND kingd
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO clan_conflict_daily_rolls(
-campaign_id,timeline_id,day_key,world_day,kingdom_id,kingdom_name,ruler_id,chance,roll,passed,status,
-incident_id,eligible_clan_count,created_ts,updated_ts)
-VALUES($campaign,$timeline,$day,$worldDay,$kingdom,$kingdomName,$ruler,$chance,$roll,$passed,$status,'',$eligible,$ts,$ts)
-ON CONFLICT(campaign_id,timeline_id,day_key,kingdom_id) DO NOTHING;",
-                    new Dictionary<string, object>
+                RelationshipsStore.InsertOrIgnoreClanConflictDailyRolls(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["day"] = day, ["worldDay"] = worldDay,
@@ -325,10 +273,7 @@ ON CONFLICT(campaign_id,timeline_id,day_key,kingdom_id) DO NOTHING;",
         {
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                ReignDatabase.ExecuteSql(connection, @"UPDATE clan_conflict_daily_rolls SET
-status='incident_created',incident_id=$incident,updated_ts=$ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND kingdom_id=$kingdom;",
-                    new Dictionary<string, object>
+                RelationshipsStore.UpdateClanConflictDailyRolls(connection, new Dictionary<string, object>
                     {
                         ["incident"] = incidentId, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
@@ -404,19 +349,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND kingd
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO clan_conflict_incidents(
-incident_id,campaign_id,timeline_id,day_key,world_day,kingdom_id,kingdom_name,ruler_id,ruler_name,
-clan_a_id,clan_a_name,clan_b_id,clan_b_name,leader_a_id,leader_b_id,involved_a_json,involved_b_json,
-involved_a_names_json,involved_b_names_json,archetype_id,category,headline,narrative,
-trait_votes_json,average_relation_a,average_relation_b,winning_side,
-charm_skill,charm_chance_bp,charm_roll,mediation_succeeded,relationship_effect_count,notice_status,status,
-last_error,payload_json,created_ts,updated_ts)
-VALUES($id,$campaign,$timeline,$day,$worldDay,$kingdom,$kingdomName,$ruler,$rulerName,
-$clanA,$clanAName,$clanB,$clanBName,$leaderA,$leaderB,$involvedA,$involvedB,
-$involvedNamesA,$involvedNamesB,$archetype,$category,$headline,$narrative,$votes,$averageA,$averageB,
-$winner,$charm,$chance,$roll,$mediated,$effectCount,'pending','effects_pending','',
-$payload,$ts,$ts) ON CONFLICT(incident_id) DO NOTHING;",
-                    new Dictionary<string, object>
+                RelationshipsStore.InsertOrIgnoreClanConflictIncidents(connection, new Dictionary<string, object>
                     {
                         ["id"] = incidentId, ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["day"] = day, ["worldDay"] = worldDay, ["kingdom"] = kingdomId,
@@ -444,10 +377,7 @@ $payload,$ts,$ts) ON CONFLICT(incident_id) DO NOTHING;",
                     });
                 foreach (ClanConflictEffectSpec effect in effects)
                 {
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO clan_conflict_relationship_effects(
-effect_id,incident_id,campaign_id,timeline_id,world_day,effect_kind,observer_id,target_id,amount,status,created_ts,updated_ts)
-VALUES($effect,$incident,$campaign,$timeline,$day,$kind,$observer,$target,$amount,'pending',$ts,$ts)
-ON CONFLICT(effect_id) DO NOTHING;", new Dictionary<string, object>
+                    RelationshipsStore.InsertOrIgnoreClanConflictRelationshipEffects(connection, new Dictionary<string, object>
                     {
                         ["effect"] = effect.EffectId, ["incident"] = incidentId,
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
@@ -628,10 +558,7 @@ ON CONFLICT(effect_id) DO NOTHING;", new Dictionary<string, object>
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                incidentIds = ReignDatabase.QuerySql(connection, @"SELECT DISTINCT incident_id
-FROM clan_conflict_relationship_effects
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND status IN ('pending','applying')
-ORDER BY incident_id;", new Dictionary<string, object>
+                incidentIds = RelationshipsStore.SelectClanConflictRelationshipEffects3(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId
                 }).Select(x => ReadString(x, "incident_id", ""))
@@ -649,15 +576,12 @@ ORDER BY incident_id;", new Dictionary<string, object>
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                incident = ReignDatabase.QuerySql(connection, @"SELECT * FROM clan_conflict_incidents
-WHERE incident_id=$incident LIMIT 1;", new Dictionary<string, object>
+                incident = RelationshipsStore.SelectClanConflictIncidents3(connection, new Dictionary<string, object>
                 {
                     ["incident"] = incidentId
                 }).FirstOrDefault();
                 if (incident == null) return;
-                effects = ReignDatabase.QuerySql(connection, @"SELECT * FROM clan_conflict_relationship_effects
-WHERE incident_id=$incident AND status IN ('pending','applying') ORDER BY effect_id;",
-                    new Dictionary<string, object> { ["incident"] = incidentId });
+                effects = RelationshipsStore.SelectClanConflictRelationshipEffects4(connection, new Dictionary<string, object> { ["incident"] = incidentId });
             }
             string kingdomId = ReadString(incident, "kingdom_id", "");
             double worldDay = ReadDouble(incident, "world_day", 0d);
@@ -675,8 +599,7 @@ WHERE incident_id=$incident AND status IN ('pending','applying') ORDER BY effect
                     {
                         EnsureClanConflictSchema(connection);
                         before = ReadClanConflictAffinity(connection, observer, target);
-                        ReignDatabase.ExecuteSql(connection, "UPDATE clan_conflict_relationship_effects SET status='applying',updated_ts=$ts WHERE effect_id=$effect AND status='pending';",
-                            new Dictionary<string, object>
+                        RelationshipsStore.UpdateClanConflictRelationshipEffects(connection, new Dictionary<string, object>
                             {
                                 ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["effect"] = effectId
                             });
@@ -695,9 +618,7 @@ WHERE incident_id=$incident AND status IN ('pending','applying') ORDER BY effect
                     using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                     {
                         after = ReadClanConflictAffinity(connection, observer, target);
-                        ReignDatabase.ExecuteSql(connection, @"UPDATE clan_conflict_relationship_effects SET
-status='applied',before_affinity=$before,after_affinity=$after,last_error='',updated_ts=$ts WHERE effect_id=$effect;",
-                            new Dictionary<string, object>
+                        RelationshipsStore.UpdateClanConflictRelationshipEffects2(connection, new Dictionary<string, object>
                             {
                                 ["before"] = before, ["after"] = after,
                                 ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["effect"] = effectId
@@ -708,9 +629,7 @@ status='applied',before_affinity=$before,after_affinity=$after,last_error='',upd
                 {
                     using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                     {
-                        ReignDatabase.ExecuteSql(connection, @"UPDATE clan_conflict_relationship_effects SET
-status='failed',last_error=$error,updated_ts=$ts WHERE effect_id=$effect;",
-                            new Dictionary<string, object>
+                        RelationshipsStore.UpdateClanConflictRelationshipEffects3(connection, new Dictionary<string, object>
                             {
                                 ["error"] = ex.Message, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                                 ["effect"] = effectId
@@ -720,20 +639,13 @@ status='failed',last_error=$error,updated_ts=$ts WHERE effect_id=$effect;",
             }
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                Dictionary<string, object> counts = ReignDatabase.QuerySql(connection, @"SELECT
-SUM(CASE WHEN status='applied' THEN 1 ELSE 0 END) AS applied,
-SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,
-SUM(CASE WHEN status IN ('pending','applying') THEN 1 ELSE 0 END) AS pending
-FROM clan_conflict_relationship_effects WHERE incident_id=$incident;",
-                    new Dictionary<string, object> { ["incident"] = incidentId }).FirstOrDefault()
+                Dictionary<string, object> counts = RelationshipsStore.SelectClanConflictRelationshipEffects5(connection, new Dictionary<string, object> { ["incident"] = incidentId }).FirstOrDefault()
                     ?? new Dictionary<string, object>();
                 int failed = ReadInt(counts, "failed", 0);
                 int pending = ReadInt(counts, "pending", 0);
                 string status = failed > 0 ? "failed" : pending > 0 ? "effects_pending" : "completed";
                 string notice = status == "completed" ? "ready" : "pending";
-                ReignDatabase.ExecuteSql(connection, @"UPDATE clan_conflict_incidents SET
-status=$status,notice_status=$notice,last_error=CASE WHEN $failed>0 THEN 'One or more relationship effects failed.' ELSE '' END,
-updated_ts=$ts WHERE incident_id=$incident;", new Dictionary<string, object>
+                RelationshipsStore.UpdateClanConflictIncidents(connection, new Dictionary<string, object>
                 {
                     ["status"] = status, ["notice"] = notice, ["failed"] = failed,
                     ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["incident"] = incidentId
@@ -752,9 +664,7 @@ updated_ts=$ts WHERE incident_id=$incident;", new Dictionary<string, object>
             string observerId, string targetId)
         {
             string pairKey = AmbientPairKey(observerId, targetId);
-            Dictionary<string, object> row = ReignDatabase.QuerySql(connection, @"SELECT
-hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a FROM relationship_pair_chemistry
-WHERE pair_key=$pair LIMIT 1;", new Dictionary<string, object>
+            Dictionary<string, object> row = RelationshipsStore.SelectRelationshipPairChemistry7(connection, new Dictionary<string, object>
             {
                 ["pair"] = pairKey
             }).FirstOrDefault();
@@ -775,20 +685,14 @@ WHERE pair_key=$pair LIMIT 1;", new Dictionary<string, object>
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                List<Dictionary<string, object>> notices = ReignDatabase.QuerySql(connection, @"SELECT *
-FROM clan_conflict_incidents WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND notice_status IN ('ready','fetched') ORDER BY world_day,incident_id LIMIT "
-                    + limit.ToString(CultureInfo.InvariantCulture) + ";",
-                    new Dictionary<string, object>
+                List<Dictionary<string, object>> notices = RelationshipsStore.SelectClanConflictIncidents4(connection, limit.ToString(CultureInfo.InvariantCulture),                    new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId
                     });
                 foreach (Dictionary<string, object> notice in notices)
                 {
                     notice["news_description"] = ClanConflictCatalog.FirstOrDefault(a => a.Id == ReadString(notice, "archetype_id", ""))?.Description ?? "";
-                    ReignDatabase.ExecuteSql(connection, @"UPDATE clan_conflict_incidents SET
-notice_status='fetched',updated_ts=$ts WHERE incident_id=$incident;",
-                        new Dictionary<string, object>
+                    RelationshipsStore.UpdateClanConflictIncidents2(connection, new Dictionary<string, object>
                         {
                             ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                             ["incident"] = ReadString(notice, "incident_id", "")
@@ -808,17 +712,13 @@ notice_status='fetched',updated_ts=$ts WHERE incident_id=$incident;",
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                int found = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
-FROM clan_conflict_incidents WHERE incident_id=$incident AND campaign_id=$campaign AND timeline_id=$timeline;",
-                    new Dictionary<string, object>
+                int found = ReadInt(RelationshipsStore.CountClanConflictIncidents3(connection, new Dictionary<string, object>
                     {
                         ["incident"] = incidentId, ["campaign"] = campaignId,
                         ["timeline"] = timelineId
                     }).FirstOrDefault(), "count", 0);
                 if (found == 0) return ClanConflictAcknowledgeResponse.NotFound().ToDictionary();
-                ReignDatabase.ExecuteSql(connection, @"UPDATE clan_conflict_incidents SET
-notice_status='acknowledged',updated_ts=$ts WHERE incident_id=$incident;",
-                    new Dictionary<string, object>
+                RelationshipsStore.UpdateClanConflictIncidents3(connection, new Dictionary<string, object>
                     {
                         ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                         ["incident"] = incidentId

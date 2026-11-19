@@ -116,7 +116,7 @@ namespace ReignBetaServer
                 && ReignPostgreSqlDialect.IsPostgreSql(connection))
                 context.Execute(sql, values);
             else
-                ReignDatabase.ExecuteSql(connection, sql, values);
+                RelationshipsStore.ExecuteSql(connection, sql, values);
         }
 
         internal static void EnsureRelationshipLifecycleSchema(ReignDbConnection connection)
@@ -128,11 +128,7 @@ namespace ReignBetaServer
             EnsureRelationshipLifecycleSchemaCore(connection);
             if (ReignPostgreSqlDialect.IsPostgreSql(connection))
             {
-                ReignDatabase.ExecuteSql(connection, @"
-INSERT INTO schema_meta(key,value)
-VALUES('postgresql_relationship_lifecycle_schema_revision',$revision)
-ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
-                    new Dictionary<string, object>
+                RelationshipsStore.UpsertSchemaMeta14(connection, new Dictionary<string, object>
                     {
                         ["revision"] =
                             PostgreSqlRelationshipLifecycleSchemaRevision
@@ -160,8 +156,7 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
                 && Program.PostgreSqlComponentSchemaFastPaths.ContainsKey(shapeKey))
                 return true;
             HashSet<string> columns = new HashSet<string>(
-                ReignDatabase.QuerySql(connection,
-                    "PRAGMA table_info(relationship_pair_lifecycle);")
+                RelationshipsStore.Pragma2(connection)
                     .Select(row => ReadString(row, "name", "")),
                 StringComparer.OrdinalIgnoreCase);
             bool ready = RelationshipLifecycleRomanceColumns.All(
@@ -187,43 +182,11 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
         private static void EnsureRelationshipLifecycleSchemaCore(
             ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_pair_lifecycle (
-pair_key TEXT PRIMARY KEY,hero_a_id TEXT NOT NULL,hero_b_id TEXT NOT NULL,
-lover_active INTEGER NOT NULL DEFAULT 0,lover_started_day REAL NOT NULL DEFAULT 0,
-lover_exception_attempted INTEGER NOT NULL DEFAULT 0,lover_exception_passed INTEGER NOT NULL DEFAULT 0,
-lover_exception_roll INTEGER NOT NULL DEFAULT 0,lover_rumor_id TEXT NOT NULL DEFAULT '',
-affair_active INTEGER NOT NULL DEFAULT 0,affair_started_day REAL NOT NULL DEFAULT 0,
-affair_rumor_id TEXT NOT NULL DEFAULT '',
-romance_stage TEXT NOT NULL DEFAULT '',romance_stage_started_day REAL NOT NULL DEFAULT 0,
-romance_last_colocated_day REAL NOT NULL DEFAULT 0,romance_positive_bonus INTEGER NOT NULL DEFAULT 0,
-flirt_episode INTEGER NOT NULL DEFAULT 0,flirt_attempted INTEGER NOT NULL DEFAULT 0,
-flirt_passed INTEGER NOT NULL DEFAULT 0,flirt_trait_a INTEGER NOT NULL DEFAULT 0,
-flirt_trait_b INTEGER NOT NULL DEFAULT 0,flirt_roll_a INTEGER NOT NULL DEFAULT 0,
-flirt_roll_b INTEGER NOT NULL DEFAULT 0,affair_episode INTEGER NOT NULL DEFAULT 0,
-affair_attempted INTEGER NOT NULL DEFAULT 0,affair_passed INTEGER NOT NULL DEFAULT 0,
-judgment_trait_a INTEGER NOT NULL DEFAULT 0,judgment_trait_b INTEGER NOT NULL DEFAULT 0,
-judgment_roll_a INTEGER NOT NULL DEFAULT 0,judgment_roll_b INTEGER NOT NULL DEFAULT 0,
-estranged_a_to_b INTEGER NOT NULL DEFAULT 0,estranged_b_to_a INTEGER NOT NULL DEFAULT 0,
-estranged_rumor_id TEXT NOT NULL DEFAULT '',
-married INTEGER NOT NULL DEFAULT 0,marriage_action_id TEXT NOT NULL DEFAULT '',
-marriage_blocked INTEGER NOT NULL DEFAULT 0,marriage_block_reason TEXT NOT NULL DEFAULT '',
-divorced INTEGER NOT NULL DEFAULT 0,divorce_day REAL NOT NULL DEFAULT 0,
-divorce_action_id TEXT NOT NULL DEFAULT '',divorce_rumor_id TEXT NOT NULL DEFAULT '',
-conception_action_id TEXT NOT NULL DEFAULT '',last_conception_day REAL NOT NULL DEFAULT -1000,
-last_marriage_evaluation_day REAL NOT NULL DEFAULT -1000,
-organic_marriage_colocated_days INTEGER NOT NULL DEFAULT 0,
-last_processed_day INTEGER NOT NULL DEFAULT -1,version INTEGER NOT NULL DEFAULT 1,
-updated_ts INTEGER NOT NULL);" );
-            ReignDatabase.EnsureDatabaseColumn(connection, "relationship_pair_lifecycle",
-                "last_marriage_evaluation_day",
-                "REAL NOT NULL DEFAULT -1000");
-            ReignDatabase.EnsureDatabaseColumn(connection, "relationship_pair_lifecycle",
-                "organic_marriage_colocated_days",
-                "INTEGER NOT NULL DEFAULT 0");
-            ReignDatabase.EnsureDatabaseColumn(connection, "relationship_pair_lifecycle",
-                "marriage_blocked", "INTEGER NOT NULL DEFAULT 0");
-            ReignDatabase.EnsureDatabaseColumn(connection, "relationship_pair_lifecycle",
-                "marriage_block_reason", "TEXT NOT NULL DEFAULT ''");
+            RelationshipsSchema.CreateRelationshipPairLifecycle(connection);
+            RelationshipsSchema.EnsureColumnRelationshipPairLifecycleLastMarriageEvaluationDay(connection);
+            RelationshipsSchema.EnsureColumnRelationshipPairLifecycleOrganicMarriageColocatedDays(connection);
+            RelationshipsSchema.EnsureColumnRelationshipPairLifecycleMarriageBlocked(connection);
+            RelationshipsSchema.EnsureColumnRelationshipPairLifecycleMarriageBlockReason(connection);
             foreach (KeyValuePair<string, string> column in new Dictionary<string, string>
             {
                 ["romance_stage"] = "TEXT NOT NULL DEFAULT ''",
@@ -245,73 +208,29 @@ updated_ts INTEGER NOT NULL);" );
                 ["judgment_roll_a"] = "INTEGER NOT NULL DEFAULT 0",
                 ["judgment_roll_b"] = "INTEGER NOT NULL DEFAULT 0"
             })
-                ReignDatabase.EnsureDatabaseColumn(connection, "relationship_pair_lifecycle",
+                RelationshipsSchema.EnsureDatabaseColumn(connection, "relationship_pair_lifecycle",
                     column.Key, column.Value);
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_relationship_lifecycle_heroes ON relationship_pair_lifecycle(hero_a_id,hero_b_id);");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_marriage_reservations (
-hero_id TEXT PRIMARY KEY,pair_key TEXT NOT NULL,director_action_id TEXT NOT NULL,
-created_day REAL NOT NULL,created_ts INTEGER NOT NULL);" );
-            ReignDatabase.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_relationship_marriage_reservation_action
-ON relationship_marriage_reservations(director_action_id);" );
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_conception_commitments (
-conception_id TEXT PRIMARY KEY,pair_key TEXT NOT NULL,hero_a_id TEXT NOT NULL,hero_b_id TEXT NOT NULL,
-honor_a INTEGER NOT NULL,honor_b INTEGER NOT NULL,chance_a INTEGER NOT NULL,chance_b INTEGER NOT NULL,
-roll_a INTEGER NOT NULL,roll_b INTEGER NOT NULL,passed_a INTEGER NOT NULL,passed_b INTEGER NOT NULL,
-status TEXT NOT NULL,marriage_action_id TEXT NOT NULL DEFAULT '',affinity_delta INTEGER NOT NULL DEFAULT 0,
-world_day REAL NOT NULL,updated_ts INTEGER NOT NULL);" );
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_affair_commitments (
-pair_key TEXT PRIMARY KEY,hero_a_id TEXT NOT NULL,hero_b_id TEXT NOT NULL,spouse_a_id TEXT NOT NULL DEFAULT '',
-spouse_b_id TEXT NOT NULL DEFAULT '',chance_a INTEGER NOT NULL DEFAULT 0,chance_b INTEGER NOT NULL DEFAULT 0,
-roll_a INTEGER NOT NULL DEFAULT 0,roll_b INTEGER NOT NULL DEFAULT 0,passed_a INTEGER NOT NULL DEFAULT 0,
-passed_b INTEGER NOT NULL DEFAULT 0,divorce_action_a_id TEXT NOT NULL DEFAULT '',divorce_action_b_id TEXT NOT NULL DEFAULT '',
-divorce_a_completed INTEGER NOT NULL DEFAULT 0,divorce_b_completed INTEGER NOT NULL DEFAULT 0,
-marriage_action_id TEXT NOT NULL DEFAULT '',status TEXT NOT NULL,world_day REAL NOT NULL,updated_ts INTEGER NOT NULL);" );
+            RelationshipsSchema.CreateIndexRelationshipLifecycleHeroes(connection);
+            RelationshipsSchema.CreateRelationshipMarriageReservations(connection);
+            RelationshipsSchema.CreateIndexRelationshipMarriageReservationAction(connection);
+            RelationshipsSchema.CreateRelationshipConceptionCommitments(connection);
+            RelationshipsSchema.CreateRelationshipAffairCommitments(connection);
             if (WorldSimulationService.TableExists(connection, "relationship_director_actions"))
             {
-                ReignDatabase.ExecuteSql(connection, @"DELETE FROM relationship_marriage_reservations
-WHERE NOT EXISTS (SELECT 1 FROM relationship_director_actions a
-WHERE a.director_action_id=relationship_marriage_reservations.director_action_id
-AND a.action_type='marriage' AND a.status IN ('pending','claimed'));");
-                ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO relationship_marriage_reservations(
-hero_id,pair_key,director_action_id,created_day,created_ts)
-SELECT actor_id,
-CASE WHEN lower(actor_id)<=lower(target_id) THEN actor_id||'|'||target_id
-ELSE target_id||'|'||actor_id END,
-director_action_id,world_day,created_ts
-FROM relationship_director_actions
-WHERE action_type='marriage' AND status IN ('pending','claimed')
-UNION ALL
-SELECT target_id,
-CASE WHEN lower(actor_id)<=lower(target_id) THEN actor_id||'|'||target_id
-ELSE target_id||'|'||actor_id END,
-director_action_id,world_day,created_ts
-FROM relationship_director_actions
-WHERE action_type='marriage' AND status IN ('pending','claimed');");
+                RelationshipsStore.DeleteRelationshipMarriageReservations4(connection);
+                RelationshipsStore.InsertOrIgnoreRelationshipMarriageReservations2(connection);
             }
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_incidents (
-incident_id TEXT PRIMARY KEY,pair_key TEXT NOT NULL,kind TEXT NOT NULL,
-hero_a_id TEXT NOT NULL,hero_b_id TEXT NOT NULL,world_day REAL NOT NULL,
-summary TEXT NOT NULL DEFAULT '',rumor_id TEXT NOT NULL DEFAULT '',
-payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL);" );
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_relationship_incidents_pair ON relationship_incidents(pair_key,world_day DESC);");
+            RelationshipsSchema.CreateRelationshipIncidents(connection);
+            RelationshipsSchema.CreateIndexRelationshipIncidentsPair(connection);
             EnsureRelationshipFlingSchemaCore(connection);
         }
 
         private static void CompactDormantRelationshipLifecycleRows(ReignDbConnection connection)
         {
-            if (ReadString(ReignDatabase.QuerySql(connection,
-                "SELECT value FROM schema_meta WHERE key='relationship_lifecycle_sparse_v1' LIMIT 1;")
+            if (ReadString(RelationshipsStore.SelectSchemaMeta8(connection)
                 .FirstOrDefault(), "value", "") == "1") return;
-            ReignDatabase.ExecuteSql(connection, @"DELETE FROM relationship_pair_lifecycle
-WHERE lover_active=0 AND lover_exception_attempted=0 AND lover_rumor_id=''
-  AND affair_active=0 AND affair_rumor_id=''
-  AND romance_stage='' AND flirt_attempted=0 AND affair_attempted=0
-  AND estranged_a_to_b=0 AND estranged_b_to_a=0 AND estranged_rumor_id=''
-  AND married=0 AND marriage_action_id='' AND marriage_blocked=0
-  AND divorced=0 AND divorce_action_id='' AND divorce_rumor_id=''
-  AND conception_action_id='';" );
-            ReignDatabase.ExecuteSql(connection,
-                "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('relationship_lifecycle_sparse_v1','1');");
+            RelationshipsStore.DeleteRelationshipPairLifecycle(connection);
+            RelationshipsStore.UpsertSchemaMeta15(connection);
         }
 
         private static int RomancePositiveChanceBonus(
@@ -415,12 +334,7 @@ WHERE lover_active=0 AND lover_exception_attempted=0 AND lover_rumor_id=''
                 + "|pregnancy_commitment_a", 100);
             int rollB = StableDie(campaignId + "|" + conceptionId
                 + "|pregnancy_commitment_b", 100);
-            ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO relationship_conception_commitments(
-conception_id,pair_key,hero_a_id,hero_b_id,honor_a,honor_b,chance_a,chance_b,
-roll_a,roll_b,passed_a,passed_b,status,marriage_action_id,world_day,updated_ts)
-VALUES($id,$pair,$a,$b,$honorA,$honorB,$chanceA,$chanceB,$rollA,$rollB,
-$passedA,$passedB,'awaiting_conception',$marriageAction,$day,$ts);",
-                new Dictionary<string, object>
+            RelationshipsStore.InsertOrIgnoreRelationshipConceptionCommitments(connection, new Dictionary<string, object>
                 {
                     ["id"] = conceptionId, ["pair"] = pair.PairKey,
                     ["a"] = pair.HeroAId, ["b"] = pair.HeroBId,
@@ -463,8 +377,7 @@ $passedA,$passedB,'awaiting_conception',$marriageAction,$day,$ts);",
             Dictionary<string, object> heroB, string spouseA,
             string spouseB, int mutualAffinity)
         {
-            if (ReignDatabase.QuerySql(connection, @"SELECT pair_key FROM relationship_affair_commitments
-WHERE pair_key=$pair LIMIT 1;", new Dictionary<string, object>
+            if (RelationshipsStore.SelectRelationshipAffairCommitments2(connection, new Dictionary<string, object>
                 { ["pair"] = pair.PairKey }).Any()) return;
             bool aMarried = !string.IsNullOrWhiteSpace(spouseA)
                 && !spouseA.Equals(pair.HeroBId,
@@ -511,12 +424,7 @@ WHERE pair_key=$pair LIMIT 1;", new Dictionary<string, object>
                     status = "divorce_queue_failed";
             }
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_affair_commitments(
-pair_key,hero_a_id,hero_b_id,spouse_a_id,spouse_b_id,chance_a,chance_b,roll_a,roll_b,
-passed_a,passed_b,divorce_action_a_id,divorce_action_b_id,status,world_day,updated_ts)
-VALUES($pair,$a,$b,$spouseA,$spouseB,$chanceA,$chanceB,$rollA,$rollB,$passedA,$passedB,
-$divorceA,$divorceB,$status,$day,$ts);",
-                new Dictionary<string, object>
+            RelationshipsStore.InsertRelationshipAffairCommitments(connection, new Dictionary<string, object>
                 {
                     ["pair"] = pair.PairKey, ["a"] = pair.HeroAId,
                     ["b"] = pair.HeroBId, ["spouseA"] = spouseA,
@@ -546,9 +454,7 @@ $divorceA,$divorceB,$status,$day,$ts);",
             string observerId, string targetId)
         {
             string pairKey = AmbientPairKey(observerId, targetId);
-            Dictionary<string, object> row = string.IsNullOrWhiteSpace(pairKey) ? null : ReignDatabase.QuerySql(connection,
-                "SELECT * FROM relationship_pair_lifecycle WHERE pair_key=$pair LIMIT 1;",
-                new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
+            Dictionary<string, object> row = string.IsNullOrWhiteSpace(pairKey) ? null : RelationshipsStore.SelectRelationshipPairLifecycle3(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
             if (row == null) return new Dictionary<string, object>();
             bool observerIsA = ReadString(row, "hero_a_id", "").Equals(observerId, StringComparison.OrdinalIgnoreCase);
             List<string> tags = new List<string>();

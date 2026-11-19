@@ -57,8 +57,7 @@ namespace ReignBetaServer
                         queries = timing.Queries;
                     }
                     reads[count] = queries;
-                    int contacts = ReadInt(ReignDatabase.QuerySql(c,
-                        "SELECT COUNT(*) AS count FROM court_ruler_favor_contact;")
+                    int contacts = ReadInt(ReputationSelfTestStore.CountCourtRulerFavorContact(c)
                         .First(), "count", -1);
                     int expectedReads = 1 + (count + RulerFavorContactLookupBatchSize - 1)
                         / RulerFavorContactLookupBatchSize;
@@ -83,21 +82,12 @@ namespace ReignBetaServer
         private static void SeedRulerFavorBatchTag(ReignDbConnection c, string campaign,
             string timeline, string ruler, string favorite, string suffix, double? anchor)
         {
-            ReignDatabase.ExecuteSql(c, @"INSERT INTO identity_roster(hero_id,canonical_name,is_alive,is_adult,is_player,is_ruler,kingdom_id)
-VALUES($ruler,$ruler,1,1,0,1,'fixture_realm') ON CONFLICT(hero_id) DO NOTHING;",
-                TestDict("ruler", ruler));
-            ReignDatabase.ExecuteSql(c, @"INSERT INTO character_reputations
-(campaign_id,timeline_id,subject_id,tag_id,acquired_day,catalog_revision,snapshot_json,updated_ts)
-VALUES($campaign,$timeline,$ruler,$tag,0,1,$snapshot,0);",
-                TestDict("campaign", campaign, "timeline", timeline, "ruler", ruler,
+            ReputationSelfTestStore.InsertOrIgnoreIdentityRoster(c, TestDict("ruler", ruler));
+            ReputationSelfTestStore.InsertCharacterReputations(c, TestDict("campaign", campaign, "timeline", timeline, "ruler", ruler,
                     "tag", "ruler_favoring:" + suffix,
                     "snapshot", Json.Serialize(TestDict("linkedHeroId", favorite, "fixture", suffix))));
             if (anchor.HasValue)
-                ReignDatabase.ExecuteSql(c, @"INSERT INTO court_ruler_favor_contact
-(campaign_id,timeline_id,ruler_id,favorite_id,last_contact_day,grace_day)
-VALUES($campaign,$timeline,$ruler,$favorite,$anchor,10)
-ON CONFLICT(campaign_id,timeline_id,ruler_id,favorite_id) DO NOTHING;",
-                    TestDict("campaign", campaign, "timeline", timeline, "ruler", ruler,
+                ReputationSelfTestStore.InsertOrIgnoreCourtRulerFavorContact(c, TestDict("campaign", campaign, "timeline", timeline, "ruler", ruler,
                         "favorite", favorite, "anchor", anchor.Value));
         }
 
@@ -116,23 +106,7 @@ ON CONFLICT(campaign_id,timeline_id,ruler_id,favorite_id) DO NOTHING;",
             SeedRulerFavorBatchTag(c, campaign, "main", "case", "favorite", "lower", 95d);
             SeedRulerFavorBatchTag(c, campaign, "main", "blank", "  ", "blank", null);
             SeedRulerFavorBatchTag(c, campaign, "other", "boundary", "favorite", "other", 0d);
-            ReignDatabase.ExecuteSql(c, @"INSERT INTO court_ruler_favor_contact
-(campaign_id,timeline_id,ruler_id,favorite_id,last_contact_day,grace_day)
-VALUES($campaign,'main','null_anchor','favorite',NULL,60);
-UPDATE court_ruler_favor_contact SET expired_day=80 WHERE ruler_id='old';
-INSERT INTO court_player_favoring_exchanges
-(campaign_id,timeline_id,ruler_id,favorite_id,exchange_count,last_world_day,updated_ts)
-VALUES($campaign,'main','zero_exchange','favorite',0,1,0),
-($campaign,'main','exchange','favorite',1,50,0);
-INSERT INTO rumor_occurrences
-(occurrence_id,campaign_id,timeline_id,archetype_id,thread_key,world_day,expires_day,catalog_revision,created_ts,updated_ts)
-VALUES('mixed',$campaign,'main','ruler_favoring_dialogue','mixed',0,200,1,0,0),
-('only_favor',$campaign,'main','ruler_favoring_dialogue','only',0,200,1,0,0);
-INSERT INTO rumor_subject_tags(occurrence_id,subject_id,tag_id,snapshot_json,updated_ts)
-VALUES('mixed','duplicate','ruler_favoring:duplicate_a','{""linkedHeroId"":""favorite"",""extra"":true}',0),
-('mixed','duplicate','neutral_fixture','{}',0),
-('only_favor','old','ruler_favoring:old','{""linkedHeroId"":""favorite""}',0);",
-                TestDict("campaign", campaign));
+            ReputationSelfTestStore.InsertCourtRulerFavorContact(c, TestDict("campaign", campaign));
         }
 
         private static Dictionary<string, object> RulerFavorBatchFixtureSnapshot(ReignDbConnection c)
@@ -146,7 +120,7 @@ VALUES('mixed','duplicate','ruler_favoring:duplicate_a','{""linkedHeroId"":""fav
                 ("rumor_subject_tags", "occurrence_id,subject_id,tag_id"),
                 ("character_public_standing", "campaign_id,timeline_id,subject_id") })
             {
-                var rows = ReignDatabase.QuerySql(c, "SELECT * FROM " + table.Item1 + " ORDER BY " + table.Item2 + ";");
+                var rows = ReputationSelfTestStore.SelectDynamic(c, table.Item1, table.Item2);
                 foreach (var row in rows)
                 {
                     row.Remove("updated_ts");
@@ -172,29 +146,17 @@ VALUES('mixed','duplicate','ruler_favoring:duplicate_a','{""linkedHeroId"":""fav
                     ["ruler"] = rulerId, ["favorite"] = favoriteId, ["day"] = day, ["tag"] = ReadString(tag, "tag_id", ""),
                     ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() };
                 // The old exchange timestamp is evidence; proximity is deliberately not contact.
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO court_ruler_favor_contact
-(campaign_id,timeline_id,ruler_id,favorite_id,last_contact_day,grace_day)
-VALUES($campaign,$timeline,$ruler,$favorite,
-(SELECT last_world_day FROM court_player_favoring_exchanges WHERE campaign_id=$campaign AND timeline_id=$timeline AND ruler_id=$ruler AND favorite_id=$favorite AND exchange_count>0),$day)
-ON CONFLICT(campaign_id,timeline_id,ruler_id,favorite_id) DO NOTHING;", p);
-                var contact = ReignDatabase.QuerySql(connection, @"SELECT * FROM court_ruler_favor_contact WHERE campaign_id=$campaign AND timeline_id=$timeline AND ruler_id=$ruler AND favorite_id=$favorite;", p).First();
+                ReputationSelfTestStore.InsertOrIgnoreCourtRulerFavorContact2(connection, p);
+                var contact = ReputationSelfTestStore.SelectCourtRulerFavorContact(connection, p).First();
                 object contactDay;
                 double anchor = contact.TryGetValue("last_contact_day", out contactDay) && contactDay != null && contactDay != DBNull.Value
                     ? ReadDouble(contact, "last_contact_day", day) : ReadDouble(contact, "grace_day", day);
                 if (!ReignFamilyVisitRules.FavorExpired(anchor, day)) continue;
-                ReignDatabase.ExecuteSql(connection, @"UPDATE character_reputations SET status='forgotten',updated_ts=$ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$ruler AND tag_id=$tag AND status='active';", p);
-                ReignDatabase.ExecuteSql(connection, @"UPDATE rumor_subject_tags SET status='forgotten',updated_ts=$ts
-WHERE subject_id=$ruler AND tag_id=$tag AND status='active' AND occurrence_id IN
-(SELECT occurrence_id FROM rumor_occurrences WHERE campaign_id=$campaign AND timeline_id=$timeline);", p);
-                ReignDatabase.ExecuteSql(connection, @"UPDATE rumor_occurrences SET status='forgotten',updated_ts=$ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='active'
-AND occurrence_id IN (SELECT occurrence_id FROM rumor_subject_tags WHERE subject_id=$ruler AND tag_id=$tag AND status='forgotten')
-AND NOT EXISTS (SELECT 1 FROM rumor_subject_tags live WHERE live.occurrence_id=rumor_occurrences.occurrence_id AND live.status='active');", p);
-                ReignDatabase.ExecuteSql(connection, @"UPDATE court_ruler_favor_contact SET expired_day=$day
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND ruler_id=$ruler AND favorite_id=$favorite;", p);
-                ReignDatabase.ExecuteSql(connection, @"UPDATE court_player_favoring_exchanges SET exchange_count=0
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND ruler_id=$ruler AND favorite_id=$favorite;", p);
+                ReputationSelfTestStore.UpdateCharacterReputations(connection, p);
+                ReputationSelfTestStore.UpdateRumorSubjectTags(connection, p);
+                ReputationSelfTestStore.UpdateRumorOccurrences(connection, p);
+                ReputationSelfTestStore.UpdateCourtRulerFavorContact(connection, p);
+                ReputationSelfTestStore.UpdateCourtPlayerFavoringExchanges(connection, p);
                 changed.Add(rulerId);
             }
             var subjects = changed.Distinct(StringComparer.OrdinalIgnoreCase).ToList();

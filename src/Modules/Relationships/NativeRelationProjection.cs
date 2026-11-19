@@ -45,8 +45,7 @@ namespace ReignBetaServer
             RelationshipStandingContext context = RelationshipStandingContext.For(connection);
             if (context != null) return context.PlayerIds();
             if (connection == null) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            return new HashSet<string>(ReignDatabase.QuerySql(connection,
-                    "SELECT hero_id FROM identity_roster WHERE is_player=1 AND hero_id<>'';")
+            return new HashSet<string>(RelationshipsStore.SelectIdentityRoster(connection)
                 .Select(row => ReadString(row, "hero_id", ""))
                 .Where(id => !string.IsNullOrWhiteSpace(id)),
                 StringComparer.OrdinalIgnoreCase);

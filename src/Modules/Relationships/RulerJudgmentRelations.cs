@@ -53,10 +53,10 @@ namespace ReignBetaServer
                 if (ReadString(row, "subjectId", "").Length == 0 || ReadString(row, "targetId", "").Length == 0)
                     return TestDict("ok", false, "error", "Relationship participants are required.");
             }
-            ReignDatabase.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS relationship_ruler_receipts(timeline_id TEXT NOT NULL,operation_id TEXT NOT NULL,terms_hash TEXT NOT NULL,PRIMARY KEY(timeline_id,operation_id));");
+            RelationshipsSchema.CreateRelationshipRulerReceipts(c);
             string hash = DialogueService.PromptHash(CanonicalJson(deltas));
             using var transaction = c.BeginTransaction();
-            var prior = ReignDatabase.QuerySql(c, "SELECT terms_hash FROM relationship_ruler_receipts WHERE timeline_id=$timeline AND operation_id=$id;", TestDict("timeline", timeline, "id", id)).FirstOrDefault();
+            var prior = RelationshipsStore.SelectRelationshipRulerReceipts(c, TestDict("timeline", timeline, "id", id)).FirstOrDefault();
             if (prior != null)
             {
                 if (ReadString(prior, "terms_hash", "") != hash) return TestDict("ok", false, "error", "Ruler consequence terms changed.");
@@ -67,14 +67,14 @@ namespace ReignBetaServer
                 string subject = ReadString(row, "subjectId", ""), target = ReadString(row, "targetId", ""); if (subject == target) continue;
                 string pairKey = AmbientPairKey(subject, target); var ids = new[] { subject, target }.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray();
                 EnsurePoliticalRelationshipPair(c, campaign, timeline, pairKey, ids[0], ids[1], day, true);
-                var pair = ReignDatabase.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", pairKey)).Single();
+                var pair = RelationshipsStore.SelectRelationshipPairChemistry18(c, TestDict("pair", pairKey)).Single();
                 string column = ReadString(pair, "hero_a_id", "") == subject ? "affinity_a_to_b" : "affinity_b_to_a";
                 int value = Clamp(ReadInt(pair, column, 0) + ReadInt(row, "delta", 0), -100, 100);
-                ReignDatabase.ExecuteSql(c, "UPDATE relationship_pair_chemistry SET " + column + "=$value,state_revision=state_revision+1 WHERE pair_key=$pair;", TestDict("value", value, "pair", pairKey));
+                RelationshipsStore.UpdateRelationshipPairChemistry26(c, column,TestDict("value", value, "pair", pairKey));
                 pair[column] = value;
                 RefreshEffectivePairProjection(c, campaign, timeline, pair, day, "ruler_" + ReadString(row, "reason", ""));
             }
-            ReignDatabase.ExecuteSql(c, "INSERT INTO relationship_ruler_receipts(timeline_id,operation_id,terms_hash) VALUES($timeline,$id,$hash);", TestDict("timeline", timeline, "id", id, "hash", hash));
+            RelationshipsStore.InsertRelationshipRulerReceipts(c, TestDict("timeline", timeline, "id", id, "hash", hash));
             transaction.Commit(); InvalidateRelationshipPairStateCache(campaign);
             return TestDict("ok", true, "operationId", id, "replay", false);
         }
@@ -113,7 +113,7 @@ namespace ReignBetaServer
             var ids = new[] { subject, target }.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray();
             string key = AmbientPairKey(subject, target);
             EnsurePoliticalRelationshipPair(c, campaign, timeline, key, ids[0], ids[1], day, true);
-            var pair = ReignDatabase.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", key)).FirstOrDefault();
+            var pair = RelationshipsStore.SelectRelationshipPairChemistry18(c, TestDict("pair", key)).FirstOrDefault();
             if (pair == null) throw new InvalidOperationException("Ruler affinity is unavailable.");
             return ReadInt(pair, ReadString(pair, "hero_a_id", "") == subject ? "affinity_a_to_b" : "affinity_b_to_a", 0);
         }

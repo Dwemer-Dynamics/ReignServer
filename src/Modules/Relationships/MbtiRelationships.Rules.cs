@@ -27,12 +27,7 @@ namespace ReignBetaServer
             string planId = "native_sync_" + campaignId + "_" + timelineId + "_"
                 + day.ToString(CultureInfo.InvariantCulture);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            List<Dictionary<string, object>> targets = ReignDatabase.QuerySql(connection, @"
-SELECT pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,world_day,
-attempt_count,revision
-FROM relationship_native_targets
-WHERE status IN ('pending','claimed','failed')
-ORDER BY ABS(target_relation-observed_relation) DESC,pair_key;")
+            List<Dictionary<string, object>> targets = RelationshipsStore.SelectRelationshipNativeTargets2(connection)
                 .Select(row => new Dictionary<string, object>
                 {
                     ["pairKey"] = ReadString(row, "pair_key", ""),
@@ -44,11 +39,7 @@ ORDER BY ABS(target_relation-observed_relation) DESC,pair_key;")
                     ["attemptCount"] = ReadInt(row, "attempt_count", 0),
                     ["revision"] = ReadInt(row, "revision", 1)
                 }).ToList();
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_native_sync_batches(
-plan_id,campaign_id,timeline_id,world_day,target_count,issued_ts,client_remaining)
-VALUES($plan,$campaign,$timeline,$day,$count,$ts,$count)
-ON CONFLICT(plan_id) DO UPDATE SET target_count=$count,issued_ts=$ts;",
-                new Dictionary<string, object>
+            RelationshipsStore.UpsertRelationshipNativeSyncBatches(connection, new Dictionary<string, object>
                 {
                     ["plan"] = planId, ["campaign"] = campaignId, ["timeline"] = timelineId,
                     ["day"] = (double)day, ["count"] = targets.Count, ["ts"] = ts
@@ -79,9 +70,7 @@ ON CONFLICT(plan_id) DO UPDATE SET target_count=$count,issued_ts=$ts;",
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureMbtiRelationshipSchema(connection);
-                Dictionary<string, object> batch = ReignDatabase.QuerySql(connection,
-                    "SELECT * FROM relationship_native_sync_batches WHERE plan_id=$plan AND timeline_id=$timeline LIMIT 1;",
-                    new Dictionary<string, object> { ["plan"] = planId, ["timeline"] = timelineId }).FirstOrDefault();
+                Dictionary<string, object> batch = RelationshipsStore.SelectRelationshipNativeSyncBatches(connection, new Dictionary<string, object> { ["plan"] = planId, ["timeline"] = timelineId }).FirstOrDefault();
                 if (batch == null)
                     return new Dictionary<string, object>
                     {
@@ -94,11 +83,8 @@ ON CONFLICT(plan_id) DO UPDATE SET target_count=$count,issued_ts=$ts;",
                     .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 foreach (string pairKey in obsolete)
                 {
-                    ReignDatabase.ExecuteSql(connection, "DELETE FROM relationship_native_targets WHERE pair_key=$pair;",
-                        new Dictionary<string, object> { ["pair"] = pairKey });
-                    ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry
-SET native_action_pending=0,native_action_id='',updated_ts=$ts WHERE pair_key=$pair;",
-                        new Dictionary<string, object> { ["pair"] = pairKey, ["ts"] = ts });
+                    RelationshipsStore.DeleteRelationshipNativeTargets2(connection, new Dictionary<string, object> { ["pair"] = pairKey });
+                    RelationshipsStore.UpdateRelationshipPairChemistry4(connection, new Dictionary<string, object> { ["pair"] = pairKey, ["ts"] = ts });
                 }
 
                 List<Dictionary<string, object>> failures = ReadDictionaryList(payload, "failedPairs");
@@ -106,10 +92,7 @@ SET native_action_pending=0,native_action_id='',updated_ts=$ts WHERE pair_key=$p
                 {
                     string pairKey = ReadString(failure, "pairKey", "");
                     if (string.IsNullOrWhiteSpace(pairKey)) continue;
-                    ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_native_targets
-SET status='failed',attempt_count=attempt_count+1,claimed_ts=0,last_error=$error,updated_ts=$ts
-WHERE pair_key=$pair AND status<>'failed';",
-                        new Dictionary<string, object>
+                    RelationshipsStore.UpdateRelationshipNativeTargets2(connection, new Dictionary<string, object>
                         {
                             ["pair"] = pairKey,
                             ["error"] = Program.LimitText(ReadString(failure, "error", "Native relation projection failed."), 500),
@@ -139,18 +122,12 @@ WHERE pair_key=$pair AND status<>'failed';",
                     // restore only failures explicitly reported for this
                     // attempt. Newer targets are protected by world_day.
                     double batchDay = ReadDouble(batch, "world_day", 0d);
-                    ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_native_targets
-SET status='pending',claimed_ts=0,last_error='',updated_ts=$ts
-WHERE world_day<=$day;",
-                        new Dictionary<string, object> { ["day"] = batchDay, ["ts"] = ts });
+                    RelationshipsStore.UpdateRelationshipNativeTargets3(connection, new Dictionary<string, object> { ["day"] = batchDay, ["ts"] = ts });
                     foreach (Dictionary<string, object> failure in failures)
                     {
                         string pairKey = ReadString(failure, "pairKey", "");
                         if (string.IsNullOrWhiteSpace(pairKey)) continue;
-                        ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_native_targets
-SET status='failed',claimed_ts=0,last_error=$error,updated_ts=$ts
-WHERE pair_key=$pair AND world_day<=$day;",
-                            new Dictionary<string, object>
+                        RelationshipsStore.UpdateRelationshipNativeTargets4(connection, new Dictionary<string, object>
                             {
                                 ["pair"] = pairKey,
                                 ["day"] = batchDay,
@@ -159,28 +136,15 @@ WHERE pair_key=$pair AND world_day<=$day;",
                                 ["ts"] = ts
                             });
                     }
-                    ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry
-SET native_action_pending=0,native_action_id='',last_native_sync_day=$day,updated_ts=$ts
-WHERE pair_key IN (
-    SELECT pair_key FROM relationship_native_targets
-    WHERE world_day<=$day AND status<>'failed'
-);",
-                        new Dictionary<string, object>
+                    RelationshipsStore.UpdateRelationshipPairChemistry5(connection, new Dictionary<string, object>
                         {
                             ["day"] = batchDay,
                             ["ts"] = ts
                         });
-                    ReignDatabase.ExecuteSql(connection, @"DELETE FROM relationship_native_targets
-WHERE world_day<=$day AND status<>'failed';",
-                        new Dictionary<string, object> { ["day"] = batchDay });
+                    RelationshipsStore.DeleteRelationshipNativeTargets3(connection, new Dictionary<string, object> { ["day"] = batchDay });
                 }
 
-                ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_native_sync_batches SET
-client_applied=$applied,client_already_aligned=$aligned,client_obsolete=$obsolete,
-client_failed=$failed,client_remaining=$remaining,client_duration_ms=$duration,
-last_report_day=$day,last_report_ts=$ts,last_error=$error
-WHERE plan_id=$plan AND timeline_id=$timeline;",
-                    new Dictionary<string, object>
+                RelationshipsStore.UpdateRelationshipNativeSyncBatches(connection, new Dictionary<string, object>
                     {
                         ["applied"] = appliedCount,
                         ["aligned"] = alignedCount,
@@ -222,24 +186,18 @@ WHERE plan_id=$plan AND timeline_id=$timeline;",
                     ["nativeRelationRule"] = "Bannerlord native relation converges to the rounded average of the two authoritative Reign directional affinities.",
                     ["lastProcessedDay"] = RelationshipLastProcessedDay(connection,
                         ReadString(payload, "timelineId", "main")),
-                    ["latestIngestedDay"] = ReadDouble(ReignDatabase.QuerySql(connection,
-                        "SELECT MAX(world_day) AS day FROM relationship_daily_inputs;").FirstOrDefault(),
+                    ["latestIngestedDay"] = ReadDouble(RelationshipsStore.SelectRelationshipDailyInputs3(connection).FirstOrDefault(),
                         "day", -1d),
-                    ["pendingDailyInputCount"] = ReadInt(ReignDatabase.QuerySql(connection,
-                        "SELECT COUNT(*) AS count FROM relationship_daily_inputs WHERE status IN ('pending','processing');")
+                    ["pendingDailyInputCount"] = ReadInt(RelationshipsStore.CountRelationshipDailyInputs(connection)
                         .FirstOrDefault(), "count", 0),
-                    ["oldestPendingDailyInputDay"] = ReadDouble(ReignDatabase.QuerySql(connection,
-                        "SELECT MIN(world_day) AS day FROM relationship_daily_inputs WHERE status='pending';")
+                    ["oldestPendingDailyInputDay"] = ReadDouble(RelationshipsStore.SelectRelationshipDailyInputs4(connection)
                         .FirstOrDefault(), "day", -1d),
-                    ["partialDay"] = ReignDatabase.QuerySql(connection, @"SELECT day_key,pair_cursor,candidate_pairs,processed_pairs,
-started_ts,last_error FROM relationship_daily_inputs WHERE status='processing'
-ORDER BY day_key LIMIT 1;").FirstOrDefault() ?? new Dictionary<string, object>(),
+                    ["partialDay"] = RelationshipsStore.SelectRelationshipDailyInputs5(connection).FirstOrDefault() ?? new Dictionary<string, object>(),
                     ["worker"] = ContinuousRelationshipWorkerStatus(),
-                    ["mbtiInitializationError"] = ReadString(ReignDatabase.QuerySql(connection,
-                        "SELECT value FROM schema_meta WHERE key='relationship_mbti_error' LIMIT 1;")
+                    ["mbtiInitializationError"] = ReadString(RelationshipsStore.SelectSchemaMeta2(connection)
                         .FirstOrDefault(), "value", ""),
-                    ["currentPairs"] = ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_pair_chemistry ORDER BY last_day DESC,weighted_exposure DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";"),
-                    ["pendingNativeChanges"] = ReignDatabase.QuerySql(connection, "SELECT pair_key,hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,projected_native_relation,native_action_pending,native_action_id FROM relationship_pair_chemistry WHERE native_action_pending=1 ORDER BY last_day DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";"),
+                    ["currentPairs"] = RelationshipsStore.SelectRelationshipPairChemistry10(connection, limit.ToString(CultureInfo.InvariantCulture)),
+                    ["pendingNativeChanges"] = RelationshipsStore.SelectRelationshipPairChemistry11(connection, limit.ToString(CultureInfo.InvariantCulture)),
                     ["retiredDailyFacetRows"] = 0
                 };
             }
@@ -272,16 +230,13 @@ ORDER BY day_key LIMIT 1;").FirstOrDefault() ?? new Dictionary<string, object>()
 
         internal static int RelationshipLastProcessedDay(ReignDbConnection connection, string timelineId)
         {
-            Dictionary<string, object> row = ReignDatabase.QuerySql(connection,
-                "SELECT value FROM schema_meta WHERE key=$key LIMIT 1;",
-                new Dictionary<string, object>
+            Dictionary<string, object> row = RelationshipsStore.SelectSchemaMeta3(connection, new Dictionary<string, object>
                 {
                     ["key"] = "mbti_relationship_last_processed_day:"
                         + (string.IsNullOrWhiteSpace(timelineId) ? "main" : timelineId)
                 }).FirstOrDefault();
             if (row != null) return ReadInt(row, "value", -1);
-            return ReadInt(ReignDatabase.QuerySql(connection,
-                "SELECT value FROM schema_meta WHERE key='mbti_relationship_last_processed_day' LIMIT 1;")
+            return ReadInt(RelationshipsStore.SelectSchemaMeta4(connection)
                 .FirstOrDefault(), "value", -1);
         }
 
@@ -545,9 +500,7 @@ ORDER BY day_key LIMIT 1;").FirstOrDefault() ?? new Dictionary<string, object>()
             string pairKey = AmbientPairKey(observerId, targetId);
             if (!string.IsNullOrWhiteSpace(pairKey))
             {
-                Dictionary<string, object> row = ReignDatabase.QuerySql(connection,
-                    "SELECT hero_a_id,hero_b_id,tag_a_to_b,tag_b_to_a FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                    new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
+                Dictionary<string, object> row = RelationshipsStore.SelectRelationshipPairChemistry12(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
                 if (row != null)
                 {
                     Dictionary<string, object> lifecycle = RelationshipLifecycleView(connection, observerId, targetId);
@@ -593,21 +546,7 @@ ORDER BY day_key LIMIT 1;").FirstOrDefault() ?? new Dictionary<string, object>()
                         ?? new Dictionary<string, object>()
                 };
                 long notableTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_personalities(
-hero_id,mbti_type,title,description,source,assignment_day,template_version,traits_json,created_ts,updated_ts)
-VALUES($hero,$type,$title,$description,'notable_mbti_template',$day,$version,$traits,$ts,$ts)
-ON CONFLICT(hero_id) DO UPDATE SET
-mbti_type=excluded.mbti_type,title=excluded.title,description=excluded.description,
-source=excluded.source,assignment_day=excluded.assignment_day,
-template_version=excluded.template_version,traits_json=excluded.traits_json,updated_ts=excluded.updated_ts
-WHERE relationship_personalities.mbti_type<>excluded.mbti_type
-OR relationship_personalities.title<>excluded.title
-OR relationship_personalities.description<>excluded.description
-OR relationship_personalities.source<>excluded.source
-OR relationship_personalities.assignment_day<>excluded.assignment_day
-OR relationship_personalities.template_version<>excluded.template_version
-OR relationship_personalities.traits_json<>excluded.traits_json;",
-                    new Dictionary<string, object>
+                RelationshipsStore.UpsertRelationshipPersonalities(connection, new Dictionary<string, object>
                     {
                         ["hero"] = heroId,
                         ["type"] = notableType,
@@ -630,9 +569,7 @@ OR relationship_personalities.traits_json<>excluded.traits_json;",
                     resolvedNotable);
                 return resolvedNotable;
             }
-            Dictionary<string, object> stored = ReignDatabase.QuerySql(connection,
-                "SELECT * FROM relationship_personalities WHERE hero_id=$hero LIMIT 1;",
-                new Dictionary<string, object> { ["hero"] = heroId }).FirstOrDefault();
+            Dictionary<string, object> stored = RelationshipsStore.SelectRelationshipPersonalities2(connection, new Dictionary<string, object> { ["hero"] = heroId }).FirstOrDefault();
             if (stored != null)
             {
                 string storedType = ReadString(stored, "mbti_type", "XXXX");
@@ -684,11 +621,7 @@ OR relationship_personalities.traits_json<>excluded.traits_json;",
             if (!MbtiDefinitions.TryGetValue(resolvedType, out MbtiDefinition resolvedDefinition))
                 return new Dictionary<string, object> { ["type"] = "XXXX", ["source"] = source };
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_personalities(
-hero_id,mbti_type,title,description,source,assignment_day,template_version,traits_json,created_ts,updated_ts)
-VALUES($hero,$type,$title,$description,$source,$day,$version,$traits,$ts,$ts)
-ON CONFLICT(hero_id) DO NOTHING;",
-                new Dictionary<string, object>
+            RelationshipsStore.InsertOrIgnoreRelationshipPersonalities(connection, new Dictionary<string, object>
                 {
                     ["hero"] = heroId,
                     ["type"] = resolvedType,
@@ -736,18 +669,11 @@ ON CONFLICT(hero_id) DO NOTHING;",
                 string requestedJson = Json.Serialize(missing);
                 List<Dictionary<string, object>> rows =
                     ReignPostgreSqlDialect.IsPostgreSql(connection)
-                        ? ReignDatabase.QuerySql(connection, @"SELECT personalities.hero_id,
-personalities.mbti_type,personalities.title,personalities.description,
-personalities.source
-FROM relationship_personalities personalities
-JOIN jsonb_array_elements_text(CAST($heroes AS jsonb)) requested
-  ON requested.value=personalities.hero_id;",
-                            new Dictionary<string, object>
+                        ? RelationshipsStore.SelectRelationshipPersonalities3(connection, new Dictionary<string, object>
                             {
                                 ["heroes"] = requestedJson
                             })
-                        : ReignDatabase.QuerySql(connection, @"SELECT hero_id,mbti_type,title,
-description,source FROM relationship_personalities;")
+                        : RelationshipsStore.SelectRelationshipPersonalities4(connection)
                             .Where(row => required.Contains(
                                 ReadString(row, "hero_id", ""))).ToList();
                 foreach (Dictionary<string, object> row in rows)

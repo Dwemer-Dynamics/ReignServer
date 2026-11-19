@@ -165,11 +165,7 @@ namespace ReignBetaServer
                         EnsureMbtiRelationshipSchema(connection);
                         RecoverInterruptedRelationshipDays(connection, campaignId);
                         long readyVersion = RelationshipReadyVersion(campaignId);
-                        Dictionary<string, object> row = ReignDatabase.QuerySql(connection, @"
-SELECT *,COUNT(*) OVER () AS pending_count FROM relationship_daily_inputs
-WHERE status='pending'
-ORDER BY CASE WHEN timeline_id=$preferredTimeline THEN 0 ELSE 1 END,day_key,timeline_id LIMIT 1;",
-                            new Dictionary<string, object> { ["preferredTimeline"] =
+                        Dictionary<string, object> row = RelationshipsStore.SelectRelationshipDailyInputs(connection, new Dictionary<string, object> { ["preferredTimeline"] =
                                 campaignId == preferredCampaign ? preferredTimeline : "" }).FirstOrDefault();
                         ObserveRelationshipCampaignPending(campaignId, ReadInt(row, "pending_count", 0), readyVersion);
                         if (row == null) continue;
@@ -219,10 +215,7 @@ ORDER BY CASE WHEN timeline_id=$preferredTimeline THEN 0 ELSE 1 END,day_key,time
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(selectedCampaign))
             {
                 EnsureMbtiRelationshipSchema(connection);
-                ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_daily_inputs
-SET status='processing',started_ts=$ts,last_error=''
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND status='pending';",
-                    new Dictionary<string, object>
+                RelationshipsStore.UpdateRelationshipDailyInputs(connection, new Dictionary<string, object>
                     {
                         ["ts"] = startedTs, ["campaign"] = selectedCampaign,
                         ["timeline"] = timelineId, ["day"] = day
@@ -241,13 +234,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND statu
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(selectedCampaign))
             {
                 EnsureMbtiRelationshipSchema(connection);
-                cadenceInputs = ReignDatabase.QuerySql(connection, @"
-SELECT day_key,world_day,presence_groups_json,hero_changes_json
-FROM relationship_daily_inputs
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND day_key BETWEEN $start AND $day
-ORDER BY day_key;",
-                    new Dictionary<string, object>
+                cadenceInputs = RelationshipsStore.SelectRelationshipDailyInputs2(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = selectedCampaign,
                         ["timeline"] = timelineId,
@@ -354,12 +341,7 @@ ORDER BY day_key;",
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(selectedCampaign))
                 {
                     EnsureMbtiRelationshipSchema(connection);
-                    ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_daily_inputs SET
-status='processed',pair_cursor='',candidate_pairs=$candidates,processed_pairs=$processed,
-cadence_shard=$shard,window_start_day=$windowStart,window_day_count=$windowDays,
-pair_day_evaluations=$pairDays,processed_ts=$ts,last_error=''
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
-                        new Dictionary<string, object>
+                    RelationshipsStore.UpdateRelationshipDailyInputs2(connection, new Dictionary<string, object>
                         {
                             ["candidates"] = ReadInt(result, "candidatePairs", processedPairs),
                             ["processed"] = processedPairs, ["ts"] = ContinuousRelationshipLastCompletedTs,
@@ -367,25 +349,18 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
                             ["windowDays"] = cadenceInputs.Count, ["pairDays"] = evaluatedPairDays,
                             ["campaign"] = selectedCampaign, ["timeline"] = timelineId, ["day"] = day
                         });
-                    ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_daily_inputs SET
-presence_groups_json='[]',hero_changes_json='[]'
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND status='processed' AND day_key<=$consumedThrough;",
-                        new Dictionary<string, object>
+                    RelationshipsStore.UpdateRelationshipDailyInputs3(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = selectedCampaign,
                             ["timeline"] = timelineId,
                             ["consumedThrough"] = day - RelationshipCadenceDays + 1
                         });
                     PruneRelationshipHeroObservations(connection, timelineId, day);
-                    ReignDatabase.ExecuteSql(connection, @"DELETE FROM relationship_daily_inputs
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND status='processed' AND day_key<$day-7;",
-                        new Dictionary<string, object>
+                    RelationshipsStore.DeleteRelationshipDailyInputs(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = selectedCampaign, ["timeline"] = timelineId, ["day"] = day
                         });
-                    ReignDatabase.ExecuteSql(connection, "PRAGMA wal_checkpoint(PASSIVE);");
+                    RelationshipsStore.Pragma(connection);
                 }
                 Dictionary<string, object> performance = result
                     .Where(entry => entry.Key.EndsWith("Ms", StringComparison.Ordinal)
@@ -415,10 +390,7 @@ AND status='processed' AND day_key<$day-7;",
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(selectedCampaign))
                 {
                     EnsureMbtiRelationshipSchema(connection);
-                    ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_daily_inputs
-SET status='pending',last_error=$error
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
-                        new Dictionary<string, object>
+                    RelationshipsStore.UpdateRelationshipDailyInputs4(connection, new Dictionary<string, object>
                         {
                             ["error"] = ContinuousRelationshipLastError,
                             ["campaign"] = selectedCampaign, ["timeline"] = timelineId, ["day"] = day

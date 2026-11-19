@@ -172,24 +172,24 @@ namespace ReignBetaServer
                         "npc", "player", "Player", "Mira", "", openingUnit.Reply, openingUnit.EventId, 8, acceptance: accept));
                     string openingSession = ReadString(acceptedOpening, "sessionId", "");
                     Check("individual_opening_only_npc_source_and_heard_receipt", ReadBool(acceptedOpening, "ok", false)
-                        && ReignDatabase.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id=$session AND role='player';", TestDict("session", openingSession)).Count == 0
-                        && ReignDatabase.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id=$session AND role='npc';", TestDict("session", openingSession)).Count == 1
+                        && RelationshipsSelfTestStore.SelectConversationTurns(c, TestDict("session", openingSession)).Count == 0
+                        && RelationshipsSelfTestStore.SelectConversationTurns2(c, TestDict("session", openingSession)).Count == 1
                         && ReadStringList(ApproachState(c, "individual_opening_test", "request:individual_invitation"), "heard").Contains("npc"),
                         "Accepted opening speech and the heard/contact receipt commit together with no empty player source.");
                     Check("individual_heard_opening_cannot_restart", !PrepareIndividualNpcOpening(campaign, "npc", Program.CloneDictionary(individualOpening)),
                         "A heard invitation cannot reauthorize an empty NPC-first opening.");
-                    ReignDatabase.ExecuteSql(c, "DELETE FROM player_attention_events WHERE timeline_id='individual_opening_test';");
+                    RelationshipsSelfTestStore.DeletePlayerAttentionEvents(c);
                     foreach (string key in new[] { PlayerApproachOptions.AttentionKey, PlayerApproachOptions.MasterKey })
                     {
                         var disabled = new PlayerApproachOptions(field => field != key);
                         var tracking = RecordAcceptedPlayerAttention(c, Unit("npc", "tracking_off_" + key, 9), Sources("npc", "off_source"), disabled);
-                        Check("tracking_off_" + key, ReadBool(tracking, "trackingDisabled", false) && ReignDatabase.QuerySql(c, "SELECT * FROM player_attention_events;").Count == 0
+                        Check("tracking_off_" + key, ReadBool(tracking, "trackingDisabled", false) && RelationshipsSelfTestStore.SelectPlayerAttentionEvents(c).Count == 0
                             && ReadInt(ApproachState(c, "attention_test", "contact:player:npc"), "day", 0) == 9,
                             "Disabling tracking inserts no observation while successful player contact still clears stale neglect.");
                     }
                     RecordAcceptedPlayerAttention(c, Unit("npc", "first", 10), Sources("npc", "source1"));
                     RecordAcceptedPlayerAttention(c, Unit("npc", "again", 10), Sources("npc", "source2"));
-                    Check("daily_observer_deduplication", ReignDatabase.QuerySql(c, "SELECT * FROM player_attention_events;").Count == 1,
+                    Check("daily_observer_deduplication", RelationshipsSelfTestStore.SelectPlayerAttentionEvents(c).Count == 1,
                         "Two successful conversations create one generic event for the present observer and none for the absent observer.");
                     var historyInput = TestDict("campaignId", campaign, "timelineId", "attention_test", "playerId", "player", "heroStringId", "observer");
                     var visibleHistory = Program.DialogueHistory(historyInput);
@@ -200,7 +200,7 @@ namespace ReignBetaServer
                     var newcomer = people.Concat(new[] { TestDict("heroId", "newcomer", "alive", true, "scopes", new[] { "settlement:town" }) }).ToList();
                     var afterArrival = Unit("npc", "new-arrival", 10); afterArrival.Payload["playerAttentionPresence"] = newcomer;
                     RecordAcceptedPlayerAttention(c, afterArrival, Sources("npc", "source3"));
-                    Check("newcomer_observes_same_day", ReignDatabase.QuerySql(c, "SELECT * FROM player_attention_events WHERE observer_id='newcomer';").Count == 1,
+                    Check("newcomer_observes_same_day", RelationshipsSelfTestStore.SelectPlayerAttentionEvents2(c).Count == 1,
                         "Per-observer deduplication preserves same-day observation by a newly arrived character.");
                     string baselineBeforeFailure = CanonicalJson(ApproachState(c, "attention_test", "contact:player:npc"));
                     bool noticesExcluded = true;
@@ -213,19 +213,18 @@ namespace ReignBetaServer
                     var letter = Unit("npc", "letter", 11); letter.Payload["channel"] = "correspondence";
                     RecordAcceptedPlayerAttention(c, letter, Sources("npc", "mail"));
                     Check("failed_and_remote_excluded", noticesExcluded
-                        && ReignDatabase.QuerySql(c, "SELECT * FROM player_attention_events WHERE calendar_day=11;").Count == 0
+                        && RelationshipsSelfTestStore.SelectPlayerAttentionEvents3(c).Count == 0
                         && CanonicalJson(ApproachState(c, "attention_test", "contact:player:npc")) == baselineBeforeFailure,
                         "Technical notices and letters neither observe attention nor reset a successful-contact baseline.");
-                    ReignDatabase.ExecuteSql(c, "BEGIN;");
+                    RelationshipsSelfTestStore.Begin(c);
                     RecordAcceptedPlayerAttention(c, Unit("npc", "rollback", 12), Sources("npc", "rollback_source"));
-                    ReignDatabase.ExecuteSql(c, "ROLLBACK;");
-                    Check("accepted_transaction_rollback", ReignDatabase.QuerySql(c, "SELECT * FROM player_attention_events WHERE calendar_day=12;").Count == 0,
+                    RelationshipsSelfTestStore.Rollback(c);
+                    Check("accepted_transaction_rollback", RelationshipsSelfTestStore.SelectPlayerAttentionEvents4(c).Count == 0,
                         "An accepted-source transaction rollback also removes attention and its contact effects.");
                     RecordAcceptedPlayerAttention(c, Unit("observer", "group", 13), Sources("observer", "group_a"));
                     RecordAcceptedPlayerAttention(c, Unit("npc", "group", 13), Sources("npc", "group_b"));
                     var contact = ApproachState(c, "attention_test", "contact:player:observer");
-                    var live = ReignDatabase.QuerySql(c, "SELECT * FROM player_attention_events WHERE observer_id='observer' AND sequence_id>$sequence AND exchange_id<>$exchange;",
-                        TestDict("sequence", ReadLong(contact, "sequence", 0), "exchange", ReadString(contact, "exchange", "")));
+                    var live = RelationshipsSelfTestStore.SelectPlayerAttentionEvents5(c, TestDict("sequence", ReadLong(contact, "sequence", 0), "exchange", ReadString(contact, "exchange", "")));
                     Check("group_participants_not_neglected", live.Count == 0, "Later speakers in the same successful group exchange do not artificially neglect an earlier speaker.");
                     var request = TestDict("requestId", "accepted_request", "playerId", "player", "kind", "shared", "status", "accepted", "heroes", new[] { TestDict("heroId", "observer", "name", "Observer", "severityLevel", 2) }, "heard", new List<string>());
                     PutApproachState(c, "attention_test", "request:accepted_request", request);
@@ -237,9 +236,7 @@ namespace ReignBetaServer
                     var nobles = Enumerable.Range(0, 5).Select(i => TestDict("heroId", "noble_" + i, "name", "Noble " + i,
                         "alive", true, "adult", true, "free", true, "coPresent", true, "isLord", true, "known", false, "nativeRelation", 100)).ToList();
                     foreach (var noble in nobles)
-                        ReignDatabase.ExecuteSql(c, @"INSERT INTO relationship_pair_chemistry(pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,
-affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts) VALUES($pair,$hero,'player','ENFP','INTJ',100,0,1,20,123);",
-                            TestDict("pair", AmbientPairKey(ReadString(noble, "heroId", ""), "player"), "hero", ReadString(noble, "heroId", "")));
+                        RelationshipsSelfTestStore.InsertRelationshipPairChemistry(c, TestDict("pair", AmbientPairKey(ReadString(noble, "heroId", ""), "player"), "hero", ReadString(noble, "heroId", "")));
                     foreach (var scope in new[] { (kind: "shared", key: PlayerApproachOptions.JealousyKey), (kind: "keep", key: PlayerApproachOptions.KeepKey), (kind: "patrol", key: PlayerApproachOptions.PatrolKey) })
                     {
                         foreach (string offKey in new[] { scope.key, PlayerApproachOptions.MasterKey })
@@ -250,7 +247,7 @@ affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts) VALUES($pair,$her
                                 "kind", scope.kind, "candidates", nobles);
                             var offResult = PlayerApproachEvaluateApi(evaluate, disabled);
                             Check("disabled_evaluation_" + isolated, ReadString(offResult, "status", "") == "disabled"
-                                && ReignDatabase.QuerySql(c, "SELECT * FROM player_approach_state WHERE timeline_id=$timeline;", TestDict("timeline", isolated)).Count == 0,
+                                && RelationshipsSelfTestStore.SelectPlayerApproachState(c, TestDict("timeline", isolated)).Count == 0,
                                 "Disabled evaluation consumes no roll, cadence, daily quota or cooldown and returns no request.");
                             string requestKey = "off_request";
                             PutApproachState(c, isolated, "request:" + requestKey, TestDict("requestId", requestKey, "playerId", "player", "kind", scope.kind,
@@ -261,8 +258,7 @@ affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts) VALUES($pair,$her
                             Check("disabled_decision_" + isolated, ReadString(ReadDictionary(cancelled, "request"), "status", "") == "cancelled"
                                 && ReadDictionaryList(ReadDictionary(cancelled, "request"), "receipts").Count == 0
                                 && ReadBool(replayed, "idempotent", false)
-                                && ReadInt(ReignDatabase.QuerySql(c, "SELECT affinity_a_to_b FROM relationship_pair_chemistry WHERE pair_key=$pair;",
-                                    TestDict("pair", AmbientPairKey("noble_0", "player"))).Single(), "affinity_a_to_b", 0) == 100,
+                                && ReadInt(RelationshipsSelfTestStore.SelectRelationshipPairChemistry(c, TestDict("pair", AmbientPairKey("noble_0", "player"))).Single(), "affinity_a_to_b", 0) == 100,
                                 "A pending disabled invitation cancels without affinity loss or native receipts; re-enabling cannot replay it.");
                             PutApproachState(c, isolated, "request:off_accept", TestDict("requestId", "off_accept", "playerId", "player", "kind", scope.kind,
                                 "status", "pending", "heroes", new[] { TestDict("heroId", "noble_0", "lastContact", TestDict(), "penalty", 8) }));
@@ -286,8 +282,7 @@ affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts) VALUES($pair,$her
                     var firstDecline = PlayerApproachDecisionApi(decline);
                     var secondDecline = PlayerApproachDecisionApi(decline);
                     Check("refusal_atomic_replay", ReadBool(firstDecline, "ok", false) && ReadBool(secondDecline, "idempotent", false)
-                        && invitedHeroes.All(h => ReadInt(ReignDatabase.QuerySql(c, "SELECT affinity_a_to_b FROM relationship_pair_chemistry WHERE pair_key=$pair;",
-                            TestDict("pair", AmbientPairKey(ReadString(h, "heroId", ""), "player"))).Single(), "affinity_a_to_b", 0) == 100 - ReadInt(h, "penalty", 0))
+                        && invitedHeroes.All(h => ReadInt(RelationshipsSelfTestStore.SelectRelationshipPairChemistry(c, TestDict("pair", AmbientPairKey(ReadString(h, "heroId", ""), "player"))).Single(), "affinity_a_to_b", 0) == 100 - ReadInt(h, "penalty", 0))
                         && ReadDictionaryList(ReadDictionary(firstDecline, "request"), "receipts").Count == 4,
                         "A repeated decline applies each saved 1d5 penalty once and returns the same four native receipt identities.");
                     var effect = ReadDictionaryList(ReadDictionary(firstDecline, "request"), "receipts")[0];
@@ -322,24 +317,24 @@ affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts) VALUES($pair,$her
                 long savedEvents, savedSequence; string savedRequest;
                 using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    savedEvents = ReadLong(ReignDatabase.QuerySql(c, "SELECT COUNT(*) AS count FROM player_attention_events;").Single(), "count", 0);
-                    savedSequence = ReadLong(ReignDatabase.QuerySql(c, "SELECT MAX(sequence_id) AS sequence FROM player_attention_events;").Single(), "sequence", 0);
+                    savedEvents = ReadLong(RelationshipsSelfTestStore.CountPlayerAttentionEvents(c).Single(), "count", 0);
+                    savedSequence = ReadLong(RelationshipsSelfTestStore.SelectPlayerAttentionEvents6(c).Single(), "sequence", 0);
                     savedRequest = CanonicalJson(ApproachState(c, "attention_test", "request:accepted_request"));
                 }
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "approach_checkpoint");
                 using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    ReignDatabase.ExecuteSql(c, "DELETE FROM player_attention_events;");
+                    RelationshipsSelfTestStore.DeletePlayerAttentionEvents2(c);
                     PutApproachState(c, "attention_test", "request:accepted_request", TestDict("status", "changed_after_save"));
                 }
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "approach_checkpoint");
                 using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    bool restored = ReadLong(ReignDatabase.QuerySql(c, "SELECT COUNT(*) AS count FROM player_attention_events;").Single(), "count", 0) == savedEvents
+                    bool restored = ReadLong(RelationshipsSelfTestStore.CountPlayerAttentionEvents(c).Single(), "count", 0) == savedEvents
                         && CanonicalJson(ApproachState(c, "attention_test", "request:accepted_request")) == savedRequest;
                     RecordAcceptedPlayerAttention(c, Unit("npc", "after_restore", 30), Sources("npc", "restored_source"));
                     Check("snapshot_restore_and_sequence", restored
-                        && ReadLong(ReignDatabase.QuerySql(c, "SELECT MAX(sequence_id) AS sequence FROM player_attention_events;").Single(), "sequence", 0) > savedSequence,
+                        && ReadLong(RelationshipsSelfTestStore.SelectPlayerAttentionEvents6(c).Single(), "sequence", 0) > savedSequence,
                         "A real isolated PostgreSQL Save Sync schema snapshot restores attention and frozen requests, then preserves monotonic accepted-source ordering.");
                     var individualContact = Unit("observer", "", 31); individualContact.Payload.Remove("sceneTurnId"); individualContact.EventId = "individual_contact";
                     RecordAcceptedPlayerAttention(c, individualContact, Sources("observer", "individual_contact_source"));
@@ -347,8 +342,7 @@ affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts) VALUES($pair,$her
                     RecordAcceptedPlayerAttention(c, individualRival, Sources("npc", "individual_rival_source"));
                     var individualBaseline = ApproachState(c, "attention_test", "contact:player:observer");
                     Check("individual_exchange_identity", ReadString(individualBaseline, "exchange", "") == "individual_contact"
-                        && ReignDatabase.QuerySql(c, "SELECT * FROM player_attention_events WHERE observer_id='observer' AND sequence_id>$sequence AND exchange_id<>$exchange;",
-                            TestDict("sequence", ReadLong(individualBaseline, "sequence", 0), "exchange", ReadString(individualBaseline, "exchange", ""))).Count == 1,
+                        && RelationshipsSelfTestStore.SelectPlayerAttentionEvents5(c, TestDict("sequence", ReadLong(individualBaseline, "sequence", 0), "exchange", ReadString(individualBaseline, "exchange", ""))).Count == 1,
                         "Individual dialogue uses its accepted event identity when no group turn key exists; later individual rival attention remains visible.");
                 }
             }

@@ -54,10 +54,7 @@ namespace ReignBetaServer
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureSocialReputationSchema(connection);
-                    sourceEvents = ReignDatabase.QuerySql(connection, @"SELECT event_id,correlation_id,sequence,world_day,payload_json
-FROM world_history_events WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND event_type='social_outcome' AND correlation_id IN ($female,$male)
-ORDER BY sequence DESC;", new Dictionary<string, object>
+                    sourceEvents = ReputationStore.SelectWorldHistoryEvents9(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["female"] = femaleSource, ["male"] = maleSource
@@ -73,10 +70,7 @@ ORDER BY sequence DESC;", new Dictionary<string, object>
                         DateTime receiptDeadline = DateTime.UtcNow.AddSeconds(30);
                         do
                         {
-                            sourceReceipts = ReignDatabase.QuerySql(connection, @"SELECT event_id,subject_id,archetype_id,
-completed,attempt_count,last_error,result_json,updated_ts FROM social_outcome_receipts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND event_id IN ($first,$second)
-ORDER BY event_id;", new Dictionary<string, object>
+                            sourceReceipts = ReputationStore.SelectSocialOutcomeReceipts2(connection, new Dictionary<string, object>
                             {
                                 ["campaign"] = campaignId, ["timeline"] = timelineId,
                                 ["first"] = sourceEventIds[0],
@@ -89,11 +83,7 @@ ORDER BY event_id;", new Dictionary<string, object>
                             Thread.Sleep(100);
                         }
                         while (true);
-                        occurrences = ReignDatabase.QuerySql(connection, @"SELECT occurrence_id,archetype_id,source_event_id,
-world_day,status,exposure_chance,exposure_roll,participants_json,provenance_summary,snapshot_json
-FROM rumor_occurrences WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND archetype_id='the_unchaste' AND source_event_id IN ($first,$second)
-ORDER BY source_event_id;", new Dictionary<string, object>
+                        occurrences = ReputationStore.SelectRumorOccurrences3(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId,
                             ["first"] = sourceEventIds[0],
@@ -105,20 +95,13 @@ ORDER BY source_event_id;", new Dictionary<string, object>
                         .Where(id => !string.IsNullOrWhiteSpace(id)).ToList();
                     if (occurrenceIds.Count > 0)
                     {
-                        subjectTags = ReignDatabase.QuerySql(connection, @"SELECT occurrence_id,subject_id,tag_id,subject_role,
-rumor_value,reputation_value,status,snapshot_json FROM rumor_subject_tags
-WHERE tag_id='the_unchaste' AND occurrence_id IN ($first,$second)
-ORDER BY subject_id;", new Dictionary<string, object>
+                        subjectTags = ReputationStore.SelectRumorSubjectTags4(connection, new Dictionary<string, object>
                         {
                             ["first"] = occurrenceIds[0],
                             ["second"] = occurrenceIds.Count > 1 ? occurrenceIds[1] : occurrenceIds[0]
                         });
                     }
-                    reputations = ReignDatabase.QuerySql(connection, @"SELECT subject_id,tag_id,source_occurrence_id,
-archetype_id,subject_role,description,reputation_value,acquired_day,status,snapshot_json
-FROM character_reputations WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND tag_id='the_unchaste' AND subject_id IN ($female,$male)
-ORDER BY subject_id;", new Dictionary<string, object>
+                    reputations = ReputationStore.SelectCharacterReputations11(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["female"] = femaleId, ["male"] = maleId
@@ -236,10 +219,7 @@ ORDER BY subject_id;", new Dictionary<string, object>
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureSocialReputationSchema(connection);
-                    sourceEvent = ReignDatabase.QuerySql(connection, @"SELECT event_id,correlation_id,sequence,world_day,payload_json
-FROM world_history_events WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND event_type='social_outcome' AND correlation_id=$source ORDER BY sequence DESC LIMIT 1;",
-                        new Dictionary<string, object>
+                    sourceEvent = ReputationStore.SelectWorldHistoryEvents10(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId,
                             ["source"] = sourceKey
@@ -250,10 +230,7 @@ AND event_type='social_outcome' AND correlation_id=$source ORDER BY sequence DES
                         DateTime receiptDeadline = DateTime.UtcNow.AddSeconds(30);
                         do
                         {
-                            sourceReceipt = ReignDatabase.QuerySql(connection, @"SELECT event_id,subject_id,archetype_id,
-completed,attempt_count,last_error,result_json,updated_ts FROM social_outcome_receipts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND event_id=$event LIMIT 1;",
-                                new Dictionary<string, object>
+                            sourceReceipt = ReputationStore.SelectSocialOutcomeReceipts3(connection, new Dictionary<string, object>
                                 {
                                     ["campaign"] = campaignId, ["timeline"] = timelineId,
                                     ["event"] = eventId
@@ -263,11 +240,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND event_id=$event LIMIT 
                             Thread.Sleep(100);
                         }
                         while (true);
-                        occurrence = ReignDatabase.QuerySql(connection, @"SELECT occurrence_id,archetype_id,source_event_id,
-world_day,status,exposure_chance,exposure_roll,participants_json,provenance_summary,snapshot_json
-FROM rumor_occurrences WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND archetype_id='ruler_favoring_presence' AND source_event_id=$event LIMIT 1;",
-                            new Dictionary<string, object>
+                        occurrence = ReputationStore.SelectRumorOccurrences4(connection, new Dictionary<string, object>
                             {
                                 ["campaign"] = campaignId, ["timeline"] = timelineId,
                                 ["event"] = eventId
@@ -276,16 +249,9 @@ AND archetype_id='ruler_favoring_presence' AND source_event_id=$event LIMIT 1;",
                     string occurrenceId = ReadString(occurrence, "occurrence_id", "");
                     if (!string.IsNullOrWhiteSpace(occurrenceId))
                     {
-                        subjectTags = ReignDatabase.QuerySql(connection, @"SELECT occurrence_id,subject_id,tag_id,subject_role,
-rumor_value,reputation_value,status,snapshot_json FROM rumor_subject_tags
-WHERE occurrence_id=$occurrence AND tag_id LIKE 'ruler_favoring:%';",
-                            new Dictionary<string, object> { ["occurrence"] = occurrenceId });
+                        subjectTags = ReputationStore.SelectRumorSubjectTags5(connection, new Dictionary<string, object> { ["occurrence"] = occurrenceId });
                     }
-                    reputations = ReignDatabase.QuerySql(connection, @"SELECT subject_id,tag_id,source_occurrence_id,
-archetype_id,subject_role,description,reputation_value,acquired_day,status,snapshot_json
-FROM character_reputations WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND subject_id=$ruler AND status='active' AND tag_id LIKE 'ruler_favoring:%';",
-                        new Dictionary<string, object>
+                    reputations = ReputationStore.SelectCharacterReputations12(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId,
                             ["ruler"] = rulerId
@@ -396,54 +362,34 @@ AND subject_id=$ruler AND status='active' AND tag_id LIKE 'ruler_favoring:%';",
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureSocialReputationSchema(connection);
-                player = ReignDatabase.QuerySql(connection, @"SELECT hero_id,is_player,is_ruler,is_alive,is_adult,clan_tier
-FROM identity_roster WHERE hero_id=$player LIMIT 1;",
-                    new Dictionary<string, object> { ["player"] = playerId }).FirstOrDefault()
+                player = ReputationStore.SelectIdentityRoster5(connection, new Dictionary<string, object> { ["player"] = playerId }).FirstOrDefault()
                     ?? new Dictionary<string, object>();
-                primaryCounter = ReignDatabase.QuerySql(connection, @"SELECT ruler_id,favorite_id,exchange_count,last_exchange_id,last_world_day
-FROM court_player_favoring_exchanges WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND ruler_id=$ruler AND favorite_id=$favorite LIMIT 1;",
-                    new Dictionary<string, object>
+                primaryCounter = ReputationStore.SelectCourtPlayerFavoringExchanges2(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["ruler"] = playerId, ["favorite"] = primaryId
                     }).FirstOrDefault() ?? new Dictionary<string, object>();
-                controlCounter = ReignDatabase.QuerySql(connection, @"SELECT ruler_id,favorite_id,exchange_count,last_exchange_id,last_world_day
-FROM court_player_favoring_exchanges WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND ruler_id=$ruler AND favorite_id=$favorite LIMIT 1;",
-                    new Dictionary<string, object>
+                controlCounter = ReputationStore.SelectCourtPlayerFavoringExchanges2(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["ruler"] = playerId, ["favorite"] = controlId
                     }).FirstOrDefault() ?? new Dictionary<string, object>();
-                primaryReceipts = ReignDatabase.QuerySql(connection, @"SELECT exchange_id,world_day,created_ts
-FROM court_player_favoring_exchange_receipts WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND ruler_id=$ruler AND favorite_id=$favorite ORDER BY created_ts,exchange_id;",
-                    new Dictionary<string, object>
+                primaryReceipts = ReputationStore.SelectCourtPlayerFavoringExchangeReceipts2(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["ruler"] = playerId, ["favorite"] = primaryId
                     });
-                controlReceipts = ReignDatabase.QuerySql(connection, @"SELECT exchange_id,world_day,created_ts
-FROM court_player_favoring_exchange_receipts WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND ruler_id=$ruler AND favorite_id=$favorite ORDER BY created_ts,exchange_id;",
-                    new Dictionary<string, object>
+                controlReceipts = ReputationStore.SelectCourtPlayerFavoringExchangeReceipts2(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["ruler"] = playerId, ["favorite"] = controlId
                     });
-                primaryOccurrences = ReignDatabase.QuerySql(connection, @"SELECT occurrence_id,thread_key,source_event_id,status,
-exposure_chance,exposure_roll,participants_json,provenance_summary FROM rumor_occurrences
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND archetype_id='ruler_favoring_dialogue'
-AND thread_key=$thread;", new Dictionary<string, object>
+                primaryOccurrences = ReputationStore.SelectRumorOccurrences5(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["thread"] = playerId + "|ruler_favoring|" + primaryId
                     });
-                controlOccurrences = ReignDatabase.QuerySql(connection, @"SELECT occurrence_id,thread_key,source_event_id,status,
-exposure_chance,exposure_roll,participants_json,provenance_summary FROM rumor_occurrences
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND archetype_id='ruler_favoring_dialogue'
-AND thread_key=$thread;", new Dictionary<string, object>
+                controlOccurrences = ReputationStore.SelectRumorOccurrences5(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["thread"] = playerId + "|ruler_favoring|" + controlId
@@ -590,10 +536,7 @@ AND thread_key=$thread;", new Dictionary<string, object>
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureSocialReputationSchema(connection);
-                sourceEvents = ReignDatabase.QuerySql(connection, @"SELECT event_id,correlation_id,sequence,world_day,payload_json
-FROM world_history_events WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND event_type='social_outcome' AND (correlation_id=$first OR correlation_id=$second)
-ORDER BY sequence;", new Dictionary<string, object>
+                sourceEvents = ReputationStore.SelectWorldHistoryEvents11(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId,
                     ["first"] = firstSourceKey, ["second"] = secondSourceKey
@@ -606,13 +549,7 @@ ORDER BY sequence;", new Dictionary<string, object>
                 {
                     sourceReceipts = sourceEvents.Count == 0
                         ? new List<Dictionary<string, object>>()
-                        : ReignDatabase.QuerySql(connection, @"SELECT event_id,subject_id,archetype_id,completed,
-attempt_count,last_error,result_json,updated_ts FROM social_outcome_receipts
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND event_id IN (SELECT event_id FROM world_history_events WHERE campaign_id=$campaign
-AND timeline_id=$timeline AND event_type='social_outcome' AND (correlation_id=$first OR correlation_id=$second))
-ORDER BY event_id;",
-                            new Dictionary<string, object>
+                        : ReputationStore.SelectSocialOutcomeReceipts4(connection, new Dictionary<string, object>
                             {
                                 ["campaign"] = campaignId, ["timeline"] = timelineId,
                                 ["first"] = firstSourceKey,
@@ -624,40 +561,18 @@ ORDER BY event_id;",
                     Thread.Sleep(100);
                 }
                 while (true);
-                occurrences = ReignDatabase.QuerySql(connection, @"SELECT occurrence_id,archetype_id,source_event_id,
-world_day,status,exposure_chance,exposure_roll,participants_json,provenance_summary,snapshot_json
-FROM rumor_occurrences WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND archetype_id='ruler_favoring_presence'
-AND source_event_id IN (SELECT event_id FROM world_history_events WHERE campaign_id=$campaign
-AND timeline_id=$timeline AND event_type='social_outcome' AND (correlation_id=$first OR correlation_id=$second))
-ORDER BY occurrence_id;",
-                    new Dictionary<string, object>
+                occurrences = ReputationStore.SelectRumorOccurrences6(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["first"] = firstSourceKey,
                         ["second"] = secondSourceKey
                     });
-                subjectTags = ReignDatabase.QuerySql(connection, @"SELECT occurrence_id,subject_id,tag_id,subject_role,
-rumor_value,reputation_value,status,snapshot_json FROM rumor_subject_tags
-WHERE occurrence_id IN (SELECT occurrence_id FROM rumor_occurrences WHERE campaign_id=$campaign
-AND timeline_id=$timeline AND archetype_id='ruler_favoring_presence' AND source_event_id IN
-(SELECT event_id FROM world_history_events WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND event_type='social_outcome' AND (correlation_id=$first OR correlation_id=$second)))
-AND tag_id LIKE 'ruler_favoring:%' ORDER BY occurrence_id,tag_id;",
-                    new Dictionary<string, object>
+                subjectTags = ReputationStore.SelectRumorSubjectTags6(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["first"] = firstSourceKey, ["second"] = secondSourceKey
                     });
-                reputations = ReignDatabase.QuerySql(connection, @"SELECT subject_id,tag_id,source_occurrence_id,
-archetype_id,subject_role,description,reputation_value,acquired_day,status,snapshot_json
-FROM character_reputations WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND subject_id=$ruler AND status='active' AND tag_id LIKE 'ruler_favoring:%'
-AND source_occurrence_id IN (SELECT occurrence_id FROM rumor_occurrences WHERE campaign_id=$campaign
-AND timeline_id=$timeline AND archetype_id='ruler_favoring_presence' AND source_event_id IN
-(SELECT event_id FROM world_history_events WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND event_type='social_outcome' AND (correlation_id=$first OR correlation_id=$second)))
-ORDER BY tag_id,source_occurrence_id;", new Dictionary<string, object>
+                reputations = ReputationStore.SelectCharacterReputations13(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId,
                     ["ruler"] = rulerId, ["first"] = firstSourceKey,
@@ -669,16 +584,12 @@ ORDER BY tag_id,source_occurrence_id;", new Dictionary<string, object>
                     new[] { rulerId }, worldDay);
                 standing = ReadPublicStandingTrait(connection, campaignId, timelineId,
                     rulerId, worldDay);
-                rulerCharm = ReadInt(ReignDatabase.QuerySql(connection,
-                    "SELECT current_charm FROM identity_roster WHERE hero_id=$id LIMIT 1;",
-                    new Dictionary<string, object> { ["id"] = rulerId }).FirstOrDefault(),
+                rulerCharm = ReadInt(ReputationStore.SelectIdentityRoster6(connection, new Dictionary<string, object> { ["id"] = rulerId }).FirstOrDefault(),
                     "current_charm", 0);
                 foreach (string observerId in new[] { favoriteOneId, favoriteTwoId, nonFavoriteId, foreignId })
                 {
                     string pairKey = RelationshipsService.AmbientPairKey(observerId, rulerId);
-                    pairCountsBefore[observerId] = ReadInt(ReignDatabase.QuerySql(connection,
-                        "SELECT COUNT(*) AS count FROM relationship_pair_chemistry WHERE pair_key=$pair;",
-                        new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault(), "count", 0);
+                    pairCountsBefore[observerId] = ReadInt(ReputationStore.CountRelationshipPairChemistry(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault(), "count", 0);
                 }
                 favoriteOneView = RelationshipsService.ResolveObserverPublicStanding(connection, campaignId,
                     timelineId, favoriteOneId, rulerId);
@@ -691,9 +602,7 @@ ORDER BY tag_id,source_occurrence_id;", new Dictionary<string, object>
                 foreach (string observerId in new[] { favoriteOneId, favoriteTwoId, nonFavoriteId, foreignId })
                 {
                     string pairKey = RelationshipsService.AmbientPairKey(observerId, rulerId);
-                    pairCountsAfter[observerId] = ReadInt(ReignDatabase.QuerySql(connection,
-                        "SELECT COUNT(*) AS count FROM relationship_pair_chemistry WHERE pair_key=$pair;",
-                        new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault(), "count", 0);
+                    pairCountsAfter[observerId] = ReadInt(ReputationStore.CountRelationshipPairChemistry(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault(), "count", 0);
                 }
             }
 
@@ -815,25 +724,16 @@ ORDER BY tag_id,source_occurrence_id;", new Dictionary<string, object>
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureSocialReputationSchema(connection);
-                Dictionary<string, object> rulerRow = ReignDatabase.QuerySql(connection, @"SELECT subject_id,
-COUNT(*) AS favoring_count FROM character_reputations
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='active'
-AND tag_id LIKE 'ruler_favoring:%' GROUP BY subject_id
-ORDER BY favoring_count DESC,subject_id LIMIT 1;", new Dictionary<string, object>
+                Dictionary<string, object> rulerRow = ReputationStore.SelectCharacterReputations14(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId
                 }).FirstOrDefault() ?? new Dictionary<string, object>();
                 rulerId = ReadString(rulerRow, "subject_id", "");
-                Dictionary<string, object> roster = ReignDatabase.QuerySql(connection, @"SELECT hero_id,kingdom_id,
-current_charm FROM identity_roster WHERE hero_id=$id LIMIT 1;",
-                    new Dictionary<string, object> { ["id"] = rulerId }).FirstOrDefault()
+                Dictionary<string, object> roster = ReputationStore.SelectIdentityRoster7(connection, new Dictionary<string, object> { ["id"] = rulerId }).FirstOrDefault()
                     ?? new Dictionary<string, object>();
                 rulerKingdomId = ReadString(roster, "kingdom_id", "");
                 rulerCharm = ReadInt(roster, "current_charm", 0);
-                double worldDay = ReadDouble(ReignDatabase.QuerySql(connection, @"SELECT MAX(acquired_day) AS day
-FROM character_reputations WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND subject_id=$subject AND status='active' AND tag_id LIKE 'ruler_favoring:%';",
-                    new Dictionary<string, object>
+                double worldDay = ReadDouble(ReputationStore.SelectCharacterReputations15(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["subject"] = rulerId
@@ -847,9 +747,7 @@ AND subject_id=$subject AND status='active' AND tag_id LIKE 'ruler_favoring:%';"
                     .Select(source => ReadString(source, "linkedHeroId", ""))
                     .Where(id => !string.IsNullOrWhiteSpace(id))
                     .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                observerCandidates = ReignDatabase.QuerySql(connection, @"SELECT hero_id,kingdom_id,is_player
-FROM identity_roster WHERE is_alive=1 AND is_adult=1 AND kingdom_id=$kingdom
-AND hero_id<>$subject ORDER BY hero_id;", new Dictionary<string, object>
+                observerCandidates = ReputationStore.SelectIdentityRoster8(connection, new Dictionary<string, object>
                 {
                     ["kingdom"] = rulerKingdomId, ["subject"] = rulerId
                 }).Where(row => !favoriteIds.Contains(ReadString(row, "hero_id", ""),
@@ -865,12 +763,8 @@ AND hero_id<>$subject ORDER BY hero_id;", new Dictionary<string, object>
                     .ToList();
                 lowObserver = observerCandidates.FirstOrDefault() ?? new Dictionary<string, object>();
                 highObserver = observerCandidates.LastOrDefault() ?? new Dictionary<string, object>();
-                playerId = ReadString(ReignDatabase.QuerySql(connection,
-                    "SELECT hero_id FROM identity_roster WHERE is_player=1 LIMIT 1;",
-                    new Dictionary<string, object>()).FirstOrDefault(), "hero_id", "");
-                foreignId = ReadString(ReignDatabase.QuerySql(connection, @"SELECT hero_id FROM identity_roster
-WHERE is_alive=1 AND is_adult=1 AND kingdom_id<>'' AND kingdom_id<>$kingdom
-ORDER BY hero_id LIMIT 1;", new Dictionary<string, object>
+                playerId = ReadString(ReputationStore.SelectIdentityRoster9(connection, new Dictionary<string, object>()).FirstOrDefault(), "hero_id", "");
+                foreignId = ReadString(ReputationStore.SelectIdentityRoster10(connection, new Dictionary<string, object>
                 {
                     ["kingdom"] = rulerKingdomId
                 }).FirstOrDefault(), "hero_id", "");
@@ -881,9 +775,7 @@ ORDER BY hero_id LIMIT 1;", new Dictionary<string, object>
                     .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase))
                 {
                     string pairKey = RelationshipsService.AmbientPairKey(observerId, rulerId);
-                    pairCountsBefore[observerId] = ReadInt(ReignDatabase.QuerySql(connection,
-                        "SELECT COUNT(*) AS count FROM relationship_pair_chemistry WHERE pair_key=$pair;",
-                        new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault(), "count", 0);
+                    pairCountsBefore[observerId] = ReadInt(ReputationStore.CountRelationshipPairChemistry(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault(), "count", 0);
                 }
                 lowView = RelationshipsService.ResolveObserverPublicStanding(connection, campaignId, timelineId,
                     lowId, rulerId);
@@ -898,9 +790,7 @@ ORDER BY hero_id LIMIT 1;", new Dictionary<string, object>
                 foreach (string observerId in pairCountsBefore.Keys.ToList())
                 {
                     string pairKey = RelationshipsService.AmbientPairKey(observerId, rulerId);
-                    pairCountsAfter[observerId] = ReadInt(ReignDatabase.QuerySql(connection,
-                        "SELECT COUNT(*) AS count FROM relationship_pair_chemistry WHERE pair_key=$pair;",
-                        new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault(), "count", 0);
+                    pairCountsAfter[observerId] = ReadInt(ReputationStore.CountRelationshipPairChemistry(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault(), "count", 0);
                 }
             }
 
@@ -1016,10 +906,7 @@ ORDER BY hero_id LIMIT 1;", new Dictionary<string, object>
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureSocialReputationSchema(connection);
-                    sourceEvent = ReignDatabase.QuerySql(connection, @"SELECT event_id,correlation_id,sequence,world_day,payload_json
-FROM world_history_events WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND event_type='social_outcome' AND correlation_id=$source ORDER BY sequence DESC LIMIT 1;",
-                        new Dictionary<string, object>
+                    sourceEvent = ReputationStore.SelectWorldHistoryEvents10(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId,
                             ["source"] = sourceKey
@@ -1030,10 +917,7 @@ AND event_type='social_outcome' AND correlation_id=$source ORDER BY sequence DES
                         DateTime receiptDeadline = DateTime.UtcNow.AddSeconds(30);
                         do
                         {
-                            sourceReceipt = ReignDatabase.QuerySql(connection, @"SELECT event_id,subject_id,archetype_id,
-completed,attempt_count,last_error,result_json,updated_ts FROM social_outcome_receipts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND event_id=$event LIMIT 1;",
-                                new Dictionary<string, object>
+                            sourceReceipt = ReputationStore.SelectSocialOutcomeReceipts3(connection, new Dictionary<string, object>
                                 {
                                     ["campaign"] = campaignId, ["timeline"] = timelineId,
                                     ["event"] = eventId
@@ -1043,11 +927,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND event_id=$event LIMIT 
                             Thread.Sleep(100);
                         }
                         while (true);
-                        occurrence = ReignDatabase.QuerySql(connection, @"SELECT occurrence_id,archetype_id,source_event_id,
-world_day,status,exposure_chance,exposure_roll,participants_json,provenance_summary,snapshot_json
-FROM rumor_occurrences WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND archetype_id='the_unchaste' AND source_event_id=$event LIMIT 1;",
-                            new Dictionary<string, object>
+                        occurrence = ReputationStore.SelectRumorOccurrences7(connection, new Dictionary<string, object>
                             {
                                 ["campaign"] = campaignId, ["timeline"] = timelineId,
                                 ["event"] = eventId
@@ -1056,26 +936,17 @@ AND archetype_id='the_unchaste' AND source_event_id=$event LIMIT 1;",
                     string occurrenceId = ReadString(occurrence, "occurrence_id", "");
                     if (!string.IsNullOrWhiteSpace(occurrenceId))
                     {
-                        subjectTag = ReignDatabase.QuerySql(connection, @"SELECT occurrence_id,subject_id,tag_id,subject_role,
-rumor_value,reputation_value,status,snapshot_json FROM rumor_subject_tags
-WHERE occurrence_id=$occurrence AND subject_id=$subject AND tag_id='the_unchaste' LIMIT 1;",
-                            new Dictionary<string, object>
+                        subjectTag = ReputationStore.SelectRumorSubjectTags7(connection, new Dictionary<string, object>
                             {
                                 ["occurrence"] = occurrenceId, ["subject"] = playerId
                             }).FirstOrDefault() ?? new Dictionary<string, object>();
-                        reputation = ReignDatabase.QuerySql(connection, @"SELECT subject_id,tag_id,source_occurrence_id,
-archetype_id,subject_role,description,reputation_value,acquired_day,status,snapshot_json
-FROM character_reputations WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND subject_id=$subject AND tag_id='the_unchaste' AND source_occurrence_id=$occurrence LIMIT 1;",
-                            new Dictionary<string, object>
+                        reputation = ReputationStore.SelectCharacterReputations16(connection, new Dictionary<string, object>
                             {
                                 ["campaign"] = campaignId, ["timeline"] = timelineId,
                                 ["subject"] = playerId, ["occurrence"] = occurrenceId
                             }).FirstOrDefault() ?? new Dictionary<string, object>();
                     }
-                    roster = ReignDatabase.QuerySql(connection, @"SELECT hero_id,is_player,is_alive,is_adult,sex,
-kingdom_id,current_charm FROM identity_roster WHERE hero_id=$subject LIMIT 1;",
-                        new Dictionary<string, object> { ["subject"] = playerId })
+                    roster = ReputationStore.SelectIdentityRoster11(connection, new Dictionary<string, object> { ["subject"] = playerId })
                         .FirstOrDefault() ?? new Dictionary<string, object>();
                     double worldDay = ReadDouble(sourceEvent, "world_day", 0d);
                     RecomputePublicStandingForSubjects(connection, campaignId, timelineId,

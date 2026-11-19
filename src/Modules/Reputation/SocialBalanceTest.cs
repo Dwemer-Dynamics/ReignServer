@@ -82,11 +82,7 @@ namespace ReignBetaServer
             {
                 using (ReignDbConnection connection = OpenSocialBalanceDatabase())
                 {
-                    ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO social_balance_runs(
-run_id,campaign_id,timeline_id,save_prefix,main_hero_id,status,manifest_json,created_ts,updated_ts)
-VALUES($run,$campaign,$timeline,$prefix,$hero,'prepared',$manifest,
-COALESCE((SELECT created_ts FROM social_balance_runs WHERE run_id=$run),$now),$now);",
-                        new Dictionary<string, object>
+                    ReputationStore.UpsertSocialBalanceRuns(connection, new Dictionary<string, object>
                         {
                             ["run"] = runId, ["campaign"] = campaignId, ["timeline"] = timelineId,
                             ["prefix"] = savePrefix, ["hero"] = mainHeroId,
@@ -138,21 +134,9 @@ COALESCE((SELECT created_ts FROM social_balance_runs WHERE run_id=$run),$now),$n
             {
                 using (ReignDbConnection connection = OpenSocialBalanceDatabase())
                 {
-                    Dictionary<string, object> enrolled = ReignDatabase.QuerySql(connection,
-                        "SELECT * FROM social_balance_runs WHERE run_id=$run AND campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
-                        new Dictionary<string, object> { ["run"] = runId, ["campaign"] = campaignId, ["timeline"] = timelineId }).FirstOrDefault();
+                    Dictionary<string, object> enrolled = ReputationStore.SelectSocialBalanceRuns5(connection, new Dictionary<string, object> { ["run"] = runId, ["campaign"] = campaignId, ["timeline"] = timelineId }).FirstOrDefault();
                     if (enrolled == null) return SocialBalanceError("The run is not enrolled for this campaign and timeline.");
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO social_balance_case_results(
-campaign_id,timeline_id,case_id,period_key,run_id,scenario_version,dependency_fingerprint,
-status,attempt_count,evidence_json,first_started_ts,completed_ts,updated_ts)
-VALUES($campaign,$timeline,$case,$period,$run,$version,$fingerprint,$status,1,$evidence,$now,
-CASE WHEN $terminal=1 THEN $now ELSE 0 END,$now)
-ON CONFLICT(campaign_id,timeline_id,case_id,period_key) DO UPDATE SET
-run_id=excluded.run_id,scenario_version=excluded.scenario_version,
-dependency_fingerprint=excluded.dependency_fingerprint,status=excluded.status,
-attempt_count=social_balance_case_results.attempt_count+1,evidence_json=excluded.evidence_json,
-completed_ts=excluded.completed_ts,updated_ts=excluded.updated_ts;",
-                        new Dictionary<string, object>
+                    ReputationStore.UpsertSocialBalanceCaseResults(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId, ["case"] = caseId,
                             ["period"] = periodKey, ["run"] = runId, ["version"] = SocialBalanceScenarioVersion,
@@ -160,8 +144,7 @@ completed_ts=excluded.completed_ts,updated_ts=excluded.updated_ts;",
                             ["evidence"] = Json.Serialize(ReadDictionary(payload, "evidence")),
                             ["terminal"] = status == "passed" || status == "failed" ? 1 : 0, ["now"] = now
                         });
-                    ReignDatabase.ExecuteSql(connection, "UPDATE social_balance_runs SET updated_ts=$now WHERE run_id=$run;",
-                        new Dictionary<string, object> { ["now"] = now, ["run"] = runId });
+                    ReputationStore.UpdateSocialBalanceRuns(connection, new Dictionary<string, object> { ["now"] = now, ["run"] = runId });
                 }
             }
             return SocialBalanceStatus(campaignId, timelineId, runId, periodKey);
@@ -303,12 +286,7 @@ completed_ts=excluded.completed_ts,updated_ts=excluded.updated_ts;",
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureSocialReputationSchema(connection);
-                    persisted = ReignDatabase.QuerySql(connection, @"SELECT exchange_id,signal_id,signal_type,speaker_id,target_id,
-supporting_quote,accepted,rejection_reason,evidence_json,created_ts
-FROM court_social_signal_evidence
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND exchange_id IN ($valid,$hypothetical)
-ORDER BY created_ts,signal_id;", new Dictionary<string, object>
+                    persisted = ReputationStore.SelectCourtSocialSignalEvidence2(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId,
                         ["timeline"] = timelineId,
@@ -645,21 +623,13 @@ ORDER BY created_ts,signal_id;", new Dictionary<string, object>
             {
                 using (ReignDbConnection connection = OpenSocialBalanceDatabase())
                 {
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO social_balance_longitudinal_checkpoints(
-campaign_id,timeline_id,run_id,world_day,snapshot_json,created_ts)
-VALUES($campaign,$timeline,$run,$day,$snapshot,$now)
-ON CONFLICT(campaign_id,timeline_id,run_id,world_day) DO UPDATE SET
-snapshot_json=excluded.snapshot_json,created_ts=excluded.created_ts;",
-                        new Dictionary<string, object>
+                    ReputationStore.UpsertSocialBalanceLongitudinalCheckpoints(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId,
                             ["run"] = runId, ["day"] = worldDay,
                             ["snapshot"] = Json.Serialize(snapshot), ["now"] = now
                         });
-                    checkpoints = ReignDatabase.QuerySql(connection, @"SELECT world_day,snapshot_json,created_ts
-FROM social_balance_longitudinal_checkpoints WHERE campaign_id=$campaign
-AND timeline_id=$timeline AND run_id=$run ORDER BY world_day;",
-                        new Dictionary<string, object>
+                    checkpoints = ReputationStore.SelectSocialBalanceLongitudinalCheckpoints2(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId, ["run"] = runId
                         });
@@ -765,10 +735,7 @@ AND timeline_id=$timeline AND run_id=$run ORDER BY world_day;",
             {
                 using (ReignDbConnection connection = OpenSocialBalanceDatabase())
                 {
-                    Dictionary<string, object> row = ReignDatabase.QuerySql(connection, @"SELECT snapshot_json
-FROM social_balance_snapshots WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND run_id=$run AND period_key=$period LIMIT 1;",
-                        new Dictionary<string, object>
+                    Dictionary<string, object> row = ReputationStore.SelectSocialBalanceSnapshots2(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId,
                             ["run"] = runId, ["period"] = periodKey
@@ -789,10 +756,7 @@ AND run_id=$run AND period_key=$period LIMIT 1;",
             {
                 using (ReignDbConnection connection = OpenSocialBalanceDatabase())
                 {
-                    Dictionary<string, object> row = ReignDatabase.QuerySql(connection, @"SELECT *
-FROM social_balance_case_results WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND case_id=$case AND period_key='once' LIMIT 1;",
-                        new Dictionary<string, object>
+                    Dictionary<string, object> row = ReputationStore.SelectSocialBalanceCaseResults3(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId, ["case"] = caseId
                         }).FirstOrDefault();
@@ -838,27 +802,16 @@ AND case_id=$case AND period_key='once' LIMIT 1;",
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureSocialReputationSchema(connection);
-                    signalEvidence = ReignDatabase.QuerySql(connection, @"SELECT exchange_id,signal_id,signal_type,speaker_id,target_id,
-supporting_quote,accepted,rejection_reason,evidence_json,created_ts
-FROM court_social_signal_evidence
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND exchange_id=$exchange
-ORDER BY created_ts,signal_id;", new Dictionary<string, object>
+                    signalEvidence = ReputationStore.SelectCourtSocialSignalEvidence3(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId, ["exchange"] = exchangeId
                     });
-                    producerReceipts = ReignDatabase.QuerySql(connection, @"SELECT session_id,signal_key,signal_type,speaker_id,target_id,
-result_json,created_ts FROM court_conversation_signal_receipts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND session_id=$session
-AND speaker_id=$player AND target_id=$target ORDER BY created_ts,signal_key;",
-                        new Dictionary<string, object>
+                    producerReceipts = ReputationStore.SelectCourtConversationSignalReceipts3(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId, ["session"] = sessionId,
                             ["player"] = playerId, ["target"] = targetId
                         });
-                    targetRows = ReignDatabase.QuerySql(connection, @"SELECT subject_id,target_id,first_session_id,first_world_day,
-last_session_id,last_world_day,incident_count,updated_ts FROM court_flirt_targets
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$player AND target_id=$target;",
-                        new Dictionary<string, object>
+                    targetRows = ReputationStore.SelectCourtFlirtTargets3(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId,
                             ["player"] = playerId, ["target"] = targetId
@@ -980,26 +933,15 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$player AND
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureSocialReputationSchema(connection);
-                    signalEvidence = ReignDatabase.QuerySql(connection, @"SELECT exchange_id,signal_id,signal_type,speaker_id,target_id,
-supporting_quote,accepted,rejection_reason,evidence_json,created_ts
-FROM court_social_signal_evidence
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND signal_id=$signal;",
-                        new Dictionary<string, object>
+                    signalEvidence = ReputationStore.SelectCourtSocialSignalEvidence4(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId, ["signal"] = signalId
                         });
-                    exposureReceipts = ReignDatabase.QuerySql(connection, @"SELECT signal_id,player_id,partner_id,eligible,exposed,
-probability,roll,result_json,created_ts FROM court_intimacy_exposure_receipts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND signal_id=$signal;",
-                        new Dictionary<string, object>
+                    exposureReceipts = ReputationStore.SelectCourtIntimacyExposureReceipts3(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId, ["signal"] = signalId
                         });
-                    occurrences = ReignDatabase.QuerySql(connection, @"SELECT occurrence_id,archetype_id,thread_key,source_event_id,
-world_day,expires_day,status,exposure_chance,exposure_roll,participants_json,provenance_summary
-FROM rumor_occurrences WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND archetype_id='affair' AND source_event_id=$event;",
-                        new Dictionary<string, object>
+                    occurrences = ReputationStore.SelectRumorOccurrences8(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId,
                             ["event"] = "intimacy|" + signalId
@@ -1066,9 +1008,7 @@ AND archetype_id='affair' AND source_event_id=$event;",
                                 forcedResult["rareExposureOverride"] =
                                     new Dictionary<string, object>(rareExposureOverride);
                                 string receiptResultJson = Json.Serialize(forcedResult);
-                                ReignDatabase.ExecuteSql(connection, @"UPDATE court_intimacy_exposure_receipts
-SET exposed=1,result_json=$result WHERE campaign_id=$campaign AND timeline_id=$timeline AND signal_id=$signal;",
-                                    new Dictionary<string, object>
+                                ReputationStore.UpdateCourtIntimacyExposureReceipts(connection, new Dictionary<string, object>
                                     {
                                         ["result"] = receiptResultJson,
                                         ["campaign"] = campaignId,
@@ -1076,20 +1016,13 @@ SET exposed=1,result_json=$result WHERE campaign_id=$campaign AND timeline_id=$t
                                         ["signal"] = signalId
                                     });
                                 rareExposureOverride["forcedResult"] = forcedResult;
-                                exposureReceipts = ReignDatabase.QuerySql(connection, @"SELECT signal_id,player_id,partner_id,eligible,exposed,
-probability,roll,result_json,created_ts FROM court_intimacy_exposure_receipts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND signal_id=$signal;",
-                                    new Dictionary<string, object>
+                                exposureReceipts = ReputationStore.SelectCourtIntimacyExposureReceipts3(connection, new Dictionary<string, object>
                                     {
                                         ["campaign"] = campaignId,
                                         ["timeline"] = timelineId,
                                         ["signal"] = signalId
                                     });
-                                occurrences = ReignDatabase.QuerySql(connection, @"SELECT occurrence_id,archetype_id,thread_key,source_event_id,
-world_day,expires_day,status,exposure_chance,exposure_roll,participants_json,provenance_summary
-FROM rumor_occurrences WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND archetype_id='affair' AND source_event_id=$event;",
-                                    new Dictionary<string, object>
+                                occurrences = ReputationStore.SelectRumorOccurrences8(connection, new Dictionary<string, object>
                                     {
                                         ["campaign"] = campaignId,
                                         ["timeline"] = timelineId,
@@ -1268,31 +1201,22 @@ AND archetype_id='affair' AND source_event_id=$event;",
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureSocialReputationSchema(connection);
-                if (ReignDatabase.QuerySql(connection,
-                    "SELECT 1 FROM identity_roster WHERE hero_id=$id AND is_alive=1 AND is_adult=1 LIMIT 1;",
-                    new Dictionary<string, object> { ["id"] = observerId }).Count == 0
-                    || ReignDatabase.QuerySql(connection,
-                    "SELECT 1 FROM identity_roster WHERE hero_id=$id AND is_alive=1 AND is_adult=1 LIMIT 1;",
-                    new Dictionary<string, object> { ["id"] = subjectId }).Count == 0)
+                if (ReputationStore.SelectIdentityRoster12(connection, new Dictionary<string, object> { ["id"] = observerId }).Count == 0
+                    || ReputationStore.SelectIdentityRoster12(connection, new Dictionary<string, object> { ["id"] = subjectId }).Count == 0)
                     return SocialBalanceError("Both heroes must exist as living adults in the synchronized identity roster.");
 
                 string pairKey = RelationshipsService.AmbientPairKey(observerId, subjectId);
                 bool observerIsA = pairKey.StartsWith(observerId + "|", StringComparison.OrdinalIgnoreCase);
                 string heroA = observerIsA ? observerId : subjectId;
                 string heroB = observerIsA ? subjectId : observerId;
-                Dictionary<string, object> priorPair = ReignDatabase.QuerySql(connection,
-                    "SELECT affinity_a_to_b,affinity_b_to_a FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                    new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
+                Dictionary<string, object> priorPair = ReputationStore.SelectRelationshipPairChemistry(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
                 bool pairExisted = priorPair != null;
                 int priorUnderlyingAffinity = pairExisted
                     ? ReadInt(priorPair, observerIsA ? "affinity_a_to_b" : "affinity_b_to_a", 0)
                     : 0;
                 int day = (int)Math.Floor(worldDay + 0.000001d);
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                int subjectStanding = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT standing_value
-FROM character_public_standing
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject
-LIMIT 1;", new Dictionary<string, object>
+                int subjectStanding = ReadInt(ReputationStore.SelectCharacterPublicStanding3(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["subject"] = subjectId
@@ -1301,18 +1225,13 @@ LIMIT 1;", new Dictionary<string, object>
                     ? SocialBalanceUnderlyingAffinityForEffectiveValue(
                         requestedValue, subjectStanding)
                     : requestedValue;
-                ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO relationship_pair_chemistry(
-pair_key,hero_a_id,hero_b_id,first_day,last_day,updated_ts)
-VALUES($pair,$a,$b,$day,$day,$ts);",
-                    new Dictionary<string, object>
+                ReputationStore.InsertOrIgnoreRelationshipPairChemistry(connection, new Dictionary<string, object>
                     {
                         ["pair"] = pairKey, ["a"] = heroA, ["b"] = heroB,
                         ["day"] = day, ["ts"] = ts
                     });
                 string affinityColumn = observerIsA ? "affinity_a_to_b" : "affinity_b_to_a";
-                ReignDatabase.ExecuteSql(connection, "UPDATE relationship_pair_chemistry SET "
-                    + affinityColumn + "=$value,last_day=MAX(last_day,$day),updated_ts=$ts WHERE pair_key=$pair;",
-                    new Dictionary<string, object>
+                ReputationStore.UpdateRelationshipPairChemistry(connection, affinityColumn,                    new Dictionary<string, object>
                     {
                         ["value"] = value, ["day"] = day, ["ts"] = ts, ["pair"] = pairKey
                     });
@@ -1323,15 +1242,9 @@ VALUES($pair,$a,$b,$day,$day,$ts);",
                     ReconcileSocialRelationshipsForSubjects(connection, campaignId, timelineId,
                         new[] { subjectId }, worldDay);
                 RelationshipsService.RefreshEffectivePairProjection(connection, campaignId, timelineId,
-                    ReignDatabase.QuerySql(connection,
-                        "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                        new Dictionary<string, object> { ["pair"] = pairKey })
+                    ReputationStore.SelectRelationshipPairChemistry2(connection, new Dictionary<string, object> { ["pair"] = pairKey })
                         .FirstOrDefault(), worldDay, "social_balance_affinity");
-                Dictionary<string, object> updatedPair = ReignDatabase.QuerySql(connection, @"SELECT
-affinity_a_to_b,affinity_b_to_a,effective_affinity_a_to_b,effective_affinity_b_to_a,
-projected_native_relation,native_action_pending,native_action_id
-FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                    new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
+                Dictionary<string, object> updatedPair = ReputationStore.SelectRelationshipPairChemistry3(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
                 return new Dictionary<string, object>
                 {
                     ["ok"] = true, ["observerId"] = observerId, ["subjectId"] = subjectId,

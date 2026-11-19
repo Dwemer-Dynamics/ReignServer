@@ -28,9 +28,7 @@ namespace ReignBetaServer
             else
             {
                 EnsureRelationshipLifecycleSchema(connection);
-                row = ReignDatabase.QuerySql(connection,
-                    "SELECT * FROM relationship_pair_lifecycle WHERE pair_key=$pair LIMIT 1;",
-                    new Dictionary<string, object> { ["pair"] = pair.PairKey }).FirstOrDefault()
+                row = RelationshipsStore.SelectRelationshipPairLifecycle3(connection, new Dictionary<string, object> { ["pair"] = pair.PairKey }).FirstOrDefault()
                     ?? new Dictionary<string, object>();
             }
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -470,11 +468,7 @@ namespace ReignBetaServer
                             || (!marriedToEachOther && !unmarriedCommitment)
                             || !legalFatherId.Equals(fatherId,
                                 StringComparison.OrdinalIgnoreCase);
-                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO conceptions(
-conception_id,attempt_id,mother_id,biological_father_id,legal_father_id,conception_day,due_day,status,secrecy,
-payload_json,created_ts,updated_ts)
-VALUES($id,$attempt,$mother,$father,$legal,$day,$due,'pending_game',$secrecy,$payload,$ts,$ts);",
-                            new Dictionary<string, object>
+                        RelationshipsStore.InsertConceptions2(connection, new Dictionary<string, object>
                             {
                                 ["id"] = conceptionId, ["attempt"] = "relationship_lifecycle_" + pair.PairKey + "_" + day,
                                 ["mother"] = motherId, ["father"] = fatherId, ["legal"] = legalFatherId,
@@ -613,37 +607,7 @@ VALUES($id,$attempt,$mother,$father,$legal,$day,$due,'pending_game',$secrecy,$pa
                 || ReadInt(row, "version", 0) != RelationshipLifecycleVersion;
             if (lifecycleStateChanged)
             {
-                ExecuteRelationshipLifecycleWrite(connection, @"INSERT INTO relationship_pair_lifecycle(
-pair_key,hero_a_id,hero_b_id,lover_active,lover_started_day,lover_exception_attempted,lover_exception_passed,
-lover_exception_roll,lover_rumor_id,romance_stage,romance_stage_started_day,romance_last_colocated_day,
-romance_positive_bonus,flirt_episode,flirt_attempted,flirt_passed,flirt_trait_a,flirt_trait_b,flirt_roll_a,flirt_roll_b,
-affair_episode,affair_attempted,affair_passed,judgment_trait_a,judgment_trait_b,judgment_roll_a,judgment_roll_b,
-affair_active,affair_started_day,affair_rumor_id,
-estranged_a_to_b,estranged_b_to_a,estranged_rumor_id,married,marriage_action_id,
-marriage_blocked,marriage_block_reason,divorced,divorce_day,
-divorce_action_id,divorce_rumor_id,conception_action_id,last_conception_day,last_marriage_evaluation_day,organic_marriage_colocated_days,last_processed_day,version,updated_ts)
-VALUES($pair,$a,$b,$lovers,$loverDay,$attempted,$passed,$exceptionRoll,$loverRumor,$romanceStage,$romanceStageDay,$romanceColocatedDay,
-$romanceBonus,$flirtEpisode,$flirtAttempted,$flirtPassed,$flirtTraitA,$flirtTraitB,$flirtRollA,$flirtRollB,
-$affairEpisode,$affairAttempted,$affairPassed,$judgmentTraitA,$judgmentTraitB,$judgmentRollA,$judgmentRollB,
-$affair,$affairDay,$affairRumor,
-$estrangedAB,$estrangedBA,$estrangedRumor,$married,$marriageAction,$marriageBlocked,$marriageBlockReason,
-$divorced,$divorceDay,$divorceAction,
-$divorceRumor,$conceptionAction,$conceptionDay,$marriageEvaluationDay,$marriageColocatedDays,$day,$version,$ts)
-ON CONFLICT(pair_key) DO UPDATE SET lover_active=$lovers,lover_started_day=$loverDay,
- lover_exception_attempted=$attempted,lover_exception_passed=$passed,lover_exception_roll=$exceptionRoll,
- lover_rumor_id=$loverRumor,romance_stage=$romanceStage,romance_stage_started_day=$romanceStageDay,
- romance_last_colocated_day=$romanceColocatedDay,romance_positive_bonus=$romanceBonus,
- flirt_episode=$flirtEpisode,flirt_attempted=$flirtAttempted,flirt_passed=$flirtPassed,
- flirt_trait_a=$flirtTraitA,flirt_trait_b=$flirtTraitB,flirt_roll_a=$flirtRollA,flirt_roll_b=$flirtRollB,
- affair_episode=$affairEpisode,affair_attempted=$affairAttempted,affair_passed=$affairPassed,
- judgment_trait_a=$judgmentTraitA,judgment_trait_b=$judgmentTraitB,judgment_roll_a=$judgmentRollA,
- judgment_roll_b=$judgmentRollB,affair_active=$affair,affair_started_day=$affairDay,affair_rumor_id=$affairRumor,
-estranged_a_to_b=$estrangedAB,estranged_b_to_a=$estrangedBA,estranged_rumor_id=$estrangedRumor,
-married=$married,marriage_action_id=$marriageAction,marriage_blocked=$marriageBlocked,
-marriage_block_reason=$marriageBlockReason,divorced=$divorced,divorce_day=$divorceDay,
-divorce_action_id=$divorceAction,divorce_rumor_id=$divorceRumor,conception_action_id=$conceptionAction,
-last_conception_day=$conceptionDay,last_marriage_evaluation_day=$marriageEvaluationDay,
-organic_marriage_colocated_days=$marriageColocatedDays,last_processed_day=$day,version=$version,updated_ts=$ts;",
+                ExecuteRelationshipLifecycleWrite(connection, RelationshipsStore.UpsertRelationshipPairLifecycleSql,
                 new Dictionary<string, object>
                 {
                     ["pair"] = pair.PairKey, ["a"] = pair.HeroAId, ["b"] = pair.HeroBId,
@@ -776,22 +740,13 @@ organic_marriage_colocated_days=$marriageColocatedDays,last_processed_day=$day,v
 
             // Seed missing checkpoints in one write. They are existing state,
             // not decay work for the current period.
-            ReignDatabase.ExecuteSql(connection, @"
-UPDATE relationship_pair_chemistry
-SET last_decay_period=$period,updated_ts=$ts
-WHERE last_decay_period<0
-AND (affinity_a_to_b<>0 OR affinity_b_to_a<>0);",
-                new Dictionary<string, object>
+            RelationshipsStore.UpdateRelationshipPairChemistry22(connection, new Dictionary<string, object>
                 {
                     ["period"] = period,
                     ["ts"] = ts
                 });
 
-            List<Dictionary<string, object>> rows = ReignDatabase.QuerySql(connection, @"
-SELECT * FROM relationship_pair_chemistry
-WHERE last_decay_period>=0 AND last_decay_period<$period
-AND (affinity_a_to_b<>0 OR affinity_b_to_a<>0);",
-                new Dictionary<string, object> { ["period"] = period });
+            List<Dictionary<string, object>> rows = RelationshipsStore.SelectRelationshipPairChemistry19(connection, new Dictionary<string, object> { ["period"] = period });
             if (rows.Count == 0)
             {
                 return new Dictionary<string, object>
@@ -805,10 +760,7 @@ AND (affinity_a_to_b<>0 OR affinity_b_to_a<>0);",
                 };
             }
 
-            Dictionary<string, int> standings = ReignDatabase.QuerySql(connection, @"
-SELECT subject_id,standing_value FROM character_public_standing
-WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                new Dictionary<string, object>
+            Dictionary<string, int> standings = RelationshipsStore.SelectCharacterPublicStanding(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId,
                     ["timeline"] = timelineId
@@ -819,11 +771,11 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                     row => ReadInt(row, "standing_value", 0),
                     StringComparer.OrdinalIgnoreCase);
             Dictionary<string, Dictionary<string, object>> lifecycleByPair =
-                ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_pair_lifecycle;")
+                RelationshipsStore.SelectRelationshipPairLifecycle4(connection)
                     .ToDictionary(row => ReadString(row, "pair_key", ""),
                         row => row, StringComparer.OrdinalIgnoreCase);
             Dictionary<string, Dictionary<string, object>> targetsByPair =
-                ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_native_targets;")
+                RelationshipsStore.SelectRelationshipNativeTargets4(connection)
                     .ToDictionary(row => ReadString(row, "pair_key", ""),
                         row => row, StringComparer.OrdinalIgnoreCase);
 
@@ -956,29 +908,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
 
             if (endedLovers.Count > 0)
             {
-                ExecutePostgreSqlJsonCommand(connection, @"
-WITH x AS (
-    SELECT * FROM jsonb_to_recordset(@rows) AS r(
-        pair text,a text,b text,ab integer,ba integer,ts bigint)
-)
-UPDATE relationship_pair_lifecycle AS lifecycle
-SET lover_active=0,
-    affair_active=0,
-    romance_stage=CASE WHEN LEAST(x.ab,x.ba) >= 25
-        THEN 'flirtation' ELSE '' END,
-    romance_stage_started_day=0,
-    romance_positive_bonus=CASE WHEN LEAST(x.ab,x.ba) >= 25
-        THEN 10 ELSE 0 END,
-    affair_episode=CASE WHEN affair_attempted=1
-        THEN GREATEST(1,affair_episode)+1 ELSE affair_episode END,
-    affair_attempted=0,
-    affair_passed=0,
-    judgment_trait_a=0,
-    judgment_trait_b=0,
-    judgment_roll_a=0,
-    judgment_roll_b=0,
-    updated_ts=x.ts
-FROM x WHERE lifecycle.pair_key=x.pair;", 
+                ExecutePostgreSqlJsonCommand(connection, RelationshipsStore.SelectSql2, 
                     PostgreSqlRelationshipRowsJson(endedLovers));
                 foreach (Dictionary<string, object> ended in endedLovers)
                 {
@@ -1001,30 +931,7 @@ FROM x WHERE lifecycle.pair_key=x.pair;",
 
             if (pairUpdates.Count > 0)
             {
-                ExecutePostgreSqlJsonCommand(connection, @"
-WITH x AS (
-    SELECT * FROM jsonb_to_recordset(@rows) AS r(
-        pair text,ab integer,ba integer,tagab text,tagba text,
-        shared text,projected integer,pending integer,action text,
-        period integer,ts bigint)
-)
-UPDATE relationship_pair_chemistry AS chemistry
-SET affinity_a_to_b=x.ab,
-    affinity_b_to_a=x.ba,
-    effective_affinity_a_to_b=x.ab,
-    effective_affinity_b_to_a=x.ba,
-    tag_a_to_b=x.tagab,
-    tag_b_to_a=x.tagba,
-    shared_tag=x.shared,
-    projected_native_relation=x.projected,
-    native_action_pending=x.pending,
-    native_action_id=x.action,
-    native_incident_offset=0,
-    last_decay_period=x.period,
-    state_revision=chemistry.state_revision+1,
-    updated_ts=x.ts
-FROM x
-WHERE chemistry.pair_key=x.pair;", 
+                ExecutePostgreSqlJsonCommand(connection, RelationshipsStore.SelectSql3, 
                     PostgreSqlRelationshipRowsJson(pairUpdates));
                 InvalidateRelationshipPairStateCache(campaignId);
             }
@@ -1054,10 +961,7 @@ WHERE chemistry.pair_key=x.pair;",
         private static void RecordRelationshipIncident(ReignDbConnection connection, AmbientPairContext pair, string kind,
             double day, string summary, Dictionary<string, object> payload, string rumorId = "")
         {
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_incidents(
-incident_id,pair_key,kind,hero_a_id,hero_b_id,world_day,summary,rumor_id,payload_json,created_ts)
-VALUES($id,$pair,$kind,$a,$b,$day,$summary,$rumor,$payload,$ts);",
-                new Dictionary<string, object>
+            RelationshipsStore.InsertRelationshipIncidents(connection, new Dictionary<string, object>
                 {
                     ["id"] = "relationship_incident_" + Guid.NewGuid().ToString("N"),
                     ["pair"] = pair.PairKey, ["kind"] = kind, ["a"] = pair.HeroAId, ["b"] = pair.HeroBId,
