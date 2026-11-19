@@ -51,7 +51,7 @@ namespace ReignBetaServer
                 routeContext["worldDay"] = ReadDouble(routeContext, "currentWorldDay", 0d);
             }
             string precisionMode;
-            using (var connection = OpenCampaignConnection(campaignId)) precisionMode = DialogueService.MemoryPrecisionMode(connection, settings);
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaignId)) precisionMode = DialogueService.MemoryPrecisionMode(connection, settings);
             string precisionQuery = ReadString(routeContext, "memoryQueryText", topic);
             // Scene state is grounding for the writer, not the player's historical
             // question. Keep lexical routing and semantic retrieval on that same
@@ -85,14 +85,14 @@ namespace ReignBetaServer
             timingPhases["queryPreparationMs"] = phaseTimer.ElapsedMilliseconds;
             phaseTimer.Restart();
 
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 timingPhases["connectionOpenMs"] = phaseTimer.ElapsedMilliseconds;
                 phaseTimer.Restart();
                 ftsMemoryIds = SearchMemoryFts(connection, queryTerms, 80, knowledge);
                 ftsSummaryIds = SearchSummaryFts(connection, queryTerms, 40, knowledge);
                 volatileSnapshotEventIds = new HashSet<string>(
-                    QuerySql(connection,
+                    ReignDatabase.QuerySql(connection,
                             @"SELECT event_id FROM events
 WHERE event_type='daily_world_snapshot';")
                         .Select(row => ReadString(
@@ -103,7 +103,7 @@ WHERE event_type='daily_world_snapshot';")
                 if (!string.IsNullOrWhiteSpace(playerId) || DialogueService.RouteHasLane(retrievalRoute, "interpersonal_history") || DialogueService.RouteHasLane(retrievalRoute, "commitments_and_plots"))
                 {
                     List<string> relationshipTargets = string.IsNullOrWhiteSpace(playerId)
-                        ? QuerySql(connection, @"SELECT hero_a_id,hero_b_id FROM relationship_pair_chemistry
+                        ? ReignDatabase.QuerySql(connection, @"SELECT hero_a_id,hero_b_id FROM relationship_pair_chemistry
 WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
                             new Dictionary<string, object> { ["npc"] = npcId })
                             .Select(row => ReadString(row, "hero_a_id", "").Equals(npcId, StringComparison.OrdinalIgnoreCase)
@@ -264,7 +264,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
             minimeRerank["applied"] = ReadBool(semanticRetrieval, "applied", false);
             minimeRerank["method"] = "persistent_vector_index_plus_deterministic_rank";
             minimeRerank["candidateCount"] = summaries.Count + memories.Count + beliefs.Count + comprehension.Count;
-            using (var observerConnection = OpenCampaignConnection(campaignId))
+            using (var observerConnection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 memories = DialogueService.ProjectRetrievedConversationMemories(observerConnection, memories, knowledge);
                 summaries = DialogueService.ProjectRetrievedConversationMemories(observerConnection, summaries, knowledge);
@@ -404,7 +404,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
             {
                 packet = packet.TrimEnd() + "\n\nExact conversation source (use for precise continuity; do not invent omitted lines):\n" + exactText;
             }
-            using (var correspondenceConnection = OpenCampaignConnection(campaignId))
+            using (var correspondenceConnection = ReignDatabase.OpenCampaignConnection(campaignId))
                 foreach (var letter in DialogueService.LoadCorrespondenceMemory(correspondenceConnection, npcId, playerId, precisionQuery, routeContext, knowledge))
                 {
                     packet += "\n\n" + DialogueService.RenderContinuityRecord(letter.SourceId, letter.Kind, letter.Owner, letter.Session, letter.Day, 119, true, letter.Text);
@@ -495,7 +495,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
             // toward the candidate limit; unrelated rows cannot exhaust it.
             while (result.Count < Math.Max(1, limit))
             {
-                var rows = QuerySql(connection, "SELECT * FROM " + table + " WHERE " + where
+                var rows = ReignDatabase.QuerySql(connection, "SELECT * FROM " + table + " WHERE " + where
                     + " ORDER BY " + order + " DESC," + key + " LIMIT $batch OFFSET $offset;",
                     new Dictionary<string, object> { ["observer"] = knowledge?.NpcId ?? "", ["batch"] = batch, ["offset"] = offset,
                         ["query"] = BuildFtsQuery(queryTerms ?? new List<string>()), ["timeline"] = knowledge?.TimelineId ?? "" });
@@ -539,7 +539,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
                 parameters[key] = selectedIds[index];
             }
 
-            return QuerySql(connection, "SELECT * FROM " + table + " WHERE status='active' AND " + idColumn
+            return ReignDatabase.QuerySql(connection, "SELECT * FROM " + table + " WHERE status='active' AND " + idColumn
                     + " IN (" + string.Join(",", placeholders.ToArray()) + ");", parameters)
                 .Where(row => KnowledgeRowVisibleToNpc(table, row, knowledge, connection))
                 .ToList();

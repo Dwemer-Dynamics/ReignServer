@@ -72,16 +72,9 @@ namespace ReignBetaServer
         }
         private static void EnsureFamilyChambersSchema(ReignDbConnection connection)
         {
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS childhood_experiences (
-experience_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,hero_id TEXT NOT NULL,
-session_id TEXT NOT NULL,world_day REAL NOT NULL DEFAULT 0,experienced_age REAL NOT NULL DEFAULT 0,
-summary TEXT NOT NULL DEFAULT '',participants_json TEXT NOT NULL DEFAULT '[]',status TEXT NOT NULL DEFAULT 'active_child',
-created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);" );
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_childhood_experiences_hero ON childhood_experiences(campaign_id,timeline_id,hero_id,world_day DESC);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS childhood_maturity_receipts (
-receipt_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,hero_id TEXT NOT NULL,
-retained_count INTEGER NOT NULL DEFAULT 0,archived_count INTEGER NOT NULL DEFAULT 0,created_ts INTEGER NOT NULL,
-UNIQUE(campaign_id,timeline_id,hero_id));");
+            CourtSchema.CreateChildhoodExperiences(connection);
+            CourtSchema.CreateIndexChildhoodExperiencesHero(connection);
+            CourtSchema.CreateChildhoodMaturityReceipts(connection);
         }
 
         internal static Dictionary<string, object> FamilyChambersChildRespond(Dictionary<string, object> payload,
@@ -101,17 +94,14 @@ UNIQUE(campaign_id,timeline_id,hero_id));");
                 ReadStringList(payload, "participants"), childhoodOnly: true, settingsOverride: settingsOverride);
             payload = memoryContext.Payload;
             List<Dictionary<string, object>> prior;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureFamilyChambersSchema(connection);
-                prior = Program.QuerySql(connection, @"SELECT experience_id,summary,experienced_age,world_day FROM childhood_experiences
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND hero_id=$hero AND status='active_child' AND world_day<=$day
-ORDER BY ts_rank_cd(to_tsvector('simple',summary),plainto_tsquery('simple',$query)) DESC,world_day DESC,experience_id LIMIT 12;",
-                    new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId,
+                prior = CourtStore.SelectChildhoodExperiences(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId,
                         ["day"] = ReadDouble(payload, "worldDay", 0d), ["query"] = ReadString(payload, "playerText", "") });
             }
             var prompt = new StringBuilder();
-            using (ReignDbConnection attentionConnection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection attentionConnection = ReignDatabase.OpenCampaignConnection(campaignId))
                 prompt.AppendLine(BuildFamilyAttentionContext(attentionConnection, campaignId, timelineId, heroId,
                     ReadFirstString(payload, "playerHeroStringId", "playerId"), ReadDouble(payload, "worldDay", 0d)));
             prompt.AppendLine("Write only valid JSON with reply, emotion and intent. Lasting memories are derived from the actual accepted exchange.");
@@ -154,9 +144,7 @@ ORDER BY ts_rank_cd(to_tsvector('simple',summary),plainto_tsquery('simple',$quer
             {
                 if (failedDraft) return;
                 EnsureFamilyChambersSchema(connection);
-                Program.ExecuteSql(connection, @"INSERT INTO childhood_experiences(experience_id,campaign_id,timeline_id,hero_id,session_id,world_day,experienced_age,summary,participants_json,status,created_ts,updated_ts)
-VALUES($id,$campaign,$timeline,$hero,$session,$day,$age,$summary,$participants,'active_child',$ts,$ts)
-ON CONFLICT(experience_id) DO NOTHING;", new Dictionary<string, object>
+                CourtStore.InsertOrIgnoreChildhoodExperiences(connection, new Dictionary<string, object>
                 {
                     ["id"] = experienceId, ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId,
                     ["session"] = sessionId, ["day"] = ReadDouble(payload, "worldDay", 0d), ["age"] = age,
@@ -194,32 +182,26 @@ ON CONFLICT(experience_id) DO NOTHING;", new Dictionary<string, object>
             if (!Program.IsCharacterConstructionReady(construction))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Normal adult character construction is not ready.", ["construction"] = construction };
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureFamilyChambersSchema(connection);
                 MigrateFamilyChildAttentionRelation(connection, campaignId, timelineId, heroId, ReadDouble(payload, "worldDay", 0d));
-                Dictionary<string, object> receipt = Program.QuerySql(connection, "SELECT * FROM childhood_maturity_receipts WHERE campaign_id=$campaign AND timeline_id=$timeline AND hero_id=$hero LIMIT 1;",
-                    new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId }).FirstOrDefault();
+                Dictionary<string, object> receipt = CourtStore.SelectChildhoodMaturityReceipts(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId }).FirstOrDefault();
                 if (receipt != null) return new Dictionary<string, object> { ["ok"] = true, ["idempotent"] = true, ["retainedCount"] = ReadInt(receipt, "retained_count", 0), ["archivedCount"] = ReadInt(receipt, "archived_count", 0) };
-                List<Dictionary<string, object>> rows = Program.QuerySql(connection, "SELECT * FROM childhood_experiences WHERE campaign_id=$campaign AND timeline_id=$timeline AND hero_id=$hero AND status='active_child' ORDER BY world_day;",
-                    new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId });
+                List<Dictionary<string, object>> rows = CourtStore.SelectChildhoodExperiences2(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId });
                 int retained = rows.Count(row => FamilyChildhoodRetainedAtAdulthood(ReadDouble(row, "experienced_age", 0d)));
                 int archived = rows.Count - retained;
                 foreach (Dictionary<string, object> row in rows.Where(row => FamilyChildhoodRetainedAtAdulthood(ReadDouble(row, "experienced_age", 0d))))
                 {
                     string experienceId = ReadString(row, "experience_id", "");
-                    Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO summaries(summary_id,scope,owner_id,summary_type,summary,source_events_json,start_ts,end_ts,event_count,participants_json,known_by_json,visibility,importance,confidence,tags_json,status,source,embedding_status,updated_ts,payload_json,memory_lane)
-VALUES($id,$scope,$hero,'middle_term',$summary,$events,$ts,$ts,1,$participants,$known,'private',0.65,1.0,$tags,'active','childhood_migration','pending',$ts,$payload,'personal_state');",
-                        new Dictionary<string, object> { ["id"] = "childhood_memory_" + experienceId, ["scope"] = "childhood:" + heroId,
+                    CourtStore.InsertOrIgnoreSummaries(connection, new Dictionary<string, object> { ["id"] = "childhood_memory_" + experienceId, ["scope"] = "childhood:" + heroId,
                             ["hero"] = heroId, ["summary"] = ReadString(row, "summary", ""), ["events"] = Json.Serialize(new[] { experienceId }),
                             ["participants"] = ReadString(row, "participants_json", "[]"), ["known"] = Json.Serialize(new[] { heroId }),
                             ["tags"] = Json.Serialize(new[] { "childhood_memory", "retained_at_adulthood" }), ["ts"] = ts,
                             ["payload"] = Json.Serialize(new Dictionary<string, object> { ["experiencedAge"] = ReadDouble(row, "experienced_age", 0d), ["sourceExperienceId"] = experienceId }) });
                 }
-                Program.ExecuteSql(connection, "UPDATE childhood_experiences SET status=CASE WHEN experienced_age>=5 THEN 'adult_retained' ELSE 'adult_archived' END,updated_ts=$ts WHERE campaign_id=$campaign AND timeline_id=$timeline AND hero_id=$hero AND status='active_child';",
-                    new Dictionary<string, object> { ["ts"] = ts, ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId });
-                Program.ExecuteSql(connection, "INSERT INTO childhood_maturity_receipts(receipt_id,campaign_id,timeline_id,hero_id,retained_count,archived_count,created_ts) VALUES($id,$campaign,$timeline,$hero,$retained,$archived,$ts);",
-                    new Dictionary<string, object> { ["id"] = "childhood_maturity_" + FamilyStableId(campaignId + "|" + timelineId + "|" + heroId), ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId, ["retained"] = retained, ["archived"] = archived, ["ts"] = ts });
+                CourtStore.UpdateChildhoodExperiences(connection, new Dictionary<string, object> { ["ts"] = ts, ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId });
+                CourtStore.InsertChildhoodMaturityReceipts(connection, new Dictionary<string, object> { ["id"] = "childhood_maturity_" + FamilyStableId(campaignId + "|" + timelineId + "|" + heroId), ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId, ["retained"] = retained, ["archived"] = archived, ["ts"] = ts });
                 return new Dictionary<string, object> { ["ok"] = true, ["retainedCount"] = retained, ["archivedCount"] = archived };
             }
         }

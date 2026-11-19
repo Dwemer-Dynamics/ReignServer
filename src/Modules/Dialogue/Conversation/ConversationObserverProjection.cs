@@ -236,7 +236,7 @@ namespace ReignBetaServer
                 if (ReadString(row, "owner_id", "") == knowledge.NpcId || !HasPrivateNarrativeMeaning(ReadString(row, "summary", "")))
                 { result.Add(row); continue; }
                 string eventId = ReadString(row, "event_id", "");
-                var originals = eventId.Length == 0 ? new List<Dictionary<string, object>>() : Program.QuerySql(connection,
+                var originals = eventId.Length == 0 ? new List<Dictionary<string, object>>() : ReignDatabase.QuerySql(connection,
                     "SELECT * FROM conversation_turns WHERE event_id=$event AND status='active' ORDER BY accepted_sequence;", TestDict("event", eventId))
                     .Where(r => PrecisionTurnVisible(r, knowledge.NpcId, knowledge, connection)).ToList();
                 // A mixed-scope legacy paraphrase without an eligible original is

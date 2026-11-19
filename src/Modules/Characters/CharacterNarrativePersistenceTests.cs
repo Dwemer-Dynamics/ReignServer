@@ -29,25 +29,23 @@ namespace ReignBetaServer
                     ["personalMeaning"] = "Learning to cope over many weeks has made this concern more manageable.",
                     ["supportingQuote"] = "Over these months I have learned to approach this concern with deliberate calm and careful preparation.",
                     ["quoteValidated"] = true, ["compatibilityValidated"] = true };
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     EnsureDynamicCharacteristicsSchema(connection); EnsureCharacterEditorSchema(connection);
-                    Program.ExecuteSql(connection, "INSERT INTO character_editor_heads(hero_id,revision_token,updated_ts) VALUES($hero,'before',0);", new Dictionary<string, object> { ["hero"] = hero });
+                    CharactersSelfTestStore.InsertCharacterEditorHeads(connection, new Dictionary<string, object> { ["hero"] = hero });
                     StoreNarrativeDevelopment(connection, campaign, hero, proposal, "first", "exchange-1", "", 1, 100);
                     StoreNarrativeDevelopment(connection, campaign, hero, proposal, "second", "exchange-2", "", 15, 200);
                     var accepted = StoreNarrativeDevelopment(connection, campaign, hero, proposal, "third", "exchange-3", "", 31, 300);
                     var replay = StoreNarrativeDevelopment(connection, campaign, hero, proposal, "third", "exchange-3", "", 31, 300);
-                    var rows = Program.QuerySql(connection, "SELECT * FROM dynamic_characteristics WHERE owner_id=$hero;", new Dictionary<string, object> { ["hero"] = hero });
+                    var rows = CharactersSelfTestStore.SelectDynamicCharacteristics3(connection, new Dictionary<string, object> { ["hero"] = hero });
                     check("development_database_and_replay", ReadString(accepted, "status", "") == "active" && rows.Count == 3
                         && ReadString(replay, "characteristic_id", "") == ReadString(accepted, "characteristic_id", ""),
                         "Three qualifying encounters persist one accepted change; replaying an exchange adds no duplicate evidence or override.");
-                    var head = Program.QuerySql(connection, "SELECT revision_token FROM character_editor_heads WHERE hero_id=$hero;", new Dictionary<string, object> { ["hero"] = hero }).First();
+                    var head = CharactersSelfTestStore.SelectCharacterEditorHeads(connection, new Dictionary<string, object> { ["hero"] = hero }).First();
                     check("development_editor_conflict", ReadString(head, "revision_token", "") != "before",
                         "Development invalidates an already-open editor revision so a stale draft cannot silently overwrite it.");
                     // Fill the ordinary projection beyond its display cap.
-                    for (int i = 0; i < 260; i++) Program.ExecuteSql(connection,
-                        "INSERT INTO dynamic_characteristics(characteristic_id,owner_id,category,text,normalized_key,status,importance,first_ts,last_ts) VALUES($id,$hero,'habit','An ordinary stored habit.',$id,'active',2,400,400);",
-                        new Dictionary<string, object> { ["id"] = "ordinary_" + i, ["hero"] = hero });
+                    for (int i = 0; i < 260; i++) CharactersSelfTestStore.InsertDynamicCharacteristics(connection, new Dictionary<string, object> { ["id"] = "ordinary_" + i, ["hero"] = hero });
                     ProjectDynamicCharacteristicsFile(campaign, hero, connection);
                     var projection = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "dynamic_characteristics.json"));
                     check("active_override_survives_projection_cap", ReadDictionaryList(projection, "active")
@@ -60,9 +58,9 @@ namespace ReignBetaServer
                     Program.WriteJsonObject(Program.CharacterFile(campaign, hero, "narrative.json"), merged);
                 }
                 ReconcileEditedNarrative(campaign, hero);
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var rows = Program.QuerySql(connection, "SELECT * FROM dynamic_characteristics WHERE owner_id=$hero AND category='narrative_development';", new Dictionary<string, object> { ["hero"] = hero });
+                    var rows = CharactersSelfTestStore.SelectDynamicCharacteristics4(connection, new Dictionary<string, object> { ["hero"] = hero });
                     check("editor_retains_superseded_history", rows.Count == 3 && rows.Count(x => ReadString(x, "status", "") == "superseded") == 1,
                         "Manual correction supersedes the accepted version without deleting its observations or history.");
                     var next = StoreNarrativeDevelopment(connection, campaign, hero, proposal, "fourth", "exchange-4", "", 90, 500);

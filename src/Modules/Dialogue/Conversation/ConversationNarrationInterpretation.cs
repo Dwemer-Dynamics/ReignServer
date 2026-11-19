@@ -188,9 +188,9 @@ namespace ReignBetaServer
             string key = campaign + "|" + source.Generation + "|" + source.InputId;
             lock (InputInterpretationLocks[(uint)StringComparer.Ordinal.GetHashCode(key) % InputInterpretationLocks.Length])
             {
-                using var connection = Program.OpenCampaignConnection(campaign);
+                using var connection = ReignDatabase.OpenCampaignConnection(campaign);
                 EnsureConversationInputSchema(connection);
-                var row = source.InputId.Length == 0 ? null : Program.QuerySql(connection,
+                var row = source.InputId.Length == 0 ? null : ReignDatabase.QuerySql(connection,
                     "SELECT projection_json FROM conversation_input_receipts WHERE input_id=$id AND restore_generation=$generation;",
                     TestDict("id", source.InputId, "generation", source.Generation)).SingleOrDefault();
                 var cached = TryParseJsonObject(ReadString(row, "projection_json", "{}"));
@@ -235,7 +235,7 @@ namespace ReignBetaServer
                 }
                 result["sourceHash"] = ConversationExactTextHash(source.Original);
                 if (source.InputId.Length > 0)
-                    Program.ExecuteSql(connection, @"UPDATE conversation_input_receipts SET projection_json=$json,updated_ts=$now
+                    ReignDatabase.ExecuteSql(connection, @"UPDATE conversation_input_receipts SET projection_json=$json,updated_ts=$now
 WHERE input_id=$id AND restore_generation=$generation;",
                         TestDict("json", Json.Serialize(result), "now", DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                             "id", source.InputId, "generation", source.Generation));

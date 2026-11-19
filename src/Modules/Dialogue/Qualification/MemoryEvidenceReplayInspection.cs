@@ -37,10 +37,10 @@ namespace ReignBetaServer
             var inspection = ReadDictionary(writer, "questionLinkInspection");
             string reply = ReadString(inspection, "reply", "");
             var rows = new List<Dictionary<string, object>>();
-            using var connection = Program.OpenCampaignConnection(campaign);
+            using var connection = ReignDatabase.OpenCampaignConnection(campaign);
             using var transaction = connection.BeginTransaction();
-            Program.ExecuteSql(connection, "SET TRANSACTION READ ONLY;");
-            if (ReadString(Program.QuerySql(connection, "SELECT current_setting('transaction_read_only') AS mode;").Single(), "mode", "") != "on")
+            ReignDatabase.ExecuteSql(connection, "SET TRANSACTION READ ONLY;");
+            if (ReadString(ReignDatabase.QuerySql(connection, "SELECT current_setting('transaction_read_only') AS mode;").Single(), "mode", "") != "on")
                 throw new InvalidOperationException("question_link_inspection_read_only_required");
             int index = 0;
             foreach (var supplied in ReadDictionaryList(inspection, "writes"))

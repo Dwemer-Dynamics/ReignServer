@@ -282,14 +282,9 @@ namespace ReignBetaServer
             using (ReignDbConnection connection =
                 ReignPostgreSqlStorage.OpenCampaignConnection(campaignId))
             {
-                bool hasEmbeddingDocuments = ReadInt(Program.QuerySql(connection, @"
-SELECT COUNT(*) AS count
-FROM information_schema.tables
-WHERE table_schema=current_schema()
-  AND table_name='embedding_documents';").FirstOrDefault(), "count", 0) > 0;
+                bool hasEmbeddingDocuments = ReadInt(PersistenceStore.CountTables(connection).FirstOrDefault(), "count", 0) > 0;
                 ids = hasEmbeddingDocuments
-                    ? Program.QuerySql(connection,
-                            "SELECT vector_id FROM embedding_documents WHERE vector_id<>'' AND status<>'deleted';")
+                    ? PersistenceStore.SelectEmbeddingDocuments(connection)
                         .Select(row => ReadString(row, "vector_id", ""))
                         .Where(id => !string.IsNullOrWhiteSpace(id))
                         .Distinct(StringComparer.OrdinalIgnoreCase)

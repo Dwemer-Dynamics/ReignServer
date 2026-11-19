@@ -13,7 +13,7 @@ namespace ReignBetaServer
             double latestDay)
         {
             EnsureClanConflictSchema(connection);
-            Dictionary<string, object> sweeps = Program.QuerySql(connection, @"SELECT
+            Dictionary<string, object> sweeps = ReignDatabase.QuerySql(connection, @"SELECT
 COUNT(*) AS total,SUM(eligible_kingdoms) AS expected,SUM(processed_kingdoms) AS processed,
 SUM(CASE WHEN status<>'completed' THEN 1 ELSE 0 END) AS incomplete,MAX(world_day) AS latest
 FROM clan_conflict_day_sweeps WHERE campaign_id=$campaign AND timeline_id=$timeline;",
@@ -21,7 +21,7 @@ FROM clan_conflict_day_sweeps WHERE campaign_id=$campaign AND timeline_id=$timel
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId
                 }).FirstOrDefault() ?? new Dictionary<string, object>();
-            Dictionary<string, object> rolls = Program.QuerySql(connection, @"SELECT
+            Dictionary<string, object> rolls = ReignDatabase.QuerySql(connection, @"SELECT
 COUNT(*) AS total,SUM(CASE WHEN passed=1 THEN 1 ELSE 0 END) AS passed,
 SUM(CASE WHEN status='roll_failed' THEN 1 ELSE 0 END) AS failed,
 SUM(CASE WHEN status='no_eligible_pair' THEN 1 ELSE 0 END) AS no_pair,
@@ -31,7 +31,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId
                 }).FirstOrDefault() ?? new Dictionary<string, object>();
-            Dictionary<string, object> incidents = Program.QuerySql(connection, @"SELECT
+            Dictionary<string, object> incidents = ReignDatabase.QuerySql(connection, @"SELECT
 COUNT(*) AS total,SUM(CASE WHEN mediation_succeeded=1 THEN 1 ELSE 0 END) AS mediated,
 SUM(CASE WHEN mediation_succeeded=0 THEN 1 ELSE 0 END) AS feuds,
 SUM(CASE WHEN notice_status='acknowledged' THEN 1 ELSE 0 END) AS acknowledged,
@@ -42,7 +42,7 @@ FROM clan_conflict_incidents WHERE campaign_id=$campaign AND timeline_id=$timeli
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId
                 }).FirstOrDefault() ?? new Dictionary<string, object>();
-            Dictionary<string, object> effects = Program.QuerySql(connection, @"SELECT
+            Dictionary<string, object> effects = ReignDatabase.QuerySql(connection, @"SELECT
 COUNT(*) AS total,SUM(CASE WHEN status='applied' THEN 1 ELSE 0 END) AS applied,
 SUM(CASE WHEN status IN ('pending','applying') THEN 1 ELSE 0 END) AS pending,
 SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed
@@ -51,14 +51,14 @@ FROM clan_conflict_relationship_effects WHERE campaign_id=$campaign AND timeline
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId
                 }).FirstOrDefault() ?? new Dictionary<string, object>();
-            List<Dictionary<string, object>> sweepDetails = Program.QuerySql(connection, @"SELECT
+            List<Dictionary<string, object>> sweepDetails = ReignDatabase.QuerySql(connection, @"SELECT
 day_key,eligible_kingdom_ids_json FROM clan_conflict_day_sweeps
 WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY day_key;",
                 new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId
                 });
-            List<Dictionary<string, object>> rollDetails = Program.QuerySql(connection, @"SELECT
+            List<Dictionary<string, object>> rollDetails = ReignDatabase.QuerySql(connection, @"SELECT
 kingdom_id,MAX(kingdom_name) AS kingdom_name,COUNT(*) AS observed,
 SUM(CASE WHEN passed=1 THEN 1 ELSE 0 END) AS passed,
 SUM(CASE WHEN incident_id<>'' THEN 1 ELSE 0 END) AS incidents,
@@ -103,7 +103,7 @@ GROUP BY kingdom_id ORDER BY kingdom_id;", new Dictionary<string, object>
                         ["latestDay"] = ReadInt(row, "latest_day", -1)
                     };
                 }).ToList();
-            List<Dictionary<string, object>> incidentDetails = Program.QuerySql(connection, @"SELECT *
+            List<Dictionary<string, object>> incidentDetails = ReignDatabase.QuerySql(connection, @"SELECT *
 FROM clan_conflict_incidents WHERE campaign_id=$campaign AND timeline_id=$timeline
 ORDER BY world_day DESC,incident_id;", new Dictionary<string, object>
                 {
@@ -171,7 +171,7 @@ ORDER BY world_day DESC,incident_id;", new Dictionary<string, object>
                     ["status"] = ReadString(x, "status", ""),
                     ["lastError"] = ReadString(x, "last_error", "")
                 }).ToList();
-            List<Dictionary<string, object>> effectKinds = Program.QuerySql(connection, @"SELECT
+            List<Dictionary<string, object>> effectKinds = ReignDatabase.QuerySql(connection, @"SELECT
 effect_kind,COUNT(*) AS count,SUM(amount) AS net,MIN(amount) AS minimum,MAX(amount) AS maximum,
 SUM(CASE WHEN status='applied' THEN 1 ELSE 0 END) AS applied,
 SUM(CASE WHEN status IN ('pending','applying') THEN 1 ELSE 0 END) AS pending,
@@ -181,7 +181,7 @@ GROUP BY effect_kind ORDER BY effect_kind;", new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId
                 });
-            int duplicateEffects = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count FROM (
+            int duplicateEffects = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count FROM (
 SELECT incident_id,effect_kind,observer_id,target_id,COUNT(*) AS copies
 FROM clan_conflict_relationship_effects WHERE campaign_id=$campaign AND timeline_id=$timeline
 GROUP BY incident_id,effect_kind,observer_id,target_id HAVING COUNT(*)>1) AS duplicate_rows;",
@@ -197,7 +197,7 @@ GROUP BY incident_id,effect_kind,observer_id,target_id HAVING COUNT(*)>1) AS dup
             int expected = ReadInt(sweeps, "expected", 0);
             int processed = ReadInt(sweeps, "processed", 0);
             int totalRolls = ReadInt(rolls, "total", 0);
-            var rollIdentityRows = Program.QuerySql(connection, @"SELECT day_key,kingdom_id FROM clan_conflict_daily_rolls
+            var rollIdentityRows = ReignDatabase.QuerySql(connection, @"SELECT day_key,kingdom_id FROM clan_conflict_daily_rolls
 WHERE campaign_id=$campaign AND timeline_id=$timeline;", new Dictionary<string, object>
                 { ["campaign"] = campaignId, ["timeline"] = timelineId });
             var rollCoverage = ClanConflictRollCoverage(sweepDetails, rollIdentityRows);
@@ -208,7 +208,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;", new Dictionary<string, 
             if (unexpectedRolls > 0) anomalies.Add(unexpectedRolls + " clan-conflict rolls have no matching eligible kingdom/day.");
             if (duplicateRolls > 0) anomalies.Add(duplicateRolls + " duplicate clan-conflict kingdom/day rolls exist.");
             if (expected != processed) anomalies.Add("Clan-conflict sweep expected and processed counts disagree.");
-            int badChance = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+            int badChance = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM clan_conflict_daily_rolls WHERE campaign_id=$campaign AND timeline_id=$timeline AND chance<>8;",
                 new Dictionary<string, object>
                 {
@@ -312,7 +312,7 @@ FROM clan_conflict_daily_rolls WHERE campaign_id=$campaign AND timeline_id=$time
             string campaignId, string timelineId)
         {
             int violations = 0;
-            List<Dictionary<string, object>> incidents = Program.QuerySql(connection, @"SELECT *
+            List<Dictionary<string, object>> incidents = ReignDatabase.QuerySql(connection, @"SELECT *
 FROM clan_conflict_incidents WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                 new Dictionary<string, object>
                 {
@@ -333,7 +333,7 @@ FROM clan_conflict_incidents WHERE campaign_id=$campaign AND timeline_id=$timeli
                     || !b.Contains(ReadString(incident, "leader_b_id", ""), StringComparer.OrdinalIgnoreCase)
                     || a.Count > 6 || b.Count > 6) violations++;
             }
-            List<Dictionary<string, object>> effects = Program.QuerySql(connection, @"SELECT e.*,i.mediation_succeeded
+            List<Dictionary<string, object>> effects = ReignDatabase.QuerySql(connection, @"SELECT e.*,i.mediation_succeeded
 FROM clan_conflict_relationship_effects e JOIN clan_conflict_incidents i ON i.incident_id=e.incident_id
 WHERE e.campaign_id=$campaign AND e.timeline_id=$timeline;",
                 new Dictionary<string, object>
@@ -446,16 +446,16 @@ WHERE e.campaign_id=$campaign AND e.timeline_id=$timeline;",
                 Dictionary<string, object> persistenceOverview;
                 int rollCount;
                 int incidentCount;
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(persistenceCampaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(persistenceCampaign))
                 {
-                    rollCount = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+                    rollCount = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM clan_conflict_daily_rolls WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                         new Dictionary<string, object>
                         {
                             ["campaign"] = persistenceCampaign,
                             ["timeline"] = persistenceTimeline
                         }).FirstOrDefault(), "count", 0);
-                    incidentCount = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+                    incidentCount = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM clan_conflict_incidents WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                         new Dictionary<string, object>
                         {

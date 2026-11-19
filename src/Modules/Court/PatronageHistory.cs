@@ -18,17 +18,11 @@ namespace ReignBetaServer
                 || day < 0 || double.IsNaN(day) || double.IsInfinity(day))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "An exact campaign, timeline, kingdom and finite world day are required." };
             var subjects = new List<Dictionary<string, object>>();
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 WorldSimulationService.EnsureWorldHistorySchema(connection);
                 // Knowledge rules are the authority. Private participant evidence and premature realm news never qualify.
-                var rows = Program.QuerySql(connection, @"SELECT e.event_id,e.event_type,e.summary,e.world_day FROM world_history_events e
-WHERE e.timeline_id=$timeline AND e.is_complete=1 AND e.phase='completed' AND e.source='bannerlord_native'
-AND e.world_day<=$day AND e.event_type IN ('battle_completed','hero_prisoner_released','hero_killed','settlement_owner_changed','peace_made')
-AND EXISTS(SELECT 1 FROM world_history_knowledge_rules k WHERE k.event_id=e.event_id AND k.available_day<=$day
- AND (k.audience_type='global' OR (k.audience_type='kingdom' AND k.audience_id=$kingdom)))
-AND EXISTS(SELECT 1 FROM world_history_entities n WHERE n.event_id=e.event_id AND (n.kingdom_id=$kingdom OR (n.entity_type='kingdom' AND n.entity_id=$kingdom)))
-ORDER BY e.sequence DESC LIMIT 200;", new Dictionary<string, object> { ["timeline"] = timeline, ["day"] = day, ["kingdom"] = kingdom });
+                var rows = CourtStore.SelectWorldHistoryEvents(connection, new Dictionary<string, object> { ["timeline"] = timeline, ["day"] = day, ["kingdom"] = kingdom });
                 foreach (var row in rows)
                 {
                     string id = ReadString(row, "event_id", "");

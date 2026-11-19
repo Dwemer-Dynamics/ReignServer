@@ -30,7 +30,7 @@ namespace ReignBetaServer
                 ReadFirstString(payload, "conversationSessionId", "sessionId", "conversationId"),
                 FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), Program.EnsureCorrelationId(payload)))).Substring(0, 32);
 
-        internal static void EnsureAcceptedConversationUnitSchema(ReignDbConnection connection) => Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_accepted_units (
+        internal static void EnsureAcceptedConversationUnitSchema(ReignDbConnection connection) => ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_accepted_units (
 unit_id TEXT PRIMARY KEY, response_hash TEXT NOT NULL, restore_generation TEXT NOT NULL,
 receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
 
@@ -54,22 +54,22 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                 throw new InvalidOperationException("The final spoken approach no longer matches its saved opening evidence.");
             lock (RelationshipsService.CampaignRelationshipWriteLock(unit.Campaign))
             {
-                using (var setup = Program.OpenCampaignConnection(unit.Campaign)) EnsureAcceptedConversationUnitSchema(setup);
+                using (var setup = ReignDatabase.OpenCampaignConnection(unit.Campaign)) EnsureAcceptedConversationUnitSchema(setup);
                 var exchange = publishSources((connection, source) =>
                 {
-                    var sourceRows = ReadStringList(source, "turnIds").SelectMany(id => Program.QuerySql(connection,
+                    var sourceRows = ReadStringList(source, "turnIds").SelectMany(id => ReignDatabase.QuerySql(connection,
                         "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id))).ToList();
                     source["turnIds"] = sourceRows.Select(row => ReadString(row, "turn_id", "")).ToList();
                     BindAcceptedInputSource(connection, unit.Payload, ReadString(source, "sessionId", ""), unit.EventId,
                         ReadStringList(source, "turnIds"));
-                    string generation = ReadString(Program.QuerySql(connection,
+                    string generation = ReadString(ReignDatabase.QuerySql(connection,
                         "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").Single(), "restore_generation", "");
                     if (generation != unit.Generation)
                         throw new InvalidOperationException("The campaign changed before the conversation could be accepted.");
                     string hash = PromptHash(CanonicalJson(TestDict("reply", unit.Reply, "playerText", unit.PlayerText,
                         "hero", unit.Hero, "player", unit.Player, "timeline", ContinuityTimeline(unit.Payload),
                         "sourceIds", ReadStringList(source, "turnIds"))));
-                    var previous = Program.QuerySql(connection, "SELECT * FROM conversation_accepted_units WHERE unit_id=$unit;",
+                    var previous = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_accepted_units WHERE unit_id=$unit;",
                         TestDict("unit", unit.EventId)).SingleOrDefault();
                     if (previous != null)
                     {
@@ -146,10 +146,10 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                         : CharactersService.RecordAcceptedNpcLives(connection, unit, sourceRows);
                     var communications = suppressReplyEffects ? TestDict("status", excludedStatus)
                         : AcceptCommunicationCommitments(connection, unit, source, sourceRows.Concat(
-                            ReadStringList(privateExchange, "turnIds").SelectMany(id => Program.QuerySql(connection,
+                            ReadStringList(privateExchange, "turnIds").SelectMany(id => ReignDatabase.QuerySql(connection,
                                 "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)))).ToList());
                     var references = StoreAcceptedConversationReferences(connection, unit, sourceRows.Concat(
-                        ReadStringList(privateExchange, "turnIds").SelectMany(id => Program.QuerySql(connection,
+                        ReadStringList(privateExchange, "turnIds").SelectMany(id => ReignDatabase.QuerySql(connection,
                             "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)))).ToList(),
                         suppressReplyEffects || ReadString(ReadDictionary(unit.Payload, "npcLeaveResponseGuard"), "repair", "") == "bounded_local");
                     boundary?.Invoke("after_reference_graph");
@@ -174,7 +174,7 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                         && !unit.PrivateWhisper && unit.EventType == "dialogue_turn"
                         ? IndividualViewInsertionDescriptor(unit, session, generation, sourceRows) : null;
                     if (viewInsertion != null) receipt["viewInsertion"] = viewInsertion;
-                    Program.ExecuteSql(connection, @"INSERT INTO conversation_accepted_units(unit_id,response_hash,restore_generation,receipt_json,created_ts)
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_accepted_units(unit_id,response_hash,restore_generation,receipt_json,created_ts)
 VALUES($unit,$hash,$generation,$receipt,$ts);", TestDict("unit", unit.EventId, "hash", hash,
                         "generation", generation, "receipt", Json.Serialize(receipt), "ts", unit.Timestamp));
                     SaveConversationInputAcceptance(connection, unit, source, receipt);
@@ -206,7 +206,7 @@ VALUES($unit,$hash,$generation,$receipt,$ts);", TestDict("unit", unit.EventId, "
             request["conversationSessionId"] = session; request["sceneTurnId"] = exchange;
             request["participants"] = audience; request["activeHeroIds"] = new[] { unit.Hero };
             double day = ReadDouble(request, "worldDay", 0d);
-            Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO conversation_sessions
+            ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO conversation_sessions
 (session_id,campaign_id,npc_id,player_id,channel,status,start_ts,end_ts,start_world_day,end_world_day,location_id,participants_json,payload_json)
 VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$day,$location,$audience,$payload);",
                 TestDict("session", session, "campaign", unit.Campaign, "hero", unit.Hero, "player", unit.Player,
@@ -219,7 +219,7 @@ VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$d
             InsertConversationTurn(connection, npcTurn, session, unit.EventId, 1, exchange, "npc", unit.Hero,
                 unit.HeroName, unit.Reply, "private_whisper", day, unit.Timestamp, unit.Location, audience, request);
             return TestDict("ok", true, "sessionId", session, "exchangeId", exchange, "turnIds",
-                new[] { playerTurn, npcTurn }.Where(id => Program.QuerySql(connection,
+                new[] { playerTurn, npcTurn }.Where(id => ReignDatabase.QuerySql(connection,
                     "SELECT turn_id FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).Count > 0).ToArray());
         }
 
@@ -295,7 +295,7 @@ VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$d
             using var connection = ReignPostgreSqlStorage.OpenMetadataConnection();
             using var transaction = connection.BeginTransaction(System.Data.IsolationLevel.ReadCommitted);
             // First statement of the transaction; disposal rolls back and restores search_path.
-            Program.QuerySql(connection, "SELECT set_config('search_path', $path, true) AS path;", TestDict("path", "\"" + schema + "\", reign_meta, public"));
+            ReignDatabase.QuerySql(connection, "SELECT set_config('search_path', $path, true) AS path;", TestDict("path", "\"" + schema + "\", reign_meta, public"));
             // Absent prerequisites mean no descriptor can exist; an acknowledgment never creates them.
             if (!new[] { "conversation_turns", "memory_precision_state", "conversation_accepted_units" }.All(table => WorldSimulationService.TableExists(connection, table)))
                 return Reply("unknown", "no_view_insertion_descriptor");
@@ -306,11 +306,11 @@ VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$d
             // locks, so it cannot avoid the inversion. Then source turn before fence, as the
             // direct editor update trigger orders them; the share lock is held through commit.
             LockConversationSourceSession(connection, ack["sessionId"]);
-            var source = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND session_id=$session FOR SHARE;",
+            var source = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND session_id=$session FOR SHARE;",
                 TestDict("id", ack["sourceTurnId"], "session", ack["sessionId"])).FirstOrDefault();
-            string current = ReadString(Program.QuerySql(connection,
+            string current = ReadString(ReignDatabase.QuerySql(connection,
                 "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").FirstOrDefault(), "restore_generation", "");
-            var stored = Program.QuerySql(connection, "SELECT restore_generation,receipt_json FROM conversation_accepted_units WHERE unit_id=$unit FOR UPDATE;",
+            var stored = ReignDatabase.QuerySql(connection, "SELECT restore_generation,receipt_json FROM conversation_accepted_units WHERE unit_id=$unit FOR UPDATE;",
                 TestDict("unit", ack["unitId"])).FirstOrDefault();
             if (stored == null) return Reply("unknown", "unknown_unit");
             var receipt = TryParseJsonObject(ReadString(stored, "receipt_json", "{}"));
@@ -339,7 +339,7 @@ VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$d
                 "acknowledgedTs", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             descriptor["insertion"] = insertion;
             receipt["viewInsertion"] = descriptor;
-            Program.ExecuteSql(connection, "UPDATE conversation_accepted_units SET receipt_json=$receipt WHERE unit_id=$unit AND restore_generation=$generation;",
+            ReignDatabase.ExecuteSql(connection, "UPDATE conversation_accepted_units SET receipt_json=$receipt WHERE unit_id=$unit AND restore_generation=$generation;",
                 TestDict("receipt", Json.Serialize(receipt), "unit", ack["unitId"], "generation", ack["restoreGeneration"]));
             transaction.Commit();
             return Reply("inserted", "recorded", insertion);

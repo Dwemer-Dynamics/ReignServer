@@ -12,13 +12,13 @@ namespace ReignBetaServer
         {
             const string marker =
                 "postgresql_public_standing_schema_revision";
-            if (Program.IsPostgreSqlComponentSchemaReady(connection, marker,
+            if (ReignDatabase.IsPostgreSqlComponentSchemaReady(connection, marker,
                 PostgreSqlPublicStandingSchemaRevision))
                 return;
             EnsurePublicStandingSchemaCore(connection);
             if (ReignPostgreSqlDialect.IsPostgreSql(connection))
             {
-                Program.ExecuteSql(connection, @"
+                ReignDatabase.ExecuteSql(connection, @"
 INSERT INTO schema_meta(key,value)
 VALUES('postgresql_public_standing_schema_revision',$revision)
 ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
@@ -27,7 +27,7 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
                         ["revision"] =
                             PostgreSqlPublicStandingSchemaRevision.ToString()
                     });
-                Program.MarkPostgreSqlComponentSchemaReady(connection, marker,
+                ReignDatabase.MarkPostgreSqlComponentSchemaReady(connection, marker,
                     PostgreSqlPublicStandingSchemaRevision);
             }
         }
@@ -35,19 +35,19 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
         private static void EnsurePublicStandingSchemaCore(
             ReignDbConnection connection)
         {
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS character_public_standing (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS character_public_standing (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,subject_id TEXT NOT NULL,
 standing_value INTEGER NOT NULL DEFAULT 0,sources_json TEXT NOT NULL DEFAULT '[]',
 revision INTEGER NOT NULL DEFAULT 1,last_changed_day REAL NOT NULL DEFAULT 0,
 updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,subject_id));");
-            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_character_public_standing_subject
+            ReignDatabase.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_character_public_standing_subject
 ON character_public_standing(campaign_id,timeline_id,subject_id);");
-            Program.EnsureDatabaseColumn(connection, "character_public_standing", "calculation_status",
+            ReignDatabase.EnsureDatabaseColumn(connection, "character_public_standing", "calculation_status",
                 "TEXT NOT NULL DEFAULT 'ready'");
-            Program.EnsureDatabaseColumn(connection, "character_public_standing", "last_error",
+            ReignDatabase.EnsureDatabaseColumn(connection, "character_public_standing", "last_error",
                 "TEXT NOT NULL DEFAULT ''");
-            Program.EnsureDatabaseColumn(connection, "character_public_standing",
+            ReignDatabase.EnsureDatabaseColumn(connection, "character_public_standing",
                 "calculated_revision", "INTEGER NOT NULL DEFAULT 1");
         }
 
@@ -57,7 +57,7 @@ ON character_public_standing(campaign_id,timeline_id,subject_id);");
         {
             EnsurePublicStandingSchema(connection);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO character_public_standing(
+            ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO character_public_standing(
 campaign_id,timeline_id,subject_id,standing_value,sources_json,revision,last_changed_day,updated_ts)
 SELECT $campaign,$timeline,hero_id,0,'[]',1,$day,$ts
 FROM identity_roster WHERE hero_id<>'';",
@@ -71,7 +71,7 @@ FROM identity_roster WHERE hero_id<>'';",
 
             if (recomputeTaggedSubjects)
             {
-                List<string> taggedSubjects = Program.QuerySql(connection, @"
+                List<string> taggedSubjects = ReignDatabase.QuerySql(connection, @"
 SELECT DISTINCT rst.subject_id
 FROM rumor_subject_tags rst
 JOIN rumor_occurrences ro ON ro.occurrence_id=rst.occurrence_id
@@ -92,7 +92,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline; ",
                 RecomputePublicStandingForSubjects(connection, campaignId, timelineId,
                     taggedSubjects, worldDay);
             }
-            return ReadInt(Program.QuerySql(connection, @"
+            return ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM character_public_standing
 WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                 new Dictionary<string, object>
@@ -120,7 +120,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
             string subjectId, double worldDay)
         {
             EnsurePublicStandingSchema(connection);
-            Dictionary<string, object> row = Program.QuerySql(connection, @"
+            Dictionary<string, object> row = ReignDatabase.QuerySql(connection, @"
 SELECT subject_id,standing_value,sources_json,revision,calculated_revision,last_changed_day,
 calculation_status,last_error
 FROM character_public_standing
@@ -181,14 +181,14 @@ LIMIT 1;",
             if (string.IsNullOrWhiteSpace(subjectId))
                 return;
 
-            Dictionary<string, object> roster = Program.QuerySql(connection, @"
+            Dictionary<string, object> roster = ReignDatabase.QuerySql(connection, @"
 SELECT current_charm FROM identity_roster WHERE hero_id=$subject LIMIT 1;",
                 new Dictionary<string, object> { ["subject"] = subjectId }).FirstOrDefault();
             int charm = ReadInt(roster, "current_charm", 0);
             double mitigation = SocialCharmMitigation(charm);
             List<Dictionary<string, object>> sources = new List<Dictionary<string, object>>();
 
-            foreach (Dictionary<string, object> rumor in Program.QuerySql(connection, @"
+            foreach (Dictionary<string, object> rumor in ReignDatabase.QuerySql(connection, @"
 SELECT rst.tag_id,rst.description,rst.rumor_value,rst.snapshot_json,
 ro.occurrence_id,ro.archetype_id,ro.world_day,ro.expires_day,
 ro.catalog_revision,ro.provenance_summary
@@ -236,7 +236,7 @@ ORDER BY rst.tag_id,ro.world_day,ro.occurrence_id;",
                 sources.Add(source);
             }
 
-            foreach (Dictionary<string, object> reputation in Program.QuerySql(connection, @"
+            foreach (Dictionary<string, object> reputation in ReignDatabase.QuerySql(connection, @"
 SELECT tag_id,description,reputation_value,snapshot_json,source_occurrence_id,
 archetype_id,acquired_day,catalog_revision
 FROM character_reputations
@@ -283,7 +283,7 @@ ORDER BY tag_id,acquired_day,source_occurrence_id;",
             string sourcesJson = Json.Serialize(sources);
             int standingValue = RelationshipsService.RoundAwayFromZero(sources.Sum(source =>
                 ReadDouble(source, "effectiveContribution", 0d)));
-            Dictionary<string, object> existing = Program.QuerySql(connection, @"
+            Dictionary<string, object> existing = ReignDatabase.QuerySql(connection, @"
 SELECT standing_value,sources_json,revision,last_changed_day
 FROM character_public_standing
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject
@@ -305,7 +305,7 @@ LIMIT 1;",
 
             int revision = existing == null ? 1 : ReadInt(existing, "revision", 1) + 1;
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Program.ExecuteSql(connection, @"INSERT INTO character_public_standing(
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO character_public_standing(
 campaign_id,timeline_id,subject_id,standing_value,sources_json,revision,calculated_revision,last_changed_day,updated_ts)
 VALUES($campaign,$timeline,$subject,$value,$sources,$revision,$revision,$day,$ts)
 ON CONFLICT(campaign_id,timeline_id,subject_id) DO UPDATE SET

@@ -14,14 +14,14 @@ namespace ReignBetaServer
 
         private static void EnsureRelationshipStorylineSchema(ReignDbConnection connection)
         {
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_story_threads (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_story_threads (
 thread_key TEXT PRIMARY KEY,pair_key TEXT NOT NULL,subject_id TEXT NOT NULL,target_id TEXT NOT NULL,
 kind TEXT NOT NULL,route TEXT NOT NULL DEFAULT '',intensity REAL NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'active',
 qualifying_events INTEGER NOT NULL DEFAULT 0,last_event_type TEXT NOT NULL DEFAULT '',last_event_id TEXT NOT NULL DEFAULT '',
 last_event_day REAL NOT NULL DEFAULT 0,payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
 UNIQUE(subject_id,target_id,kind));");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_story_threads_pair ON relationship_story_threads(pair_key,kind,status,last_event_day DESC);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_story_seeded_pairs (
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_story_threads_pair ON relationship_story_threads(pair_key,kind,status,last_event_day DESC);");
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_story_seeded_pairs (
 pair_key TEXT PRIMARY KEY,seeded_day REAL NOT NULL DEFAULT 0,created_ts INTEGER NOT NULL);");
         }
 
@@ -73,7 +73,7 @@ pair_key TEXT PRIMARY KEY,seeded_day REAL NOT NULL DEFAULT 0,created_ts INTEGER 
 
         private static Dictionary<string, object> LoadStoryThread(ReignDbConnection connection, string subject, string target, string kind, double day)
         {
-            Dictionary<string, object> row = Program.QuerySql(connection,
+            Dictionary<string, object> row = ReignDatabase.QuerySql(connection,
                 "SELECT * FROM relationship_story_threads WHERE subject_id=$subject AND target_id=$target AND kind=$kind LIMIT 1;",
                 new Dictionary<string, object> { ["subject"] = subject, ["target"] = target, ["kind"] = kind }).FirstOrDefault();
             if (row == null) return new Dictionary<string, object>();
@@ -98,7 +98,7 @@ pair_key TEXT PRIMARY KEY,seeded_day REAL NOT NULL DEFAULT 0,created_ts INTEGER 
         private static Dictionary<string, object> LoadPairStorySummary(ReignDbConnection connection, string a, string b, double day)
         {
             EnsureDirectorPairThreadsSeeded(connection, a, b, day);
-            List<Dictionary<string, object>> rows = Program.QuerySql(connection,
+            List<Dictionary<string, object>> rows = ReignDatabase.QuerySql(connection,
                 "SELECT * FROM relationship_story_threads WHERE pair_key=$pair AND status='active';",
                 new Dictionary<string, object> { ["pair"] = StoryPairKey(a, b) });
             double multiplier = 1d;
@@ -128,17 +128,17 @@ pair_key TEXT PRIMARY KEY,seeded_day REAL NOT NULL DEFAULT 0,created_ts INTEGER 
         private static void EnsureDirectorPairThreadsSeeded(ReignDbConnection connection, string a, string b, double day)
         {
             string pair = StoryPairKey(a, b);
-            if (Program.QuerySql(connection, "SELECT pair_key FROM relationship_story_seeded_pairs WHERE pair_key=$pair LIMIT 1;",
+            if (ReignDatabase.QuerySql(connection, "SELECT pair_key FROM relationship_story_seeded_pairs WHERE pair_key=$pair LIMIT 1;",
                 new Dictionary<string, object> { ["pair"] = pair }).Any()) return;
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            foreach (Dictionary<string, object> prior in Program.QuerySql(connection,
+            foreach (Dictionary<string, object> prior in ReignDatabase.QuerySql(connection,
                 "SELECT * FROM passive_relationship_events WHERE world_day >= $day AND ((hero_a_id=$a AND hero_b_id=$b) OR (hero_a_id=$b AND hero_b_id=$a)) ORDER BY world_day;",
                 new Dictionary<string, object> { ["day"] = day - 120d, ["a"] = a, ["b"] = b }))
                 ApplyStoryEventToDatabase(connection, ReadString(prior, "kind", ""), ReadString(prior, "event_id", ""), ReadString(prior, "hero_a_id", a),
                     ReadString(prior, "hero_b_id", b), ReadDouble(prior, "world_day", day), false, false);
             try
             {
-                foreach (Dictionary<string, object> milestone in Program.QuerySql(connection,
+                foreach (Dictionary<string, object> milestone in ReignDatabase.QuerySql(connection,
                     "SELECT subject_id,target_id,kind FROM relationship_milestones WHERE status='active' AND ((subject_id=$a AND target_id=$b) OR (subject_id=$b AND target_id=$a));",
                     new Dictionary<string, object> { ["a"] = a, ["b"] = b }))
                 {
@@ -152,7 +152,7 @@ pair_key TEXT PRIMARY KEY,seeded_day REAL NOT NULL DEFAULT 0,created_ts INTEGER 
             catch { }
             try
             {
-                foreach(Dictionary<string,object> pressure in Program.QuerySql(connection,
+                foreach(Dictionary<string,object> pressure in ReignDatabase.QuerySql(connection,
                     "SELECT subject_id,target_id,kind,intensity FROM relationship_pressures WHERE status='active' AND updated_day >= $day AND ((subject_id=$a AND target_id=$b) OR (subject_id=$b AND target_id=$a));",
                     new Dictionary<string,object>{{"day",day-120d},{"a",a},{"b",b}}))
                 {
@@ -165,7 +165,7 @@ pair_key TEXT PRIMARY KEY,seeded_day REAL NOT NULL DEFAULT 0,created_ts INTEGER 
                     if(!string.IsNullOrWhiteSpace(storyKind))SeedStoryThreadAtLeast(connection,ReadString(pressure,"subject_id",a),ReadString(pressure,"target_id",b),
                         storyKind,route,Math.Min(75d,Math.Max(25d,ReadDouble(pressure,"intensity",25d))),"lazy_pressure_seed",day);
                 }
-                foreach(Dictionary<string,object> development in Program.QuerySql(connection,
+                foreach(Dictionary<string,object> development in ReignDatabase.QuerySql(connection,
                     "SELECT subject_id,target_id,kind FROM relationship_developments WHERE status IN ('ready','claimed') AND available_day >= $day AND ((subject_id=$a AND target_id=$b) OR (subject_id=$b AND target_id=$a));",
                     new Dictionary<string,object>{{"day",day-120d},{"a",a},{"b",b}}))
                 {
@@ -178,7 +178,7 @@ pair_key TEXT PRIMARY KEY,seeded_day REAL NOT NULL DEFAULT 0,created_ts INTEGER 
                 }
             }
             catch { }
-            Program.ExecuteSql(connection, "INSERT OR IGNORE INTO relationship_story_seeded_pairs(pair_key,seeded_day,created_ts) VALUES($pair,$day,$ts);",
+            ReignDatabase.ExecuteSql(connection, "INSERT OR IGNORE INTO relationship_story_seeded_pairs(pair_key,seeded_day,created_ts) VALUES($pair,$day,$ts);",
                 new Dictionary<string, object> { ["pair"] = pair, ["day"] = day, ["ts"] = ts });
         }
 
@@ -203,7 +203,7 @@ pair_key TEXT PRIMARY KEY,seeded_day REAL NOT NULL DEFAULT 0,created_ts INTEGER 
             metadata["stage"] = StoryStage(kind, next);
             if (!string.IsNullOrWhiteSpace(motiveChannel)) metadata["motiveChannel"] = motiveChannel;
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Program.ExecuteSql(connection, @"INSERT INTO relationship_story_threads(thread_key,pair_key,subject_id,target_id,kind,route,intensity,status,qualifying_events,last_event_type,last_event_id,last_event_day,payload_json,created_ts,updated_ts)
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_story_threads(thread_key,pair_key,subject_id,target_id,kind,route,intensity,status,qualifying_events,last_event_type,last_event_id,last_event_day,payload_json,created_ts,updated_ts)
 VALUES($key,$pair,$subject,$target,$kind,$route,$intensity,$status,$qualifying,$eventType,$event,$day,$payload,$ts,$ts)
 ON CONFLICT(subject_id,target_id,kind) DO UPDATE SET route=CASE WHEN $route='' THEN relationship_story_threads.route ELSE $route END,
 intensity=$intensity,status=$status,qualifying_events=$qualifying,last_event_type=$eventType,last_event_id=$event,last_event_day=$day,payload_json=$payload,updated_ts=$ts;",
@@ -215,7 +215,7 @@ intensity=$intensity,status=$status,qualifying_events=$qualifying,last_event_typ
                     ["payload"] = Json.Serialize(metadata), ["ts"] = ts
                 });
             if(kind=="rivalry"&&current<75d&&next>=75d&&qualifying>=2)
-                Program.ExecuteSql(connection,@"INSERT OR IGNORE INTO relationship_milestones(milestone_id,subject_id,target_id,kind,status,stability,strength,reason,created_event_id,last_event_id,evidence_json,created_day,last_meaningful_day,updated_ts,payload_json)
+                ReignDatabase.ExecuteSql(connection,@"INSERT OR IGNORE INTO relationship_milestones(milestone_id,subject_id,target_id,kind,status,stability,strength,reason,created_event_id,last_event_id,evidence_json,created_day,last_meaningful_day,updated_ts,payload_json)
 VALUES($id,$subject,$target,'feud','active',75,80,'Repeated political conflict escalated into an active feud.',$event,$event,$evidence,$day,$day,$ts,$payload);",
                     new Dictionary<string,object>{{"id","rms_"+Guid.NewGuid().ToString("N")},{"subject",subject},{"target",target},{"event",eventId??""},
                         {"evidence",Json.Serialize(new[]{eventId??""})},{"day",day},{"ts",ts},{"payload",Json.Serialize(new Dictionary<string,object>{{"threadKind","rivalry"},{"intensity",next}})}});
@@ -224,7 +224,7 @@ VALUES($id,$subject,$target,'feud','active',75,80,'Repeated political conflict e
         private static void ApplyStoryEventToDatabase(ReignDbConnection connection, string eventType, string eventId, string a, string b, double day,
             bool aMarried, bool bMarried, Dictionary<string, object> postureA = null, Dictionary<string, object> postureB = null)
         {
-            if(!string.IsNullOrWhiteSpace(eventId)&&Program.QuerySql(connection,
+            if(!string.IsNullOrWhiteSpace(eventId)&&ReignDatabase.QuerySql(connection,
                 "SELECT thread_key FROM relationship_story_threads WHERE pair_key=$pair AND last_event_id=$event LIMIT 1;",
                 new Dictionary<string,object>{{"pair",StoryPairKey(a,b)},{"event",eventId}}).Any())return;
             switch ((eventType ?? "").ToLowerInvariant())
@@ -290,7 +290,7 @@ VALUES($id,$subject,$target,'feud','active',75,80,'Repeated political conflict e
         private static double ArrangedMarriageCourtshipMultiplier(ReignDbConnection connection,string a,string b,double day)
         {
             if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b)) return 1d;
-            int activeThirdPartyLovers = ReadInt(Program.QuerySql(connection, @"
+            int activeThirdPartyLovers = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count
 FROM relationship_pair_lifecycle
 WHERE lover_active=1
@@ -302,7 +302,7 @@ WHERE lover_active=1
 
         private static int ConvertDisplacedCourtshipsToTemptation(ReignDbConnection connection,string newlywed,string spouse,double day,string eventId)
         {
-            List<string> partners=Program.QuerySql(connection,
+            List<string> partners=ReignDatabase.QuerySql(connection,
                 "SELECT target_id FROM relationship_story_threads WHERE subject_id=$subject AND kind='romance' AND route='courtship' AND status='active' AND target_id<>$spouse;",
                 new Dictionary<string,object>{{"subject",newlywed},{"spouse",spouse}})
                 .Select(x=>ReadString(x,"target_id","")).Where(x=>!string.IsNullOrWhiteSpace(x))

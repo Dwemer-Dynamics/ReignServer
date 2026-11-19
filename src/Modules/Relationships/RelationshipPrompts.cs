@@ -178,7 +178,7 @@ Do not expose a private relationship tag merely because it is supplied as behavi
             HashSet<string> usedLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var evidenceBudget = new RelationshipPromptEvidenceBudget();
 
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureMbtiRelationshipSchema(connection);
                 CharactersService.EnsureIdentitySchema(connection);
@@ -205,7 +205,7 @@ Do not expose a private relationship tag merely because it is supplied as behavi
                     }
 
                     string pairKey = AmbientPairKey(speakerHeroId, targetId);
-                    Dictionary<string, object> chemistry = Program.QuerySql(connection,
+                    Dictionary<string, object> chemistry = ReignDatabase.QuerySql(connection,
                         "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                         new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
                     bool speakerIsA = chemistry != null && ReadString(chemistry, "hero_a_id", "")
@@ -319,20 +319,20 @@ Do not expose a private relationship tag merely because it is supplied as behavi
             try
             {
                 string pairKey = AmbientPairKey("speaker", "target");
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureMbtiRelationshipSchema(connection);
                     CharactersService.EnsureIdentitySchema(connection);
                     long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                    Program.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
 pair_key,hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts)
 VALUES($pair,'speaker','target',55,-35,1,1,$ts);",
                         new Dictionary<string, object> { ["pair"] = pairKey, ["ts"] = ts });
-                    Program.ExecuteSql(connection, @"INSERT INTO acquaintances(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO acquaintances(
 observer_id,subject_id,identity_state,canonical_name,verification_source,confidence,updated_ts)
 VALUES('speaker','target','verified','Target Noble','same_kingdom',1,$ts);",
                         new Dictionary<string, object> { ["ts"] = ts });
-                    Program.ExecuteSql(connection, @"INSERT INTO relationship_pair_lifecycle(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_pair_lifecycle(
 pair_key,hero_a_id,hero_b_id,lover_active,affair_active,last_processed_day,updated_ts)
 VALUES($pair,'speaker','target',1,1,1,$ts);",
                         new Dictionary<string, object> { ["pair"] = pairKey, ["ts"] = ts });

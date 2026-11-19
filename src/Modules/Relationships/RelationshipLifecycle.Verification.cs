@@ -36,7 +36,7 @@ namespace ReignBetaServer
             string correspondenceCampaignId = "rc_" + Guid.NewGuid().ToString("N").Substring(0, 12);
             try
             {
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(correspondenceCampaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(correspondenceCampaignId))
                 {
                     EnsureRelationshipAndCorrespondenceSchema(connection);
                 }
@@ -71,9 +71,9 @@ namespace ReignBetaServer
                     ["worldDay"] = 12d
                 });
                 int receiptCount;
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(correspondenceCampaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(correspondenceCampaignId))
                 {
-                    receiptCount = Program.QuerySql(connection,
+                    receiptCount = ReignDatabase.QuerySql(connection,
                         "SELECT event_id FROM relationship_interaction_receipts;").Count;
                 }
                 add("letters_change_native_relation_without_llm",
@@ -121,7 +121,7 @@ namespace ReignBetaServer
             bool immediateReads = true, rollbackClean = true;
             for (int route = 0; route < trajectories.Length; route++)
             {
-                Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                 try
                 {
                     using (RelationshipLifecycleWriteContext context = route == 1
@@ -133,7 +133,7 @@ namespace ReignBetaServer
                             Dictionary<string, object> result = ProcessRelationshipLifecycle(
                                 connection, campaignId, pair, index + 1, heroA, heroB,
                                 affinities[index], affinities[index]);
-                            Dictionary<string, object> row = Program.QuerySql(connection,
+                            Dictionary<string, object> row = ReignDatabase.QuerySql(connection,
                                 "SELECT * FROM relationship_pair_lifecycle WHERE pair_key=$pair;",
                                 new Dictionary<string, object> { ["pair"] = pair.PairKey }).FirstOrDefault();
                             immediateReads &= row != null
@@ -145,8 +145,8 @@ namespace ReignBetaServer
                         if (context != null) { writes = context.Writes; commands = context.CreatedCommands; }
                     }
                 }
-                finally { Program.ExecuteSql(connection, "ROLLBACK;"); }
-                rollbackClean &= Program.QuerySql(connection,
+                finally { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); }
+                rollbackClean &= ReignDatabase.QuerySql(connection,
                     "SELECT pair_key FROM relationship_pair_lifecycle WHERE pair_key=$pair;",
                     new Dictionary<string, object> { ["pair"] = pair.PairKey }).Count == 0;
             }
@@ -170,13 +170,13 @@ namespace ReignBetaServer
             string campaignId = "rl_" + Guid.NewGuid().ToString("N").Substring(0, 12);
             try
             {
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureRelationshipDirectorSchema(connection);
                     EnsureMbtiRelationshipSchema(connection);
                     ReputationService.EnsureSocialReputationSchema(connection);
                     HashSet<string> lifecycleColumns = new HashSet<string>(
-                        Program.QuerySql(connection,
+                        ReignDatabase.QuerySql(connection,
                             "PRAGMA table_info(relationship_pair_lifecycle);")
                             .Select(row => ReadString(row, "name", "")),
                         StringComparer.OrdinalIgnoreCase);
@@ -204,7 +204,7 @@ namespace ReignBetaServer
                             "relationship_affair_commitments"),
                         "Pregnancy and affair-marriage decisions have durable idempotent receipt tables.");
                     long staleConceptionTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                    Program.ExecuteSql(connection, @"INSERT INTO conceptions(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conceptions(
 conception_id,attempt_id,mother_id,biological_father_id,legal_father_id,
 conception_day,due_day,status,secrecy,payload_json,created_ts,updated_ts)
 VALUES('stale_conception','stale_attempt','stale_mother','stale_father',
@@ -228,7 +228,7 @@ VALUES('stale_conception','stale_attempt','stale_mother','stale_father',
                             ["worldDay"] = 10d
                         });
                     Dictionary<string, object> staleConceptionReceipt =
-                        Program.QuerySql(connection, @"SELECT a.status AS action_status,
+                        ReignDatabase.QuerySql(connection, @"SELECT a.status AS action_status,
 c.status AS conception_status FROM relationship_director_actions a
 JOIN conceptions c ON c.conception_id='stale_conception'
 WHERE a.director_action_id=$id LIMIT 1;",
@@ -242,7 +242,7 @@ WHERE a.director_action_id=$id LIMIT 1;",
                             "conception_status", "") == "obsolete_game",
                         "A stale already-pregnant receipt closes both the action and conception without a terminal failure.");
 
-                    Program.ExecuteSql(connection, @"INSERT INTO conceptions(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conceptions(
 conception_id,attempt_id,mother_id,biological_father_id,legal_father_id,
 conception_day,due_day,status,secrecy,payload_json,created_ts,updated_ts)
 VALUES('historic_stale_conception','historic_stale_attempt','historic_mother',
@@ -256,7 +256,7 @@ VALUES('historic_stale_conception','historic_stale_attempt','historic_mother',
                             ["pairKey"] = "historic_father|historic_mother",
                             ["conceptionId"] = "historic_stale_conception"
                         });
-                    Program.ExecuteSql(connection, @"UPDATE relationship_director_actions
+                    ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_director_actions
 SET status='failed',result_json=$result WHERE director_action_id=$id;",
                         new Dictionary<string, object>
                         {
@@ -267,11 +267,11 @@ SET status='failed',result_json=$result WHERE director_action_id=$id;",
                                 ["error"] = "Mother is already pregnant."
                             })
                         });
-                    Program.ExecuteSql(connection, @"DELETE FROM schema_meta
+                    ReignDatabase.ExecuteSql(connection, @"DELETE FROM schema_meta
 WHERE key='already_pregnant_conception_obsolete_repair_v1';");
                     RepairAlreadyPregnantConceptionActions(connection);
                     Dictionary<string, object> historicStaleRepair =
-                        Program.QuerySql(connection, @"SELECT a.status AS action_status,
+                        ReignDatabase.QuerySql(connection, @"SELECT a.status AS action_status,
 c.status AS conception_status FROM relationship_director_actions a
 JOIN conceptions c ON c.conception_id='historic_stale_conception'
 WHERE a.director_action_id=$id LIMIT 1;",
@@ -361,7 +361,7 @@ WHERE a.director_action_id=$id LIMIT 1;",
                     ProcessRelationshipLifecycle(connection, campaignId, rumorPair, loverRumorDay + 2,
                         rumorMan, rumorWoman, 70, 70);
                     add("lovers_are_not_a_social_rumor",
-                        Program.QuerySql(connection, @"SELECT occurrence_id FROM rumor_occurrences
+                        ReignDatabase.QuerySql(connection, @"SELECT occurrence_id FROM rumor_occurrences
 WHERE thread_key=$pair;", new Dictionary<string, object> { ["pair"] = rumorPair.PairKey }).Count == 0,
                         "The relationship-only lovers state never creates a character-owned social rumor.");
 
@@ -443,7 +443,7 @@ WHERE thread_key=$pair;", new Dictionary<string, object> { ["pair"] = rumorPair.
                     };
                     ProcessRelationshipLifecycle(connection, campaignId,
                         cautiousPair, 20, cautiousMan, cautiousWoman, 50, 50);
-                    Dictionary<string, object> cautiousState = Program.QuerySql(connection,
+                    Dictionary<string, object> cautiousState = ReignDatabase.QuerySql(connection,
                         "SELECT * FROM relationship_pair_lifecycle WHERE pair_key=$pair;",
                         new Dictionary<string, object>
                         {
@@ -456,7 +456,7 @@ WHERE thread_key=$pair;", new Dictionary<string, object> { ["pair"] = rumorPair.
                         "Each participant's judgment percentage can independently stop a married attraction from becoming an affair.");
                     ProcessRelationshipLifecycle(connection, campaignId,
                         cautiousPair, 21, cautiousMan, cautiousWoman, 50, 50);
-                    Dictionary<string, object> oneAttemptState = Program.QuerySql(connection,
+                    Dictionary<string, object> oneAttemptState = ReignDatabase.QuerySql(connection,
                         "SELECT * FROM relationship_pair_lifecycle WHERE pair_key=$pair;",
                         new Dictionary<string, object>
                         {
@@ -466,7 +466,7 @@ WHERE thread_key=$pair;", new Dictionary<string, object> { ["pair"] = rumorPair.
                         cautiousPair, 22, cautiousMan, cautiousWoman, 44, 44);
                     ProcessRelationshipLifecycle(connection, campaignId,
                         cautiousPair, 23, cautiousMan, cautiousWoman, 50, 50);
-                    Dictionary<string, object> retriedState = Program.QuerySql(connection,
+                    Dictionary<string, object> retriedState = ReignDatabase.QuerySql(connection,
                         "SELECT * FROM relationship_pair_lifecycle WHERE pair_key=$pair;",
                         new Dictionary<string, object>
                         {
@@ -502,7 +502,7 @@ WHERE thread_key=$pair;", new Dictionary<string, object> { ["pair"] = rumorPair.
                         ReadBool(RelationshipLifecycleView(connection,
                             sameSexPair.HeroAId, sameSexPair.HeroBId),
                             "lovers", false)
-                        && !Program.QuerySql(connection, @"SELECT director_action_id
+                        && !ReignDatabase.QuerySql(connection, @"SELECT director_action_id
 FROM relationship_director_actions WHERE action_type='marriage'
 AND ((actor_id=$a AND target_id=$b) OR (actor_id=$b AND target_id=$a));",
                             new Dictionary<string, object>
@@ -532,7 +532,7 @@ AND ((actor_id=$a AND target_id=$b) OR (actor_id=$b AND target_id=$a));",
                     ProcessRelationshipLifecycle(connection, campaignId, marriagePair, marriageDay,
                         marriageMan, marriageWoman, 70, 70);
                     add("lovers_at_seventy_roll_ten_percent_daily_when_colocated",
-                        Program.QuerySql(connection, @"SELECT director_action_id FROM relationship_director_actions
+                        ReignDatabase.QuerySql(connection, @"SELECT director_action_id FROM relationship_director_actions
 WHERE action_type='marriage' AND actor_id='marriage_man' AND target_id='marriage_woman' AND status='pending';").Any(),
                         "Unmarried lovers at mutual seventy or above roll ten percent on every eligible co-location day.");
 
@@ -556,11 +556,11 @@ WHERE action_type='marriage' AND actor_id='marriage_man' AND target_id='marriage
                         overlappingMarriagePair, overlappingDay, marriageMan,
                         otherWoman, 70, 70);
                     add("one_pending_marriage_reservation_per_hero",
-                        Program.QuerySql(connection, @"SELECT director_action_id FROM relationship_director_actions
+                        ReignDatabase.QuerySql(connection, @"SELECT director_action_id FROM relationship_director_actions
 WHERE action_type='marriage' AND actor_id='marriage_man' AND status='pending';").Count == 1,
                         "A hero already reserved by one pending marriage cannot receive an overlapping marriage action.");
 
-                    string invalidMarriageActionId = ReadString(Program.QuerySql(connection,
+                    string invalidMarriageActionId = ReadString(ReignDatabase.QuerySql(connection,
                         @"SELECT director_action_id FROM relationship_director_actions
 WHERE action_type='marriage' AND actor_id='marriage_man'
 AND target_id='marriage_woman' AND status='pending' LIMIT 1;")
@@ -577,7 +577,7 @@ AND target_id='marriage_woman' AND status='pending' LIMIT 1;")
                     ProcessRelationshipLifecycle(connection, campaignId,
                         marriagePair, marriageDay + OrganicMarriageEvaluationCadenceDays,
                         marriageMan, marriageWoman, 70, 70);
-                    Dictionary<string, object> blockedMarriage = Program.QuerySql(connection,
+                    Dictionary<string, object> blockedMarriage = ReignDatabase.QuerySql(connection,
                         @"SELECT marriage_blocked,marriage_block_reason
 FROM relationship_pair_lifecycle WHERE pair_key=$pair LIMIT 1;",
                         new Dictionary<string, object>
@@ -588,7 +588,7 @@ FROM relationship_pair_lifecycle WHERE pair_key=$pair LIMIT 1;",
                         ReadInt(blockedMarriage, "marriage_blocked", 0) == 1
                         && ReadString(blockedMarriage,
                             "marriage_block_reason", "").Contains("reciprocal spouse")
-                        && !Program.QuerySql(connection, @"SELECT director_action_id
+                        && !ReignDatabase.QuerySql(connection, @"SELECT director_action_id
 FROM relationship_director_actions WHERE action_type='marriage'
 AND actor_id='marriage_man' AND target_id='marriage_woman'
 AND status IN ('pending','claimed');").Any(),
@@ -613,7 +613,7 @@ AND status IN ('pending','claimed');").Any(),
                             ["pairKey"] = "commitment_man|commitment_woman",
                             ["timelineId"] = "main"
                         });
-                    Program.ExecuteSql(connection, @"INSERT INTO relationship_conception_commitments(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_conception_commitments(
 conception_id,pair_key,hero_a_id,hero_b_id,honor_a,honor_b,chance_a,chance_b,
 roll_a,roll_b,passed_a,passed_b,status,marriage_action_id,world_day,updated_ts)
 VALUES('commitment_conception','commitment_man|commitment_woman',
@@ -638,7 +638,7 @@ VALUES('commitment_conception','commitment_man|commitment_woman',
                     bool marriageQuarantined = !commitmentPollActions.Any(
                         action => ReadString(action, "director_action_id", "")
                             == commitmentMarriageAction);
-                    Program.ExecuteSql(connection, @"UPDATE relationship_conception_commitments
+                    ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_conception_commitments
 SET status='awaiting_marriage' WHERE conception_id='commitment_conception';");
                     Dictionary<string, object> marriagePoll =
                         RelationshipDirectorPollActionsApi(
@@ -674,7 +674,7 @@ SET status='awaiting_marriage' WHERE conception_id='commitment_conception';");
                             ["pairKey"] = "refused_man|refused_woman",
                             ["timelineId"] = "main"
                         });
-                    Program.ExecuteSql(connection, @"INSERT INTO relationship_conception_commitments(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_conception_commitments(
 conception_id,pair_key,hero_a_id,hero_b_id,honor_a,honor_b,chance_a,chance_b,
 roll_a,roll_b,passed_a,passed_b,status,marriage_action_id,world_day,updated_ts)
 VALUES('refused_conception','refused_man|refused_woman',
@@ -698,14 +698,14 @@ VALUES('refused_conception','refused_man|refused_woman',
                             ["status"] = "completed",
                             ["worldDay"] = 41d
                         });
-                    string refusedMarriageStatus = ReadString(Program.QuerySql(
+                    string refusedMarriageStatus = ReadString(ReignDatabase.QuerySql(
                         connection, @"SELECT status FROM relationship_director_actions
 WHERE director_action_id=$id LIMIT 1;",
                         new Dictionary<string, object>
                         {
                             ["id"] = refusedMarriageAction
                         }).FirstOrDefault(), "status", "");
-                    int refusedReservationCount = Program.QuerySql(connection, @"SELECT hero_id
+                    int refusedReservationCount = ReignDatabase.QuerySql(connection, @"SELECT hero_id
 FROM relationship_marriage_reservations WHERE director_action_id=$id;",
                         new Dictionary<string, object>
                         {
@@ -742,7 +742,7 @@ FROM relationship_marriage_reservations WHERE director_action_id=$id;",
                     ProcessRelationshipLifecycle(connection, campaignId,
                         cadencePair, refusedMarriageDay + 1, cadenceMan,
                         cadenceWoman, 70, 70);
-                    Dictionary<string, object> cadenceState = Program.QuerySql(connection,
+                    Dictionary<string, object> cadenceState = ReignDatabase.QuerySql(connection,
                         @"SELECT last_marriage_evaluation_day FROM relationship_pair_lifecycle
 WHERE pair_key=$pair LIMIT 1;",
                         new Dictionary<string, object>
@@ -781,16 +781,16 @@ WHERE pair_key=$pair LIMIT 1;",
                     ProcessRelationshipLifecycle(connection, campaignId, spousePair, estrangedRumorDay + 1,
                         spouseA, spouseB, -30, 10);
                     add("estrangement_uses_temporary_character_tags",
-                        Program.QuerySql(connection, @"SELECT occurrence_id FROM rumor_occurrences
+                        ReignDatabase.QuerySql(connection, @"SELECT occurrence_id FROM rumor_occurrences
 WHERE thread_key=$pair AND archetype_id='marital_strife' AND world_day=$day AND expires_day=$expires;",
                             new Dictionary<string, object> { ["pair"] = spousePair.PairKey, ["day"] = (double)estrangedRumorDay, ["expires"] = (double)estrangedRumorDay + 45d }).Count == 1
-                        && Program.QuerySql(connection, @"SELECT subject_id FROM rumor_subject_tags
+                        && ReignDatabase.QuerySql(connection, @"SELECT subject_id FROM rumor_subject_tags
 WHERE occurrence_id IN (SELECT occurrence_id FROM rumor_occurrences WHERE thread_key=$pair AND world_day=$day);",
                             new Dictionary<string, object> { ["pair"] = spousePair.PairKey, ["day"] = (double)estrangedRumorDay }).Count == 2,
                         "Exposed marital strife creates one forty-five-day occurrence with one temporary character-owned entry for each spouse.");
                     ProcessRelationshipLifecycle(connection, campaignId, spousePair, 2, spouseA, spouseB, -50, 100);
                     add("one_spouse_at_negative_fifty_queues_divorce",
-                        Program.QuerySql(connection, @"SELECT director_action_id FROM relationship_director_actions
+                        ReignDatabase.QuerySql(connection, @"SELECT director_action_id FROM relationship_director_actions
 WHERE action_type='divorce' AND actor_id='spouse_a' AND target_id='spouse_b' AND status='pending';").Any(),
                         "A spouse at negative fifty queues divorce regardless of the reverse affinity.");
 
@@ -819,7 +819,7 @@ WHERE action_type='divorce' AND actor_id='spouse_a' AND target_id='spouse_b' AND
                             + "|lover_conception", 100) <= LoverConceptionChancePercent);
                     ProcessRelationshipLifecycle(connection, campaignId, affairPair, conceptionDay,
                         affairMan, affairWoman, 70, 70);
-                    Dictionary<string, object> conception = Program.QuerySql(connection, @"
+                    Dictionary<string, object> conception = ReignDatabase.QuerySql(connection, @"
 SELECT payload_json FROM conceptions WHERE mother_id='affair_woman' AND biological_father_id='affair_man'
 ORDER BY conception_day DESC LIMIT 1;").FirstOrDefault();
                     Dictionary<string, object> affairConceptionPayload =
@@ -834,16 +834,16 @@ ORDER BY conception_day DESC LIMIT 1;").FirstOrDefault();
                         "The five-percent daily lover conception roll marks an affair child illegitimate even when the mother is unmarried.");
 
                     const string repairPairKey = "repair_man_a|repair_man_b";
-                    Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO relationship_observed_heroes(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO relationship_observed_heroes(
 hero_id,profile_json,profile_hash,first_observed_day,last_observed_day,updated_ts)
 VALUES
 ('repair_man_a','{""heroStringId"":""repair_man_a"",""isFemale"":false,""isAlive"":true,""spouseId"":""""}','',1,20,1),
 ('repair_man_b','{""heroStringId"":""repair_man_b"",""isFemale"":false,""isAlive"":true,""spouseId"":""""}','',1,20,1);");
-                    Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO relationship_pair_lifecycle(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO relationship_pair_lifecycle(
 pair_key,hero_a_id,hero_b_id,lover_active,married,last_processed_day,updated_ts)
 VALUES($pair,'repair_man_a','repair_man_b',1,1,20,1);",
                         new Dictionary<string, object> { ["pair"] = repairPairKey });
-                    Program.ExecuteSql(connection, @"INSERT INTO relationship_director_actions(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_director_actions(
 director_action_id,action_type,status,world_day,actor_id,target_id,payload_json,
 created_ts,resolved_ts,result_json) VALUES
 ('repair_action_1','marriage','completed',10,'repair_man_a','repair_man_b',
@@ -852,7 +852,7 @@ created_ts,resolved_ts,result_json) VALUES
 ('repair_action_2','marriage','completed',15,'repair_man_a','repair_man_b',
 '{""source"":""mbti_relationship_lifecycle"",""route"":""mutual_affinity"",""pairKey"":""repair_man_a|repair_man_b"",""timelineId"":""main""}',3,4,
 '{""status"":""completed"",""worldDay"":15.25}');");
-                    Program.ExecuteSql(connection, @"INSERT INTO relationship_incidents(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_incidents(
 incident_id,pair_key,kind,hero_a_id,hero_b_id,world_day,summary,payload_json,created_ts)
 VALUES
 ('repair_incident_1',$pair,'marriage','repair_man_a','repair_man_b',10,'false marriage','{""directorActionId"":""repair_action_1""}',1),
@@ -880,10 +880,10 @@ VALUES
                         ["visibility"] = "public",
                         ["importance"] = 0.9d
                     }, "relationship_lifecycle_marriage");
-                    Program.ExecuteSql(connection, @"DELETE FROM schema_meta
+                    ReignDatabase.ExecuteSql(connection, @"DELETE FROM schema_meta
 WHERE key='organic_marriage_native_postcondition_repair_v1';");
                     RepairUnconfirmedOrganicMarriageHistory(connection);
-                    Dictionary<string, object> repairedLifecycle = Program.QuerySql(connection,
+                    Dictionary<string, object> repairedLifecycle = ReignDatabase.QuerySql(connection,
                         @"SELECT married,marriage_blocked,marriage_block_reason
 FROM relationship_pair_lifecycle WHERE pair_key=$pair LIMIT 1;",
                         new Dictionary<string, object> { ["pair"] = repairPairKey })
@@ -892,19 +892,19 @@ FROM relationship_pair_lifecycle WHERE pair_key=$pair LIMIT 1;",
                             "married", 1) == 0
                         && ReadInt(repairedLifecycle,
                             "marriage_blocked", 0) == 1
-                        && ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+                        && ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM relationship_director_actions WHERE director_action_id IN
 ('repair_action_1','repair_action_2') AND status='invalid';")
                             .FirstOrDefault(), "count", 0) == 2
-                        && ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+                        && ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM relationship_incidents WHERE incident_id IN
 ('repair_incident_1','repair_incident_2');")
                             .FirstOrDefault(), "count", -1) == 0
-                        && ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+                        && ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM events WHERE event_id IN
 ('marriage_repair_action_1','marriage_repair_action_2');")
                             .FirstOrDefault(), "count", -1) == 0
-                        && ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+                        && ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM memories WHERE event_id IN
 ('marriage_repair_action_1','marriage_repair_action_2');")
                             .FirstOrDefault(), "count", -1) == 0;
@@ -913,13 +913,13 @@ FROM memories WHERE event_id IN
                         "The migration reclassifies false completion reports, blocks the pair, and removes only their incident and semantic-memory projections.");
                     RepairUnconfirmedOrganicMarriageHistory(connection);
                     add("false_marriage_history_repair_marker_is_idempotent",
-                        ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+                        ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM relationship_director_actions WHERE director_action_id IN
 ('repair_action_1','repair_action_2') AND status='invalid';")
                             .FirstOrDefault(), "count", 0) == 2,
                         "Re-entering schema initialization after repair does not mutate or duplicate the migration result.");
 
-                    HashSet<string> schemaTables = new HashSet<string>(Program.QuerySql(connection,
+                    HashSet<string> schemaTables = new HashSet<string>(ReignDatabase.QuerySql(connection,
                         "SELECT name FROM sqlite_master WHERE type='table';")
                         .Select(item => ReadString(item, "name", "")), StringComparer.OrdinalIgnoreCase);
                     string[] retiredTables =
@@ -935,13 +935,13 @@ FROM relationship_director_actions WHERE director_action_id IN
                 }
 
                 string divorceActionId;
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    divorceActionId = ReadString(Program.QuerySql(connection, @"
+                    divorceActionId = ReadString(ReignDatabase.QuerySql(connection, @"
 SELECT director_action_id FROM relationship_director_actions
 WHERE action_type='divorce' AND actor_id='spouse_a' AND target_id='spouse_b'
 ORDER BY created_ts DESC LIMIT 1;").FirstOrDefault(), "director_action_id", "");
-					Dictionary<string, object> stagedAction=Program.QuerySql(connection,
+					Dictionary<string, object> stagedAction=ReignDatabase.QuerySql(connection,
 						"SELECT payload_json FROM relationship_director_actions WHERE director_action_id=$id LIMIT 1;",
 						new Dictionary<string, object>{{"id",divorceActionId}}).FirstOrDefault();
 					Dictionary<string, object> stagedPayload=TryParseJsonObject(
@@ -965,24 +965,24 @@ ORDER BY created_ts DESC LIMIT 1;").FirstOrDefault(), "director_action_id", "");
 					["status"] = "completed", ["worldDay"] = 2d,
 					["timelineId"] = "main"
                 });
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     Dictionary<string, object> divorceView = RelationshipLifecycleView(connection,
                         "spouse_a", "spouse_b");
                     add("divorce_is_tagged_and_establishes_reputations",
                         ReadBool(divorceView, "divorced", false)
-                        && !string.IsNullOrWhiteSpace(ReadString(Program.QuerySql(connection, @"
+                        && !string.IsNullOrWhiteSpace(ReadString(ReignDatabase.QuerySql(connection, @"
 SELECT divorce_rumor_id FROM relationship_pair_lifecycle
 WHERE pair_key=$pair LIMIT 1;",
                             new Dictionary<string, object> { ["pair"] = AmbientPairKey("spouse_a", "spouse_b") })
                             .FirstOrDefault(), "divorce_rumor_id", ""))
-						&& Program.QuerySql(connection, @"SELECT subject_id FROM character_reputations
+						&& ReignDatabase.QuerySql(connection, @"SELECT subject_id FROM character_reputations
 WHERE timeline_id='main' AND tag_id='divorcee' AND subject_id IN ('spouse_a','spouse_b') AND status='active';").Count == 2
-						&& !Program.QuerySql(connection, @"SELECT subject_id FROM character_reputations
+						&& !ReignDatabase.QuerySql(connection, @"SELECT subject_id FROM character_reputations
 WHERE timeline_id='main' AND tag_id='marital_strife' AND subject_id IN ('spouse_a','spouse_b') AND status='active';").Any()
-						&& Program.QuerySql(connection,"SELECT event_id FROM events WHERE event_id=$id LIMIT 1;",
+						&& ReignDatabase.QuerySql(connection,"SELECT event_id FROM events WHERE event_id=$id LIMIT 1;",
 							new Dictionary<string, object>{{"id","divorce_"+divorceActionId}}).Any()
-						&& Program.QuerySql(connection,"SELECT event_id FROM world_history_events WHERE event_id=$id AND timeline_id='main' LIMIT 1;",
+						&& ReignDatabase.QuerySql(connection,"SELECT event_id FROM world_history_events WHERE event_id=$id AND timeline_id='main' LIMIT 1;",
 							new Dictionary<string, object>{{"id","divorce_"+divorceActionId}}).Any(),
 						"Completed divorce retains its timeline, establishes divorcee reputations, resolves marital-strife standing, and writes authoritative history.");
                 }

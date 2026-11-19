@@ -80,7 +80,7 @@ namespace ReignBetaServer
                 && CanonicalJson(ReadDictionary(p, "testCase")) == CanonicalJson(ReadDictionary(command, "testCase"));
         }
 
-        private static void EnsureGossipTestSchema(ReignDbConnection c) => Program.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS personal_gossip_test_fixtures (
+        private static void EnsureGossipTestSchema(ReignDbConnection c) => ReignDatabase.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS personal_gossip_test_fixtures (
 fixture_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,speaker_id TEXT NOT NULL,marker TEXT NOT NULL,
 created_utc TEXT NOT NULL,consumed_topic TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL);");
 
@@ -104,7 +104,7 @@ created_utc TEXT NOT NULL,consumed_topic TEXT NOT NULL DEFAULT '',payload_json T
                 throw new ArgumentException("Unknown gossip test phase.");
             if (phase == "composition_probe") return PersonalGossipCompositionProbe(campaign, timeline, p, test);
             using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
-            using (var c = Program.OpenCampaignConnection(campaign))
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsurePersonalGossipSchema(c); RelationshipsService.EnsureMbtiRelationshipSchema(c);
                 if (WorldSimulationService.ActiveWorldHistoryTimeline(c) != timeline) throw new InvalidOperationException("The active timeline changed.");
@@ -166,8 +166,8 @@ created_utc TEXT NOT NULL,consumed_topic TEXT NOT NULL DEFAULT '',payload_json T
                             filter += " AND (" + heroColumn + " IN (" + string.Join(",", parts) + ")"
                                 + (table == "messages" ? " OR recipient_id IN (" + string.Join(",", parts) + ")" : "") + ")";
                         }
-                        result[table] = Program.QuerySql(c, "SELECT * FROM personal_gossip_" + table + " WHERE " + filter + " ORDER BY " + idColumn + " LIMIT $limit OFFSET $offset;", args);
-                        result[table + "Count"] = ReadInt(Program.QuerySql(c, "SELECT COUNT(*) AS n FROM personal_gossip_" + table + " WHERE " + filter + ";", args).First(), "n", 0);
+                        result[table] = ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_" + table + " WHERE " + filter + " ORDER BY " + idColumn + " LIMIT $limit OFFSET $offset;", args);
+                        result[table + "Count"] = ReadInt(ReignDatabase.QuerySql(c, "SELECT COUNT(*) AS n FROM personal_gossip_" + table + " WHERE " + filter + ";", args).First(), "n", 0);
                     }
                     result["affinities"] = selected.SelectMany(a => selected.Where(b => a != b).Select(b => GossipFields("observerId", a, "subjectId", b,
                         "affinity", GossipAffinity(c, a, b, people.Single(h => GossipHeroId(h) == a), people.Single(h => GossipHeroId(h) == b))))).ToList();
@@ -224,7 +224,7 @@ created_utc TEXT NOT NULL,consumed_topic TEXT NOT NULL DEFAULT '',payload_json T
             string owners = string.Join(",", slots);
             string topicFilter = "timeline_id=$timeline AND created_day>$since AND created_day<=$day AND speaker_id IN (" + owners + ")";
             string messageFilter = "timeline_id=$timeline AND created_day>$since AND created_day<=$day AND (speaker_id IN (" + owners + ") OR recipient_id IN (" + owners + "))";
-            var topics = Program.QuerySql(c, "SELECT topic_id,speaker_id,status,created_day,payload_json FROM personal_gossip_topics WHERE "
+            var topics = ReignDatabase.QuerySql(c, "SELECT topic_id,speaker_id,status,created_day,payload_json FROM personal_gossip_topics WHERE "
                 + topicFilter + " ORDER BY created_day DESC,topic_id LIMIT 64;", args).Select(row => {
                     var payload = TryParseJsonObject(ReadString(row, "payload_json", "")) ?? GossipFields();
                     return GossipFields("topicId", ReadString(row, "topic_id", ""), "speakerId", ReadString(row, "speaker_id", ""),
@@ -233,10 +233,10 @@ created_utc TEXT NOT NULL,consumed_topic TEXT NOT NULL DEFAULT '',payload_json T
                         "sessionId", ReadString(payload, "sessionId", ""), "category", ReadString(payload, "category", ""),
                         "recipientId", ReadString(payload, "recipientId", ""), "savedRolls", ReadDictionary(payload, "savedRolls"));
                 }).ToList();
-            var messages = Program.QuerySql(c, "SELECT message_id,topic_id,root_id,speaker_id,recipient_id,status,is_reply,hop,created_day,due_day,expires_day,attempts FROM personal_gossip_messages WHERE "
+            var messages = ReignDatabase.QuerySql(c, "SELECT message_id,topic_id,root_id,speaker_id,recipient_id,status,is_reply,hop,created_day,due_day,expires_day,attempts FROM personal_gossip_messages WHERE "
                 + messageFilter + " ORDER BY created_day DESC,message_id LIMIT 64;", args);
-            int topicCount = ReadInt(Program.QuerySql(c, "SELECT COUNT(*) AS n FROM personal_gossip_topics WHERE " + topicFilter + ";", args).Single(), "n", 0);
-            int messageCount = ReadInt(Program.QuerySql(c, "SELECT COUNT(*) AS n FROM personal_gossip_messages WHERE " + messageFilter + ";", args).Single(), "n", 0);
+            int topicCount = ReadInt(ReignDatabase.QuerySql(c, "SELECT COUNT(*) AS n FROM personal_gossip_topics WHERE " + topicFilter + ";", args).Single(), "n", 0);
+            int messageCount = ReadInt(ReignDatabase.QuerySql(c, "SELECT COUNT(*) AS n FROM personal_gossip_messages WHERE " + messageFilter + ";", args).Single(), "n", 0);
             return GossipFields("schema", "reign-gossip-open-conversation-observation-v1", "origin", "operator_readonly_observation",
                 "worldDay", day, "participants", participants, "topics", topics, "messages", messages,
                 "topicCount", topicCount, "messageCount", messageCount, "truncated", topicCount > 64 || messageCount > 64,
@@ -332,7 +332,7 @@ created_utc TEXT NOT NULL,consumed_topic TEXT NOT NULL DEFAULT '',payload_json T
             EnsureGossipTestSchema(c);
             EnsureMemoryPrecisionSchema(c);
             string fixture = ReadString(p, "runId", "") + ":" + ReadString(p, "commandId", "");
-            if (Program.QuerySql(c, "SELECT fixture_id FROM personal_gossip_test_fixtures WHERE fixture_id=$id;", GossipFields("id", fixture)).Count > 0)
+            if (ReignDatabase.QuerySql(c, "SELECT fixture_id FROM personal_gossip_test_fixtures WHERE fixture_id=$id;", GossipFields("id", fixture)).Count > 0)
                 throw new InvalidOperationException("This fixture already ran. Observe it or restore the retained Current before retrying.");
             var journal = GossipFields("testCase", test, "gameInstanceId", ReadString(p, "gameInstanceId", ""),
                 "restoreGeneration", Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration), "activeSaveName", ReadString(p, "activeSaveName", ""),
@@ -341,21 +341,21 @@ created_utc TEXT NOT NULL,consumed_topic TEXT NOT NULL DEFAULT '',payload_json T
                 "beforeNativeActivationStates", activationStates,
                 "beforeTraits", profiles.ToDictionary(x => ReadString(x, "heroId", ""), x => (object)Program.ReadJsonObject(Program.CharacterFile(campaign, ReadString(x, "heroId", ""), "traits.json"))),
                 "beforeEditorAuthority", profiles.ToDictionary(x => ReadString(x, "heroId", ""), x => (object)Program.ReadJsonObject(Program.CharacterFile(campaign, ReadString(x, "heroId", ""), "editor_authority.json"))),
-                "beforeRelationships", ReadDictionaryList(test, "relationships").SelectMany(x => Program.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;",
+                "beforeRelationships", ReadDictionaryList(test, "relationships").SelectMany(x => ReignDatabase.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;",
                     GossipFields("pair", RelationshipsService.AmbientPairKey(ReadString(x, "observerId", ""), ReadString(x, "subjectId", ""))))).ToList());
             // Persist recovery evidence BEFORE any fixture mutation. Current's retained save restores both stores.
-            Program.ExecuteSql(c, "INSERT INTO personal_gossip_test_fixtures(fixture_id,timeline_id,speaker_id,marker,created_utc,payload_json) VALUES($id,$timeline,$actor,$marker,$utc,$json);",
+            ReignDatabase.ExecuteSql(c, "INSERT INTO personal_gossip_test_fixtures(fixture_id,timeline_id,speaker_id,marker,created_utc,payload_json) VALUES($id,$timeline,$actor,$marker,$utc,$json);",
                 GossipFields("id", fixture, "timeline", ReadString(p, "timelineId", ""), "actor", actor, "marker", marker,
                     "utc", DateTimeOffset.UtcNow.ToString("o"), "json", Json.Serialize(journal)));
             foreach (var row in ReadDictionaryList(test, "relationships"))
             {
                 string a = ReadString(row, "observerId", ""), b = ReadString(row, "subjectId", ""), pair = RelationshipsService.AmbientPairKey(a, b);
-                var old = Program.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", GossipFields("pair", pair)).FirstOrDefault();
+                var old = ReignDatabase.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", GossipFields("pair", pair)).FirstOrDefault();
                 if (old == null)
-                    Program.ExecuteSql(c, @"INSERT INTO relationship_pair_chemistry(pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts)
+                    ReignDatabase.ExecuteSql(c, @"INSERT INTO relationship_pair_chemistry(pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts)
 VALUES($pair,$a,$b,'','',$affinity,0,$day,$day,$ts);", GossipFields("pair", pair, "a", a, "b", b,
                         "affinity", ReadInt(row, "affinity", 0), "day", ReadDouble(p, "worldDay", 0), "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
-                else Program.ExecuteSql(c, "UPDATE relationship_pair_chemistry SET " + (GossipSameId(ReadString(old, "hero_a_id", ""), a) ? "affinity_a_to_b" : "affinity_b_to_a")
+                else ReignDatabase.ExecuteSql(c, "UPDATE relationship_pair_chemistry SET " + (GossipSameId(ReadString(old, "hero_a_id", ""), a) ? "affinity_a_to_b" : "affinity_b_to_a")
                     + "=$value WHERE pair_key=$pair;", GossipFields("value", ReadInt(row, "affinity", 0), "pair", pair));
             }
             foreach (var item in profiles)
@@ -380,7 +380,7 @@ VALUES($pair,$a,$b,'','',$affinity,0,$day,$day,$ts);", GossipFields("pair", pair
             var loaded = CharactersService.CharacterEditorLoadApi(GossipFields("campaignId", campaign, "heroStringId", hero));
             if (!ReadBool(loaded, "ok", false))
                 throw new InvalidOperationException("The guarded trait prerequisite could not load its ordinary editor profile.");
-            var head = Program.QuerySql(c, "SELECT revision_token FROM character_editor_heads WHERE hero_id=$hero LIMIT 1;", GossipFields("hero", hero)).FirstOrDefault();
+            var head = ReignDatabase.QuerySql(c, "SELECT revision_token FROM character_editor_heads WHERE hero_id=$hero LIMIT 1;", GossipFields("hero", hero)).FirstOrDefault();
             var saved = CharactersService.CharacterEditorSaveApi(GossipFields("campaignId", campaign, "heroStringId", hero,
                 "section", "traits", "revisionToken", ReadString(head, "revision_token", ""),
                 "description", "Guarded disposable personal gossip trait prerequisite", "documents", GossipFields("traits", traits)));
@@ -418,7 +418,7 @@ VALUES($pair,$a,$b,'','',$affinity,0,$day,$day,$ts);", GossipFields("pair", pair
             }
             if (!WorldSimulationService.TableExists(c, "personal_gossip_test_fixtures")) return;
             var runtime = WorldSimulationService.LoadLiveTestRuntime(campaign);
-            foreach (var row in Program.QuerySql(c, "SELECT * FROM personal_gossip_test_fixtures WHERE timeline_id=$timeline AND speaker_id=$speaker AND consumed_topic='' ORDER BY created_utc LIMIT 32;",
+            foreach (var row in ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_test_fixtures WHERE timeline_id=$timeline AND speaker_id=$speaker AND consumed_topic='' ORDER BY created_utc LIMIT 32;",
                 GossipFields("timeline", ReadString(topic, "timelineId", ""), "speaker", ReadString(topic, "speakerId", ""))))
             {
                 var journal = GossipJson(row); var test = ReadDictionary(journal, "testCase"); string marker = ReadString(row, "marker", "");
@@ -428,7 +428,7 @@ VALUES($pair,$a,$b,'','',$affinity,0,$day,$day,$ts);", GossipFields("pair", pair
                         WorldSimulationService.ParseLiveTestUtc(ReadString(row, "created_utc", "")), DateTimeOffset.UtcNow)) continue;
                 topic["operatorTestControls"] = GossipFields("fixtureId", ReadString(row, "fixture_id", ""), "draws", ReadDictionary(test, "draws"),
                     "compositionMode", ReadString(test, "compositionMode", "production"));
-                Program.ExecuteSql(c, "UPDATE personal_gossip_test_fixtures SET consumed_topic=$topic WHERE fixture_id=$id AND consumed_topic='';",
+                ReignDatabase.ExecuteSql(c, "UPDATE personal_gossip_test_fixtures SET consumed_topic=$topic WHERE fixture_id=$id AND consumed_topic='';",
                     GossipFields("topic", ReadString(topic, "id", ""), "id", ReadString(row, "fixture_id", "")));
                 break;
             }

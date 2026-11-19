@@ -118,7 +118,7 @@ namespace ReignBetaServer
                 var documents = new List<Dictionary<string, object>>();
                 var bindings = new List<Dictionary<string, object>>();
                 string generation;
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
                     if (string.IsNullOrWhiteSpace(generation))

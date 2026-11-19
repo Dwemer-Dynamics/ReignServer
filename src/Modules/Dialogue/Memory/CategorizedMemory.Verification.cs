@@ -26,7 +26,7 @@ namespace ReignBetaServer
                 new List<string>(), "private", importance, 0.5d, confidence,
                 Program.MergeStringLists(Program.SimpleTags(summary), new[] { "conversation" }), "active", "categorized_memory_test",
                 Json.Serialize(payload), "", "not_indexed");
-            Program.ExecuteSql(connection, "UPDATE memories SET memory_domain=$domain WHERE memory_id=$id;",
+            ReignDatabase.ExecuteSql(connection, "UPDATE memories SET memory_domain=$domain WHERE memory_id=$id;",
                 new Dictionary<string, object> { ["domain"] = domain, ["id"] = memoryId });
         }
 
@@ -145,11 +145,11 @@ namespace ReignBetaServer
                     ["known_by"] = new List<string> { "npc_a", "npc_b", "npc_c" }, ["visibility"] = "public",
                     ["worldDay"] = 12d, ["ts"] = 1200L
                 }, "categorized_memory_test");
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    int canonical = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM memories WHERE event_id='tournament_test' AND memory_type='world_knowledge' AND status='active';").FirstOrDefault(), "count", 0);
-                    int experiences = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM memories WHERE event_id='tournament_test' AND memory_type='personal_experience' AND status='active';").FirstOrDefault(), "count", 0);
-                    int receipts = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM knowledge_receipts WHERE event_id='tournament_test' AND status='active';").FirstOrDefault(), "count", 0);
+                    int canonical = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM memories WHERE event_id='tournament_test' AND memory_type='world_knowledge' AND status='active';").FirstOrDefault(), "count", 0);
+                    int experiences = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM memories WHERE event_id='tournament_test' AND memory_type='personal_experience' AND status='active';").FirstOrDefault(), "count", 0);
+                    int receipts = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM knowledge_receipts WHERE event_id='tournament_test' AND status='active';").FirstOrDefault(), "count", 0);
                     add("canonical_world_event", canonical == 1 && experiences == 2 && receipts == 3,
                         "One canonical public fact is stored with participant experiences and knowledge receipts.");
                 }
@@ -167,9 +167,9 @@ namespace ReignBetaServer
                 Dictionary<string, object> unauthorizedPromisePacket = Program.BuildNpcMemoryPacket(campaignId, "npc_c", "player", "", "SABLE memory promise", 2500, datedContext, legacySettings);
                 string authorizedPromiseText = ReadString(authorizedPromisePacket, "memoryPacket", "");
                 string unauthorizedPromiseText = ReadString(unauthorizedPromisePacket, "memoryPacket", "");
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    int commitmentRows = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM memories WHERE event_id='private_promise_test' AND owner_id='npc_a' AND memory_domain='commitments_and_plots' AND status='active';").FirstOrDefault(), "count", 0);
+                    int commitmentRows = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM memories WHERE event_id='private_promise_test' AND owner_id='npc_a' AND memory_domain='commitments_and_plots' AND status='active';").FirstOrDefault(), "count", 0);
                     add("private_promise_retrieval",
                         commitmentRows == 1 && authorizedPromiseText.Contains(privatePromiseMarker) && !unauthorizedPromiseText.Contains(privatePromiseMarker),
                         "Private promises route through commitments, remain retrievable by their owner, and do not leak to uninvolved NPCs.");
@@ -183,7 +183,7 @@ namespace ReignBetaServer
                     "An undated caller cannot disclose a memory later than the conservative day-zero boundary.");
 
                 const string oldArchiveMarker = "OBSIDIAN_ARCHIVE_OATH_9173";
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     InsertCategorizedMemoryTestRow(connection, "old_archive_memory", "old_archive_event", "npc_a",
                         "The NPC witnessed the " + oldArchiveMarker + " and swore to preserve it.", 1400L, 0.65d, 0.82d,
@@ -233,7 +233,7 @@ namespace ReignBetaServer
                     "Precision retrieves the older lexical hit beyond 90 decoys, preserves source uncertainty and observer privacy; recalled=" + preciseArchive.Contains(oldArchiveMarker) + ".");
 
                 const string contradictionMarker = "SUNDERED_CROWN_REPORT_4421";
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     InsertCategorizedMemoryTestRow(connection, "contradiction_firsthand", "contradiction_event_a", "npc_a",
                         contradictionMarker + ": Duke Orman survived the ambush.", 1460L, 0.7d, 0.85d,
@@ -258,13 +258,13 @@ namespace ReignBetaServer
                         && record.Text.Contains(contradictionMarker)) == 2,
                     "Both source-less contradictory recollections remain separate unverified records; survived=" + preciseContradictions.Contains("survived the ambush") + ", died=" + preciseContradictions.Contains("died in the ambush") + ".");
 
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     InsertCategorizedMemoryTestRow(connection, "consolidated_semantic_memory", "consolidated_semantic_event", "npc_a",
                         "This source memory must disappear after consolidation.", 1450L, 0.7d, 0.8d,
                         "interpersonal_history", new List<string> { "npc_a", "player" }, new List<string> { "npc_a" }, new List<string>());
-                    Program.ExecuteSql(connection, "UPDATE memories SET status='consolidated' WHERE memory_id='consolidated_semantic_memory';");
-                    Dictionary<string, object> consolidated = Program.QuerySql(connection,
+                    ReignDatabase.ExecuteSql(connection, "UPDATE memories SET status='consolidated' WHERE memory_id='consolidated_semantic_memory';");
+                    Dictionary<string, object> consolidated = ReignDatabase.QuerySql(connection,
                         "SELECT * FROM memories WHERE memory_id='consolidated_semantic_memory' LIMIT 1;").FirstOrDefault();
                     Dictionary<string, object> fakeSemanticSearch = new Dictionary<string, object>
                     {
@@ -339,12 +339,12 @@ namespace ReignBetaServer
                     "Remember the blue ribbon and the bent pin.", "The ribbon and pin are noted.", "party_event_b", 1902L);
                 StorePartyConversationExchange(campaignId, partyRequest, "npc_a", "player", "Player", "Aldric",
                     "Remember the blue ribbon and the bent pin.", "I will remember both.", "party_event_a", 1901L);
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    Dictionary<string, object> partySession = Program.QuerySql(connection,
+                    Dictionary<string, object> partySession = ReignDatabase.QuerySql(connection,
                         "SELECT * FROM conversation_sessions WHERE session_id=$id LIMIT 1;",
                         new Dictionary<string, object> { ["id"] = partySessionId }).FirstOrDefault();
-                    List<Dictionary<string, object>> partyTurns = Program.QuerySql(connection,
+                    List<Dictionary<string, object>> partyTurns = ReignDatabase.QuerySql(connection,
                         "SELECT * FROM conversation_turns WHERE session_id=$id ORDER BY turn_order;",
                         new Dictionary<string, object> { ["id"] = partySessionId });
                     Dictionary<string, object> partyScene = CreateConversationSceneSummary(
@@ -360,10 +360,10 @@ namespace ReignBetaServer
                             ["enableMinimeMemoryReranking"] = false
                         });
                     string partySummaryId = ReadString(partyScene, "summaryId", "");
-                    Dictionary<string, object> partySummary = Program.QuerySql(connection,
+                    Dictionary<string, object> partySummary = ReignDatabase.QuerySql(connection,
                         "SELECT * FROM summaries WHERE summary_id=$id LIMIT 1;",
                         new Dictionary<string, object> { ["id"] = partySummaryId }).FirstOrDefault();
-                    int partySourceLinks = ReadInt(Program.QuerySql(connection,
+                    int partySourceLinks = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) count FROM memory_sources WHERE document_type='summary' AND document_id=$id;",
                         new Dictionary<string, object> { ["id"] = partySummaryId }).FirstOrDefault(), "count", 0);
                     bool partyParticipantsComplete = partyTurns.All(turn =>
@@ -441,7 +441,7 @@ namespace ReignBetaServer
                     "Paraphrase the obsidian-compass fact without losing its exact name or description.",
                     "No.", "exchange_failed_recall_probe", 2250L);
                 FinishConversationSession(campaignId, failedRecallSessionId, "test", false, 22.5d, 2251L);
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     Dictionary<string, object> exactRoute = BuildMemoryRetrievalRoute(disabledSettings,
                         "What exactly did you say about the silver falcon returning at dawn?", new Dictionary<string, object> { ["worldDay"] = 23d });
@@ -453,8 +453,8 @@ namespace ReignBetaServer
                         "What do you remember about our last conversation?", new Dictionary<string, object> { ["worldDay"] = 23d });
                     Dictionary<string, object> recentRaw = SearchExactConversationHistory(connection, "npc_a",
                         "What do you remember about our last conversation?", recentRoute, 50000, new Dictionary<string, object>(), "", 30);
-                    int turns = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM conversation_turns WHERE session_id=$id AND status='active';", new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault(), "count", 0);
-                    int links = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM memory_sources WHERE document_type='summary' AND document_id=$id;", new Dictionary<string, object> { ["id"] = ReadString(finished, "sceneSummaryId", "") }).FirstOrDefault(), "count", 0);
+                    int turns = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM conversation_turns WHERE session_id=$id AND status='active';", new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault(), "count", 0);
+                    int links = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM memory_sources WHERE document_type='summary' AND document_id=$id;", new Dictionary<string, object> { ["id"] = ReadString(finished, "sceneSummaryId", "") }).FirstOrDefault(), "count", 0);
                     add("session_sources", turns == 2 && !string.IsNullOrWhiteSpace(ReadString(finished, "sceneSummaryId", "")) && links >= 3,
                         "Completed sessions retain exact turns and link scene summaries back to their sources.");
                     add("exact_expansion", ReadString(exact, "text", "").Contains("silver falcon")

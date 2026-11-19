@@ -396,9 +396,9 @@ namespace ReignBetaServer
             {
                 try
                 {
-                    using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                    using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                     {
-                        List<Dictionary<string, object>> stored = Program.QuerySql(connection, @"SELECT
+                        List<Dictionary<string, object>> stored = ReignDatabase.QuerySql(connection, @"SELECT
 turn_id,session_id,turn_order,role,speaker_id,speaker_name AS speaker,text,ts
 FROM conversation_turns
 WHERE status='active' AND role='npc' AND speaker_id=$hero

@@ -64,7 +64,7 @@ namespace ReignBetaServer
 
         internal static void EnsureMemoryPrecisionSchema(ReignDbConnection connection)
         {
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS memory_precision_state (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS memory_precision_state (
 state_id TEXT PRIMARY KEY, mode TEXT NOT NULL DEFAULT 'shadow', restore_generation TEXT NOT NULL,
 projection_generation INTEGER NOT NULL DEFAULT 1, updated_ts INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS memory_projections (
@@ -72,7 +72,7 @@ projection_id TEXT PRIMARY KEY, timeline_id TEXT NOT NULL, owner_id TEXT NOT NUL
 restore_generation TEXT NOT NULL, projection_generation INTEGER NOT NULL, source_hash TEXT NOT NULL,
 watermark BIGINT NOT NULL, payload_json TEXT NOT NULL, updated_ts INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_memory_projection_owner ON memory_projections(timeline_id,owner_id,peer_id);");
-            Program.ExecuteSql(connection, @"INSERT INTO memory_precision_state(state_id,mode,restore_generation,updated_ts)
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO memory_precision_state(state_id,mode,restore_generation,updated_ts)
 VALUES('current','shadow',$generation,$ts) ON CONFLICT(state_id) DO NOTHING;",
                 new Dictionary<string, object> { ["generation"] = Guid.NewGuid().ToString("N"), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
             foreach (var column in new Dictionary<string, string> {
@@ -81,32 +81,32 @@ VALUES('current','shadow',$generation,$ts) ON CONFLICT(state_id) DO NOTHING;",
                 ["valid_to_day"] = "REAL NULL",
                 ["learned_day"] = "REAL NOT NULL DEFAULT 0", ["recorded_ts"] = "BIGINT NOT NULL DEFAULT 0",
                 ["cardinality"] = "TEXT NOT NULL DEFAULT 'many'", ["processing_version"] = "TEXT NOT NULL DEFAULT 'legacy'" })
-                Program.EnsureDatabaseColumn(connection, "temporal_knowledge_assertions", column.Key, column.Value);
-            Program.EnsureDatabaseColumn(connection, "memory_precision_state", "source_revision", "BIGINT NOT NULL DEFAULT 0");
-            Program.ExecuteSql(connection, "CREATE SEQUENCE IF NOT EXISTS memory_accepted_turn_sequence;");
-            Program.EnsureDatabaseColumn(connection, "conversation_turns", "accepted_sequence", "BIGINT NOT NULL DEFAULT nextval('memory_accepted_turn_sequence')");
+                ReignDatabase.EnsureDatabaseColumn(connection, "temporal_knowledge_assertions", column.Key, column.Value);
+            ReignDatabase.EnsureDatabaseColumn(connection, "memory_precision_state", "source_revision", "BIGINT NOT NULL DEFAULT 0");
+            ReignDatabase.ExecuteSql(connection, "CREATE SEQUENCE IF NOT EXISTS memory_accepted_turn_sequence;");
+            ReignDatabase.EnsureDatabaseColumn(connection, "conversation_turns", "accepted_sequence", "BIGINT NOT NULL DEFAULT nextval('memory_accepted_turn_sequence')");
             EnsureConversationContinuitySchema(connection);
             EnsureMemorySnapshotSourceSchema(connection);
             EnsureMemorySpecialistSchema(connection);
             EnsurePrecisionProjectionTracking(connection);
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_assertion_precision ON temporal_knowledge_assertions(timeline_id,perspective_owner_id,fact_key,valid_to_ts);");
-            Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('memory_precision_v1','complete');");
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_assertion_precision ON temporal_knowledge_assertions(timeline_id,perspective_owner_id,fact_key,valid_to_ts);");
+            ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('memory_precision_v1','complete');");
         }
 
         internal static void EnsurePrecisionProjectionTracking(ReignDbConnection connection)
         {
-            Program.ExecuteSql(connection, @"CREATE OR REPLACE FUNCTION memory_precision_source_changed() RETURNS trigger LANGUAGE plpgsql AS $$
+            ReignDatabase.ExecuteSql(connection, @"CREATE OR REPLACE FUNCTION memory_precision_source_changed() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN UPDATE memory_precision_state SET source_revision=source_revision+1 WHERE state_id='current'; RETURN NULL; END $$;");
             foreach (string table in new[] { "conversation_turns", "conversation_sessions", "conversation_continuity", "conversation_relationship_receipts",
                 "court_social_signal_evidence", "relationship_milestones", "temporal_knowledge_assertions", "memories", "summaries", "beliefs", "comprehension", "obligations" })
                 if (WorldSimulationService.TableExists(connection, table))
-                    Program.ExecuteSql(connection, "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='precision_revision_" + table
+                    ReignDatabase.ExecuteSql(connection, "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='precision_revision_" + table
                         + "' AND tgrelid='" + table + "'::regclass) THEN CREATE TRIGGER precision_revision_" + table + " AFTER INSERT OR UPDATE OR DELETE ON "
                         + table + " FOR EACH STATEMENT EXECUTE FUNCTION memory_precision_source_changed(); END IF; END $$;");
         }
 
         internal static Dictionary<string, object> ReadMemoryPrecisionState(ReignDbConnection connection) =>
-            Program.QuerySql(connection, "SELECT * FROM memory_precision_state WHERE state_id='current';").Single();
+            ReignDatabase.QuerySql(connection, "SELECT * FROM memory_precision_state WHERE state_id='current';").Single();
 
         private static bool IsIsolatedMemoryValidation => ReignPostgreSqlStorage.Options.IsValidation
             && !string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value);
@@ -131,19 +131,19 @@ BEGIN UPDATE memory_precision_state SET source_revision=source_revision+1 WHERE 
         internal static void AdvanceMemoryRestoreGeneration(string campaignId, Dictionary<string, object> restoredPoint = null, string snapshotSchema = "",
             string loadSessionId = "")
         {
-            using (var connection = Program.OpenCampaignConnection(campaignId))
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaignId))
             using (var transaction = connection.BeginTransaction())
             {
                 EnsureMemoryPrecisionSchema(connection);
                 string generation = Guid.NewGuid().ToString("N");
                 CaptureRestoredMemorySources(connection, restoredPoint, generation, snapshotSchema, loadSessionId);
                 RecoverLegacySnapshotMemorySources(connection, campaignId, restoredPoint, generation);
-                Program.ExecuteSql(connection, "UPDATE memory_precision_state SET restore_generation=$generation,updated_ts=$ts WHERE state_id='current';",
+                ReignDatabase.ExecuteSql(connection, "UPDATE memory_precision_state SET restore_generation=$generation,updated_ts=$ts WHERE state_id='current';",
                     new Dictionary<string, object> { ["generation"] = generation, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
-                Program.ExecuteSql(connection, "DELETE FROM memory_projections;");
+                ReignDatabase.ExecuteSql(connection, "DELETE FROM memory_projections;");
                 CaptureRestoredLetterSources(connection, restoredPoint);
                 RebindRestoredConversationReferences(connection, restoredPoint, generation);
-                Program.ExecuteSql(connection, "UPDATE memory_background_jobs SET status='pending',lease_token='',lease_until=0 WHERE status='running';");
+                ReignDatabase.ExecuteSql(connection, "UPDATE memory_background_jobs SET status='pending',lease_token='',lease_until=0 WHERE status='running';");
                 QueueAllEmbeddingJobs(connection, true);
                 transaction.Commit();
             }
@@ -161,7 +161,7 @@ BEGIN UPDATE memory_precision_state SET source_revision=source_revision+1 WHERE 
                 || !new[] { "memory_id", "summary_id", "turn_id" }.Contains(key)) throw new InvalidOperationException("Unknown memory source table.");
             foreach (var source in sources.OrderBy(r => ReadString(r, key, ""), StringComparer.Ordinal))
             {
-                var current = Program.QuerySql(connection, "SELECT * FROM " + table + " WHERE " + key + "=$id FOR UPDATE;",
+                var current = ReignDatabase.QuerySql(connection, "SELECT * FROM " + table + " WHERE " + key + "=$id FOR UPDATE;",
                     new Dictionary<string, object> { ["id"] = ReadString(source, key, "") }).SingleOrDefault();
                 if (current == null || MemorySourceHash(new[] { current }) != MemorySourceHash(new[] { source }))
                     throw new InvalidOperationException("Memory source changed during compaction; keep the original and retry.");
@@ -579,7 +579,7 @@ BEGIN UPDATE memory_precision_state SET source_revision=source_revision+1 WHERE 
                 : TrySemanticMemorySearch(campaign, query, route, settings,
                     SemanticSourceTypesForRoute(route).Append("conversation_turn").Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
                     plan.Timeline, npc, plan.WorldDay);
-            using (var connection = Program.OpenCampaignConnection(campaign))
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 if (!shadow && !ReadBool(context, "officialMemoryFirewall", false) && ValidActivityDay(plan.WorldDay))
                 {
@@ -690,9 +690,9 @@ BEGIN UPDATE memory_precision_state SET source_revision=source_revision+1 WHERE 
             {
                 var anchor = candidates.Where(e => e.Session.Length > 0).OrderByDescending(e => e.Score).FirstOrDefault();
                 if (anchor != null)
-                    using (var connection = Program.OpenCampaignConnection(campaign))
+                    using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                     {
-                        var later = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$session AND status='active' ORDER BY turn_order DESC;",
+                        var later = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$session AND status='active' ORDER BY turn_order DESC;",
                             new Dictionary<string,object> { ["session"]=anchor.Session }).FirstOrDefault(t => PrecisionTurnVisible(t, npc, knowledge, connection));
                         var expansion = later == null ? null : PrecisionExchangeEvidence(connection,later,knowledge,false,anchor.Score);
                         if (expansion != null) candidates.Add(expansion);
@@ -821,7 +821,7 @@ BEGIN UPDATE memory_precision_state SET source_revision=source_revision+1 WHERE 
                 ? " UNION ALL SELECT COALESCE(MAX(COALESCE((to_jsonb(l)->>'dispatch_sequence')::bigint,0)),0) AS n FROM letters l" : "";
             string communicationPart = WorldSimulationService.TableExists(connection, "communication_history")
                 ? " UNION ALL SELECT COALESCE(MAX(accepted_sequence),0) AS n FROM communication_history" : "";
-            return ReadLong(Program.QuerySql(connection, "SELECT MAX(n) AS watermark FROM (SELECT COALESCE(MAX(accepted_sequence),0) AS n FROM conversation_turns"
+            return ReadLong(ReignDatabase.QuerySql(connection, "SELECT MAX(n) AS watermark FROM (SELECT COALESCE(MAX(accepted_sequence),0) AS n FROM conversation_turns"
                 + letterPart + communicationPart + ") sources;").Single(), "watermark", 0);
         }
 
@@ -874,7 +874,7 @@ BEGIN UPDATE memory_precision_state SET source_revision=source_revision+1 WHERE 
         private static bool PrecisionEvidenceGenerationCurrent(Dictionary<string,object> evidence)
         {
             if (ReadString(evidence,"mode","")!="precision" || ReadString(evidence,"campaignId","").Length==0) return true;
-            using(var connection=Program.OpenCampaignConnection(ReadString(evidence,"campaignId","")))
+            using(var connection=ReignDatabase.OpenCampaignConnection(ReadString(evidence,"campaignId","")))
             {
                 var state=ReadMemoryPrecisionState(connection);
                 return ReadString(evidence,"generation","")==ReadString(state,"restore_generation","")+":"+ReadInt(state,"projection_generation",1);

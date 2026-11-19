@@ -147,7 +147,7 @@ namespace ReignBetaServer
                     if (currentRoster.Count > 0 && present.Any(x => !currentRoster.Any(y => Program.CharacterIdFrom(y) == Program.CharacterIdFrom(x) && TavernHouseAdultAvailable(y))))
                         return TavernHouseError("A participant is no longer available. End this visit before making a new agreement.", "participant_unavailable");
                     if (ReadDictionaryList(payload, "identityRoster").Count > 0) state["identityRoster"] = ReadDictionaryList(payload, "identityRoster");
-                    using (var identityConnection = Program.OpenCampaignConnection(ReadString(state, "campaignId", "")))
+                    using (var identityConnection = ReignDatabase.OpenCampaignConnection(ReadString(state, "campaignId", "")))
                         SynchronizeTavernHouseIdentities(identityConnection, state);
                     var chat = new Dictionary<string, object>(payload, StringComparer.OrdinalIgnoreCase);
                     // Roster cards are never witness lists. Remove caller group state and bind every membership field.
@@ -289,11 +289,9 @@ namespace ReignBetaServer
                 || phaseSession != ReadString(state, "conversationSessionId", "") + (ReadString(state, "status", "") == "visiting" ? "_visit" : "_negotiation")
                 || ReadInt(pending, "transcriptRevision", -1) != ReadInt(state, "transcriptRevision", 0))
                 throw new InvalidDataException("The saved pending dialogue does not match this exact phase and revision.");
-            using (var connection = Program.OpenCampaignConnection(ReadString(state, "campaignId", "")))
+            using (var connection = ReignDatabase.OpenCampaignConnection(ReadString(state, "campaignId", "")))
             {
-                var row = Program.QuerySql(connection, @"SELECT text,payload_json,event_id FROM conversation_turns
-WHERE session_id=$session AND exchange_id=$exchange AND speaker_id=$speaker AND role='npc' AND turn_id=$turn LIMIT 1;",
-                    new Dictionary<string, object> { ["session"] = phaseSession, ["exchange"] = turn, ["speaker"] = speaker,
+                var row = CharactersStore.SelectConversationTurns8(connection, new Dictionary<string, object> { ["session"] = phaseSession, ["exchange"] = turn, ["speaker"] = speaker,
                         ["turn"] = turn + "_npc_" + DialogueService.SafeMemoryKey(speaker) }).FirstOrDefault();
                 return RecoverTavernHouseDialogueRow(state, pending, row);
             }
@@ -507,7 +505,7 @@ WHERE session_id=$session AND exchange_id=$exchange AND speaker_id=$speaker AND 
                     foreach (string key in new[] { "actionTermsHash", "preparationId", "payeeHeroId", "paymentState" })
                         if (incoming.TryGetValue(key, out var value)) receipt[key] = value;
                     // Reputation persists first with its own idempotent receipt. A process stop before the session write is safely replayed.
-                    using (var connection = Program.OpenCampaignConnection(ReadString(state, "campaignId", "")))
+                    using (var connection = ReignDatabase.OpenCampaignConnection(ReadString(state, "campaignId", "")))
                     {
                         SynchronizeTavernHouseIdentities(connection, state);
                         ReputationService.EnsureSocialReputationSchema(connection);

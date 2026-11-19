@@ -547,12 +547,12 @@ namespace ReignBetaServer
                 int activeCount = 0;
                 try
                 {
-                    using (ReignDbConnection connection = Program.OpenCampaignConnection(ReadString(run, "campaignId", "")))
+                    using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(ReadString(run, "campaignId", "")))
                     {
                         CharactersService.EnsureDynamicCharacteristicsSchema(connection);
                         foreach (string heroId in heroIds)
                         {
-                            Dictionary<string, object> count = Program.QuerySql(connection,
+                            Dictionary<string, object> count = ReignDatabase.QuerySql(connection,
                                 "SELECT COUNT(*) AS count FROM dynamic_characteristics WHERE owner_id=$owner AND status='active';",
                                 new Dictionary<string, object> { ["owner"] = heroId }).FirstOrDefault();
                             activeCount = Math.Max(activeCount, ReadInt(count, "count", 0));
@@ -1113,38 +1113,38 @@ namespace ReignBetaServer
                 int relatedScenes;
                 int rollingArcs;
                 int rollingArcSources;
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    session = Program.QuerySql(connection,
+                    session = ReignDatabase.QuerySql(connection,
                         "SELECT * FROM conversation_sessions WHERE session_id=$id LIMIT 1;",
                         new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault();
                     string storedSummaryId = ReadString(session, "scene_summary_id", "");
-                    summary = Program.QuerySql(connection,
+                    summary = ReignDatabase.QuerySql(connection,
                         "SELECT * FROM summaries WHERE summary_id=$id LIMIT 1;",
                         new Dictionary<string, object> { ["id"] = storedSummaryId }).FirstOrDefault();
-                    turnCount = ReadInt(Program.QuerySql(connection,
+                    turnCount = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) count FROM conversation_turns WHERE session_id=$id AND status='active';",
                         new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault(), "count", 0);
-                    distinctExchanges = ReadInt(Program.QuerySql(connection,
+                    distinctExchanges = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(DISTINCT exchange_id) count FROM conversation_turns WHERE session_id=$id AND status='active' AND exchange_id<>'';",
                         new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault(), "count", 0);
-                    sourceLinks = ReadInt(Program.QuerySql(connection,
+                    sourceLinks = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) count FROM memory_sources WHERE document_type='summary' AND document_id=$id;",
                         new Dictionary<string, object> { ["id"] = storedSummaryId }).FirstOrDefault(), "count", 0);
-                    ftsRows = ReadInt(Program.QuerySql(connection,
+                    ftsRows = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) count FROM summary_fts WHERE summary_id=$id;",
                         new Dictionary<string, object> { ["id"] = storedSummaryId }).FirstOrDefault(), "count", 0);
-                    embeddingJobs = ReadInt(Program.QuerySql(connection,
+                    embeddingJobs = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) count FROM embedding_jobs WHERE source_type='summary' AND source_id=$id;",
                         new Dictionary<string, object> { ["id"] = storedSummaryId }).FirstOrDefault(), "count", 0);
-                    consolidationJobs = ReadInt(Program.QuerySql(connection,
+                    consolidationJobs = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) count FROM memory_background_jobs WHERE job_type='memory_consolidation' AND session_id=$id;",
                         new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault(), "count", 0);
 
                     string ownerId = ReadString(summary, "owner_id", "");
                     string playerId = ReadString(session, "player_id", "");
                     string lane = ReadString(summary, "memory_lane", "");
-                    relatedScenes = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) count FROM summaries
+                    relatedScenes = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) count FROM summaries
 WHERE owner_id=$owner AND summary_type='scene' AND status='active' AND memory_lane=$lane
 AND ($player='' OR participants_json LIKE $playerLike);",
                         new Dictionary<string, object>
@@ -1152,7 +1152,7 @@ AND ($player='' OR participants_json LIKE $playerLike);",
                             ["owner"] = ownerId, ["lane"] = lane, ["player"] = playerId,
                             ["playerLike"] = "%" + playerId + "%"
                         }).FirstOrDefault(), "count", 0);
-                    Dictionary<string, object> arc = Program.QuerySql(connection, @"SELECT summary_id FROM summaries
+                    Dictionary<string, object> arc = ReignDatabase.QuerySql(connection, @"SELECT summary_id FROM summaries
 WHERE owner_id=$owner AND summary_type='arc' AND status='active' AND memory_lane=$lane
 AND ($player='' OR participants_json LIKE $playerLike)
 ORDER BY updated_ts DESC LIMIT 1;",
@@ -1163,7 +1163,7 @@ ORDER BY updated_ts DESC LIMIT 1;",
                         }).FirstOrDefault();
                     string arcId = ReadString(arc, "summary_id", "");
                     rollingArcs = string.IsNullOrWhiteSpace(arcId) ? 0 : 1;
-                    rollingArcSources = ReadInt(Program.QuerySql(connection,
+                    rollingArcSources = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) count FROM memory_sources WHERE document_type='summary' AND document_id=$id AND source_type='summary';",
                         new Dictionary<string, object> { ["id"] = arcId }).FirstOrDefault(), "count", 0);
                 }
@@ -1307,13 +1307,13 @@ ORDER BY updated_ts DESC LIMIT 1;",
                 int eligibleConsolidations = 0;
                 int verifiedConsolidations = 0;
 
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     DialogueService.EnsureMemoryBackgroundWorkSchema(connection);
                     DialogueService.EnsureSemanticMemorySchema(connection);
                     foreach (string sessionId in sessionIds)
                     {
-                        Dictionary<string, object> session = Program.QuerySql(connection,
+                        Dictionary<string, object> session = ReignDatabase.QuerySql(connection,
                             "SELECT * FROM conversation_sessions WHERE session_id=$id LIMIT 1;",
                             new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault();
                         string sceneId = ReadString(session, "scene_summary_id", "");
@@ -1323,7 +1323,7 @@ ORDER BY updated_ts DESC LIMIT 1;",
                             continue;
                         }
                         summaryIds.Add(sceneId);
-                        List<Dictionary<string, object>> jobs = Program.QuerySql(connection, @"SELECT * FROM memory_background_jobs
+                        List<Dictionary<string, object>> jobs = ReignDatabase.QuerySql(connection, @"SELECT * FROM memory_background_jobs
 WHERE job_type='memory_consolidation' AND session_id=$session ORDER BY owner_id;",
                             new Dictionary<string, object> { ["session"] = sessionId });
                         jobCount += jobs.Count;
@@ -1341,7 +1341,7 @@ WHERE job_type='memory_consolidation' AND session_id=$session ORDER BY owner_id;
                                 continue;
                             }
 
-                            int sourceEventCount = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(DISTINCT m.event_id) count
+                            int sourceEventCount = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(DISTINCT m.event_id) count
 FROM memories m JOIN conversation_turns t ON t.event_id=m.event_id
 WHERE t.session_id=$session AND m.owner_id=$owner AND m.event_id<>'';",
                                 new Dictionary<string, object>
@@ -1350,7 +1350,7 @@ WHERE t.session_id=$session AND m.owner_id=$owner AND m.event_id<>'';",
                                 }).FirstOrDefault(), "count", 0);
                             if (sourceEventCount < minimumItems) continue;
                             eligibleConsolidations++;
-                            Dictionary<string, object> middle = Program.QuerySql(connection, @"SELECT * FROM summaries
+                            Dictionary<string, object> middle = ReignDatabase.QuerySql(connection, @"SELECT * FROM summaries
 WHERE scope=$scope AND owner_id=$owner AND summary_type='middle_term'
 ORDER BY updated_ts DESC LIMIT 1;",
                                 new Dictionary<string, object>
@@ -1367,21 +1367,21 @@ ORDER BY updated_ts DESC LIMIT 1;",
                                 TryParseJsonObject(ReadString(middle, "payload_json", "{}"))
                                 ?? new Dictionary<string, object>();
                             List<string> sourceMemoryIds = ReadStringList(middlePayload, "sourceMemoryIds");
-                            int memoryLinks = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) count FROM memory_sources
+                            int memoryLinks = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) count FROM memory_sources
 WHERE document_type='summary' AND document_id=$id AND source_type='memory';",
                                 new Dictionary<string, object> { ["id"] = middleId }).FirstOrDefault(), "count", 0);
-                            int eventLinks = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) count FROM memory_sources
+                            int eventLinks = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) count FROM memory_sources
 WHERE document_type='summary' AND document_id=$id AND source_type='event';",
                                 new Dictionary<string, object> { ["id"] = middleId }).FirstOrDefault(), "count", 0);
-                            int unconsolidated = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) count
+                            int unconsolidated = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) count
 FROM memory_sources s JOIN memories m ON m.memory_id=s.source_id
 WHERE s.document_type='summary' AND s.document_id=$id AND s.source_type='memory'
 AND m.status<>'consolidated';",
                                 new Dictionary<string, object> { ["id"] = middleId }).FirstOrDefault(), "count", 0);
-                            int fts = ReadInt(Program.QuerySql(connection,
+                            int fts = ReadInt(ReignDatabase.QuerySql(connection,
                                 "SELECT COUNT(*) count FROM summary_fts WHERE summary_id=$id;",
                                 new Dictionary<string, object> { ["id"] = middleId }).FirstOrDefault(), "count", 0);
-                            int embeddingJobs = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) count FROM embedding_jobs
+                            int embeddingJobs = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) count FROM embedding_jobs
 WHERE source_type='summary' AND source_id=$id;",
                                 new Dictionary<string, object> { ["id"] = middleId }).FirstOrDefault(), "count", 0);
                             bool valid = ReadInt(middle, "event_count", 0) >= minimumItems
@@ -1412,11 +1412,11 @@ WHERE source_type='summary' AND source_id=$id;",
                     List<string> sceneIds = summaryIds
                         .Where(id => id.StartsWith("scene_", StringComparison.OrdinalIgnoreCase))
                         .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                    foreach (Dictionary<string, object> arc in Program.QuerySql(connection,
+                    foreach (Dictionary<string, object> arc in ReignDatabase.QuerySql(connection,
                         "SELECT summary_id FROM summaries WHERE summary_type='arc' AND status='active';"))
                     {
                         string arcId = ReadString(arc, "summary_id", "");
-                        int matchedSources = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) count FROM memory_sources
+                        int matchedSources = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) count FROM memory_sources
 WHERE document_type='summary' AND document_id=$id AND source_type='summary'
 AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" + index)) + ");",
                             sceneIds.Select((id, index) => new KeyValuePair<string, object>(

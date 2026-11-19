@@ -283,13 +283,13 @@ namespace ReignBetaServer
                 connection = ReignPostgreSqlStorage.OpenMetadataConnection();
                 try
                 {
-                    locked = ReadBool(Program.QuerySql(connection,
+                    locked = ReadBool(ReignDatabase.QuerySql(connection,
                         "SELECT pg_try_advisory_lock(hashtextextended($owner,0)) AS acquired;",
                         TestDict("owner", "memory-evidence-replay:" + Campaign)).Single(), "acquired", false);
                     if (!locked) throw new InvalidOperationException("This evidence replay world is already owned by another run.");
                     // CampaignExists joins the registry to pg_namespace and
                     // therefore cannot establish absence of orphaned state.
-                    if (ReadBool(Program.QuerySql(connection, @"SELECT
+                    if (ReadBool(ReignDatabase.QuerySql(connection, @"SELECT
 EXISTS(SELECT 1 FROM pg_namespace WHERE nspname=$schema)
 OR EXISTS(SELECT 1 FROM reign_meta.campaign_registry WHERE campaign_id=$campaign OR schema_name=$schema)
 OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campaign) AS present;",
@@ -308,7 +308,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                 {
                     try
                     {
-                        if (locked) Program.QuerySql(connection, "SELECT pg_advisory_unlock(hashtextextended($owner,0));",
+                        if (locked) ReignDatabase.QuerySql(connection, "SELECT pg_advisory_unlock(hashtextextended($owner,0));",
                             TestDict("owner", "memory-evidence-replay:" + Campaign));
                     }
                     finally { connection.Dispose(); connection = null; }
@@ -897,7 +897,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             result["grounding"] = Program.CloneDictionary(ReadDictionary(payload, "conversationGrounding"));
             long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             string generation;
-            using (var connection = Program.OpenCampaignConnection(campaign))
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
             var rejections = new List<Dictionary<string, object>>();
             List<Dictionary<string, object>> Writes(string key, string kind)
@@ -926,12 +926,12 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             result["publication"] = publication; result["writeRejections"] = rejections;
             result["acceptedProse"] = reply;
             var stored = TestDict();
-            using (var connection = Program.OpenCampaignConnection(campaign))
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 foreach (string table in new[] { "conversation_turns", "memories", "beliefs", "obligations", "comprehension" })
-                    if (WorldSimulationService.TableExists(connection, table)) stored[table] = Program.QuerySql(connection,
+                    if (WorldSimulationService.TableExists(connection, table)) stored[table] = ReignDatabase.QuerySql(connection,
                         "SELECT * FROM " + table + " WHERE event_id=$event LIMIT 256;", TestDict("event", unit.EventId));
-                if (WorldSimulationService.TableExists(connection, "conversation_continuity")) stored["continuity"] = Program.QuerySql(connection,
+                if (WorldSimulationService.TableExists(connection, "conversation_continuity")) stored["continuity"] = ReignDatabase.QuerySql(connection,
                     "SELECT * FROM conversation_continuity WHERE owner_id=$owner AND timeline_id=$timeline LIMIT 256;",
                     TestDict("owner", observer, "timeline", ContinuityTimeline(payload)));
             }
@@ -1176,7 +1176,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                     var lateViews = new List<Dictionary<string, object>>();
                     var indexingClock = System.Diagnostics.Stopwatch.StartNew();
                     if (seedHistory)
-                    using (var connection = Program.OpenCampaignConnection(campaign))
+                    using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                     using (var transaction = connection.BeginTransaction())
                     {
                         foreach (var group in sources.GroupBy(s => ReadString(s, "sessionId", "history")))
@@ -1190,7 +1190,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                             // recent and leave selection dependent on row order.
                             long startTimestamp = group.Min(s => ReadLong(s, "sequence", 0));
                             long endTimestamp = group.Max(s => ReadLong(s, "sequence", 0));
-                            Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
+                            ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
 VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$payload);", TestDict("session", session, "campaign", campaign,
                                 "npc", observer, "player", peer, "start", startTimestamp, "end", endTimestamp,
                                 "participants", Json.Serialize(participants), "payload", Json.Serialize(context)));
@@ -1202,18 +1202,18 @@ VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$paylo
                                     ReadString(source, "role", ""), Map(ReadString(source, "speakerId", "")), ReadString(source, "speakerName", ReadString(source, "speakerId", "")),
                                     ReadString(source, "text", ""), published ? "party_chat" : "in_person", ReadDouble(source, "worldDay", 0),
                                     ReadLong(source, "sequence", 0), "", ReadStringList(source, "audience").Select(Map).ToList(), context);
-                                Program.ExecuteSql(connection, "UPDATE conversation_turns SET accepted_sequence=$sequence WHERE turn_id=$id;",
+                                ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET accepted_sequence=$sequence WHERE turn_id=$id;",
                                     TestDict("sequence", ReadLong(source, "sequence", 0), "id", id));
                                 if (indexSpecialists)
                                 {
-                                    var original = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).Single();
+                                    var original = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).Single();
                                     var captured = extractorEnabled ? extractionCaptures[ReadString(source, "sourceId", "")] : null;
                                     var extraction = captured == null ? null : RebindMemoryExtractionReplay(captured, id, extractorModelHash);
                                     StoreMemorySpecialistDocument(connection, original, extraction);
                                     var indexed = TestDict("sourceId", id, "sourceHash", MemorySpecialistSourceHash(original));
                                     if (extractorEnabled)
                                     {
-                                        var stored = Program.QuerySql(connection, "SELECT payload_json,public_topics_json,public_entities_json FROM memory_specialist_sources WHERE turn_id=$id;", TestDict("id", id)).Single();
+                                        var stored = ReignDatabase.QuerySql(connection, "SELECT payload_json,public_topics_json,public_entities_json FROM memory_specialist_sources WHERE turn_id=$id;", TestDict("id", id)).Single();
                                         indexed["document"] = TryParseJsonObject(ReadString(stored, "payload_json", "{}"));
                                         indexed["publicTopics"] = Program.TextListFromJson(ReadString(stored, "public_topics_json", "[]"));
                                         indexed["publicEntitiesJson"] = ReadString(stored, "public_entities_json", "[]");
@@ -1224,7 +1224,7 @@ VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$paylo
                                 }
                                 if(captureLateInteraction)
                                 {
-                                    var original=Program.QuerySql(connection,"SELECT *,xmin::text AS source_revision FROM conversation_turns WHERE turn_id=$id;",TestDict("id",id)).Single();
+                                    var original=ReignDatabase.QuerySql(connection,"SELECT *,xmin::text AS source_revision FROM conversation_turns WHERE turn_id=$id;",TestDict("id",id)).Single();
                                     foreach(var view in new[]{"self","public"}.Select(v=>LateInteractionView(original,v)).Where(v=>v!=null))
                                     {
                                         lateViews.Add(view);
@@ -1281,7 +1281,7 @@ VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$paylo
                     }
                     if (ReadBool(item, "captureSemanticDocuments", false))
                     {
-                        using var captureConnection = Program.OpenCampaignConnection(campaign);
+                        using var captureConnection = ReignDatabase.OpenCampaignConnection(campaign);
                         semanticDocuments = CaptureReplaySemanticDocuments(captureConnection, campaign, observer, peer,
                             context, settings, sources.Select(s => Map(ReadString(s, "sourceId", ""))));
                     }

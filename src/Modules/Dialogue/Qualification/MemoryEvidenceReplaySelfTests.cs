@@ -398,7 +398,7 @@ namespace ReignBetaServer
                 Check("scene_formation_rejects_query_in_external_manifest", formationQueryBlocked);
                 using (var lease = new EvidenceReplayCampaignLease(stableInput))
                 {
-                    using (var seeded = Program.OpenCampaignConnection(lease.Campaign)) ReadMemoryPrecisionState(seeded);
+                    using (var seeded = ReignDatabase.OpenCampaignConnection(lease.Campaign)) ReadMemoryPrecisionState(seeded);
                     bool overlapBlocked = false;
                     try { using var competing = new EvidenceReplayCampaignLease(stableInput); }
                     catch (InvalidOperationException) { overlapBlocked = true; }
@@ -407,7 +407,7 @@ namespace ReignBetaServer
                 Check("world_lease_cleans_only_owned_schema", !ReignPostgreSqlStorage.CampaignExists(stableCampaign));
                 try
                 {
-                    using (var existing = Program.OpenCampaignConnection(stableCampaign)) ReadMemoryPrecisionState(existing);
+                    using (var existing = ReignDatabase.OpenCampaignConnection(stableCampaign)) ReadMemoryPrecisionState(existing);
                     bool existingBlocked = false;
                     try { using var refused = new EvidenceReplayCampaignLease(stableInput); }
                     catch (InvalidOperationException) { existingBlocked = true; }
@@ -419,29 +419,29 @@ namespace ReignBetaServer
                 {
                     try
                     {
-                        Program.ExecuteSql(metadata, "CREATE SCHEMA " + quotedSchema + ";");
-                        Program.ExecuteSql(metadata, "CREATE TABLE " + quotedSchema + ".ownership_sentinel(value TEXT NOT NULL);");
-                        Program.ExecuteSql(metadata, "INSERT INTO " + quotedSchema + ".ownership_sentinel VALUES('preserve-orphan');");
+                        ReignDatabase.ExecuteSql(metadata, "CREATE SCHEMA " + quotedSchema + ";");
+                        ReignDatabase.ExecuteSql(metadata, "CREATE TABLE " + quotedSchema + ".ownership_sentinel(value TEXT NOT NULL);");
+                        ReignDatabase.ExecuteSql(metadata, "INSERT INTO " + quotedSchema + ".ownership_sentinel VALUES('preserve-orphan');");
                         bool orphanBlocked = false;
                         try { using var refused = new EvidenceReplayCampaignLease(stableInput); }
                         catch (InvalidOperationException) { orphanBlocked = true; }
                         Check("world_lease_preserves_unregistered_orphan_schema", orphanBlocked
-                            && ReadString(Program.QuerySql(metadata, "SELECT value FROM " + quotedSchema + ".ownership_sentinel;").Single(), "value", "") == "preserve-orphan");
+                            && ReadString(ReignDatabase.QuerySql(metadata, "SELECT value FROM " + quotedSchema + ".ownership_sentinel;").Single(), "value", "") == "preserve-orphan");
                     }
-                    finally { Program.ExecuteSql(metadata, "DROP SCHEMA IF EXISTS " + quotedSchema + " CASCADE;"); }
+                    finally { ReignDatabase.ExecuteSql(metadata, "DROP SCHEMA IF EXISTS " + quotedSchema + " CASCADE;"); }
                 }
                 try
                 {
-                    using (var existing = Program.OpenCampaignConnection(stableCampaign)) ReadMemoryPrecisionState(existing);
+                    using (var existing = ReignDatabase.OpenCampaignConnection(stableCampaign)) ReadMemoryPrecisionState(existing);
                     using var metadata = ReignPostgreSqlStorage.OpenMetadataConnection();
-                    Program.ExecuteSql(metadata, "DROP SCHEMA " + quotedSchema + " CASCADE;");
+                    ReignDatabase.ExecuteSql(metadata, "DROP SCHEMA " + quotedSchema + " CASCADE;");
                     var registryParameters = TestDict("campaign", stableCampaign);
                     const string registrySql = "SELECT to_jsonb(r)::text AS row_json FROM reign_meta.campaign_registry r WHERE campaign_id=$campaign;";
-                    var registryBefore = Program.QuerySql(metadata, registrySql, registryParameters);
+                    var registryBefore = ReignDatabase.QuerySql(metadata, registrySql, registryParameters);
                     bool registryBlocked = false;
                     try { using var refused = new EvidenceReplayCampaignLease(stableInput); }
                     catch (InvalidOperationException) { registryBlocked = true; }
-                    var registryAfter = Program.QuerySql(metadata, registrySql, registryParameters);
+                    var registryAfter = ReignDatabase.QuerySql(metadata, registrySql, registryParameters);
                     Check("world_lease_preserves_registry_without_namespace", registryBlocked && registryBefore.Count == 1
                         && registryAfter.Count == 1 && CanonicalJson(registryBefore) == CanonicalJson(registryAfter),
                         TestDict("blocked", registryBlocked, "beforeCount", registryBefore.Count, "afterCount", registryAfter.Count));
@@ -648,7 +648,7 @@ namespace ReignBetaServer
                 var collisionInput = TestDict("schema", "reign-memory-evidence-replay-input-v1", "cases", new[] { collisionCase });
                 using (var collisionLease = new EvidenceReplayCampaignLease(collisionInput))
                 {
-                    using (var c = Program.OpenCampaignConnection(collisionLease.Campaign)) ReadMemoryPrecisionState(c);
+                    using (var c = ReignDatabase.OpenCampaignConnection(collisionLease.Campaign)) ReadMemoryPrecisionState(c);
                     var collisionFixture = ReadDictionary(collisionCase, "writerReplay");
                     var collisionProfile = Program.CloneDictionary(ReadDictionary(collisionFixture, "profile"));
                     var collisionCharacteristics = Program.CloneDictionary(ReadDictionary(collisionFixture, "characteristics"));
@@ -1326,17 +1326,17 @@ namespace ReignBetaServer
             string campaign = "memory_evidence_replay_" + Guid.NewGuid().ToString("N");
             try
             {
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     ReadMemoryPrecisionState(connection);
-                    Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
 VALUES('orchard_history',$campaign,'npc','player','closed',1,10,'[""npc"",""player""]','{""timelineId"":""branch_a""}');", TestDict("campaign", campaign));
                 }
                 void Turn(string id, string role, string speaker, string words, int order, string timeline = "branch_a",
                     double day = 2d, string audience = "[\"npc\",\"player\"]")
                 {
-                    using var connection = Program.OpenCampaignConnection(campaign);
-                    Program.ExecuteSql(connection, @"INSERT INTO conversation_turns(turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,speaker_name,text,world_day,ts,participants_json,payload_json)
+                    using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_turns(turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,speaker_name,text,world_day,ts,participants_json,payload_json)
 VALUES($id,'orchard_history',$id,$order,$id,$role,$speaker,$speaker,$text,$day,10,$audience,$payload);",
                         TestDict("id", id, "order", order, "role", role, "speaker", speaker, "text", words,
                             "day", day, "audience", audience, "payload", Json.Serialize(TestDict("timelineId", timeline))));
@@ -1385,8 +1385,8 @@ VALUES($id,'orchard_history',$id,$order,$id,$role,$speaker,$speaker,$text,$day,1
                     && !ReadDictionary(pendingWriter, "request").ContainsKey("providerWireCapture"));
                 int SourceCount()
                 {
-                    using var connection = Program.OpenCampaignConnection(campaign);
-                    return ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS n FROM conversation_turns;").Single(), "n", -1);
+                    using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                    return ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS n FROM conversation_turns;").Single(), "n", -1);
                 }
                 int sourcesBeforeWriter = SourceCount();
                 var writerConfiguration = ReadDictionary(writerFixture, "writerReplay");
@@ -1454,8 +1454,8 @@ VALUES($id,'orchard_history',$id,$order,$id,$role,$speaker,$speaker,$text,$day,1
                 string writerWireHash = ReadString(pendingWire, "requestSha256", "");
                 int MemoryCount()
                 {
-                    using var connection = Program.OpenCampaignConnection(campaign);
-                    return ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS n FROM memories;").Single(), "n", -1);
+                    using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                    return ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS n FROM memories;").Single(), "n", -1);
                 }
                 int memoryBeforeBinding = MemoryCount();
                 boundResponse["requestSha256"] = ReadString(pendingWriter, "requestSha256", "");
@@ -1793,9 +1793,9 @@ VALUES($id,'orchard_history',$id,$order,$id,$role,$speaker,$speaker,$text,$day,1
                         TestDict("schema", "reign-continuation-retry-diagnostic-v1", "providerCalls", 0,
                             "scope", "synthetic_isolated_fixture", "before", completedChain, "retry", retriedChain));
                 }
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    Program.ExecuteSql(connection, @"INSERT INTO conversation_continuity
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_continuity
 (record_id,timeline_id,owner_id,peer_id,kind,status,importance,revision,source_event_id,source_turn_id,updated_ts,payload_json)
 VALUES('private_replacement','branch_a','npc','player','agenda','open',1,2,'unheard','unheard',10,'{""worldDay"":2}');
 INSERT INTO conversation_continuity_versions(version_id,record_id,source_event_id,revision,payload_json,created_ts)

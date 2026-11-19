@@ -31,7 +31,7 @@ namespace ReignBetaServer
             var initial = new List<Dictionary<string, object>> { arrival, win, battle };
             var ingest = WorldSimulationService.WorldHistoryIngestBatchApi(TestDict("campaignId", campaign, "timelineId", timeline, "events", initial));
             check("canonical_ingestion", ReadBool(ingest, "ok", false), ingest);
-            using (var connection = Program.OpenCampaignConnection(campaign))
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsureSharedActivityMemorySchema(connection);
                 EnsureConversationContinuitySchema(connection);
@@ -67,12 +67,12 @@ namespace ReignBetaServer
 
                 var root = TestDict("id", "travel_root", "kind", "agenda", "subject", "Visit family", "status", "open", "worldDay", 19d,
                     "activityStep", TestDict("kind", "arrival", "targetId", "town_pravend", "mechanicalCompletion", true, "requiredOutcome", "finished"));
-                Program.ExecuteSql(connection, @"INSERT INTO conversation_continuity
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_continuity
 (record_id,timeline_id,owner_id,peer_id,kind,status,importance,revision,source_event_id,source_turn_id,updated_ts,payload_json)
 VALUES('travel_root',$timeline,'npc_a','player','agenda','open',0.8,1,'accepted_plan','turn_plan',1,$json);",
                     TestDict("timeline", timeline, "json", Json.Serialize(root)));
                 var resolved = ReconcileSharedActivitySteps(connection, timeline, "npc_a", LoadSharedActivities(connection, timeline, "player", "npc_a", 22d));
-                var rootRow = Program.QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id='travel_root';").Single();
+                var rootRow = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id='travel_root';").Single();
                 check("arrival_completes_step_without_emotional_closure", resolved.Count == 1 && ReadString(rootRow, "status", "") == "open"
                     && ReadString(ReadDictionary(TryParseJsonObject(ReadString(rootRow, "payload_json", "")), "activityStep"), "status", "") == "completed", rootRow);
                 check("completed_step_not_revised_again", ReconcileSharedActivitySteps(connection, timeline, "npc_a", LoadSharedActivities(connection, timeline, "player", "npc_a", 22d)).Count == 0, null);
@@ -107,7 +107,7 @@ VALUES('travel_root',$timeline,'npc_a','player','agenda','open',0.8,1,'accepted_
                 check("failed_quest_does_not_satisfy_success_promise", !SharedActivityMatchesStep(questStep,
                     LoadSharedActivities(connection, timeline, "player", "npc_a", 22d).First(r => ReadString(r, "activity_id", "") == "quest_failure")), null);
 
-                Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,channel,status,start_ts,start_world_day,participants_json,payload_json)
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,channel,status,start_ts,start_world_day,participants_json,payload_json)
 VALUES('real_chat',$campaign,'npc_a','player','in_person','open',1,10,'[""player"",""npc_a""]',$json);", TestDict("campaign", campaign, "json", Json.Serialize(TestDict("timelineId", timeline))));
                 InsertConversationTurn(connection, "real_chat_player", "real_chat", "real_exchange", 0, "real_exchange", "player", "player", "Traveler", "How are you?", "in_person", 10d, 1, "", new List<string> { "player", "npc_a" }, TestDict("timelineId", timeline));
                 InsertConversationTurn(connection, "real_chat_npc", "real_chat", "real_exchange", 1, "real_exchange", "npc", "npc_a", "Speaker", "I am well, thank you.", "in_person", 10d, 1, "", new List<string> { "player", "npc_a" }, TestDict("timelineId", timeline));
@@ -117,7 +117,7 @@ VALUES('real_chat',$campaign,'npc_a','player','in_person','open',1,10,'[""player
                     ProjectRoutineContact(connection, timeline, "presence_" + i, "player", until,
                         TestDict("fromDay", from, "partyId", "main_party", "eligibleHeroIds", new[] { "player", "npc_a" }));
                 }
-                var intervals = Program.QuerySql(connection, "SELECT * FROM shared_travel_contact WHERE owner_id='npc_a';");
+                var intervals = ReignDatabase.QuerySql(connection, "SELECT * FROM shared_travel_contact WHERE owner_id='npc_a';");
                 check("twelve_day_journey_coalesces_with_exact_bounds", intervals.Count == 1 && ReadDouble(intervals.Single(), "start_day", 0d) == 10d
                     && ReadDouble(intervals.Single(), "end_day", 0d) == 22d, intervals);
                 string routine = BuildProtectedConversationContinuity(campaign, "npc_a", payload, state);
@@ -126,9 +126,9 @@ VALUES('real_chat',$campaign,'npc_a','player','in_person','open',1,10,'[""player
                 string routineAgain = BuildProtectedConversationContinuity(campaign, "npc_a", payload, state);
                 check("routine_detail_stable_across_reopen", routine == routineAgain, null);
                 ProjectRoutineContact(connection, timeline, "unknown_weeks", "player", 40d, TestDict("fromDay", 22d, "partyId", "main_party", "eligibleHeroIds", new[] { "player", "npc_a", "npc_absent" }));
-                check("unobserved_time_not_backfilled", Program.QuerySql(connection, "SELECT * FROM shared_travel_contact;").Count == 1, null);
+                check("unobserved_time_not_backfilled", ReignDatabase.QuerySql(connection, "SELECT * FROM shared_travel_contact;").Count == 1, null);
                 ProjectRoutineContact(connection, timeline, "reunion", "player", 24.04d, TestDict("fromDay", 24d, "partyId", "main_party", "eligibleHeroIds", new[] { "player", "npc_a" }));
-                check("separation_creates_distinct_interval", Program.QuerySql(connection, "SELECT * FROM shared_travel_contact;").Count == 2, null);
+                check("separation_creates_distinct_interval", ReignDatabase.QuerySql(connection, "SELECT * FROM shared_travel_contact;").Count == 2, null);
                 InsertConversationTurn(connection, "only_new_input", "real_chat", "pending_exchange", 2, "pending_exchange", "player", "player", "Traveler", "When did we last talk?", "in_person", 22d, 2, "", new List<string> { "player", "npc_a" }, TestDict("timelineId", timeline));
                 InsertConversationTurn(connection, "empty_attempt", "real_chat", "failed_exchange", 3, "failed_exchange", "npc", "npc_a", "Speaker", "", "in_person", 22d, 3, "", new List<string> { "player", "npc_a" }, TestDict("timelineId", timeline));
                 InsertConversationTurn(connection, "delivered_letter", "real_chat", "letter_exchange", 4, "letter_exchange", "npc", "npc_a", "Speaker", "A letter from afar.", "correspondence", 22d, 4, "", new List<string> { "player", "npc_a" }, TestDict("timelineId", timeline));
@@ -145,7 +145,7 @@ VALUES('real_chat',$campaign,'npc_a','player','in_person','open',1,10,'[""player
                 check("official_firewall_retains_private_activity_boundary", !BuildProtectedConversationContinuity(campaign, "npc_a", official, state).Contains("activity_team_win"), null);
 
                 // Raw history can expire without erasing personal outcome capsules.
-                Program.ExecuteSql(connection, "DELETE FROM world_history_events WHERE event_id='activity_team_win';");
+                ReignDatabase.ExecuteSql(connection, "DELETE FROM world_history_events WHERE event_id='activity_team_win';");
                 check("retention_keeps_personal_milestone", BuildProtectedConversationContinuity(campaign, "npc_a", payload, state).Contains("activity_team_win"), null);
                 var restored = new Dictionary<string, object>(payload) { ["worldDay"] = 15d };
                 check("rewind_does_not_show_future_routine_or_outcomes", !BuildProtectedConversationContinuity(campaign, "npc_a", restored, state).Contains("activity_looters")
@@ -153,7 +153,7 @@ VALUES('real_chat',$campaign,'npc_a','player','in_person','open',1,10,'[""player
                 check("obsolete_restore_generation_rejected", !SharedActivityGenerationMatches(connection, TestDict("sharedActivityGeneration", "obsolete_generation")), null);
             }
             RunSharedActivityEnvelopeTests(campaign, timeline, check);
-            using (var connection = Program.OpenCampaignConnection(campaign))
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 for (int i = 0; i < 100; i++) ProjectSharedActivity(connection, timeline, evt("routine_arrival_" + i, "settlement_entered", 23d + i / 100d));
                 var dense = TestDict("timelineId", timeline, "worldDay", 24d, "playerHeroStringId", "player", "playerText", "Do you remember the tournament?");
@@ -168,7 +168,7 @@ VALUES('real_chat',$campaign,'npc_a','player','in_person','open',1,10,'[""player
             string campaign = "shared_activity_restore_" + Guid.NewGuid().ToString("N");
             try
             {
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     EnsureSharedActivityMemorySchema(connection);
                     ProjectRoutineContact(connection, "main", "before_save", "player", 10.04d,
@@ -176,7 +176,7 @@ VALUES('real_chat',$campaign,'npc_a','player','in_person','open',1,10,'[""player
                 }
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "activity_before");
                 string beforeGeneration;
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     beforeGeneration = SharedActivityGeneration(connection);
                     ProjectRoutineContact(connection, "main", "after_save", "player", 10.08d,
@@ -186,9 +186,9 @@ VALUES('real_chat',$campaign,'npc_a','player','in_person','open',1,10,'[""player
                 }
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "activity_before");
                 AdvanceMemoryRestoreGeneration(campaign);
-                using (var connection = Program.OpenCampaignConnection(campaign))
-                    check("real_schema_restore_rewinds_contact_and_activity", Program.QuerySql(connection, "SELECT * FROM shared_activity_events;").Count == 0
-                        && Math.Abs(ReadDouble(Program.QuerySql(connection, "SELECT * FROM shared_travel_contact;").Single(), "end_day", 0d) - 10.04d) < 0.000001d
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                    check("real_schema_restore_rewinds_contact_and_activity", ReignDatabase.QuerySql(connection, "SELECT * FROM shared_activity_events;").Count == 0
+                        && Math.Abs(ReadDouble(ReignDatabase.QuerySql(connection, "SELECT * FROM shared_travel_contact;").Single(), "end_day", 0d) - 10.04d) < 0.000001d
                         && !SharedActivityGenerationMatches(connection, TestDict("sharedActivityGeneration", beforeGeneration)), null);
             }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }

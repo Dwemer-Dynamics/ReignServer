@@ -58,14 +58,14 @@ namespace ReignBetaServer
                     && LateInteractionTransientIndexResult(TestDict("status", "index_unavailable", "retryable", true))
                     && !LateInteractionTransientIndexResult(TestDict("status", "index_unavailable", "retryable", false)));
 
-                using var connection = Program.OpenCampaignConnection(campaign);
+                using var connection = ReignDatabase.OpenCampaignConnection(campaign);
                 Dictionary<string, object> Add(string id, string speaker, string text, long ts, string session = "", string[] audience = null,
                     double day = 10, string timeline = "main")
                 {
                     var row = SpecialistFixtureTurn(connection, campaign, id, speaker, text, day, ts, timeline, audience, session,
                         speaker == "player" ? "player" : "npc");
-                    Program.ExecuteSql(connection, "UPDATE conversation_turns SET accepted_sequence=$sequence WHERE turn_id=$id;", TestDict("sequence", ts, "id", id));
-                    row = Program.QuerySql(connection, "SELECT *,xmin::text AS source_revision FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).Single();
+                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET accepted_sequence=$sequence WHERE turn_id=$id;", TestDict("sequence", ts, "id", id));
+                    row = ReignDatabase.QuerySql(connection, "SELECT *,xmin::text AS source_revision FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).Single();
                     foreach (var view in new[] { "self", "public" }.Select(v => LateInteractionView(row, v)).Where(v => v != null))
                         StoreLateInteractionReceipt(connection, row, view, "fixture-epoch");
                     return row;
@@ -166,7 +166,7 @@ namespace ReignBetaServer
                     && ReadString(LateInteractionReplayAudit.Value.Last(),"status","")=="local_search_fallback");
                 LateInteractionReplay.Value = request => {
                     var response=Answer(request,"question");
-                    Program.ExecuteSql(connection,"UPDATE conversation_turns SET text='A changed source.' WHERE turn_id='question';");
+                    ReignDatabase.ExecuteSql(connection,"UPDATE conversation_turns SET text='A changed source.' WHERE turn_id='question';");
                     return response;
                 };
                 Check("canonical_content_rechecked_after_worker", FindLateInteractionTurns(connection,plan,knowledge,4,false).Count==0);
@@ -194,7 +194,7 @@ namespace ReignBetaServer
             string campaign = "late_interaction_recovery_" + Guid.NewGuid().ToString("N");
             try
             {
-                using var connection = Program.OpenCampaignConnection(campaign);
+                using var connection = ReignDatabase.OpenCampaignConnection(campaign);
                 var row = SpecialistFixtureTurn(connection, campaign, "original", "npc", "We will meet tomorrow at the gate.", 10, 10);
                 string originalHash = MemorySpecialistSourceHash(row);
                 var settings = TestDict("memoryLateInteractionMode", "shadow", "vectorWorkerUrl", "http://isolated.invalid");
@@ -205,7 +205,7 @@ namespace ReignBetaServer
                 ReconcileLateInteractionMemory(campaign, settings);
                 check("startup_failure_is_deferred_without_immediate_http_retry", calls == 1
                     && ReadString(LateInteractionReplayAudit.Value.Last(), "phase", "") == "worker_status");
-                check("startup_failure_does_not_spend_source_attempts", Program.QuerySql(connection, "SELECT * FROM memory_late_interaction_attempts;").Count == 0);
+                check("startup_failure_does_not_spend_source_attempts", ReignDatabase.QuerySql(connection, "SELECT * FROM memory_late_interaction_attempts;").Count == 0);
                 recovery.Complete("http://isolated.invalid");
                 LateInteractionReplay.Value = request => {
                     calls++;
@@ -214,7 +214,7 @@ namespace ReignBetaServer
                         : TestDict("ok", false, "status", "index_busy", "schema", LateInteractionSchema, "modelHash", LateInteractionModelHash, "retryable", true);
                 };
                 ReconcileLateInteractionMemory(campaign, settings);
-                check("busy_worker_preserves_content_attempt_budget", Program.QuerySql(connection, "SELECT * FROM memory_late_interaction_attempts;").Count == 0
+                check("busy_worker_preserves_content_attempt_budget", ReignDatabase.QuerySql(connection, "SELECT * FROM memory_late_interaction_attempts;").Count == 0
                     && ReadString(LateInteractionReplayAudit.Value.Last(), "phase", "") == "worker_index");
                 recovery.Complete("http://isolated.invalid");
                 bool complete = false;
@@ -228,25 +228,25 @@ namespace ReignBetaServer
                     return TestDict("ok", true, "schema", LateInteractionSchema, "modelHash", LateInteractionModelHash, "sources", views, "indexGeneration", "epoch");
                 };
                 ReconcileLateInteractionMemory(campaign, settings);
-                check("incomplete_worker_receipts_never_mark_source_indexed", Program.QuerySql(connection, "SELECT * FROM memory_late_interaction_sources;").Count == 0
-                    && ReadString(Program.QuerySql(connection, "SELECT * FROM memory_late_interaction_attempts;").Single(), "outcome", "") == "invalid_receipts");
-                Program.ExecuteSql(connection, "UPDATE memory_late_interaction_attempts SET next_attempt_ts=0;");
+                check("incomplete_worker_receipts_never_mark_source_indexed", ReignDatabase.QuerySql(connection, "SELECT * FROM memory_late_interaction_sources;").Count == 0
+                    && ReadString(ReignDatabase.QuerySql(connection, "SELECT * FROM memory_late_interaction_attempts;").Single(), "outcome", "") == "invalid_receipts");
+                ReignDatabase.ExecuteSql(connection, "UPDATE memory_late_interaction_attempts SET next_attempt_ts=0;");
                 complete = true;
                 ReconcileLateInteractionMemory(campaign, settings);
-                check("later_maintenance_recovers_complete_views_and_clears_attempts", Program.QuerySql(connection, "SELECT * FROM memory_late_interaction_sources;").Count == 2
-                    && Program.QuerySql(connection, "SELECT * FROM memory_late_interaction_attempts;").Count == 0);
-                Program.ExecuteSql(connection, "UPDATE memory_late_interaction_sources SET schema_version=@schema;",
+                check("later_maintenance_recovers_complete_views_and_clears_attempts", ReignDatabase.QuerySql(connection, "SELECT * FROM memory_late_interaction_sources;").Count == 2
+                    && ReignDatabase.QuerySql(connection, "SELECT * FROM memory_late_interaction_attempts;").Count == 0);
+                ReignDatabase.ExecuteSql(connection, "UPDATE memory_late_interaction_sources SET schema_version=@schema;",
                     TestDict("schema", LateInteractionSchema));
                 int beforePolicyUpgrade = indexCalls;
                 ReconcileLateInteractionMemory(campaign, settings);
-                var upgraded = Program.QuerySql(connection, "SELECT * FROM memory_late_interaction_sources;");
+                var upgraded = ReignDatabase.QuerySql(connection, "SELECT * FROM memory_late_interaction_sources;");
                 check("normal_maintenance_upgrades_old_observer_projection_policy", indexCalls == beforePolicyUpgrade + 1
                     && upgraded.Count == 2 && upgraded.All(source => ReadString(source, "schema_version", "") == LateInteractionIndexSchema));
                 int afterPolicyUpgrade = indexCalls;
                 ReconcileLateInteractionMemory(campaign, settings);
                 check("current_observer_projection_policy_is_not_reindexed", indexCalls == afterPolicyUpgrade);
                 check("index_recovery_keeps_original_conversation_unchanged", MemorySpecialistSourceHash(
-                    Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='original';").Single()) == originalHash);
+                    ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='original';").Single()) == originalHash);
                 int before = calls; LateInteractionReplay.Value = null;
                 ReconcileLateInteractionMemory(campaign, settings);
                 check("isolated_index_without_adapter_has_no_worker_dispatch", calls == before);

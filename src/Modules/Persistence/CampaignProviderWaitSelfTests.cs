@@ -23,8 +23,8 @@ namespace ReignBetaServer
             string marker = Path.Combine(directory, "provider-result.json");
             try
             {
-                using (var connection = Program.OpenCampaignConnection(campaign))
-                    Program.ExecuteSql(connection, "CREATE TABLE provider_wait_contract(value TEXT); INSERT INTO provider_wait_contract VALUES('snapshot');");
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                    PersistenceSelfTestSchema.CreateProviderWaitContract(connection);
                 Program.WriteJsonObject(marker, new Dictionary<string, object> { ["value"] = "snapshot" });
                 RunCampaignProviderWaitCase(campaign, marker, false, false, add);
                 RunCampaignProviderWaitCase(campaign, marker, true, false, add);
@@ -132,7 +132,7 @@ namespace ReignBetaServer
                                 // cache a failure. Both precomputed paths and SQL must fail.
                                 try { Program.WriteJsonObject(marker, new Dictionary<string, object> { ["value"] = "stale" }); }
                                 catch (CampaignRequestReplacedException) { fileDenied = true; }
-                                try { Program.ExecuteSql(null, "INSERT INTO provider_wait_contract VALUES('stale');"); }
+                                try { PersistenceSelfTestStore.InsertProviderWaitContract(null); }
                                 catch (CampaignRequestReplacedException) { sqlDenied = true; }
                             }
                             catch (IOException ex) { providerFailurePreserved = ex.Message == "fixture provider failure"; }

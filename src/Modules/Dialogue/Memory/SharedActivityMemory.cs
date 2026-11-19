@@ -51,8 +51,8 @@ namespace ReignBetaServer
         internal static void EnsureSharedActivityMemorySchema(ReignDbConnection connection)
         {
             const string marker = "shared_activity_memory_schema";
-            if (Program.IsPostgreSqlComponentSchemaReady(connection, marker, 1)) return;
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS shared_activity_events (
+            if (ReignDatabase.IsPostgreSqlComponentSchemaReady(connection, marker, 1)) return;
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS shared_activity_events (
 activity_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,player_id TEXT NOT NULL,kind TEXT NOT NULL,
 world_day REAL NOT NULL,sequence INTEGER NOT NULL,location_id TEXT NOT NULL,source_id TEXT NOT NULL,
 source_hash TEXT NOT NULL,payload_json TEXT NOT NULL);
@@ -68,8 +68,8 @@ interval_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,player_id TEXT NOT NULL,o
 party_id TEXT NOT NULL,start_day REAL NOT NULL,end_day REAL NOT NULL,source_id TEXT NOT NULL,
 motif INTEGER NOT NULL,provenance TEXT NOT NULL DEFAULT 'modeled_routine');
 CREATE INDEX IF NOT EXISTS idx_shared_contact_owner ON shared_travel_contact(timeline_id,owner_id,player_id,end_day DESC);");
-            Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');", ActivityFields("key", marker));
-            Program.MarkPostgreSqlComponentSchemaReady(connection, marker, 1);
+            ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');", ActivityFields("key", marker));
+            ReignDatabase.MarkPostgreSqlComponentSchemaReady(connection, marker, 1);
         }
 
         private static bool ValidActivityDay(double day) => day > 0d && double.IsFinite(day);
@@ -94,7 +94,7 @@ CREATE INDEX IF NOT EXISTS idx_shared_contact_owner ON shared_travel_contact(tim
         {
             var item = SharedActionReceiptItem(report, acceptedRecord, status);
             if (item == null) return;
-            using var connection = Program.OpenCampaignConnection(campaign);
+            using var connection = ReignDatabase.OpenCampaignConnection(campaign);
             EnsureSharedActivityMemorySchema(connection);
             if (!SharedActivityGenerationMatches(connection, report)) return;
             ProjectSharedActivity(connection, ReadString(report, "timelineId", ""), item);
@@ -191,18 +191,18 @@ CREATE INDEX IF NOT EXISTS idx_shared_contact_owner ON shared_travel_contact(tim
                 "provenance", "confirmed_activity", "sourceEventId", eventId);
             string json = Json.Serialize(value);
             string hash = PromptHash(json);
-            Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO shared_activity_events
+            ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO shared_activity_events
 (activity_id,timeline_id,player_id,kind,world_day,sequence,location_id,source_id,source_hash,payload_json)
 VALUES($id,$timeline,$player,$kind,$day,$sequence,$location,$id,$hash,$json);",
                 ActivityFields("id", eventId, "timeline", timeline, "player", player, "kind", kind, "day", day,
                     "sequence", ReadLong(item, "sequence", 0), "location", location, "hash", hash, "json", json));
-            var stored = Program.QuerySql(connection, "SELECT timeline_id,world_day,source_hash FROM shared_activity_events WHERE activity_id=$id;",
+            var stored = ReignDatabase.QuerySql(connection, "SELECT timeline_id,world_day,source_hash FROM shared_activity_events WHERE activity_id=$id;",
                 ActivityFields("id", eventId)).Single();
             // Retried identifiers cannot grant new observers or rewrite a result.
             if (ReadString(stored, "timeline_id", "") != timeline || ReadString(stored, "source_hash", "") != hash
                 || ReadDouble(stored, "world_day", 0d) != day) return false;
             foreach (var observer in observers)
-                Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO shared_activity_observers(activity_id,owner_id,role) VALUES($id,$owner,$role);",
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO shared_activity_observers(activity_id,owner_id,role) VALUES($id,$owner,$role);",
                     ActivityFields("id", eventId, "owner", ReadString(observer, "entityId", ""),
                         "role", SharedActivityObserverRole(type, observer)));
             return true;
@@ -220,20 +220,20 @@ VALUES($id,$timeline,$player,$kind,$day,$sequence,$location,$id,$hash,$json);",
             {
                 if (owner.Length == 0 || owner == player) continue;
                 var args = ActivityFields("timeline", timeline, "player", player, "owner", owner, "party", party, "start", start, "day", day, "event", eventId);
-                var previous = Program.QuerySql(connection, @"SELECT * FROM shared_travel_contact WHERE timeline_id=$timeline
+                var previous = ReignDatabase.QuerySql(connection, @"SELECT * FROM shared_travel_contact WHERE timeline_id=$timeline
 AND player_id=$player AND owner_id=$owner AND party_id=$party AND end_day>=$start AND start_day<=$start
 ORDER BY end_day DESC LIMIT 1;", args).FirstOrDefault();
                 if (previous != null)
                 {
                     args["id"] = ReadString(previous, "interval_id", "");
-                    Program.ExecuteSql(connection, "UPDATE shared_travel_contact SET end_day=MAX(end_day,$day),source_id=$event WHERE interval_id=$id;", args);
+                    ReignDatabase.ExecuteSql(connection, "UPDATE shared_travel_contact SET end_day=MAX(end_day,$day),source_id=$event WHERE interval_id=$id;", args);
                 }
                 else
                 {
                     string id = "routine_" + PromptHash(timeline + "|" + eventId + "|" + owner).Substring(0, 24);
                     args["id"] = id;
                     args["motif"] = Convert.ToInt32(PromptHash(id).Substring(0, 4), 16) % 4;
-                    Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO shared_travel_contact
+                    ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO shared_travel_contact
 (interval_id,timeline_id,player_id,owner_id,party_id,start_day,end_day,source_id,motif)
 VALUES($id,$timeline,$player,$owner,$party,$start,$day,$event,$motif);", args);
                 }
@@ -250,21 +250,21 @@ JOIN shared_activity_observers o ON o.activity_id=a.activity_id
 WHERE a.timeline_id=$timeline AND a.player_id=$player AND o.owner_id=$owner AND a.world_day<=$day ";
             const string order = " ORDER BY a.world_day DESC,a.sequence DESC,a.activity_id DESC LIMIT 80;";
             var args = ActivityFields("timeline", timeline, "player", player, "owner", owner, "day", day);
-            var rows = Program.QuerySql(connection, select + order, args);
+            var rows = ReignDatabase.QuerySql(connection, select + order, args);
             // Family diversity and milestone filtering happen before limits, so
             // hundreds of routine visits cannot displace a tournament or battle.
-            rows.AddRange(Program.QuerySql(connection, @"SELECT * FROM (" + select.Replace("SELECT a.*,", "SELECT ROW_NUMBER() OVER(PARTITION BY a.kind ORDER BY a.world_day DESC,a.sequence DESC) AS family_rank,a.*,")
+            rows.AddRange(ReignDatabase.QuerySql(connection, @"SELECT * FROM (" + select.Replace("SELECT a.*,", "SELECT ROW_NUMBER() OVER(PARTITION BY a.kind ORDER BY a.world_day DESC,a.sequence DESC) AS family_rank,a.*,")
                 + ") ranked WHERE family_rank<=8 ORDER BY world_day DESC;", args));
             var topics = Program.MemoryQueryTerms(query).Take(6).ToList();
             if (WorldSimulationService.TableExists(connection, "conversation_continuity"))
-                topics.AddRange(Program.QuerySql(connection, @"SELECT payload_json FROM conversation_continuity WHERE timeline_id=$timeline AND owner_id=$owner
+                topics.AddRange(ReignDatabase.QuerySql(connection, @"SELECT payload_json FROM conversation_continuity WHERE timeline_id=$timeline AND owner_id=$owner
 AND kind='agenda' AND status IN ('open','active','waiting','blocked','deferred');", args)
                     .Select(r => ReadString(ReadDictionary(TryParseJsonObject(ReadString(r, "payload_json", "{}")), "activityStep"), "targetId", ""))
                     .Where(t => t.Length > 0).Distinct().Take(24));
             foreach (string topic in topics.Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 args["topic"] = "%" + topic.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%";
-                rows.AddRange(Program.QuerySql(connection, select + " AND a.payload_json ILIKE $topic" + order, args));
+                rows.AddRange(ReignDatabase.QuerySql(connection, select + " AND a.payload_json ILIKE $topic" + order, args));
             }
             return rows.DistinctBy(a => ReadString(a, "activity_id", "")).OrderByDescending(a => ReadDouble(a, "world_day", 0d))
                 .ThenByDescending(a => ReadLong(a, "sequence", 0)).ToList();
@@ -276,7 +276,7 @@ AND kind='agenda' AND status IN ('open','active','waiting','blocked','deferred')
             var evidence = ReadDictionary(payload, "sharedActivityEvidence");
             if (evidence == null || string.IsNullOrWhiteSpace(reply) || string.IsNullOrWhiteSpace(turnId)) return;
             foreach (string id in ReadStringList(evidence, "activityIds"))
-                Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO shared_activity_deliveries(activity_id,owner_id,turn_id,world_day)
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO shared_activity_deliveries(activity_id,owner_id,turn_id,world_day)
 SELECT activity_id,$owner,$turn,$day FROM shared_activity_events a WHERE activity_id=$id AND timeline_id=$timeline
 AND EXISTS(SELECT 1 FROM shared_activity_observers o WHERE o.activity_id=a.activity_id AND o.owner_id=$owner);",
                     ActivityFields("id", id, "owner", owner, "turn", turnId, "day", ReadDouble(payload, "worldDay", 0d),
@@ -290,7 +290,7 @@ AND EXISTS(SELECT 1 FROM shared_activity_observers o WHERE o.activity_id=a.activ
             // Exact historic participants BEFORE the limit; current party members
             // are never used to grant attendance at older events.
             string supported = string.Join(",", SharedActivityKinds.Keys.Select(k => "'" + k + "'"));
-            var rows = Program.QuerySql(connection, @"SELECT e.* FROM world_history_events e
+            var rows = ReignDatabase.QuerySql(connection, @"SELECT e.* FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.world_day<=$day
 AND e.source IN ('bannerlord_native','arena_overhaul') AND e.event_type IN (" + supported + @")
 AND EXISTS(SELECT 1 FROM world_history_entities n WHERE n.event_id=e.event_id AND n.entity_id=$owner)
@@ -313,7 +313,7 @@ ORDER BY e.world_day DESC,e.sequence DESC LIMIT 80;", ActivityFields("timeline",
             if (!WorldSimulationService.TableExists(connection, "conversation_turns") || !WorldSimulationService.TableExists(connection, "conversation_sessions")) return null;
             // These source turns are inserted only after accepted output. Group
             // listeners do not acquire a fictional direct reply or private talk.
-            var rows = Program.QuerySql(connection, @"SELECT t.*,s.player_id,s.payload_json AS session_payload FROM conversation_turns t
+            var rows = ReignDatabase.QuerySql(connection, @"SELECT t.*,s.player_id,s.payload_json AS session_payload FROM conversation_turns t
 JOIN conversation_sessions s ON s.session_id=t.session_id
 WHERE t.speaker_id=$owner AND s.player_id=$player AND t.status='active' AND t.world_day<=$day
 AND t.role='npc' AND t.text<>'' AND t.channel NOT IN ('letter','correspondence')
@@ -349,7 +349,7 @@ ORDER BY t.world_day DESC,t.ts DESC,t.turn_order DESC LIMIT 1;", ActivityFields(
             if (ids.Count > 256 || !WorldSimulationService.TableExists(connection, "world_history_events")) return false;
             var args = ActivityFields("timeline", timeline);
             for (int i = 0; i < ids.Count; i++) args["e" + i] = ids[i];
-            return Program.QuerySql(connection, "SELECT event_id FROM world_history_events WHERE timeline_id=$timeline AND event_id IN ("
+            return ReignDatabase.QuerySql(connection, "SELECT event_id FROM world_history_events WHERE timeline_id=$timeline AND event_id IN ("
                 + string.Join(",", Enumerable.Range(0, ids.Count).Select(i => "$e" + i)) + ");", args).Count == ids.Count;
         }
 
@@ -405,7 +405,7 @@ ORDER BY t.world_day DESC,t.ts DESC,t.turn_order DESC LIMIT 1;", ActivityFields(
         {
             var resolved = new List<Dictionary<string, object>>();
             if (!WorldSimulationService.TableExists(connection, "conversation_continuity")) return resolved;
-            foreach (var row in Program.QuerySql(connection, @"SELECT * FROM conversation_continuity WHERE timeline_id=$timeline
+            foreach (var row in ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_continuity WHERE timeline_id=$timeline
 AND owner_id=$owner AND kind='agenda' AND status IN ('open','active','waiting','blocked','deferred');",
                 ActivityFields("timeline", timeline, "owner", owner)))
             {
@@ -427,7 +427,7 @@ AND owner_id=$owner AND kind='agenda' AND status IN ('open','active','waiting','
                 record["completionEventId"] = evidence;
                 record["completedWorldDay"] = ReadDouble(match, "world_day", 0d);
                 string json = Json.Serialize(record);
-                var changed = Program.QuerySql(connection, @"WITH changed AS (UPDATE conversation_continuity SET status=$status,revision=$next,payload_json=$json,updated_ts=$ts
+                var changed = ReignDatabase.QuerySql(connection, @"WITH changed AS (UPDATE conversation_continuity SET status=$status,revision=$next,payload_json=$json,updated_ts=$ts
 WHERE record_id=$id AND revision=$expected AND owner_id=$owner AND timeline_id=$timeline RETURNING record_id)
 INSERT INTO conversation_continuity_versions(version_id,record_id,source_event_id,revision,payload_json,created_ts)
 SELECT $version,record_id,$event,$next,$json,$ts FROM changed ON CONFLICT DO NOTHING RETURNING record_id;",
@@ -543,7 +543,7 @@ SELECT $version,record_id,$event,$next,$json,$ts FROM changed ON CONFLICT DO NOT
             // facts. It is never destructively deleted by a keyword match.
             if (selected.Count > 0 && currentPlan.Length > 0)
                 text.AppendLine("Stored plan text may predate these outcomes. Treat any preparation for the same completed occurrence as historical; preserve distinct future trips and unrelated personal intentions. Stored text: " + currentPlan);
-            var contact = Program.QuerySql(connection, @"SELECT * FROM shared_travel_contact WHERE timeline_id=$timeline AND player_id=$player
+            var contact = ReignDatabase.QuerySql(connection, @"SELECT * FROM shared_travel_contact WHERE timeline_id=$timeline AND player_id=$player
 AND owner_id=$owner AND end_day<=$day ORDER BY end_day DESC LIMIT 4;",
                 ActivityFields("timeline", timeline, "player", player, "owner", owner, "day", day));
             string contactId = "contact_" + PromptHash(timeline + "|" + player + "|" + owner + "|" + day.ToString("R", CultureInfo.InvariantCulture)).Substring(0, 24);

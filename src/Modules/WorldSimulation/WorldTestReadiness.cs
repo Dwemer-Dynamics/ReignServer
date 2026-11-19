@@ -19,24 +19,24 @@ namespace ReignBetaServer
             var events = ReadWorldTestDiplomacyEvents(campaignId);
             var actions = ReadWorldTestActions(campaignId);
             string generation = RelationshipsService.RelationshipCampaignGeneration(campaignId);
-            using (var connection = Program.OpenCampaignConnection(campaignId))
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 // PostgreSQL aborts this explicit transaction on a statement
                 // error. Retrying that statement would mask it with 25P02.
                 // The connection-scoped synchronous lease also covers nested reads.
-                using var noStatementRetry = new Program.SqlStatementRetrySuppression(connection);
+                using var noStatementRetry = new ReignDatabase.SqlStatementRetrySuppression(connection);
                 try
                 {
                 // A status read must never queue CREATE INDEX behind an active
                 // data writer. Normal heartbeat/worker initialization owns schema
                 // migration; an old/missing shape fails this observation closed.
                 using var transaction = connection.BeginTransaction();
-                Program.ExecuteSql(connection, "SET TRANSACTION READ ONLY;");
-                Program.ExecuteSql(connection, "SET LOCAL lock_timeout='200ms';");
-                Program.ExecuteSql(connection, "SET LOCAL statement_timeout='3000ms';");
+                ReignDatabase.ExecuteSql(connection, "SET TRANSACTION READ ONLY;");
+                ReignDatabase.ExecuteSql(connection, "SET LOCAL lock_timeout='200ms';");
+                ReignDatabase.ExecuteSql(connection, "SET LOCAL statement_timeout='3000ms';");
                 var parameters = new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["player"] = player ?? "" };
-                Func<string, double> day = sql => ReadDouble(Program.QuerySql(connection, sql, parameters).FirstOrDefault(), "day", -1d);
-                Func<string, long> count = sql => ReadLong(Program.QuerySql(connection, sql, parameters).FirstOrDefault(), "count", -1);
+                Func<string, double> day = sql => ReadDouble(ReignDatabase.QuerySql(connection, sql, parameters).FirstOrDefault(), "day", -1d);
+                Func<string, long> count = sql => ReadLong(ReignDatabase.QuerySql(connection, sql, parameters).FirstOrDefault(), "count", -1);
                 double latest = Math.Max(day("SELECT MAX(world_day) AS day FROM world_test_native_heartbeats WHERE timeline_id=$timeline;"),
                     LatestKnownWorldDay(connection, campaignId, timelineId));
                 parameters["latest"] = Math.Max(0, latest);
@@ -44,7 +44,7 @@ namespace ReignBetaServer
                 long pending = count("SELECT COUNT(*) AS count FROM relationship_native_targets WHERE status IN ('pending','claimed')" + nativeFilter + ";");
                 pending += RelationshipsService.CountUnrepresentedNativeFlags(connection, player);
                 long failed = count("SELECT COUNT(*) AS count FROM relationship_native_targets WHERE status='failed'" + nativeFilter + ";");
-                var batch = Program.QuerySql(connection, "SELECT client_failed FROM relationship_native_sync_batches WHERE timeline_id=$timeline ORDER BY world_day DESC,issued_ts DESC LIMIT 1;", parameters).FirstOrDefault();
+                var batch = ReignDatabase.QuerySql(connection, "SELECT client_failed FROM relationship_native_sync_batches WHERE timeline_id=$timeline ORDER BY world_day DESC,issued_ts DESC LIMIT 1;", parameters).FirstOrDefault();
                 failed = Math.Max(failed, ReadInt(batch, "client_failed", 0));
                 var result = new Dictionary<string, object>
                 {

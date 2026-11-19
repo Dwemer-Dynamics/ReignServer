@@ -108,7 +108,7 @@ namespace ReignBetaServer
             string campaign = "unanswered_input_" + Guid.NewGuid().ToString("N"), oldGeneration = _playerActionGeneration;
             try
             {
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                     _playerActionGeneration = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
                 foreach (string route in new[] { "individual", "party", "event", "private_party" })
                 {
@@ -119,8 +119,8 @@ namespace ReignBetaServer
                         "heroStringId", "npc", "participants", new[] { "npc", "player", "listener" },
                         "playerText", words, "publicPlayerText", secret ? "I speak privately." : words,
                         "privatePlayerInputForSpeaker", secret, "mode", group ? "party_chat" : "dialogue");
-                    using (var connection = Program.OpenCampaignConnection(campaign))
-                        Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions
+                    using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions
 (session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
 VALUES($session,$campaign,'npc','player','open',1,1,'[""npc"",""player"",""listener""]','{""timelineId"":""input_branch""}');",
                             TestDict("session", session, "campaign", campaign));
@@ -128,15 +128,15 @@ VALUES($session,$campaign,'npc','player','open',1,1,'[""npc"",""player"",""liste
                         words, group, route == "event" ? "event-input" : "");
                     var replay = RetainUnansweredPlayerContribution(campaign, input, "npc", "player", "Player", "Mira",
                         words, group, route == "event" ? "event-input" : "");
-                    using (var connection = Program.OpenCampaignConnection(campaign))
+                    using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                     {
                         string unit = AcceptedConversationEventId(campaign, "npc", input);
-                        var originals = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$id;",
+                        var originals = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$id;",
                             TestDict("id", unit));
                         Check(route + "_failed_generation_retains_input_once_without_npc", ReadString(retained, "status", "") == "player_input_retained"
                             && ReadStringList(retained, "sourceIds").SequenceEqual(ReadStringList(replay, "sourceIds"))
                             && originals.Count == (secret ? 2 : 1) && originals.All(t => ReadString(t, "role", "") == "player")
-                            && Program.QuerySql(connection, "SELECT * FROM memories;").Count == 0);
+                            && ReignDatabase.QuerySql(connection, "SELECT * FROM memories;").Count == 0);
                         if (secret)
                             Check("failed_private_input_is_not_heard_by_bystander", originals
                                 .Where(t => ReadString(t, "text", "").Contains("SECRET-EAST-GATE-901"))
@@ -163,8 +163,8 @@ VALUES($session,$campaign,'npc','player','open',1,1,'[""npc"",""player"",""liste
                         var recovered = RunDialogueWithRetryGate(input, () => { generated++; return TestDict("ok", true); });
                         Check("completed_response_is_recovered_without_generation", ReadBool(recovered, "reloadConversationHistory", false)
                             && ReadInt(recovered, "additionalProviderCalls", -1) == 0 && generated == 1);
-                        using (var connection = Program.OpenCampaignConnection(campaign))
-                            Check("retry_never_duplicates_original_player_line", Program.QuerySql(connection,
+                        using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                            Check("retry_never_duplicates_original_player_line", ReignDatabase.QuerySql(connection,
                                 "SELECT turn_id FROM conversation_turns WHERE event_id=$id AND role='player';", TestDict("id", unit)).Count == 1);
                     }
                 }

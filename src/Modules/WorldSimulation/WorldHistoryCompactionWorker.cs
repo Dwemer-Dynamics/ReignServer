@@ -71,7 +71,7 @@ namespace ReignBetaServer
                     Dictionary<string, object> result;
                     Stopwatch timer = Stopwatch.StartNew();
                     using (ReignDbConnection connection =
-                        Program.OpenCampaignConnection(lane.CampaignId))
+                        ReignDatabase.OpenCampaignConnection(lane.CampaignId))
                     {
                         EnsureWorldHistorySchema(connection);
                         using (ReignDbTransaction transaction =
@@ -142,7 +142,7 @@ namespace ReignBetaServer
             {
                 Dictionary<string, object> result;
                 using (ReignDbConnection connection =
-                    Program.OpenCampaignConnection(campaignId))
+                    ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureWorldHistorySchema(connection);
                     using (ReignDbTransaction transaction =

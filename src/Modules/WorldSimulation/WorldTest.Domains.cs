@@ -26,7 +26,7 @@ namespace ReignBetaServer
                 ["timeline"] = timelineId,
                 ["player"] = mainHeroId ?? string.Empty
             };
-            Dictionary<string, object> pairSummary = Program.QuerySql(connection, @"
+            Dictionary<string, object> pairSummary = ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS pair_count,
 SUM(CASE WHEN p.last_delta_a_to_b>0 THEN 1 ELSE 0 END)
  +SUM(CASE WHEN p.last_delta_b_to_a>0 THEN 1 ELSE 0 END) AS positive_rolls,
@@ -63,7 +63,7 @@ WHERE $player='' OR (p.hero_a_id<>$player AND p.hero_b_id<>$player);",
                     ["latestDay"] = (int)Math.Floor(latestDay)
                 }).FirstOrDefault() ?? new Dictionary<string, object>();
             int pairCount = ReadInt(pairSummary, "pair_count", 0);
-            List<Dictionary<string, object>> notableProfiles = Program.QuerySql(connection, "SELECT * FROM notable_mbti_profiles;");
+            List<Dictionary<string, object>> notableProfiles = ReignDatabase.QuerySql(connection, "SELECT * FROM notable_mbti_profiles;");
             Dictionary<string, int> notableTypes = notableProfiles
                 .GroupBy(x => ReadString(x, "mbti_type", "XXXX"), StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(x => x.Key, x => x.Count(), StringComparer.OrdinalIgnoreCase);
@@ -72,7 +72,7 @@ WHERE $player='' OR (p.hero_a_id<>$player AND p.hero_b_id<>$player);",
                 .ToDictionary(x => x.Key, x => x.Count(), StringComparer.OrdinalIgnoreCase);
             int nobleNotablePairs = ReadInt(pairSummary, "noble_notable_pairs", 0);
             int missingMbti = ReadInt(pairSummary, "missing_mbti", 0);
-            int typeMismatches = ReadInt(Program.QuerySql(connection, @"
+            int typeMismatches = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_pair_chemistry p
 LEFT JOIN notable_mbti_profiles a ON p.hero_a_id=a.hero_id
 LEFT JOIN notable_mbti_profiles b ON p.hero_b_id=b.hero_id
@@ -87,7 +87,7 @@ AND ((a.hero_id IS NOT NULL AND p.mbti_a<>a.mbti_type)
             Dictionary<string, Dictionary<string, int>> bands = WorldTestRelationshipBands.ToDictionary(
                 x => x, x => new Dictionary<string, int> { ["uniqueNpcCount"] = 0, ["directionalEdgeCount"] = 0, ["pairCount"] = 0 },
                 StringComparer.OrdinalIgnoreCase);
-            List<Dictionary<string, object>> materializedCategories = Program.QuerySql(connection, @"
+            List<Dictionary<string, object>> materializedCategories = ReignDatabase.QuerySql(connection, @"
 WITH directions AS (
  SELECT p.pair_key,p.hero_a_id AS hero_id,p.affinity_a_to_b AS affinity,
         p.tag_a_to_b AS directional_tag
@@ -156,7 +156,7 @@ GROUP BY h.category_type,h.category_key,p.pair_count;",
                         ["pairCount"] = counts["pairCount"]
                     };
             }
-            foreach (Dictionary<string, object> row in Program.QuerySql(connection, @"
+            foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection, @"
 WITH directions AS (
  SELECT p.affinity_a_to_b AS affinity FROM relationship_pair_chemistry p
  WHERE $player='' OR (p.hero_a_id<>$player AND p.hero_b_id<>$player)
@@ -170,7 +170,7 @@ FROM directions GROUP BY affinity;", pairParameters))
                 affinityHistogram[ReadInt(row, "affinity", 0)] =
                     ReadInt(row, "directional_edge_count", 0);
             }
-            int uniqueNpcCount = ReadInt(Program.QuerySql(connection, @"
+            int uniqueNpcCount = ReadInt(ReignDatabase.QuerySql(connection, @"
 WITH heroes AS (
  SELECT p.hero_a_id AS hero_id FROM relationship_pair_chemistry p
  WHERE $player='' OR (p.hero_a_id<>$player AND p.hero_b_id<>$player)
@@ -180,8 +180,8 @@ WITH heroes AS (
 )
 SELECT COUNT(*) AS count FROM heroes;",
                 pairParameters).FirstOrDefault(), "count", 0);
-            List<Dictionary<string, object>> lifecycle = Program.QuerySql(connection, "SELECT * FROM relationship_pair_lifecycle;");
-            List<Dictionary<string, object>> lifecycleMarriageActions = Program.QuerySql(connection,
+            List<Dictionary<string, object>> lifecycle = ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_pair_lifecycle;");
+            List<Dictionary<string, object>> lifecycleMarriageActions = ReignDatabase.QuerySql(connection,
                     @"SELECT director_action_id,status,world_day,actor_id,target_id,payload_json,result_json
 FROM relationship_director_actions WHERE action_type='marriage';")
                 .Where(row =>
@@ -209,7 +209,7 @@ FROM relationship_director_actions WHERE action_type='marriage';")
                     .Equals("pregnancy_commitment",
                         StringComparison.OrdinalIgnoreCase)).ToList();
             Dictionary<string, Dictionary<string, object>> observedMarriageRows =
-                Program.QuerySql(connection, @"SELECT hero_id,profile_json,last_observed_day
+                ReignDatabase.QuerySql(connection, @"SELECT hero_id,profile_json,last_observed_day
 FROM relationship_observed_heroes;")
                     .ToDictionary(row => ReadString(row, "hero_id", ""), row => row,
                         StringComparer.OrdinalIgnoreCase);
@@ -290,12 +290,12 @@ FROM relationship_observed_heroes;")
                 - completedPregnancyCommitmentMarriageReports
                     .Select(organicPairKey)
                     .Distinct(StringComparer.OrdinalIgnoreCase).Count());
-            int arrangedMarriages = Program.QuerySql(connection,
+            int arrangedMarriages = ReignDatabase.QuerySql(connection,
                     "SELECT evaluation_id,hero_a_id,hero_b_id FROM marriage_evaluations WHERE route='arranged' AND status='executed';")
                 .Count(row => string.IsNullOrWhiteSpace(mainHeroId)
                     || (!ReadString(row, "hero_a_id", "").Equals(mainHeroId, StringComparison.OrdinalIgnoreCase)
                         && !ReadString(row, "hero_b_id", "").Equals(mainHeroId, StringComparison.OrdinalIgnoreCase)));
-            int affairEligibleLovers = ReadInt(Program.QuerySql(connection, @"
+            int affairEligibleLovers = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count
 FROM relationship_pair_lifecycle lifecycle
 JOIN relationship_observed_heroes observed_a
@@ -313,19 +313,19 @@ WHERE lifecycle.lover_active=1 AND (
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId
                 };
-            Dictionary<string, object> flingRollTotals = Program.QuerySql(connection, @"
+            Dictionary<string, object> flingRollTotals = ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS rolls,SUM(passed) AS passes,
 SUM(CASE WHEN status='passed_unmatched' THEN 1 ELSE 0 END) AS unmatched,
 COUNT(DISTINCT world_day) AS observed_days
 FROM relationship_fling_rolls WHERE campaign_id=$campaign
 AND timeline_id=$timeline;", flingParameters).FirstOrDefault()
                 ?? new Dictionary<string, object>();
-            Dictionary<string, object> flingSparkTotals = Program.QuerySql(connection, @"
+            Dictionary<string, object> flingSparkTotals = ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS attempts,SUM(passed) AS passes
 FROM relationship_fling_sparks WHERE campaign_id=$campaign
 AND timeline_id=$timeline;", flingParameters).FirstOrDefault()
                 ?? new Dictionary<string, object>();
-            Dictionary<string, object> flingEncounterTotals = Program.QuerySql(connection, @"
+            Dictionary<string, object> flingEncounterTotals = ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS pairings,SUM(same_sex) AS same_sex,
 SUM(CASE WHEN same_sex=0 THEN 1 ELSE 0 END) AS opposite_sex,
 SUM(short_affair) AS short_affairs,SUM(fixed_discovered) AS fixed_discoveries,
@@ -335,19 +335,19 @@ SUM(conceived) AS conceptions,SUM(discovery_applied) AS discovered_encounters
 FROM relationship_fling_encounters WHERE campaign_id=$campaign
 AND timeline_id=$timeline AND status='completed';", flingParameters)
                 .FirstOrDefault() ?? new Dictionary<string, object>();
-            int flingChanceViolations = ReadInt(Program.QuerySql(connection, @"
+            int flingChanceViolations = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_fling_rolls
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND (judgment<0 OR judgment>40 OR chance_percent<>50-judgment
  OR roll<1 OR roll>100 OR passed<>CASE WHEN roll<=chance_percent THEN 1 ELSE 0 END);",
                 flingParameters).FirstOrDefault(), "count", 0);
-            int flingSparkChanceViolations = ReadInt(Program.QuerySql(connection, @"
+            int flingSparkChanceViolations = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_fling_sparks
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND (chance_percent<>25 OR roll<1 OR roll>100
  OR passed<>CASE WHEN roll<=chance_percent THEN 1 ELSE 0 END);",
                 flingParameters).FirstOrDefault(), "count", 0);
-            int flingReceiptViolations = ReadInt(Program.QuerySql(connection, @"
+            int flingReceiptViolations = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_fling_encounters encounter
 WHERE encounter.campaign_id=$campaign AND encounter.timeline_id=$timeline
 AND (NOT EXISTS (SELECT 1 FROM relationship_fling_rolls roll
@@ -374,7 +374,7 @@ AND (NOT EXISTS (SELECT 1 FROM relationship_fling_rolls roll
         AND spark.location_kind=encounter.location_kind
         AND spark.location_id=encounter.location_id)));", flingParameters)
                 .FirstOrDefault(), "count", 0);
-            int flingCooldownViolations = ReadInt(Program.QuerySql(connection, @"
+            int flingCooldownViolations = ReadInt(ReignDatabase.QuerySql(connection, @"
 WITH participation AS (
  SELECT hero_a_id AS hero_id,world_day FROM relationship_fling_encounters
  WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='completed'
@@ -388,12 +388,12 @@ WITH participation AS (
 SELECT COUNT(*) AS count FROM ordered
 WHERE prior_day IS NOT NULL AND world_day-prior_day<7;",
                 flingParameters).FirstOrDefault(), "count", 0);
-            int flingSameSexConceptionViolations = ReadInt(Program.QuerySql(connection, @"
+            int flingSameSexConceptionViolations = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_fling_encounters
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND same_sex=1
 AND (conception_attempt_id<>'' OR conception_id<>'' OR conceived=1);",
                 flingParameters).FirstOrDefault(), "count", 0);
-            int flingDuplicatePersonDayViolations = ReadInt(Program.QuerySql(connection, @"
+            int flingDuplicatePersonDayViolations = ReadInt(ReignDatabase.QuerySql(connection, @"
 WITH participation AS (
  SELECT hero_a_id AS hero_id,world_day FROM relationship_fling_encounters
  WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='completed'
@@ -450,15 +450,15 @@ SELECT COUNT(*) AS count FROM (
                         flingSameSexConceptionViolations,
                     ["duplicatePersonDayViolations"] =
                         flingDuplicatePersonDayViolations,
-                    ["recentEncounters"] = Program.QuerySql(connection, @"
+                    ["recentEncounters"] = ReignDatabase.QuerySql(connection, @"
 SELECT * FROM relationship_fling_encounters
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 ORDER BY world_day DESC,encounter_id DESC LIMIT 20;", flingParameters),
-                    ["recentSparks"] = Program.QuerySql(connection, @"
+                    ["recentSparks"] = ReignDatabase.QuerySql(connection, @"
 SELECT * FROM relationship_fling_sparks
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 ORDER BY world_day DESC,pair_key LIMIT 40;", flingParameters),
-                    ["recentRolls"] = Program.QuerySql(connection, @"
+                    ["recentRolls"] = ReignDatabase.QuerySql(connection, @"
 SELECT * FROM relationship_fling_rolls
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 ORDER BY world_day DESC,hero_id LIMIT 40;", flingParameters)
@@ -516,67 +516,67 @@ ORDER BY world_day DESC,hero_id LIMIT 40;", flingParameters)
                 ["romanticMarriageBlockedPairs"] = lifecycle.Count(x =>
                     ReadInt(x, "marriage_blocked", 0) == 1),
                 ["arrangedMarriages"] = arrangedMarriages,
-                ["affairDiscoveries"] = ReadInt(Program.QuerySql(connection, @"
+                ["affairDiscoveries"] = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM rumor_occurrences
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND archetype_id='affair';", flingParameters).FirstOrDefault(), "count", 0),
                 ["flings"] = flingTelemetry,
                 ["pregnancyCommitments"] = TableCount(connection,
                     "relationship_conception_commitments"),
-                ["pregnancyCommitmentMarriages"] = ReadInt(Program.QuerySql(connection,
+                ["pregnancyCommitmentMarriages"] = ReadInt(ReignDatabase.QuerySql(connection,
                     "SELECT COUNT(*) AS count FROM relationship_conception_commitments WHERE status='married';")
                     .FirstOrDefault(), "count", 0),
-                ["pregnancyCommitmentBreakups"] = ReadInt(Program.QuerySql(connection,
+                ["pregnancyCommitmentBreakups"] = ReadInt(ReignDatabase.QuerySql(connection,
                     "SELECT COUNT(*) AS count FROM relationship_conception_commitments WHERE status='broke_up';")
                     .FirstOrDefault(), "count", 0),
-                ["pregnancyCommitmentChanceViolations"] = ReadInt(Program.QuerySql(connection,
+                ["pregnancyCommitmentChanceViolations"] = ReadInt(ReignDatabase.QuerySql(connection,
                     "SELECT COUNT(*) AS count FROM relationship_conception_commitments WHERE chance_a>90 OR chance_b>90 OR chance_a<>MIN(90,honor_a+10) OR chance_b<>MIN(90,honor_b+10);")
                     .FirstOrDefault(), "count", 0),
                 ["affairMarriageCommitments"] = TableCount(connection,
                     "relationship_affair_commitments"),
-                ["affairMarriageCommitmentMarriages"] = ReadInt(Program.QuerySql(connection,
+                ["affairMarriageCommitmentMarriages"] = ReadInt(ReignDatabase.QuerySql(connection,
                     "SELECT COUNT(*) AS count FROM relationship_affair_commitments WHERE status='married';")
                     .FirstOrDefault(), "count", 0),
-                ["affairMarriageChanceCapViolations"] = ReadInt(Program.QuerySql(connection,
+                ["affairMarriageChanceCapViolations"] = ReadInt(ReignDatabase.QuerySql(connection,
                     "SELECT COUNT(*) AS count FROM relationship_affair_commitments WHERE chance_a>30 AND spouse_a_id<>'' OR chance_b>30 AND spouse_b_id<>'';")
                     .FirstOrDefault(), "count", 0),
                 ["incidents"] = TableCount(connection, "relationship_incidents"),
                 ["conceptions"] = StatusCounts(connection, "conceptions", "status"),
-                ["concealedParentage"] = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM parentage WHERE revealed=0 AND is_illegitimate=1;").FirstOrDefault(), "count", 0)
+                ["concealedParentage"] = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS count FROM parentage WHERE revealed=0 AND is_illegitimate=1;").FirstOrDefault(), "count", 0)
             };
             Dictionary<string, object> playerParameter = new Dictionary<string, object>
             {
                 ["player"] = mainHeroId ?? string.Empty,
                 ["latest"] = latestDay
             };
-            int pending = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+            int pending = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM relationship_native_targets
 WHERE status IN ('pending','claimed')
 AND ($player='' OR (hero_a_id<>$player AND hero_b_id<>$player));", playerParameter).FirstOrDefault(), "count", 0);
-            int overdue = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+            int overdue = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM relationship_native_targets
 WHERE status IN ('pending','claimed','failed') AND $latest-world_day>1
 AND ($player='' OR (hero_a_id<>$player AND hero_b_id<>$player));",
                 playerParameter).FirstOrDefault(), "count", 0);
             int unrepresentedNativeFlags = RelationshipsService.CountUnrepresentedNativeFlags(connection, mainHeroId);
             pending += unrepresentedNativeFlags;
-            Dictionary<string, object> latestNativeBatch = Program.QuerySql(connection, @"
+            Dictionary<string, object> latestNativeBatch = ReignDatabase.QuerySql(connection, @"
 SELECT * FROM relationship_native_sync_batches
 WHERE timeline_id=$timeline ORDER BY world_day DESC,issued_ts DESC LIMIT 1;",
                 new Dictionary<string, object> { ["timeline"] = timelineId })
                 .FirstOrDefault() ?? new Dictionary<string, object>();
             int clientRemaining = ReadInt(latestNativeBatch, "client_remaining", 0);
-            int persistedTargetFailures = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+            int persistedTargetFailures = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM relationship_native_targets WHERE status='failed'
 AND ($player='' OR (hero_a_id<>$player AND hero_b_id<>$player));", playerParameter).FirstOrDefault(), "count", 0);
             int latestClientFailures = ReadInt(latestNativeBatch, "client_failed", 0);
             int nativeFailures = Math.Max(persistedTargetFailures, latestClientFailures);
-            int directorFailures = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+            int directorFailures = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM relationship_director_actions
 WHERE action_type<>'native_relation' AND status='failed'
 AND ($player='' OR (actor_id<>$player AND target_id<>$player));", playerParameter).FirstOrDefault(), "count", 0);
             int failed = nativeFailures + directorFailures;
-            Dictionary<string, object> openingSeed = Program.QuerySql(connection, @"
+            Dictionary<string, object> openingSeed = ReignDatabase.QuerySql(connection, @"
 SELECT * FROM relationship_opening_seed_runs
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 ORDER BY seed_version DESC LIMIT 1;", pairParameters).FirstOrDefault()
@@ -711,8 +711,8 @@ ORDER BY seed_version DESC LIMIT 1;", pairParameters).FirstOrDefault()
                     ["arrangedMarriages"] = arrangedMarriages,
                     ["statuses"] = StatusCounts(connection, "marriage_evaluations", "status"),
                     ["proposalPolicy"] = Reign.Relationships.ArrangedMarriagePolicy.Version,
-                    ["completedPeriods"] = Program.QuerySql(connection,"SELECT name FROM sqlite_master WHERE type='table' AND name='arranged_marriage_periods';").Any()
-                        ? Program.QuerySql(connection,"SELECT period_index,world_day,status FROM arranged_marriage_periods WHERE timeline_id=$t ORDER BY period_index DESC LIMIT 16;",new Dictionary<string,object>{{"t",timelineId}})
+                    ["completedPeriods"] = ReignDatabase.QuerySql(connection,"SELECT name FROM sqlite_master WHERE type='table' AND name='arranged_marriage_periods';").Any()
+                        ? ReignDatabase.QuerySql(connection,"SELECT period_index,world_day,status FROM arranged_marriage_periods WHERE timeline_id=$t ORDER BY period_index DESC LIMIT 16;",new Dictionary<string,object>{{"t",timelineId}})
                         : new List<Dictionary<string,object>>()
                 },
                 ["publicStanding"] = ReadDictionary(standingAndPolitical,
@@ -805,7 +805,7 @@ ORDER BY seed_version DESC LIMIT 1;", pairParameters).FirstOrDefault()
             ReignDbConnection connection, string campaignId, string timelineId)
         {
             if (connection == null) return -1d;
-            foreach (Dictionary<string, object> row in Program.QuerySql(connection, @"SELECT day_key,counters_json
+            foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(connection, @"SELECT day_key,counters_json
 FROM world_test_chunk_counters
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND subsystem='diplomacy' AND chunk_key LIKE 'evaluation_%'
@@ -864,7 +864,7 @@ ORDER BY day_key DESC;",
             string timelineId,
             double latestDay)
         {
-            Dictionary<string, object> rumorSummary = Program.QuerySql(connection, @"
+            Dictionary<string, object> rumorSummary = ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS rumor_count,
 COUNT(*) FILTER (WHERE status='active' AND expires_day<=$day) AS expired_active,
 COALESCE(MAX(world_day),-1) AS last_occurrence_day
@@ -876,7 +876,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                     ["timeline"] = timelineId,
                     ["day"] = latestDay
                 }).FirstOrDefault() ?? new Dictionary<string, object>();
-            Dictionary<string, object> outcomeSummary = Program.QuerySql(connection, @"
+            Dictionary<string, object> outcomeSummary = ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS source_count,
 COUNT(*) FILTER (WHERE r.completed=1) AS processed_count,
 COUNT(*) FILTER (WHERE r.completed<0 OR
@@ -937,7 +937,7 @@ WHERE e.timeline_id=$timeline AND e.event_type='social_outcome';",
                 + "JOIN rumor_occurrences ro ON ro.occurrence_id=rst.occurrence_id "
                 + "WHERE ro.campaign_id=$campaign AND ro.timeline_id=$timeline GROUP BY rst.status;",
                 campaignId, timelineId);
-            Dictionary<string, object> supportingCounts = Program.QuerySql(connection, @"
+            Dictionary<string, object> supportingCounts = ReignDatabase.QuerySql(connection, @"
 SELECT
 (SELECT COUNT(*) FROM rumor_subject_tags rst JOIN rumor_occurrences ro
  ON ro.occurrence_id=rst.occurrence_id WHERE ro.campaign_id=$campaign
@@ -956,7 +956,7 @@ SELECT
                     ["campaign"] = campaignId,
                     ["timeline"] = timelineId
                 }).FirstOrDefault() ?? new Dictionary<string, object>();
-            List<Dictionary<string, object>> reach = Program.QuerySql(connection, @"
+            List<Dictionary<string, object>> reach = ReignDatabase.QuerySql(connection, @"
 SELECT ro.occurrence_id AS rumor_id,ro.provenance_summary AS claim,
 ro.status,ro.archetype_id AS archetype,
 COUNT(DISTINCT rst.subject_id) AS subject_count,
@@ -1022,7 +1022,7 @@ LIMIT 50;", new Dictionary<string, object>
             ReignDbConnection connection, string sql, string campaignId,
             string timelineId)
         {
-            return Program.QuerySql(connection, sql, new Dictionary<string, object>
+            return ReignDatabase.QuerySql(connection, sql, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId,
                     ["timeline"] = timelineId
@@ -1038,7 +1038,7 @@ LIMIT 50;", new Dictionary<string, object>
             List<Dictionary<string, object>> rolls = LatestNativeArray(connection, campaignId, timelineId, "rebellions", "weeklyRolls");
             List<Dictionary<string, object>> movements = LatestNativeArray(connection, campaignId, timelineId, "rebellions", "movements");
             List<Dictionary<string, object>> memberships = LatestNativeArray(connection, campaignId, timelineId, "rebellions", "memberships");
-            List<Dictionary<string, object>> recognitionAttempts = Program.QuerySql(connection,
+            List<Dictionary<string, object>> recognitionAttempts = ReignDatabase.QuerySql(connection,
                 @"SELECT * FROM rebellion_recognition_attempts
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 ORDER BY world_day DESC, attempt_index DESC LIMIT 100;",

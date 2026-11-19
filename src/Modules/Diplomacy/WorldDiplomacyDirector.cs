@@ -582,7 +582,7 @@ namespace ReignBetaServer
         private static void AttachDirectorRulerAttitudes(string campaignId,
             string timelineId, List<Dictionary<string, object>> kingdoms)
         {
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                 RelationshipsService.EnsureWorldRelationshipSchema(connection);

@@ -252,13 +252,13 @@ namespace ReignBetaServer
             {
                 try
                 {
-                    using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                    using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                     {
                         RelationshipsService.EnsureConversationRelationshipSchema(connection);
                         DialogueService.EnsureWorldHistoryLieDetectionSchema(connection);
                         foreach (KeyValuePair<string, List<Dictionary<string, object>>> occurrence in auditByReceipt)
                         {
-                            Dictionary<string, object> stored = Program.QuerySql(connection,
+                            Dictionary<string, object> stored = ReignDatabase.QuerySql(connection,
                                 "SELECT * FROM conversation_relationship_receipts WHERE receipt_id=$id LIMIT 1;",
                                 new Dictionary<string, object> { ["id"] = occurrence.Key }).FirstOrDefault();
                             if (stored == null)
@@ -274,7 +274,7 @@ namespace ReignBetaServer
                             string lieCheckId = ReadString(receipt, "lieCheckId", "");
                             if (!string.IsNullOrWhiteSpace(lieCheckId))
                             {
-                                Dictionary<string, object> lie = Program.QuerySql(connection,
+                                Dictionary<string, object> lie = ReignDatabase.QuerySql(connection,
                                     "SELECT * FROM world_history_lie_checks WHERE lie_check_id=$id LIMIT 1;",
                                     new Dictionary<string, object> { ["id"] = lieCheckId }).FirstOrDefault();
                                 string outcome = ReadString(lie, "outcome", "").ToLowerInvariant();
@@ -304,7 +304,7 @@ namespace ReignBetaServer
                             string benefitId = ReadString(receipt, "benefitEventId", "");
                             if (!string.IsNullOrWhiteSpace(benefitId))
                             {
-                                Dictionary<string, object> benefit = Program.QuerySql(connection,
+                                Dictionary<string, object> benefit = ReignDatabase.QuerySql(connection,
                                     "SELECT * FROM conversation_relationship_benefits WHERE benefit_id=$id LIMIT 1;",
                                     new Dictionary<string, object> { ["id"] = benefitId }).FirstOrDefault();
                                 receipt["benefitLedger"] = benefit == null
@@ -811,7 +811,7 @@ namespace ReignBetaServer
             long totalDurationMs = 0, providerDurationMs = 0;
             try
             {
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     RelationshipsService.EnsureSharedRelationshipHistorySchema(connection);
                     foreach (Dictionary<string, object> reply in replies
@@ -908,7 +908,7 @@ namespace ReignBetaServer
                                 target, "sharedRelationshipHistoryIds"))
                             {
                                 historyIds.Add(historyId);
-                                Dictionary<string, object> row = Program.QuerySql(connection,
+                                Dictionary<string, object> row = ReignDatabase.QuerySql(connection,
                                     "SELECT * FROM shared_relationship_history_chapters WHERE history_id=$id LIMIT 1;",
                                     new Dictionary<string, object> { ["id"] = historyId })
                                     .FirstOrDefault();
@@ -933,7 +933,7 @@ namespace ReignBetaServer
                                         promptedChapterOrdinals[pairKey] = ordinals;
                                     }
                                     ordinals.Add(chapterOrdinal);
-                                    Dictionary<string, object> chemistry = Program.QuerySql(
+                                    Dictionary<string, object> chemistry = ReignDatabase.QuerySql(
                                         connection,
                                         "SELECT affinity_a_to_b,affinity_b_to_a FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                                         new Dictionary<string, object>

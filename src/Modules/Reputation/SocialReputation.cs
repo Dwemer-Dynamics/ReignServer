@@ -29,9 +29,9 @@ namespace ReignBetaServer
             MigrateLegacySocialStorage(connection);
             EnsureExpandedSocialReputationSchema(connection);
             EnsurePublicStandingSchema(connection);
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS social_catalog_revisions (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS social_catalog_revisions (
 revision INTEGER PRIMARY KEY,catalog_json TEXT NOT NULL,created_ts INTEGER NOT NULL);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rumor_occurrences (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rumor_occurrences (
 occurrence_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,
 archetype_id TEXT NOT NULL,thread_key TEXT NOT NULL,source_event_id TEXT NOT NULL DEFAULT '',
 world_day REAL NOT NULL,expires_day REAL NOT NULL,status TEXT NOT NULL DEFAULT 'active',
@@ -39,30 +39,30 @@ exposure_chance REAL NOT NULL DEFAULT 0,exposure_roll REAL NOT NULL DEFAULT 1,
 catalog_revision INTEGER NOT NULL,participants_json TEXT NOT NULL DEFAULT '[]',
 provenance_summary TEXT NOT NULL DEFAULT '',snapshot_json TEXT NOT NULL DEFAULT '{}',
 created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_rumor_occurrence_active ON rumor_occurrences(campaign_id,timeline_id,status,expires_day);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rumor_subject_tags (
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_rumor_occurrence_active ON rumor_occurrences(campaign_id,timeline_id,status,expires_day);");
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rumor_subject_tags (
 occurrence_id TEXT NOT NULL,subject_id TEXT NOT NULL,tag_id TEXT NOT NULL,
 subject_role TEXT NOT NULL DEFAULT '',description TEXT NOT NULL DEFAULT '',
 rumor_value INTEGER NOT NULL DEFAULT 0,reputation_value INTEGER NOT NULL DEFAULT 0,
 status TEXT NOT NULL DEFAULT 'active',co_participants_json TEXT NOT NULL DEFAULT '[]',
 snapshot_json TEXT NOT NULL DEFAULT '{}',updated_ts INTEGER NOT NULL,
 PRIMARY KEY(occurrence_id,subject_id,tag_id));");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_rumor_subject_active ON rumor_subject_tags(subject_id,status,tag_id);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rumor_exposure_streaks (
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_rumor_subject_active ON rumor_subject_tags(subject_id,status,tag_id);");
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rumor_exposure_streaks (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,archetype_id TEXT NOT NULL,
 thread_key TEXT NOT NULL,streak_count INTEGER NOT NULL DEFAULT 0,last_exposure_day REAL NOT NULL DEFAULT -1,
 last_occurrence_id TEXT NOT NULL DEFAULT '',updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,archetype_id,thread_key));");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS shared_tag_exposure_streaks (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS shared_tag_exposure_streaks (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,subject_id TEXT NOT NULL,tag_id TEXT NOT NULL,
 streak_count INTEGER NOT NULL DEFAULT 0,last_exposure_day REAL NOT NULL DEFAULT -1,
 last_occurrence_id TEXT NOT NULL DEFAULT '',updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,subject_id,tag_id));");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rumor_promotion_results (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rumor_promotion_results (
 occurrence_id TEXT PRIMARY KEY,streak_count INTEGER NOT NULL,promotion_chance REAL NOT NULL DEFAULT 0,
 promotion_roll REAL NOT NULL DEFAULT 1,promoted INTEGER NOT NULL DEFAULT 0,
 promoted_tags_json TEXT NOT NULL DEFAULT '[]',created_ts INTEGER NOT NULL);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS character_reputations (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS character_reputations (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,subject_id TEXT NOT NULL,tag_id TEXT NOT NULL,
 source_occurrence_id TEXT NOT NULL DEFAULT '',archetype_id TEXT NOT NULL DEFAULT '',
 subject_role TEXT NOT NULL DEFAULT '',description TEXT NOT NULL DEFAULT '',
@@ -70,43 +70,43 @@ reputation_value INTEGER NOT NULL DEFAULT 0,acquired_day REAL NOT NULL,
 catalog_revision INTEGER NOT NULL,snapshot_json TEXT NOT NULL DEFAULT '{}',
 status TEXT NOT NULL DEFAULT 'active',updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,subject_id,tag_id));");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_character_reputations_subject ON character_reputations(campaign_id,timeline_id,subject_id,status);");
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_character_reputations_subject ON character_reputations(campaign_id,timeline_id,subject_id,status);");
             // Court migrations update these base tables. A fresh installation
             // must create them before applying migrations from older campaigns.
             EnsureCourtSocialReputationSchema(connection);
             EnsureCharacterSocialProfileSchema(connection);
             EnsureWhoremongerSchema(connection);
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS directional_social_projections (
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS directional_social_projections (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,observer_id TEXT NOT NULL,subject_id TEXT NOT NULL,
 rumor_total REAL NOT NULL DEFAULT 0,reputation_total REAL NOT NULL DEFAULT 0,
 charm INTEGER NOT NULL DEFAULT 0,kingdom_scale REAL NOT NULL DEFAULT 0.5,
 social_modifier INTEGER NOT NULL DEFAULT 0,calculated_day REAL NOT NULL DEFAULT 0,
 details_json TEXT NOT NULL DEFAULT '{}',updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,observer_id,subject_id));");
-            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "social_modifier_a_to_b", "INTEGER NOT NULL DEFAULT 0");
-            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "social_modifier_b_to_a", "INTEGER NOT NULL DEFAULT 0");
-            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "effective_affinity_a_to_b", "INTEGER NOT NULL DEFAULT 0");
-            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "effective_affinity_b_to_a", "INTEGER NOT NULL DEFAULT 0");
+            ReignDatabase.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "social_modifier_a_to_b", "INTEGER NOT NULL DEFAULT 0");
+            ReignDatabase.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "social_modifier_b_to_a", "INTEGER NOT NULL DEFAULT 0");
+            ReignDatabase.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "effective_affinity_a_to_b", "INTEGER NOT NULL DEFAULT 0");
+            ReignDatabase.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "effective_affinity_b_to_a", "INTEGER NOT NULL DEFAULT 0");
 
             Dictionary<string, object> catalog = ReadGlobalSocialCatalog();
             int activeRevision = ReadInt(catalog, "revision", BuiltInSocialCatalogRevision);
-            Program.ExecuteSql(connection, @"INSERT INTO social_catalog_revisions(revision,catalog_json,created_ts)
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO social_catalog_revisions(revision,catalog_json,created_ts)
 VALUES($revision,$catalog,$ts)
 ON CONFLICT(revision) DO UPDATE SET catalog_json=excluded.catalog_json;", new Dictionary<string, object>
             {
                 ["revision"] = activeRevision, ["catalog"] = Json.Serialize(catalog),
                 ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
             });
-            Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('social_reputation_schema_version',$version);",
+            ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('social_reputation_schema_version',$version);",
                 new Dictionary<string, object> { ["version"] = SocialReputationSchemaVersion.ToString(CultureInfo.InvariantCulture) });
         }
 
         private static void MigrateLegacySocialStorage(ReignDbConnection connection)
         {
-            if (ReadString(Program.QuerySql(connection,
+            if (ReadString(ReignDatabase.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='character_owned_social_cleanup_v1' LIMIT 1;").FirstOrDefault(), "value", "") == "1")
                 return;
-            Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+            ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
             try
             {
                 foreach (string table in new[]
@@ -114,26 +114,26 @@ ON CONFLICT(revision) DO UPDATE SET catalog_json=excluded.catalog_json;", new Di
                     "rumor_receipts", "rumor_delivery_runs", "rumor_source_rolls", "rumors", "rumor_chains",
                     "reputation_axes", "reputation_profiles", "court_knowledge", "relationship_affair_discoveries"
                 })
-                    Program.ExecuteSql(connection, "DROP TABLE IF EXISTS " + table + ";");
-                if (Program.QuerySql(connection, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversation_sessions' LIMIT 1;").Any())
+                    ReignDatabase.ExecuteSql(connection, "DROP TABLE IF EXISTS " + table + ";");
+                if (ReignDatabase.QuerySql(connection, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversation_sessions' LIMIT 1;").Any())
                 {
-                    if (Program.QuerySql(connection, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='summaries' LIMIT 1;").Any())
-                        Program.ExecuteSql(connection, @"DELETE FROM summaries WHERE summary_id IN (
+                    if (ReignDatabase.QuerySql(connection, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='summaries' LIMIT 1;").Any())
+                        ReignDatabase.ExecuteSql(connection, @"DELETE FROM summaries WHERE summary_id IN (
 SELECT scene_summary_id FROM conversation_sessions
 WHERE channel IN ('rumor_acquisition','rumor_correction') AND scene_summary_id<>'');");
-                    if (Program.QuerySql(connection, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversation_turns' LIMIT 1;").Any())
-                        Program.ExecuteSql(connection, @"DELETE FROM conversation_turns WHERE session_id IN (
+                    if (ReignDatabase.QuerySql(connection, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversation_turns' LIMIT 1;").Any())
+                        ReignDatabase.ExecuteSql(connection, @"DELETE FROM conversation_turns WHERE session_id IN (
 SELECT session_id FROM conversation_sessions WHERE channel IN ('rumor_acquisition','rumor_correction'));");
-                    Program.ExecuteSql(connection, "DELETE FROM conversation_sessions WHERE channel IN ('rumor_acquisition','rumor_correction');");
+                    ReignDatabase.ExecuteSql(connection, "DELETE FROM conversation_sessions WHERE channel IN ('rumor_acquisition','rumor_correction');");
                 }
-                if (Program.QuerySql(connection, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='embedding_jobs' LIMIT 1;").Any())
-                    Program.ExecuteSql(connection, "DELETE FROM embedding_jobs WHERE source_type IN ('court_knowledge','rumor_history');");
-                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('character_owned_social_cleanup_v1','1');");
-                Program.ExecuteSql(connection, "COMMIT;");
+                if (ReignDatabase.QuerySql(connection, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='embedding_jobs' LIMIT 1;").Any())
+                    ReignDatabase.ExecuteSql(connection, "DELETE FROM embedding_jobs WHERE source_type IN ('court_knowledge','rumor_history');");
+                ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('character_owned_social_cleanup_v1','1');");
+                ReignDatabase.ExecuteSql(connection, "COMMIT;");
             }
             catch
             {
-                try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                try { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                 throw;
             }
         }
@@ -221,7 +221,7 @@ SELECT session_id FROM conversation_sessions WHERE channel IN ('rumor_acquisitio
         {
             Dictionary<string, object> catalog = ReadGlobalSocialCatalog();
             int revision = ReadInt(catalog, "revision", BuiltInSocialCatalogRevision);
-            Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO social_catalog_revisions(revision,catalog_json,created_ts)
+            ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO social_catalog_revisions(revision,catalog_json,created_ts)
 VALUES($revision,$catalog,$ts);", new Dictionary<string, object>
             {
                 ["revision"] = revision, ["catalog"] = Json.Serialize(catalog),
@@ -313,7 +313,7 @@ VALUES($revision,$catalog,$ts);", new Dictionary<string, object>
         internal static Dictionary<string, object> SocialCatalogApi(Dictionary<string, object> payload)
         {
             string campaignId = ReadString(payload, "campaignId", "default");
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureSocialReputationSchema(connection);
                 Dictionary<string, object> catalog = ReadActiveSocialCatalog(connection);
@@ -330,7 +330,7 @@ VALUES($revision,$catalog,$ts);", new Dictionary<string, object>
         {
             string campaignId = ReadString(payload, "campaignId", "default");
             Dictionary<string, object> proposed = Program.DictionaryOrDefault(payload, "catalog", payload);
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureSocialReputationSchema(connection);
                 Dictionary<string, object> current = ReadGlobalSocialCatalog();
@@ -348,7 +348,7 @@ VALUES($revision,$catalog,$ts);", new Dictionary<string, object>
                     SocialCatalogCachedWriteTicks =
                         File.GetLastWriteTimeUtc(catalogPath).Ticks;
                 }
-                Program.ExecuteSql(connection, "INSERT INTO social_catalog_revisions(revision,catalog_json,created_ts) VALUES($revision,$json,$ts);",
+                ReignDatabase.ExecuteSql(connection, "INSERT INTO social_catalog_revisions(revision,catalog_json,created_ts) VALUES($revision,$json,$ts);",
                     new Dictionary<string, object>
                     {
                         ["revision"] = revision, ["json"] = Json.Serialize(proposed),
@@ -388,7 +388,7 @@ VALUES($revision,$catalog,$ts);", new Dictionary<string, object>
             {
                 string customId = ReadString(custom, "id", "");
                 if (proposedIds.Contains(customId)) continue;
-                bool used = Program.QuerySql(connection, @"SELECT 1 FROM (
+                bool used = ReignDatabase.QuerySql(connection, @"SELECT 1 FROM (
 SELECT tag_id FROM rumor_subject_tags UNION ALL SELECT tag_id FROM character_reputations
 ) WHERE tag_id=$id LIMIT 1;",
                     new Dictionary<string, object> { ["id"] = customId }).Any();
@@ -441,7 +441,7 @@ SELECT tag_id FROM rumor_subject_tags UNION ALL SELECT tag_id FROM character_rep
         {
             string campaignId = ReadString(payload, "campaignId", "default");
             Dictionary<string, object> result;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureSocialReputationSchema(connection);
                 result = RegisterSocialOccurrence(connection, campaignId, payload);
@@ -577,7 +577,7 @@ SELECT tag_id FROM rumor_subject_tags UNION ALL SELECT tag_id FROM character_rep
             foreach (Dictionary<string, object> participant in participants)
             {
                 string subjectId = ReadFirstString(participant, "subjectId", "heroId", "id");
-                Dictionary<string, object> roster = Program.QuerySql(connection,
+                Dictionary<string, object> roster = ReignDatabase.QuerySql(connection,
                     "SELECT * FROM identity_roster WHERE hero_id=$id LIMIT 1;",
                     new Dictionary<string, object> { ["id"] = subjectId }).FirstOrDefault();
                 if (roster != null)
@@ -647,7 +647,7 @@ SELECT tag_id FROM rumor_subject_tags UNION ALL SELECT tag_id FROM character_rep
 
             string occurrenceId = FirstNonEmpty(ReadString(payload, "occurrenceId", ""),
                 "rumor_occurrence_" + DeterministicSocialId(exposureSeed));
-            Dictionary<string, object> duplicate = Program.QuerySql(connection,
+            Dictionary<string, object> duplicate = ReignDatabase.QuerySql(connection,
                 string.IsNullOrWhiteSpace(sourceEventId)
                     ? "SELECT occurrence_id FROM rumor_occurrences WHERE campaign_id=$campaign AND timeline_id=$timeline AND archetype_id=$archetype AND thread_key=$thread AND world_day=$day LIMIT 1;"
                     : "SELECT occurrence_id FROM rumor_occurrences WHERE campaign_id=$campaign AND timeline_id=$timeline AND archetype_id=$archetype AND thread_key=$thread AND source_event_id=$event LIMIT 1;",
@@ -676,7 +676,7 @@ SELECT tag_id FROM rumor_subject_tags UNION ALL SELECT tag_id FROM character_rep
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             int catalogRevision = ReadInt(catalog, "revision", 1);
             double expiresDay = worldDay + ReadDouble(archetype, "durationDays", 45d);
-            Dictionary<string, object> streak = Program.QuerySql(connection, @"SELECT * FROM rumor_exposure_streaks
+            Dictionary<string, object> streak = ReignDatabase.QuerySql(connection, @"SELECT * FROM rumor_exposure_streaks
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND archetype_id=$archetype AND thread_key=$thread LIMIT 1;",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["archetype"] = archetypeId, ["thread"] = threadKey }).FirstOrDefault();
             double promotionWindowDays = ReadDouble(archetype, "promotionWindowDays", 45d);
@@ -694,10 +694,10 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND archetype_id=$archetyp
             List<object> sharedPromotionResults = new List<object>();
             bool anySharedPromotionRoll = false;
             if (!useExistingTransaction)
-                Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
             try
             {
-                Program.ExecuteSql(connection, @"INSERT INTO rumor_occurrences(occurrence_id,campaign_id,timeline_id,archetype_id,thread_key,source_event_id,
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO rumor_occurrences(occurrence_id,campaign_id,timeline_id,archetype_id,thread_key,source_event_id,
 world_day,expires_day,status,exposure_chance,exposure_roll,catalog_revision,participants_json,provenance_summary,snapshot_json,created_ts,updated_ts)
 VALUES($id,$campaign,$timeline,$archetype,$thread,$event,$day,$expires,'active',$chance,$roll,$revision,$participants,$summary,$snapshot,$ts,$ts);",
                     new Dictionary<string, object>
@@ -723,11 +723,11 @@ VALUES($id,$campaign,$timeline,$archetype,$thread,$event,$day,$expires,'active',
                         snap["baseTagId"] = baseTagId;
                         snap["storageTagId"] = tagId;
                         if (baseTagId == "ruler_favoring")
-                            Program.ExecuteSql(connection, @"INSERT INTO court_ruler_favor_contact(campaign_id,timeline_id,ruler_id,favorite_id,grace_day)
+                            ReignDatabase.ExecuteSql(connection, @"INSERT INTO court_ruler_favor_contact(campaign_id,timeline_id,ruler_id,favorite_id,grace_day)
 VALUES($campaign,$timeline,$ruler,$favorite,$day) ON CONFLICT(campaign_id,timeline_id,ruler_id,favorite_id) DO NOTHING;",
                                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["ruler"] = subjectId,
                                     ["favorite"] = ReadString(snap, "linkedHeroId", ""), ["day"] = worldDay });
-                        Program.ExecuteSql(connection, @"INSERT INTO rumor_subject_tags(occurrence_id,subject_id,tag_id,subject_role,description,rumor_value,reputation_value,status,co_participants_json,snapshot_json,updated_ts)
+                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO rumor_subject_tags(occurrence_id,subject_id,tag_id,subject_role,description,rumor_value,reputation_value,status,co_participants_json,snapshot_json,updated_ts)
 VALUES($occurrence,$subject,$tag,$role,$description,$rumor,$reputation,'active',$others,$snapshot,$ts);",
                             new Dictionary<string, object>
                             {
@@ -740,7 +740,7 @@ VALUES($occurrence,$subject,$tag,$role,$description,$rumor,$reputation,'active',
                         bool sharedPromoted = false;
                         if (ReadBool(tag, "sharedPromotionStreak", false))
                         {
-                            Dictionary<string, object> sharedStreak = Program.QuerySql(connection, @"SELECT *
+                            Dictionary<string, object> sharedStreak = ReignDatabase.QuerySql(connection, @"SELECT *
 FROM shared_tag_exposure_streaks WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND subject_id=$subject AND tag_id=$tag LIMIT 1;",
                                 new Dictionary<string, object>
@@ -757,7 +757,7 @@ AND subject_id=$subject AND tag_id=$tag LIMIT 1;",
                                 timelineId, subjectId, tagId, occurrenceId, "shared_tag_promotion"));
                             sharedPromoted = forcePromotion || sharedRoll < sharedChance;
                             anySharedPromotionRoll |= sharedPromoted;
-                            Program.ExecuteSql(connection, @"INSERT INTO shared_tag_exposure_streaks(
+                            ReignDatabase.ExecuteSql(connection, @"INSERT INTO shared_tag_exposure_streaks(
 campaign_id,timeline_id,subject_id,tag_id,streak_count,last_exposure_day,last_occurrence_id,updated_ts)
 VALUES($campaign,$timeline,$subject,$tag,$count,$day,$occurrence,$ts)
 ON CONFLICT(campaign_id,timeline_id,subject_id,tag_id) DO UPDATE SET
@@ -780,10 +780,10 @@ streak_count=$count,last_exposure_day=$day,last_occurrence_id=$occurrence,update
                             promotedTags.Add(new Dictionary<string, object> { ["subjectId"] = subjectId, ["tagId"] = tagId });
                     }
                 }
-                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO rumor_exposure_streaks(campaign_id,timeline_id,archetype_id,thread_key,streak_count,last_exposure_day,last_occurrence_id,updated_ts)
+                ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO rumor_exposure_streaks(campaign_id,timeline_id,archetype_id,thread_key,streak_count,last_exposure_day,last_occurrence_id,updated_ts)
 VALUES($campaign,$timeline,$archetype,$thread,$count,$day,$occurrence,$ts);",
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["archetype"] = archetypeId, ["thread"] = threadKey, ["count"] = streakCount, ["day"] = worldDay, ["occurrence"] = occurrenceId, ["ts"] = ts });
-                Program.ExecuteSql(connection, @"INSERT INTO rumor_promotion_results(occurrence_id,streak_count,promotion_chance,promotion_roll,promoted,promoted_tags_json,created_ts)
+                ReignDatabase.ExecuteSql(connection, @"INSERT INTO rumor_promotion_results(occurrence_id,streak_count,promotion_chance,promotion_roll,promoted,promoted_tags_json,created_ts)
 VALUES($occurrence,$count,$chance,$roll,$promoted,$tags,$ts);",
                     new Dictionary<string, object> { ["occurrence"] = occurrenceId, ["count"] = streakCount, ["chance"] = promotionChance, ["roll"] = promotionRoll, ["promoted"] = promoted || anySharedPromotionRoll ? 1 : 0, ["tags"] = Json.Serialize(promotedTags), ["ts"] = ts });
                 Dictionary<string, object> occurrenceCounters = new Dictionary<string, object>
@@ -793,7 +793,7 @@ VALUES($occurrence,$count,$chance,$roll,$promoted,$tags,$ts);",
                     ["exposureAttempts"] = 1,
                     ["exposurePassed"] = 1,
                     ["occurrencesCreated"] = 1,
-                    ["subjectTagsCreated"] = ReadInt(Program.QuerySql(connection,
+                    ["subjectTagsCreated"] = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM rumor_subject_tags WHERE occurrence_id=$id;",
                         new Dictionary<string, object> { ["id"] = occurrenceId }).FirstOrDefault(), "count", 0),
                     ["streakAdvanced"] = 1,
@@ -816,7 +816,7 @@ VALUES($occurrence,$count,$chance,$roll,$promoted,$tags,$ts);",
                 bool immediateExpiration = expiresDay <= worldDay + 0.000001d;
                 if (immediateExpiration)
                 {
-                    Program.ExecuteSql(connection, @"UPDATE rumor_occurrences
+                    ReignDatabase.ExecuteSql(connection, @"UPDATE rumor_occurrences
 SET status='expired',updated_ts=$ts WHERE occurrence_id=$id AND status='active';
 UPDATE rumor_subject_tags SET status='expired',updated_ts=$ts
 WHERE occurrence_id=$id AND status='active';",
@@ -830,13 +830,13 @@ WHERE occurrence_id=$id AND status='active';",
                 recordWorldTest("occurrence_" + occurrenceId,
                     occurrenceCounters);
                 if (!useExistingTransaction)
-                    Program.ExecuteSql(connection, "COMMIT;");
+                    ReignDatabase.ExecuteSql(connection, "COMMIT;");
             }
             catch
             {
                 if (!useExistingTransaction)
                 {
-                    try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                 }
                 throw;
             }
@@ -862,10 +862,10 @@ WHERE occurrence_id=$id AND status='active';",
             string occurrenceId, string archetypeId, string subjectId, string role, string tagId,
             Dictionary<string, object> snapshot, double worldDay, int catalogRevision, long ts)
         {
-            bool isNew = Program.QuerySql(connection, @"SELECT 1 AS found FROM character_reputations
+            bool isNew = ReignDatabase.QuerySql(connection, @"SELECT 1 AS found FROM character_reputations
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND tag_id=$tag AND status='active' LIMIT 1;",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["subject"] = subjectId, ["tag"] = tagId }).Count == 0;
-            Program.ExecuteSql(connection, @"INSERT INTO character_reputations(campaign_id,timeline_id,subject_id,tag_id,
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO character_reputations(campaign_id,timeline_id,subject_id,tag_id,
 source_occurrence_id,archetype_id,subject_role,description,reputation_value,acquired_day,catalog_revision,snapshot_json,status,updated_ts)
 VALUES($campaign,$timeline,$subject,$tag,$occurrence,$archetype,$role,$description,$value,$day,$revision,$snapshot,'active',$ts)
 ON CONFLICT(campaign_id,timeline_id,subject_id,tag_id) DO UPDATE SET
@@ -879,7 +879,7 @@ WHERE character_reputations.status<>'active';",
                     ["description"] = ReadString(snapshot, "description", ""), ["value"] = ReadInt(snapshot, "reputationValue", 0),
                     ["day"] = worldDay, ["revision"] = catalogRevision, ["snapshot"] = Json.Serialize(snapshot), ["ts"] = ts
                 });
-            Program.ExecuteSql(connection, @"UPDATE rumor_subject_tags SET status='superseded_by_reputation',updated_ts=$ts
+            ReignDatabase.ExecuteSql(connection, @"UPDATE rumor_subject_tags SET status='superseded_by_reputation',updated_ts=$ts
 WHERE subject_id=$subject AND tag_id=$tag AND status='active'
 AND ($tag<>'whoremonger' OR occurrence_id IN (SELECT occurrence_id FROM rumor_occurrences
 WHERE campaign_id=$campaign AND timeline_id=$timeline));",
@@ -958,22 +958,22 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline));",
             string campaignId = ReadString(payload, "campaignId", "default");
             string timelineId = ReadString(payload, "timelineId", "main");
             string occurrenceId = ReadString(payload, "occurrenceId", "");
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureSocialReputationSchema(connection);
-                Dictionary<string, object> occurrence = Program.QuerySql(connection,
+                Dictionary<string, object> occurrence = ReignDatabase.QuerySql(connection,
                     "SELECT * FROM rumor_occurrences WHERE occurrence_id=$id AND campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
                     new Dictionary<string, object> { ["id"] = occurrenceId, ["campaign"] = campaignId, ["timeline"] = timelineId }).FirstOrDefault();
                 if (occurrence == null) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Occurrence not found." };
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                 try
                 {
-                    foreach (Dictionary<string, object> affectedTag in Program.QuerySql(connection,
+                    foreach (Dictionary<string, object> affectedTag in ReignDatabase.QuerySql(connection,
                         "SELECT subject_id,tag_id FROM rumor_subject_tags WHERE occurrence_id=$id;",
                         new Dictionary<string, object> { ["id"] = occurrenceId }))
                     {
-                        Program.ExecuteSql(connection, @"DELETE FROM shared_tag_exposure_streaks
+                        ReignDatabase.ExecuteSql(connection, @"DELETE FROM shared_tag_exposure_streaks
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND tag_id=$tag;",
                             new Dictionary<string, object>
                             {
@@ -982,11 +982,11 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AN
                                 ["tag"] = ReadString(affectedTag, "tag_id", "")
                             });
                     }
-                    Program.ExecuteSql(connection, "UPDATE rumor_occurrences SET status='disproven',updated_ts=$ts WHERE occurrence_id=$id;",
+                    ReignDatabase.ExecuteSql(connection, "UPDATE rumor_occurrences SET status='disproven',updated_ts=$ts WHERE occurrence_id=$id;",
                         new Dictionary<string, object> { ["id"] = occurrenceId, ["ts"] = ts });
-                    Program.ExecuteSql(connection, "UPDATE rumor_subject_tags SET status='disproven',updated_ts=$ts WHERE occurrence_id=$id AND status='active';",
+                    ReignDatabase.ExecuteSql(connection, "UPDATE rumor_subject_tags SET status='disproven',updated_ts=$ts WHERE occurrence_id=$id AND status='active';",
                         new Dictionary<string, object> { ["id"] = occurrenceId, ["ts"] = ts });
-                    Program.ExecuteSql(connection, @"DELETE FROM rumor_exposure_streaks WHERE campaign_id=$campaign AND timeline_id=$timeline
+                    ReignDatabase.ExecuteSql(connection, @"DELETE FROM rumor_exposure_streaks WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND archetype_id=$archetype AND thread_key=$thread AND last_occurrence_id=$id;",
                         new Dictionary<string, object>
                         {
@@ -997,14 +997,14 @@ AND archetype_id=$archetype AND thread_key=$thread AND last_occurrence_id=$id;",
                     WorldSimulationService.RecordWorldTestCounter(connection, campaignId, timelineId, occurrenceDay, "rumors",
                         "correction_" + occurrenceId,
                         new Dictionary<string, object> { ["corrected"] = 1, ["disproven"] = 1 });
-                Program.ExecuteSql(connection, "COMMIT;");
+                ReignDatabase.ExecuteSql(connection, "COMMIT;");
                 }
                 catch
                 {
-                    try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                     throw;
                 }
-                List<string> affected = Program.QuerySql(connection,
+                List<string> affected = ReignDatabase.QuerySql(connection,
                     "SELECT DISTINCT subject_id FROM rumor_subject_tags WHERE occurrence_id=$id;",
                     new Dictionary<string, object> { ["id"] = occurrenceId })
                     .Select(x => ReadString(x, "subject_id", "")).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
@@ -1020,12 +1020,12 @@ AND archetype_id=$archetype AND thread_key=$thread AND last_occurrence_id=$id;",
             string timelineId = ReadString(payload, "timelineId", "main");
             string subjectId = ReadFirstString(payload, "subjectId", "heroId", "npcId");
             double worldDay = ReadDouble(payload, "worldDay", 0d);
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureSocialReputationSchema(connection);
                 if (ExpireSocialRumors(connection, campaignId, timelineId, worldDay) > 0)
                     ReconcileSocialRelationshipsForSubjects(connection, campaignId, timelineId, new[] { subjectId }, worldDay);
-                List<Dictionary<string, object>> reputations = Program.QuerySql(connection, @"SELECT cr.tag_id,cr.description,cr.reputation_value,cr.archetype_id,cr.subject_role,cr.acquired_day,cr.reason_text,cr.reason_status,cr.reason_activation_id,
+                List<Dictionary<string, object>> reputations = ReignDatabase.QuerySql(connection, @"SELECT cr.tag_id,cr.description,cr.reputation_value,cr.archetype_id,cr.subject_role,cr.acquired_day,cr.reason_text,cr.reason_status,cr.reason_activation_id,
 (SELECT ra.source_event_id FROM reputation_activations ra
  WHERE ra.activation_id=cr.reason_activation_id LIMIT 1) AS activation_source_event_id,
 (SELECT ra.evidence_json FROM reputation_activations ra
@@ -1066,7 +1066,7 @@ ORDER BY cr.acquired_day DESC;", new Dictionary<string, object>
                     ["ok"] = true, ["subjectId"] = subjectId,
                     ["publicStanding"] = ReadPublicStandingTrait(connection,
                         campaignId, timelineId, subjectId, worldDay),
-                    ["rumors"] = Program.QuerySql(connection, @"SELECT rst.tag_id,rst.description,rst.rumor_value,ro.archetype_id,ro.world_day,ro.expires_day,ro.provenance_summary
+                    ["rumors"] = ReignDatabase.QuerySql(connection, @"SELECT rst.tag_id,rst.description,rst.rumor_value,ro.archetype_id,ro.world_day,ro.expires_day,ro.provenance_summary
 FROM rumor_subject_tags rst JOIN rumor_occurrences ro ON ro.occurrence_id=rst.occurrence_id
 WHERE ro.campaign_id=$campaign AND ro.timeline_id=$timeline AND rst.subject_id=$subject AND rst.status='active' AND ro.status='active' AND ro.expires_day>$day
 AND ro.world_day=(SELECT MAX(ro2.world_day) FROM rumor_subject_tags rst2
@@ -1092,7 +1092,7 @@ ORDER BY ro.world_day DESC;", new Dictionary<string, object> { ["campaign"] = ca
                 };
             if (ExpireSocialRumors(connection, campaignId, timelineId, worldDay) > 0)
                 ReconcileSocialRelationshipsForSubjects(connection, campaignId, timelineId, new[] { subjectId }, worldDay);
-            List<Dictionary<string, object>> rumors = Program.QuerySql(connection, @"SELECT rst.description,rst.snapshot_json,
+            List<Dictionary<string, object>> rumors = ReignDatabase.QuerySql(connection, @"SELECT rst.description,rst.snapshot_json,
 ro.archetype_id,ro.world_day,ro.expires_day,ro.provenance_summary,ro.participants_json
 FROM rumor_subject_tags rst JOIN rumor_occurrences ro ON ro.occurrence_id=rst.occurrence_id
 WHERE ro.campaign_id=$campaign AND ro.timeline_id=$timeline AND rst.subject_id=$subject
@@ -1103,7 +1103,7 @@ WHERE rst2.subject_id=rst.subject_id AND rst2.tag_id=rst.tag_id AND rst2.status=
 AND ro2.campaign_id=ro.campaign_id AND ro2.timeline_id=ro.timeline_id AND ro2.status='active' AND ro2.expires_day>$day)
 ORDER BY ro.world_day DESC;",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["subject"] = subjectId, ["day"] = worldDay });
-            List<Dictionary<string, object>> reputations = Program.QuerySql(connection, @"SELECT description,snapshot_json,
+            List<Dictionary<string, object>> reputations = ReignDatabase.QuerySql(connection, @"SELECT description,snapshot_json,
 archetype_id,subject_role,acquired_day,source_occurrence_id,reason_text,reason_status FROM character_reputations
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND status='active'
 ORDER BY acquired_day DESC;",
@@ -1182,7 +1182,7 @@ ORDER BY acquired_day DESC;",
             List<Dictionary<string, object>> candidates = new List<Dictionary<string, object>>();
             List<string> topicTokens = Program.NormalizeLookup(topic).Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)
                 .Where(token => token.Length >= 3).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            List<Dictionary<string, object>> rows = Program.QuerySql(connection, @"SELECT 'rumor' AS social_type,rst.subject_id,rst.description,
+            List<Dictionary<string, object>> rows = ReignDatabase.QuerySql(connection, @"SELECT 'rumor' AS social_type,rst.subject_id,rst.description,
 rst.snapshot_json,ro.provenance_summary,ro.world_day AS lifecycle_day,ro.expires_day
 FROM rumor_subject_tags rst JOIN rumor_occurrences ro ON ro.occurrence_id=rst.occurrence_id
 WHERE ro.campaign_id=$campaign AND ro.timeline_id=$timeline AND rst.status='active' AND ro.status='active' AND ro.expires_day>$day
@@ -1201,7 +1201,7 @@ ORDER BY lifecycle_day DESC LIMIT 500;",
                 string subjectId = ReadString(row, "subject_id", "");
                 if (string.IsNullOrWhiteSpace(subjectId) || subjectId.Equals(observerId, StringComparison.OrdinalIgnoreCase)
                     || !CharactersService.IdentityStateVerified(CharactersService.ReadAcquaintance(connection, observerId, subjectId))) continue;
-                Dictionary<string, object> roster = Program.QuerySql(connection,
+                Dictionary<string, object> roster = ReignDatabase.QuerySql(connection,
                     "SELECT canonical_name FROM identity_roster WHERE hero_id=$id LIMIT 1;",
                     new Dictionary<string, object> { ["id"] = subjectId }).FirstOrDefault();
                 string name = FirstNonEmpty(ReadString(roster, "canonical_name", ""), "a known person");
@@ -1227,7 +1227,7 @@ ORDER BY lifecycle_day DESC LIMIT 500;",
             int forgottenCount = ExpireRulerFavorContact(connection, campaignId, timelineId, worldDay).Count
                 + ExpireWhoremongerActivity(connection, campaignId, timelineId, worldDay);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            List<string> affectedSubjects = Program.QuerySql(connection, @"SELECT DISTINCT rst.subject_id
+            List<string> affectedSubjects = ReignDatabase.QuerySql(connection, @"SELECT DISTINCT rst.subject_id
 FROM rumor_subject_tags rst JOIN rumor_occurrences ro ON ro.occurrence_id=rst.occurrence_id
 WHERE ro.campaign_id=$campaign AND ro.timeline_id=$timeline
 AND ro.status='active' AND ro.expires_day<=$day;",
@@ -1235,15 +1235,15 @@ AND ro.status='active' AND ro.expires_day<=$day;",
                 .Select(row => ReadString(row, "subject_id", ""))
                 .Where(id => !string.IsNullOrWhiteSpace(id))
                 .ToList();
-            List<Dictionary<string, object>> expiring = Program.QuerySql(connection, @"SELECT occurrence_id,world_day,expires_day
+            List<Dictionary<string, object>> expiring = ReignDatabase.QuerySql(connection, @"SELECT occurrence_id,world_day,expires_day
 FROM rumor_occurrences
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='active' AND expires_day<=$day;",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = worldDay });
             int count = expiring.Count;
-            Program.ExecuteSql(connection, @"UPDATE rumor_occurrences SET status='expired',updated_ts=$ts
+            ReignDatabase.ExecuteSql(connection, @"UPDATE rumor_occurrences SET status='expired',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='active' AND expires_day<=$day;",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = worldDay, ["ts"] = ts });
-            Program.ExecuteSql(connection, @"UPDATE rumor_subject_tags SET status='expired',updated_ts=$ts
+            ReignDatabase.ExecuteSql(connection, @"UPDATE rumor_subject_tags SET status='expired',updated_ts=$ts
 WHERE status='active' AND occurrence_id IN (SELECT occurrence_id FROM rumor_occurrences WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='expired');",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["ts"] = ts });
             int expirationDay = (int)Math.Floor(worldDay + 0.000001d);
@@ -1307,7 +1307,7 @@ WHERE status='active' AND occurrence_id IN (SELECT occurrence_id FROM rumor_occu
             string observerId = ReadString(observer, "hero_id", "");
             string subjectId = ReadString(subject, "hero_id", "");
             List<int> rumorValues = new List<int>();
-            foreach (Dictionary<string, object> rumor in Program.QuerySql(connection, @"SELECT rst.rumor_value,rst.co_participants_json,ro.archetype_id
+            foreach (Dictionary<string, object> rumor in ReignDatabase.QuerySql(connection, @"SELECT rst.rumor_value,rst.co_participants_json,ro.archetype_id
 FROM rumor_subject_tags rst JOIN rumor_occurrences ro ON ro.occurrence_id=rst.occurrence_id
 WHERE ro.campaign_id=$campaign AND ro.timeline_id=$timeline AND rst.subject_id=$subject
 AND rst.status='active' AND ro.status='active' AND ro.expires_day>$day
@@ -1321,7 +1321,7 @@ AND ro2.campaign_id=ro.campaign_id AND ro2.timeline_id=ro.timeline_id AND ro2.st
                     && Program.TextListFromJson(ReadString(rumor, "co_participants_json", "[]")).Contains(observerId, StringComparer.OrdinalIgnoreCase);
                 if (!affairCoParticipant) rumorValues.Add(ReadInt(rumor, "rumor_value", 0));
             }
-            List<int> reputationValues = Program.QuerySql(connection, @"SELECT reputation_value FROM character_reputations
+            List<int> reputationValues = ReignDatabase.QuerySql(connection, @"SELECT reputation_value FROM character_reputations
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND status='active';",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["subject"] = subjectId })
                 .Select(x => ReadInt(x, "reputation_value", 0)).ToList();

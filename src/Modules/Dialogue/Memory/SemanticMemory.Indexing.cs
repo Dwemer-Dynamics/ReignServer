@@ -104,10 +104,10 @@ namespace ReignBetaServer
         {
             int batchSize = Math.Max(1, Math.Min(128, ReadInt(settings, "embeddingBatchSize", 32)));
             List<Dictionary<string, object>> jobs;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                jobs = Program.QuerySql(connection, @"SELECT * FROM embedding_jobs
+                jobs = ReignDatabase.QuerySql(connection, @"SELECT * FROM embedding_jobs
 WHERE status='pending' AND next_attempt_ts<=$now
 ORDER BY CASE WHEN operation='delete' THEN 0 ELSE 1 END,
 CASE source_type
@@ -128,7 +128,7 @@ LIMIT $limit;",
             int completedJobs = 0;
             List<EmbeddingSourceDocument> documents = new List<EmbeddingSourceDocument>();
             List<Dictionary<string, object>> deletes = new List<Dictionary<string, object>>();
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 foreach (Dictionary<string, object> job in jobs)
                 {
@@ -149,12 +149,12 @@ LIMIT $limit;",
                     }
                     EmbeddingSourceDocument document = BuildEmbeddingDocument(campaignId, sourceType, sourceId, row, text, settings);
                     document.Payload["restoreGeneration"] = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
-                    var restoredContext = Program.QuerySql(connection, "SELECT timeline_id FROM memory_restored_source_context WHERE state_id='current';").SingleOrDefault();
+                    var restoredContext = ReignDatabase.QuerySql(connection, "SELECT timeline_id FROM memory_restored_source_context WHERE state_id='current';").SingleOrDefault();
                     string restoredTimeline = ReadString(restoredContext, "timeline_id", "");
                     if (IsVerifiedRestoredMemorySource(connection, row, restoredTimeline))
                         document.Payload["restoredSavePointId"] = ReadString(RestoredMemorySourceContext(connection, restoredTimeline), "save_point_id", "");
                     document.ContentHash = SemanticSha256Hex(document.Text + CanonicalJson(document.Payload));
-                    Dictionary<string, object> indexed = Program.QuerySql(connection, @"SELECT content_hash,status FROM embedding_documents
+                    Dictionary<string, object> indexed = ReignDatabase.QuerySql(connection, @"SELECT content_hash,status FROM embedding_documents
 WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=$provider LIMIT 1;",
                         new Dictionary<string, object> { ["type"] = sourceType, ["id"] = sourceId, ["model"] = SemanticModelVersion, ["provider"] = document.Provider }).FirstOrDefault();
                     if (indexed != null && string.Equals(ReadString(indexed, "content_hash", ""), document.ContentHash, StringComparison.OrdinalIgnoreCase)
@@ -209,7 +209,7 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
                         if (!ReadBool(response, "ok", false))
                             throw new InvalidOperationException(
                                 ReadString(response, "error", "Vector upsert failed."));
-                        using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                        using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                         using (var publication = connection.BeginTransaction())
                         {
                             AcquirePostgreSqlTransactionMutationLock(connection);
@@ -229,9 +229,9 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
                 if (!yieldedForInteractive && deletes.Count > 0)
                 {
                     List<string> ids;
-                    using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                    using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                     {
-                        ids = deletes.SelectMany(job => Program.QuerySql(connection, "SELECT vector_id FROM embedding_documents WHERE source_type=$type AND source_id=$id AND status<>'deleted';",
+                        ids = deletes.SelectMany(job => ReignDatabase.QuerySql(connection, "SELECT vector_id FROM embedding_documents WHERE source_type=$type AND source_id=$id AND status<>'deleted';",
                             new Dictionary<string, object> { ["type"] = ReadString(job, "source_type", ""), ["id"] = ReadString(job, "source_id", "") }))
                             .Select(row => ReadString(row, "vector_id", "")).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct().ToList();
                     }
@@ -242,7 +242,7 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
                         request["ids"] = ids;
                         Program.PostJsonToUrl(SemanticWorkerUrl(settings, "/vectors/delete"), Json.Serialize(request), 15000);
                     }
-                    using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                    using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                     using (var deletion = connection.BeginTransaction())
                     {
                         AcquirePostgreSqlTransactionMutationLock(connection);
@@ -251,7 +251,7 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
                             string type = ReadString(job, "source_type", ""), id = ReadString(job, "source_id", "");
                             var latest = LoadEmbeddingSourceRow(connection,type,id);
                             if (latest != null && EmbeddingRowActive(type,latest)) continue;
-                            Program.ExecuteSql(connection, "UPDATE embedding_documents SET status='deleted',updated_ts=$ts WHERE source_type=$type AND source_id=$id;",
+                            ReignDatabase.ExecuteSql(connection, "UPDATE embedding_documents SET status='deleted',updated_ts=$ts WHERE source_type=$type AND source_id=$id;",
                                 new Dictionary<string, object> { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["type"] = type, ["id"] = id });
                             CompleteEmbeddingJob(connection, type, id, "deleted", "");
                             completedJobs++;
@@ -265,7 +265,7 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
             }
             catch (Exception ex)
             {
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     foreach (Dictionary<string, object> job in jobs) FailEmbeddingJob(connection, job, ex.Message);
                 }
@@ -289,7 +289,7 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
                 case "world_history_event": table = "world_history_events"; id = "event_id"; break;
                 default: return null;
             }
-            return Program.QuerySql(connection, "SELECT * FROM " + table + " WHERE " + id + "=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = sourceId }).FirstOrDefault();
+            return ReignDatabase.QuerySql(connection, "SELECT * FROM " + table + " WHERE " + id + "=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = sourceId }).FirstOrDefault();
         }
 
         private static bool EmbeddingRowActive(string sourceType, Dictionary<string, object> row)
@@ -400,7 +400,7 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
         private static void MarkEmbeddingIndexed(ReignDbConnection connection, EmbeddingSourceDocument document, Dictionary<string, object> settings)
         {
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO embedding_documents(source_type,source_id,model_version,provider,campaign_id,timeline_id,content_hash,vector_id,dimensions,status,attempt_count,last_error,updated_ts,payload_json)
+            ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO embedding_documents(source_type,source_id,model_version,provider,campaign_id,timeline_id,content_hash,vector_id,dimensions,status,attempt_count,last_error,updated_ts,payload_json)
 VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed',0,'',$ts,$payload);",
                 new Dictionary<string, object>
                 {
@@ -408,22 +408,22 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
                     ["provider"] = document.Provider, ["campaign"] = document.CampaignId, ["timeline"] = document.TimelineId,
                     ["hash"] = document.ContentHash, ["vector"] = document.VectorId, ["ts"] = now, ["payload"] = Json.Serialize(document.Payload)
                 });
-            if (document.SourceType == "event") Program.ExecuteSql(connection, "UPDATE events SET vector_id=$vector,embedding_status='indexed' WHERE event_id=$id;", new Dictionary<string, object> { ["vector"] = document.VectorId, ["id"] = document.SourceId });
-            if (document.SourceType == "memory") Program.ExecuteSql(connection, "UPDATE memories SET vector_id=$vector,embedding_status='indexed' WHERE memory_id=$id;", new Dictionary<string, object> { ["vector"] = document.VectorId, ["id"] = document.SourceId });
-            if (document.SourceType == "summary") Program.ExecuteSql(connection, "UPDATE summaries SET vector_id=$vector,embedding_status='indexed' WHERE summary_id=$id;", new Dictionary<string, object> { ["vector"] = document.VectorId, ["id"] = document.SourceId });
+            if (document.SourceType == "event") ReignDatabase.ExecuteSql(connection, "UPDATE events SET vector_id=$vector,embedding_status='indexed' WHERE event_id=$id;", new Dictionary<string, object> { ["vector"] = document.VectorId, ["id"] = document.SourceId });
+            if (document.SourceType == "memory") ReignDatabase.ExecuteSql(connection, "UPDATE memories SET vector_id=$vector,embedding_status='indexed' WHERE memory_id=$id;", new Dictionary<string, object> { ["vector"] = document.VectorId, ["id"] = document.SourceId });
+            if (document.SourceType == "summary") ReignDatabase.ExecuteSql(connection, "UPDATE summaries SET vector_id=$vector,embedding_status='indexed' WHERE summary_id=$id;", new Dictionary<string, object> { ["vector"] = document.VectorId, ["id"] = document.SourceId });
             CompleteEmbeddingJob(connection, document.SourceType, document.SourceId, "completed", "");
         }
 
         private static void CompleteEmbeddingJob(ReignDbConnection connection, string type, string id, string status, string message)
         {
-            Program.ExecuteSql(connection, "DELETE FROM embedding_jobs WHERE source_type=$type AND source_id=$id;", new Dictionary<string, object> { ["type"] = type, ["id"] = id });
+            ReignDatabase.ExecuteSql(connection, "DELETE FROM embedding_jobs WHERE source_type=$type AND source_id=$id;", new Dictionary<string, object> { ["type"] = type, ["id"] = id });
         }
 
         private static void FailEmbeddingJob(ReignDbConnection connection, Dictionary<string, object> job, string error)
         {
             int attempts = ReadInt(job, "attempt_count", 0) + 1;
             long delay = Math.Min(300, Math.Max(5, 5 * (1L << Math.Min(6, attempts - 1))));
-            Program.ExecuteSql(connection, "UPDATE embedding_jobs SET attempt_count=$attempts,next_attempt_ts=$next,last_error=$error,updated_ts=$ts WHERE source_type=$type AND source_id=$id;",
+            ReignDatabase.ExecuteSql(connection, "UPDATE embedding_jobs SET attempt_count=$attempts,next_attempt_ts=$next,last_error=$error,updated_ts=$ts WHERE source_type=$type AND source_id=$id;",
                 new Dictionary<string, object>
                 {
                     ["attempts"] = attempts, ["next"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() + delay,

@@ -117,11 +117,11 @@ The pending commitments below are your own private dispatch ledger. Mention a pa
             if (originalPlans.Count > 0)
             using (new CommunicationDataReadLease())
             using (PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign)))
-            using (var c = Program.OpenCampaignConnection(campaign))
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsureCommunicationSchema(c); generation = CharactersService.NpcLivesGeneration(c);
                 foreach (var plan in originalPlans.Where(p => ReadString(p, "operation", "send") == "send"))
-                    drafts.AddRange(Program.QuerySql(c, @"SELECT * FROM communication_messages WHERE timeline_id=$timeline AND speaker_id=$speaker
+                    drafts.AddRange(ReignDatabase.QuerySql(c, @"SELECT * FROM communication_messages WHERE timeline_id=$timeline AND speaker_id=$speaker
 AND recipient_id=$recipient AND topic_key=$key AND status IN ('draft','needs_clarification') ORDER BY created_day,message_id LIMIT 1;",
                         TestDict("timeline", ContinuityTimeline(payload), "speaker", hero, "recipient", ReadString(plan, "recipientId", ""), "key", ReadString(plan, "key", ""))));
             }
@@ -171,7 +171,7 @@ AND recipient_id=$recipient AND topic_key=$key AND status IN ('draft','needs_cla
                 if (generation.Length == 0)
                 using (new CommunicationDataReadLease())
                 using (PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign)))
-                using (var c = Program.OpenCampaignConnection(campaign)) generation = CharactersService.NpcLivesGeneration(c);
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign)) generation = CharactersService.NpcLivesGeneration(c);
                 foreach (var plan in ReadDictionaryList(repaired, "communicationPlans"))
                     if (ReadString(plan, "operation", "send") == "send" && !CommunicationPromise(ReadString(plan, "evidenceQuote", ""), currentReply))
                     {
@@ -192,11 +192,11 @@ AND recipient_id=$recipient AND topic_key=$key AND status IN ('draft','needs_cla
                 if (drafts.Count > 0)
                 using (new CommunicationDataReadLease())
                 using (PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign)))
-                using (var c = Program.OpenCampaignConnection(campaign))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                     if (CharactersService.NpcLivesGeneration(c) == generation)
                         foreach (var draft in drafts)
                         {
-                            var current = Program.QuerySql(c, @"SELECT * FROM communication_messages WHERE message_id=$id AND revision=$revision
+                            var current = ReignDatabase.QuerySql(c, @"SELECT * FROM communication_messages WHERE message_id=$id AND revision=$revision
 AND payload_json=$json AND status IN ('draft','needs_clarification');", TestDict("id", ReadString(draft, "message_id", ""),
                                 "revision", ReadInt(draft, "revision", 0), "json", ReadString(draft, "payload_json", ""))).FirstOrDefault();
                             if (current == null) continue;
@@ -212,9 +212,9 @@ AND payload_json=$json AND status IN ('draft','needs_clarification');", TestDict
 
         private static void EnsureCommunicationSchema(ReignDbConnection c)
         {
-            if (Program.IsPostgreSqlComponentSchemaReady(c, "conversation_communication", 1)) return;
+            if (ReignDatabase.IsPostgreSqlComponentSchemaReady(c, "conversation_communication", 1)) return;
             EnsureMemoryPrecisionSchema(c);
-            Program.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS communication_messages (
+            ReignDatabase.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS communication_messages (
 message_id TEXT PRIMARY KEY, root_id TEXT NOT NULL, parent_id TEXT NOT NULL DEFAULT '',
 timeline_id TEXT NOT NULL, logical_id TEXT NOT NULL, session_id TEXT NOT NULL,
 speaker_id TEXT NOT NULL, recipient_id TEXT NOT NULL, player_id TEXT NOT NULL,
@@ -232,7 +232,7 @@ receipt_id TEXT PRIMARY KEY,message_id TEXT NOT NULL,timeline_id TEXT NOT NULL,
 owner_id TEXT NOT NULL,peer_id TEXT NOT NULL,acquired_day DOUBLE PRECISION NOT NULL,
 acquired_ts BIGINT NOT NULL DEFAULT 0,accepted_sequence BIGINT NOT NULL DEFAULT nextval('memory_accepted_turn_sequence'),
 payload_json TEXT NOT NULL,UNIQUE(message_id,owner_id));");
-            Program.MarkPostgreSqlComponentSchemaReady(c, "conversation_communication", 1);
+            ReignDatabase.MarkPostgreSqlComponentSchemaReady(c, "conversation_communication", 1);
         }
 
         private static bool CommunicationPromise(string quote) => CommunicationPromise(quote, quote);
@@ -343,7 +343,7 @@ payload_json TEXT NOT NULL,UNIQUE(message_id,owner_id));");
                 // conversation. Resolve only the requested ID and retain the same
                 // owner, timeline, time and accepted-sequence visibility check.
                 if (row == null && id != "current_player" && id != "current_npc" && id.Length is > 0 and <= 160)
-                    row = Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).FirstOrDefault();
+                    row = ReignDatabase.QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).FirstOrDefault();
                 if (row == null || quote.Length < 8 || quote.Length > 4000
                     || !ReadString(row, "text", "").Contains(quote, StringComparison.Ordinal)
                     || !current.Contains(row) && !PrecisionTurnVisible(row, speaker, access, c)) return new List<Dictionary<string, object>>();
@@ -360,7 +360,7 @@ payload_json TEXT NOT NULL,UNIQUE(message_id,owner_id));");
             var accepted = new List<string>(); var rejected = new List<string>();
             if (ReadBool(unit.Payload, "officialMemoryFirewall", false)) return TestDict("accepted", accepted, "status", "official_scope");
             string sessionId = ReadString(source, "sessionId", ""), timeline = ContinuityTimeline(unit.Payload);
-            var session = Program.QuerySql(c, "SELECT * FROM conversation_sessions WHERE session_id=$id;", TestDict("id", sessionId)).FirstOrDefault();
+            var session = ReignDatabase.QuerySql(c, "SELECT * FROM conversation_sessions WHERE session_id=$id;", TestDict("id", sessionId)).FirstOrDefault();
             if (session == null) return TestDict("accepted", accepted, "status", "no_session");
             string logical = CommunicationLogicalId(session);
             var people = ReadDictionaryList(ReadDictionary(unit.Payload, "gossipPresence"), "people");
@@ -371,10 +371,10 @@ payload_json TEXT NOT NULL,UNIQUE(message_id,owner_id));");
             {
                 string key = ReadString(plan, "key", ""), targetId = ReadString(plan, "recipientId", ""), quote = ReadString(plan, "evidenceQuote", "").Trim();
                 string id = "comm_" + PromptHash(timeline + "|" + logical + "|" + unit.Hero + "|" + targetId + "|" + key).Substring(0, 32).ToLowerInvariant();
-                var prior = Program.QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", id)).FirstOrDefault();
+                var prior = ReignDatabase.QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", id)).FirstOrDefault();
                 if (prior == null)
                 {
-                    prior = Program.QuerySql(c, @"SELECT * FROM communication_messages WHERE timeline_id=$timeline AND speaker_id=$speaker
+                    prior = ReignDatabase.QuerySql(c, @"SELECT * FROM communication_messages WHERE timeline_id=$timeline AND speaker_id=$speaker
 AND recipient_id=$recipient AND topic_key=$key AND status IN ('draft','needs_clarification') ORDER BY created_day,message_id LIMIT 1;",
                         TestDict("timeline", timeline, "speaker", unit.Hero, "recipient", targetId, "key", key)).FirstOrDefault();
                     if (prior != null) id = ReadString(prior, "message_id", id);
@@ -396,7 +396,7 @@ AND recipient_id=$recipient AND topic_key=$key AND status IN ('draft','needs_cla
                         // The model's topic spelling is not the identity of an
                         // unsent letter. Bind a clear withdrawal only to its one
                         // pending recipient draft in this same conversation.
-                        var pending = Program.QuerySql(c, @"SELECT * FROM communication_messages WHERE timeline_id=$timeline AND logical_id=$logical
+                        var pending = ReignDatabase.QuerySql(c, @"SELECT * FROM communication_messages WHERE timeline_id=$timeline AND logical_id=$logical
 AND speaker_id=$speaker AND recipient_id=$recipient AND status IN ('draft','needs_clarification') ORDER BY created_day,message_id;",
                             TestDict("timeline", timeline, "logical", logical, "speaker", unit.Hero, "recipient", targetId));
                         if (pending.Count == 1) { prior = pending[0]; id = ReadString(prior, "message_id", id); }
@@ -412,7 +412,7 @@ AND speaker_id=$speaker AND recipient_id=$recipient AND status IN ('draft','need
                     }
                     if (prior == null || !new[] { "draft", "needs_clarification" }.Contains(ReadString(prior, "status", "")) || !CommunicationWithdrawal(quote)) { Reject("not_a_draft_withdrawal"); continue; }
                     var cancelled = GossipJson(prior); cancelled["withdrawalQuote"] = quote;
-                    Program.ExecuteSql(c, "UPDATE communication_messages SET status='cancelled',revision=revision+1,payload_json=$json WHERE message_id=$id;",
+                    ReignDatabase.ExecuteSql(c, "UPDATE communication_messages SET status='cancelled',revision=revision+1,payload_json=$json WHERE message_id=$id;",
                         TestDict("id", id, "json", Json.Serialize(cancelled))); accepted.Add(id); continue;
                 }
                 if (!CommunicationPromise(quote, unit.Reply) && !CommunicationSemanticAccepted(plan, unit)) { Reject("not_an_unconditional_promise"); continue; }
@@ -442,7 +442,7 @@ AND speaker_id=$speaker AND recipient_id=$recipient AND status IN ('draft','need
                     "kind", kind, "dispatchDelayDays", delay, "destinationId", destination, "stayDays", stay,
                     "destinationName", ReadString(unit.Profile, "currentSettlementId", "") == destination ? ReadString(unit.Profile, "currentSettlementName", "") : "",
                     "sourceGeneration", unit.Generation, "replyRequested", kind == "ask" || kind.StartsWith("summon", StringComparison.Ordinal));
-                Program.ExecuteSql(c, @"INSERT INTO communication_messages(message_id,root_id,timeline_id,logical_id,session_id,speaker_id,recipient_id,player_id,
+                ReignDatabase.ExecuteSql(c, @"INSERT INTO communication_messages(message_id,root_id,timeline_id,logical_id,session_id,speaker_id,recipient_id,player_id,
 topic_key,kind,status,created_day,created_ts,accepted_sequence,payload_json) VALUES($id,$id,$timeline,$logical,$session,$speaker,$recipient,$player,$key,$kind,'draft',$day,$ts,$sequence,$json)
 ON CONFLICT(message_id) DO UPDATE SET status='draft',revision=communication_messages.revision+1,payload_json=EXCLUDED.payload_json,
 logical_id=EXCLUDED.logical_id,session_id=EXCLUDED.session_id,kind=EXCLUDED.kind,created_ts=EXCLUDED.created_ts,accepted_sequence=EXCLUDED.accepted_sequence;",
@@ -460,7 +460,7 @@ logical_id=EXCLUDED.logical_id,session_id=EXCLUDED.session_id,kind=EXCLUDED.kind
             EnsureCommunicationSchema(c);
             if (!new[] { "closed_by_player", "conversation_ended", "goodbye" }.Contains(reason)) return;
             string logical = CommunicationLogicalId(session), timeline = ContinuityTimeline(TryParseJsonObject(ReadString(session, "payload_json", "{}")));
-            foreach (var row in Program.QuerySql(c, "SELECT * FROM communication_messages WHERE timeline_id=$timeline AND logical_id=$logical AND status='draft';",
+            foreach (var row in ReignDatabase.QuerySql(c, "SELECT * FROM communication_messages WHERE timeline_id=$timeline AND logical_id=$logical AND status='draft';",
                 TestDict("timeline", timeline, "logical", logical)))
             {
                 var data = GossipJson(row);
@@ -485,7 +485,7 @@ logical_id=EXCLUDED.logical_id,session_id=EXCLUDED.session_id,kind=EXCLUDED.kind
         {
             foreach (var evidence in ReadDictionaryList(data, "contentEvidence"))
             {
-                var row = Program.QuerySql(c, "SELECT text,status FROM conversation_turns WHERE turn_id=$id;", TestDict("id", ReadString(evidence, "turnId", ""))).FirstOrDefault();
+                var row = ReignDatabase.QuerySql(c, "SELECT text,status FROM conversation_turns WHERE turn_id=$id;", TestDict("id", ReadString(evidence, "turnId", ""))).FirstOrDefault();
                 if (row == null || ReadString(row, "status", "") != "active" || PromptHash(ReadString(row, "text", "")) != ReadString(evidence, "sourceHash", "")) return false;
             }
             return ReadDictionaryList(data, "contentEvidence").Count > 0;
@@ -493,7 +493,7 @@ logical_id=EXCLUDED.logical_id,session_id=EXCLUDED.session_id,kind=EXCLUDED.kind
 
         private static void SetCommunicationStatus(ReignDbConnection c, Dictionary<string, object> row, string status, Dictionary<string, object> data)
         {
-            Program.ExecuteSql(c, "UPDATE communication_messages SET status=$status,payload_json=$json WHERE message_id=$id;",
+            ReignDatabase.ExecuteSql(c, "UPDATE communication_messages SET status=$status,payload_json=$json WHERE message_id=$id;",
                 TestDict("id", ReadString(row, "message_id", ""), "status", status, "json", Json.Serialize(data)));
             row["status"] = status; row["payload_json"] = Json.Serialize(data);
         }
@@ -513,7 +513,7 @@ logical_id=EXCLUDED.logical_id,session_id=EXCLUDED.session_id,kind=EXCLUDED.kind
                 text.AppendLine("Referenced recipient: " + ReadString(person, "name", "") + " [" + GossipHeroId(person) + "].");
             text.AppendLine("Current fixed meeting location ID: " + CommunicationFixedLocation(self) + ". Summons may use this location only; explicitly agree the stay in your reply.");
             string timeline = ContinuityTimeline(payload); double day = ReadDouble(payload, "worldDay", 0);
-            foreach (var row in Program.QuerySql(c, @"SELECT * FROM communication_messages WHERE timeline_id=$timeline AND speaker_id=$hero
+            foreach (var row in ReignDatabase.QuerySql(c, @"SELECT * FROM communication_messages WHERE timeline_id=$timeline AND speaker_id=$hero
 AND parent_id='' AND created_day<=$day AND created_ts<=$ts AND accepted_sequence<=$sequence ORDER BY created_day DESC,message_id LIMIT 24;",
                 TestDict("timeline", timeline, "hero", hero, "day", day, "ts", access.AsOfTimestamp, "sequence", access.AsOfAcceptedSequence)))
             {
@@ -529,7 +529,7 @@ AND parent_id='' AND created_day<=$day AND created_ts<=$ts AND accepted_sequence
                     + "; status=" + status + "; promise=" + ReadString(data, "evidenceQuote", "")
                     + (status == "blocked" || status == "interrupted" || status == "needs_clarification" ? "; observed problem=" + ReadString(data, "failure", "") : ""));
             }
-            foreach (var row in Program.QuerySql(c, @"SELECT * FROM communication_history WHERE timeline_id=$timeline AND owner_id=$hero
+            foreach (var row in ReignDatabase.QuerySql(c, @"SELECT * FROM communication_history WHERE timeline_id=$timeline AND owner_id=$hero
 AND acquired_day<=$day AND acquired_ts<=$ts AND accepted_sequence<=$sequence ORDER BY acquired_day DESC,receipt_id LIMIT 30;",
                 TestDict("timeline", timeline, "hero", hero, "day", day, "ts", access.AsOfTimestamp, "sequence", access.AsOfAcceptedSequence)))
             {
@@ -544,7 +544,7 @@ AND acquired_day<=$day AND acquired_ts<=$ts AND accepted_sequence<=$sequence ORD
         {
             if (c == null || !WorldSimulationService.TableExists(c, "communication_history")) return false;
             var access = Program.BuildKnowledgeAccessContext(hero, ReadFirstString(payload, "playerHeroStringId", "playerId"), "", payload);
-            return Program.QuerySql(c, @"SELECT receipt_id FROM communication_history WHERE message_id=$id AND timeline_id=$timeline AND owner_id=$hero
+            return ReignDatabase.QuerySql(c, @"SELECT receipt_id FROM communication_history WHERE message_id=$id AND timeline_id=$timeline AND owner_id=$hero
 AND acquired_day<=$day AND acquired_ts<=$ts AND accepted_sequence<=$sequence LIMIT 1;",
                 TestDict("id", id + "_reply", "timeline", ContinuityTimeline(payload), "hero", hero,
                     "day", ReadDouble(payload, "worldDay", 0), "ts", access.AsOfTimestamp, "sequence", access.AsOfAcceptedSequence)).Count > 0;
@@ -558,15 +558,15 @@ AND acquired_day<=$day AND acquired_ts<=$ts AND accepted_sequence<=$sequence LIM
             var args = TestDict("old", requested, "new", recovered, "day", ReadDouble(restored, "world_day", -1));
             // This is an exact restored database, not permission to inherit a
             // similarly named timeline. IDs, content, deadlines and receipts stay fixed.
-            Program.ExecuteSql(c, @"UPDATE communication_messages SET timeline_id=$new WHERE timeline_id=$old AND created_day<=$day;
+            ReignDatabase.ExecuteSql(c, @"UPDATE communication_messages SET timeline_id=$new WHERE timeline_id=$old AND created_day<=$day;
 UPDATE communication_history SET timeline_id=$new WHERE timeline_id=$old AND acquired_day<=$day;", args);
             if (!WorldSimulationService.TableExists(c, "character_npc_lives_state")) return;
-            var old = Program.QuerySql(c, "SELECT value_json FROM character_npc_lives_state WHERE timeline_id=$old;", args).FirstOrDefault();
+            var old = ReignDatabase.QuerySql(c, "SELECT value_json FROM character_npc_lives_state WHERE timeline_id=$old;", args).FirstOrDefault();
             if (old == null) return;
             var state = Json.Deserialize<ReignBeta.Shared.Characters.NpcLivesState>(ReadString(old, "value_json", "{}"));
             if (state.TimelineId != requested) throw new InvalidOperationException("The restored meeting ledger has a different timeline.");
             state.TimelineId = recovered;
-            Program.ExecuteSql(c, @"INSERT INTO character_npc_lives_state(timeline_id,value_json) VALUES($timeline,$json)
+            ReignDatabase.ExecuteSql(c, @"INSERT INTO character_npc_lives_state(timeline_id,value_json) VALUES($timeline,$json)
 ON CONFLICT(timeline_id) DO NOTHING;", TestDict("timeline", recovered, "json", Json.Serialize(state)));
         }
     }

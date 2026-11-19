@@ -14,12 +14,12 @@ namespace ReignBetaServer
             string campaign = "pregnancy_context_" + Guid.NewGuid().ToString("N");
             try
             {
-                using var c = Program.OpenCampaignConnection(campaign);
+                using var c = ReignDatabase.OpenCampaignConnection(campaign);
                 EnsurePregnancyContextSchema(c);
                 var f = new PregnancyFacts { PregnancyId = "pregnancy", MotherId = "mother", MotherName = "Ingunde",
                     BiologicalFatherId = "actual_father", BiologicalFatherName = "Actual Father", LegalFatherId = "husband", LegalFatherName = "Husband",
                     Active = true, Illicit = true, TimingKnown = true, ConceptionDay = 10, DueDay = 46, WorldDay = 28 };
-                Program.ExecuteSql(c, "INSERT INTO conception_contexts(timeline_id,pregnancy_id,facts_json,world_day) VALUES('test','pregnancy',$facts,28);", TestDict("facts", Json.Serialize(f)));
+                ReignDatabase.ExecuteSql(c, "INSERT INTO conception_contexts(timeline_id,pregnancy_id,facts_json,world_day) VALUES('test','pregnancy',$facts,28);", TestDict("facts", Json.Serialize(f)));
                 GrantPregnancyKnowledge(c, "test", f, "mother", true, true, "native", "native_hash", 28);
                 Check("self_and_unknown_existing_save", BuildPregnancyPrompt(TestDict("heroStringId", "mother", "name", "Ingunde", "isPregnant", true)).Contains("ARE pregnant"));
                 Dictionary<string, object> Disclosure(string kind, string quote) => TestDict("pregnancyDisclosures", new[] {
@@ -38,7 +38,7 @@ namespace ReignBetaServer
                     new[] { "illicit_denial" }, "illicit_denial_source", 28);
                 Check("negated_illicit_admission_cannot_grant_knowledge", !ReadPregnancyKnowledge(c, "test", "pregnancy", "illicit_denial").Pregnancy);
                 f.SpouseId = "husband";
-                Program.ExecuteSql(c, "UPDATE conception_contexts SET facts_json=$facts WHERE timeline_id='test' AND pregnancy_id='pregnancy';", TestDict("facts", Json.Serialize(f)));
+                ReignDatabase.ExecuteSql(c, "UPDATE conception_contexts SET facts_json=$facts WHERE timeline_id='test' AND pregnancy_id='pregnancy';", TestDict("facts", Json.Serialize(f)));
                 AcceptPregnancyDisclosures(c, "test", "mother", "I am unmarried.", Disclosure("illicit", "I am unmarried."), new[] { "false_marital_claim" }, "false_marriage", 28);
                 Check("false_current_marriage_claim_cannot_grant_confirmed_illicit_knowledge", !ReadPregnancyKnowledge(c, "test", "pregnancy", "false_marital_claim").Illicit);
                 string claim = "Husband is the father.";
@@ -56,27 +56,27 @@ namespace ReignBetaServer
                 Check("undelivered_quote_and_other_timeline_excluded", !ReadPregnancyKnowledge(c, "test", "pregnancy", "draft_only").Pregnancy
                     && !ReadPregnancyKnowledge(c, "other_branch", "pregnancy", "player").Pregnancy);
                 AcceptPregnancyDisclosures(c, "test", "mother", claim, Disclosure("paternity", claim), new[] { "player" }, "true_admission", 28);
-                Check("disclosure_retry_idempotent", Program.QuerySql(c, "SELECT * FROM conception_knowledge WHERE timeline_id='test' AND observer_id='player';").Count == 1);
+                Check("disclosure_retry_idempotent", ReignDatabase.QuerySql(c, "SELECT * FROM conception_knowledge WHERE timeline_id='test' AND observer_id='player';").Count == 1);
                 Check("prompt_keeps_private_truth_and_deliberate_deception", PregnancyContextPolicy.SelfPrompt(f).Contains("Biological and legal father differ")
                     && PregnancyContextPolicy.SelfPrompt(f).Contains("claim never changes true parentage"));
                 Check("save_sync_covers_new_tables", PersistenceService.SaveSyncSubsystemForTable("conception_contexts") == "relationships" && PersistenceService.SaveSyncSubsystemForTable("conception_knowledge") == "relationships");
                 WorldSimulationService.EnsureWorldHistorySchema(c);
-                Program.ExecuteSql(c, @"INSERT INTO world_history_events(event_id,campaign_id,timeline_id,sequence,world_day,event_type,created_utc)
+                ReignDatabase.ExecuteSql(c, @"INSERT INTO world_history_events(event_id,campaign_id,timeline_id,sequence,world_day,event_type,created_utc)
 VALUES('stale_conception',$campaign,'stale',1,28,'child_conceived','2026-10-10T00:00:00Z');
 INSERT INTO world_history_knowledge_rules(rule_id,event_id,audience_type,audience_id,available_day,acquisition_mode)
 VALUES('stale_conception_news','stale_conception','kingdom','realm',28,'realm_news');", TestDict("campaign", campaign));
                 var staleSync = FamilyPregnancySyncApi(TestDict("campaignId", campaign, "timelineId", "stale", "worldDay", 28d,
                     "pregnancies", Array.Empty<Dictionary<string, object>>()));
                 Check("stale_sync_cannot_repair_another_timeline", !ReadBool(staleSync, "ok", true)
-                    && Program.QuerySql(c, "SELECT rule_id FROM world_history_knowledge_rules WHERE rule_id='stale_conception_news';").Count == 1);
+                    && ReignDatabase.QuerySql(c, "SELECT rule_id FROM world_history_knowledge_rules WHERE rule_id='stale_conception_news';").Count == 1);
                 var staleProfile = TestDict("heroStringId", "mother", "isPregnant", false);
                 Check("delayed_letter_uses_current_canonical_state", BuildCurrentPregnancyPrompt(campaign, "test", "mother", 28, staleProfile).Contains("Actual Father"));
                 Check("remote_observer_does_not_see_private_father", !BuildCurrentPregnancyPrompt(campaign, "test", "denial", 28, staleProfile).Contains("Actual Father"));
                 GrantPregnancyKnowledge(c, "test", f, "future_letter_reader", true, true, "future_letter_discovery", "future_letter_hash", 29d);
                 Check("dated_letter_excludes_later_paternity_discovery", !BuildCurrentPregnancyPrompt(campaign, "test", "future_letter_reader", 28, TestDict()).Contains("Actual Father"));
-                Program.ExecuteSql(c, "UPDATE conception_contexts SET world_day=40 WHERE timeline_id='test' AND pregnancy_id='pregnancy';");
+                ReignDatabase.ExecuteSql(c, "UPDATE conception_contexts SET world_day=40 WHERE timeline_id='test' AND pregnancy_id='pregnancy';");
                 Check("dated_letter_excludes_future_canonical_snapshot", !BuildCurrentPregnancyPrompt(campaign, "test", "mother", 28, staleProfile).Contains("ARE pregnant"));
-                Program.ExecuteSql(c, "UPDATE conception_contexts SET world_day=28 WHERE timeline_id='test' AND pregnancy_id='pregnancy';");
+                ReignDatabase.ExecuteSql(c, "UPDATE conception_contexts SET world_day=28 WHERE timeline_id='test' AND pregnancy_id='pregnancy';");
                 DialogueService.EnsureBanterSchema(c);
                 var banterHeroes = new List<Dictionary<string, object>> { TestDict("heroStringId", "mother", "name", "Ingunde", "age", 30,
                     "isAlive", true, "isLord", true, "currentPartyId", "main_party"), TestDict("heroStringId", "banter_listener", "name", "Listener", "age", 30,
@@ -95,14 +95,14 @@ VALUES('stale_conception_news','stale_conception','kingdom','realm',28,'realm_ne
                     && ReadPregnancyKnowledge(c, "test", "pregnancy", "banter_listener").Pregnancy, acceptedBanter);
                 f.MotherExposed = true;
                 ApplyConfirmedPregnancyExposure(c, campaign, "test", f, 28);
-                var reputations = Program.QuerySql(c, "SELECT subject_id,reputation_value FROM character_reputations WHERE timeline_id='test' AND tag_id='the_unchaste' AND status='active';");
+                var reputations = ReignDatabase.QuerySql(c, "SELECT subject_id,reputation_value FROM character_reputations WHERE timeline_id='test' AND tag_id='the_unchaste' AND status='active';");
                 Check("mother_only_immediate_penalty", reputations.Count == 1 && ReadString(reputations[0], "subject_id", "") == "mother" && ReadInt(reputations[0], "reputation_value", 0) == -50, reputations);
-                int activations = Program.QuerySql(c, "SELECT * FROM reputation_lifecycle_events WHERE timeline_id='test';").Count;
+                int activations = ReignDatabase.QuerySql(c, "SELECT * FROM reputation_lifecycle_events WHERE timeline_id='test';").Count;
                 ApplyConfirmedPregnancyExposure(c, campaign, "test", f, 28);
-                Check("exposure_retry_has_no_duplicate_activation", Program.QuerySql(c, "SELECT * FROM reputation_lifecycle_events WHERE timeline_id='test';").Count == activations);
+                Check("exposure_retry_has_no_duplicate_activation", ReignDatabase.QuerySql(c, "SELECT * FROM reputation_lifecycle_events WHERE timeline_id='test';").Count == activations);
                 f.FatherExposed = true;
                 ApplyConfirmedPregnancyExposure(c, campaign, "test", f, 28);
-                reputations = Program.QuerySql(c, "SELECT subject_id,reputation_value FROM character_reputations WHERE timeline_id='test' AND tag_id='the_unchaste' AND status='active';");
+                reputations = ReignDatabase.QuerySql(c, "SELECT subject_id,reputation_value FROM character_reputations WHERE timeline_id='test' AND tag_id='the_unchaste' AND status='active';");
                 Check("later_named_father_only_adds_minus_five", reputations.Count == 2 && reputations.Any(row => ReadString(row, "subject_id", "") == "actual_father" && ReadInt(row, "reputation_value", 0) == -5)
                     && reputations.All(row => ReadString(row, "subject_id", "") != "husband"), reputations);
                 var rules = PersistenceService.BuildWorldHistoryKnowledgeRules("child_conceived", 28, "ordinary", new List<Dictionary<string, object>> {
@@ -131,11 +131,11 @@ VALUES('stale_conception_news','stale_conception','kingdom','realm',28,'realm_ne
                 var point = TestDict("savePointId", "pregnancy_before", "timelineId", "test", "campaignTimeDays", 28.123456789d,
                     "worldHistorySequence", 8L, "worldHistoryHeadEventId", "pregnancy_head");
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "pregnancy_before");
-                using (var future = Program.OpenCampaignConnection(campaign))
+                using (var future = ReignDatabase.OpenCampaignConnection(campaign))
                     GrantPregnancyKnowledge(future, "test", f, "future_observer", true, true, "future", "future_hash", 29d);
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "pregnancy_before");
                 DialogueService.AdvanceMemoryRestoreGeneration(campaign, point);
-                using (var restored = Program.OpenCampaignConnection(campaign))
+                using (var restored = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     BindRecoveredPregnancyKnowledge(restored, "test", "sibling", 8, "pregnancy_head");
                     Check("unverified_sibling_has_no_knowledge", !ReadPregnancyKnowledge(restored, "sibling", "pregnancy", "player").Pregnancy);

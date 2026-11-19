@@ -114,7 +114,7 @@ namespace ReignBetaServer
             string protocolId = ReadString(ReadDictionaryList(two, "queuedDialogueActions").FirstOrDefault(), "id", "");
             var protocolRecord = ReadDictionary(ReadDurableConversationAction(campaign, protocolId), "record");
             string protocolActor = ReadString(protocolRecord, "actorHeroStringId", ""), protocolGeneration;
-            using (var connection = Program.OpenCampaignConnection(campaign))
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 protocolGeneration = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
             Func<string, string, string> protocolReport = (player, message) => Json.Serialize(TestDict("campaignId", campaign,
                 "serverActionId", protocolId, "actionId", protocolId, "timelineId", "player_actions_timeline", "playerHeroStringId", player,
@@ -129,26 +129,26 @@ namespace ReignBetaServer
                     "termsHash", ReadString(protocolRecord, "termsHash", ""), "status", "completed", "reportJson", json, "reportSha256", sha);
             };
             string protocolJson = protocolReport(protocolActor, "A kind gift was handed over with thanks.");
-            Func<string, int> protocolCount = sql => { using (var c = Program.OpenCampaignConnection(campaign)) return Program.QuerySql(c, sql, TestDict("id", protocolId)).Count; };
+            Func<string, int> protocolCount = sql => { using (var c = ReignDatabase.OpenCampaignConnection(campaign)) return ReignDatabase.QuerySql(c, sql, TestDict("id", protocolId)).Count; };
             const string directionalSql = "SELECT event_id FROM relationship_interaction_receipts WHERE event_id LIKE 'action_relationship_' || $id || '_%';";
             const string actionReceiptSql = "SELECT receipt_id FROM conversation_relationship_receipts WHERE source_turn_id=$id AND mode='completed_action' AND status='action_effect' AND severity_tier='routine';";
             // Derived court-popularity metrics and dependent standing/reputation rows for the action pair.
             var derivedArgs = TestDict("campaign", campaign, "actor", protocolActor, "target", ReadString(protocolRecord, "targetHeroStringId", ""));
             const string derivedMetricSql = "SELECT subject_id,positive_count,negative_count,calculated_day FROM court_dynamic_reputation_metrics WHERE campaign_id=$campaign AND timeline_id='player_actions_timeline' AND domain='popularity' AND subject_id IN ($actor,$target) ORDER BY subject_id;";
-            Func<ReignDbConnection, string> derivedSnapshot = c => Json.Serialize(new object[] { Program.QuerySql(c, derivedMetricSql, derivedArgs),
-                Program.QuerySql(c, "SELECT subject_id,standing_value,revision FROM character_public_standing WHERE campaign_id=$campaign AND timeline_id='player_actions_timeline' AND subject_id IN ($actor,$target) ORDER BY subject_id;", derivedArgs),
-                Program.QuerySql(c, "SELECT subject_id,tag_id,status,reputation_value FROM character_reputations WHERE campaign_id=$campaign AND timeline_id='player_actions_timeline' AND subject_id IN ($actor,$target) ORDER BY subject_id,tag_id;", derivedArgs) });
-            Func<string> derivedCommitted = () => { using (var c = Program.OpenCampaignConnection(campaign)) { ReputationService.EnsureSocialReputationSchema(c); ReputationService.EnsureCourtSocialReputationSchema(c); return derivedSnapshot(c); } };
+            Func<ReignDbConnection, string> derivedSnapshot = c => Json.Serialize(new object[] { ReignDatabase.QuerySql(c, derivedMetricSql, derivedArgs),
+                ReignDatabase.QuerySql(c, "SELECT subject_id,standing_value,revision FROM character_public_standing WHERE campaign_id=$campaign AND timeline_id='player_actions_timeline' AND subject_id IN ($actor,$target) ORDER BY subject_id;", derivedArgs),
+                ReignDatabase.QuerySql(c, "SELECT subject_id,tag_id,status,reputation_value FROM character_reputations WHERE campaign_id=$campaign AND timeline_id='player_actions_timeline' AND subject_id IN ($actor,$target) ORDER BY subject_id,tag_id;", derivedArgs) });
+            Func<string> derivedCommitted = () => { using (var c = ReignDatabase.OpenCampaignConnection(campaign)) { ReputationService.EnsureSocialReputationSchema(c); ReputationService.EnsureCourtSocialReputationSchema(c); return derivedSnapshot(c); } };
             string derivedBefore = derivedCommitted();
             int derivedMetricsBefore, derivedMetricsInTransaction = -1;
-            using (var c = Program.OpenCampaignConnection(campaign)) derivedMetricsBefore = Program.QuerySql(c, derivedMetricSql, derivedArgs).Count;
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign)) derivedMetricsBefore = ReignDatabase.QuerySql(c, derivedMetricSql, derivedArgs).Count;
             bool interrupted = false;
             try
             {
                 TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson), (step, c) =>
                 {
                     if (step != 2) return;
-                    derivedMetricsInTransaction = Program.QuerySql(c, derivedMetricSql, derivedArgs).Count(r => ReadDouble(r, "calculated_day", 0d) == 20d);
+                    derivedMetricsInTransaction = ReignDatabase.QuerySql(c, derivedMetricSql, derivedArgs).Count(r => ReadDouble(r, "calculated_day", 0d) == 20d);
                     throw new InvalidOperationException("Injected pre-commit failure.");
                 });
             }
@@ -165,17 +165,17 @@ namespace ReignBetaServer
             var changedType = TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson.Replace("\"RegularTransferGold\"", "\"RegularDuelPlayer\"")));
             // The stored record carries the normalized type; a different stored type or any typeValue
             // override is rejected by GET and POST, then the exact original row text is restored.
-            Func<string> storedPayload = () => { using (var c = Program.OpenCampaignConnection(campaign)) return ReadString(Program.QuerySql(c,
+            Func<string> storedPayload = () => { using (var c = ReignDatabase.OpenCampaignConnection(campaign)) return ReadString(ReignDatabase.QuerySql(c,
                 "SELECT payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", protocolId)).Single(), "payload_json", ""); };
             string originalPayload = storedPayload();
             Func<string, bool> storedOverrideRejected = patch =>
             {
-                using (var c = Program.OpenCampaignConnection(campaign)) Program.ExecuteSql(c,
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign)) ReignDatabase.ExecuteSql(c,
                     "UPDATE conversation_action_outbox SET payload_json=jsonb_set(payload_json::jsonb, '{record}', (payload_json::jsonb->'record') || $patch::jsonb)::text WHERE action_id=$id;",
                     TestDict("id", protocolId, "patch", patch));
                 var get = preflight(campaign, protocolId, protocolGeneration, ReadString(protocolRecord, "termsHash", ""));
                 var post = TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson));
-                using (var c = Program.OpenCampaignConnection(campaign)) Program.ExecuteSql(c,
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign)) ReignDatabase.ExecuteSql(c,
                     "UPDATE conversation_action_outbox SET payload_json=$payload WHERE action_id=$id;", TestDict("id", protocolId, "payload", originalPayload));
                 return ReadString(get, "disposition", "") == "conflict" && ReadString(get, "reason", "") == "action_type_mismatch"
                     && ReadString(post, "reason", "") == "action_type_mismatch";
@@ -198,8 +198,8 @@ namespace ReignBetaServer
                 && ReadString(preflight(absentCampaign, protocolId, protocolGeneration, protocolTerms), "disposition", "") == "unknown", eligible);
             // A known row made ineligible by a foreign projection owner answers ineligible only for
             // its exact current scope; stale or mismatched scope never permits legacy fallback.
-            Action<string, bool> foreignOwner = (id, present) => { using (var c = Program.OpenCampaignConnection(campaign)) { RebellionService.EnsureRebellionSchema(c);
-                Program.ExecuteSql(c, present ? @"INSERT INTO negotiated_action_drafts(negotiation_id,campaign_id,timeline_id,broker_hero_id,first_kingdom_id,
+            Action<string, bool> foreignOwner = (id, present) => { using (var c = ReignDatabase.OpenCampaignConnection(campaign)) { RebellionService.EnsureRebellionSchema(c);
+                ReignDatabase.ExecuteSql(c, present ? @"INSERT INTO negotiated_action_drafts(negotiation_id,campaign_id,timeline_id,broker_hero_id,first_kingdom_id,
 second_kingdom_id,first_ruler_id,second_ruler_id,command,terms_json,terms_hash,status,created_day,updated_day,expires_day,queued_action_id)
 VALUES($n,$campaign,'player_actions_timeline','b','k1','k2','r1','r2','make_peace','{}','h','queued',20,20,30,$id);"
                     : "DELETE FROM negotiated_action_drafts WHERE negotiation_id=$n AND campaign_id=$campaign AND queued_action_id=$id;",
@@ -232,12 +232,12 @@ VALUES($n,$campaign,'player_actions_timeline','b','k1','k2','r1','r2','make_peac
             Program.WriteJsonObject(profilePath, spouseProfile);
             var standingKey = TestDict("campaign", campaign, "timeline", "player_actions_timeline", "subject", pairTarget);
             Dictionary<string, object> priorStanding, ordinaryStanding;
-            using (var c = Program.OpenCampaignConnection(campaign))
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 ReputationService.EnsureSocialReputationSchema(c);
-                priorStanding = Program.QuerySql(c, @"SELECT standing_value,sources_json,revision,calculated_revision,last_changed_day,updated_ts,calculation_status,last_error
+                priorStanding = ReignDatabase.QuerySql(c, @"SELECT standing_value,sources_json,revision,calculated_revision,last_changed_day,updated_ts,calculation_status,last_error
 FROM character_public_standing WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;", standingKey).FirstOrDefault();
-                Program.ExecuteSql(c, @"INSERT INTO character_public_standing(campaign_id,timeline_id,subject_id,standing_value,sources_json,revision,calculated_revision,last_changed_day,updated_ts)
+                ReignDatabase.ExecuteSql(c, @"INSERT INTO character_public_standing(campaign_id,timeline_id,subject_id,standing_value,sources_json,revision,calculated_revision,last_changed_day,updated_ts)
 VALUES($campaign,$timeline,$subject,-5,$sources,1,1,20,$ts) ON CONFLICT(campaign_id,timeline_id,subject_id) DO UPDATE SET
 standing_value=-5,sources_json=$sources,revision=character_public_standing.revision+1,calculated_revision=character_public_standing.revision+1,updated_ts=$ts;",
                     new Dictionary<string, object>(standingKey) { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
@@ -261,7 +261,7 @@ standing_value=-5,sources_json=$sources,revision=character_public_standing.revis
             // Backends currently waiting on a lock held by this connection's backend. pg_locks
             // and pg_blocking_pids are read live on every call; pg_stat_activity is a snapshot
             // fixed at its first read in a transaction and would miss a peer backend opened later.
-            Func<ReignDbConnection, List<int>> blockedWaiters = c => Program.QuerySql(c,
+            Func<ReignDbConnection, List<int>> blockedWaiters = c => ReignDatabase.QuerySql(c,
                 "SELECT DISTINCT pid FROM pg_locks WHERE NOT granted AND pg_backend_pid()=ANY(pg_blocking_pids(pid));")
                 .Select(r => ReadInt(r, "pid", 0)).Where(pid => pid != 0).ToList();
             try
@@ -270,7 +270,7 @@ standing_value=-5,sources_json=$sources,revision=character_public_standing.revis
                 {
                     if (step == 0)
                     {
-                        int acceptancePid = ReadInt(Program.QuerySql(c, "SELECT pg_backend_pid() AS pid;").Single(), "pid", 0);
+                        int acceptancePid = ReadInt(ReignDatabase.QuerySql(c, "SELECT pg_backend_pid() AS pid;").Single(), "pid", 0);
                         peer = System.Threading.Tasks.Task.Run(() =>
                         {
                             lock (Program.FileLock)
@@ -312,7 +312,7 @@ standing_value=-5,sources_json=$sources,revision=character_public_standing.revis
                                     watchdogFired = true;
                                     if (knownPeer == 0) return;
                                     using (var meta = ReignPostgreSqlStorage.OpenMetadataConnection())
-                                        watchdogCancelled = Program.QuerySql(meta, @"SELECT pg_cancel_backend(pid) AS cancelled FROM (SELECT DISTINCT pid FROM pg_locks
+                                        watchdogCancelled = ReignDatabase.QuerySql(meta, @"SELECT pg_cancel_backend(pid) AS cancelled FROM (SELECT DISTINCT pid FROM pg_locks
 WHERE pid=$peer AND NOT granted AND $acceptance=ANY(pg_blocking_pids(pid))) AS waiting;",
                                             TestDict("peer", knownPeer, "acceptance", acceptancePid)).Count(r => ReadBool(r, "cancelled", false));
                                 }
@@ -328,7 +328,7 @@ WHERE pid=$peer AND NOT granted AND $acceptance=ANY(pg_blocking_pids(pid))) AS w
                         fileLockHeldByPeer = !entered;
                         // The pair row exactly as the production evaluation just wrote it in this
                         // transaction, before reputation recompute can change the target's standing.
-                        chemistryAtEvaluation = Program.QuerySql(c, @"SELECT hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,
+                        chemistryAtEvaluation = ReignDatabase.QuerySql(c, @"SELECT hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,
 effective_affinity_a_to_b,effective_affinity_b_to_a FROM relationship_pair_chemistry WHERE pair_key=$pair;",
                             TestDict("pair", RelationshipsService.AmbientPairKey(protocolActor, pairTarget))).FirstOrDefault();
                         // Inside the acceptance scope the pair resolves from its snapshot; any other hero is refused.
@@ -361,10 +361,10 @@ effective_affinity_a_to_b,effective_affinity_b_to_a FROM relationship_pair_chemi
                     }
                     finally { System.Threading.Monitor.Exit(Program.FileLock); }
                 else restoreError = "profile_restore_skipped_file_lock_busy";
-                using (var c = Program.OpenCampaignConnection(campaign))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                     if (priorStanding == null)
-                        Program.ExecuteSql(c, "DELETE FROM character_public_standing WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;", standingKey);
-                    else Program.ExecuteSql(c, @"UPDATE character_public_standing SET standing_value=$value,sources_json=$priorSources,revision=$revision,
+                        ReignDatabase.ExecuteSql(c, "DELETE FROM character_public_standing WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;", standingKey);
+                    else ReignDatabase.ExecuteSql(c, @"UPDATE character_public_standing SET standing_value=$value,sources_json=$priorSources,revision=$revision,
 calculated_revision=$calculated,last_changed_day=$day,updated_ts=$updated,calculation_status=$status,last_error=$error
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                         new Dictionary<string, object>(standingKey) { ["value"] = ReadInt(priorStanding, "standing_value", 0),
@@ -406,8 +406,8 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             protocolFirst = protocolFirst ?? TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson));
             var protocolEffect = ReadDictionary(protocolFirst, "nativeEffect");
             List<int> directionalDeltas;
-            using (var connection = Program.OpenCampaignConnection(campaign))
-                directionalDeltas = Program.QuerySql(connection, "SELECT native_delta FROM relationship_interaction_receipts WHERE event_id LIKE 'action_relationship_' || $id || '_%';",
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                directionalDeltas = ReignDatabase.QuerySql(connection, "SELECT native_delta FROM relationship_interaction_receipts WHERE event_id LIKE 'action_relationship_' || $id || '_%';",
                     TestDict("id", protocolId)).Select(r => ReadInt(r, "native_delta", 0)).Where(d => d != 0).ToList();
             add("terminal_report_stages_one_isolated_action_delta", ReadString(protocolFirst, "disposition", "") == "accepted"
                 && ReadInt(protocolEffect, "delta", 0) != 0 && ReadInt(protocolEffect, "delta", 0) == RelationshipsService.CompletedActionSharedDelta(directionalDeltas)
@@ -416,11 +416,11 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             // The retried first acceptance commits exactly one derived metric per changed target, at the report day.
             List<string> derivedTargets;
             List<Dictionary<string, object>> derivedMetrics;
-            using (var connection = Program.OpenCampaignConnection(campaign))
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
-                derivedTargets = Program.QuerySql(connection, "SELECT target_id FROM relationship_interaction_receipts WHERE event_id LIKE 'action_relationship_' || $id || '_%' AND native_delta<>0;",
+                derivedTargets = ReignDatabase.QuerySql(connection, "SELECT target_id FROM relationship_interaction_receipts WHERE event_id LIKE 'action_relationship_' || $id || '_%' AND native_delta<>0;",
                     TestDict("id", protocolId)).Select(r => ReadString(r, "target_id", "")).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
-                derivedMetrics = Program.QuerySql(connection, derivedMetricSql, derivedArgs);
+                derivedMetrics = ReignDatabase.QuerySql(connection, derivedMetricSql, derivedArgs);
             }
             string derivedAfterFirst = derivedCommitted();
             add("terminal_report_commits_one_set_of_derived_writes", derivedTargets.Count > 0
@@ -430,12 +430,12 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                 TestDict("targets", derivedTargets, "metrics", derivedMetrics));
             // Action memory commits with projectedTs under the exact outbox row lock: one row per owner, stable IDs.
             const string memorySql = "SELECT owner_id,memory_id FROM memories WHERE event_id='action_' || $id ORDER BY owner_id,memory_id;";
-            Func<ReignDbConnection, string> memoryIn = c => Json.Serialize(Program.QuerySql(c, memorySql, TestDict("id", protocolId)));
-            Func<string> memoryRows = () => { using (var c = Program.OpenCampaignConnection(campaign)) return memoryIn(c); };
-            Func<bool> onePerOwner = () => { using (var c = Program.OpenCampaignConnection(campaign)) { var rows = Program.QuerySql(c, memorySql, TestDict("id", protocolId));
+            Func<ReignDbConnection, string> memoryIn = c => Json.Serialize(ReignDatabase.QuerySql(c, memorySql, TestDict("id", protocolId)));
+            Func<string> memoryRows = () => { using (var c = ReignDatabase.OpenCampaignConnection(campaign)) return memoryIn(c); };
+            Func<bool> onePerOwner = () => { using (var c = ReignDatabase.OpenCampaignConnection(campaign)) { var rows = ReignDatabase.QuerySql(c, memorySql, TestDict("id", protocolId));
                 return rows.Count > 0 && rows.Select(r => ReadString(r, "owner_id", "")).Distinct().Count() == rows.Count; } };
             Func<bool> markerProjected = () => ReadDictionary(ReadDurableConversationAction(campaign, protocolId), "terminalReport")?.ContainsKey("projectedTs") == true;
-            Action clearProjected = () => { using (var c = Program.OpenCampaignConnection(campaign)) Program.ExecuteSql(c,
+            Action clearProjected = () => { using (var c = ReignDatabase.OpenCampaignConnection(campaign)) ReignDatabase.ExecuteSql(c,
                 "UPDATE conversation_action_outbox SET payload_json=(payload_json::jsonb #- '{terminalReport,projectedTs}')::text WHERE action_id=$id;", TestDict("id", protocolId)); };
             Func<Action<ReignDbConnection>, bool> project = seam => ProjectAcceptedTerminalReport(campaign, protocolId, ReadString(protocolFirst, "reportSha256", ""),
                 protocolGeneration, TryParseJsonObject(protocolJson), protocolRecord, ReadString(protocolFirst, "authoritativeStatus", ""), seam);
@@ -469,24 +469,24 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             System.Threading.Tasks.Task<bool> queued = null;
             bool queuedObserved = false, holderUpgraded = false;
             string holderError = "";
-            using (var c = Program.OpenCampaignConnection(campaign))
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             using (var transaction = c.BeginTransaction())
             {
-                Func<long> revision = () => ReadLong(Program.QuerySql(c, "SELECT source_revision FROM memory_precision_state WHERE state_id='current';").Single(), "source_revision", 0);
-                Program.QuerySql(c, "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;");
-                Program.QuerySql(c, "SELECT action_id FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;", TestDict("id", protocolId));
+                Func<long> revision = () => ReadLong(ReignDatabase.QuerySql(c, "SELECT source_revision FROM memory_precision_state WHERE state_id='current';").Single(), "source_revision", 0);
+                ReignDatabase.QuerySql(c, "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;");
+                ReignDatabase.QuerySql(c, "SELECT action_id FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;", TestDict("id", protocolId));
                 long revisionBefore = revision();
                 queued = System.Threading.Tasks.Task.Run(() => project(null));
                 // Proceed only once the projection is actually blocked by this transaction.
                 for (int i = 0; i < 300 && !queuedObserved && !queued.IsCompleted; i++)
                 {
-                    queuedObserved = ReadLong(Program.QuerySql(c, "SELECT COUNT(*) AS n FROM pg_stat_activity WHERE pg_backend_pid()=ANY(pg_blocking_pids(pid));").Single(), "n", 0) > 0;
+                    queuedObserved = ReadLong(ReignDatabase.QuerySql(c, "SELECT COUNT(*) AS n FROM pg_stat_activity WHERE pg_backend_pid()=ANY(pg_blocking_pids(pid));").Single(), "n", 0) > 0;
                     if (!queuedObserved) System.Threading.Thread.Sleep(50);
                 }
                 try
                 {
                     // A statement trigger fires with zero rows: the real memory trigger upgrades the generation row.
-                    Program.ExecuteSql(c, "DELETE FROM memories WHERE false;");
+                    ReignDatabase.ExecuteSql(c, "DELETE FROM memories WHERE false;");
                     holderUpgraded = revision() > revisionBefore;
                     transaction.Commit();
                 }
@@ -627,7 +627,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                 && ReadDurableConversationAction(campaign, discardedNpcId) == null, mixedFailure);
 
             string generation;
-            using (var connection = Program.OpenCampaignConnection(campaign))
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
             var batchPayload = TestDict("campaignId", campaign, "timelineId", "player_actions_timeline", "sceneTurnId", "atomic_batch");
             Func<string, Dictionary<string, object>> batchRow = id => TestDict("id", id, "campaignId", campaign,
@@ -682,10 +682,10 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             // context bound inside the transaction; every refusal mutates nothing.
             {
                 var P = Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RecoverySchema;
-                Func<string> liveGeneration = () => { using (var c = Program.OpenCampaignConnection(campaign)) return ReadString(ReadMemoryPrecisionState(c), "restore_generation", ""); };
-                Func<Dictionary<string, object>> restoreContext = () => { using (var c = Program.OpenCampaignConnection(campaign)) return TerminalReportRestoreContext(c); };
-                Action<string, string> setContext = (column, value) => { using (var c = Program.OpenCampaignConnection(campaign))
-                    Program.ExecuteSql(c, "UPDATE memory_restored_source_context SET " + column + "=$v WHERE state_id='current';", TestDict("v", value)); };
+                Func<string> liveGeneration = () => { using (var c = ReignDatabase.OpenCampaignConnection(campaign)) return ReadString(ReadMemoryPrecisionState(c), "restore_generation", ""); };
+                Func<Dictionary<string, object>> restoreContext = () => { using (var c = ReignDatabase.OpenCampaignConnection(campaign)) return TerminalReportRestoreContext(c); };
+                Action<string, string> setContext = (column, value) => { using (var c = ReignDatabase.OpenCampaignConnection(campaign))
+                    ReignDatabase.ExecuteSql(c, "UPDATE memory_restored_source_context SET " + column + "=$v WHERE state_id='current';", TestDict("v", value)); };
                 Func<string, Dictionary<string, object>> markerOf = id => ReadDictionary(ReadDurableConversationAction(campaign, id), "terminalReport");
                 Func<Dictionary<string, object>, string, string, string, Dictionary<string, object>> recover = (envelope, live, session, point) =>
                 {
@@ -710,9 +710,9 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                 // Fixture precondition: the second row is an eligible gold transfer, so later
                 // dispositions are about recovery authority, not fixture shape.
                 string jobIneligible = "missing";
-                using (var c = Program.OpenCampaignConnection(campaign))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var storedJob = Program.QuerySql(c, "SELECT timeline_id,payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", jobId)).FirstOrDefault();
+                    var storedJob = ReignDatabase.QuerySql(c, "SELECT timeline_id,payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", jobId)).FirstOrDefault();
                     var jobPayload = storedJob == null ? null : TryParseJsonObject(ReadString(storedJob, "payload_json", "{}"));
                     if (jobPayload != null) jobIneligible = TerminalReportIneligibility(c, jobPayload, campaign, jobId, ReadString(storedJob, "timeline_id", ""));
                 }
@@ -817,9 +817,9 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                 // Remaining held/rollback cases run on an unreported pa_ row from the original
                 // generation. The context row is saved exactly and restored afterwards.
                 string savedContext;
-                using (var cx = Program.OpenCampaignConnection(campaign))
-                    savedContext = ReadString(Program.QuerySql(cx, "SELECT to_jsonb(c)::text AS saved FROM memory_restored_source_context c WHERE c.state_id='current';").Single(), "saved", "");
-                Action restoreSavedContext = () => { using (var cx = Program.OpenCampaignConnection(campaign)) Program.ExecuteSql(cx,
+                using (var cx = ReignDatabase.OpenCampaignConnection(campaign))
+                    savedContext = ReadString(ReignDatabase.QuerySql(cx, "SELECT to_jsonb(c)::text AS saved FROM memory_restored_source_context c WHERE c.state_id='current';").Single(), "saved", "");
+                Action restoreSavedContext = () => { using (var cx = ReignDatabase.OpenCampaignConnection(campaign)) ReignDatabase.ExecuteSql(cx,
                     "DELETE FROM memory_restored_source_context; INSERT INTO memory_restored_source_context SELECT * FROM jsonb_populate_record(CAST(NULL AS memory_restored_source_context), CAST($saved AS jsonb));",
                     TestDict("saved", savedContext)); };
                 const string reboundTimeline = "stage3_rebound_timeline";
@@ -837,16 +837,16 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                     var giftEnvelope = TestDict("schema", Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RequestSchema, "campaignId", campaign,
                         "timelineId", "player_actions_timeline", "playerHeroStringId", giftActor, "generation", protocolGeneration,
                         "actionId", giftId, "termsHash", ReadString(giftRecord, "termsHash", ""), "status", "completed", "reportJson", giftJson, "reportSha256", giftSha);
-                    Func<string, string, int> countFor = (sql, id) => { using (var cx = Program.OpenCampaignConnection(campaign)) return Program.QuerySql(cx, sql, TestDict("id", id)).Count; };
+                    Func<string, string, int> countFor = (sql, id) => { using (var cx = ReignDatabase.OpenCampaignConnection(campaign)) return ReignDatabase.QuerySql(cx, sql, TestDict("id", id)).Count; };
                     const string giftMemorySql = "SELECT owner_id,memory_id FROM memories WHERE event_id='action_' || $id ORDER BY owner_id,memory_id;";
                     const string sharedRowSql = "SELECT activity_id FROM shared_activity_events WHERE source_id LIKE 'action_receipt_%' AND (payload_json::jsonb->'facts'->>'actionId')=$id;";
                     Func<string> giftRow = () => Json.Serialize(ReadDurableConversationAction(campaign, giftId));
                     Func<bool> giftUntouched = () => markerOf(giftId) == null && countFor(directionalSql, giftId) == 0
                         && countFor(actionReceiptSql, giftId) == 0 && countFor(giftMemorySql, giftId) == 0 && countFor(sharedRowSql, giftId) == 0;
                     string giftIneligible = "missing";
-                    using (var cx = Program.OpenCampaignConnection(campaign))
+                    using (var cx = ReignDatabase.OpenCampaignConnection(campaign))
                     {
-                        var storedGift = Program.QuerySql(cx, "SELECT timeline_id,payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", giftId)).FirstOrDefault();
+                        var storedGift = ReignDatabase.QuerySql(cx, "SELECT timeline_id,payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", giftId)).FirstOrDefault();
                         var storedGiftPayload = storedGift == null ? null : TryParseJsonObject(ReadString(storedGift, "payload_json", "{}"));
                         if (storedGiftPayload != null) giftIneligible = TerminalReportIneligibility(cx, storedGiftPayload, campaign, giftId, ReadString(storedGift, "timeline_id", ""));
                     }
@@ -861,7 +861,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
 
                     // Empty context: with no restore context row no proof can be bound, so both a first
                     // acceptance and an adoption fail closed as load_proof_stale and nothing is written.
-                    using (var cx = Program.OpenCampaignConnection(campaign)) Program.ExecuteSql(cx, "DELETE FROM memory_restored_source_context;");
+                    using (var cx = ReignDatabase.OpenCampaignConnection(campaign)) ReignDatabase.ExecuteSql(cx, "DELETE FROM memory_restored_source_context;");
                     var emptyFirst = TerminalActionReportApi(recover(giftEnvelope, g3, "stage3_l2", "stage3_point"));
                     var emptyAdopt = TerminalActionReportApi(recover(protocolBase, g3, "stage3_l2", "stage3_point"));
                     restoreSavedContext();
@@ -903,11 +903,11 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                     var headContext = restoreContext();
                     long headSequence = ReadLong(headContext, "head_sequence", 0);
                     string headEvent = ReadString(headContext, "head_event_id", "");
-                    using (var cx = Program.OpenCampaignConnection(campaign)) BindRecoveredMemorySources(cx, "player_actions_timeline", reboundTimeline, headSequence, headEvent);
+                    using (var cx = ReignDatabase.OpenCampaignConnection(campaign)) BindRecoveredMemorySources(cx, "player_actions_timeline", reboundTimeline, headSequence, headEvent);
                     string reboundTo = ReadString(restoreContext(), "timeline_id", "");
                     var reboundAdopt = TerminalActionReportApi(recover(protocolBase, g3, "stage3_l2", "stage3_point"));
                     var reboundFirst = TerminalActionReportApi(recover(giftEnvelope, g3, "stage3_l2", "stage3_point"));
-                    using (var cx = Program.OpenCampaignConnection(campaign)) BindRecoveredMemorySources(cx, reboundTimeline, "player_actions_timeline", headSequence, headEvent);
+                    using (var cx = ReignDatabase.OpenCampaignConnection(campaign)) BindRecoveredMemorySources(cx, reboundTimeline, "player_actions_timeline", headSequence, headEvent);
                     string reboundBack = ReadString(restoreContext(), "timeline_id", "");
                     var reboundAdmitted = TerminalActionReportApi(recover(protocolBase, g3, "stage3_l2", "stage3_point"));
                     add("terminal_report_recovery_rebound_timeline_held_then_admitted", reboundTo == reboundTimeline && reboundBack == "player_actions_timeline"
@@ -925,12 +925,12 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                     Func<object> projectedTsOf = () => { var m = markerOf(protocolId); return m != null && m.TryGetValue("projectedTs", out object v) ? v : null; };
                     object projectedTsBefore = projectedTsOf();
                     int sharedOriginal = countFor(sharedRowSql, protocolId);
-                    using (var cx = Program.OpenCampaignConnection(campaign))
+                    using (var cx = ReignDatabase.OpenCampaignConnection(campaign))
                     {
-                        Program.ExecuteSql(cx, "UPDATE conversation_action_outbox SET payload_json=(payload_json::jsonb #- '{terminalReport,projectedShared}')::text WHERE action_id=$id;", TestDict("id", protocolId));
-                        var sharedIds = Program.QuerySql(cx, sharedRowSql, TestDict("id", protocolId)).Select(r => ReadString(r, "activity_id", "")).ToList();
+                        ReignDatabase.ExecuteSql(cx, "UPDATE conversation_action_outbox SET payload_json=(payload_json::jsonb #- '{terminalReport,projectedShared}')::text WHERE action_id=$id;", TestDict("id", protocolId));
+                        var sharedIds = ReignDatabase.QuerySql(cx, sharedRowSql, TestDict("id", protocolId)).Select(r => ReadString(r, "activity_id", "")).ToList();
                         foreach (string sharedId in sharedIds)
-                            Program.ExecuteSql(cx, "DELETE FROM shared_activity_observers WHERE activity_id=$a; DELETE FROM shared_activity_events WHERE activity_id=$a;", TestDict("a", sharedId));
+                            ReignDatabase.ExecuteSql(cx, "DELETE FROM shared_activity_observers WHERE activity_id=$a; DELETE FROM shared_activity_events WHERE activity_id=$a;", TestDict("a", sharedId));
                     }
                     bool legacyShape = markerOf(protocolId)?.ContainsKey("projectedTs") == true && markerOf(protocolId)?.ContainsKey("projectedShared") == false
                         && countFor(sharedRowSql, protocolId) == 0;
@@ -957,7 +957,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                             TerminalActionReportApi(recover(giftEnvelope, g3, "stage3_l2", "stage3_point"), (step, cx) =>
                             {
                                 if (step != seam) return;
-                                Program.ExecuteSql(cx, "UPDATE memory_precision_state SET restore_generation='stage3_injected_restore' WHERE state_id='current';");
+                                ReignDatabase.ExecuteSql(cx, "UPDATE memory_precision_state SET restore_generation='stage3_injected_restore' WHERE state_id='current';");
                                 throw new InvalidOperationException("Injected restore during recovery acceptance.");
                             });
                         }
@@ -968,9 +968,9 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                     var giftAccepted = TerminalActionReportApi(recover(giftEnvelope, g3, "stage3_l2", "stage3_point"));
                     var giftMarker = markerOf(giftId);
                     int giftDirectional = countFor(directionalSql, giftId), giftActionReceipts = countFor(actionReceiptSql, giftId);
-                    string giftMemory; using (var cx = Program.OpenCampaignConnection(campaign)) giftMemory = Json.Serialize(Program.QuerySql(cx, giftMemorySql, TestDict("id", giftId)));
+                    string giftMemory; using (var cx = ReignDatabase.OpenCampaignConnection(campaign)) giftMemory = Json.Serialize(ReignDatabase.QuerySql(cx, giftMemorySql, TestDict("id", giftId)));
                     var giftReplay = TerminalActionReportApi(recover(giftEnvelope, g3, "stage3_l2", "stage3_point"));
-                    string giftMemoryAfterReplay; using (var cx = Program.OpenCampaignConnection(campaign)) giftMemoryAfterReplay = Json.Serialize(Program.QuerySql(cx, giftMemorySql, TestDict("id", giftId)));
+                    string giftMemoryAfterReplay; using (var cx = ReignDatabase.OpenCampaignConnection(campaign)) giftMemoryAfterReplay = Json.Serialize(ReignDatabase.QuerySql(cx, giftMemorySql, TestDict("id", giftId)));
                     string giftReceipt = ReadString(ReadDictionary(giftAccepted, "nativeEffect"), "receiptId", "");
                     // The gift shares the protocol pair (fixture precondition), so derivedArgs reads its standing;
                     // the clean acceptance must change it, which makes the rollback comparison above meaningful.
@@ -993,8 +993,8 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                 finally
                 {
                     restoreSavedContext();
-                    using (var cx = Program.OpenCampaignConnection(campaign))
-                        Program.ExecuteSql(cx, "DELETE FROM memory_continuity_branches WHERE timeline_id=$t;", TestDict("t", reboundTimeline));
+                    using (var cx = ReignDatabase.OpenCampaignConnection(campaign))
+                        ReignDatabase.ExecuteSql(cx, "DELETE FROM memory_continuity_branches WHERE timeline_id=$t;", TestDict("t", reboundTimeline));
                 }
             }
             var point = PersistenceService.SaveSyncTestPointPayload(campaign, "player_action_snapshot", 20d, "Player action isolated snapshot");

@@ -97,7 +97,7 @@ namespace ReignBetaServer
                 Directory.CreateDirectory(Path.Combine(campaignDir, "characters", "hero_test", "memory"));
                 File.WriteAllText(Path.Combine(campaignDir, "characters", "hero_test", "memory", "memories.jsonl"), "{\"memory\":\"kept\"}\n", Encoding.UTF8);
                 Program.WriteJsonObject(Path.Combine(campaignDir, "campaign.json"), new Dictionary<string, object> { ["campaignId"] = campaignId, ["campaignLabel"] = "Backup Test", ["mainHeroName"] = "Tester" });
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId)) Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('backup_test','preserved');");
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId)) PersistenceStore.UpsertSchemaMeta(connection);
                 Directory.CreateDirectory(Path.Combine(portraitDir, "hero_test"));
                 File.WriteAllBytes(Path.Combine(portraitDir, "hero_test", "custom.png"), new byte[] { 1, 2, 3, 4, 5 });
                 string nativeSaveFixture = Path.Combine(
@@ -142,7 +142,7 @@ namespace ReignBetaServer
                     && ReadInt(imported, "nativeSavesRestored", 0) == 1;
                 add("import_round_trip", importRoundTrip, importRoundTrip ? "Import restores campaign files, the external portrait cache, and the exact native Bannerlord save." : "Import round trip failed: " + Json.Serialize(imported));
                 bool postgresPreserved = false;
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId)) postgresPreserved = ReadString(Program.QuerySql(connection, "SELECT value FROM schema_meta WHERE key='backup_test';").FirstOrDefault(), "value", "") == "preserved";
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId)) postgresPreserved = ReadString(PersistenceStore.SelectSchemaMeta(connection).FirstOrDefault(), "value", "") == "preserved";
                 add("postgresql_snapshot_preserved", postgresPreserved, postgresPreserved ? "The consistent PostgreSQL campaign archive survives export and import." : "The imported PostgreSQL schema did not contain the exported backup_test marker. Import result: " + Json.Serialize(imported));
                 add("manifest_hashes_present", ReadInt(export, "fileCount", 0) >= 4 && ReadInt(export, "nativeSaveCount", 0) == 1, "The archive manifest covers campaign, database, portrait, Save Sync, and native Bannerlord save files.");
 

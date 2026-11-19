@@ -263,7 +263,7 @@ namespace ReignBetaServer
 JOIN conversation_turns t ON t.turn_id=f.turn_id JOIN conversation_sessions s ON s.session_id=t.session_id
 WHERE conversation_turn_fts MATCH $query AND " + MemorySessionObserverSql("s", "t") + @" AND t.status='active'" + excludeCurrent + @"
 ORDER BY bm25(conversation_turn_fts),t.ts DESC LIMIT 8;";
-                        matched = Program.QuerySql(connection, lexicalSql, searchParameters);
+                        matched = ReignDatabase.QuerySql(connection, lexicalSql, searchParameters);
                     }
                     for (int index = 0; index < matched.Count; index++)
                     {
@@ -302,7 +302,7 @@ ORDER BY bm25(conversation_turn_fts),t.ts DESC LIMIT 8;";
                 string turnId = ReadString(payload, "sourceId", "");
                 if (string.IsNullOrWhiteSpace(turnId)) continue;
                 var existing = matched.FirstOrDefault(r => ReadString(r,"turn_id","") == turnId);
-                Dictionary<string, object> row = existing ?? Program.QuerySql(connection, @"SELECT t.* FROM conversation_turns t
+                Dictionary<string, object> row = existing ?? ReignDatabase.QuerySql(connection, @"SELECT t.* FROM conversation_turns t
 JOIN conversation_sessions s ON s.session_id=t.session_id WHERE t.turn_id=$id AND " + MemorySessionObserverSql("s", "t") + @" AND t.status='active'" + excludeCurrent + " LIMIT 1;",
                     new Dictionary<string, object> { ["id"] = turnId, ["npc"] = npcId, ["excluded_session"] = excludedSessionId ?? "" }).FirstOrDefault();
                 if (row == null) continue;
@@ -336,7 +336,7 @@ JOIN conversation_sessions s ON s.session_id=t.session_id WHERE t.turn_id=$id AN
             double targetDay = ReadDouble(route, "targetWorldDay", -1d);
             if (matched.Count == 0 && targetDay >= 0d)
             {
-                matched = Program.QuerySql(connection, @"SELECT t.* FROM conversation_turns t
+                matched = ReignDatabase.QuerySql(connection, @"SELECT t.* FROM conversation_turns t
 JOIN conversation_sessions s ON s.session_id=t.session_id WHERE " + MemorySessionObserverSql("s", "t") + @" AND t.status='active'" + excludeCurrent + @"
 ORDER BY ABS(t.world_day-$day),t.ts DESC LIMIT 12;", new Dictionary<string, object> { ["npc"] = npcId, ["day"] = targetDay, ["excluded_session"] = excludedSessionId ?? "" })
                     .Where(row => ConversationSessionContainsSourceBearingPlayerTurn(connection,
@@ -344,7 +344,7 @@ ORDER BY ABS(t.world_day-$day),t.ts DESC LIMIT 12;", new Dictionary<string, obje
             }
             if (matched.Count == 0)
             {
-                matched = Program.QuerySql(connection, @"SELECT t.* FROM conversation_turns t
+                matched = ReignDatabase.QuerySql(connection, @"SELECT t.* FROM conversation_turns t
 JOIN conversation_sessions s ON s.session_id=t.session_id WHERE " + MemorySessionObserverSql("s", "t") + @" AND t.status='active'" + excludeCurrent + @"
 ORDER BY t.ts DESC LIMIT 16;", new Dictionary<string, object> { ["npc"] = npcId, ["excluded_session"] = excludedSessionId ?? "" })
                     .Where(row => ConversationSessionContainsSourceBearingPlayerTurn(connection,
@@ -397,7 +397,7 @@ ORDER BY t.ts DESC LIMIT 16;", new Dictionary<string, object> { ["npc"] = npcId,
         {
             string sessionId = ReadString(anchor, "session_id", "");
             int ordinal = ReadInt(anchor, "turn_order", 0);
-            Dictionary<string, object> sourceSession = Program.QuerySql(connection,
+            Dictionary<string, object> sourceSession = ReignDatabase.QuerySql(connection,
                 "SELECT * FROM conversation_sessions WHERE session_id=$session LIMIT 1;",
                 new Dictionary<string, object> { ["session"] = sessionId }).FirstOrDefault()
                 ?? new Dictionary<string, object>();
@@ -419,7 +419,7 @@ ORDER BY t.ts DESC LIMIT 16;", new Dictionary<string, object> { ["npc"] = npcId,
                 ? "Source semantics: we/us/here refer to this recorded session; listed participants heard this conversation but are not automatically witnesses to events described within it.\n"
                 : "Historical deictic terms in this source (we/us/here/present/everyone/all three) refer only to the source conversation, never to the current group. Its participant list proves who heard this source conversation, not who witnessed an older event described inside it. Only an explicit source-event witness link or the current NPC's own attributed first-person line establishes firsthand participation; another NPC's collective wording cannot override this NPC's denial or missing witness evidence.\n";
             string sourceHeader = sourceMetadata + sourceSemantics;
-            List<Dictionary<string, object>> expanded = Program.QuerySql(connection, @"SELECT * FROM conversation_turns
+            List<Dictionary<string, object>> expanded = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_turns
 WHERE session_id=$session AND status='active'
  AND turn_order BETWEEN $start AND $end ORDER BY turn_order;",
                 new Dictionary<string, object> { ["session"] = sessionId, ["start"] = Math.Max(0, ordinal - 4), ["end"] = ordinal + 4 }).Where(t => PrecisionTurnVisible(t, npcId, knowledge, connection)).ToList();
@@ -430,7 +430,7 @@ WHERE session_id=$session AND status='active'
             var wholeExchange = expanded.Where(turn => ReadString(turn, "turn_id", "") == anchorTurnId
                 || (anchorExchangeId.Length > 0 && ReadString(turn, "exchange_id", "") == anchorExchangeId)).ToList();
             if (preserveWholeExchange && anchorExchangeId.Length > 0)
-                wholeExchange = Program.QuerySql(connection, @"SELECT * FROM conversation_turns
+                wholeExchange = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_turns
 WHERE session_id=$session AND exchange_id=$exchange AND status='active' ORDER BY turn_order;",
                     TestDict("session", sessionId, "exchange", anchorExchangeId))
                     .Where(turn => PrecisionTurnVisible(turn, npcId, knowledge, connection)).ToList();
@@ -860,13 +860,13 @@ WHERE session_id=$session AND exchange_id=$exchange AND status='active' ORDER BY
             if (cache.TryGetValue(sessionId, out bool cached)) return cached;
             // Caller already applied observer/time eligibility. NPC-only gossip is
             // source-bearing testimony even though no player spoke in that exchange.
-            if (Program.QuerySql(connection, "SELECT session_id FROM conversation_sessions WHERE session_id=$id AND channel='npc_gossip' LIMIT 1;",
+            if (ReignDatabase.QuerySql(connection, "SELECT session_id FROM conversation_sessions WHERE session_id=$id AND channel='npc_gossip' LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = sessionId }).Count > 0)
             {
                 cache[sessionId] = true;
                 return true;
             }
-            List<Dictionary<string, object>> playerTurns = Program.QuerySql(connection, @"SELECT text FROM conversation_turns
+            List<Dictionary<string, object>> playerTurns = ReignDatabase.QuerySql(connection, @"SELECT text FROM conversation_turns
 WHERE session_id=$session AND status='active' AND role='player' ORDER BY turn_order;",
                 new Dictionary<string, object> { ["session"] = sessionId });
             bool sourceBearing = playerTurns.Any(turn => !IsPureConversationRecallRequest(ReadString(turn, "text", "")));
@@ -878,7 +878,7 @@ WHERE session_id=$session AND status='active' AND role='player' ORDER BY turn_or
             string excludedSessionId, int charBudget, int turnLimit, Program.KnowledgeAccessContext knowledge = null)
         {
             string exclusion = string.IsNullOrWhiteSpace(excludedSessionId) ? "" : " AND session_id<>$excluded_session";
-            List<Dictionary<string, object>> sessions = Program.QuerySql(connection, @"SELECT * FROM conversation_sessions
+            List<Dictionary<string, object>> sessions = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_sessions
 WHERE status='closed' AND (npc_id=$npc OR " + MemoryJsonContainsSql("participants_json","$npc") + ")" + exclusion + @"
 ORDER BY end_ts DESC,start_ts DESC,session_id DESC;",
                 new Dictionary<string, object>
@@ -892,7 +892,7 @@ ORDER BY end_ts DESC,start_ts DESC,session_id DESC;",
             foreach (Dictionary<string, object> session in sessions)
             {
                 string candidateSessionId = ReadString(session, "session_id", "");
-                List<Dictionary<string, object>> sessionTurns = Program.QuerySql(connection, @"SELECT * FROM conversation_turns
+                List<Dictionary<string, object>> sessionTurns = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_turns
 WHERE session_id=$session AND status='active'
 ORDER BY turn_order DESC,turn_id DESC;", new Dictionary<string, object> { ["session"] = candidateSessionId }).Where(t => PrecisionTurnVisible(t, npcId, knowledge, connection)).ToList();
                 // Recall probes are evidence that the probe occurred, but must not displace the

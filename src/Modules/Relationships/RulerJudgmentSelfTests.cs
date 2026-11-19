@@ -109,8 +109,8 @@ namespace ReignBetaServer
                     "operationId", "submission_once", "deltas", new[] { delta });
                 var first = RulerRelationsApi("relations", payment); var replay = RulerRelationsApi("relations", payment);
                 Check("consequence_receipt_and_replay", ReadBool(first, "ok", false) && ReadBool(replay, "replay", false));
-                using var c = Program.OpenCampaignConnection(campaign);
-                var pair = Program.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", AmbientPairKey("prisoner", "victor"))).Single();
+                using var c = ReignDatabase.OpenCampaignConnection(campaign);
+                var pair = ReignDatabase.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", AmbientPairKey("prisoner", "victor"))).Single();
                 Check("submission_is_directional_exact_and_not_repeated", ReadInt(pair, "affinity_a_to_b", -1) == 75 && ReadInt(pair, "affinity_b_to_a", -1) == 0);
                 delta["delta"] = -30; delta["reason"] = "unauthorized_execution";
                 Check("changed_receipt_terms_rejected", !ReadBool(RulerRelationsApi("relations", payment), "ok", true));

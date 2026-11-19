@@ -32,13 +32,10 @@ namespace ReignBetaServer
             payload = memory.Payload;
             if (creator != null) payload["hero"] = creator;
             playerText = phase == "conversation" ? ReadString(payload, "playerText", "") : "";
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS court_life_turns(
-turn_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,matter_id TEXT NOT NULL,actor_id TEXT NOT NULL,
-phase TEXT NOT NULL,player_text TEXT NOT NULL,reply_text TEXT NOT NULL,created_ts INTEGER NOT NULL);");
-                var existing = Program.QuerySql(connection, "SELECT player_text,reply_text FROM court_life_turns WHERE turn_id=$id AND timeline_id=$timeline AND matter_id=$matter AND actor_id=$actor;",
-                    new Dictionary<string, object> { ["id"] = turnId, ["timeline"] = timeline, ["matter"] = matterId, ["actor"] = actorId }).FirstOrDefault();
+                CourtSchema.CreateCourtLifeTurns(connection);
+                var existing = CourtStore.SelectCourtLifeTurns(connection, new Dictionary<string, object> { ["id"] = turnId, ["timeline"] = timeline, ["matter"] = matterId, ["actor"] = actorId }).FirstOrDefault();
                 if (existing != null)
                 {
                     var replay = DialogueService.ReadConversationInputReplay(campaignId, payload, actorId);
@@ -74,8 +71,7 @@ phase TEXT NOT NULL,player_text TEXT NOT NULL,reply_text TEXT NOT NULL,created_t
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The visitor did not return a valid visible reply." };
             DialogueService.PublishRouteConversation(memory, reply, ReadString(payload, "speakerName", actorId), connection =>
             {
-                Program.ExecuteSql(connection, "INSERT OR IGNORE INTO court_life_turns(turn_id,timeline_id,matter_id,actor_id,phase,player_text,reply_text,created_ts) VALUES($id,$timeline,$matter,$actor,$phase,$player,$reply,$ts);",
-                    new Dictionary<string, object> { ["id"] = turnId, ["timeline"] = timeline, ["matter"] = matterId, ["actor"] = actorId,
+                CourtStore.InsertOrIgnoreCourtLifeTurns(connection, new Dictionary<string, object> { ["id"] = turnId, ["timeline"] = timeline, ["matter"] = matterId, ["actor"] = actorId,
                         ["phase"] = phase, ["player"] = playerText, ["reply"] = reply, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
             });
             return DialogueService.CompleteRouteConversationDelivery(memory, new Dictionary<string, object> { ["ok"] = true, ["reply"] = reply, ["turnId"] = turnId,

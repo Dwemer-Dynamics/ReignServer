@@ -75,11 +75,11 @@ namespace ReignBetaServer
             string campaign = "native_relation_receipt_test_" + Guid.NewGuid().ToString("N");
             try
             {
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     EnsureConversationRelationshipSchema(connection);
                     foreach (string id in new[] { "a", "b", "legacy", "replay" })
-                        Program.ExecuteSql(connection, @"INSERT INTO conversation_relationship_receipts(receipt_id,campaign_id,exchange_id,observer_id,target_id,
+                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_relationship_receipts(receipt_id,campaign_id,exchange_id,observer_id,target_id,
 final_delta,prior_native_relation,resulting_native_relation,native_pair_delta,created_ts)
 VALUES($id,$campaign,$id,$observer,'player',3,10,13,3,1);", TestDict("id", id, "campaign", campaign, "observer", id == "b" ? "other" : "npc"));
                 }
@@ -88,13 +88,13 @@ VALUES($id,$campaign,$id,$observer,'player',3,10,13,3,1);", TestDict("id", id, "
                 Dictionary<string, object> Ack(string[] ids, Dictionary<string, object> value) => ConversationRelationshipNativeReceiptApi(
                     TestDict("campaignId", campaign, "receiptIds", ids, "nativeReceipt", value));
                 Check("wrong_pair_is_rejected_before_any_batch_write", !ReadBool(Ack(new[] { "a", "b" }, measured), "ok", true));
-                using (var connection = Program.OpenCampaignConnection(campaign))
-                    Check("mixed_pair_rejection_is_atomic", Program.QuerySql(connection, "SELECT * FROM conversation_relationship_receipts WHERE native_application_status='applied';").Count == 0);
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                    Check("mixed_pair_rejection_is_atomic", ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_relationship_receipts WHERE native_application_status='applied';").Count == 0);
                 Check("wrong_requested_delta_is_rejected", !ReadBool(Ack(new[] { "a" }, new Dictionary<string, object>(measured) { ["delta"] = 4 }), "ok", true));
                 Check("matching_measured_receipt_is_accepted", ReadBool(Ack(new[] { "a" }, measured), "ok", false));
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var row = Program.QuerySql(connection, "SELECT * FROM conversation_relationship_receipts WHERE receipt_id='a';").Single();
+                    var row = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_relationship_receipts WHERE receipt_id='a';").Single();
                     var observation = TryParseJsonObject(ReadString(row, "native_receipt_json", "{}"));
                     Check("proposed_directional_and_observed_deltas_are_distinct", ReadInt(row, "final_delta", 0) == 3
                         && ReadInt(row, "native_pair_delta", 0) == 6 && ReadInt(observation, "plannedNativeDelta", 0) == 3
@@ -103,18 +103,18 @@ VALUES($id,$campaign,$id,$observer,'player',3,10,13,3,1);", TestDict("id", id, "
                 Check("acknowledgment_replay_is_noop", ReadInt(Ack(new[] { "a" }, measured), "updatedCount", -1) == 0);
                 Check("acknowledged_observation_cannot_change", !ReadBool(Ack(new[] { "a" }, new Dictionary<string, object>(measured) { ["nativeRelation"] = 17 }), "ok", true));
                 Ack(new[] { "legacy" }, TestDict("nativeRelation", 16, "delta", 3));
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var row = Program.QuerySql(connection, "SELECT * FROM conversation_relationship_receipts WHERE receipt_id='legacy';").Single();
+                    var row = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_relationship_receipts WHERE receipt_id='legacy';").Single();
                     Check("missing_legacy_before_value_is_not_invented", ReadInt(row, "prior_native_relation", 0) == 10
                         && ReadString(TryParseJsonObject(ReadString(row, "native_receipt_json", "{}")), "measurementStatus", "") == "legacy_unmeasured_transition");
-                    var pending = Program.QuerySql(connection, "SELECT * FROM conversation_relationship_receipts WHERE receipt_id='replay';").Single();
+                    var pending = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_relationship_receipts WHERE receipt_id='replay';").Single();
                     var changes = new Dictionary<string, Dictionary<string, object>>();
                     ReconcilePendingConversationNativeApplication(connection, pending,
                         new List<Dictionary<string, object>> { TestDict("subjectId", "npc", "targetId", "player", "nativeRelation", 13) },
                         "player", changes, 2L, true);
                     Check("matching_current_number_is_not_proof_of_application", changes.Count == 1
-                        && ReadString(Program.QuerySql(connection, "SELECT * FROM conversation_relationship_receipts WHERE receipt_id='replay';").Single(), "native_application_status", "") == "pending");
+                        && ReadString(ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_relationship_receipts WHERE receipt_id='replay';").Single(), "native_application_status", "") == "pending");
                 }
             }
             catch (Exception ex) { results.Add(TestDict("caseId", "native_relation_effect_suite_exception", "passed", false, "summary", Program.LimitText(ex.ToString(), 2500))); }

@@ -23,24 +23,24 @@ namespace ReignBetaServer
                     ["ok"] = false,
                     ["error"] = "Final gauntlet run was not found."
                 };
-            List<Dictionary<string, object>> cases = Program.QuerySql(
+            List<Dictionary<string, object>> cases = ReignDatabase.QuerySql(
                 connection,
                 @"SELECT * FROM final_gauntlet_cases
 WHERE run_id=$run ORDER BY created_ts,case_instance_id;",
                 new Dictionary<string, object> { ["run"] = runId });
-            List<Dictionary<string, object>> attempts = Program.QuerySql(
+            List<Dictionary<string, object>> attempts = ReignDatabase.QuerySql(
                 connection,
                 "SELECT * FROM final_gauntlet_attempts WHERE run_id=$run ORDER BY case_instance_id,attempt_number;",
                 new Dictionary<string, object> { ["run"] = runId });
-            List<Dictionary<string, object>> assertions = Program.QuerySql(
+            List<Dictionary<string, object>> assertions = ReignDatabase.QuerySql(
                 connection,
                 "SELECT * FROM final_gauntlet_assertions WHERE run_id=$run ORDER BY case_instance_id,assertion_id;",
                 new Dictionary<string, object> { ["run"] = runId });
-            List<Dictionary<string, object>> evidence = Program.QuerySql(
+            List<Dictionary<string, object>> evidence = ReignDatabase.QuerySql(
                 connection,
                 "SELECT * FROM final_gauntlet_evidence WHERE run_id=$run ORDER BY case_instance_id,evidence_key;",
                 new Dictionary<string, object> { ["run"] = runId });
-            List<Dictionary<string, object>> providerCalls = Program.QuerySql(
+            List<Dictionary<string, object>> providerCalls = ReignDatabase.QuerySql(
                 connection,
                 "SELECT * FROM final_gauntlet_provider_calls WHERE run_id=$run ORDER BY ordinal;",
                 new Dictionary<string, object> { ["run"] = runId });

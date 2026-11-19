@@ -73,7 +73,7 @@ of at most about 1,500 lines, grouped by area:
 
 | Folder | `Program.<Area>.cs` files |
 |---|---|
-| Platform | `HttpIngress` (ingress limits, `ReadRequest`, response writers), `CampaignSql` (`OpenCampaignConnection`, campaign schema caches, `ExecuteSql`/`QuerySql`), `CampaignFiles` (campaign directories and JSON file IO), `Settings`, `PromptTemplates`, `DefaultPromptTemplates`, `LlmTransport` (`ChatWithLlm`, provider requests), `ConversationResponses` (structured-response repair, visible-reply sanitising), `LogsAndAudit`, `PipelineTestRunner` and `DefaultTestCases` (the `/tests/*` prompt test cases), and the action pipeline: `DialogueActions`, `ActionGates`, `ActionPlanner`, `ActionRouter`, `DirectiveTerms`, `DirectivePackages`, `ActionReferences`, `ActionValidation`, `ActionQueue` |
+| Platform | `HttpIngress` (ingress limits, `ReadRequest`, response writers), `CampaignFiles` (campaign directories and JSON file IO), `Settings`, `PromptTemplates`, `DefaultPromptTemplates`, `LlmTransport` (`ChatWithLlm`, provider requests), `ConversationResponses` (structured-response repair, visible-reply sanitising), `LogsAndAudit`, `PipelineTestRunner` and `DefaultTestCases` (the `/tests/*` prompt test cases), and the action pipeline: `DialogueActions`, `ActionGates`, `ActionPlanner`, `ActionRouter`, `DirectiveTerms`, `DirectivePackages`, `ActionReferences`, `ActionValidation`, `ActionQueue` |
 | Dialogue | `MemoryStore` (event ingest, memory APIs and writes, consolidation), `MemoryPacket` (memory packets, knowledge visibility), `MemoryRetrieval`, `ContextPulls`, `DialogueTurns` (`/dialogue/respond`, `/dialogue/history`), `EventConversations` (social events, party chat, generated wilderness plans), `PromptContext` (prompt transcripts and context text) |
 | Characters | `CharacterConstruction` (upserts, portrait roster, construction and enrichment), `CharacterProfiles` (profile upsert, schema, diagnostics, construction prompt and defaults) |
 | Portraits | `PortraitRequests` (the portrait register, status, request and diagnose routes) |
@@ -328,12 +328,22 @@ lands.
    purpose: the private `V` factories in `CharactersService` (`string, int, bool`) and `RelationshipsService`
    (`int, int, int, int`) each build a nested type of their own module, are called only from their own file, and
    their parameter lists cannot convert into each other. What stays `Program` is the Platform core: the entry point,
-   `HandleClient` and the route table, settings, the campaign connection and `QuerySql`/`ExecuteSql` state,
+   `HandleClient` and the route table, settings,
    providers, the main turn handlers (now in `Program.<Area>.cs` partial files, see
    [Process composition](#process-composition)) and the verification lab, plus the module route files. Server
    source-text contracts read `Program` through `VerificationSourceLocator.ReadServerTypeSourceText(serverRoot,
    "Program")` (every product file declaring the partial class), so moving members between its files keeps them
    valid.
+4a. Data layer (P3-1): `Platform/Data/ReignDatabase.cs` is the data core (`OpenCampaignConnection`, the campaign
+   schema caches, `ExecuteSql`, `QuerySql`, `EnsureDatabaseColumn`; formerly `Program.CampaignSql.cs`), and the
+   low-level PostgreSQL types live in `Persistence/Data`. Every module owns its SQL under `Modules/<Module>/Data`:
+   `<Module>Store` holds its statements, `<Module>Schema` its `CREATE`/`ALTER`/`DROP` and column DDL, and the
+   `<Module>SelfTestStore`/`<Module>SelfTestSchema` classes (files named `*SelfTests*`, compiled only into the
+   verification build) hold the statements used only by self-tests. Module code calls named store methods
+   (for example `CourtStore.SelectCourtPlots(connection, parameters)`); a statement's text is kept verbatim, and
+   the non-literal pieces of a composed statement are passed as arguments in their original order. Statements a
+   module composes at run time use the store's `QuerySql`/`ExecuteSql` pass-throughs with text kept in the store.
+   The `Ensure*Schema` methods still run the same DDL in the same order, so the fresh-install schema is unchanged.
 5. Per-campaign versioned migrations: each module's `Ensure*` DDL becomes ordered migrations under one runner,
    following the `reign_meta` pattern, and runtime `Ensure*` calls leave hot paths.
 6. Typed request and response DTOs in `Reign.Core.Contracts` for client-facing routes, module by module.

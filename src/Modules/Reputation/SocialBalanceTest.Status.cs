@@ -16,7 +16,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> SocialBalancePersistenceDatabaseSnapshot(
             string campaignId, string timelineId)
         {
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureSocialReputationSchema(connection);
                 EnsureCourtSocialReputationSchema(connection);
@@ -24,34 +24,34 @@ namespace ReignBetaServer
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId
                 };
-                List<Dictionary<string, object>> signals = Program.QuerySql(connection, @"SELECT exchange_id,signal_id,
+                List<Dictionary<string, object>> signals = ReignDatabase.QuerySql(connection, @"SELECT exchange_id,signal_id,
 session_id,signal_type,speaker_id,target_id,supporting_quote,accepted,rejection_reason,evidence_json
 FROM court_social_signal_evidence WHERE campaign_id=$campaign AND timeline_id=$timeline
 ORDER BY exchange_id,signal_id;", parameters);
-                List<Dictionary<string, object>> signalReceipts = Program.QuerySql(connection, @"SELECT session_id,signal_key,
+                List<Dictionary<string, object>> signalReceipts = ReignDatabase.QuerySql(connection, @"SELECT session_id,signal_key,
 signal_type,speaker_id,target_id,result_json FROM court_conversation_signal_receipts
 WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY session_id,signal_key;", parameters);
-                List<Dictionary<string, object>> favoring = Program.QuerySql(connection, @"SELECT ruler_id,favorite_id,
+                List<Dictionary<string, object>> favoring = ReignDatabase.QuerySql(connection, @"SELECT ruler_id,favorite_id,
 exchange_count,last_exchange_id,last_world_day FROM court_player_favoring_exchanges
 WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY ruler_id,favorite_id;", parameters);
-                List<Dictionary<string, object>> favoringReceipts = Program.QuerySql(connection, @"SELECT ruler_id,favorite_id,
+                List<Dictionary<string, object>> favoringReceipts = ReignDatabase.QuerySql(connection, @"SELECT ruler_id,favorite_id,
 exchange_id,world_day FROM court_player_favoring_exchange_receipts
 WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY ruler_id,favorite_id,exchange_id;", parameters);
-                List<Dictionary<string, object>> intimacy = Program.QuerySql(connection, @"SELECT signal_id,player_id,partner_id,
+                List<Dictionary<string, object>> intimacy = ReignDatabase.QuerySql(connection, @"SELECT signal_id,player_id,partner_id,
 eligible,exposed,probability,roll,result_json FROM court_intimacy_exposure_receipts
 WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY signal_id;", parameters);
-                List<Dictionary<string, object>> flirtTargets = Program.QuerySql(connection, @"SELECT subject_id,target_id,
+                List<Dictionary<string, object>> flirtTargets = ReignDatabase.QuerySql(connection, @"SELECT subject_id,target_id,
 first_session_id,first_world_day,last_session_id,last_world_day,incident_count FROM court_flirt_targets
 WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY subject_id,target_id;", parameters);
-                int activeLegacyReputations = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+                int activeLegacyReputations = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM character_reputations WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='active'
 AND (tag_id='favored_by' OR tag_id LIKE 'favored_by:%');", parameters).FirstOrDefault(), "count", 0);
-                int activeLegacyRumors = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
+                int activeLegacyRumors = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM rumor_subject_tags tags JOIN rumor_occurrences occurrences
 ON occurrences.occurrence_id=tags.occurrence_id
 WHERE occurrences.campaign_id=$campaign AND occurrences.timeline_id=$timeline AND tags.status='active'
 AND (tags.tag_id='favored_by' OR tags.tag_id LIKE 'favored_by:%');", parameters).FirstOrDefault(), "count", 0);
-                bool migrationMarker = Program.QuerySql(connection,
+                bool migrationMarker = ReignDatabase.QuerySql(connection,
                     "SELECT 1 FROM schema_meta WHERE key='ruler_favoring_supersession_v1' AND value='1' LIMIT 1;")
                     .Any();
                 Dictionary<string, object> sections = new Dictionary<string, object>
@@ -117,11 +117,11 @@ AND (tags.tag_id='favored_by' OR tags.tag_id LIKE 'favored_by:%');", parameters)
             {
                 using (ReignDbConnection connection = OpenSocialBalanceDatabase())
                 {
-                    if (!Program.QuerySql(connection,
+                    if (!ReignDatabase.QuerySql(connection,
                         "SELECT 1 FROM social_balance_runs WHERE run_id=$run AND campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
                         new Dictionary<string, object> { ["run"] = runId, ["campaign"] = campaignId, ["timeline"] = timelineId }).Any())
                         return SocialBalanceError("The run is not enrolled for this campaign and timeline.");
-                    Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO social_balance_snapshots(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO social_balance_snapshots(
 campaign_id,timeline_id,run_id,period_key,world_day,snapshot_json,created_ts)
 VALUES($campaign,$timeline,$run,$period,$day,$snapshot,$now);",
                         new Dictionary<string, object>
@@ -253,14 +253,14 @@ VALUES($campaign,$timeline,$run,$period,$day,$snapshot,$now);",
                 || !Program.HasCampaignPostgreSqlStorage(campaignId)) return result;
             try
             {
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureSocialReputationSchema(connection);
                     Dictionary<string, object> parameters = new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId
                     };
-                    List<Dictionary<string, object>> rumorByTag = Program.QuerySql(connection, @"SELECT rst.tag_id,
+                    List<Dictionary<string, object>> rumorByTag = ReignDatabase.QuerySql(connection, @"SELECT rst.tag_id,
 COUNT(*) AS occurrence_count,COUNT(DISTINCT rst.subject_id) AS subject_count,
 SUM(rst.rumor_value) AS raw_effect_sum,MIN(ro.world_day) AS oldest_day,
 MAX(ro.world_day) AS newest_day,MAX(ro.expires_day) AS latest_expiration_day
@@ -268,12 +268,12 @@ FROM rumor_subject_tags rst JOIN rumor_occurrences ro ON ro.occurrence_id=rst.oc
 WHERE ro.campaign_id=$campaign AND ro.timeline_id=$timeline
 AND ro.status='active' AND rst.status='active'
 GROUP BY rst.tag_id ORDER BY rst.tag_id;", parameters);
-                    List<Dictionary<string, object>> reputationByTag = Program.QuerySql(connection, @"SELECT tag_id,
+                    List<Dictionary<string, object>> reputationByTag = ReignDatabase.QuerySql(connection, @"SELECT tag_id,
 COUNT(*) AS subject_count,SUM(reputation_value) AS raw_effect_sum,
 MIN(acquired_day) AS oldest_day,MAX(acquired_day) AS newest_day
 FROM character_reputations WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='active'
 GROUP BY tag_id ORDER BY tag_id;", parameters);
-                    List<Dictionary<string, object>> subjects = Program.QuerySql(connection, @"SELECT subject_id,
+                    List<Dictionary<string, object>> subjects = ReignDatabase.QuerySql(connection, @"SELECT subject_id,
 SUM(rumor_count) AS active_rumor_count,SUM(reputation_count) AS active_reputation_count,
 SUM(rumor_effect) AS raw_rumor_effect,SUM(reputation_effect) AS raw_reputation_effect
 FROM (
@@ -287,7 +287,7 @@ FROM (
  FROM character_reputations WHERE campaign_id=$campaign AND timeline_id=$timeline
  AND status='active' GROUP BY subject_id
 ) social GROUP BY subject_id ORDER BY subject_id;", parameters);
-                    List<Dictionary<string, object>> projections = Program.QuerySql(connection, @"WITH directional_views AS (
+                    List<Dictionary<string, object>> projections = ReignDatabase.QuerySql(connection, @"WITH directional_views AS (
 SELECT COALESCE(sb.standing_value,0) AS social_modifier
 FROM relationship_pair_chemistry p
 LEFT JOIN character_public_standing sb ON sb.campaign_id=$campaign
@@ -306,7 +306,7 @@ SUM(CASE WHEN social_modifier<=-20 THEN 1 ELSE 0 END) AS rebellion_pressure_coun
 MIN(social_modifier) AS minimum_modifier,MAX(social_modifier) AS maximum_modifier,
 AVG(social_modifier) AS average_modifier
 FROM directional_views;", parameters);
-                    List<Dictionary<string, object>> relationships = Program.QuerySql(connection, @"WITH effective_pairs AS (
+                    List<Dictionary<string, object>> relationships = ReignDatabase.QuerySql(connection, @"WITH effective_pairs AS (
 SELECT
 MAX(-100,MIN(100,p.affinity_a_to_b+COALESCE(sb.standing_value,0))) AS effective_a_to_b,
 MAX(-100,MIN(100,p.affinity_b_to_a+COALESCE(sa.standing_value,0))) AS effective_b_to_a
@@ -323,12 +323,12 @@ SUM(CASE WHEN effective_a_to_b<=-50 OR effective_b_to_a<=-50 THEN 1 ELSE 0 END) 
 MIN(MIN(effective_a_to_b,effective_b_to_a)) AS minimum_effective_affinity,
 MAX(MAX(effective_a_to_b,effective_b_to_a)) AS maximum_effective_affinity
 FROM effective_pairs;", parameters);
-                    List<Dictionary<string, object>> lifecycle = Program.QuerySql(connection, @"SELECT event_type,
+                    List<Dictionary<string, object>> lifecycle = ReignDatabase.QuerySql(connection, @"SELECT event_type,
 COUNT(*) AS event_count,COUNT(DISTINCT subject_id) AS subject_count,
 MIN(world_day) AS oldest_day,MAX(world_day) AS newest_day
 FROM reputation_lifecycle_events WHERE campaign_id=$campaign AND timeline_id=$timeline
 GROUP BY event_type ORDER BY event_type;", parameters);
-                    List<Dictionary<string, object>> reasons = Program.QuerySql(connection, @"SELECT reason_status,
+                    List<Dictionary<string, object>> reasons = ReignDatabase.QuerySql(connection, @"SELECT reason_status,
 COUNT(*) AS activation_count,AVG(generation_attempts) AS average_attempts
 FROM reputation_activations WHERE campaign_id=$campaign AND timeline_id=$timeline
 GROUP BY reason_status ORDER BY reason_status;", parameters);
@@ -347,7 +347,7 @@ GROUP BY reason_status ORDER BY reason_status;", parameters);
                     };
                     List<Dictionary<string, object>> courtRumors = rumorByTag.Where(isCourtTag).ToList();
                     List<Dictionary<string, object>> courtReputations = reputationByTag.Where(isCourtTag).ToList();
-                    List<Dictionary<string, object>> courtPopularityMetrics = Program.QuerySql(connection, @"SELECT
+                    List<Dictionary<string, object>> courtPopularityMetrics = ReignDatabase.QuerySql(connection, @"SELECT
 subject_id,positive_count,negative_count,dynamic_value,calculated_day
 FROM court_dynamic_reputation_metrics
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND domain='popularity'
@@ -505,7 +505,7 @@ ORDER BY subject_id;", parameters);
             {
                 using (ReignDbConnection connection = OpenSocialBalanceDatabase())
                 {
-                    List<Dictionary<string, object>> caseRows = Program.QuerySql(connection, @"SELECT *
+                    List<Dictionary<string, object>> caseRows = ReignDatabase.QuerySql(connection, @"SELECT *
 FROM social_balance_case_results WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND ($run='' OR run_id=$run) AND ($case='' OR case_id=$case) ORDER BY case_id,period_key,updated_ts;",
                         new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["run"] = runId, ["case"] = caseId });
@@ -529,11 +529,11 @@ AND ($run='' OR run_id=$run) AND ($case='' OR case_id=$case) ORDER BY case_id,pe
                         status["longitudinalCheckpoints"] = new List<object>();
                         return status;
                     }
-                    status["snapshots"] = Program.QuerySql(connection, @"SELECT period_key,world_day,snapshot_json,created_ts
+                    status["snapshots"] = ReignDatabase.QuerySql(connection, @"SELECT period_key,world_day,snapshot_json,created_ts
 FROM social_balance_snapshots WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND ($run='' OR run_id=$run) ORDER BY world_day,period_key;",
                         new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["run"] = runId });
-                    status["longitudinalCheckpoints"] = Program.QuerySql(connection, @"SELECT run_id,world_day,snapshot_json,created_ts
+                    status["longitudinalCheckpoints"] = ReignDatabase.QuerySql(connection, @"SELECT run_id,world_day,snapshot_json,created_ts
 FROM social_balance_longitudinal_checkpoints WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND ($run='' OR run_id=$run) ORDER BY world_day;",
                         new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["run"] = runId })
@@ -580,7 +580,7 @@ AND ($run='' OR run_id=$run) ORDER BY world_day;",
             {
                 using (ReignDbConnection connection = OpenSocialBalanceDatabase())
                 {
-                    bool found = Program.QuerySql(connection, @"SELECT 1 FROM social_balance_runs
+                    bool found = ReignDatabase.QuerySql(connection, @"SELECT 1 FROM social_balance_runs
 WHERE run_id=$run AND campaign_id=$campaign AND timeline_id=$timeline
 AND save_prefix=$prefix AND main_hero_id=$hero AND status IN ('prepared','running','paused') LIMIT 1;",
                         new Dictionary<string, object>
@@ -610,7 +610,7 @@ AND save_prefix=$prefix AND main_hero_id=$hero AND status IN ('prepared','runnin
                 {
                     if (string.IsNullOrWhiteSpace(runId))
                     {
-                        run = Program.QuerySql(connection, @"SELECT * FROM social_balance_runs
+                        run = ReignDatabase.QuerySql(connection, @"SELECT * FROM social_balance_runs
 WHERE ($campaign='' OR campaign_id=$campaign) AND ($timeline='' OR timeline_id=$timeline)
 ORDER BY updated_ts DESC LIMIT 1;",
                             new Dictionary<string, object> { ["campaign"] = campaignId ?? "", ["timeline"] = timelineId ?? "" }).FirstOrDefault();
@@ -618,12 +618,12 @@ ORDER BY updated_ts DESC LIMIT 1;",
                     }
                     else
                     {
-                        run = Program.QuerySql(connection, "SELECT * FROM social_balance_runs WHERE run_id=$run LIMIT 1;",
+                        run = ReignDatabase.QuerySql(connection, "SELECT * FROM social_balance_runs WHERE run_id=$run LIMIT 1;",
                             new Dictionary<string, object> { ["run"] = runId }).FirstOrDefault();
                     }
                     campaignId = FirstNonEmpty(campaignId, ReadString(run, "campaign_id", ""));
                     timelineId = FirstNonEmpty(timelineId, ReadString(run, "timeline_id", "main"));
-                    rows = Program.QuerySql(connection, @"SELECT * FROM social_balance_case_results
+                    rows = ReignDatabase.QuerySql(connection, @"SELECT * FROM social_balance_case_results
 WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY case_id,period_key;",
                         new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId });
                 }
@@ -969,23 +969,23 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY case_id,period_ke
 
         private static void EnsureSocialBalanceSchema(ReignDbConnection connection)
         {
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS social_balance_runs(
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS social_balance_runs(
 run_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,
 save_prefix TEXT NOT NULL,main_hero_id TEXT NOT NULL,status TEXT NOT NULL,
 manifest_json TEXT NOT NULL,created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_social_balance_runs_campaign ON social_balance_runs(campaign_id,timeline_id,updated_ts);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS social_balance_case_results(
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_social_balance_runs_campaign ON social_balance_runs(campaign_id,timeline_id,updated_ts);");
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS social_balance_case_results(
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,case_id TEXT NOT NULL,period_key TEXT NOT NULL,
 run_id TEXT NOT NULL,scenario_version INTEGER NOT NULL,dependency_fingerprint TEXT NOT NULL,
 status TEXT NOT NULL,attempt_count INTEGER NOT NULL DEFAULT 0,evidence_json TEXT NOT NULL DEFAULT '{}',
 first_started_ts INTEGER NOT NULL,completed_ts INTEGER NOT NULL DEFAULT 0,updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,case_id,period_key));");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_social_balance_case_run ON social_balance_case_results(run_id,status,updated_ts);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS social_balance_snapshots(
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_social_balance_case_run ON social_balance_case_results(run_id,status,updated_ts);");
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS social_balance_snapshots(
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,run_id TEXT NOT NULL,period_key TEXT NOT NULL,
 world_day REAL NOT NULL,snapshot_json TEXT NOT NULL,created_ts INTEGER NOT NULL,
  PRIMARY KEY(campaign_id,timeline_id,period_key));");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS social_balance_longitudinal_checkpoints(
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS social_balance_longitudinal_checkpoints(
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,run_id TEXT NOT NULL,
 world_day REAL NOT NULL,snapshot_json TEXT NOT NULL,created_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,run_id,world_day));");

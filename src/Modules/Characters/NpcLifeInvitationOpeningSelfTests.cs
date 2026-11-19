@@ -51,14 +51,12 @@ namespace ReignBetaServer
                 ResolveNpcLifeInvitationOpening(state, leaveSource, hero, initialOff)?.Reference.Contains(leave.Purpose) == true
                 && !leave.DepartureDay.HasValue && !leave.ReturnDay.HasValue);
 
-            using var c = Program.OpenCampaignConnection(campaign);
+            using var c = ReignDatabase.OpenCampaignConnection(campaign);
             string generation = NpcLivesGeneration(c);
             var encounter = NpcEncounter(state, "player", hero, source);
             encounter.LastAcceptedDay = 20; encounter.SessionId = session;
             WriteNpcLives(c, state);
-            Program.ExecuteSql(c, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-VALUES($session,$campaign,$hero,'player','open',1,1,$audience,$payload);",
-                TestDict("session", session, "campaign", campaign, "hero", hero, "audience", Json.Serialize(new[] { "player", hero }),
+            CharactersSelfTestStore.InsertConversationSessions(c, TestDict("session", session, "campaign", campaign, "hero", hero, "audience", Json.Serialize(new[] { "player", hero }),
                     "payload", Json.Serialize(TestDict("timelineId", timeline))));
             var oldProvider = NpcOpeningTestProvider;
             using var release = new ManualResetEventSlim();
@@ -84,7 +82,7 @@ VALUES($session,$campaign,$hero,'player','open',1,1,$audience,$payload);",
                 Check("accepted_intro_has_one_turn_and_no_consent_progress_or_rewards", completed
                     && intro.OpeningText.Contains("verse") && intro.LastAcceptedDay == 20
                     && settled.OperationReceipts.TryGetValue(invitation.ReceiptKey, out var receipt) && receipt == intro.OpeningOperationId
-                    && Program.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id=$session;", TestDict("session", session)).Count == 1
+                    && CharactersSelfTestStore.SelectConversationTurns(c, TestDict("session", session)).Count == 1
                     && settled.Stories[0].Status == "invited" && settled.Stories[0].Evidence.Count == 0 && settled.Effects.Count == 0);
                 var replay = NpcLivesOpenApi("open", DeepCloneProfileDictionary(source), initialOff);
                 var ordinary = DeepCloneProfileDictionary(source); ordinary.Remove("npcLifeInvitationEntry");
@@ -114,7 +112,7 @@ VALUES($session,$campaign,$hero,'player','open',1,1,$audience,$payload);",
                 CompleteNpcOpening(c, copy, pending, TestDict(), mutation == "missing_draft" ? TestDict() : draft, generation, currentOptions);
                 Check("obsolete_or_failed_intro_cannot_publish_" + mutation, !pending.OpeningPending && pending.LastAcceptedDay == 20
                     && !copy.OperationReceipts.ContainsKey(invitation.ReceiptKey)
-                    && Program.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id=$session;", TestDict("session", session)).Count == 1);
+                    && CharactersSelfTestStore.SelectConversationTurns(c, TestDict("session", session)).Count == 1);
             }
             return results;
         }

@@ -12,12 +12,12 @@ namespace ReignBetaServer
     {
         private static void EnsureArrangedMarriageSchema(ReignDbConnection c)
         {
-            Program.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS arranged_marriage_periods (
+            ReignDatabase.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS arranged_marriage_periods (
 timeline_id TEXT NOT NULL,period_index INTEGER NOT NULL,world_day REAL NOT NULL,
 status TEXT NOT NULL,created_ts INTEGER NOT NULL,PRIMARY KEY(timeline_id,period_index));");
-            Program.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS arranged_marriage_effects (
+            ReignDatabase.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS arranged_marriage_effects (
 effect_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,proposal_id TEXT NOT NULL,delta INTEGER NOT NULL);");
-            Program.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS arranged_marriage_refusals (
+            ReignDatabase.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS arranged_marriage_refusals (
 refusal_key TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,proposal_id TEXT NOT NULL);");
         }
 
@@ -65,14 +65,14 @@ refusal_key TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,proposal_id TEXT NOT NULL
                 try
                 {
                 string leaderId=ReadString(clan,"leaderId",""),clanId=ReadString(clan,"clanId","");
-                if(Program.QuerySql(c,"SELECT roll_id FROM marriage_leader_rolls WHERE timeline_id=$t AND period_index=$p AND leader_id=$l;",
+                if(ReignDatabase.QuerySql(c,"SELECT roll_id FROM marriage_leader_rolls WHERE timeline_id=$t AND period_index=$p AND leader_id=$l;",
                     new Dictionary<string,object>{{"t",timeline},{"p",period},{"l",leaderId}}).Any())continue;
                 var leader=nobles.FirstOrDefault(x=>ReadString(x,"heroStringId","")==leaderId)??new Dictionary<string,object>();
                 var members=nobles.Where(x=>ReadString(x,"clanId","")==clanId&&ReadString(x,"spouseId","")=="").ToList();
                 double urgency=MarriageUrgency(clan,leader,members),chance=Program.ClampDouble(.01+.04*urgency,.01,.05);
                 double roll=StableUnit(campaign+"|"+timeline+"|marriage|"+period+"|"+leaderId);
                 string rollStatus=members.Count==0?"no_member":roll<chance?"passed":"failed";
-                Program.ExecuteSql(c,@"INSERT INTO marriage_leader_rolls(roll_id,timeline_id,period_index,leader_id,clan_id,world_day,chance,roll,urgency,status,payload_json,created_ts)
+                ReignDatabase.ExecuteSql(c,@"INSERT INTO marriage_leader_rolls(roll_id,timeline_id,period_index,leader_id,clan_id,world_day,chance,roll,urgency,status,payload_json,created_ts)
 VALUES($id,$t,$p,$l,$clan,$day,$chance,$roll,$u,$status,'{}',$ts);",new Dictionary<string,object>{{"id","marriage_roll_"+Guid.NewGuid().ToString("N")},{"t",timeline},{"p",period},{"l",leaderId},{"clan",clanId},{"day",day},{"chance",chance},{"roll",roll},{"u",urgency},{"status",rollStatus},{"ts",ts}});
                 rolls++;
                 WorldSimulationService.RecordWorldTestCounter(c,campaign,timeline,(int)Math.Floor(day),"marriages","leader_roll_"+period+"_"+leaderId,
@@ -101,7 +101,7 @@ VALUES($id,$t,$p,$l,$clan,$day,$chance,$roll,$u,$status,'{}',$ts);",new Dictiona
                     if(!ReadBool(quote,"royalException",false))refusalTerms.Remove("nativeYear");
                     string signature=Json.Serialize(new object[]{timeline,leaderId,ReadString(other,"leaderId",""),aid,bid,refusalTerms,approvalB>=25,available>=fee});
                     string key=Convert.ToBase64String(System.Security.Cryptography.SHA256.Create().ComputeHash(System.Text.Encoding.UTF8.GetBytes(signature)));
-                    if(refusal!=""&&Program.QuerySql(c,"SELECT refusal_key FROM arranged_marriage_refusals WHERE refusal_key=$k AND timeline_id=$t;",new Dictionary<string,object>{{"k",key},{"t",timeline}}).Any())continue;
+                    if(refusal!=""&&ReignDatabase.QuerySql(c,"SELECT refusal_key FROM arranged_marriage_refusals WHERE refusal_key=$k AND timeline_id=$t;",new Dictionary<string,object>{{"k",key},{"t",timeline}}).Any())continue;
                     if(ReadBool(quote,"royalException",false)&&RoyalMarriageReserved(c,timeline,a,b,year))continue;
                     choices.Add(new Dictionary<string,object>{{"a",a},{"b",b},{"other",other},{"otherLeader",otherLeader},{"quote",quote},
                         {"approvalA",approvalA},{"approvalB",approvalB},{"rank",ArrangedMarriagePolicy.Rank(approvalA,approvalB,ReadInt(clan,"tier",0),ReadInt(other,"tier",0),ReadInt(quote,"fiefsA",0),ReadInt(quote,"fiefsB",0))},
@@ -130,40 +130,40 @@ VALUES($id,$t,$p,$l,$clan,$day,$chance,$roll,$u,$status,'{}',$ts);",new Dictiona
         }
 
         private static double ReservedMarriageGold(ReignDbConnection c,string timeline,string payer)
-            => Program.QuerySql(c,"SELECT payload_json FROM marriage_evaluations WHERE timeline_id=$t AND status IN ('approved','player_court_pending','awaiting_diplomacy','court_resolving','recovery');",new Dictionary<string,object>{{"t",timeline}})
+            => ReignDatabase.QuerySql(c,"SELECT payload_json FROM marriage_evaluations WHERE timeline_id=$t AND status IN ('approved','player_court_pending','awaiting_diplomacy','court_resolving','recovery');",new Dictionary<string,object>{{"t",timeline}})
                 .Select(x=>ReadDictionary(TryParseJsonObject(ReadString(x,"payload_json","{}")),"marriageTerms"))
                 .Where(x=>x!=null&&ReadString(x,"payerId","")==payer).Sum(x=>ReadDouble(x,"fee",0));
 
         private static bool RoyalMarriageReserved(ReignDbConnection c,string timeline,Dictionary<string,object> a,Dictionary<string,object> b,int year)
-            => Program.QuerySql(c,"SELECT hero_a_id,hero_b_id,payload_json FROM marriage_evaluations WHERE timeline_id=$t AND status IN ('approved','player_court_pending','awaiting_diplomacy','court_resolving','recovery','executed');",new Dictionary<string,object>{{"t",timeline}})
+            => ReignDatabase.QuerySql(c,"SELECT hero_a_id,hero_b_id,payload_json FROM marriage_evaluations WHERE timeline_id=$t AND status IN ('approved','player_court_pending','awaiting_diplomacy','court_resolving','recovery','executed');",new Dictionary<string,object>{{"t",timeline}})
                 .Any(row=> {var terms=ReadDictionary(TryParseJsonObject(ReadString(row,"payload_json","{}")),"marriageTerms");return terms!=null&&ReadInt(terms,"nativeYear",-1)==year&&ReadBool(terms,"royalException",false)
                     &&new[]{ReadString(a,"heroStringId",""),ReadString(b,"heroStringId","")}.Any(id=>id==ReadString(row,"hero_a_id","")||id==ReadString(row,"hero_b_id",""));});
 
         internal static void ApplyMarriageLeaderEffect(ReignDbConnection c,string campaign,string timeline,string proposal,string from,string to,int delta,double day)
         {
             string key=proposal+"|leaders|"+from+"|"+to;
-            if(from==""||to==""||from==to||Program.QuerySql(c,"SELECT effect_id FROM arranged_marriage_effects WHERE effect_id=$k;",new Dictionary<string,object>{{"k",key}}).Any())return;
+            if(from==""||to==""||from==to||ReignDatabase.QuerySql(c,"SELECT effect_id FROM arranged_marriage_effects WHERE effect_id=$k;",new Dictionary<string,object>{{"k",key}}).Any())return;
             ApplyAuthoritativeRelationshipDelta(c,campaign,from,to,delta,day,"arranged_marriage_leaders",timeline,true);
-            Program.ExecuteSql(c,"INSERT INTO arranged_marriage_effects(effect_id,timeline_id,proposal_id,delta) VALUES($k,$t,$p,$d);",new Dictionary<string,object>{{"k",key},{"t",timeline},{"p",proposal},{"d",delta}});
+            ReignDatabase.ExecuteSql(c,"INSERT INTO arranged_marriage_effects(effect_id,timeline_id,proposal_id,delta) VALUES($k,$t,$p,$d);",new Dictionary<string,object>{{"k",key},{"t",timeline},{"p",proposal},{"d",delta}});
         }
 
         private static void RevalidateLegacyMarriageOffers(ReignDbConnection c,string timeline,double day)
         {
-            foreach(var row in Program.QuerySql(c,"SELECT evaluation_id,payload_json,world_day FROM marriage_evaluations WHERE timeline_id=$t AND status IN ('approved','awaiting_diplomacy','player_court_pending','court_resolving');",new Dictionary<string,object>{{"t",timeline}}))
+            foreach(var row in ReignDatabase.QuerySql(c,"SELECT evaluation_id,payload_json,world_day FROM marriage_evaluations WHERE timeline_id=$t AND status IN ('approved','awaiting_diplomacy','player_court_pending','court_resolving');",new Dictionary<string,object>{{"t",timeline}}))
             {
                 var quote=ReadDictionary(TryParseJsonObject(ReadString(row,"payload_json","{}")),"marriageTerms");
                 if(ReadInt(quote,"policyVersion",0)==ArrangedMarriagePolicy.Version && day-ReadDouble(row,"world_day",day)<=14d)continue;
                 string id=ReadString(row,"evaluation_id","");
-                Program.ExecuteSql(c,"UPDATE marriage_evaluations SET status='legacy_quote_required' WHERE evaluation_id=$id;",new Dictionary<string,object>{{"id",id}});
-                foreach(var action in Program.QuerySql(c,"SELECT director_action_id,payload_json FROM relationship_director_actions WHERE action_type='marriage' AND status IN ('pending','claimed');"))
+                ReignDatabase.ExecuteSql(c,"UPDATE marriage_evaluations SET status='legacy_quote_required' WHERE evaluation_id=$id;",new Dictionary<string,object>{{"id",id}});
+                foreach(var action in ReignDatabase.QuerySql(c,"SELECT director_action_id,payload_json FROM relationship_director_actions WHERE action_type='marriage' AND status IN ('pending','claimed');"))
                 {
                     if(ReadString(TryParseJsonObject(ReadString(action,"payload_json","{}")),"evaluationId","")!=id)continue;
                     string actionId=ReadString(action,"director_action_id","");
-                    Program.ExecuteSql(c,"UPDATE relationship_director_actions SET status='obsolete' WHERE director_action_id=$id;",TestDict("id",actionId));
-                    Program.ExecuteSql(c,"DELETE FROM relationship_marriage_reservations WHERE director_action_id=$id;",TestDict("id",actionId));
+                    ReignDatabase.ExecuteSql(c,"UPDATE relationship_director_actions SET status='obsolete' WHERE director_action_id=$id;",TestDict("id",actionId));
+                    ReignDatabase.ExecuteSql(c,"DELETE FROM relationship_marriage_reservations WHERE director_action_id=$id;",TestDict("id",actionId));
                 }
-                if(Program.QuerySql(c,"SELECT name FROM sqlite_master WHERE type='table' AND name='court_matters';").Any())
-                    Program.ExecuteSql(c,"UPDATE court_matters SET state='invalidated' WHERE timeline_id=$t AND source_key=$s AND state NOT IN ('resolved','refused','expired','invalidated');",TestDict("t",timeline,"s","marriage_evaluation:"+id));
+                if(ReignDatabase.QuerySql(c,"SELECT name FROM sqlite_master WHERE type='table' AND name='court_matters';").Any())
+                    ReignDatabase.ExecuteSql(c,"UPDATE court_matters SET state='invalidated' WHERE timeline_id=$t AND source_key=$s AND state NOT IN ('resolved','refused','expired','invalidated');",TestDict("t",timeline,"s","marriage_evaluation:"+id));
                 // Do not invoice or grandfather an old agreement. Native execution also rejects missing quotes.
             }
         }
@@ -178,7 +178,7 @@ VALUES($id,$t,$p,$l,$clan,$day,$chance,$roll,$u,$status,'{}',$ts);",new Dictiona
             if(!effects.Any(x=>ReadString(x,"type","")=="marriage_completed"))return;
             // Match the director/worker order: campaign ownership, then DB work.
             using var ownership = PersistenceService.EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaign));
-            using var c=Program.OpenCampaignConnection(campaign);EnsureRelationshipDirectorSchema(c);
+            using var c=ReignDatabase.OpenCampaignConnection(campaign);EnsureRelationshipDirectorSchema(c);
             string timeline=ReadString(record,"timelineId",WorldSimulationService.ActiveWorldHistoryTimeline(c));
             double day=ReadDouble(report,"worldDay",0);
             using var tx=c.BeginTransaction();
@@ -195,17 +195,17 @@ VALUES($id,$t,$p,$l,$clan,$day,$chance,$roll,$u,$status,'{}',$ts);",new Dictiona
             Check("fixture_is_internal",Program.IsInternalCampaignId(campaign));
             try
             {
-                using var c=Program.OpenCampaignConnection(campaign);
+                using var c=ReignDatabase.OpenCampaignConnection(campaign);
                 EnsureRelationshipDirectorSchema(c);EnsureMbtiRelationshipSchema(c);EnsureRelationshipLifecycleSchema(c);
                 EnsureNotableMbtiSchema(c);
                 EnsureRelationshipFlingSchemaCore(c);
                 foreach (var declaration in RelationshipMaintenanceShapes)
                 {
-                    var actualColumns = Program.QuerySql(c,@"SELECT a.attname AS name FROM pg_attribute a
+                    var actualColumns = ReignDatabase.QuerySql(c,@"SELECT a.attname AS name FROM pg_attribute a
 JOIN pg_class t ON t.oid=a.attrelid JOIN pg_namespace n ON n.oid=t.relnamespace
 WHERE n.nspname=current_schema() AND t.relname=$table AND a.attnum>0 AND NOT a.attisdropped;",
                         TestDict("table",declaration.Key)).Select(row=>ReadString(row,"name","")).ToHashSet(StringComparer.Ordinal);
-                    var actualIndexes = Program.QuerySql(c,@"SELECT index_row.relname AS name FROM pg_index i
+                    var actualIndexes = ReignDatabase.QuerySql(c,@"SELECT index_row.relname AS name FROM pg_index i
 JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid=t.relnamespace
 JOIN pg_class index_row ON index_row.oid=i.indexrelid
 WHERE n.nspname=current_schema() AND t.relname=$table AND NOT i.indisprimary;",
@@ -215,59 +215,59 @@ WHERE n.nspname=current_schema() AND t.relname=$table AND NOT i.indisprimary;",
                         && actualIndexes.SetEquals(declaration.Value.Indexes.Split(',',StringSplitOptions.RemoveEmptyEntries)));
                 }
                 WorldSimulationService.EnsureWorldTestSchema(c); ReputationService.EnsureRumorSchema(c); EnsureClanConflictSchema(c);
-                var priorRetryScope=Program.CurrentSqlRetrySuppression;
+                var priorRetryScope=ReignDatabase.CurrentSqlRetrySuppression;
                 bool nestedRetryRestored=false;
-                using(var independent=Program.OpenCampaignConnection(campaign))
-                using(var outerRetryScope=new Program.SqlStatementRetrySuppression(c))
+                using(var independent=ReignDatabase.OpenCampaignConnection(campaign))
+                using(var outerRetryScope=new ReignDatabase.SqlStatementRetrySuppression(c))
                 {
-                    Check("retry_scope_is_connection_specific",Program.SqlStatementRetriesSuppressed(c) && !Program.SqlStatementRetriesSuppressed(independent));
-                    try { using var innerRetryScope=new Program.SqlStatementRetrySuppression(c); throw new InvalidOperationException("fixture"); }
-                    catch(InvalidOperationException) { nestedRetryRestored=ReferenceEquals(Program.CurrentSqlRetrySuppression,outerRetryScope); }
+                    Check("retry_scope_is_connection_specific",ReignDatabase.SqlStatementRetriesSuppressed(c) && !ReignDatabase.SqlStatementRetriesSuppressed(independent));
+                    try { using var innerRetryScope=new ReignDatabase.SqlStatementRetrySuppression(c); throw new InvalidOperationException("fixture"); }
+                    catch(InvalidOperationException) { nestedRetryRestored=ReferenceEquals(ReignDatabase.CurrentSqlRetrySuppression,outerRetryScope); }
                 }
-                Check("retry_scope_restores_nested_exception",nestedRetryRestored && ReferenceEquals(Program.CurrentSqlRetrySuppression,priorRetryScope));
+                Check("retry_scope_restores_nested_exception",nestedRetryRestored && ReferenceEquals(ReignDatabase.CurrentSqlRetrySuppression,priorRetryScope));
                 Check("world_readiness_does_not_block_data_writers",
                     RelationshipReadinessLeavesWritersUnblocked(campaign,"world_test_native_heartbeats","updated_ts",
                         _ => { if(!ReadBool(WorldSimulationService.BuildWorldTestReadiness(campaign,"main"),"ok",false)) throw new InvalidOperationException("Readiness was unavailable."); }));
-                using (var locked=Program.OpenCampaignConnection(campaign))
+                using (var locked=ReignDatabase.OpenCampaignConnection(campaign))
                 using (var held=locked.BeginTransaction())
                 {
-                    Program.ExecuteSql(locked,"LOCK TABLE world_test_native_heartbeats IN ACCESS EXCLUSIVE MODE;");
+                    ReignDatabase.ExecuteSql(locked,"LOCK TABLE world_test_native_heartbeats IN ACCESS EXCLUSIVE MODE;");
                     var blocked=System.Diagnostics.Stopwatch.StartNew();
                     bool rejected=false;
                     int statementRetries=0;
-                    var priorRetryObserver=Program.SqlContentionRetryObserverForTests;
+                    var priorRetryObserver=ReignDatabase.SqlContentionRetryObserverForTests;
                     try
                     {
-                        Program.SqlContentionRetryObserverForTests=_=>statementRetries++;
+                        ReignDatabase.SqlContentionRetryObserverForTests=_=>statementRetries++;
                         try { WorldSimulationService.BuildWorldTestReadiness(campaign,"main"); }
                         catch(Npgsql.PostgresException ex) when(ex.SqlState=="55P03") { rejected=true; }
                     }
-                    finally { Program.SqlContentionRetryObserverForTests=priorRetryObserver; }
+                    finally { ReignDatabase.SqlContentionRetryObserverForTests=priorRetryObserver; }
                     Check("world_readiness_lock_deadline",rejected && blocked.ElapsedMilliseconds<1500);
-                    Check("world_readiness_does_not_retry_aborted_transaction",statementRetries==0 && ReferenceEquals(Program.CurrentSqlRetrySuppression,priorRetryScope));
-                    using(var retryConnection=Program.OpenCampaignConnection(campaign))
+                    Check("world_readiness_does_not_retry_aborted_transaction",statementRetries==0 && ReferenceEquals(ReignDatabase.CurrentSqlRetrySuppression,priorRetryScope));
+                    using(var retryConnection=ReignDatabase.OpenCampaignConnection(campaign))
                     {
-                        Program.ExecuteSql(retryConnection,"SET lock_timeout='50ms';");
+                        ReignDatabase.ExecuteSql(retryConnection,"SET lock_timeout='50ms';");
                         try
                         {
-                            Program.SqlContentionRetryObserverForTests=_=> { statementRetries++; held.Rollback(); };
-                            Program.QuerySql(retryConnection,"SELECT COUNT(*) AS count FROM world_test_native_heartbeats;");
+                            ReignDatabase.SqlContentionRetryObserverForTests=_=> { statementRetries++; held.Rollback(); };
+                            ReignDatabase.QuerySql(retryConnection,"SELECT COUNT(*) AS count FROM world_test_native_heartbeats;");
                             Check("ordinary_autocommit_contention_still_retries",statementRetries==1);
                         }
                         finally
                         {
-                            Program.SqlContentionRetryObserverForTests=priorRetryObserver;
-                            Program.ExecuteSql(retryConnection,"SET lock_timeout=0;");
+                            ReignDatabase.SqlContentionRetryObserverForTests=priorRetryObserver;
+                            ReignDatabase.ExecuteSql(retryConnection,"SET lock_timeout=0;");
                         }
                     }
                 }
                 Check("world_readiness_clean_after_failure",ReadBool(WorldSimulationService.BuildWorldTestReadiness(campaign,"main"),"ok",false));
-                Program.ExecuteSql(c,"DROP INDEX idx_world_test_heartbeat_day;");
+                ReignDatabase.ExecuteSql(c,"DROP INDEX idx_world_test_heartbeat_day;");
                 var observedReadiness=WorldSimulationService.BuildWorldTestReadiness(campaign,"main");
                 Check("world_readiness_does_not_repair_schema",
-                    ReadBool(observedReadiness,"ok",false) && !Program.QuerySql(c,@"SELECT indexname FROM pg_indexes
+                    ReadBool(observedReadiness,"ok",false) && !ReignDatabase.QuerySql(c,@"SELECT indexname FROM pg_indexes
 WHERE schemaname=current_schema() AND indexname='idx_world_test_heartbeat_day';").Any());
-                Program.ExecuteSql(c,"DROP TABLE world_test_native_heartbeats;");
+                ReignDatabase.ExecuteSql(c,"DROP TABLE world_test_native_heartbeats;");
                 bool missingReadinessRejected=false;
                 try { WorldSimulationService.BuildWorldTestReadiness(campaign,"main"); }
                 catch(Npgsql.PostgresException ex) when(ex.SqlState=="42P01") { missingReadinessRejected=true; }
@@ -276,7 +276,7 @@ WHERE schemaname=current_schema() AND indexname='idx_world_test_heartbeat_day';"
                 Check("readiness_probe_detects_redundant_ddl",
                     !RelationshipReadinessLeavesWritersUnblocked(campaign,
                         "relationship_native_targets", "claimed_ts", reader =>
-                            Program.ExecuteSql(reader,"CREATE INDEX IF NOT EXISTS idx_relationship_native_targets_status ON relationship_native_targets(status,world_day,pair_key);")));
+                            ReignDatabase.ExecuteSql(reader,"CREATE INDEX IF NOT EXISTS idx_relationship_native_targets_status ON relationship_native_targets(status,world_day,pair_key);")));
                 Check("native_target_readiness_during_writes",
                     RelationshipReadinessLeavesWritersUnblocked(campaign,
                         "relationship_native_targets", "claimed_ts", EnsureRelationshipNativeTargetSchema));
@@ -286,7 +286,7 @@ WHERE schemaname=current_schema() AND indexname='idx_world_test_heartbeat_day';"
                 Check("notable_readiness_during_writes",
                     RelationshipReadinessLeavesWritersUnblocked(campaign,
                         "notable_mbti_profiles", "updated_ts", EnsureNotableMbtiSchema));
-                Program.ExecuteSql(c,"DROP INDEX idx_relationship_native_targets_status;");
+                ReignDatabase.ExecuteSql(c,"DROP INDEX idx_relationship_native_targets_status;");
                 using (var migration=c.BeginTransaction())
                 {
                     EnsureRelationshipNativeTargetSchema(c);
@@ -298,14 +298,14 @@ WHERE schemaname=current_schema() AND indexname='idx_world_test_heartbeat_day';"
                 Check("missing_index_repaired_after_rollback",
                     PostgreSqlRelationshipTableReady(c,"relationship_native_targets","revision,requires_observation","idx_relationship_native_targets_status"));
                 foreach(string hero in new[]{"proposer","respondent"})
-                    Program.ExecuteSql(c,@"INSERT INTO relationship_personalities(hero_id,mbti_type,title,description,source,assignment_day,template_version,traits_json,created_ts,updated_ts)
+                    ReignDatabase.ExecuteSql(c,@"INSERT INTO relationship_personalities(hero_id,mbti_type,title,description,source,assignment_day,template_version,traits_json,created_ts,updated_ts)
 VALUES($id,'INTJ','Fixture','','fixture',1,1,'{}',1,1);",TestDict("id",hero));
                 Check("lock_probe_detects_inverted_order",
                     !MarriageWorkWaitLeavesDatabaseAvailable(campaign, () =>
                     {
-                        using var inverted=Program.OpenCampaignConnection(campaign);
+                        using var inverted=ReignDatabase.OpenCampaignConnection(campaign);
                         using var transaction=inverted.BeginTransaction();
-                        Program.QuerySql(inverted,"SELECT effect_id FROM arranged_marriage_effects LIMIT 1;");
+                        ReignDatabase.QuerySql(inverted,"SELECT effect_id FROM arranged_marriage_effects LIMIT 1;");
                         using var ownership=PersistenceService.EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaign));
                         transaction.Commit();
                     }));
@@ -315,7 +315,7 @@ VALUES($id,'INTJ','Fixture','','fixture',1,1,'{}',1,1);",TestDict("id",hero));
                     ApplyMarriageLeaderEffect(c,campaign,"main","refusal","proposer","respondent",-10,7);
                     tx.Commit();
                 }
-                var pair=Program.QuerySql(c,"SELECT * FROM relationship_pair_chemistry WHERE pair_key='proposer|respondent';").First();
+                var pair=ReignDatabase.QuerySql(c,"SELECT * FROM relationship_pair_chemistry WHERE pair_key='proposer|respondent';").First();
                 Check("refusal_direction_and_replay",ReadInt(pair,"affinity_a_to_b",0)==-10&&ReadInt(pair,"affinity_b_to_a",0)==0);
                 using(var tx=c.BeginTransaction())
                 {
@@ -324,9 +324,9 @@ VALUES($id,'INTJ','Fixture','','fixture',1,1,'{}',1,1);",TestDict("id",hero));
                     ApplyMarriageLeaderEffect(c,campaign,"main","success","proposer","respondent",20,14);
                     tx.Commit();
                 }
-                pair=Program.QuerySql(c,"SELECT * FROM relationship_pair_chemistry WHERE pair_key='proposer|respondent';").First();
+                pair=ReignDatabase.QuerySql(c,"SELECT * FROM relationship_pair_chemistry WHERE pair_key='proposer|respondent';").First();
                 Check("success_bilateral_and_replay",ReadInt(pair,"affinity_a_to_b",0)==10&&ReadInt(pair,"affinity_b_to_a",0)==20);
-                Check("no_self_effect",Program.QuerySql(c,"SELECT effect_id FROM arranged_marriage_effects;").Count==3);
+                Check("no_self_effect",ReignDatabase.QuerySql(c,"SELECT effect_id FROM arranged_marriage_effects;").Count==3);
                 var a=TestDict("heroStringId","royal","isRulingClanMember",true,"clanFiefCount",4);
                 var b=TestDict("heroStringId","suitor","isRulingClanMember",false,"clanFiefCount",0);
                 var ca=TestDict("clanId","pethros","leaderId","respondent","tier",6,"fiefCount",4);
@@ -343,10 +343,10 @@ VALUES($id,'INTJ','Fixture','','fixture',1,1,'{}',1,1);",TestDict("id",hero));
                 var first=RunRelationshipDirector(payload,false);var replay=RunRelationshipDirector(payload,false);
                 payload["worldDay"]=14d;var next=RunRelationshipDirector(payload,false);
                 Check("weekly_period_completion_not_skip",ReadBool(first,"ok",false)&&ReadBool(replay,"idempotent",false)&&ReadBool(next,"ok",false));
-                Check("periods_saved_independently",Program.QuerySql(c,"SELECT * FROM arranged_marriage_periods WHERE timeline_id='main';").Count==2);
+                Check("periods_saved_independently",ReignDatabase.QuerySql(c,"SELECT * FROM arranged_marriage_periods WHERE timeline_id='main';").Count==2);
                 string proposer=Enumerable.Range(0,1000000).Select(i=>"leader"+i).First(h=>StableUnit(campaign+"|fixture|marriage|1|"+h)<.01&&StableUnit(campaign+"|fixture|marriage|2|"+h)<.01);
                 string respondent=Enumerable.Range(0,10000).Select(i=>"other"+i).First(h=>StableUnit(campaign+"|fixture|marriage|1|"+h)>.05&&StableUnit(campaign+"|fixture|marriage|2|"+h)>.05);
-                foreach(string hero in new[]{proposer,respondent})Program.ExecuteSql(c,@"INSERT INTO relationship_personalities(hero_id,mbti_type,title,description,source,assignment_day,template_version,traits_json,created_ts,updated_ts)
+                foreach(string hero in new[]{proposer,respondent})ReignDatabase.ExecuteSql(c,@"INSERT INTO relationship_personalities(hero_id,mbti_type,title,description,source,assignment_day,template_version,traits_json,created_ts,updated_ts)
 VALUES($id,'INTJ','Fixture','','fixture',1,1,'{}',1,1);",TestDict("id",hero));
                 Dictionary<string,object> HeroRow(string id,string clan,bool female,bool available)=>TestDict("heroStringId",id,"clanId",clan,"isAlive",true,"age",20d,"isFemale",female,"spouseId",available?"":"existing","nativeCanMarry",true,"nativeMarriageClanSuitable",true,"childrenCount",0,"cultureId","empire");
                 var lower=TestDict("clanId","lower","leaderId",proposer,"tier",1,"gold",60000,"leaderGold",60000,"fiefCount",0,"kingdomId","empire","cultureId","empire");
@@ -368,27 +368,27 @@ VALUES($id,'INTJ','Fixture','','fixture',1,1,'{}',1,1);",TestDict("id",hero));
                     try
                     {
                     Check("compact_parity_clean_start_"+compact+"_"+funded,
-                        !Program.QuerySql(c,"SELECT evaluation_id FROM marriage_evaluations WHERE timeline_id='fixture';").Any()
-                        && !Program.QuerySql(c,"SELECT roll_id FROM marriage_leader_rolls WHERE timeline_id='fixture';").Any()
-                        && !Program.QuerySql(c,"SELECT effect_id FROM arranged_marriage_effects WHERE timeline_id='fixture';").Any());
+                        !ReignDatabase.QuerySql(c,"SELECT evaluation_id FROM marriage_evaluations WHERE timeline_id='fixture';").Any()
+                        && !ReignDatabase.QuerySql(c,"SELECT roll_id FROM marriage_leader_rolls WHERE timeline_id='fixture';").Any()
+                        && !ReignDatabase.QuerySql(c,"SELECT effect_id FROM arranged_marriage_effects WHERE timeline_id='fixture';").Any());
                     var result=ProcessArrangedMarriageSystem(c,campaign,variant,7d);
                     Check("compact_parity_nontrivial_"+compact+"_"+funded,
                         ReadInt(result,"arrangedCreated",0)==1 && ReadInt(result,"leaderRolls",0)==2
                         && (funded
-                            ? Program.QuerySql(c,"SELECT director_action_id FROM relationship_director_actions WHERE actor_id='son' AND target_id='daughter';").Any()
-                            : Program.QuerySql(c,"SELECT effect_id FROM arranged_marriage_effects WHERE timeline_id='fixture';").Count==1));
+                            ? ReignDatabase.QuerySql(c,"SELECT director_action_id FROM relationship_director_actions WHERE actor_id='son' AND target_id='daughter';").Any()
+                            : ReignDatabase.QuerySql(c,"SELECT effect_id FROM arranged_marriage_effects WHERE timeline_id='fixture';").Count==1));
                     // Generated receipt IDs/timestamps differ by design; compare all
                     // deterministic decisions, rolls, quotes and mechanical deltas.
-                    var evaluations=Program.QuerySql(c,"SELECT route,status,hero_a_id,hero_b_id,clan_a_id,clan_b_id,leader_a_id,leader_b_id,world_day,score,leader_a_approved,leader_b_approved,resentment_a,resentment_b,payload_json FROM marriage_evaluations WHERE timeline_id='fixture' ORDER BY hero_a_id,hero_b_id;");
+                    var evaluations=ReignDatabase.QuerySql(c,"SELECT route,status,hero_a_id,hero_b_id,clan_a_id,clan_b_id,leader_a_id,leader_b_id,world_day,score,leader_a_approved,leader_b_approved,resentment_a,resentment_b,payload_json FROM marriage_evaluations WHERE timeline_id='fixture' ORDER BY hero_a_id,hero_b_id;");
                     foreach(var row in evaluations)
                     {
                         var detail=TryParseJsonObject(ReadString(row,"payload_json","{}"));
                         detail.Remove("evaluationId"); row["payload_json"]=detail;
                     }
                     string outcome=Json.Serialize(TestDict("result",result,"evaluations",evaluations,
-                        "rolls",Program.QuerySql(c,"SELECT leader_id,clan_id,chance,roll,urgency,status FROM marriage_leader_rolls WHERE timeline_id='fixture' ORDER BY leader_id;"),
-                        "refusals",Program.QuerySql(c,"SELECT refusal_key FROM arranged_marriage_refusals WHERE timeline_id='fixture' ORDER BY refusal_key;"),
-                        "chemistry",Program.QuerySql(c,"SELECT pair_key,affinity_a_to_b,affinity_b_to_a FROM relationship_pair_chemistry ORDER BY pair_key;")));
+                        "rolls",ReignDatabase.QuerySql(c,"SELECT leader_id,clan_id,chance,roll,urgency,status FROM marriage_leader_rolls WHERE timeline_id='fixture' ORDER BY leader_id;"),
+                        "refusals",ReignDatabase.QuerySql(c,"SELECT refusal_key FROM arranged_marriage_refusals WHERE timeline_id='fixture' ORDER BY refusal_key;"),
+                        "chemistry",ReignDatabase.QuerySql(c,"SELECT pair_key,affinity_a_to_b,affinity_b_to_a FROM relationship_pair_chemistry ORDER BY pair_key;")));
                     return outcome;
                     }
                     finally
@@ -404,21 +404,21 @@ VALUES($id,'INTJ','Fixture','','fixture',1,1,'{}',1,1);",TestDict("id",hero));
                 Check("director_wait_does_not_hold_database_locks",
                     MarriageWorkWaitLeavesDatabaseAvailable(campaign,
                         () => RunRelationshipDirector(input,false)));
-                var offer=Program.QuerySql(c,"SELECT * FROM marriage_evaluations WHERE timeline_id='fixture';");
+                var offer=ReignDatabase.QuerySql(c,"SELECT * FROM marriage_evaluations WHERE timeline_id='fixture';");
                 Check("actual_unfunded_offer_is_refused_once",offer.Count==1&&ReadString(offer.First(),"status","")=="refused");
-                Check("formal_refusal_has_no_native_action",!Program.QuerySql(c,"SELECT * FROM relationship_director_actions WHERE actor_id='son' OR target_id='daughter';").Any());
-                var responsePair=Program.QuerySql(c,"SELECT * FROM relationship_pair_chemistry WHERE pair_key=$p;",TestDict("p",AmbientPairKey(proposer,respondent))).First();
+                Check("formal_refusal_has_no_native_action",!ReignDatabase.QuerySql(c,"SELECT * FROM relationship_director_actions WHERE actor_id='son' OR target_id='daughter';").Any());
+                var responsePair=ReignDatabase.QuerySql(c,"SELECT * FROM relationship_pair_chemistry WHERE pair_key=$p;",TestDict("p",AmbientPairKey(proposer,respondent))).First();
                 bool forward=string.Compare(proposer,respondent,StringComparison.OrdinalIgnoreCase)<0;
                 Check("formal_refusal_delta",ReadInt(responsePair,forward?"affinity_a_to_b":"affinity_b_to_a",0)==-10&&ReadInt(responsePair,forward?"affinity_b_to_a":"affinity_a_to_b",0)==0);
                 RunRelationshipDirector(input,false);
-                Check("formal_offer_replay",Program.QuerySql(c,"SELECT * FROM marriage_evaluations WHERE timeline_id='fixture';").Count==1);
+                Check("formal_offer_replay",ReignDatabase.QuerySql(c,"SELECT * FROM marriage_evaluations WHERE timeline_id='fixture';").Count==1);
                 input["worldDay"]=14d;RunRelationshipDirector(input,false);
-                Check("identical_refusal_next_week_not_sent",Program.QuerySql(c,"SELECT * FROM marriage_evaluations WHERE timeline_id='fixture';").Count==1);
+                Check("identical_refusal_next_week_not_sent",ReignDatabase.QuerySql(c,"SELECT * FROM marriage_evaluations WHERE timeline_id='fixture';").Count==1);
                 var son=HeroRow("paid_son","lower",false,true);var daughter=HeroRow("paid_daughter","upper",true,true);
                 var paidQuote=MarriageQuote(campaign,son,daughter,lower,upper,new List<Dictionary<string,object>>(),1090);
                 CreateMarriageEvaluation(c,campaign,"paid_fixture","arranged","approved",21d,son,daughter,lower,upper,80,0,0,
                     TestDict("marriageTerms",paidQuote,"leaderAApproval",80d,"leaderBApproval",80d));
-                var paidAction=Program.QuerySql(c,"SELECT director_action_id FROM relationship_director_actions WHERE actor_id='paid_son';").First();
+                var paidAction=ReignDatabase.QuerySql(c,"SELECT director_action_id FROM relationship_director_actions WHERE actor_id='paid_son';").First();
                 var receipt=TestDict("campaignId",campaign,"timelineId","paid_fixture","directorActionId",ReadString(paidAction,"director_action_id",""),"status","completed","worldDay",21d,"marriageVerified",true,"paymentVerified",true);
                 Dictionary<string,object> completion=null;
                 Check("receipt_wait_does_not_hold_database_locks",
@@ -426,7 +426,7 @@ VALUES($id,'INTJ','Fixture','','fixture',1,1,'{}',1,1);",TestDict("id",hero));
                         () => completion=RelationshipDirectorReportActionApi(receipt)));
                 var completionReplay=RelationshipDirectorReportActionApi(receipt);
                 Check("paid_native_receipt_and_leaders_replay",ReadBool(completion,"ok",false)&&ReadBool(completionReplay,"idempotent",false)
-                    &&Program.QuerySql(c,"SELECT * FROM arranged_marriage_effects WHERE timeline_id='paid_fixture';").Count==2);
+                    &&ReignDatabase.QuerySql(c,"SELECT * FROM arranged_marriage_effects WHERE timeline_id='paid_fixture';").Count==2);
                 var diplomaticTerms=TestDict("marriageTerms",paidQuote);
                 Check("diplomatic_wait_does_not_hold_database_locks",
                     MarriageWorkWaitLeavesDatabaseAvailable(campaign,
@@ -435,11 +435,11 @@ VALUES($id,'INTJ','Fixture','','fixture',1,1,'{}',1,1);",TestDict("id",hero));
                             TestDict("worldDay",21d,"result",TestDict("effects",new[]{TestDict("type","marriage_completed")})))));
                 // An older snapshot must be inspected as it is, with no stale
                 // process readiness surviving its restored table shape.
-                Program.ExecuteSql(c,"ALTER TABLE relationship_native_targets DROP COLUMN requires_observation;");
+                ReignDatabase.ExecuteSql(c,"ALTER TABLE relationship_native_targets DROP COLUMN requires_observation;");
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign,"native_shape_legacy");
                 EnsureRelationshipNativeTargetSchema(c);
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign,"native_shape_legacy");
-                using (var restored=Program.OpenCampaignConnection(campaign))
+                using (var restored=ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     Check("old_snapshot_shape_detected",
                         !PostgreSqlRelationshipTableReady(restored,"relationship_native_targets","requires_observation","idx_relationship_native_targets_status"));
@@ -461,15 +461,15 @@ VALUES($id,'INTJ','Fixture','','fixture',1,1,'{}',1,1);",TestDict("id",hero));
             Task task;
             bool completedWhileWriting;
             using var started=new ManualResetEventSlim();
-            using (var writer=Program.OpenCampaignConnection(campaign))
+            using (var writer=ReignDatabase.OpenCampaignConnection(campaign))
             using (var transaction=writer.BeginTransaction())
             {
                 // Fixed test-owned identifiers; even a zero-row UPDATE holds
                 // RowExclusive, conflicting with CREATE INDEX's Share lock.
-                Program.ExecuteSql(writer,"UPDATE "+table+" SET "+column+"="+column+" WHERE 1=0;");
+                ReignDatabase.ExecuteSql(writer,"UPDATE "+table+" SET "+column+"="+column+" WHERE 1=0;");
                 task=Task.Run(() =>
                 {
-                    using var reader=Program.OpenCampaignConnection(campaign);
+                    using var reader=ReignDatabase.OpenCampaignConnection(campaign);
                     started.Set();
                     ensure(reader);
                 });
@@ -511,7 +511,7 @@ VALUES($id,'INTJ','Fixture','','fixture',1,1,'{}',1,1);",TestDict("id",hero));
                 try
                 {
                     waiting=reachedWait.Wait(TimeSpan.FromSeconds(5));
-                    using var probe=Program.OpenCampaignConnection(campaign);
+                    using var probe=ReignDatabase.OpenCampaignConnection(campaign);
                     using var transaction=probe.BeginTransaction();
                     using var command=probe.CreateCommand();
                     command.Transaction=transaction;
@@ -530,8 +530,8 @@ VALUES($id,'INTJ','Fixture','','fixture',1,1,'{}',1,1);",TestDict("id",hero));
                 if (!databaseAvailable)
                 {
                     // Fixture-only metadata, without query text or private values.
-                    using var diagnostic=Program.OpenCampaignConnection(campaign);
-                    lockHolders=Program.QuerySql(diagnostic,@"SELECT l.pid,l.locktype,l.mode,l.granted,a.state,a.wait_event_type,a.wait_event
+                    using var diagnostic=ReignDatabase.OpenCampaignConnection(campaign);
+                    lockHolders=ReignDatabase.QuerySql(diagnostic,@"SELECT l.pid,l.locktype,l.mode,l.granted,a.state,a.wait_event_type,a.wait_event
 FROM pg_locks l JOIN pg_stat_activity a ON a.pid=l.pid
 WHERE l.pid<>pg_backend_pid() AND (l.locktype='advisory' OR l.relation IN (
 SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema()

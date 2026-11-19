@@ -44,18 +44,13 @@ namespace ReignBetaServer
             string player = ReadString(payload, "playerHeroStringId", "");
             if (new[] { campaign, timeline, hero, player }.Any(string.IsNullOrWhiteSpace) || hero == player)
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Exact campaign, timeline, wanderer and player identities are required." };
-            using (var connection = Program.OpenCampaignConnection(campaign))
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 if (WorldSimulationService.ActiveWorldHistoryTimeline(connection) != timeline)
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Wanderer history timeline is not active." };
                 // An NPC's actual reply paired with the player's turn proves contact, even in group chat.
                 // Bystanders who only overheard it do not become permanent.
-                var rows = Program.QuerySql(connection, @"SELECT n.turn_id,n.payload_json,n.exchange_id FROM conversation_turns n
-JOIN conversation_sessions s ON s.session_id=n.session_id
-WHERE n.speaker_id=$hero AND n.role='npc' AND n.status='active' AND s.campaign_id=$campaign
-AND EXISTS(SELECT 1 FROM conversation_turns p WHERE p.session_id=n.session_id AND p.exchange_id=n.exchange_id
-AND p.role='player' AND p.speaker_id=$player AND p.status='active' AND length(trim(p.text))>0)
-ORDER BY n.ts DESC LIMIT 256;", new Dictionary<string, object> { ["hero"] = hero, ["player"] = player, ["campaign"] = campaign });
+                var rows = CharactersStore.SelectConversationTurns9(connection, new Dictionary<string, object> { ["hero"] = hero, ["player"] = player, ["campaign"] = campaign });
                 var match = rows.FirstOrDefault(row => {
                     var detail = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
                     string turnTimeline = ReadString(detail, "timelineId", "");

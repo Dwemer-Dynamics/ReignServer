@@ -113,7 +113,7 @@ namespace ReignBetaServer
             bool boundDelivery = IsReviewedDelivery(ReadString(review, "writerPlan", ""));
             if (bindWriterPlan && access.PlayerIdentityUnknown)
                 throw new InvalidOperationException("A reviewed writer plan requires verified actor names in the disposable fixture.");
-            using (var connection = Program.OpenCampaignConnection(campaign))
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             foreach (var fact in facts)
             {
                 string id = mapSourceId(ReadString(fact, "sourceId", ""));

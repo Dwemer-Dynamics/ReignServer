@@ -32,15 +32,15 @@ AND COALESCE({PromptObligationPayloadSql}->'sourceEvidence'->>'evidenceType','')
         {
             // Dialogue predates the Court timeline column. Its accepted-source
             // payload is authoritative only for untouched default-column rows.
-            Program.EnsureDatabaseColumn(connection, "obligations", "timeline_id", "TEXT NOT NULL DEFAULT 'main'");
+            ReignDatabase.EnsureDatabaseColumn(connection, "obligations", "timeline_id", "TEXT NOT NULL DEFAULT 'main'");
             const string marker = "character_commitment_timeline_v1";
-            if (ReadString(Program.QuerySql(connection, "SELECT value FROM schema_meta WHERE key=$key;", TestDict("key", marker)).FirstOrDefault(), "value", "") == "1") return;
-            Program.ExecuteSql(connection, @"UPDATE obligations o SET timeline_id=o.payload_json::jsonb->>'timelineId'
+            if (ReadString(ReignDatabase.QuerySql(connection, "SELECT value FROM schema_meta WHERE key=$key;", TestDict("key", marker)).FirstOrDefault(), "value", "") == "1") return;
+            ReignDatabase.ExecuteSql(connection, @"UPDATE obligations o SET timeline_id=o.payload_json::jsonb->>'timelineId'
 WHERE o.timeline_id='main' AND COALESCE((to_jsonb(o)->>'revision')::bigint,0)=0
 AND COALESCE(o.payload_json::jsonb->>'timelineId','') NOT IN ('','main')
 AND o.payload_json::jsonb->>'sourceValidation'='supported_span'
 AND o.payload_json::jsonb->'sourceEvidence'->>'status'='supported_span';");
-            Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');", TestDict("key", marker));
+            ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');", TestDict("key", marker));
         }
 
         // This fallback records only explicit promissory speech. Ordinary future
@@ -179,7 +179,7 @@ AND o.payload_json::jsonb->'sourceEvidence'->>'status'='supported_span';");
         {
             if (!WorldSimulationService.TableExists(connection, "obligations")) return "";
             var access = Program.BuildKnowledgeAccessContext(observer, peer, "", payload);
-            var rows = Program.QuerySql(connection, "SELECT * FROM obligations WHERE " + PromptActiveObligationSql + " AND "
+            var rows = ReignDatabase.QuerySql(connection, "SELECT * FROM obligations WHERE " + PromptActiveObligationSql + " AND "
                 + MemoryEligibilitySql("obligations") + " AND " + MemorySourceTimelineSql("obligations", access: access)
                 + " AND COALESCE(payload_json,'{}') NOT LIKE '%\"continuityQuarantined\":true%' ORDER BY created_day,obligation_id;",
                 new Dictionary<string, object> { ["observer"] = observer, ["timeline"] = access.TimelineId });
@@ -243,8 +243,8 @@ AND o.payload_json::jsonb->'sourceEvidence'->>'status'='supported_span';");
         internal static string DialogueCommitmentTarget(ReignDbConnection connection, string id, Dictionary<string, object> item)
         {
             if (ReadString(item, "interpretationStatus", "") != "model_inferred") return id;
-            Program.ExecuteSql(connection, "SELECT pg_advisory_xact_lock(hashtextextended($key,0));", TestDict("key", "dialogue_commitment:" + id));
-            var previous = Program.QuerySql(connection, "SELECT * FROM obligations WHERE obligation_id=$id;", TestDict("id", id)).SingleOrDefault();
+            ReignDatabase.ExecuteSql(connection, "SELECT pg_advisory_xact_lock(hashtextextended($key,0));", TestDict("key", "dialogue_commitment:" + id));
+            var previous = ReignDatabase.QuerySql(connection, "SELECT * FROM obligations WHERE obligation_id=$id;", TestDict("id", id)).SingleOrDefault();
             if (previous == null) return id;
             var old = TryParseJsonObject(ReadString(previous, "payload_json", "{}"));
             if (ReadString(old, "interpretationStatus", "") == "model_inferred"
@@ -257,7 +257,7 @@ AND o.payload_json::jsonb->'sourceEvidence'->>'status'='supported_span';");
                 item["proposedRevisionOf"] = id;
                 item["status"] = "unresolved";
                 string proposal = "interpretation_" + PromptHash(id + "|" + DialogueCommitmentIdentity(item)).Substring(0, 32);
-                var existingProposal = Program.QuerySql(connection, "SELECT payload_json FROM obligations WHERE obligation_id=$id;", TestDict("id", proposal)).SingleOrDefault();
+                var existingProposal = ReignDatabase.QuerySql(connection, "SELECT payload_json FROM obligations WHERE obligation_id=$id;", TestDict("id", proposal)).SingleOrDefault();
                 if (existingProposal != null)
                 {
                     var proposed = TryParseJsonObject(ReadString(existingProposal, "payload_json", "{}"));
@@ -309,7 +309,7 @@ AND o.payload_json::jsonb->'sourceEvidence'->>'status'='supported_span';");
             var current = ReadDictionary(item, "sourceEvidence");
             if (ReadString(item, "sourceValidation", "") != "supported_span"
                 || ReadString(current, "status", "") != "supported_span") return;
-            var previous = Program.QuerySql(connection, "SELECT * FROM obligations WHERE obligation_id=$id;", TestDict("id", id)).SingleOrDefault();
+            var previous = ReignDatabase.QuerySql(connection, "SELECT * FROM obligations WHERE obligation_id=$id;", TestDict("id", id)).SingleOrDefault();
             var old = TryParseJsonObject(ReadString(previous, "payload_json", "{}"));
             bool sameScope = previous != null && (ReadString(previous, "timeline_id", "") == ContinuityTimeline(item)
                 || IsVerifiedRestoredMemorySource(connection, previous, ContinuityTimeline(item)))
@@ -331,7 +331,7 @@ AND o.payload_json::jsonb->'sourceEvidence'->>'status'='supported_span';");
             var p = TryParseJsonObject(ReadString(turn, "payload_json", "{}"));
             string letterId = ReadFirstString(p, "letterId", "sourceLetterId");
             if (letterId.Length == 0 || !WorldSimulationService.TableExists(connection, "letters")) return false;
-            var letter = Program.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", letterId)).SingleOrDefault();
+            var letter = ReignDatabase.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", letterId)).SingleOrDefault();
             return LetterVisibleToObserver(connection, letter, access.NpcId, access, out _);
         }
 
@@ -352,7 +352,7 @@ AND o.payload_json::jsonb->'sourceEvidence'->>'status'='supported_span';");
             string speaker = ReadString(reference, "speakerId", ""), quote = ReadString(reference, "quote", "");
             string hash = ReadString(reference, "sourceHash", "");
             if (speaker.Length == 0 || quote.Length < 12 || hash.Length == 0 || id.Length == 0 && sourceEvent.Length == 0) return null;
-            var matches = Program.QuerySql(connection, @"SELECT * FROM conversation_turns
+            var matches = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_turns
 WHERE status='active' AND speaker_id=$speaker AND (turn_id=$turn OR event_id=$event);",
                 TestDict("speaker", speaker, "turn", id, "event", sourceEvent)).Where(row =>
                 PromptHash(ConversationTurnTextForRecall(row)) == hash
@@ -390,7 +390,7 @@ WHERE status='active' AND speaker_id=$speaker AND (turn_id=$turn OR event_id=$ev
                     string key = session + "|" + exchange;
                     if (!seen.Add(key)) continue;
                     var rows = exchange.Length == 0 ? new List<Dictionary<string, object>> { anchor }
-                        : Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$session AND exchange_id=$exchange AND status='active' ORDER BY turn_order;",
+                        : ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$session AND exchange_id=$exchange AND status='active' ORDER BY turn_order;",
                             TestDict("session", session, "exchange", exchange));
                     rows = ExpandPrecisionQuestionContext(connection, rows, audience[0])
                         .Where(row => audience.All(a => CommitmentSourceTurnVisible(connection, row, a)))
@@ -453,11 +453,11 @@ WHERE status='active' AND speaker_id=$speaker AND (turn_id=$turn OR event_id=$ev
         {
             const string marker = "explicit_accepted_commitment_bootstrap_v1";
             if (!WorldSimulationService.TableExists(connection, "conversation_turns") || !WorldSimulationService.TableExists(connection, "conversation_sessions")
-                || ReadString(Program.QuerySql(connection, "SELECT value FROM schema_meta WHERE key=$key;", TestDict("key", marker)).FirstOrDefault(), "value", "") == "1") return;
+                || ReadString(ReignDatabase.QuerySql(connection, "SELECT value FROM schema_meta WHERE key=$key;", TestDict("key", marker)).FirstOrDefault(), "value", "") == "1") return;
             // Bootstrap only the latest accepted private contribution per pair.
             // Older promises may have been fulfilled or withdrawn later; absence
             // of a closure record is never permission to resurrect those.
-            var rows = Program.QuerySql(connection, @"SELECT * FROM (
+            var rows = ReignDatabase.QuerySql(connection, @"SELECT * FROM (
 SELECT t.*,s.player_id,s.payload_json AS session_payload,
 ROW_NUMBER() OVER(PARTITION BY t.speaker_id,s.player_id ORDER BY t.world_day DESC,t.ts DESC,t.turn_order DESC) AS latest
 FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id
@@ -478,7 +478,7 @@ WHERE t.status='active' AND t.role='npc' AND t.channel NOT IN ('letter','corresp
                 foreach (string clause in ExplicitPromiseClauses(original))
                 {
                     // Existing records, including closed ones, remain authoritative.
-                    if (Program.QuerySql(connection, "SELECT * FROM obligations WHERE owed_by=$speaker AND owed_to=$peer AND timeline_id=$timeline;", TestDict("speaker", speaker, "peer", peer, "timeline", timeline))
+                    if (ReignDatabase.QuerySql(connection, "SELECT * FROM obligations WHERE owed_by=$speaker AND owed_to=$peer AND timeline_id=$timeline;", TestDict("speaker", speaker, "peer", peer, "timeline", timeline))
                         .Any(o => ReadString(ReadDictionary(TryParseJsonObject(ReadString(o, "payload_json", "{}")), "sourceEvidence"), "quote", "").Contains(clause, StringComparison.Ordinal))) continue;
                     var write = TestDict("description", clause, "owed_by", speaker, "owed_to", peer, "status", "unresolved", "importance", 0.9d,
                         "participants", participants, "known_by", participants, "visibility", "private", "timelineId", timeline,
@@ -488,7 +488,7 @@ WHERE t.status='active' AND t.role='npc' AND t.channel NOT IN ('letter','corresp
                     if (ReadString(write, "sourceValidation", "") == "supported_span") Program.InsertObligation(connection, turn, write, ReadLong(row, "ts", 0), "accepted_commitment_bootstrap");
                 }
             }
-            Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');", TestDict("key", marker));
+            ReignDatabase.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');", TestDict("key", marker));
         }
     }
 }

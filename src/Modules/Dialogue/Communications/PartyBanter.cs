@@ -80,17 +80,17 @@ events|something amusing about the supplied shared encounter";
         // Injected only by isolated self-tests; production always uses the canonical provider adapter.
         private static Func<Dictionary<string, object>, Action<string>, Func<bool>, Dictionary<string, object>> BanterTestProvider;
 
-        internal static void EnsureBanterSchema(ReignDbConnection c) => Program.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS conversation_banter_episodes (
+        internal static void EnsureBanterSchema(ReignDbConnection c) => ReignDatabase.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS conversation_banter_episodes (
 session_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,payload_json TEXT NOT NULL,updated_ts BIGINT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_banter_timeline ON conversation_banter_episodes(timeline_id,updated_ts);");
 
         internal static string BanterGeneration(ReignDbConnection c) => ReadString(ReadMemoryPrecisionState(c), "restore_generation", "");
         private static Dictionary<string, object> ReadBanter(ReignDbConnection c, string id) => TryParseJsonObject(ReadString(
-            Program.QuerySql(c, "SELECT payload_json FROM conversation_banter_episodes WHERE session_id=$id;", TestDict("id", id)).FirstOrDefault(), "payload_json", "{}")) ?? TestDict();
-        internal static void WriteBanter(ReignDbConnection c, Dictionary<string, object> e) => Program.ExecuteSql(c, @"INSERT INTO conversation_banter_episodes(session_id,timeline_id,payload_json,updated_ts)
+            ReignDatabase.QuerySql(c, "SELECT payload_json FROM conversation_banter_episodes WHERE session_id=$id;", TestDict("id", id)).FirstOrDefault(), "payload_json", "{}")) ?? TestDict();
+        internal static void WriteBanter(ReignDbConnection c, Dictionary<string, object> e) => ReignDatabase.ExecuteSql(c, @"INSERT INTO conversation_banter_episodes(session_id,timeline_id,payload_json,updated_ts)
 VALUES($id,$timeline,$payload,$ts) ON CONFLICT(session_id) DO UPDATE SET payload_json=EXCLUDED.payload_json,updated_ts=EXCLUDED.updated_ts;",
             TestDict("id", ReadString(e, "sessionId", ""), "timeline", ReadString(e, "timelineId", ""), "payload", Json.Serialize(e), "ts", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
-        private static List<Dictionary<string, object>> RecentBanter(ReignDbConnection c, string timeline) => Program.QuerySql(c,
+        private static List<Dictionary<string, object>> RecentBanter(ReignDbConnection c, string timeline) => ReignDatabase.QuerySql(c,
             "SELECT payload_json FROM conversation_banter_episodes WHERE timeline_id=$timeline ORDER BY COALESCE((payload_json::jsonb->>'createdUtc')::bigint,updated_ts) DESC,updated_ts DESC LIMIT 64;", TestDict("timeline", timeline))
             .Select(row => TryParseJsonObject(ReadString(row, "payload_json", "{}")) ?? TestDict()).ToList();
         private static bool BanterActive(Dictionary<string, object> e) => new[] { "generating", "ready", "delivering" }.Contains(ReadString(e, "state", ""));
@@ -103,7 +103,7 @@ VALUES($id,$timeline,$payload,$ts) ON CONFLICT(session_id) DO UPDATE SET payload
             double day = ReadDouble(p, "worldDay", -1);
             if (campaign.Length == 0 || timeline.Length == 0 || !double.IsFinite(day) || day < 0) return TestDict("ok", false, "error", "Banter requires a current campaign, timeline and clock.");
             using var ownership = PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign));
-            using var c = Program.OpenCampaignConnection(campaign); EnsureBanterSchema(c);
+            using var c = ReignDatabase.OpenCampaignConnection(campaign); EnsureBanterSchema(c);
             string generation = BanterGeneration(c);
             if (operation == "context")
             {
@@ -215,7 +215,7 @@ VALUES($id,$timeline,$payload,$ts) ON CONFLICT(session_id) DO UPDATE SET payload
         private static int BanterPairWeight(ReignDbConnection c, Dictionary<string, object> a, Dictionary<string, object> b)
         {
             RelationshipsService.EnsureMbtiRelationshipSchema(c);
-            var pair = Program.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", RelationshipsService.AmbientPairKey(Program.CharacterIdFrom(a), Program.CharacterIdFrom(b)))).FirstOrDefault();
+            var pair = ReignDatabase.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", RelationshipsService.AmbientPairKey(Program.CharacterIdFrom(a), Program.CharacterIdFrom(b)))).FirstOrDefault();
             int ab = ReadInt(pair, "affinity_a_to_b", 0), ba = ReadInt(pair, "affinity_b_to_a", 0);
             return Math.Abs(ab - ba) + Math.Max(Math.Abs(ab), Math.Abs(ba));
         }
@@ -224,7 +224,7 @@ VALUES($id,$timeline,$payload,$ts) ON CONFLICT(session_id) DO UPDATE SET payload
             if (ids.Count < 2) return new();
             var access = ids.Select(id => Program.BuildKnowledgeAccessContext(id, ReadString(p, "playerHeroStringId", ""), "", p)).ToList();
             var first = access[0];
-            var rows = Program.QuerySql(c, @"SELECT t.* FROM conversation_turns t
+            var rows = ReignDatabase.QuerySql(c, @"SELECT t.* FROM conversation_turns t
 WHERE t.participants_json::jsonb @> $audience::jsonb AND t.role='npc' AND t.status='active' AND length(t.text)<=400
 AND t.world_day<=$day AND t.accepted_sequence<=$sequence AND t.ts<=$timestamp AND " + MemorySourceTimelineSql("conversation_turns", "t", access: first) + @"
 ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDict("audience", Json.Serialize(ids),
@@ -288,7 +288,7 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
                 {
                     string target = Program.CharacterIdFrom(other); var acquaintance = CharactersService.ReadAcquaintance(c, id, target);
                     var view = CharactersService.BuildIdentityView(acquaintance, TestDict("mode", "party_chat", "canonicalName", ReadString(other, "name", ""), "subject", other, "appearance", TestDict()));
-                    var pair = Program.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", RelationshipsService.AmbientPairKey(id, target))).FirstOrDefault();
+                    var pair = ReignDatabase.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", RelationshipsService.AmbientPairKey(id, target))).FirstOrDefault();
                     int native = ReadInt(RelationshipsService.FindRelationshipPair(ReadDictionaryList(p, "relationshipPairs"), id, target), "nativeRelation", 0);
                     int affinity = pair == null ? native : ReputationService.EffectiveDirectionalAffinity(pair, ReadString(pair, "hero_a_id", "") == id, native);
                     bool known = CharactersService.IdentityStateVerified(acquaintance), ruler = ReadBool(other, "isRuler", false), noble = ReadBool(other, "isLord", false);
@@ -348,7 +348,7 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
             try
             {
                 using var ownership = PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign));
-                using var c = Program.OpenCampaignConnection(campaign); var e = ReadBanter(c, id);
+                using var c = ReignDatabase.OpenCampaignConnection(campaign); var e = ReadBanter(c, id);
                 if (!BanterActive(e) || BanterGeneration(c) != generation || ReadString(e, "generation", "") != generation) return;
                 var drafts = ReadDictionaryList(e, "drafts"); var row = ValidateBanterDraft(json, ReadStringList(e, "heroIds"), ReadDictionary(e, "options"), drafts);
                 if (row == null) throw new InvalidOperationException("Banter returned an invalid spoken line.");
@@ -380,7 +380,7 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
             var access = Program.EnterCampaignRequestAccess("/party-banter/draft");
             try
             {
-                using var ownership = PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign)); using var c = Program.OpenCampaignConnection(campaign); var e = ReadBanter(c, id);
+                using var ownership = PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign)); using var c = ReignDatabase.OpenCampaignConnection(campaign); var e = ReadBanter(c, id);
                 if (!BanterActive(e) || BanterGeneration(c) != generation || ReadString(e, "generation", "") != generation) return;
                 e["generationDone"] = true; e["generationMs"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - ReadLong(e, "createdUtc", 0); e["error"] = error;
                 if (ReadDictionaryList(e, "drafts").Count == 0) FinishBanter(c, campaign, e, ReadDouble(e, "startedDay", 0), "generation_failed", TestDict());
@@ -486,7 +486,7 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
             e["drafts"] = ReadDictionaryList(e, "drafts").Take(ReadInt(e, "accepted", 0)).ToList();
             // Keep an explicit continuation-compatible close boundary. NPC-only
             // history remains party_chat and can be adopted without republishing.
-            Program.ExecuteSql(c, "UPDATE conversation_sessions SET status='closed',close_reason='ui_continuation',end_world_day=$day WHERE session_id=$id;", TestDict("id", id, "day", day));
+            ReignDatabase.ExecuteSql(c, "UPDATE conversation_sessions SET status='closed',close_reason='ui_continuation',end_world_day=$day WHERE session_id=$id;", TestDict("id", id, "day", day));
             WriteBanter(c, e);
         }
         private static Dictionary<string, object> HandoffBanter(ReignDbConnection c, string campaign, Dictionary<string, object> e, Dictionary<string, object> p)
@@ -497,7 +497,7 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
             if (!unavailable && ReadString(e, "handoffSessionId", "").Length == 0)
             {
                 string handoff = wasActive ? id : id + "_joined";
-                if (wasActive) Program.ExecuteSql(c, "UPDATE conversation_sessions SET status='open',close_reason='' WHERE session_id=$id;", TestDict("id", id));
+                if (wasActive) ReignDatabase.ExecuteSql(c, "UPDATE conversation_sessions SET status='open',close_reason='' WHERE session_id=$id;", TestDict("id", id));
                 else
                 {
                     var start = ConversationStartApi(TestDict("campaignId", campaign, "timelineId", ReadString(e, "timelineId", ""), "sessionId", handoff,
@@ -509,7 +509,7 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
                 e["handoffSessionId"] = handoff; WriteBanter(c, e);
             }
             string adopted = ReadString(e, "handoffSessionId", "");
-            bool closed = adopted.Length > 0 && ReadString(Program.QuerySql(c, "SELECT status FROM conversation_sessions WHERE session_id=$id;", TestDict("id", adopted)).FirstOrDefault(), "status", "closed") != "open";
+            bool closed = adopted.Length > 0 && ReadString(ReignDatabase.QuerySql(c, "SELECT status FROM conversation_sessions WHERE session_id=$id;", TestDict("id", adopted)).FirstOrDefault(), "status", "closed") != "open";
             var result = BanterPublic(campaign, e); result["readOnly"] = unavailable || closed; return result;
         }
     }

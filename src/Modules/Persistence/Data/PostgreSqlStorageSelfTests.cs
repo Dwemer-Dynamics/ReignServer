@@ -60,17 +60,17 @@ namespace ReignBetaServer
                     "Older server code rejects a newer database schema before changing it.");
 
                 using (ReignDbConnection connection =
-                    Program.OpenCampaignConnection(campaignId))
+                    ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    Program.ExecuteSql(connection,
+                    ReignDatabase.ExecuteSql(connection,
                         @"CREATE TABLE IF NOT EXISTS postgresql_probe(
 probe_id TEXT PRIMARY KEY,payload TEXT NOT NULL);");
-                    Program.ExecuteSql(connection,
+                    ReignDatabase.ExecuteSql(connection,
                         @"INSERT OR REPLACE INTO postgresql_probe(
 probe_id,payload) VALUES('state','before');");
-                    Program.ExecuteSql(connection,
+                    ReignDatabase.ExecuteSql(connection,
                         "CREATE INDEX postgresql_probe_payload_a ON postgresql_probe(payload);");
-                    Program.ExecuteSql(connection,
+                    ReignDatabase.ExecuteSql(connection,
                         "CREATE INDEX postgresql_probe_payload_b ON postgresql_probe(payload);");
                 }
                 int removedIndexes =
@@ -78,8 +78,8 @@ probe_id,payload) VALUES('state','before');");
                         campaignId);
                 int payloadIndexes;
                 using (ReignDbConnection connection =
-                    Program.OpenCampaignConnection(campaignId))
-                    payloadIndexes = ReadInt(Program.QuerySql(connection, @"
+                    ReignDatabase.OpenCampaignConnection(campaignId))
+                    payloadIndexes = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM pg_indexes
 WHERE schemaname=current_schema() AND tablename='postgresql_probe'
 AND indexdef LIKE '%(payload)%';").FirstOrDefault(), "count", 0);
@@ -89,15 +89,15 @@ AND indexdef LIKE '%(payload)%';").FirstOrDefault(), "count", 0);
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(
                     campaignId, pointId);
                 using (ReignDbConnection connection =
-                    Program.OpenCampaignConnection(campaignId))
-                    Program.ExecuteSql(connection,
+                    ReignDatabase.OpenCampaignConnection(campaignId))
+                    ReignDatabase.ExecuteSql(connection,
                         "UPDATE postgresql_probe SET payload='after' WHERE probe_id='state';");
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(
                     campaignId, pointId);
                 string restored;
                 using (ReignDbConnection connection =
-                    Program.OpenCampaignConnection(campaignId))
-                    restored = ReadString(Program.QuerySql(connection,
+                    ReignDatabase.OpenCampaignConnection(campaignId))
+                    restored = ReadString(ReignDatabase.QuerySql(connection,
                         "SELECT payload FROM postgresql_probe WHERE probe_id='state';")
                         .FirstOrDefault(), "payload", "");
                 add("schema_snapshot_round_trip",
@@ -408,20 +408,20 @@ VALUES(@campaign_id,@schema_name,now(),now());", other))
             int MigrationVersionOf(ReignDbConnection connection) =>
                 ReadCampaignMigrationVersion(connection, null);
             bool ApproachTables(ReignDbConnection connection) => ReadInt(
-                Program.QuerySql(connection, @"SELECT COUNT(*) AS count FROM information_schema.tables
+                ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count FROM information_schema.tables
 WHERE table_schema=current_schema()
 AND table_name IN ('player_attention_events','player_approach_state');")
                     .FirstOrDefault(), "count", 0) == 2;
             // Simulates a schema saved before migration 2 (or before the runner when version is null).
             void Downgrade(ReignDbConnection connection, string version)
             {
-                Program.ExecuteSql(connection, "DROP TABLE IF EXISTS player_attention_events;");
-                Program.ExecuteSql(connection, "DROP TABLE IF EXISTS player_approach_state;");
+                ReignDatabase.ExecuteSql(connection, "DROP TABLE IF EXISTS player_attention_events;");
+                ReignDatabase.ExecuteSql(connection, "DROP TABLE IF EXISTS player_approach_state;");
                 if (version == null)
-                    Program.ExecuteSql(connection, "DELETE FROM schema_meta WHERE key=$key;",
+                    ReignDatabase.ExecuteSql(connection, "DELETE FROM schema_meta WHERE key=$key;",
                         new Dictionary<string, object> { ["key"] = CampaignMigrationVersionKey });
                 else
-                    Program.ExecuteSql(connection, "UPDATE schema_meta SET value=$value WHERE key=$key;",
+                    ReignDatabase.ExecuteSql(connection, "UPDATE schema_meta SET value=$value WHERE key=$key;",
                         new Dictionary<string, object> { ["key"] = CampaignMigrationVersionKey, ["value"] = version });
             }
             try
@@ -431,20 +431,20 @@ AND table_name IN ('player_attention_events','player_approach_state');")
                     && CampaignSchemaMigrations[0].Apply == null,
                     "Campaign migrations are numbered 1..N without gaps and migration 1 is the core baseline.");
 
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
                     add("campaign_migration_fresh_reaches_latest",
                         MigrationVersionOf(connection) == latest && ApproachTables(connection)
                         && IsCampaignMigrationReady(connection, PlayerApproachSchemaMigrationVersion),
                         "A fresh campaign schema records the latest migration version, has the migration-owned tables and enables the Ensure fast path.");
 
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     // With the ready marker set, the migration-owned Ensure method must not run DDL.
-                    Program.ExecuteSql(connection, "DROP TABLE IF EXISTS player_attention_events;");
-                    Program.ExecuteSql(connection, "DROP TABLE IF EXISTS player_approach_state;");
+                    ReignDatabase.ExecuteSql(connection, "DROP TABLE IF EXISTS player_attention_events;");
+                    ReignDatabase.ExecuteSql(connection, "DROP TABLE IF EXISTS player_approach_state;");
                     RelationshipsService.EnsurePlayerApproachSchema(connection);
                     bool skipped = !ApproachTables(connection);
-                    Program.InvalidateCampaignSchemaCaches(campaign);
+                    ReignDatabase.InvalidateCampaignSchemaCaches(campaign);
                     bool cleared = !IsCampaignMigrationReady(connection, PlayerApproachSchemaMigrationVersion);
                     RelationshipsService.EnsurePlayerApproachSchema(connection);
                     add("campaign_migration_marker_skips_ensure_ddl", skipped,
@@ -453,7 +453,7 @@ AND table_name IN ('player_attention_events','player_approach_state');")
                         "InvalidateCampaignSchemaCaches clears the migration-ready marker, after which EnsurePlayerApproachSchema applies its DDL again.");
                 }
 
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     var applied = new List<int>();
                     int repeated = ApplyCampaignSchemaMigrations(connection, applied);
@@ -462,28 +462,28 @@ AND table_name IN ('player_attention_events','player_approach_state');")
                         "Running the migration runner again on a current schema applies nothing.");
                     Downgrade(connection, "1");
                 }
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
                     add("campaign_migration_warm_check_detects_older_schema",
                         MigrationVersionOf(connection) == latest && ApproachTables(connection),
                         "A schema replaced beneath the warm cache by an older version is detected and upgraded on the next open.");
 
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
                     Downgrade(connection, "1");
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "migration_v1_" + token);
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
                     Downgrade(connection, null);
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "migration_v0_" + token);
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
-                    Program.ExecuteSql(connection, "INSERT INTO player_approach_state(timeline_id,state_key,value_json) VALUES('t','after_upgrade','{}');");
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
+                    ReignDatabase.ExecuteSql(connection, "INSERT INTO player_approach_state(timeline_id,state_key,value_json) VALUES('t','after_upgrade','{}');");
 
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "migration_v1_" + token);
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
                     add("campaign_migration_restored_v1_snapshot_upgraded",
                         MigrationVersionOf(connection) == latest && ApproachTables(connection)
-                        && Program.QuerySql(connection, "SELECT * FROM player_approach_state;").Count == 0,
+                        && ReignDatabase.QuerySql(connection, "SELECT * FROM player_approach_state;").Count == 0,
                         "Restoring a Save Sync snapshot taken at migration version 1 brings it to the latest version on the next open.");
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "migration_v0_" + token);
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
                     add("campaign_migration_restored_pre_runner_snapshot_upgraded",
                         MigrationVersionOf(connection) == latest && ApproachTables(connection),
                         "Restoring a snapshot saved before the runner existed brings it to the latest version on the next open.");
@@ -498,7 +498,7 @@ AND table_name IN ('player_attention_events','player_approach_state');")
                         try
                         {
                             start.SignalAndWait(10000);
-                            using ReignDbConnection connection = Program.OpenCampaignConnection(concurrent);
+                            using ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(concurrent);
                             if (MigrationVersionOf(connection) == latest && ApproachTables(connection))
                                 Interlocked.Increment(ref opened);
                         }
@@ -513,9 +513,9 @@ AND table_name IN ('player_attention_events','player_approach_state');")
                 if (!workersJoined) return;
 
                 // Concurrent runners on separate connections (as separate processes would) apply each migration once.
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(concurrent))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(concurrent))
                     Downgrade(connection, "1");
-                Program.InvalidateCampaignSchemaCaches(concurrent);
+                ReignDatabase.InvalidateCampaignSchemaCaches(concurrent);
                 var appliedByRunner = new[] { new List<int>(), new List<int>() };
                 Exception runnerError = null;
                 using (var start = new Barrier(2))
@@ -537,7 +537,7 @@ AND table_name IN ('player_attention_events','player_approach_state');")
                 if (!workersJoined) return;
                 List<int> appliedTotal = appliedByRunner.SelectMany(list => list).OrderBy(value => value).ToList();
                 bool raceUpgraded;
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(concurrent))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(concurrent))
                     raceUpgraded = MigrationVersionOf(connection) == latest && ApproachTables(connection);
                 add("campaign_migration_concurrent_runners_apply_once",
                     runnerError == null && raceUpgraded

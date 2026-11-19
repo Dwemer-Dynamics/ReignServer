@@ -59,13 +59,11 @@ namespace ReignBetaServer
             Check("political_revision_is_persisted_in_exact_timeline", Program.ReadJsonObject(Program.CharacterFile(campaign, actor,
                 "politics", "revision-1-" + DialogueService.SafeMemoryKey(timeline) + ".json")).Count > 0);
             var replay = CourtLifeRespond(payload, settings, Writer);
-            using (var connection = Program.OpenCampaignConnection(campaign))
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 Check("replay_preserves_sources_without_provider_duplicate", ReadBool(replay, "ok", false)
-                    && calls == 1 && ReadInt(Program.QuerySql(connection,
-                        "SELECT COUNT(*) AS n FROM court_life_turns WHERE actor_id=$id;", TestDict("id", actor)).Single(), "n", 0) == 1);
-                Check("original_player_whitespace_is_stored_without_editing", ReadString(Program.QuerySql(connection,
-                    "SELECT player_text FROM court_life_turns WHERE actor_id=$id;", TestDict("id", actor)).Single(), "player_text", "")
+                    && calls == 1 && ReadInt(CourtSelfTestStore.CountCourtLifeTurns(connection, TestDict("id", actor)).Single(), "n", 0) == 1);
+                Check("original_player_whitespace_is_stored_without_editing", ReadString(CourtSelfTestStore.SelectCourtLifeTurns(connection, TestDict("id", actor)).Single(), "player_text", "")
                     == ReadString(payload, "playerText", ""));
             }
             var forged = Program.CloneDictionary(payload); forged["actorId"] = "missing_native_court_lord";

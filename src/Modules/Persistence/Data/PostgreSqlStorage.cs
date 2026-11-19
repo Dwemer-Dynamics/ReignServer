@@ -449,7 +449,7 @@ SET schema_name=excluded.schema_name,
                     });
                 transaction.Commit();
             }
-            Program.InvalidateCampaignSchemaCaches(normalizedCampaignId);
+            ReignDatabase.InvalidateCampaignSchemaCaches(normalizedCampaignId);
             NpgsqlConnection.ClearAllPools();
         }
 
@@ -868,7 +868,7 @@ SELECT current_database(),current_user,
             string normalizedCampaignId = NormalizeCampaignId(campaignId);
             RegisteredCampaignSchemas.TryRemove(normalizedCampaignId,
                 out byte ignoredRegistration);
-            Program.InvalidateCampaignSchemaCaches(normalizedCampaignId);
+            ReignDatabase.InvalidateCampaignSchemaCaches(normalizedCampaignId);
             RelationshipsService.InvalidateRelationshipPairStateCache(
                 normalizedCampaignId);
             string campaignSchema = CampaignSchemaName(normalizedCampaignId);

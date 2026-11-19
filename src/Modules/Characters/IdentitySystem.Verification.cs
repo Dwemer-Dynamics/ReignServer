@@ -41,11 +41,10 @@ namespace ReignBetaServer
                 // The prompt adapter observes a court at day 50 and persists its own
                 // live roster context. Keep it separate from the day-10 roster fixture.
                 AddCourtAudienceIdentityTests(courtCampaignId, add);
-                using (ReignDbConnection isolationConnection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection isolationConnection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureIdentitySchema(isolationConnection);
-                    int priorRosterRows = ReadInt(Program.QuerySql(isolationConnection,
-                        "SELECT COUNT(*) AS count FROM identity_roster;").FirstOrDefault(), "count", -1);
+                    int priorRosterRows = ReadInt(CharactersStore.CountIdentityRoster(isolationConnection).FirstOrDefault(), "count", -1);
                     add("court_audience_fixture_isolated", priorRosterRows == 0,
                         "The persisted court prompt fixture leaves the separate roster campaign empty.",
                         new Dictionary<string, object> { ["priorRosterRows"] = priorRosterRows });
@@ -127,18 +126,15 @@ namespace ReignBetaServer
                 add("ruler_network_requires_identification", IdentityTestState(campaignId, "ruler", "foreign") == "" && IdentityTestState(campaignId, "foreign", "ruler") == "", "Ruler status does not create omniscient identity knowledge in either direction.", null);
                 add("same_clan_and_family", IdentityTestState(campaignId, "player", "clanmate") == "verified" && IdentityTestState(campaignId, "player", "child") == "verified" && IdentityTestState(campaignId, "child", "player") == "verified", "Same-clan and immediate-family safety rules verify identity.", null);
                 add("synchronization_idempotent", ReadBool(sync, "rosterChanged", false) && !ReadBool(secondSync, "rosterChanged", true), "An unchanged roster fingerprint does not rebuild the network.", secondSync);
-                using (ReignDbConnection storageConnection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection storageConnection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    int storedSyntheticPairs = ReadInt(Program.QuerySql(storageConnection,
-                        "SELECT COUNT(*) AS count FROM acquaintances WHERE verification_source IN ('same_clan','immediate_family','same_kingdom_nobility','ruler_network');").FirstOrDefault(), "count", -1);
-                    int rosterRows = ReadInt(Program.QuerySql(storageConnection,
-                        "SELECT COUNT(*) AS count FROM identity_roster;").FirstOrDefault(), "count", -1);
+                    int storedSyntheticPairs = ReadInt(CharactersStore.CountAcquaintances(storageConnection).FirstOrDefault(), "count", -1);
+                    int rosterRows = ReadInt(CharactersStore.CountIdentityRoster(storageConnection).FirstOrDefault(), "count", -1);
                     add("compact_roster_storage", storedSyntheticPairs == 0 && rosterRows == roster.Count,
                         "Automatic clan and immediate-family knowledge is derived from one roster row per hero instead of an O(N-squared) pair matrix.",
                         new Dictionary<string, object> { ["storedSyntheticPairs"] = storedSyntheticPairs, ["rosterRows"] = rosterRows });
                     HashSet<string> chemistryIndexes = new HashSet<string>(
-                        Program.QuerySql(storageConnection,
-                            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='relationship_pair_chemistry';")
+                        CharactersStore.SelectSqliteMaster(storageConnection)
                             .Select(row => ReadString(row, "name", "")),
                         StringComparer.OrdinalIgnoreCase);
                     add("court_popularity_uses_directional_pair_indexes",
@@ -469,7 +465,7 @@ namespace ReignBetaServer
                         == "authoritative_qualified_self_introduction",
                     "The exact name-first feast introduction verifies identity before the first NPC response.",
                     nameFirstEncounter);
-                using (ReignDbConnection nameFirstConnection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection nameFirstConnection = ReignDatabase.OpenCampaignConnection(campaignId))
                     add("name_first_social_event_persists",
                         IdentityStateVerified(ReadAcquaintance(
                             nameFirstConnection, "name_first_observer", "main_hero")),
@@ -515,7 +511,7 @@ namespace ReignBetaServer
                 civic["kingdomId"] = "conqueror";
                 add("civic_conquest_recalculates", !ReadBool(ReadDictionary(BuildIdentityView(null, civicContext), "authorityView"),
                     "publicOfficeKnown", true), "A realm mismatch cannot confer civic authority.", null);
-                using (ReignDbConnection introductionConnection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection introductionConnection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureIdentitySchema(introductionConnection);
                     UpsertClaimedIdentity(introductionConnection, "ochivos", "main_hero", "Michael", "Michael Howarton", "self_introduction", "main_hero", "legacy_intro", 49d,
@@ -525,14 +521,13 @@ namespace ReignBetaServer
                     ["campaignId"] = campaignId, ["observer"] = ochivos, ["subject"] = michael,
                     ["observerHeroStringId"] = "ochivos", ["subjectHeroStringId"] = "main_hero",
                     ["encounterId"] = "qualified_reconciliation", ["worldDay"] = 50d });
-                using (ReignDbConnection reopenedIntroductionConnection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection reopenedIntroductionConnection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     var savedIntroduction = ReadAcquaintance(reopenedIntroductionConnection, "ochivos", "main_hero");
                     add("qualified_claim_reconciliation_persists", IdentityStateVerified(savedIntroduction)
                         && ReadString(savedIntroduction, "verification_source", "") == "authoritative_qualified_self_introduction_reconciled",
                         "An evidence-backed legacy introduction is verified on encounter and survives a fresh database connection.", reconciledEncounter);
-                    add("qualified_claim_keeps_original_evidence", Program.QuerySql(reopenedIntroductionConnection,
-                        "SELECT evidence_id FROM identity_evidence WHERE observer_id='ochivos' AND subject_id='main_hero' AND source='self_introduction';").Count > 0,
+                    add("qualified_claim_keeps_original_evidence", CharactersStore.SelectIdentityEvidence4(reopenedIntroductionConnection).Count > 0,
                         "Reconciliation appends verification without deleting the original claim evidence.", null);
                 }
                 add("marvonara_false_claims_are_rejected",
@@ -1134,7 +1129,7 @@ namespace ReignBetaServer
                     string.IsNullOrWhiteSpace(ExtractSelfIntroducedName("Menor, I am giving you this silver cup as a sincere gift."))
                     && ExtractSelfIntroducedName("Osarios, Im actually here for the tournament.", true) == "Osarios",
                     "A name-first address to an NPC cannot rename the player; name-first answers remain available only when an NPC actually requested the player's identity.", null);
-                using (ReignDbConnection identityConnection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection identityConnection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     UpsertClaimedIdentity(identityConnection, "alias_cleanup_observer", "player", "Aeric", "Menor", "self_introduction", "player",
                         "legacy_address_encounter", 11d, new Dictionary<string, object>
@@ -1150,7 +1145,7 @@ namespace ReignBetaServer
                 });
                 Dictionary<string, object> repairedAliasView = ReadDictionary(repairedAlias, "identityView") ?? new Dictionary<string, object>();
                 List<string> repairedAliases;
-                using (ReignDbConnection identityConnection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection identityConnection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     repairedAliases = Program.TextListFromJson(ReadString(ReadStoredAcquaintance(identityConnection, "alias_cleanup_observer", "player"), "aliases_json", "[]"));
                 }
@@ -1171,7 +1166,7 @@ namespace ReignBetaServer
                 add("prompt_privacy_sanitization", !sanitized.Contains("PROFILE: Aeric") && !sanitized.Contains("MEMORY: Aeric") && sanitized.Contains("LATEST: My name is Aeric."), "Canonical names are removed from prompt context while the latest explicit introduction remains visible.", sanitized);
 
                 using (ReignDbConnection identityConnection =
-                    Program.OpenCampaignConnection(campaignId))
+                    ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     UpsertVerifiedIdentity(
                         identityConnection, ruler, foreign,

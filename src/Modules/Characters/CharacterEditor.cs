@@ -19,22 +19,12 @@ namespace ReignBetaServer
 
         internal static void EnsureCharacterEditorSchema(ReignDbConnection connection)
         {
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS character_editor_heads (
-hero_id TEXT PRIMARY KEY,revision_token TEXT NOT NULL DEFAULT '',latest_revision_id TEXT NOT NULL DEFAULT '',updated_ts INTEGER NOT NULL);" );
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS character_editor_revisions (
-revision_id TEXT PRIMARY KEY,hero_id TEXT NOT NULL,section TEXT NOT NULL DEFAULT 'all',description TEXT NOT NULL DEFAULT '',
-before_json TEXT NOT NULL DEFAULT '{}',after_json TEXT NOT NULL DEFAULT '{}',native_changes_json TEXT NOT NULL DEFAULT '{}',
-reconciliation_json TEXT NOT NULL DEFAULT '{}',rollback_of TEXT NOT NULL DEFAULT '',created_ts INTEGER NOT NULL);" );
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_editor_revisions_hero ON character_editor_revisions(hero_id,created_ts DESC);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS character_editor_native_commands (
-command_id TEXT PRIMARY KEY,revision_id TEXT NOT NULL,hero_id TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',
-changes_json TEXT NOT NULL DEFAULT '{}',inverse_json TEXT NOT NULL DEFAULT '{}',dangerous INTEGER NOT NULL DEFAULT 0,
-confirmation TEXT NOT NULL DEFAULT '',created_ts INTEGER NOT NULL,claimed_ts INTEGER NOT NULL DEFAULT 0,resolved_ts INTEGER NOT NULL DEFAULT 0,
-result_json TEXT NOT NULL DEFAULT '{}');" );
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_editor_native_commands_status ON character_editor_native_commands(status,created_ts);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS character_editor_reconciliation (
-job_id TEXT PRIMARY KEY,revision_id TEXT NOT NULL,hero_id TEXT NOT NULL,section TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',
-summary TEXT NOT NULL DEFAULT '',result_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);" );
+            CharactersSchema.CreateCharacterEditorHeads(connection);
+            CharactersSchema.CreateCharacterEditorRevisions(connection);
+            CharactersSchema.CreateIndexEditorRevisionsHero(connection);
+            CharactersSchema.CreateCharacterEditorNativeCommands(connection);
+            CharactersSchema.CreateIndexEditorNativeCommandsStatus(connection);
+            CharactersSchema.CreateCharacterEditorReconciliation(connection);
         }
 
         internal static Dictionary<string, object> CharacterEditorListApi(Dictionary<string, object> payload)
@@ -43,10 +33,9 @@ summary TEXT NOT NULL DEFAULT '',result_json TEXT NOT NULL DEFAULT '{}',created_
             Dictionary<string,Dictionary<string,object>> shippedProfiles=LoadCharacterProfileLibrary();
             HashSet<string> characterIds=new HashSet<string>(shippedProfiles.Keys,StringComparer.OrdinalIgnoreCase);
             if(Directory.Exists(root))foreach(string dir in Directory.GetDirectories(root))characterIds.Add(Path.GetFileName(dir));
-            using(ReignDbConnection c=Program.OpenCampaignConnection(campaign))
+            using(ReignDbConnection c=ReignDatabase.OpenCampaignConnection(campaign))
             {
-            Dictionary<string,int> pendingByHero=Program.QuerySql(c,@"SELECT hero_id,COUNT(*) count FROM character_editor_native_commands
-WHERE status IN ('pending','claimed','failed') GROUP BY hero_id;")
+            Dictionary<string,int> pendingByHero=CharactersStore.SelectCharacterEditorNativeCommands(c)
                 .Where(row=>!string.IsNullOrWhiteSpace(ReadString(row,"hero_id","")))
                 .ToDictionary(row=>ReadString(row,"hero_id",""),row=>ReadInt(row,"count",0),StringComparer.OrdinalIgnoreCase);
             foreach(string id in characterIds)
@@ -75,9 +64,9 @@ WHERE status IN ('pending','claimed','failed') GROUP BY hero_id;")
                 Program.UpsertCharacterProfile(campaign,runtimeProfile);
             }
             else if(runtimeProfile.Count>0)MaterializeCharacterProfile(campaign,hero,runtimeProfile,false,false);
-            using(ReignDbConnection c=Program.OpenCampaignConnection(campaign))
+            using(ReignDbConnection c=ReignDatabase.OpenCampaignConnection(campaign))
             {
-                Dictionary<string, object> snapshot=BuildCharacterEditorSnapshot(campaign,hero,c);Dictionary<string, object> head=Program.QuerySql(c,"SELECT * FROM character_editor_heads WHERE hero_id=$id LIMIT 1;",new Dictionary<string, object>{{"id",hero}}).FirstOrDefault();string token=ReadString(head,"revision_token","");if(string.IsNullOrWhiteSpace(token)){token=ComputeEditorToken(snapshot);Program.ExecuteSql(c,"INSERT OR REPLACE INTO character_editor_heads(hero_id,revision_token,latest_revision_id,updated_ts) VALUES($id,$token,'',$ts);",new Dictionary<string, object>{{"id",hero},{"token",token},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});}snapshot["revisionToken"]=token;snapshot["ok"]=true;return snapshot;
+                Dictionary<string, object> snapshot=BuildCharacterEditorSnapshot(campaign,hero,c);Dictionary<string, object> head=CharactersStore.SelectCharacterEditorHeads(c, new Dictionary<string, object>{{"id",hero}}).FirstOrDefault();string token=ReadString(head,"revision_token","");if(string.IsNullOrWhiteSpace(token)){token=ComputeEditorToken(snapshot);CharactersStore.UpsertCharacterEditorHeads(c, new Dictionary<string, object>{{"id",hero},{"token",token},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});}snapshot["revisionToken"]=token;snapshot["ok"]=true;return snapshot;
             }
         }
 
@@ -127,42 +116,35 @@ WHERE status IN ('pending','claimed','failed') GROUP BY hero_id;")
             Dictionary<string, object> records=new Dictionary<string, object>
             {
                 ["worldEvents"]=Program.QueryKnownRows(c,"events",knowledge,"",1000),
-                ["knowledgeReceipts"]=Program.QuerySql(c,"SELECT * FROM knowledge_receipts WHERE npc_id=$id ORDER BY acquired_day DESC,created_ts DESC LIMIT 1000;",EditorIdParams(hero)),
-                ["conversationSessions"]=Program.QuerySql(c,"SELECT * FROM conversation_sessions WHERE npc_id=$id OR player_id=$id ORDER BY start_ts DESC LIMIT 500;",EditorIdParams(hero)),
-                ["conversationTurns"]=Program.QuerySql(c,@"SELECT t.* FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id
-WHERE (s.npc_id=$id OR s.player_id=$id) AND t.status='active' ORDER BY t.ts DESC,t.turn_order DESC LIMIT 2000;",EditorIdParams(hero)),
-                ["memorySources"]=Program.QuerySql(c,@"SELECT ms.* FROM memory_sources ms WHERE
-(ms.document_type='summary' AND ms.document_id IN (SELECT summary_id FROM summaries WHERE owner_id=$id))
-OR (ms.source_type='session' AND ms.source_id IN (SELECT session_id FROM conversation_sessions WHERE npc_id=$id OR player_id=$id))
-ORDER BY ms.document_type,ms.document_id,ms.ordinal LIMIT 2000;",EditorIdParams(hero)),
+                ["knowledgeReceipts"]=CharactersStore.SelectKnowledgeReceipts(c, EditorIdParams(hero)),
+                ["conversationSessions"]=CharactersStore.SelectConversationSessions(c, EditorIdParams(hero)),
+                ["conversationTurns"]=CharactersStore.SelectConversationTurns(c, EditorIdParams(hero)),
+                ["memorySources"]=CharactersStore.SelectMemorySources(c, EditorIdParams(hero)),
                 ["memories"]=Program.QueryKnownRows(c,"memories",knowledge,"status='active'",1000),
                 ["summaries"]=Program.QueryKnownRows(c,"summaries",knowledge,"status='active'",500),
                 ["beliefs"]=Program.QueryKnownRows(c,"beliefs",knowledge,"",500),
                 ["comprehension"]=Program.QueryKnownRows(c,"comprehension",knowledge,"",500),
                 ["obligations"]=Program.QueryKnownRows(c,"obligations",knowledge,"",500),
-                ["dynamicCharacteristics"]=Program.QuerySql(c,@"SELECT * FROM dynamic_characteristics WHERE owner_id=$id
-ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'rejected' THEN 1 ELSE 2 END,importance DESC,last_ts DESC LIMIT 500;",EditorIdParams(hero)),
+                ["dynamicCharacteristics"]=CharactersStore.SelectDynamicCharacteristics(c, EditorIdParams(hero)),
                 ["relationshipNetwork"]=relationshipNetwork,
                 ["sharedRelationshipHistory"]=RelationshipsService.SharedRelationshipHistoryForCharacter(campaign,hero,c),
-                ["relationshipIncidents"]=Program.QuerySql(c,"SELECT * FROM relationship_incidents WHERE hero_a_id=$id OR hero_b_id=$id ORDER BY world_day DESC,created_ts DESC LIMIT 500;",EditorIdParams(hero)),
-                ["conversationRelationshipReceipts"]=Program.QuerySql(c,"SELECT * FROM conversation_relationship_receipts WHERE observer_id=$id OR target_id=$id ORDER BY created_ts DESC LIMIT 500;",EditorIdParams(hero)),
-                ["conversationBenefits"]=Program.QuerySql(c,"SELECT * FROM conversation_relationship_benefits WHERE giver_id=$id OR recipient_id=$id ORDER BY updated_ts DESC LIMIT 500;",EditorIdParams(hero)),
-                ["acquaintances"]=Program.QuerySql(c,"SELECT * FROM acquaintances WHERE observer_id=$id OR subject_id=$id ORDER BY updated_ts DESC LIMIT 1000;",EditorIdParams(hero)),
-                ["identityEvidence"]=Program.QuerySql(c,"SELECT * FROM identity_evidence WHERE observer_id=$id OR subject_id=$id ORDER BY created_ts DESC LIMIT 1000;",EditorIdParams(hero)),
-                ["rumors"]=Program.QuerySql(c,@"SELECT rst.*,ro.archetype_id,ro.world_day,ro.expires_day,ro.provenance_summary
-FROM rumor_subject_tags rst JOIN rumor_occurrences ro ON ro.occurrence_id=rst.occurrence_id
-WHERE rst.subject_id=$id ORDER BY ro.world_day DESC LIMIT 500;",EditorIdParams(hero)),
-                ["socialReputations"]=Program.QuerySql(c,"SELECT * FROM character_reputations WHERE subject_id=$id ORDER BY acquired_day DESC LIMIT 500;",EditorIdParams(hero)),
-                ["letters"]=Program.QuerySql(c,"SELECT * FROM letters WHERE sender_id=$id OR recipient_id=$id ORDER BY updated_ts DESC LIMIT 500;",EditorIdParams(hero)),
-                ["conceptions"]=Program.QuerySql(c,"SELECT * FROM conceptions WHERE mother_id=$id OR biological_father_id=$id OR legal_father_id=$id ORDER BY updated_ts DESC LIMIT 500;",EditorIdParams(hero)),
-                ["parentage"]=Program.QuerySql(c,"SELECT * FROM parentage WHERE child_id=$id OR mother_id=$id OR biological_father_id=$id OR legal_father_id=$id ORDER BY updated_ts DESC LIMIT 500;",EditorIdParams(hero))
+                ["relationshipIncidents"]=CharactersStore.SelectRelationshipIncidents(c, EditorIdParams(hero)),
+                ["conversationRelationshipReceipts"]=CharactersStore.SelectConversationRelationshipReceipts(c, EditorIdParams(hero)),
+                ["conversationBenefits"]=CharactersStore.SelectConversationRelationshipBenefits(c, EditorIdParams(hero)),
+                ["acquaintances"]=CharactersStore.SelectAcquaintances(c, EditorIdParams(hero)),
+                ["identityEvidence"]=CharactersStore.SelectIdentityEvidence(c, EditorIdParams(hero)),
+                ["rumors"]=CharactersStore.SelectRumorSubjectTags(c, EditorIdParams(hero)),
+                ["socialReputations"]=CharactersStore.SelectCharacterReputations(c, EditorIdParams(hero)),
+                ["letters"]=CharactersStore.SelectLetters(c, EditorIdParams(hero)),
+                ["conceptions"]=CharactersStore.SelectConceptions(c, EditorIdParams(hero)),
+                ["parentage"]=CharactersStore.SelectParentage(c, EditorIdParams(hero))
             };
             var narrative = ReadDictionary(documents, "narrative");
             if (NarrativeDocumentReady(narrative))
                 documents["narrative"] = ResolveEffectiveNarrative(new Dictionary<string, object> {
                     ["narrative"] = narrative, ["dynamicCharacteristics"] = Program.ReadJsonObject(Path.Combine(dir, "dynamic_characteristics.json")) });
-            List<Dictionary<string, object>> revisions=Program.QuerySql(c,"SELECT revision_id,hero_id,section,description,native_changes_json,reconciliation_json,rollback_of,created_ts FROM character_editor_revisions WHERE hero_id=$id ORDER BY created_ts DESC LIMIT 200;",new Dictionary<string, object>{{"id",hero}});
-            List<Dictionary<string, object>> commands=Program.QuerySql(c,"SELECT * FROM character_editor_native_commands WHERE hero_id=$id ORDER BY created_ts DESC LIMIT 200;",new Dictionary<string, object>{{"id",hero}});
+            List<Dictionary<string, object>> revisions=CharactersStore.SelectCharacterEditorRevisions(c, new Dictionary<string, object>{{"id",hero}});
+            List<Dictionary<string, object>> commands=CharactersStore.SelectCharacterEditorNativeCommands2(c, new Dictionary<string, object>{{"id",hero}});
             Dictionary<string, object> mbtiProfile=RelationshipsService.ResolveCharacterMbtiProfile(campaign,hero,profileDocument,traitDocument);
             return new Dictionary<string, object>{{"campaignId",campaign},{"heroStringId",hero},{"documents",documents},{"profileLibrary",Program.ReadJsonObject(Path.Combine(dir,"profile_library.json"))},{"campaignProfileOverlay",Program.ReadJsonObject(Path.Combine(dir,"campaign_profile_overlay.json"))},{"enrichment",Program.ReadJsonObject(Path.Combine(dir,"enrichment.json"))},{"memoryFiles",memoryFiles},{"history",history},{"records",records},{"socialStanding",ReputationService.CharacterSocialStandingProjection(c,campaign,hero)},{"portraits",CharacterEditorPortraitInventory(campaign,hero)},{"revisions",revisions},{"nativeCommands",commands},{"traitDefinitions",TraitDefinitions()},{"traitKeys",CoreTraitKeys.ToList()},{"courtVirtueKeys",CourtVirtueKeys.ToList()},{"mbtiProfile",mbtiProfile},{"mbtiType",ReadString(mbtiProfile,"type","XXXX")},{"storageBytes",DirectorySize(dir)}};
         }
@@ -173,9 +155,7 @@ WHERE rst.subject_id=$id ORDER BY ro.world_day DESC LIMIT 500;",EditorIdParams(h
             RelationshipsService.EnsureMbtiRelationshipSchema(connection);
             List<Dictionary<string, object>> result = new List<Dictionary<string, object>>();
             string playerId = ReadFirstString(profile, "mainHeroStringId", "playerHeroStringId");
-            bool hasPlayerChemistry = !string.IsNullOrWhiteSpace(playerId) && Program.QuerySql(connection,
-                "SELECT pair_key FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                new Dictionary<string, object> { ["pair"] = RelationshipsService.AmbientPairKey(hero, playerId) }).Count > 0;
+            bool hasPlayerChemistry = !string.IsNullOrWhiteSpace(playerId) && CharactersStore.SelectRelationshipPairChemistry(connection, new Dictionary<string, object> { ["pair"] = RelationshipsService.AmbientPairKey(hero, playerId) }).Count > 0;
             if (!string.IsNullOrWhiteSpace(playerId) && !playerId.Equals(hero, StringComparison.OrdinalIgnoreCase) && !hasPlayerChemistry)
             {
                 Dictionary<string, object> playerProfile = Program.ReadJsonObject(Program.CharacterFile(campaign, playerId, "profile.json"));
@@ -195,9 +175,7 @@ WHERE rst.subject_id=$id ORDER BY ro.world_day DESC LIMIT 500;",EditorIdParams(h
                     ["tags"] = new List<string> { "player_relationship" }
                 });
             }
-            foreach (Dictionary<string, object> row in Program.QuerySql(connection, @"SELECT * FROM relationship_pair_chemistry
-WHERE hero_a_id=$id OR hero_b_id=$id ORDER BY last_day DESC,updated_ts DESC LIMIT 1000;",
-                new Dictionary<string, object> { ["id"] = hero }))
+            foreach (Dictionary<string, object> row in CharactersStore.SelectRelationshipPairChemistry2(connection, new Dictionary<string, object> { ["id"] = hero }))
             {
                 bool observerIsA = ReadString(row, "hero_a_id", "").Equals(hero, StringComparison.OrdinalIgnoreCase);
                 string otherId = ReadString(row, observerIsA ? "hero_b_id" : "hero_a_id", "");
@@ -236,15 +214,15 @@ WHERE hero_a_id=$id OR hero_b_id=$id ORDER BY last_day DESC,updated_ts DESC LIMI
         private static Dictionary<string, object> CharacterEditorSaveApiLocked(Dictionary<string, object> payload)
         {
             payload=payload??new Dictionary<string, object>();string campaign=ReadString(payload,"campaignId",Program.LatestCampaignId()),hero=ReadFirstString(payload,"heroStringId","heroId"),section=ReadString(payload,"section","all"),token=ReadString(payload,"revisionToken","");if(string.IsNullOrWhiteSpace(campaign))campaign=Program.LatestCampaignId();if(string.IsNullOrWhiteSpace(hero))return new Dictionary<string, object>{{"ok",false},{"error","heroStringId is required."}};
-            using(ReignDbConnection c=Program.OpenCampaignConnection(campaign))
+            using(ReignDbConnection c=ReignDatabase.OpenCampaignConnection(campaign))
             {
-                Dictionary<string, object> head=Program.QuerySql(c,"SELECT * FROM character_editor_heads WHERE hero_id=$id LIMIT 1;",new Dictionary<string, object>{{"id",hero}}).FirstOrDefault();string current=ReadString(head,"revision_token","");if(!string.IsNullOrWhiteSpace(current)&&!string.Equals(token,current,StringComparison.Ordinal))return new Dictionary<string, object>{{"ok",false},{"conflict",true},{"error","This character changed after it was loaded. Reload to compare before saving."},{"currentRevisionToken",current}};
+                Dictionary<string, object> head=CharactersStore.SelectCharacterEditorHeads(c, new Dictionary<string, object>{{"id",hero}}).FirstOrDefault();string current=ReadString(head,"revision_token","");if(!string.IsNullOrWhiteSpace(current)&&!string.Equals(token,current,StringComparison.Ordinal))return new Dictionary<string, object>{{"ok",false},{"conflict",true},{"error","This character changed after it was loaded. Reload to compare before saving."},{"currentRevisionToken",current}};
                 Dictionary<string, object> before=BuildCharacterEditorSnapshot(campaign,hero,c);Dictionary<string, object> incomingHistory=ReadDictionary(payload,"history");List<long> changedHistoryTs=ChangedHistoryTimestamps(ReadDictionary(before,"history"),incomingHistory);ApplyEditorDocuments(campaign,hero,ReadDictionary(payload,"documents"));ApplyEditorHistory(campaign,hero,incomingHistory);ApplyEditorRecords(c,hero,ReadDictionary(payload,"records"));Dictionary<string, object> native=ReadDictionary(payload,"nativeChanges")??new Dictionary<string, object>();Dictionary<string, object> inverse=BuildNativeInverse(before,native);
                 if(changedHistoryTs.Count>0)RebuildEditedHistoryProjections(campaign,hero,c,incomingHistory,changedHistoryTs);
                 string revision="editor_revision_"+Guid.NewGuid().ToString("N");long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();string job="editor_reconcile_"+Guid.NewGuid().ToString("N");ReconcileCharacterEditor(campaign,hero,c,section,job,revision);
-                Dictionary<string, object> after=BuildCharacterEditorSnapshot(campaign,hero,c);string next=ComputeEditorToken(after);Program.ExecuteSql(c,@"INSERT INTO character_editor_revisions(revision_id,hero_id,section,description,before_json,after_json,native_changes_json,reconciliation_json,created_ts) VALUES($revision,$hero,$section,$description,$before,$after,$native,$reconcile,$ts);",new Dictionary<string, object>{{"revision",revision},{"hero",hero},{"section",section},{"description",ReadString(payload,"description","Character Editor save")},{"before",Json.Serialize(before)},{"after",Json.Serialize(after)},{"native",Json.Serialize(native)},{"reconcile",Json.Serialize(new Dictionary<string, object>{{"jobId",job},{"status","completed"}})},{"ts",ts}});
-                if(native.Count>0)Program.ExecuteSql(c,@"INSERT INTO character_editor_native_commands(command_id,revision_id,hero_id,status,changes_json,inverse_json,dangerous,confirmation,created_ts) VALUES($id,$revision,$hero,'pending',$changes,$inverse,$dangerous,$confirmation,$ts);",new Dictionary<string, object>{{"id","editor_command_"+Guid.NewGuid().ToString("N")},{"revision",revision},{"hero",hero},{"changes",Json.Serialize(native)},{"inverse",Json.Serialize(inverse)},{"dangerous",ReadBool(payload,"dangerous",false)?1:0},{"confirmation",ReadString(payload,"confirmation","")},{"ts",ts}});
-                Program.ExecuteSql(c,"INSERT OR REPLACE INTO character_editor_heads(hero_id,revision_token,latest_revision_id,updated_ts) VALUES($hero,$token,$revision,$ts);",new Dictionary<string, object>{{"hero",hero},{"token",next},{"revision",revision},{"ts",ts}});Program.LogOperational("character_editor.save",new Dictionary<string, object>{{"campaignId",campaign},{"heroStringId",hero},{"section",section},{"revisionId",revision},{"nativeChangeCount",native.Count}});
+                Dictionary<string, object> after=BuildCharacterEditorSnapshot(campaign,hero,c);string next=ComputeEditorToken(after);CharactersStore.InsertCharacterEditorRevisions(c, new Dictionary<string, object>{{"revision",revision},{"hero",hero},{"section",section},{"description",ReadString(payload,"description","Character Editor save")},{"before",Json.Serialize(before)},{"after",Json.Serialize(after)},{"native",Json.Serialize(native)},{"reconcile",Json.Serialize(new Dictionary<string, object>{{"jobId",job},{"status","completed"}})},{"ts",ts}});
+                if(native.Count>0)CharactersStore.InsertCharacterEditorNativeCommands(c, new Dictionary<string, object>{{"id","editor_command_"+Guid.NewGuid().ToString("N")},{"revision",revision},{"hero",hero},{"changes",Json.Serialize(native)},{"inverse",Json.Serialize(inverse)},{"dangerous",ReadBool(payload,"dangerous",false)?1:0},{"confirmation",ReadString(payload,"confirmation","")},{"ts",ts}});
+                CharactersStore.UpsertCharacterEditorHeads2(c, new Dictionary<string, object>{{"hero",hero},{"token",next},{"revision",revision},{"ts",ts}});Program.LogOperational("character_editor.save",new Dictionary<string, object>{{"campaignId",campaign},{"heroStringId",hero},{"section",section},{"revisionId",revision},{"nativeChangeCount",native.Count}});
                 Program.WriteJsonObject(Program.CharacterFile(campaign,hero,"editor_authority.json"),new Dictionary<string, object>{{"version",1},{"authoritative",true},{"latestRevisionId",revision},{"updatedUtc",DateTime.UtcNow.ToString("o")}});
                 return new Dictionary<string, object>{{"ok",true},{"revisionId",revision},{"revisionToken",next},{"reconciliationJobId",job},{"nativeQueued",native.Count>0},{"message","Server changes were saved. Native Bannerlord changes will be applied the next time this savegame is loaded."}};
             }
@@ -257,25 +235,21 @@ WHERE hero_a_id=$id OR hero_b_id=$id ORDER BY last_day DESC,updated_ts DESC LIMI
 
         private static Dictionary<string, object> CharacterEditorRollbackApiLocked(Dictionary<string, object> payload)
         {
-            string campaign=ReadString(payload,"campaignId",Program.LatestCampaignId()),hero=ReadFirstString(payload,"heroStringId","heroId"),revision=ReadFirstString(payload,"revisionId","revision_id");using(ReignDbConnection c=Program.OpenCampaignConnection(campaign)){Dictionary<string, object> row=Program.QuerySql(c,"SELECT * FROM character_editor_revisions WHERE revision_id=$revision AND hero_id=$hero LIMIT 1;",new Dictionary<string, object>{{"revision",revision},{"hero",hero}}).FirstOrDefault();if(row==null)return new Dictionary<string, object>{{"ok",false},{"error","Revision was not found."}};Dictionary<string, object> snapshot=TryParseJsonObject(ReadString(row,"before_json","{}"))??new Dictionary<string, object>();ApplyEditorSnapshot(campaign,hero,c,snapshot);string newRevision="editor_revision_"+Guid.NewGuid().ToString("N");long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();Dictionary<string, object> inverse=TryParseJsonObject(ReadString(Program.QuerySql(c,"SELECT inverse_json FROM character_editor_native_commands WHERE revision_id=$id ORDER BY created_ts DESC LIMIT 1;",new Dictionary<string, object>{{"id",revision}}).FirstOrDefault(),"inverse_json","{}"))??new Dictionary<string, object>();if(inverse.Count>0)Program.ExecuteSql(c,@"INSERT INTO character_editor_native_commands(command_id,revision_id,hero_id,status,changes_json,inverse_json,dangerous,confirmation,created_ts) VALUES($id,$revision,$hero,'pending',$changes,'{}',1,'rollback',$ts);",new Dictionary<string, object>{{"id","editor_command_"+Guid.NewGuid().ToString("N")},{"revision",newRevision},{"hero",hero},{"changes",Json.Serialize(inverse)},{"ts",ts}});Dictionary<string, object> after=BuildCharacterEditorSnapshot(campaign,hero,c);string token=ComputeEditorToken(after);Program.ExecuteSql(c,@"INSERT INTO character_editor_revisions(revision_id,hero_id,section,description,before_json,after_json,native_changes_json,reconciliation_json,rollback_of,created_ts) VALUES($id,$hero,'rollback',$description,$before,$after,$native,'{}',$rollback,$ts);",new Dictionary<string, object>{{"id",newRevision},{"hero",hero},{"description","Rollback of "+revision},{"before",ReadString(row,"after_json","{}")},{"after",Json.Serialize(after)},{"native",Json.Serialize(inverse)},{"rollback",revision},{"ts",ts}});Program.ExecuteSql(c,"INSERT OR REPLACE INTO character_editor_heads(hero_id,revision_token,latest_revision_id,updated_ts) VALUES($hero,$token,$revision,$ts);",new Dictionary<string, object>{{"hero",hero},{"token",token},{"revision",newRevision},{"ts",ts}});ReconcileCharacterEditor(campaign,hero,c,"rollback","editor_reconcile_"+Guid.NewGuid().ToString("N"),newRevision);return new Dictionary<string, object>{{"ok",true},{"revisionId",newRevision},{"revisionToken",token},{"message","Revision restored. Any native rollback changes will be applied the next time this savegame is loaded."}};}}
+            string campaign=ReadString(payload,"campaignId",Program.LatestCampaignId()),hero=ReadFirstString(payload,"heroStringId","heroId"),revision=ReadFirstString(payload,"revisionId","revision_id");using(ReignDbConnection c=ReignDatabase.OpenCampaignConnection(campaign)){Dictionary<string, object> row=CharactersStore.SelectCharacterEditorRevisions2(c, new Dictionary<string, object>{{"revision",revision},{"hero",hero}}).FirstOrDefault();if(row==null)return new Dictionary<string, object>{{"ok",false},{"error","Revision was not found."}};Dictionary<string, object> snapshot=TryParseJsonObject(ReadString(row,"before_json","{}"))??new Dictionary<string, object>();ApplyEditorSnapshot(campaign,hero,c,snapshot);string newRevision="editor_revision_"+Guid.NewGuid().ToString("N");long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();Dictionary<string, object> inverse=TryParseJsonObject(ReadString(CharactersStore.SelectCharacterEditorNativeCommands3(c, new Dictionary<string, object>{{"id",revision}}).FirstOrDefault(),"inverse_json","{}"))??new Dictionary<string, object>();if(inverse.Count>0)CharactersStore.InsertCharacterEditorNativeCommands2(c, new Dictionary<string, object>{{"id","editor_command_"+Guid.NewGuid().ToString("N")},{"revision",newRevision},{"hero",hero},{"changes",Json.Serialize(inverse)},{"ts",ts}});Dictionary<string, object> after=BuildCharacterEditorSnapshot(campaign,hero,c);string token=ComputeEditorToken(after);CharactersStore.InsertCharacterEditorRevisions2(c, new Dictionary<string, object>{{"id",newRevision},{"hero",hero},{"description","Rollback of "+revision},{"before",ReadString(row,"after_json","{}")},{"after",Json.Serialize(after)},{"native",Json.Serialize(inverse)},{"rollback",revision},{"ts",ts}});CharactersStore.UpsertCharacterEditorHeads2(c, new Dictionary<string, object>{{"hero",hero},{"token",token},{"revision",newRevision},{"ts",ts}});ReconcileCharacterEditor(campaign,hero,c,"rollback","editor_reconcile_"+Guid.NewGuid().ToString("N"),newRevision);return new Dictionary<string, object>{{"ok",true},{"revisionId",newRevision},{"revisionToken",token},{"message","Revision restored. Any native rollback changes will be applied the next time this savegame is loaded."}};}}
 
-        internal static Dictionary<string, object> CharacterEditorNativePollApi(Dictionary<string, object> payload){string campaign=ReadString(payload,"campaignId","default");using(ReignDbConnection c=Program.OpenCampaignConnection(campaign)){long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();List<Dictionary<string, object>> rows=Program.QuerySql(c,"SELECT * FROM character_editor_native_commands WHERE status='pending' OR (status='claimed' AND claimed_ts<$stale) ORDER BY created_ts LIMIT 25;",new Dictionary<string, object>{{"stale",ts-300}});foreach(Dictionary<string, object> row in rows){Program.ExecuteSql(c,"UPDATE character_editor_native_commands SET status='claimed',claimed_ts=$ts WHERE command_id=$id;",new Dictionary<string, object>{{"ts",ts},{"id",ReadString(row,"command_id","")}});row["changes"]=TryParseJsonObject(ReadString(row,"changes_json","{}"))??new Dictionary<string, object>();}return new Dictionary<string, object>{{"ok",true},{"commands",rows}};}}
+        internal static Dictionary<string, object> CharacterEditorNativePollApi(Dictionary<string, object> payload){string campaign=ReadString(payload,"campaignId","default");using(ReignDbConnection c=ReignDatabase.OpenCampaignConnection(campaign)){long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();List<Dictionary<string, object>> rows=CharactersStore.SelectCharacterEditorNativeCommands4(c, new Dictionary<string, object>{{"stale",ts-300}});foreach(Dictionary<string, object> row in rows){CharactersStore.UpdateCharacterEditorNativeCommands(c, new Dictionary<string, object>{{"ts",ts},{"id",ReadString(row,"command_id","")}});row["changes"]=TryParseJsonObject(ReadString(row,"changes_json","{}"))??new Dictionary<string, object>();}return new Dictionary<string, object>{{"ok",true},{"commands",rows}};}}
         internal static Dictionary<string, object> CharacterEditorNativeReportApi(
             Dictionary<string, object> payload)
         {
             string campaign = ReadString(payload, "campaignId", "default");
             string id = ReadFirstString(payload, "commandId", "command_id");
             string status = ReadString(payload, "status", "completed");
-            using (ReignDbConnection c = Program.OpenCampaignConnection(campaign))
+            using (ReignDbConnection c = ReignDatabase.OpenCampaignConnection(campaign))
             {
-                Dictionary<string, object> command = Program.QuerySql(c,
-                    "SELECT * FROM character_editor_native_commands WHERE command_id=$id LIMIT 1;",
-                    new Dictionary<string, object> { ["id"] = id })
+                Dictionary<string, object> command = CharactersStore.SelectCharacterEditorNativeCommands5(c, new Dictionary<string, object> { ["id"] = id })
                     .FirstOrDefault();
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                Program.ExecuteSql(c, @"UPDATE character_editor_native_commands SET
-status=$status,resolved_ts=$ts,result_json=$result WHERE command_id=$id;",
-                    new Dictionary<string, object>
+                CharactersStore.UpdateCharacterEditorNativeCommands2(c, new Dictionary<string, object>
                     {
                         ["status"] = status, ["ts"] = ts,
                         ["result"] = Json.Serialize(payload), ["id"] = id
@@ -307,10 +281,7 @@ status=$status,resolved_ts=$ts,result_json=$result WHERE command_id=$id;",
                             StringComparer.OrdinalIgnoreCase))
                     {
                         RelationshipsService.EnsureNotableMbtiSchema(c);
-                        Program.ExecuteSql(c, @"UPDATE notable_mbti_profiles SET
-native_sync_status='synchronized',native_action_id='',
-last_native_observed_json=$observed,updated_ts=$ts
-WHERE hero_id=$hero;", new Dictionary<string, object>
+                        CharactersStore.UpdateNotableMbtiProfiles(c, new Dictionary<string, object>
                         {
                             ["observed"] = Json.Serialize(
                                 ReadDictionary(changes, "traits")
@@ -331,7 +302,7 @@ WHERE hero_id=$hero;", new Dictionary<string, object>
         private static long DirectorySize(string path){try{return Directory.Exists(path)?Directory.GetFiles(path,"*",SearchOption.AllDirectories).Sum(x=>new FileInfo(x).Length):0;}catch{return 0;}}
 
         private static void ApplyEditorDocuments(string campaign,string hero,Dictionary<string, object> documents){if(documents==null)return;PrepareEditorNarrative(campaign,hero,documents);Dictionary<string,object> incomingProfile=ReadDictionary(documents,"profile")??Program.ReadJsonObject(Program.CharacterFile(campaign,hero,"profile.json"));foreach(string name in EditorDocumentNames){Dictionary<string, object> value=ReadDictionary(documents,name);if(value==null)continue;if(name=="profile"){string id=ReadFirstString(value,"heroStringId","heroId");if(!string.IsNullOrWhiteSpace(id)&&!id.Equals(hero,StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("Canonical heroStringId cannot be changed.");value["heroStringId"]=hero;}if(name=="traits"){MarkEditorFoundationTraitsCurrent(value);EnsureTraitPercentageData(value,hero);CourtService.EnsureCourtCharacterData(value,incomingProfile,hero);EnsurePersonalityPortraitData(value,ReadString(incomingProfile,"name",hero),false);}Program.WriteJsonObject(Program.CharacterFile(campaign,hero,name+".json"),value);}Dictionary<string, object> profile=Program.ReadJsonObject(Program.CharacterFile(campaign,hero,"profile.json"));if(profile.Count>0)Program.UpdateCharacterIndex(campaign,profile);ReconcileEditedNarrative(campaign,hero);DialogueService.InvalidatePromptRuntimeCache();}
-        private static void ApplyEditorHistory(string campaign,string hero,Dictionary<string, object> history){if(history==null)return;foreach(string name in new[]{"dialogue","events","decisions"}){List<Dictionary<string, object>> rows=ReadDictionaryList(history,name);if(!history.ContainsKey(name))continue;WriteEditorJsonLines(Program.CharacterFile(campaign,hero,"history",name+".jsonl"),rows);}if(history.ContainsKey("dialogue")){using(ReignDbConnection c=Program.OpenCampaignConnection(campaign))SyncEditorConversationTurns(c,hero,ReadDictionaryList(history,"dialogue"));}}
+        private static void ApplyEditorHistory(string campaign,string hero,Dictionary<string, object> history){if(history==null)return;foreach(string name in new[]{"dialogue","events","decisions"}){List<Dictionary<string, object>> rows=ReadDictionaryList(history,name);if(!history.ContainsKey(name))continue;WriteEditorJsonLines(Program.CharacterFile(campaign,hero,"history",name+".jsonl"),rows);}if(history.ContainsKey("dialogue")){using(ReignDbConnection c=ReignDatabase.OpenCampaignConnection(campaign))SyncEditorConversationTurns(c,hero,ReadDictionaryList(history,"dialogue"));}}
         private static void WriteEditorJsonLines(string path,List<Dictionary<string, object>> rows){lock(Program.FileLock){Directory.CreateDirectory(Path.GetDirectoryName(path));File.WriteAllLines(path,(rows??new List<Dictionary<string, object>>()).Select(Json.Serialize),Encoding.UTF8);}}
         private static void ApplyEditorRecords(ReignDbConnection c,string hero,Dictionary<string, object> records){if(records==null)return;foreach(Tuple<string,string,string> spec in new[]{Tuple.Create("worldEvents","events","event_id"),Tuple.Create("knowledgeReceipts","knowledge_receipts","receipt_id"),Tuple.Create("conversationSessions","conversation_sessions","session_id"),Tuple.Create("conversationTurns","conversation_turns","turn_id"),Tuple.Create("beliefs","beliefs","belief_id"),Tuple.Create("comprehension","comprehension","comprehension_id"),Tuple.Create("obligations","obligations","obligation_id"),Tuple.Create("summaries","summaries","summary_id"),Tuple.Create("memories","memories","memory_id"),Tuple.Create("letters","letters","letter_id"),Tuple.Create("conceptions","conceptions","conception_id"),Tuple.Create("parentage","parentage","child_id")})ApplyEditableRecordRows(c,spec.Item1,spec.Item2,spec.Item3,records);}
 
@@ -340,18 +311,17 @@ WHERE hero_id=$hero;", new Dictionary<string, object>
             HashSet<string> activeIds=new HashSet<string>((rows??new List<Dictionary<string, object>>()).Select(x=>ReadString(x,"id","")).Where(x=>!string.IsNullOrWhiteSpace(x)),StringComparer.OrdinalIgnoreCase);
             foreach(Dictionary<string, object> row in rows??new List<Dictionary<string, object>>())
             {
-                string id=ReadString(row,"id","");if(string.IsNullOrWhiteSpace(id))continue;Dictionary<string, object> existing=Program.QuerySql(c,"SELECT * FROM conversation_turns WHERE turn_id=$id LIMIT 1;",new Dictionary<string, object>{{"id",id}}).FirstOrDefault();if(existing==null)continue;
-                Program.ExecuteSql(c,"UPDATE conversation_turns SET text=$text,speaker_name=$speaker,role=$role,world_day=$day,status='active' WHERE turn_id=$id;",new Dictionary<string, object>{{"text",ReadString(row,"text","")},{"speaker",ReadString(row,"speaker","")},{"role",ReadString(row,"role","")},{"day",ReadDouble(row,"worldDay",ReadDouble(existing,"world_day",0d))},{"id",id}});
+                string id=ReadString(row,"id","");if(string.IsNullOrWhiteSpace(id))continue;Dictionary<string, object> existing=CharactersStore.SelectConversationTurns2(c, new Dictionary<string, object>{{"id",id}}).FirstOrDefault();if(existing==null)continue;
+                CharactersStore.UpdateConversationTurns(c, new Dictionary<string, object>{{"text",ReadString(row,"text","")},{"speaker",ReadString(row,"speaker","")},{"role",ReadString(row,"role","")},{"day",ReadDouble(row,"worldDay",ReadDouble(existing,"world_day",0d))},{"id",id}});
             }
-            foreach(Dictionary<string, object> existing in Program.QuerySql(c,@"SELECT t.turn_id FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id
-WHERE s.npc_id=$id AND t.status='active';",new Dictionary<string, object>{{"id",hero}}))
+            foreach(Dictionary<string, object> existing in CharactersStore.SelectConversationTurns3(c, new Dictionary<string, object>{{"id",hero}}))
             {
-                string id=ReadString(existing,"turn_id","");if(!activeIds.Contains(id))Program.ExecuteSql(c,"UPDATE conversation_turns SET status='superseded' WHERE turn_id=$id;",new Dictionary<string, object>{{"id",id}});
+                string id=ReadString(existing,"turn_id","");if(!activeIds.Contains(id))CharactersStore.UpdateConversationTurns2(c, new Dictionary<string, object>{{"id",id}});
             }
             DialogueService.RebuildCategorizedSearchIndexes(c);
         }
-        private static void ApplyEditableRecordRows(ReignDbConnection c,string group,string table,string key,Dictionary<string, object> records){List<Dictionary<string, object>> rows=ReadDictionaryList(records,group);foreach(Dictionary<string, object> row in rows){string id=ReadString(row,key,"");if(string.IsNullOrWhiteSpace(id))continue;Dictionary<string, object> existing=Program.QuerySql(c,"SELECT * FROM "+table+" WHERE "+key+"=$id LIMIT 1;",new Dictionary<string, object>{{"id",id}}).FirstOrDefault();if(existing==null)continue;List<string> columns=row.Keys.Where(x=>existing.ContainsKey(x)&&x!=key&&System.Text.RegularExpressions.Regex.IsMatch(x,"^[A-Za-z_][A-Za-z0-9_]*$")).ToList();if(columns.Count==0)continue;Dictionary<string, object> args=new Dictionary<string, object>{{"id",id}};foreach(string column in columns)args[column]=row[column];Program.ExecuteSql(c,"UPDATE "+table+" SET "+string.Join(",",columns.Select(x=>x+"=$"+x))+" WHERE "+key+"=$id;",args);}}
-        private static void ReconcileCharacterEditor(string campaign,string hero,ReignDbConnection c,string section,string job,string revision){long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();Program.ExecuteSql(c,"INSERT INTO character_editor_reconciliation(job_id,revision_id,hero_id,section,status,summary,created_ts,updated_ts) VALUES($job,$revision,$hero,$section,'running','Rebuilding character projections.',$ts,$ts);",new Dictionary<string, object>{{"job",job},{"revision",revision},{"hero",hero},{"section",section},{"ts",ts}});try{DialogueService.RebuildCategorizedSearchIndexes(c);Program.ExecuteSql(c,"DELETE FROM summary_fts;");foreach(Dictionary<string, object> row in Program.QuerySql(c,"SELECT * FROM summaries WHERE status='active';"))Program.InsertSummaryFts(c,ReadString(row,"summary_id",""),ReadString(row,"summary",""),Program.TextListFromJson(ReadString(row,"tags_json","[]")),Program.ExtractEntityIdsFromJson(ReadString(row,"about_entities_json","[]")));Program.ExecuteSql(c,"UPDATE character_editor_reconciliation SET status='completed',summary='Search and prompt projections rebuilt.',updated_ts=$ts WHERE job_id=$job;",new Dictionary<string, object>{{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"job",job}});}catch(Exception ex){Program.ExecuteSql(c,"UPDATE character_editor_reconciliation SET status='failed',summary=$summary,result_json=$result,updated_ts=$ts WHERE job_id=$job;",new Dictionary<string, object>{{"summary",ex.Message},{"result",Json.Serialize(new Dictionary<string, object>{{"error",ex.Message}})},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"job",job}});}}
+        private static void ApplyEditableRecordRows(ReignDbConnection c,string group,string table,string key,Dictionary<string, object> records){List<Dictionary<string, object>> rows=ReadDictionaryList(records,group);foreach(Dictionary<string, object> row in rows){string id=ReadString(row,key,"");if(string.IsNullOrWhiteSpace(id))continue;Dictionary<string, object> existing=CharactersStore.SelectDynamic(c, table, key,new Dictionary<string, object>{{"id",id}}).FirstOrDefault();if(existing==null)continue;List<string> columns=row.Keys.Where(x=>existing.ContainsKey(x)&&x!=key&&System.Text.RegularExpressions.Regex.IsMatch(x,"^[A-Za-z_][A-Za-z0-9_]*$")).ToList();if(columns.Count==0)continue;Dictionary<string, object> args=new Dictionary<string, object>{{"id",id}};foreach(string column in columns)args[column]=row[column];CharactersStore.UpdateDynamic(c, table, string.Join(",",columns.Select(x=>x+"=$"+x)), key,args);}}
+        private static void ReconcileCharacterEditor(string campaign,string hero,ReignDbConnection c,string section,string job,string revision){long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();CharactersStore.InsertCharacterEditorReconciliation(c, new Dictionary<string, object>{{"job",job},{"revision",revision},{"hero",hero},{"section",section},{"ts",ts}});try{DialogueService.RebuildCategorizedSearchIndexes(c);CharactersStore.DeleteSummaryFts(c);foreach(Dictionary<string, object> row in CharactersStore.SelectSummaries(c))Program.InsertSummaryFts(c,ReadString(row,"summary_id",""),ReadString(row,"summary",""),Program.TextListFromJson(ReadString(row,"tags_json","[]")),Program.ExtractEntityIdsFromJson(ReadString(row,"about_entities_json","[]")));CharactersStore.UpdateCharacterEditorReconciliation(c, new Dictionary<string, object>{{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"job",job}});}catch(Exception ex){CharactersStore.UpdateCharacterEditorReconciliation2(c, new Dictionary<string, object>{{"summary",ex.Message},{"result",Json.Serialize(new Dictionary<string, object>{{"error",ex.Message}})},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"job",job}});}}
         private static void ApplyEditorSnapshot(string campaign,string hero,ReignDbConnection c,Dictionary<string, object> snapshot){ApplyEditorDocuments(campaign,hero,ReadDictionary(snapshot,"documents"));ApplyEditorHistory(campaign,hero,ReadDictionary(snapshot,"history"));ApplyEditorRecords(c,hero,ReadDictionary(snapshot,"records"));}
 
         private static Dictionary<string, object> BuildNativeInverse(Dictionary<string, object> before,Dictionary<string, object> changes)
@@ -373,7 +343,7 @@ WHERE s.npc_id=$id AND t.status='active';",new Dictionary<string, object>{{"id",
         {
             foreach(long ts in timestamps)
             {
-                List<string> eventIds=Program.QuerySql(c,"SELECT event_id FROM events WHERE ts=$ts;",new Dictionary<string, object>{{"ts",ts}}).Select(x=>ReadString(x,"event_id","")).Where(x=>!string.IsNullOrWhiteSpace(x)).ToList();foreach(string eventId in eventIds)Program.ExecuteSql(c,"UPDATE memories SET status='superseded' WHERE event_id=$event;",new Dictionary<string, object>{{"event",eventId}});
+                List<string> eventIds=CharactersStore.SelectEvents(c, new Dictionary<string, object>{{"ts",ts}}).Select(x=>ReadString(x,"event_id","")).Where(x=>!string.IsNullOrWhiteSpace(x)).ToList();foreach(string eventId in eventIds)CharactersStore.UpdateMemories(c, new Dictionary<string, object>{{"event",eventId}});
                 List<Dictionary<string, object>> lines=ReadDictionaryList(history,"dialogue").Concat(ReadDictionaryList(history,"events")).Where(x=>ReadLong(x,"ts",0)==ts).ToList();if(lines.Count==0)continue;string summary=string.Join("\n",lines.Select(x=>ReadString(x,"speaker",ReadString(x,"role",""))+": "+ReadString(x,"text","")));Dictionary<string, object> profile=Program.ReadJsonObject(Program.CharacterFile(campaign,hero,"profile.json"));Program.StoreWorldMemoryEvent(new Dictionary<string, object>{{"campaignId",campaign},{"eventId","editor_history_"+hero+"_"+ts},{"ts",ts},{"eventType","edited_conversation"},{"summary",summary},{"participants",new[]{hero,ReadFirstString(profile,"mainHeroStringId","playerHeroStringId") }},{"known_by",new[]{hero,ReadFirstString(profile,"mainHeroStringId","playerHeroStringId") }},{"visibility","private"},{"importance",0.6d},{"source","character_editor_rebuild"}},"character_editor_rebuild");
             }
         }
@@ -722,22 +692,13 @@ WHERE s.npc_id=$id AND t.status='active';",new Dictionary<string, object>{{"id",
                 Program.WriteJsonObject(Program.CharacterFile(campaign,"main_hero","profile.json"),new Dictionary<string,object>{{"heroStringId","main_hero"},{"name","Player"}});
                 Program.WriteJsonObject(Program.CharacterFile(campaign,"editor_a","traits.json"),new Dictionary<string,object>{{"foundationTraits",new Dictionary<string,object>{{"assertiveness",2},{"sociability",1},{"pragmatism",1}}}});
                 Program.WriteJsonObject(Program.CharacterFile(campaign,"editor_b","traits.json"),new Dictionary<string,object>{{"foundationTraits",new Dictionary<string,object>{{"empathy",1},{"patience",1},{"loyalty",2}}}});
-                using(ReignDbConnection connection=Program.OpenCampaignConnection(campaign))
+                using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                     long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                     string pair=RelationshipsService.AmbientPairKey("editor_a","editor_b");
-                    Program.ExecuteSql(connection,@"INSERT INTO relationship_pair_chemistry(
-pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,base_chance_a_to_b,base_chance_b_to_a,
-chance_a_to_b,chance_b_to_a,affinity_a_to_b,affinity_b_to_a,tag_a_to_b,tag_b_to_a,
-shared_tag,projected_native_relation,first_day,last_day,last_context_kind,last_context_id,updated_ts)
-VALUES($pair,'editor_a','editor_b','ENTJ','ISFJ',72,63,62,53,74,41,'devoted','friend',
-'close_friends',58,10,10,'party','editor_party',$ts);",
-                        new Dictionary<string,object>{{"pair",pair},{"ts",ts}});
-                    Program.ExecuteSql(connection,@"INSERT INTO relationship_pair_lifecycle(
-pair_key,hero_a_id,hero_b_id,lover_active,lover_started_day,last_processed_day,updated_ts)
-VALUES($pair,'editor_a','editor_b',1,10,10,$ts);",
-                        new Dictionary<string,object>{{"pair",pair},{"ts",ts}});
+                    CharactersStore.InsertRelationshipPairChemistry(connection, new Dictionary<string,object>{{"pair",pair},{"ts",ts}});
+                    CharactersStore.InsertRelationshipPairLifecycle(connection, new Dictionary<string,object>{{"pair",pair},{"ts",ts}});
                     List<Dictionary<string,object>> network=BuildCharacterEditorRelationshipNetwork(campaign,"editor_a",connection,heroA);
                     Dictionary<string,object> npc=network.FirstOrDefault(item=>ReadString(item,"otherHeroId","")=="editor_b");
                     Dictionary<string,object> player=network.FirstOrDefault(item=>ReadString(item,"relationshipKind","")=="player");

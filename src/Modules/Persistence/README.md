@@ -31,7 +31,8 @@ part of `Program` and registers the service handlers. The PostgreSQL helper type
 (`ReignPostgreSqlStorage`, `ReignPostgreSqlDialect` and the others in `PostgreSqlStorage.cs`, `PostgreSqlDialect.cs`,
 `DatabaseParameterExtensions.cs`, `DatabaseAvailability.cs`, `GlobalDatabaseAliases.cs`,
 `PostgreSqlCampaignOwnership.cs`, `PostgreSqlValidationArchive.cs`) were already their own types.
-`Program` keeps the campaign connection and `QuerySql`/`ExecuteSql`; `PersistenceService` holds Save Sync, campaign
+Those PostgreSQL files and `CampaignMigrations.cs` now live in `Data/`; the campaign connection and
+`QuerySql`/`ExecuteSql` are in the `ReignDatabase` data core (`Platform/Data/ReignDatabase.cs`). `PersistenceService` holds Save Sync, campaign
 backups, campaign migrations and the provider-wait leases. The self-tests listed below are `PersistenceService`
 members.
 

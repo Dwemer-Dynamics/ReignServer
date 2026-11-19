@@ -68,16 +68,14 @@ namespace ReignBetaServer
             var basis = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "narrative.json"));
             if (!NarrativeDocumentReady(basis)) return;
             var items = ReadDictionaryList(basis, "items");
-            using (var connection = Program.OpenCampaignConnection(campaign))
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
-                foreach (var row in Program.QuerySql(connection, "SELECT * FROM dynamic_characteristics WHERE owner_id=$hero AND category='narrative_development' AND status='active';",
-                    new Dictionary<string, object> { ["hero"] = hero }))
+                foreach (var row in CharactersStore.SelectDynamicCharacteristics3(connection, new Dictionary<string, object> { ["hero"] = hero }))
                 {
                     var change = ReadDictionary(TryParseJsonObject(ReadString(row, "payload_json", "{}")), "narrativeDevelopment");
                     var item = items.FirstOrDefault(x => ReadString(x, "id", "") == ReadString(change, "itemId", ""));
                     if (item != null && ReadString(change, "baseItemFingerprint", "") == NarrativeItemFingerprint(item)) continue;
-                    Program.ExecuteSql(connection, "UPDATE dynamic_characteristics SET status='superseded',rejection_reason='superseded_by_character_editor' WHERE characteristic_id=$id;",
-                        new Dictionary<string, object> { ["id"] = ReadString(row, "characteristic_id", "") });
+                    CharactersStore.UpdateDynamicCharacteristics4(connection, new Dictionary<string, object> { ["id"] = ReadString(row, "characteristic_id", "") });
                 }
                 ProjectDynamicCharacteristicsFile(campaign, hero, connection);
             }

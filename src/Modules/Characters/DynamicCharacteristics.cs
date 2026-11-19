@@ -30,34 +30,10 @@ namespace ReignBetaServer
 
         internal static void EnsureDynamicCharacteristicsSchema(ReignDbConnection connection)
         {
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS dynamic_characteristics (
-characteristic_id TEXT PRIMARY KEY,
-owner_id TEXT NOT NULL,
-category TEXT NOT NULL DEFAULT 'personal_history',
-topic_key TEXT NOT NULL DEFAULT '',
-text TEXT NOT NULL,
-normalized_key TEXT NOT NULL,
-status TEXT NOT NULL DEFAULT 'active',
-confidence REAL NOT NULL DEFAULT 0.65,
-importance REAL NOT NULL DEFAULT 0.5,
-provenance TEXT NOT NULL DEFAULT 'npc_generated_personal_history',
-compatibility_status TEXT NOT NULL DEFAULT 'compatible_soft_canon',
-rejection_reason TEXT NOT NULL DEFAULT '',
-source_event_id TEXT NOT NULL DEFAULT '',
-source_session_id TEXT NOT NULL DEFAULT '',
-source_exchange_id TEXT NOT NULL DEFAULT '',
-source_turn_ids_json TEXT NOT NULL DEFAULT '[]',
-source_mode TEXT NOT NULL DEFAULT '',
-location_id TEXT NOT NULL DEFAULT '',
-world_day REAL NOT NULL DEFAULT 0,
-known_by_json TEXT NOT NULL DEFAULT '[]',
-first_ts INTEGER NOT NULL,
-last_ts INTEGER NOT NULL,
-repeat_count INTEGER NOT NULL DEFAULT 1,
-payload_json TEXT NOT NULL DEFAULT '{}');");
-            Program.ExecuteSql(connection, "CREATE UNIQUE INDEX IF NOT EXISTS idx_dynamic_characteristic_owner_key ON dynamic_characteristics(owner_id,normalized_key);");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_dynamic_characteristic_owner_status ON dynamic_characteristics(owner_id,status,last_ts DESC);");
-            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_dynamic_characteristic_topic ON dynamic_characteristics(owner_id,topic_key,status);");
+            CharactersSchema.CreateDynamicCharacteristics(connection);
+            CharactersSchema.CreateIndexDynamicCharacteristicOwnerKey(connection);
+            CharactersSchema.CreateIndexDynamicCharacteristicOwnerStatus(connection);
+            CharactersSchema.CreateIndexDynamicCharacteristicTopic(connection);
         }
 
         internal static List<Dictionary<string, object>> NormalizeDynamicCharacteristicWrites(
@@ -409,7 +385,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
             List<string> knownBy = Program.MergeStringLists(audienceIds, new[] { heroId });
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             lock (NarrativeStateLock)
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 foreach (Dictionary<string, object> write in writes.Take(1))
                 {
@@ -427,9 +403,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                     string status = ReadString(write, "status", "rejected");
                     string topicKey = ReadString(write, "topicKey", "");
                     string rejection = ReadString(write, "rejectionReason", "");
-                    Dictionary<string, object> existing = Program.QuerySql(connection,
-                        "SELECT * FROM dynamic_characteristics WHERE owner_id=$owner AND normalized_key=$normalized LIMIT 1;",
-                        new Dictionary<string, object> { ["owner"] = heroId, ["normalized"] = normalized }).FirstOrDefault();
+                    Dictionary<string, object> existing = CharactersStore.SelectDynamicCharacteristics4(connection, new Dictionary<string, object> { ["owner"] = heroId, ["normalized"] = normalized }).FirstOrDefault();
                     if (existing != null)
                     {
                         knownBy = Program.MergeStringLists(knownBy, Program.TextListFromJson(ReadString(existing, "known_by_json", "[]")));
@@ -439,9 +413,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                     {
                         // Preserve the original and record the new rejected paraphrase with its own
                         // lineage. Changing a topic key must not create a second active self-story.
-                        var equivalent = Program.QuerySql(connection,
-                            "SELECT characteristic_id,text FROM dynamic_characteristics WHERE owner_id=$owner AND status='active' AND category<>'narrative_development' ORDER BY last_ts DESC LIMIT 250;",
-                            new Dictionary<string, object> { ["owner"] = heroId })
+                        var equivalent = CharactersStore.SelectDynamicCharacteristics5(connection, new Dictionary<string, object> { ["owner"] = heroId })
                             .FirstOrDefault(row => DialogueService.DynamicCharacteristicsEquivalent(ReadString(row, "text", ""), text));
                         if (equivalent != null)
                         {
@@ -454,9 +426,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                     }
                     if (status.Equals("active", StringComparison.OrdinalIgnoreCase))
                     {
-                        Dictionary<string, object> conflict = Program.QuerySql(connection, @"SELECT characteristic_id,text FROM dynamic_characteristics
-WHERE owner_id=$owner AND topic_key=$topic AND status='active' AND normalized_key<>$normalized ORDER BY last_ts DESC LIMIT 1;",
-                            new Dictionary<string, object> { ["owner"] = heroId, ["topic"] = topicKey, ["normalized"] = normalized }).FirstOrDefault();
+                        Dictionary<string, object> conflict = CharactersStore.SelectDynamicCharacteristics6(connection, new Dictionary<string, object> { ["owner"] = heroId, ["topic"] = topicKey, ["normalized"] = normalized }).FirstOrDefault();
                         if (conflict != null)
                         {
                             status = "rejected";
@@ -474,21 +444,7 @@ WHERE owner_id=$owner AND topic_key=$topic AND status='active' AND normalized_ke
                         ["sourceCorrelationId"] = ReadFirstString(payload, "correlationId", "requestId"),
                         ["audienceIds"] = knownBy
                     };
-                    Program.ExecuteSql(connection, @"INSERT INTO dynamic_characteristics(
-characteristic_id,owner_id,category,topic_key,text,normalized_key,status,confidence,importance,provenance,compatibility_status,rejection_reason,
-source_event_id,source_session_id,source_exchange_id,source_turn_ids_json,source_mode,location_id,world_day,known_by_json,first_ts,last_ts,repeat_count,payload_json)
-VALUES($id,$owner,$category,$topic,$text,$normalized,$status,$confidence,$importance,'npc_generated_personal_history',$compatibility,$rejection,
-$event,$session,$exchange,$turns,$mode,$location,$day,$known,$ts,$ts,1,$payload)
-ON CONFLICT(owner_id,normalized_key) DO UPDATE SET
-last_ts=$ts,
-repeat_count=dynamic_characteristics.repeat_count+1,
-known_by_json=$known,
-source_turn_ids_json=$turns,
-status=CASE WHEN dynamic_characteristics.status='active' THEN 'active' ELSE excluded.status END,
-compatibility_status=CASE WHEN dynamic_characteristics.status='active' THEN dynamic_characteristics.compatibility_status ELSE excluded.compatibility_status END,
-rejection_reason=CASE WHEN dynamic_characteristics.status='active' THEN dynamic_characteristics.rejection_reason ELSE excluded.rejection_reason END,
-payload_json=$payload;",
-                        new Dictionary<string, object>
+                    CharactersStore.UpsertDynamicCharacteristics2(connection, new Dictionary<string, object>
                         {
                             ["id"] = id, ["owner"] = heroId, ["category"] = ReadString(write, "category", "personal_history"), ["topic"] = topicKey,
                             ["text"] = text, ["normalized"] = normalized, ["status"] = status,
@@ -498,8 +454,7 @@ payload_json=$payload;",
                             ["turns"] = Json.Serialize(turnIds), ["mode"] = sourceMode ?? "", ["location"] = locationId ?? "",
                             ["day"] = worldDay, ["known"] = Json.Serialize(knownBy), ["ts"] = ts, ["payload"] = Json.Serialize(rowPayload)
                         });
-                    Dictionary<string, object> saved = Program.QuerySql(connection, "SELECT * FROM dynamic_characteristics WHERE characteristic_id=$id LIMIT 1;",
-                        new Dictionary<string, object> { ["id"] = id }).FirstOrDefault() ?? new Dictionary<string, object>();
+                    Dictionary<string, object> saved = CharactersStore.SelectDynamicCharacteristics7(connection, new Dictionary<string, object> { ["id"] = id }).FirstOrDefault() ?? new Dictionary<string, object>();
                     if (ReadString(saved, "status", status).Equals("active", StringComparison.OrdinalIgnoreCase)) stored.Add(saved); else rejected.Add(saved);
                 }
                 ProjectDynamicCharacteristicsFile(campaignId, heroId, connection);
@@ -513,14 +468,10 @@ payload_json=$payload;",
 
         private static void ProjectDynamicCharacteristicsFile(string campaignId, string heroId, ReignDbConnection connection)
         {
-            List<Dictionary<string, object>> rows = Program.QuerySql(connection,
-                "SELECT * FROM dynamic_characteristics WHERE owner_id=$owner ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'superseded' THEN 1 ELSE 2 END,importance DESC,last_ts DESC LIMIT 250;",
-                new Dictionary<string, object> { ["owner"] = heroId });
+            List<Dictionary<string, object>> rows = CharactersStore.SelectDynamicCharacteristics8(connection, new Dictionary<string, object> { ["owner"] = heroId });
             // Current narrative overrides must not disappear when ordinary memories fill
             // the bounded display projection. History remains in the temporal database.
-            var narrativeRows = Program.QuerySql(connection,
-                "SELECT * FROM dynamic_characteristics WHERE owner_id=$owner AND category='narrative_development' AND status='active';",
-                new Dictionary<string, object> { ["owner"] = heroId });
+            var narrativeRows = CharactersStore.SelectDynamicCharacteristics9(connection, new Dictionary<string, object> { ["owner"] = heroId });
             rows = rows.Concat(narrativeRows).GroupBy(x => ReadString(x, "characteristic_id", "")).Select(x => x.First()).ToList();
             Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "dynamic_characteristics.json"), new Dictionary<string, object>
             {
@@ -626,10 +577,9 @@ payload_json=$payload;",
             StoreDynamicCharacteristicWrites(campaign, hero, accepted, payload,
                 new Dictionary<string, object> { ["sessionId"] = "session_c", ["exchangeId"] = "exchange_c", ["turnIds"] = new List<string> { "turn_c" } },
                 "event_c", "dialogue", "town_ES1", 115, new[] { hero, "main_hero" });
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
-                Dictionary<string, object> duplicate = Program.QuerySql(connection, "SELECT * FROM dynamic_characteristics WHERE owner_id=$owner AND status='active';",
-                    new Dictionary<string, object> { ["owner"] = hero }).Single();
+                Dictionary<string, object> duplicate = CharactersStore.SelectDynamicCharacteristics10(connection, new Dictionary<string, object> { ["owner"] = hero }).Single();
                 add("duplicate_is_exactly_once", ReadInt(duplicate, "repeat_count", 0) == 3
                     && Program.TextListFromJson(ReadString(duplicate, "known_by_json", "[]")).Contains("npc_witness", StringComparer.OrdinalIgnoreCase),
                     "Repeated details update one record, expand its audience, and never forget an earlier group witness.", duplicate);

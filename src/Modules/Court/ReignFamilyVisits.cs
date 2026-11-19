@@ -9,24 +9,11 @@ namespace ReignBetaServer
     {
         private static void EnsureFamilyVisitSchema(ReignDbConnection c)
         {
-            Program.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS court_family_attention (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,player_id TEXT NOT NULL,hero_id TEXT NOT NULL,
-dismissals INTEGER NOT NULL DEFAULT 0,neglected INTEGER NOT NULL DEFAULT 0,decay_finished INTEGER NOT NULL DEFAULT 0,
-last_decay_day INTEGER NOT NULL DEFAULT -1,directional_relation INTEGER NOT NULL DEFAULT 0,
-adult_migrated INTEGER NOT NULL DEFAULT 0,profile_json TEXT NOT NULL DEFAULT '{}',
-PRIMARY KEY(campaign_id,timeline_id,player_id,hero_id));");
-            Program.EnsureDatabaseColumn(c, "court_family_attention", "child_relation_owned", "INTEGER NOT NULL DEFAULT 0");
-            Program.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS court_family_visits (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,visit_id TEXT NOT NULL,player_id TEXT NOT NULL,hero_id TEXT NOT NULL,
-created_day REAL NOT NULL,deadline REAL NOT NULL,status TEXT NOT NULL DEFAULT 'pending',player_turns INTEGER NOT NULL DEFAULT 0,
-PRIMARY KEY(campaign_id,timeline_id,visit_id));");
-            Program.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS court_family_visit_turns (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,visit_id TEXT NOT NULL,turn_id TEXT NOT NULL,world_day REAL NOT NULL,
-PRIMARY KEY(campaign_id,timeline_id,visit_id,turn_id));");
-            Program.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS court_family_reconciliations (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,hero_id TEXT NOT NULL,exchange_id TEXT NOT NULL,
-player_quote TEXT NOT NULL,npc_quote TEXT NOT NULL,world_day REAL NOT NULL,
-PRIMARY KEY(campaign_id,timeline_id,hero_id,exchange_id));");
+            CourtSchema.CreateCourtFamilyAttention(c);
+            CourtSchema.EnsureColumnCourtFamilyAttentionChildRelationOwned(c);
+            CourtSchema.CreateCourtFamilyVisits(c);
+            CourtSchema.CreateCourtFamilyVisitTurns(c);
+            CourtSchema.CreateCourtFamilyReconciliations(c);
         }
 
         internal static Dictionary<string, object> FamilyVisitDispatch(Dictionary<string, object> payload)
@@ -38,11 +25,11 @@ PRIMARY KEY(campaign_id,timeline_id,hero_id,exchange_id));");
             string action = ReadString(payload, "action", "tick");
             if (string.IsNullOrWhiteSpace(player)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "player_required" };
             lock (RelationshipsService.CampaignRelationshipWriteLock(campaign))
-            using (ReignDbConnection c = Program.OpenCampaignConnection(campaign))
+            using (ReignDbConnection c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 ReputationService.EnsureSocialReputationSchema(c);
                 EnsureFamilyVisitSchema(c);
-                Program.ExecuteSql(c, "BEGIN IMMEDIATE;");
+                CourtStore.Begin(c);
                 try
                 {
                     var p = new Dictionary<string, object> { ["campaign"] = campaign, ["timeline"] = timeline, ["player"] = player,
@@ -52,7 +39,7 @@ PRIMARY KEY(campaign_id,timeline_id,hero_id,exchange_id));");
                     {
                         var profile = ReadDictionary(payload, "hero");
                         string hero = Program.CharacterIdFrom(profile);
-                        var existing = Program.QuerySql(c, @"SELECT * FROM court_family_visits WHERE campaign_id=$campaign AND timeline_id=$timeline AND visit_id=$visit;", p).FirstOrDefault();
+                        var existing = CourtStore.SelectCourtFamilyVisits(c, p).FirstOrDefault();
                         if (existing != null)
                         {
                             if (ReadString(existing, "hero_id", "") != hero || ReadString(existing, "player_id", "") != player)
@@ -68,21 +55,19 @@ PRIMARY KEY(campaign_id,timeline_id,hero_id,exchange_id));");
                         p["deadline"] = ReadDouble(payload, "deadline", ReignFamilyVisitRules.NextCourtMorning(day));
                         if (string.IsNullOrWhiteSpace(ReadString(p, "visit", "")) || ReadDouble(p, "deadline", 0d) <= day)
                             throw new InvalidOperationException("family_visit_deadline_invalid");
-                        Program.ExecuteSql(c, @"INSERT INTO court_family_visits(campaign_id,timeline_id,visit_id,player_id,hero_id,created_day,deadline)
-VALUES($campaign,$timeline,$visit,$player,$hero,$day,$deadline) ON CONFLICT(campaign_id,timeline_id,visit_id) DO NOTHING;", p);
+                        CourtStore.InsertOrIgnoreCourtFamilyVisits(c, p);
                         }
                     }
                     else if (action == "turn") RecordFamilyAttentionTurn(c, campaign, timeline, player, payload);
                     else if (action == "invalidate")
-                        Program.ExecuteSql(c, @"UPDATE court_family_visits SET status='invalidated' WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND player_id=$player AND visit_id=$visit AND status='pending';", p);
+                        CourtStore.UpdateCourtFamilyVisits(c, p);
                     else if (action == "tick")
                     {
                         AdvanceFamilyAttention(c, campaign, timeline, player, day, ReadBool(payload, "courtUnavailable", false));
                         ReputationService.ExpireSocialRumors(c, campaign, timeline, day);
                     }
                     else if (action != "context") throw new InvalidOperationException("unknown_family_visit_action");
-                    var members = Program.QuerySql(c, "SELECT * FROM court_family_attention WHERE campaign_id=$campaign AND timeline_id=$timeline AND player_id=$player;", p);
+                    var members = CourtStore.SelectCourtFamilyAttention(c, p);
                     foreach (var member in members)
                     {
                         string hero = ReadString(member, "hero_id", "");
@@ -96,19 +81,19 @@ AND player_id=$player AND visit_id=$visit AND status='pending';", p);
                     for (int i = 0; i < requestedVisits.Count; i++) { p["requestedVisit" + i] = requestedVisits[i]; visitParameters.Add("$requestedVisit" + i); }
                     string requestedClause = visitParameters.Count == 0 ? "" : " OR visit_id IN (" + string.Join(",", visitParameters) + ")";
                     var result = new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaign, ["timelineId"] = timeline, ["playerId"] = player, ["members"] = members,
-                        ["visits"] = Program.QuerySql(c, "SELECT * FROM court_family_visits WHERE campaign_id=$campaign AND timeline_id=$timeline AND player_id=$player AND (deadline>$day-2" + requestedClause + ");", p),
+                        ["visits"] = CourtStore.SelectCourtFamilyVisits2(c, requestedClause,p),
                         ["worldDay"] = day };
                     if (ReadBool(payload, "includeJealousy", false))
                     {
                         result["jealousyCandidates"] = CourtJealousyCandidates(c, campaign, timeline, player, day);
                         result["jealousyDay"] = ReignFamilyVisitRules.CourtDay(day);
                     }
-                    Program.ExecuteSql(c, "COMMIT;");
+                    CourtStore.Commit(c);
                     return result;
                 }
                 catch (Exception ex)
                 {
-                    Program.ExecuteSql(c, "ROLLBACK;");
+                    CourtStore.Rollback(c);
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = ex.Message };
                 }
             }
@@ -129,9 +114,7 @@ AND player_id=$player AND visit_id=$visit AND status='pending';", p);
             string hero = Program.CharacterIdFrom(profile);
             if (string.IsNullOrWhiteSpace(hero) || !(ReadString(profile, "spouseId", "") == player
                 || ReadString(profile, "fatherId", "") == player || ReadString(profile, "motherId", "") == player)) return;
-            Program.ExecuteSql(c, @"INSERT INTO court_family_attention(campaign_id,timeline_id,player_id,hero_id,directional_relation,profile_json,child_relation_owned)
-VALUES($campaign,$timeline,$player,$hero,$relation,$profile,$child) ON CONFLICT(campaign_id,timeline_id,player_id,hero_id)
-DO UPDATE SET profile_json=$profile;", new Dictionary<string, object> { ["campaign"] = campaign, ["timeline"] = timeline,
+            CourtStore.UpsertCourtFamilyAttention(c, new Dictionary<string, object> { ["campaign"] = campaign, ["timeline"] = timeline,
                 ["player"] = player, ["hero"] = hero, ["relation"] = Clamp(ReadInt(profile, "relationToPlayer", 0), -100, 100),
                 ["child"] = ReadBool(profile, "isChild", false) ? 1 : 0, ["profile"] = Json.Serialize(profile) });
         }
@@ -139,8 +122,7 @@ DO UPDATE SET profile_json=$profile;", new Dictionary<string, object> { ["campai
         private static Dictionary<string, object> ReadFamilyAttention(ReignDbConnection c, string campaign, string timeline, string player, string hero)
         {
             EnsureFamilyVisitSchema(c);
-            return Program.QuerySql(c, @"SELECT * FROM court_family_attention WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND player_id=$player AND hero_id=$hero;", new Dictionary<string, object> { ["campaign"] = campaign, ["timeline"] = timeline,
+            return CourtStore.SelectCourtFamilyAttention2(c, new Dictionary<string, object> { ["campaign"] = campaign, ["timeline"] = timeline,
                 ["player"] = player, ["hero"] = hero }).FirstOrDefault();
         }
 
@@ -150,30 +132,25 @@ AND player_id=$player AND hero_id=$hero;", new Dictionary<string, object> { ["ca
             if (string.IsNullOrWhiteSpace(turn)) throw new InvalidOperationException("completed_player_turn_required");
             var p = new Dictionary<string, object> { ["campaign"] = campaign, ["timeline"] = timeline, ["player"] = player,
                 ["visit"] = ReadString(payload, "visitId", ""), ["turn"] = turn, ["day"] = ReadDouble(payload, "worldDay", 0d) };
-            var visit = Program.QuerySql(c, @"SELECT * FROM court_family_visits WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND player_id=$player AND visit_id=$visit;", p).FirstOrDefault();
+            var visit = CourtStore.SelectCourtFamilyVisits3(c, p).FirstOrDefault();
             if (visit == null) throw new InvalidOperationException("family_visit_not_registered");
             if (ReadString(visit, "status", "") != "pending" || ReadDouble(p, "day", 0d) >= ReadDouble(visit, "deadline", 0d)) return;
-            Program.ExecuteSql(c, @"INSERT INTO court_family_visit_turns(campaign_id,timeline_id,visit_id,turn_id,world_day)
-VALUES($campaign,$timeline,$visit,$turn,$day) ON CONFLICT(campaign_id,timeline_id,visit_id,turn_id) DO NOTHING;", p);
-            int count = ReadInt(Program.QuerySql(c, @"SELECT COUNT(*) AS n FROM court_family_visit_turns WHERE campaign_id=$campaign
-AND timeline_id=$timeline AND visit_id=$visit;", p).First(), "n", 0);
+            CourtStore.InsertOrIgnoreCourtFamilyVisitTurns(c, p);
+            int count = ReadInt(CourtStore.CountCourtFamilyVisitTurns(c, p).First(), "n", 0);
             p["count"] = count;
-            Program.ExecuteSql(c, @"UPDATE court_family_visits SET player_turns=$count WHERE campaign_id=$campaign AND timeline_id=$timeline AND visit_id=$visit;", p);
+            CourtStore.UpdateCourtFamilyVisits2(c, p);
             ReputationService.RecordRulerFavorContact(c, campaign, timeline, player, ReadString(visit, "hero_id", ""), ReadDouble(p, "day", 0d), "family_visit:" + turn);
             if (count < ReignFamilyVisitRules.RequiredPlayerTurns) return;
             p["hero"] = ReadString(visit, "hero_id", "");
-            Program.ExecuteSql(c, @"UPDATE court_family_attention SET dismissals=MAX(0,dismissals-1)
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND player_id=$player AND hero_id=$hero;", p);
-            Program.ExecuteSql(c, @"UPDATE court_family_visits SET status='attended' WHERE campaign_id=$campaign AND timeline_id=$timeline AND visit_id=$visit;", p);
+            CourtStore.UpdateCourtFamilyAttention(c, p);
+            CourtStore.UpdateCourtFamilyVisits3(c, p);
         }
 
         private static void AdvanceFamilyAttention(ReignDbConnection c, string campaign, string timeline, string player, double day, bool courtUnavailable)
         {
             int today = ReignFamilyVisitRules.CourtDay(day);
             var p = new Dictionary<string, object> { ["campaign"] = campaign, ["timeline"] = timeline, ["player"] = player, ["day"] = day, ["today"] = today };
-            foreach (var visit in Program.QuerySql(c, @"SELECT * FROM court_family_visits WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND player_id=$player AND status='pending' AND deadline<=$day ORDER BY deadline,visit_id;", p))
+            foreach (var visit in CourtStore.SelectCourtFamilyVisits4(c, p))
             {
                 string hero = ReadString(visit, "hero_id", "");
                 var member = ReadFamilyAttention(c, campaign, timeline, player, hero);
@@ -181,27 +158,22 @@ AND player_id=$player AND status='pending' AND deadline<=$day ORDER BY deadline,
                 p["hero"] = hero; p["visit"] = ReadString(visit, "visit_id", "");
                 bool invalid = courtUnavailable || !FamilyVisitProfileEligible(profile, player);
                 p["status"] = invalid ? "invalidated" : "dismissed";
-                Program.ExecuteSql(c, @"UPDATE court_family_visits SET status=$status WHERE campaign_id=$campaign AND timeline_id=$timeline AND visit_id=$visit;", p);
+                CourtStore.UpdateCourtFamilyVisits4(c, p);
                 if (invalid) continue;
                 int dismissals = ReadInt(member, "dismissals", 0) + 1;
                 bool neglected = ReignFamilyVisitRules.IsNeglected(dismissals, FamilyPatiencePercent(campaign, hero));
                 p["dismissals"] = dismissals; p["neglected"] = neglected ? 1 : 0;
                 p["neglectStartDay"] = ReignFamilyVisitRules.CourtDay(ReadDouble(visit, "deadline", day));
-                Program.ExecuteSql(c, @"UPDATE court_family_attention SET dismissals=$dismissals,neglected=$neglected,
-decay_finished=CASE WHEN neglected=0 AND $neglected=1 THEN 0 ELSE decay_finished END,
-last_decay_day=CASE WHEN neglected=0 AND $neglected=1 THEN $neglectStartDay ELSE last_decay_day END
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND player_id=$player AND hero_id=$hero;", p);
+                CourtStore.UpdateCourtFamilyAttention2(c, p);
             }
-            foreach (var member in Program.QuerySql(c, @"SELECT * FROM court_family_attention WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND player_id=$player AND neglected=1 AND decay_finished=0 AND last_decay_day<$today;", p))
+            foreach (var member in CourtStore.SelectCourtFamilyAttention3(c, p))
             {
                 string hero = ReadString(member, "hero_id", "");
                 var profile = TryParseJsonObject(ReadString(member, "profile_json", "{}"));
                 if (!ReadBool(profile, "isAlive", false)) continue;
                 int relation = ReadInt(member, "directional_relation", 0);
                 bool child = ReadBool(profile, "isChild", false) || (ReadInt(member, "child_relation_owned", 0) != 0 && ReadInt(member, "adult_migrated", 0) == 0);
-                var pair = child ? null : Program.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;",
-                    new Dictionary<string, object> { ["pair"] = RelationshipsService.AmbientPairKey(hero, player) }).FirstOrDefault();
+                var pair = child ? null : CourtStore.SelectRelationshipPairChemistry(c, new Dictionary<string, object> { ["pair"] = RelationshipsService.AmbientPairKey(hero, player) }).FirstOrDefault();
                 if (!child)
                 {
                     if (pair == null) SetFamilyDirectionalRelation(c, campaign, timeline, hero, player, relation, day, "family_attention_initial_relation");
@@ -212,8 +184,7 @@ AND player_id=$player AND neglected=1 AND decay_finished=0 AND last_decay_day<$t
                     relation = SetFamilyDirectionalRelation(c, campaign, timeline, hero, player, relation + delta, day, "family_neglect");
                 else relation += delta;
                 p["hero"] = hero; p["relation"] = relation; p["finished"] = relation <= 0 ? 1 : 0;
-                Program.ExecuteSql(c, @"UPDATE court_family_attention SET directional_relation=$relation,last_decay_day=$today,decay_finished=$finished
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND player_id=$player AND hero_id=$hero;", p);
+                CourtStore.UpdateCourtFamilyAttention3(c, p);
             }
         }
 
@@ -240,12 +211,12 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND player_id=$player AND 
             bool offspring = ReadString(profile, "fatherId", "") == player || ReadString(profile, "motherId", "") == player;
             if (!offspring && !spouse) return result;
             var favorites = ReputationService.CurrentRulerFavorites(c, campaign, timeline, player, day);
-            var ruler = Program.QuerySql(c, "SELECT sex FROM identity_roster WHERE hero_id=$id;", new Dictionary<string, object> { ["id"] = player }).FirstOrDefault();
+            var ruler = CourtStore.SelectIdentityRoster(c, new Dictionary<string, object> { ["id"] = player }).FirstOrDefault();
             foreach (string rival in favorites.Where(id => id != observer))
             {
                 // Public reputation still requires a known person; private romance is never inferred.
                 if (!CharactersService.IdentityStateVerified(CharactersService.ReadAcquaintance(c, observer, rival))) continue;
-                var target = Program.QuerySql(c, "SELECT * FROM identity_roster WHERE hero_id=$id;", new Dictionary<string, object> { ["id"] = rival }).FirstOrDefault();
+                var target = CourtStore.SelectIdentityRoster2(c, new Dictionary<string, object> { ["id"] = rival }).FirstOrDefault();
                 if (target == null || ReadInt(target, "is_alive", 0) == 0 || ReadInt(target, "is_adult", 0) == 0) continue;
                 if (spouse && (ruler == null || ReadString(target, "sex", "") == ReadString(ruler, "sex", ""))) continue;
                 double temperament = child ? 0.5d : RelationshipsService.RelationshipTraitPercent(Program.ReadJsonObject(Program.CharacterFile(campaign, observer, "traits.json")), "jealousy") / 100d;
@@ -265,8 +236,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND player_id=$player AND 
             var result = new List<Dictionary<string, object>>();
             var favorites = ReputationService.CurrentRulerFavorites(c, campaign, timeline, player, day);
             if (favorites.Count == 0) return result;
-            foreach (var observer in Program.QuerySql(c, @"SELECT * FROM identity_roster WHERE is_alive=1 AND is_adult=1 AND is_player=0 AND is_lord=1
-AND kingdom_id=(SELECT kingdom_id FROM identity_roster WHERE hero_id=$player) ORDER BY hero_id;", new Dictionary<string, object> { ["player"] = player }))
+            foreach (var observer in CourtStore.SelectIdentityRoster3(c, new Dictionary<string, object> { ["player"] = player }))
             {
                 string id = ReadString(observer, "hero_id", "");
                 if (ReadInt(ReadFamilyAttention(c, campaign, timeline, player, id), "neglected", 0) != 0) continue;
@@ -291,7 +261,7 @@ AND kingdom_id=(SELECT kingdom_id FROM identity_roster WHERE hero_id=$player) OR
             string playerText = ReadString(payload, "playerText", ""), reply = ReadString(response, "reply", "");
             string exchange = ReadString(payload, "turnId", "");
             if (string.IsNullOrWhiteSpace(exchange) || string.IsNullOrWhiteSpace(playerText) || string.IsNullOrWhiteSpace(reply)) return;
-            using (var c = Program.OpenCampaignConnection(campaign))
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 var member = ReadFamilyAttention(c, campaign, timeline, player, hero);
                 if (ReadInt(member, "neglected", 0) == 0) return;
@@ -332,19 +302,17 @@ AND kingdom_id=(SELECT kingdom_id FROM identity_roster WHERE hero_id=$player) OR
                 var p = new Dictionary<string, object> { ["campaign"] = campaign, ["timeline"] = timeline, ["player"] = player,
                     ["hero"] = hero, ["exchange"] = exchange, ["day"] = day,
                     ["playerQuote"] = ReadString(evidence, "playerQuote", ""), ["npcQuote"] = ReadString(evidence, "npcQuote", "") };
-                Program.ExecuteSql(c, "BEGIN IMMEDIATE;");
+                CourtStore.Begin(c);
                 try
                 {
-                    if (!Program.QuerySql(c, @"SELECT 1 FROM court_family_reconciliations WHERE campaign_id=$campaign AND timeline_id=$timeline AND hero_id=$hero AND exchange_id=$exchange;", p).Any())
+                    if (!CourtStore.SelectCourtFamilyReconciliations(c, p).Any())
                     {
-                        Program.ExecuteSql(c, @"INSERT INTO court_family_reconciliations(campaign_id,timeline_id,hero_id,exchange_id,player_quote,npc_quote,world_day)
-VALUES($campaign,$timeline,$hero,$exchange,$playerQuote,$npcQuote,$day);", p);
-                        Program.ExecuteSql(c, @"UPDATE court_family_attention SET dismissals=0,neglected=0,decay_finished=1
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND player_id=$player AND hero_id=$hero;", p);
+                        CourtStore.InsertCourtFamilyReconciliations(c, p);
+                        CourtStore.UpdateCourtFamilyAttention4(c, p);
                     }
-                    Program.ExecuteSql(c, "COMMIT;");
+                    CourtStore.Commit(c);
                 }
-                catch { Program.ExecuteSql(c, "ROLLBACK;"); throw; }
+                catch { CourtStore.Rollback(c); throw; }
             }
         }
 
@@ -353,29 +321,26 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND player_id=$player AND 
             EnsureFamilyVisitSchema(c);
             lock (RelationshipsService.CampaignRelationshipWriteLock(campaign))
             {
-            Program.ExecuteSql(c, "BEGIN IMMEDIATE;");
+            CourtStore.Begin(c);
             try
             {
-            foreach (var member in Program.QuerySql(c, @"SELECT * FROM court_family_attention WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND hero_id=$hero AND adult_migrated=0;", new Dictionary<string, object> { ["campaign"] = campaign, ["timeline"] = timeline, ["hero"] = hero }))
+            foreach (var member in CourtStore.SelectCourtFamilyAttention4(c, new Dictionary<string, object> { ["campaign"] = campaign, ["timeline"] = timeline, ["hero"] = hero }))
             {
                 if (ReadInt(member, "child_relation_owned", 0) == 0) continue;
                 string player = ReadString(member, "player_id", "");
                 int migrated = SetFamilyDirectionalRelation(c, campaign, timeline, hero, player, ReadInt(member, "directional_relation", 0), day, "family_childhood_relation_migration");
-                Program.ExecuteSql(c, @"UPDATE court_family_attention SET adult_migrated=1,directional_relation=$relation WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND hero_id=$hero AND player_id=$player;", new Dictionary<string, object> { ["campaign"] = campaign, ["timeline"] = timeline, ["hero"] = hero, ["player"] = player, ["relation"] = migrated });
+                CourtStore.UpdateCourtFamilyAttention5(c, new Dictionary<string, object> { ["campaign"] = campaign, ["timeline"] = timeline, ["hero"] = hero, ["player"] = player, ["relation"] = migrated });
             }
-            Program.ExecuteSql(c, "COMMIT;");
+            CourtStore.Commit(c);
             }
-            catch { Program.ExecuteSql(c, "ROLLBACK;"); throw; }
+            catch { CourtStore.Rollback(c); throw; }
             }
         }
 
         private static int SetFamilyDirectionalRelation(ReignDbConnection c, string campaign, string timeline,
             string observer, string player, int desiredEffectiveRelation, double day, string reason)
         {
-            var pair = Program.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;",
-                new Dictionary<string, object> { ["pair"] = RelationshipsService.AmbientPairKey(observer, player) }).FirstOrDefault();
+            var pair = CourtStore.SelectRelationshipPairChemistry(c, new Dictionary<string, object> { ["pair"] = RelationshipsService.AmbientPairKey(observer, player) }).FirstOrDefault();
             int personal = ReadInt(pair, ReadString(pair, "hero_a_id", "") == observer ? "affinity_a_to_b" : "affinity_b_to_a", 0);
             int standing = ReadInt(RelationshipsService.ResolveObserverPublicStanding(c, campaign, timeline, observer, player), "value", 0);
             int desiredPersonal = ReignFamilyVisitRules.PersonalAffinityForEffectiveRelation(desiredEffectiveRelation, standing);

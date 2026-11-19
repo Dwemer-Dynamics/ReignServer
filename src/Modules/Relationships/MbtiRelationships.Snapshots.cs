@@ -105,10 +105,10 @@ namespace ReignBetaServer
             long transactionBeginMs = 0;
             long commitMs = 0;
 
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             using (RelationshipStandingContext standingContext = new RelationshipStandingContext(connection, campaignId, timelineId))
             using (RelationshipLifecycleWriteContext lifecycleWriteContext = new RelationshipLifecycleWriteContext(connection))
-            using (Program.SqlReadTimingContext sqlReadTiming = new Program.SqlReadTimingContext())
+            using (ReignDatabase.SqlReadTimingContext sqlReadTiming = new ReignDatabase.SqlReadTimingContext())
             {
                 Stopwatch schemaReadinessTimer = Stopwatch.StartNew();
                 EnsureMbtiRelationshipSchema(connection);
@@ -125,7 +125,7 @@ namespace ReignBetaServer
                 schemaReadinessTimer.Stop();
                 schemaReadinessMs = schemaReadinessTimer.ElapsedMilliseconds;
                 Stopwatch progressLoadTimer = Stopwatch.StartNew();
-                Dictionary<string, object> dailyProgress = Program.QuerySql(connection, @"
+                Dictionary<string, object> dailyProgress = ReignDatabase.QuerySql(connection, @"
 SELECT pair_cursor,processed_pairs FROM relationship_daily_inputs
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day
 LIMIT 1;", new Dictionary<string, object>
@@ -146,7 +146,7 @@ LIMIT 1;", new Dictionary<string, object>
                     Dictionary<string, object> repeatedPlan = continuousWorker
                         ? new Dictionary<string, object>
                         {
-                            ["targetCount"] = ReadInt(Program.QuerySql(connection,
+                            ["targetCount"] = ReadInt(ReignDatabase.QuerySql(connection,
                                 "SELECT COUNT(*) AS count FROM relationship_native_targets WHERE status IN ('pending','claimed','failed');")
                                 .FirstOrDefault(), "count", 0)
                         }
@@ -351,7 +351,7 @@ LIMIT 1;", new Dictionary<string, object>
                     StringComparer.OrdinalIgnoreCase).ToList());
                 List<Dictionary<string, object>> persistedNotableRows =
                     ReignPostgreSqlDialect.IsPostgreSql(connection)
-                        ? Program.QuerySql(connection, @"SELECT profiles.*
+                        ? ReignDatabase.QuerySql(connection, @"SELECT profiles.*
 FROM notable_mbti_profiles profiles
 JOIN jsonb_array_elements_text(CAST($heroes AS jsonb)) requested
   ON requested.value=profiles.hero_id;",
@@ -359,7 +359,7 @@ JOIN jsonb_array_elements_text(CAST($heroes AS jsonb)) requested
                             {
                                 ["heroes"] = neededHeroesJson
                             })
-                        : Program.QuerySql(connection,
+                        : ReignDatabase.QuerySql(connection,
                             "SELECT * FROM notable_mbti_profiles;");
                 Dictionary<string, Dictionary<string, object>> persistedNotables =
                     persistedNotableRows
@@ -450,7 +450,7 @@ JOIN jsonb_array_elements_text(CAST($heroes AS jsonb)) requested
                     commandPreparationTimer.Stop();
                     commandPreparationMs = commandPreparationTimer.ElapsedMilliseconds;
                     Stopwatch transactionBeginTimer = Stopwatch.StartNew();
-                    Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                    ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                     transactionBeginTimer.Stop();
                     transactionBeginMs = transactionBeginTimer.ElapsedMilliseconds;
                     try
@@ -488,7 +488,7 @@ JOIN jsonb_array_elements_text(CAST($heroes AS jsonb)) requested
                         .ToList());
                     List<Dictionary<string, object>> existingPairRows =
                         ReignPostgreSqlDialect.IsPostgreSql(connection)
-                            ? Program.QuerySql(connection, @"SELECT pairs.*
+                            ? ReignDatabase.QuerySql(connection, @"SELECT pairs.*
 FROM relationship_pair_chemistry pairs
 JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested
   ON requested.value=pairs.pair_key;",
@@ -505,7 +505,7 @@ JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested
                     stateChemistryReadMs = stateLoadTimer.ElapsedMilliseconds - stateLifecycleReadMs;
                     List<Dictionary<string, object>> existingNativeTargetRows =
                         ReignPostgreSqlDialect.IsPostgreSql(connection)
-                            ? Program.QuerySql(connection, @"SELECT targets.*
+                            ? ReignDatabase.QuerySql(connection, @"SELECT targets.*
 FROM relationship_native_targets targets
 JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested
   ON requested.value=targets.pair_key;",
@@ -513,7 +513,7 @@ JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested
                                 {
                                     ["pairs"] = neededPairsJson
                                 })
-                            : Program.QuerySql(connection,
+                            : ReignDatabase.QuerySql(connection,
                                 "SELECT * FROM relationship_native_targets;");
                     Dictionary<string, Dictionary<string, object>> existingNativeTargets =
                         existingNativeTargetRows
@@ -641,7 +641,7 @@ JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested
                                 skippedMissing++;
                                 string error = "Missing immutable MBTI assignment for relationship pair " + pair.PairKey
                                     + " (" + pair.HeroAId + "=" + typeA + ", " + pair.HeroBId + "=" + typeB + ").";
-                                Program.ExecuteSql(connection,
+                                ReignDatabase.ExecuteSql(connection,
                                     "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('relationship_mbti_error',$error);",
                                     new Dictionary<string, object> { ["error"] = error });
                                 continue;
@@ -1047,7 +1047,7 @@ JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested
                                 nativeTargetDeleteBatch);
                             FlushPostgreSqlRelationshipProvenanceBatch(connection,
                                 provenanceWriteBatch);
-                            Program.ExecuteSql(connection, @"UPDATE relationship_daily_inputs SET
+                            ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_daily_inputs SET
 pair_cursor=$cursor,candidate_pairs=$candidates,processed_pairs=$processed
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
                                 new Dictionary<string, object>
@@ -1056,13 +1056,13 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
                                     ["processed"] = processed, ["campaign"] = campaignId,
                                     ["timeline"] = timelineId, ["day"] = day
                                 });
-                            Program.ExecuteSql(connection, "COMMIT;");
+                            ReignDatabase.ExecuteSql(connection, "COMMIT;");
                             StoreCommittedRelationshipPairCacheRows(
                                 campaignId, pendingCacheRows);
                             pendingCacheRows.Clear();
                             ThrottleContinuousRelationshipChunk(evaluationUnitsSinceThrottle);
                             evaluationUnitsSinceThrottle = 0;
-                            Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                            ReignDatabase.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                         }
                     }
                     pairProcessingTimer.Stop();
@@ -1126,7 +1126,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
                                 lifecyclePairState, "shared_tag", ""),
                                 StringComparison.OrdinalIgnoreCase))
                         {
-                            Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry
+                            ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry
 SET shared_tag=$shared,state_revision=state_revision+1,updated_ts=$ts
 WHERE pair_key=$pair;",
                                 new Dictionary<string, object>
@@ -1232,7 +1232,7 @@ WHERE pair_key=$pair;",
                     Dictionary<string, object> nativeSyncPlan = continuousWorker
                         ? new Dictionary<string, object>
                         {
-                            ["targetCount"] = ReadInt(Program.QuerySql(connection,
+                            ["targetCount"] = ReadInt(ReignDatabase.QuerySql(connection,
                                 "SELECT COUNT(*) AS count FROM relationship_native_targets WHERE status IN ('pending','claimed','failed');")
                                 .FirstOrDefault(), "count", 0)
                         }
@@ -1338,17 +1338,17 @@ WHERE pair_key=$pair;",
                         ["llmCalls"] = 0, ["noLlmConfirmed"] = true
                     };
                     Stopwatch commitTimer = Stopwatch.StartNew();
-                    Program.ExecuteSql(connection,
+                    ReignDatabase.ExecuteSql(connection,
                         "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,$day);",
                         new Dictionary<string, object>
                         {
                             ["key"] = "mbti_relationship_last_processed_day:" + timelineId,
                             ["day"] = day.ToString(CultureInfo.InvariantCulture)
                         });
-                    Program.ExecuteSql(connection,
+                    ReignDatabase.ExecuteSql(connection,
                         "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('mbti_relationship_last_processed_day',$day);",
                         new Dictionary<string, object> { ["day"] = day.ToString(CultureInfo.InvariantCulture) });
-                    Program.ExecuteSql(connection, "COMMIT;");
+                    ReignDatabase.ExecuteSql(connection, "COMMIT;");
                     commitTimer.Stop();
                     commitMs = commitTimer.ElapsedMilliseconds;
                     timer.Stop();
@@ -1392,7 +1392,7 @@ WHERE pair_key=$pair;",
                     }
                     catch
                     {
-                        try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                        try { ReignDatabase.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                         throw;
                     }
                 }

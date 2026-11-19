@@ -52,10 +52,10 @@ namespace ReignBetaServer
             Func<Dictionary<string, object>, Dictionary<string, object>> member = result => ReadDictionaryList(result, "members").FirstOrDefault();
             try
             {
-                using (var c = Program.OpenCampaignConnection(campaign))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     ReputationService.EnsureSocialReputationSchema(c); EnsureFamilyVisitSchema(c);
-                    Program.ExecuteSql(c, "INSERT INTO identity_roster(hero_id,canonical_name,is_alive,is_adult,is_player,is_ruler,kingdom_id) VALUES('ruler','Ruler',1,1,1,1,'realm'),('child','Child',1,0,0,0,'realm');");
+                    CourtSelfTestStore.InsertIdentityRoster(c);
                 }
                 var underAge = new Dictionary<string, object>(child) { ["age"] = 3.999d };
                 add("family_visit_exact_age_and_locality", FamilyVisitProfileEligible(child, "ruler") && !FamilyVisitProfileEligible(underAge, "ruler")
@@ -90,7 +90,7 @@ namespace ReignBetaServer
                 add("family_directional_daily_idempotency", ReadInt(member(decayed), "directional_relation", -1) == 2
                     && ReadInt(member(sameDay), "directional_relation", -1) == 2 && ReadInt(member(atZero), "directional_relation", -1) == 0,
                     "The child's actual family-response directional state decreases once per campaign day and catches up only to zero.");
-                using (var c = Program.OpenCampaignConnection(campaign))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     string context = BuildFamilyAttentionContext(c, campaign, timeline, "child", "ruler", 24.34);
                     add("family_child_neglect_prompt_reads_state", context.Contains("deeply neglected") && context.Contains("family attachment") && !context.Contains("dismissals=5"),
@@ -113,8 +113,8 @@ namespace ReignBetaServer
                 AppendRulerFavorContactSelfTests(campaign, timeline, add);
                 var catchup = command("register", 30.4, "late_tick"); catchup["timelineId"] = "catchup";
                 FamilyVisitDispatch(catchup);
-                using (var c = Program.OpenCampaignConnection(campaign))
-                    Program.ExecuteSql(c, "UPDATE court_family_attention SET dismissals=4 WHERE timeline_id='catchup';");
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
+                    CourtSelfTestStore.UpdateCourtFamilyAttention(c);
                 catchup["action"] = "tick"; catchup["worldDay"] = 34.34; catchup["visitIds"] = new List<string> { "late_tick" };
                 var caughtUp = FamilyVisitDispatch(catchup);
                 add("family_delayed_tick_preserves_elapsed_decay", ReadInt(member(caughtUp), "neglected", 0) == 1
@@ -129,13 +129,13 @@ namespace ReignBetaServer
 
         private static void AppendRulerFavorContactSelfTests(string campaign, string timeline, Action<string, bool, string> add)
         {
-            using (var c = Program.OpenCampaignConnection(campaign))
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 ReputationService.EnsureSocialReputationSchema(c);
-                Program.ExecuteSql(c, "INSERT INTO identity_roster(hero_id,canonical_name,is_alive,is_adult,is_player,is_ruler,kingdom_id) VALUES('favorite','Favorite',1,1,0,0,'realm'),('foreign_ruler','Foreign Ruler',1,1,0,1,'foreign');");
+                CourtSelfTestStore.InsertIdentityRoster2(c);
                 ReputationService.RecordRulerFavorContact(c, campaign, timeline, "ruler", "favorite", 1, "spoken-one");
                 ReputationService.RecordRulerFavorContact(c, campaign, timeline, "ruler", "favorite", 29, "spoken-one");
-                var contact = Program.QuerySql(c, "SELECT * FROM court_ruler_favor_contact WHERE ruler_id='ruler' AND favorite_id='favorite';").First();
+                var contact = CourtSelfTestStore.SelectCourtRulerFavorContact(c).First();
                 add("favor_actual_contact_receipt_idempotency", ReadDouble(contact, "last_contact_day", -1) == 1, "Replaying an old completed exchange cannot refresh the favor clock.");
                 var occurrence = new Dictionary<string, object> { ["timelineId"] = timeline, ["archetypeId"] = "ruler_favoring_dialogue", ["threadKey"] = "test_favor", ["sourceEventId"] = "favor-event",
                     ["worldDay"] = 1d, ["forceExposure"] = true, ["forcePromotion"] = true,
@@ -154,7 +154,7 @@ namespace ReignBetaServer
                 ReputationService.RecordRulerFavorContact(c, campaign, timeline, "favorite", "ruler", 31, "fresh-return");
                 ReputationService.RecordRulerFavorContact(c, campaign, timeline, "favorite", "foreign_ruler", 31, "npc-exchange");
                 add("favor_player_npc_ruler_bidirectional_contact", !ReputationService.RulerFavorRequiresFreshContact(c, campaign, timeline, "ruler", "favorite")
-                    && Program.QuerySql(c, "SELECT 1 FROM court_ruler_favor_contact WHERE ruler_id='foreign_ruler' AND favorite_id='favorite';").Any(),
+                    && CourtSelfTestStore.SelectCourtRulerFavorContact2(c).Any(),
                     "Fresh speech resumes favor eligibility and either side of a completed exchange may be an NPC ruler.");
                 var npcOccurrence = new Dictionary<string, object>(occurrence) { ["worldDay"] = 31d, ["threadKey"] = "npc_favor", ["sourceEventId"] = "npc-favor-event",
                     ["participants"] = new List<object> { new Dictionary<string, object> { ["subjectId"] = "foreign_ruler", ["role"] = "ruler", ["isPlayer"] = false,
@@ -165,9 +165,7 @@ namespace ReignBetaServer
                 add("favor_npc_ruler_expiration", ReadBool(npcRegistered, "ok", false) && npcBefore
                     && !ReputationService.CurrentRulerFavorites(c, campaign, timeline, "foreign_ruler", 61).Contains("favorite"),
                     "An NPC ruler's parameterized favor expires at the same thirty-day contact boundary.");
-                Program.ExecuteSql(c, @"UPDATE character_reputations SET status='active' WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id='foreign_ruler';
-DELETE FROM court_ruler_favor_contact WHERE campaign_id=$campaign AND timeline_id=$timeline AND ruler_id='foreign_ruler';",
-                    new Dictionary<string, object> { ["campaign"] = campaign, ["timeline"] = timeline });
+                CourtSelfTestStore.UpdateCharacterReputations(c, new Dictionary<string, object> { ["campaign"] = campaign, ["timeline"] = timeline });
                 ReputationService.ExpireSocialRumors(c, campaign, timeline, 100);
                 ReputationService.ExpireSocialRumors(c, campaign, timeline, 129.999);
                 bool graceActive = ReputationService.CurrentRulerFavorites(c, campaign, timeline, "foreign_ruler", 129.999).Contains("favorite");
@@ -181,26 +179,22 @@ DELETE FROM court_ruler_favor_contact WHERE campaign_id=$campaign AND timeline_i
         private static void AppendFamilyEffectiveRelationSelfTests(string campaign, Action<string, bool, string> add)
         {
             const string timeline = "effective_relation";
-            using (var c = Program.OpenCampaignConnection(campaign))
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 var profile = new Dictionary<string, object> { ["heroStringId"] = "adult_family", ["name"] = "Family", ["age"] = 30d,
                     ["isChild"] = false, ["isAlive"] = true, ["isPrisoner"] = false, ["isLocal"] = true, ["spouseId"] = "ruler", ["relationToPlayer"] = 5 };
-                Program.ExecuteSql(c, "INSERT INTO identity_roster(hero_id,canonical_name,is_alive,is_adult) VALUES('adult_family','Family',1,1);");
-                Program.ExecuteSql(c, @"INSERT INTO relationship_pair_chemistry(pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts)
-VALUES('adult_family|ruler','adult_family','ruler','ESTJ','ISFJ',2,17,10,10,0);");
+                CourtSelfTestStore.InsertIdentityRoster3(c);
+                CourtSelfTestStore.InsertRelationshipPairChemistry(c);
                 UpsertFamilyAttention(c, campaign, timeline, "ruler", profile);
                 var p = new Dictionary<string, object> { ["campaign"] = campaign, ["timeline"] = timeline, ["offset"] = 3, ["affinity"] = 2 };
                 Action<int, int> reset = (affinity, offset) => {
                     p["affinity"] = affinity; p["offset"] = offset;
-                    Program.ExecuteSql(c, @"INSERT INTO character_public_standing(campaign_id,timeline_id,subject_id,standing_value,updated_ts)
-VALUES($campaign,$timeline,'ruler',$offset,0) ON CONFLICT(campaign_id,timeline_id,subject_id) DO UPDATE SET standing_value=$offset;
-UPDATE relationship_pair_chemistry SET affinity_a_to_b=$affinity WHERE pair_key='adult_family|ruler';
-UPDATE court_family_attention SET neglected=1,decay_finished=0,last_decay_day=10 WHERE campaign_id=$campaign AND timeline_id=$timeline AND hero_id='adult_family';", p);
+                    CourtSelfTestStore.UpsertCharacterPublicStanding(c, p);
                 };
                 Func<int> effective = () => ReadInt(RelationshipsService.ResolveEffectiveAttitude(c, campaign, timeline, "adult_family", "ruler"), "effectiveAttitude", -999);
                 reset(2, 3); AdvanceFamilyAttention(c, campaign, timeline, "ruler", 11.34, false);
                 int positiveFirst = effective(); AdvanceFamilyAttention(c, campaign, timeline, "ruler", 16.34, false);
-                var positivePair = Program.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key='adult_family|ruler';").First();
+                var positivePair = CourtSelfTestStore.SelectRelationshipPairChemistry(c).First();
                 add("family_neglect_positive_standing_reaches_actual_zero", positiveFirst == 4 && effective() == 0
                     && ReadInt(positivePair, "affinity_a_to_b", 999) == -3 && ReadInt(positivePair, "affinity_b_to_a", 999) == 17
                     && RelationshipsService.PublicStandingValue(c, campaign, timeline, "ruler") == 3,
@@ -208,7 +202,7 @@ UPDATE court_family_attention SET neglected=1,decay_finished=0,last_decay_day=10
                 reset(5, -3); AdvanceFamilyAttention(c, campaign, timeline, "ruler", 11.34, false);
                 int negativeFirst = effective(); AdvanceFamilyAttention(c, campaign, timeline, "ruler", 16.34, false);
                 add("family_neglect_negative_standing_stops_at_actual_zero", negativeFirst == 1 && effective() == 0
-                    && ReadInt(Program.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key='adult_family|ruler';").First(), "affinity_a_to_b", 999) == 3
+                    && ReadInt(CourtSelfTestStore.SelectRelationshipPairChemistry(c).First(), "affinity_a_to_b", 999) == 3
                     && RelationshipsService.PublicStandingValue(c, campaign, timeline, "ruler") == -3,
                     "Negative standing stops decay at actual zero while personal affinity remains positive.");
                 reset(100, 20); AdvanceFamilyAttention(c, campaign, timeline, "ruler", 11.34, false);
@@ -220,8 +214,7 @@ UPDATE court_family_attention SET neglected=1,decay_finished=0,last_decay_day=10
                     "Already negative actual relation remains unchanged and stops the neglect-decay episode.");
                 // This fixture stands after normal adulthood construction; the persistent child-owned flag survives the updated profile.
                 p["offset"] = 3;
-                Program.ExecuteSql(c, @"UPDATE character_public_standing SET standing_value=3 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id='ruler';
-UPDATE court_family_attention SET child_relation_owned=1,adult_migrated=0,directional_relation=0 WHERE campaign_id=$campaign AND timeline_id=$timeline AND hero_id='adult_family';", p);
+                CourtSelfTestStore.UpdateCharacterPublicStanding(c, p);
                 MigrateFamilyChildAttentionRelation(c, campaign, timeline, "adult_family", 18.34);
                 MigrateFamilyChildAttentionRelation(c, campaign, timeline, "adult_family", 18.34);
                 add("family_child_maturity_preserves_actual_zero_with_standing", effective() == 0

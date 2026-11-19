@@ -19,21 +19,21 @@ namespace ReignBetaServer
                 _playerActionGeneration = null;
                 var payload = TestDict("campaignId", campaign, "conversationSessionId", "source_session",
                     "timelineId", "source_branch", "worldDay", 4d, "participants", new[] { "player", "npc" });
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     ReadMemoryPrecisionState(connection);
-                    Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json)
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json)
 VALUES('source_session',$campaign,'npc','player','open',1,1,'[""player"",""npc""]');", TestDict("campaign", campaign));
                 }
                 int Count(string table, string turn = "")
                 {
-                    using var connection = Program.OpenCampaignConnection(campaign);
-                    return ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS n FROM " + table + (turn.Length == 0 ? "" : " WHERE turn_id=$turn") + ";", TestDict("turn", turn)).Single(), "n", 0);
+                    using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                    return ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS n FROM " + table + (turn.Length == 0 ? "" : " WHERE turn_id=$turn") + ";", TestDict("turn", turn)).Single(), "n", 0);
                 }
                 string Stored(string table, string id, string field)
                 {
-                    using var connection = Program.OpenCampaignConnection(campaign);
-                    return ReadString(Program.QuerySql(connection, "SELECT * FROM " + table + " WHERE turn_id=$id;", TestDict("id", id)).Single(), field, "");
+                    using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                    return ReadString(ReignDatabase.QuerySql(connection, "SELECT * FROM " + table + " WHERE turn_id=$id;", TestDict("id", id)).Single(), field, "");
                 }
                 Dictionary<string, object> Store(string id, Action<string> boundary = null) => StoreConversationExchange(campaign,
                     payload, "npc", "player", "Player", "Mira", "The old mill is my answer.", "I understand your answer.", id, 100, boundary);
@@ -71,16 +71,16 @@ VALUES('source_session',$campaign,'npc','player','open',1,1,'[""player"",""npc""
                         && Stored("conversation_turns", "accepted_npc", "text") == "I understand your answer."
                         && Stored("conversation_turn_fts", "accepted_npc", "text") == "I understand your answer.");
                 }
-                using (var connection = Program.OpenCampaignConnection(campaign))
-                    Program.ExecuteSql(connection, "DELETE FROM conversation_turn_fts WHERE turn_id='accepted_npc';");
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                    ReignDatabase.ExecuteSql(connection, "DELETE FROM conversation_turn_fts WHERE turn_id='accepted_npc';");
                 Store("accepted");
                 Check("repairs_derived_index_from_immutable_source", Count("conversation_turn_fts") == 2
                     && Stored("conversation_turn_fts", "accepted_npc", "text") == Stored("conversation_turns", "accepted_npc", "text"));
 
                 Task.WaitAll(Enumerable.Range(0, 6).Select(index => Task.Run(() => Store("parallel_" + index))).ToArray());
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var turns = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id='source_session' ORDER BY turn_order;");
+                    var turns = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id='source_session' ORDER BY turn_order;");
                     Check("concurrent_complete_pairs_have_distinct_order", turns.Count == 14
                         && turns.Select(t => ReadInt(t, "turn_order", -1)).Distinct().Count() == 14
                         && turns.GroupBy(t => ReadString(t, "exchange_id", "")).All(group => group.Count() == 2
@@ -137,26 +137,26 @@ VALUES('source_session',$campaign,'npc','player','open',1,1,'[""player"",""npc""
                 var compact = TryParseJsonObject(SerializeConversationTurnStoragePayload(oversized));
                 Check("oversized_metadata_keeps_timeline_identity", ReadBool(compact, "payloadGuardTriggered", false)
                     && ReadString(compact, "timelineId", "") == "source_branch" && ReadDouble(compact, "worldDay", 0d) == 4d);
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                     _playerActionGeneration = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
                 AdvanceMemoryRestoreGeneration(campaign);
                 bool replaced = false;
                 try { Store("stale_generation"); }
                 catch (InvalidOperationException) { replaced = true; }
                 Check("pre_restore_writer_cannot_publish", replaced && Count("conversation_turns") == beforeGroupFault);
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     const string notice = "[Dialogue memory correction could not be verified. No new memory or world change is confirmed.]";
                     InsertConversationTurn(connection, "technical_new", "source_session", "technical_event", 99,
                         "technical_exchange", "npc", "npc", "Mira", notice, "in_person", 4d, 105L, "",
                         new List<string> { "npc", "player" }, payload);
-                    var technical = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='technical_new';").Single();
+                    var technical = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='technical_new';").Single();
                     Check("technical_notice_is_inactive_and_unindexed", ReadString(technical, "status", "") == "technical_notice"
-                        && !Program.QuerySql(connection, "SELECT * FROM conversation_turn_fts WHERE turn_id='technical_new';").Any()
+                        && !ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turn_fts WHERE turn_id='technical_new';").Any()
                         && !ReadLogicalConversationTurns(connection, "source_session", 100).Any(t => ReadString(t, "turn_id", "") == "technical_new"));
-                    Program.ExecuteSql(connection, "UPDATE conversation_turns SET status='active' WHERE turn_id='technical_new';");
+                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET status='active' WHERE turn_id='technical_new';");
                     Check("legacy_active_notice_excluded_without_rewriting_row", !PrecisionTurnVisible(
-                        Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='technical_new';").Single(), "npc", null)
+                        ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='technical_new';").Single(), "npc", null)
                         && !ReadLogicalConversationTurns(connection, "source_session", 100).Any(t => ReadString(t, "turn_id", "") == "technical_new"));
                     const string safeSpeech = "The old mill is settled. Which gate should we use?";
                     string mixed = safeSpeech + "\n\n" + notice + ".,";
@@ -174,9 +174,9 @@ VALUES('source_session',$campaign,'npc','player','open',1,1,'[""player"",""npc""
                         .Any(t => ReadString(t, "turn_id", "") == "recovered_speech" && ReadString(t, "text", "") == safeSpeech)
                         && continued.Any(t => ReadString(t, "turn_id", "") == "next_answer" && ReadString(t, "text", "") == "Use the east gate.")
                         && continued.Any(t => ReadString(t, "turn_id", "") == "next_reply")
-                        && Program.QuerySql(connection, "SELECT text FROM conversation_turns WHERE turn_id='recovered_speech';")
+                        && ReignDatabase.QuerySql(connection, "SELECT text FROM conversation_turns WHERE turn_id='recovered_speech';")
                             .Any(t => ReadString(t, "text", "") == mixed)
-                        && Program.QuerySql(connection, "SELECT text FROM conversation_turn_fts WHERE turn_id='recovered_speech';")
+                        && ReignDatabase.QuerySql(connection, "SELECT text FROM conversation_turn_fts WHERE turn_id='recovered_speech';")
                             .Any(t => ReadString(t, "text", "") == safeSpeech));
                     RebuildCategorizedSearchIndexes(connection);
                     Check("diagnostic_cannot_support_future_continuity", ConversationContinuityLinkError(connection,
@@ -185,10 +185,10 @@ VALUES('source_session',$campaign,'npc','player','open',1,1,'[""player"",""npc""
                             == "related_source_quote_mismatch"
                         && ConversationContinuityLinkError(connection, TestDict("relatedTurnId", "recovered_speech",
                             "relationKind", "answer", "relatedQuote", "Which gate should we use?"), "npc", "source_branch", 4d) == "");
-                    Check("index_rebuild_keeps_safe_speech_without_diagnostic", Program.QuerySql(connection,
+                    Check("index_rebuild_keeps_safe_speech_without_diagnostic", ReignDatabase.QuerySql(connection,
                         "SELECT text FROM conversation_turn_fts WHERE turn_id='recovered_speech';")
                         .Any(t => ReadString(t, "text", "") == safeSpeech)
-                        && !Program.QuerySql(connection, "SELECT * FROM conversation_turn_fts WHERE turn_id='technical_new';").Any());
+                        && !ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turn_fts WHERE turn_id='technical_new';").Any());
                 }
             }
             finally

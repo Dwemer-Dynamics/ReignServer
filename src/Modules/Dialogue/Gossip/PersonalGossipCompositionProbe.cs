@@ -15,10 +15,10 @@ namespace ReignBetaServer
             Dictionary<string, object> data;
             string root, topic, before;
             using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
-            using (var c = Program.OpenCampaignConnection(campaign))
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 if (WorldSimulationService.ActiveWorldHistoryTimeline(c) != timeline) throw new InvalidOperationException("The active timeline changed.");
-                var row = Program.QuerySql(c, "SELECT * FROM personal_gossip_messages WHERE message_id=$id AND timeline_id=$timeline;",
+                var row = ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_messages WHERE message_id=$id AND timeline_id=$timeline;",
                     GossipFields("id", message, "timeline", timeline)).SingleOrDefault();
                 data = PersonalGossipProbeSource(row, actor, timeline);
                 root = ReadString(row, "root_id", ""); topic = ReadString(row, "topic_id", "");
@@ -27,7 +27,7 @@ namespace ReignBetaServer
             var proposal = PersonalGossipProbeDraft(data, Program.ChatWithLlm);
             if (!GossipTestAuthorized(request)) throw new InvalidOperationException("The exact probe lease or native scope changed.");
             using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
-            using (var c = Program.OpenCampaignConnection(campaign))
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 if (WorldSimulationService.ActiveWorldHistoryTimeline(c) != timeline || before != PersonalGossipProbeState(c, timeline, root, topic))
                     throw new InvalidOperationException("The frozen gossip state changed during the probe; no proposal may be credited.");
@@ -68,9 +68,9 @@ namespace ReignBetaServer
         {
             var args = GossipFields("timeline", timeline, "root", root, "topic", topic);
             return CanonicalJson(GossipFields(
-                "topics", Program.QuerySql(c, "SELECT * FROM personal_gossip_topics WHERE timeline_id=$timeline AND topic_id=$topic ORDER BY topic_id;", args),
-                "messages", Program.QuerySql(c, "SELECT * FROM personal_gossip_messages WHERE timeline_id=$timeline AND root_id=$root ORDER BY message_id;", args),
-                "history", Program.QuerySql(c, "SELECT * FROM personal_gossip_history WHERE timeline_id=$timeline AND root_id=$root ORDER BY receipt_id;", args)));
+                "topics", ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_topics WHERE timeline_id=$timeline AND topic_id=$topic ORDER BY topic_id;", args),
+                "messages", ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_messages WHERE timeline_id=$timeline AND root_id=$root ORDER BY message_id;", args),
+                "history", ReignDatabase.QuerySql(c, "SELECT * FROM personal_gossip_history WHERE timeline_id=$timeline AND root_id=$root ORDER BY receipt_id;", args)));
         }
 
         private static Dictionary<string, object> PersonalGossipProbeDraft(Dictionary<string, object> source,

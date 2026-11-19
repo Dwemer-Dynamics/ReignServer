@@ -161,7 +161,7 @@ namespace ReignBetaServer
             try
             {
                 using (ReignDbConnection connection =
-                    Program.OpenCampaignConnection(campaignId))
+                    ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureRelationshipDirectorSchema(connection);
                     EnsureMbtiRelationshipSchema(connection);
@@ -239,7 +239,7 @@ namespace ReignBetaServer
                     heroes["ineligible_child"] = cachedProfileChild;
                     groups[day][0]["heroIds"] = heroes.Keys.Cast<object>().ToList();
                     foreach (string heroId in heroes.Keys)
-                        Program.ExecuteSql(connection, @"INSERT INTO relationship_personalities(
+                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_personalities(
 hero_id,mbti_type,title,description,source,assignment_day,template_version,traits_json,created_ts,updated_ts)
 VALUES($hero,'INTJ','Fixture','Fixture','self_test',50,1,$traits,1,1);",
                             new Dictionary<string, object> { ["hero"] = heroId,
@@ -256,14 +256,14 @@ VALUES($hero,'INTJ','Fixture','Fixture','self_test',50,1,$traits,1,1);",
                     add("fling_roll_batch_precedes_spark_dependencies",
                         ReadInt(firstRun, "rollWriteCommands", -1) == (ReignPostgreSqlDialect.IsPostgreSql(connection) ? 1 : 3),
                         "All three roll receipts are written together before spark/encounter updates consume them.");
-                    int rollCount = ReadInt(Program.QuerySql(connection, @"
+                    int rollCount = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_fling_rolls
 WHERE timeline_id=$timeline AND world_day=$day;",
                         new Dictionary<string, object>
                         {
                             ["timeline"] = timeline, ["day"] = day
                         }).FirstOrDefault(), "count", 0);
-                    int encounterCount = ReadInt(Program.QuerySql(connection, @"
+                    int encounterCount = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_fling_encounters
 WHERE timeline_id=$timeline AND world_day=$day;",
                         new Dictionary<string, object>
@@ -271,7 +271,7 @@ WHERE timeline_id=$timeline AND world_day=$day;",
                             ["timeline"] = timeline, ["day"] = day
                         }).FirstOrDefault(), "count", 0);
                     Dictionary<string, object> sparkCount =
-                        Program.QuerySql(connection, @"
+                        ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS attempts,SUM(passed) AS passes
 FROM relationship_fling_sparks
 WHERE timeline_id=$timeline AND world_day=$day;",
@@ -280,10 +280,10 @@ WHERE timeline_id=$timeline AND world_day=$day;",
                                 ["timeline"] = timeline, ["day"] = day
                             }).FirstOrDefault()
                         ?? new Dictionary<string, object>();
-                    int lifecycleCount = ReadInt(Program.QuerySql(connection,
+                    int lifecycleCount = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM relationship_pair_lifecycle;")
                         .FirstOrDefault(), "count", 0);
-                    int chemistryCount = ReadInt(Program.QuerySql(connection,
+                    int chemistryCount = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM relationship_pair_chemistry;")
                         .FirstOrDefault(), "count", 0);
                     add("fling_ledger_replay_is_idempotent",
@@ -314,7 +314,7 @@ WHERE timeline_id=$timeline AND world_day=$day;",
                         lifecycleCount == 0 && chemistryCount == 0,
                         "A fling receipt never creates lover/affair lifecycle state or changes directional affinity.");
                     add("same_sex_fling_has_no_conception",
-                        ReadInt(Program.QuerySql(connection, @"
+                        ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_fling_encounters
 WHERE timeline_id=$timeline AND same_sex=1
 AND (conception_attempt_id<>'' OR conception_id<>'' OR conceived=1);",
@@ -337,7 +337,7 @@ AND (conception_attempt_id<>'' OR conception_id<>'' OR conceived=1);",
                         quietGroups, null, quietHeroes);
                     Dictionary<string, object> quietReplay = ProcessDailyNpcFlings(connection, campaignId, timeline,
                         quietGroups, null, quietHeroes);
-                    Dictionary<string, object> quietRoll = Program.QuerySql(connection,
+                    Dictionary<string, object> quietRoll = ReignDatabase.QuerySql(connection,
                         "SELECT * FROM relationship_fling_rolls WHERE timeline_id=$timeline AND world_day=$day;",
                         new Dictionary<string, object> { ["timeline"] = timeline, ["day"] = quietDay }).SingleOrDefault();
                     int expectedQuietRoll = StableDie(string.Join("|", campaignId, timeline,
@@ -430,7 +430,7 @@ AND (conception_attempt_id<>'' OR conception_id<>'' OR conceived=1);",
                         failedSparkGroups, failedSparkRows,
                         failedSparkHeroMap);
                     Dictionary<string, object> failedSparkCounts =
-                        Program.QuerySql(connection, @"
+                        ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS attempts,SUM(passed) AS passes
 FROM relationship_fling_sparks WHERE timeline_id=$timeline
 AND world_day=$day;", new Dictionary<string, object>
@@ -439,7 +439,7 @@ AND world_day=$day;", new Dictionary<string, object>
                             ["day"] = failedSparkDay
                         }).FirstOrDefault()
                         ?? new Dictionary<string, object>();
-                    int nextDayRolls = ReadInt(Program.QuerySql(connection, @"
+                    int nextDayRolls = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_fling_rolls
 WHERE timeline_id=$timeline AND world_day=$day;",
                         new Dictionary<string, object>
@@ -447,7 +447,7 @@ WHERE timeline_id=$timeline AND world_day=$day;",
                             ["timeline"] = timeline,
                             ["day"] = failedSparkDay + 1
                         }).FirstOrDefault(), "count", 0);
-                    int failedSparkEncounters = ReadInt(Program.QuerySql(connection, @"
+                    int failedSparkEncounters = ReadInt(ReignDatabase.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_fling_encounters
 WHERE timeline_id=$timeline AND world_day=$day;",
                         new Dictionary<string, object>

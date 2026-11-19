@@ -13,7 +13,7 @@ namespace ReignBetaServer
             string reason = ReadString(payload, "continuationReason", "");
             string logical = ReadString(payload, "logicalConversationId", "");
             string timeline = ContinuityTimeline(payload);
-            var existing = Program.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id;",
+            var existing = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id;",
                 new Dictionary<string, object> { ["id"] = session }).FirstOrDefault();
             bool Owns(Dictionary<string, object> row) => row != null && ReadString(row, "campaign_id", "") == campaign
                 && ReadString(row, "npc_id", "") == npc && ReadString(row, "player_id", "") == player
@@ -27,7 +27,7 @@ namespace ReignBetaServer
             }
             if (parentId.Length > 0)
             {
-                var parent = Program.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id;",
+                var parent = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id;",
                     new Dictionary<string, object> { ["id"] = parentId }).FirstOrDefault();
                 if (!Owns(parent) || !new[] { "scene_transition", "transport_reconnect", "ui_continuation", "campaign_reload" }.Contains(reason)
                     || !new[] { "closed", "interrupted" }.Contains(ReadString(parent, "status", ""))
@@ -38,7 +38,7 @@ namespace ReignBetaServer
                 if (logical.Length > 0 && logical != previousLogical)
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Logical conversation does not match its continuation source." };
                 if (ReadString(parent, "channel", "in_person") != ReadString(payload, "channel", "in_person")
-                    || Program.QuerySql(connection, "SELECT session_id FROM conversation_sessions WHERE payload_json::jsonb->>'continuedFromSessionId'=$id LIMIT 1;",
+                    || ReignDatabase.QuerySql(connection, "SELECT session_id FROM conversation_sessions WHERE payload_json::jsonb->>'continuedFromSessionId'=$id LIMIT 1;",
                         new Dictionary<string, object> { ["id"] = parentId }).Count > 0)
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Conversation handoff was already consumed or changed channel." };
                 logical = previousLogical;
@@ -47,7 +47,7 @@ namespace ReignBetaServer
             {
                 // A fresh conversation cannot borrow a logical ID merely because
                 // the same people are present. Require the explicit parent chain.
-                if (logical.Length > 0 && Program.QuerySql(connection,
+                if (logical.Length > 0 && ReignDatabase.QuerySql(connection,
                     "SELECT session_id FROM conversation_sessions WHERE payload_json::jsonb->>'logicalConversationId'=$logical LIMIT 1;",
                     new Dictionary<string, object> { ["logical"] = logical }).Count > 0)
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = "An existing logical conversation requires continuedFromSessionId." };
@@ -63,7 +63,7 @@ namespace ReignBetaServer
         private static List<string> LogicalConversationAncestors(ReignDbConnection connection, string sessionId)
         {
             var result = new List<string>();
-            var current = Program.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id;",
+            var current = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id;",
                 new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault();
             if (current == null) return result;
             var identity = current;
@@ -82,7 +82,7 @@ namespace ReignBetaServer
                     || ContinuityTimeline(payload) != timeline || ReadString(payload, "logicalConversationId", id) != logical) break;
                 result.Add(id);
                 string parent = ReadString(payload, "continuedFromSessionId", "");
-                current = parent.Length == 0 ? null : Program.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id;",
+                current = parent.Length == 0 ? null : ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id;",
                     new Dictionary<string, object> { ["id"] = parent }).FirstOrDefault();
             }
             return result;
@@ -107,7 +107,7 @@ namespace ReignBetaServer
             }
             parameters["limit"] = Math.Clamp(limit, 2, 100);
             // Apply as-of and observer filters before the bounded LIMIT.
-            return Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE " + eligible
+            return ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE " + eligible
                 + " ORDER BY accepted_sequence DESC,ts DESC,turn_order DESC,turn_id DESC LIMIT $limit;", parameters)
                 .Where(r => !string.IsNullOrWhiteSpace(ConversationTurnTextForRecall(r)))
                 .Where(r => knowledge == null || PrecisionTurnVisible(r, knowledge.NpcId, knowledge, connection))

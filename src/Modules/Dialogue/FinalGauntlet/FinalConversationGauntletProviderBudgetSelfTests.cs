@@ -226,22 +226,22 @@ FROM final_gauntlet_provider_calls WHERE run_id='run-audit';";
                 "final_gauntlet_review_items"
             })
             {
-                Program.ExecuteSql(connection,
+                ReignDatabase.ExecuteSql(connection,
                     "DELETE FROM " + table + " WHERE run_id=$run;",
                     parameters);
             }
-            Program.ExecuteSql(connection,
+            ReignDatabase.ExecuteSql(connection,
                 "DELETE FROM final_gauntlet_cases WHERE run_id=$run;",
                 parameters);
-            Program.ExecuteSql(connection,
+            ReignDatabase.ExecuteSql(connection,
                 "DELETE FROM final_gauntlet_runs WHERE run_id=$run;",
                 parameters);
-            Program.ExecuteSql(connection, @"
+            ReignDatabase.ExecuteSql(connection, @"
 INSERT INTO final_gauntlet_runs(
 run_id,campaign_id,stage,build_version,state,created_ts,updated_ts)
 VALUES($run,'self-test','stage-a','self-test','running',1,1);",
                 parameters);
-            Program.ExecuteSql(connection, @"
+            ReignDatabase.ExecuteSql(connection, @"
 INSERT INTO final_gauntlet_cases(
 run_id,case_instance_id,family,evaluation_kind,execution_kind,mode,
 requires_provider,requires_game,requirement_ids,tags,

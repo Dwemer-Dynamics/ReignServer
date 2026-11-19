@@ -19,7 +19,7 @@ using Reign.Core.Contracts.Court;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class ReignDatabase
     {
         [ThreadStatic] internal static Action<bool> CampaignSchemaSettingsReadObserverForTests;
         [ThreadStatic] internal static Action<ReignDbConnection> CampaignSchemaConnectionOpenedForTests;
@@ -30,15 +30,15 @@ namespace ReignBetaServer
         internal static ReignDbConnection OpenCampaignConnection(string campaignId)
         {
             // A caller must not carry the reverse order into the cold path.
-            if (Monitor.IsEntered(CampaignSchemaLock) && !Monitor.IsEntered(FileLock))
+            if (Monitor.IsEntered(Program.CampaignSchemaLock) && !Monitor.IsEntered(Program.FileLock))
                 throw new InvalidOperationException("Campaign schema access requires FileLock before CampaignSchemaLock.");
-            Directory.CreateDirectory(CampaignDirectory(campaignId));
+            Directory.CreateDirectory(Program.CampaignDirectory(campaignId));
             ReignDbConnection connection = ReignPostgreSqlStorage.OpenCampaignConnection(campaignId);
             try
             {
                 CampaignSchemaConnectionOpenedForTests?.Invoke(connection);
                 string schemaKey = ReignPostgreSqlStorage.CampaignSchemaName(campaignId);
-                lock (CampaignSchemaLock)
+                lock (Program.CampaignSchemaLock)
                 {
                     if (IsCampaignSchemaCachedReady(connection, campaignId, schemaKey))
                         return connection;
@@ -47,12 +47,12 @@ namespace ReignBetaServer
                 // must use FileLock -> SchemaLock, including reentrant action reads.
                 // Holding it through initialization also keeps the provider snapshot
                 // consistent with settings saves. Warm checkouts never take FileLock.
-                CampaignSchemaColdWaitObserverForTests?.Invoke(Monitor.IsEntered(CampaignSchemaLock));
-                lock (SettingsSaveGate)
+                CampaignSchemaColdWaitObserverForTests?.Invoke(Monitor.IsEntered(Program.CampaignSchemaLock));
+                lock (Program.SettingsSaveGate)
                 {
-                    string providerGeneration = ReadString(LoadSettings(), "vectorProvider", "local")
+                    string providerGeneration = ReadString(Program.LoadSettings(), "vectorProvider", "local")
                         .ToLowerInvariant() + "|" + DialogueService.SemanticModelVersion;
-                    lock (CampaignSchemaLock)
+                    lock (Program.CampaignSchemaLock)
                     {
                         if (IsCampaignSchemaCachedReady(connection, campaignId, schemaKey))
                             return connection;
@@ -62,7 +62,7 @@ namespace ReignBetaServer
                         int migrationVersion = PersistenceService.ApplyCampaignSchemaMigrations(connection);
                         ReignPostgreSqlStorage.DeduplicateCampaignIndexes(campaignId);
                         PersistenceService.MarkCampaignMigrationsReady(connection, migrationVersion);
-                        CampaignSchemaReady.Add(schemaKey);
+                        Program.CampaignSchemaReady.Add(schemaKey);
                     }
                 }
                 return connection;
@@ -79,7 +79,7 @@ namespace ReignBetaServer
         private static bool IsCampaignSchemaCachedReady(ReignDbConnection connection,
             string campaignId, string schemaKey)
         {
-            if (!CampaignSchemaReady.Contains(schemaKey)) return false;
+            if (!Program.CampaignSchemaReady.Contains(schemaKey)) return false;
             if (IsMemorySchemaRevisionCurrent(connection)) return true;
             // Save Sync can replace a schema beneath a pooled connection.
             InvalidateCampaignSchemaCaches(campaignId);
@@ -113,7 +113,7 @@ namespace ReignBetaServer
             string fastPathKey = campaignId + "|" + markerKey + "|"
                 + revision.ToString(CultureInfo.InvariantCulture);
             if (!string.IsNullOrWhiteSpace(campaignId)
-                && PostgreSqlComponentSchemaFastPaths.ContainsKey(
+                && Program.PostgreSqlComponentSchemaFastPaths.ContainsKey(
                     fastPathKey))
                 return true;
             string persisted = ReadString(QuerySql(connection, @"
@@ -126,7 +126,7 @@ SELECT value FROM schema_meta WHERE key=$key LIMIT 1;",
                 revision.ToString(CultureInfo.InvariantCulture),
                 StringComparison.Ordinal);
             if (ready && !string.IsNullOrWhiteSpace(campaignId))
-                PostgreSqlComponentSchemaFastPaths[fastPathKey] = 0;
+                Program.PostgreSqlComponentSchemaFastPaths[fastPathKey] = 0;
             return ready;
         }
 
@@ -139,7 +139,7 @@ SELECT value FROM schema_meta WHERE key=$key LIMIT 1;",
                 ReignPostgreSqlStorage.CampaignIdForConnection(connection);
             if (string.IsNullOrWhiteSpace(campaignId))
                 return;
-            PostgreSqlComponentSchemaFastPaths[campaignId + "|"
+            Program.PostgreSqlComponentSchemaFastPaths[campaignId + "|"
                 + markerKey + "|"
                 + revision.ToString(CultureInfo.InvariantCulture)] = 0;
         }
@@ -151,19 +151,19 @@ SELECT value FROM schema_meta WHERE key=$key LIMIT 1;",
                 return;
             string schemaKey =
                 ReignPostgreSqlStorage.CampaignSchemaName(campaignId);
-            lock (CampaignSchemaLock)
-                CampaignSchemaReady.Remove(schemaKey);
+            lock (Program.CampaignSchemaLock)
+                Program.CampaignSchemaReady.Remove(schemaKey);
             string prefix = campaignId + "|";
-            foreach (string key in PostgreSqlComponentSchemaFastPaths.Keys
+            foreach (string key in Program.PostgreSqlComponentSchemaFastPaths.Keys
                 .Where(value => value.StartsWith(prefix,
                     StringComparison.OrdinalIgnoreCase)))
-                PostgreSqlComponentSchemaFastPaths.TryRemove(key,
+                Program.PostgreSqlComponentSchemaFastPaths.TryRemove(key,
                     out byte ignored);
             RelationshipsService.InvalidateRelationshipPairStateCache(campaignId);
             RelationshipsService.InvalidateRelationshipPermanentMbtiCache(campaignId);
         }
 
-        private static bool IsMemorySchemaCurrent(ReignDbConnection connection)
+        internal static bool IsMemorySchemaCurrent(ReignDbConnection connection)
         {
             try
             {
@@ -508,7 +508,7 @@ WHERE table_schema=current_schema()
             public int Queries;
             private readonly Dictionary<string, Dictionary<string, object>> queryProfiles =
                 new Dictionary<string, Dictionary<string, object>>(StringComparer.Ordinal);
-            public readonly bool CaptureQueryProfiles = HasArg(Environment.GetCommandLineArgs(), "--run-verification") && ActiveServerPort <= 0;
+            public readonly bool CaptureQueryProfiles = Program.HasArg(Environment.GetCommandLineArgs(), "--run-verification") && Program.ActiveServerPort <= 0;
             public List<Dictionary<string, object>> QueryProfiles => queryProfiles.Values.ToList();
             public double SetupMs => SetupTicks * 1000d / Stopwatch.Frequency;
             public double ExecuteMs => ExecuteTicks * 1000d / Stopwatch.Frequency;

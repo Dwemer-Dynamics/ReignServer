@@ -115,17 +115,17 @@ namespace ReignBetaServer
                     ["known_by"] = new List<string> { "npc_owner" }, ["visibility"] = "private", ["importance"] = 0.8d,
                     ["worldDay"] = 10d, ["ts"] = 1000L
                 }, "semantic_self_test");
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    int triggerCount = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_semantic_%';").FirstOrDefault(), "count", 0);
-                    int queued = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM embedding_jobs WHERE source_type IN ('event','memory');").FirstOrDefault(), "count", 0);
-                    Dictionary<string, object> memory = Program.QuerySql(connection, "SELECT * FROM memories WHERE summary LIKE '%abandoned his ally%' LIMIT 1;").FirstOrDefault();
+                    int triggerCount = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_semantic_%';").FirstOrDefault(), "count", 0);
+                    int queued = ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) count FROM embedding_jobs WHERE source_type IN ('event','memory');").FirstOrDefault(), "count", 0);
+                    Dictionary<string, object> memory = ReignDatabase.QuerySql(connection, "SELECT * FROM memories WHERE summary LIKE '%abandoned his ally%' LIMIT 1;").FirstOrDefault();
                     bool ownerAllowed = Program.KnowledgeRowVisibleToNpc("memories", memory, new Program.KnowledgeAccessContext { NpcId = "npc_owner" });
                     bool strangerDenied = !Program.KnowledgeRowVisibleToNpc("memories", memory, new Program.KnowledgeAccessContext { NpcId = "npc_stranger" });
                     EmbeddingSourceDocument document = BuildEmbeddingDocument(campaignId, "memory", ReadString(memory, "memory_id", ""), memory,
                         BuildCanonicalEmbeddingText("memory", memory), new Dictionary<string, object> { ["vectorProvider"] = "local" });
                     string payload = Json.Serialize(document.Payload);
-                    int rawConversationTriggerCount = ReadInt(Program.QuerySql(connection,
+                    int rawConversationTriggerCount = ReadInt(ReignDatabase.QuerySql(connection,
                         "SELECT COUNT(*) count FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_semantic_conversation_turns_%';")
                         .FirstOrDefault(), "count", 0);
                     int expectedTriggerCount =
@@ -136,23 +136,23 @@ namespace ReignBetaServer
                     add("knowledge_filter", ownerAllowed && strangerDenied, "Private semantic candidates remain visible to their owner and hidden from strangers.");
                     add("external_payload_privacy", payload.IndexOf("abandoned", StringComparison.OrdinalIgnoreCase) < 0 && payload.IndexOf("promise", StringComparison.OrdinalIgnoreCase) < 0,
                         "Vector payload metadata contains no raw memory prose.");
-                    Program.ExecuteSql(connection, @"INSERT INTO world_history_events
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_events
 (event_id,campaign_id,timeline_id,sequence,world_day,event_type,category,phase,dissemination_class,summary,semantic_text,created_utc)
 VALUES('semantic_routine_history',$campaign,'timeline',1,10,'settlement_entered','settlement','completed','ordinary','Routine entry','Routine entry',$utc);",
                         new Dictionary<string, object> { ["campaign"] = campaignId, ["utc"] = DateTime.UtcNow.ToString("o") });
-                    Program.ExecuteSql(connection, @"INSERT INTO world_history_events
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_events
 (event_id,campaign_id,timeline_id,sequence,world_day,event_type,category,phase,dissemination_class,summary,semantic_text,created_utc)
 VALUES('semantic_significant_history',$campaign,'timeline',2,10,'siege_completed','warfare','completed','ordinary','Siege completed','Siege completed',$utc);",
                         new Dictionary<string, object> { ["campaign"] = campaignId, ["utc"] = DateTime.UtcNow.ToString("o") });
-                    Dictionary<string, object> routineJob = Program.QuerySql(connection,
+                    Dictionary<string, object> routineJob = ReignDatabase.QuerySql(connection,
                         "SELECT * FROM embedding_jobs WHERE source_type='world_history_event' AND source_id='semantic_routine_history' LIMIT 1;").FirstOrDefault();
-                    Dictionary<string, object> significantJob = Program.QuerySql(connection,
+                    Dictionary<string, object> significantJob = ReignDatabase.QuerySql(connection,
                         "SELECT * FROM embedding_jobs WHERE source_type='world_history_event' AND source_id='semantic_significant_history' LIMIT 1;").FirstOrDefault();
                     add("world_history_queue_filter", routineJob == null && ReadString(significantJob, "operation", "") == "upsert",
                         "Embedding triggers enqueue significant world history without queuing routine settlement traffic.");
-                    Dictionary<string, object> job = Program.QuerySql(connection, "SELECT * FROM embedding_jobs LIMIT 1;").FirstOrDefault();
+                    Dictionary<string, object> job = ReignDatabase.QuerySql(connection, "SELECT * FROM embedding_jobs LIMIT 1;").FirstOrDefault();
                     FailEmbeddingJob(connection, job, "temporary worker failure");
-                    Dictionary<string, object> retried = Program.QuerySql(connection, "SELECT * FROM embedding_jobs WHERE source_type=$type AND source_id=$id LIMIT 1;",
+                    Dictionary<string, object> retried = ReignDatabase.QuerySql(connection, "SELECT * FROM embedding_jobs WHERE source_type=$type AND source_id=$id LIMIT 1;",
                         new Dictionary<string, object> { ["type"] = ReadString(job, "source_type", ""), ["id"] = ReadString(job, "source_id", "") }).FirstOrDefault();
                     add("retry_backoff", ReadInt(retried, "attempt_count", 0) == 1 && ReadLong(retried, "next_attempt_ts", 0) > DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                         "Failed indexing jobs persist with bounded retry backoff.");

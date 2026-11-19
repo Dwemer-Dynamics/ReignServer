@@ -97,12 +97,12 @@ namespace ReignBetaServer
                     throw new InvalidOperationException("Campaign load generation changed; this lookup is no longer valid.");
                 var result = new List<Dictionary<string, object>>();
                 if (Firewall || !string.IsNullOrEmpty(ArchiveUnavailableReason)) return Records = result;
-                using var connection = Program.OpenCampaignConnection(Campaign);
+                using var connection = ReignDatabase.OpenCampaignConnection(Campaign);
                 using var transaction = connection.BeginTransaction(System.Data.IsolationLevel.RepeatableRead);
                 // Access is frozen at the start of this request. Queries never take campaign,
                 // owner, timeline, SQL or paths from the model, and never modify memory.
                 if (WorldSimulationService.TableExists(connection, "conversation_turns"))
-                    foreach (var row in Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE status='active' AND (speaker_id=$observer OR participants_json::jsonb ? $observer) ORDER BY ts,turn_order,turn_id;", TestDict("observer", Observer)))
+                    foreach (var row in ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE status='active' AND (speaker_id=$observer OR participants_json::jsonb ? $observer) ORDER BY ts,turn_order,turn_id;", TestDict("observer", Observer)))
                     {
                         if (!PrecisionTurnVisible(row, Observer, Knowledge, connection)) continue;
                         string text = RenderExactHistoryTurn(row, Knowledge);
@@ -110,7 +110,7 @@ namespace ReignBetaServer
                             ReadDouble(row, "world_day", 0), ReadString(row, "role", ""));
                     }
                 if (WorldSimulationService.TableExists(connection, "memories"))
-                    foreach (var row in Program.QuerySql(connection, "SELECT * FROM memories WHERE status='active' ORDER BY ts,memory_id;"))
+                    foreach (var row in ReignDatabase.QuerySql(connection, "SELECT * FROM memories WHERE status='active' ORDER BY ts,memory_id;"))
                     {
                         if (!Program.KnowledgeRowVisibleToNpc("memories", row, Knowledge, connection)) continue;
                         string text = ReadFirstString(row, "text", "summary", "content");
@@ -119,7 +119,7 @@ namespace ReignBetaServer
                             ReadDouble(row, "world_day", 0), "attributed_memory");
                     }
                 if (WorldSimulationService.TableExists(connection, "letters") && !Knowledge.PlayerIdentityUnknown)
-                    foreach (var row in Program.QuerySql(connection, "SELECT * FROM letters WHERE sender_id=$observer OR recipient_id=$observer ORDER BY created_ts,letter_id;", TestDict("observer", Observer)))
+                    foreach (var row in ReignDatabase.QuerySql(connection, "SELECT * FROM letters WHERE sender_id=$observer OR recipient_id=$observer ORDER BY created_ts,letter_id;", TestDict("observer", Observer)))
                     {
                         if (!LetterVisibleToObserver(connection, row, Observer, Knowledge, out double day)) continue;
                         string text = "Original letter; author=" + ReadString(row, "sender_name", "") + "; recipient=" + ReadString(row, "recipient_name", "")

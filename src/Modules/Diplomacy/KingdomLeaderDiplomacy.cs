@@ -12,71 +12,18 @@ namespace ReignBetaServer
 
         internal static void EnsureKingdomLeaderDiplomacySchema(ReignDbConnection connection)
         {
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ruler_relationship_rolls (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,day_key INTEGER NOT NULL,world_day REAL NOT NULL,
-observer_id TEXT NOT NULL,target_id TEXT NOT NULL,observer_kingdom_id TEXT NOT NULL,target_kingdom_id TEXT NOT NULL,
-compatibility_chance INTEGER NOT NULL,compatibility_roll INTEGER NOT NULL,magnitude INTEGER NOT NULL,
-delta INTEGER NOT NULL,before_affinity INTEGER NOT NULL,after_affinity INTEGER NOT NULL,
-before_effective INTEGER NOT NULL,after_effective INTEGER NOT NULL,co_located INTEGER NOT NULL DEFAULT 0,
-correlation_id TEXT NOT NULL,created_ts INTEGER NOT NULL,
-PRIMARY KEY(campaign_id,timeline_id,day_key,observer_id,target_id));");
-            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_ruler_relationship_rolls_pair
-ON ruler_relationship_rolls(campaign_id,timeline_id,observer_id,target_id,world_day DESC);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ruler_relationship_crossings (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,season_index INTEGER NOT NULL,
-observer_id TEXT NOT NULL,target_id TEXT NOT NULL,observer_kingdom_id TEXT NOT NULL,target_kingdom_id TEXT NOT NULL,
-polarity TEXT NOT NULL,threshold INTEGER NOT NULL,crossing_day REAL NOT NULL,
-before_effective INTEGER NOT NULL,after_effective INTEGER NOT NULL,bonus_chance INTEGER NOT NULL,
-bonus_roll INTEGER NOT NULL,bonus_passed INTEGER NOT NULL,opportunity_id TEXT NOT NULL DEFAULT '',
-correlation_id TEXT NOT NULL,created_ts INTEGER NOT NULL,
-PRIMARY KEY(campaign_id,timeline_id,season_index,observer_id,target_id,polarity,threshold));");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ruler_diplomacy_opportunities (
-opportunity_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,
-observer_id TEXT NOT NULL,target_id TEXT NOT NULL,observer_kingdom_id TEXT NOT NULL,target_kingdom_id TEXT NOT NULL,
-polarity TEXT NOT NULL,threshold INTEGER NOT NULL,season_index INTEGER NOT NULL,crossing_day REAL NOT NULL,
-effective_attitude INTEGER NOT NULL,bonus_chance INTEGER NOT NULL,bonus_roll INTEGER NOT NULL,
-status TEXT NOT NULL DEFAULT 'queued',expiry_day REAL NOT NULL,terminal_day REAL NOT NULL DEFAULT -1,
-action_id TEXT NOT NULL DEFAULT '',outcome TEXT NOT NULL DEFAULT '',correlation_id TEXT NOT NULL,
-created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);");
-            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_ruler_opportunity_queue
-ON ruler_diplomacy_opportunities(campaign_id,timeline_id,status,threshold DESC,crossing_day,opportunity_id);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ruler_diplomacy_activity (
-activity_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,world_day REAL NOT NULL,
-observer_id TEXT NOT NULL DEFAULT '',target_id TEXT NOT NULL DEFAULT '',event_type TEXT NOT NULL,
-polarity TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT '',threshold INTEGER NOT NULL DEFAULT 0,
-before_value INTEGER NOT NULL DEFAULT 0,after_value INTEGER NOT NULL DEFAULT 0,
-roll INTEGER NOT NULL DEFAULT 0,chance INTEGER NOT NULL DEFAULT 0,action_id TEXT NOT NULL DEFAULT '',
-correlation_id TEXT NOT NULL DEFAULT '',reason TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL DEFAULT '{}',
-created_ts INTEGER NOT NULL);");
-            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_ruler_activity_pair
-ON ruler_diplomacy_activity(campaign_id,timeline_id,observer_id,target_id,world_day DESC);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ruler_diplomatic_incidents (
-incident_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,world_day REAL NOT NULL,
-event_kind TEXT NOT NULL,source_id TEXT NOT NULL DEFAULT '',observer_id TEXT NOT NULL,target_id TEXT NOT NULL,
-observer_kingdom_id TEXT NOT NULL DEFAULT '',target_kingdom_id TEXT NOT NULL DEFAULT '',
-affinity_delta INTEGER NOT NULL,public_subject_id TEXT NOT NULL DEFAULT '',public_delta INTEGER NOT NULL DEFAULT 0,
-before_effective INTEGER NOT NULL,after_effective INTEGER NOT NULL,breakthroughs_enabled INTEGER NOT NULL DEFAULT 1,
-correlation_id TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL);");
-            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_ruler_incidents_pair
-ON ruler_diplomatic_incidents(campaign_id,timeline_id,observer_id,target_id,world_day DESC);");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ruler_war_origins (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,war_id TEXT NOT NULL,aggressor_kingdom_id TEXT NOT NULL,
-defender_kingdom_id TEXT NOT NULL,aggressor_ruler_id TEXT NOT NULL,defender_ruler_id TEXT NOT NULL,
-declaration_day REAL NOT NULL,origin_kind TEXT NOT NULL,cause TEXT NOT NULL DEFAULT '',source_action_id TEXT NOT NULL DEFAULT '',
-parent_war_id TEXT NOT NULL DEFAULT '',is_active INTEGER NOT NULL,ended_day REAL NOT NULL DEFAULT 0,payload_json TEXT NOT NULL DEFAULT '{}',
-PRIMARY KEY(campaign_id,timeline_id,war_id));");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ruler_treaty_obligations (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,obligation_id TEXT NOT NULL,agreement_id TEXT NOT NULL,
-triggering_war_id TEXT NOT NULL,resulting_war_id TEXT NOT NULL DEFAULT '',ally_kingdom_id TEXT NOT NULL,
-ally_ruler_id TEXT NOT NULL,defended_kingdom_id TEXT NOT NULL,defended_ruler_id TEXT NOT NULL,
-aggressor_kingdom_id TEXT NOT NULL,triggered_day REAL NOT NULL,status TEXT NOT NULL,reason TEXT NOT NULL DEFAULT '',
-payload_json TEXT NOT NULL DEFAULT '{}',PRIMARY KEY(campaign_id,timeline_id,obligation_id));");
-            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS ruler_agreement_history (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,agreement_id TEXT NOT NULL,kind TEXT NOT NULL,
-actor_kingdom_id TEXT NOT NULL,target_kingdom_id TEXT NOT NULL,created_day REAL NOT NULL,expire_day REAL NOT NULL,
-is_active INTEGER NOT NULL,ended_day REAL NOT NULL DEFAULT 0,end_reason TEXT NOT NULL DEFAULT '',
-breaker_kingdom_id TEXT NOT NULL DEFAULT '',triggering_war_id TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL DEFAULT '{}',
-PRIMARY KEY(campaign_id,timeline_id,agreement_id));");
+            DiplomacySchema.CreateRulerRelationshipRolls(connection);
+            DiplomacySchema.CreateIndexRulerRelationshipRollsPair(connection);
+            DiplomacySchema.CreateRulerRelationshipCrossings(connection);
+            DiplomacySchema.CreateRulerDiplomacyOpportunities(connection);
+            DiplomacySchema.CreateIndexRulerOpportunityQueue(connection);
+            DiplomacySchema.CreateRulerDiplomacyActivity(connection);
+            DiplomacySchema.CreateIndexRulerActivityPair(connection);
+            DiplomacySchema.CreateRulerDiplomaticIncidents(connection);
+            DiplomacySchema.CreateIndexRulerIncidentsPair(connection);
+            DiplomacySchema.CreateRulerWarOrigins(connection);
+            DiplomacySchema.CreateRulerTreatyObligations(connection);
+            DiplomacySchema.CreateRulerAgreementHistory(connection);
         }
 
         internal static void ProcessDailyRulerRelationships(ReignDbConnection connection,
@@ -102,16 +49,13 @@ PRIMARY KEY(campaign_id,timeline_id,agreement_id));");
 
             lock (RelationshipsService.CampaignRelationshipWriteLock(campaignId))
             {
-                Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                DiplomacyStore.Begin(connection);
                 try
                 {
                     HashSet<string> activeRulerIds = new HashSet<string>(npcRulers.Select(row =>
                         ReadFirstString(row, "hero_id", "heroStringId", "heroId")),
                         StringComparer.OrdinalIgnoreCase);
-                    foreach (Dictionary<string, object> obsolete in Program.QuerySql(connection, @"
-SELECT opportunity_id,observer_id,target_id,correlation_id FROM ruler_diplomacy_opportunities
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND status IN ('queued','waiting_cooldown');",
-                        new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId }))
+                    foreach (Dictionary<string, object> obsolete in DiplomacyStore.SelectRulerDiplomacyOpportunities(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId }))
                     {
                         string observer = ReadString(obsolete, "observer_id", "");
                         string target = ReadString(obsolete, "target_id", "");
@@ -120,11 +64,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND status IN ('queued','w
                             ReadString(obsolete, "opportunity_id", ""), worldDay,
                             "invalidated", "ruler_replacement_or_kingdom_elimination", "");
                     }
-                    Program.ExecuteSql(connection, @"UPDATE ruler_diplomacy_opportunities SET
-status='expired',terminal_day=$day,outcome='season_expired',updated_ts=$ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND status IN ('queued','waiting_cooldown') AND expiry_day<$day;",
-                        new Dictionary<string, object> { ["campaign"] = campaignId,
+                    DiplomacyStore.UpdateRulerDiplomacyOpportunities(connection, new Dictionary<string, object> { ["campaign"] = campaignId,
                             ["timeline"] = timelineId, ["day"] = worldDay, ["ts"] = ts });
 
                     // Ruler affinity now moves only through recorded political and
@@ -133,7 +73,7 @@ AND status IN ('queued','waiting_cooldown') AND expiry_day<$day;",
                     // disabled so re-enabling it later cannot revive stale work.
                     if (!DailyRulerRelationshipRollsEnabled)
                     {
-                        Program.ExecuteSql(connection, "COMMIT;");
+                        DiplomacyStore.Commit(connection);
                         return;
                     }
 
@@ -143,9 +83,7 @@ AND status IN ('queued','waiting_cooldown') AND expiry_day<$day;",
                         string observer = ReadFirstString(observerRow, "hero_id", "heroStringId", "heroId");
                         string target = ReadFirstString(targetRow, "hero_id", "heroStringId", "heroId");
                         if (observer.Equals(target, StringComparison.OrdinalIgnoreCase)) continue;
-                        if (ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count FROM ruler_relationship_rolls
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day
-AND observer_id=$observer AND target_id=$target;", new Dictionary<string, object>
+                        if (ReadInt(DiplomacyStore.CountRulerRelationshipRolls(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = day,
                             ["observer"] = observer, ["target"] = target
@@ -154,18 +92,14 @@ AND observer_id=$observer AND target_id=$target;", new Dictionary<string, object
                         string observerKingdom = FirstNonEmpty(ReadString(observerRow, "kingdom_id", ""), ReadString(observerRow, "kingdomId", ""));
                         string targetKingdom = FirstNonEmpty(ReadString(targetRow, "kingdom_id", ""), ReadString(targetRow, "kingdomId", ""));
                         string pairKey = RelationshipsService.AmbientPairKey(observer, target);
-                        Dictionary<string, object> beforePair = Program.QuerySql(connection,
-                            "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                            new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
+                        Dictionary<string, object> beforePair = DiplomacyStore.SelectRelationshipPairChemistry(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
                         if (beforePair == null)
                         {
                             RelationshipsService.ApplyAuthoritativeRelationshipDelta(connection, campaignId, observer,
                                 target, 1, worldDay, "ruler_diplomacy_contact", timelineId);
                             RelationshipsService.ApplyAtomicDirectionalRelationshipDelta(connection, campaignId, observer,
                                 target, -1, worldDay, "ruler_diplomacy_contact_initialization", timelineId);
-                            beforePair = Program.QuerySql(connection,
-                                "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                                new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
+                            beforePair = DiplomacyStore.SelectRelationshipPairChemistry(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
                         }
                         RelationshipsService.RecordRelationshipPairProvenance(connection, campaignId, timelineId,
                             pairKey, "ruler_diplomacy_contact", true, worldDay,
@@ -191,13 +125,7 @@ AND observer_id=$observer AND target_id=$target;", new Dictionary<string, object
                         int finalEffective = afterEffective;
                         string correlation = "ruler-roll:" + timelineId + ":" + day.ToString(CultureInfo.InvariantCulture)
                             + ":" + observer + ":" + target;
-                        Program.ExecuteSql(connection, @"INSERT INTO ruler_relationship_rolls(
-campaign_id,timeline_id,day_key,world_day,observer_id,target_id,observer_kingdom_id,target_kingdom_id,
-compatibility_chance,compatibility_roll,magnitude,delta,before_affinity,after_affinity,before_effective,after_effective,
-co_located,correlation_id,created_ts)
-VALUES($campaign,$timeline,$day,$worldDay,$observer,$target,$observerKingdom,$targetKingdom,
-$chance,$roll,$magnitude,$delta,$beforeAffinity,$afterAffinity,$beforeEffective,$afterEffective,$coLocated,$correlation,$ts);",
-                            new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId,
+                        DiplomacyStore.InsertRulerRelationshipRolls(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId,
                                 ["day"] = day, ["worldDay"] = worldDay, ["observer"] = observer, ["target"] = target,
                                 ["observerKingdom"] = observerKingdom, ["targetKingdom"] = targetKingdom,
                                 ["chance"] = compatibilityChance, ["roll"] = compatibilityRoll, ["magnitude"] = magnitude,
@@ -250,11 +178,11 @@ $chance,$roll,$magnitude,$delta,$beforeAffinity,$afterAffinity,$beforeEffective,
                             observer, target, observerKingdom, targetKingdom, beforeEffective, finalEffective,
                             correlation, ts);
                     }
-                    Program.ExecuteSql(connection, "COMMIT;");
+                    DiplomacyStore.Commit(connection);
                 }
                 catch
                 {
-                    try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { DiplomacyStore.Rollback(connection); } catch { }
                     throw;
                 }
             }
@@ -277,21 +205,14 @@ $chance,$roll,$magnitude,$delta,$beforeAffinity,$afterAffinity,$beforeEffective,
                 string correlation = rollCorrelation + ":threshold:" + polarity + ":" + threshold.ToString(CultureInfo.InvariantCulture);
                 string opportunityId = bonusRoll <= chance ? "ruler-opportunity:" + campaignId + ":" + timelineId + ":"
                     + season.ToString(CultureInfo.InvariantCulture) + ":" + observer + ":" + target + ":" + polarity + ":" + threshold.ToString(CultureInfo.InvariantCulture) : "";
-                bool alreadyRecorded = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
-FROM ruler_relationship_crossings WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND season_index=$season AND observer_id=$observer AND target_id=$target
-AND polarity=$polarity AND threshold=$threshold;", new Dictionary<string, object>
+                bool alreadyRecorded = ReadInt(DiplomacyStore.CountRulerRelationshipCrossings(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId, ["season"] = season,
                     ["observer"] = observer, ["target"] = target, ["polarity"] = polarity,
                     ["threshold"] = threshold
                 }).FirstOrDefault(), "count", 0) > 0;
                 if (alreadyRecorded) continue;
-                Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO ruler_relationship_crossings(
-campaign_id,timeline_id,season_index,observer_id,target_id,observer_kingdom_id,target_kingdom_id,polarity,
-threshold,crossing_day,before_effective,after_effective,bonus_chance,bonus_roll,bonus_passed,opportunity_id,correlation_id,created_ts)
-VALUES($campaign,$timeline,$season,$observer,$target,$observerKingdom,$targetKingdom,$polarity,$threshold,$day,
-$before,$after,$chance,$roll,$passed,$opportunity,$correlation,$ts);", new Dictionary<string, object>
+                DiplomacyStore.InsertOrIgnoreRulerRelationshipCrossings(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId, ["season"] = season,
                     ["observer"] = observer, ["target"] = target, ["observerKingdom"] = observerKingdom,
@@ -313,12 +234,7 @@ $before,$after,$chance,$roll,$passed,$opportunity,$correlation,$ts);", new Dicti
                         [bonusRoll <= chance ? "bonusPassed" : "bonusFailed"] = 1
                     });
                 if (bonusRoll > chance) continue;
-                Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO ruler_diplomacy_opportunities(
-opportunity_id,campaign_id,timeline_id,observer_id,target_id,observer_kingdom_id,target_kingdom_id,
-polarity,threshold,season_index,crossing_day,effective_attitude,bonus_chance,bonus_roll,status,expiry_day,
-correlation_id,created_ts,updated_ts)
-VALUES($id,$campaign,$timeline,$observer,$target,$observerKingdom,$targetKingdom,$polarity,$threshold,$season,
-$day,$effective,$chance,$roll,'queued',$expiry,$correlation,$ts,$ts);", new Dictionary<string, object>
+                DiplomacyStore.InsertOrIgnoreRulerDiplomacyOpportunities(connection, new Dictionary<string, object>
                 {
                     ["id"] = opportunityId, ["campaign"] = campaignId, ["timeline"] = timelineId,
                     ["observer"] = observer, ["target"] = target, ["observerKingdom"] = observerKingdom,
@@ -357,11 +273,7 @@ $day,$effective,$chance,$roll,'queued',$expiry,$correlation,$ts,$ts);", new Dict
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             string id = "ruler-activity:" + campaignId + ":" + timelineId + ":" + eventType + ":"
                 + FirstNonEmpty(correlationId, actionId, worldDay.ToString("R", CultureInfo.InvariantCulture)) + ":" + observer + ":" + target;
-            Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO ruler_diplomacy_activity(
-activity_id,campaign_id,timeline_id,world_day,observer_id,target_id,event_type,polarity,status,threshold,
-before_value,after_value,roll,chance,action_id,correlation_id,reason,payload_json,created_ts)
-VALUES($id,$campaign,$timeline,$day,$observer,$target,$event,$polarity,$status,$threshold,$before,$after,
-$roll,$chance,$action,$correlation,$reason,$payload,$ts);", new Dictionary<string, object>
+            DiplomacyStore.InsertOrIgnoreRulerDiplomacyActivity(connection, new Dictionary<string, object>
             {
                 ["id"] = id, ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = worldDay,
                 ["observer"] = observer ?? "", ["target"] = target ?? "", ["event"] = eventType ?? "",
@@ -375,13 +287,10 @@ $roll,$chance,$action,$correlation,$reason,$payload,$ts);", new Dictionary<strin
         private static void CompleteRulerOpportunity(ReignDbConnection connection, string campaignId,
             string timelineId, string opportunityId, double worldDay, string status, string outcome, string actionId)
         {
-            Dictionary<string, object> row = Program.QuerySql(connection, @"SELECT * FROM ruler_diplomacy_opportunities
-WHERE opportunity_id=$id AND campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
-                new Dictionary<string, object> { ["id"] = opportunityId, ["campaign"] = campaignId, ["timeline"] = timelineId }).FirstOrDefault();
+            Dictionary<string, object> row = DiplomacyStore.SelectRulerDiplomacyOpportunities2(connection, new Dictionary<string, object> { ["id"] = opportunityId, ["campaign"] = campaignId, ["timeline"] = timelineId }).FirstOrDefault();
             if (row == null) return;
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Program.ExecuteSql(connection, @"UPDATE ruler_diplomacy_opportunities SET status=$status,terminal_day=$day,
-outcome=$outcome,action_id=$action,updated_ts=$ts WHERE opportunity_id=$id;", new Dictionary<string, object>
+            DiplomacyStore.UpdateRulerDiplomacyOpportunities2(connection, new Dictionary<string, object>
             {
                 ["status"] = status, ["day"] = worldDay, ["outcome"] = outcome ?? "",
                 ["action"] = actionId ?? "", ["ts"] = ts, ["id"] = opportunityId
@@ -410,44 +319,18 @@ outcome=$outcome,action_id=$action,updated_ts=$ts WHERE opportunity_id=$id;", ne
             int expectedEdges = npcRulers.Count * Math.Max(0, npcRulers.Count - 1);
             int expectedRolls = DailyRulerRelationshipRollsEnabled
                 ? expectedEdges : 0;
-            Dictionary<string, object> rollSummary = Program.QuerySql(connection, @"
-SELECT COUNT(*) AS completed,
-SUM(CASE WHEN delta>0 THEN 1 ELSE 0 END) AS positive,
-SUM(CASE WHEN delta<0 THEN 1 ELSE 0 END) AS negative,
-SUM(ABS(delta)) AS movement,
-SUM(CASE WHEN co_located=1 THEN 1 ELSE 0 END) AS colocated,
-MAX(world_day) AS latest_day
-FROM ruler_relationship_rolls WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
-                new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = day })
+            Dictionary<string, object> rollSummary = DiplomacyStore.CountRulerRelationshipRolls2(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = day })
                 .FirstOrDefault() ?? new Dictionary<string, object>();
-            Dictionary<string, object> crossingSummary = Program.QuerySql(connection, @"
-SELECT COUNT(*) AS attempts,SUM(bonus_passed) AS passed,
-SUM(CASE WHEN bonus_passed=0 THEN 1 ELSE 0 END) AS failed,
-SUM(CASE WHEN polarity='positive' THEN 1 ELSE 0 END) AS positive,
-SUM(CASE WHEN polarity='negative' THEN 1 ELSE 0 END) AS negative,
-MAX(crossing_day) AS latest_day
-FROM ruler_relationship_crossings WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
+            Dictionary<string, object> crossingSummary = DiplomacyStore.CountRulerRelationshipCrossings2(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
                 .FirstOrDefault() ?? new Dictionary<string, object>();
-            List<Dictionary<string, object>> opportunityRows = Program.QuerySql(connection, @"
-SELECT * FROM ruler_diplomacy_opportunities WHERE campaign_id=$campaign AND timeline_id=$timeline
-ORDER BY threshold DESC,crossing_day,opportunity_id;",
-                new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId });
+            List<Dictionary<string, object>> opportunityRows = DiplomacyStore.SelectRulerDiplomacyOpportunities3(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId });
             Dictionary<string, int> opportunityStatuses = opportunityRows.GroupBy(row =>
                 ReadString(row, "status", "unknown"), StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, int> breakthroughsByThreshold = Program.QuerySql(connection, @"
-SELECT threshold,COUNT(*) AS count FROM ruler_relationship_crossings
-WHERE campaign_id=$campaign AND timeline_id=$timeline GROUP BY threshold;",
-                new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
+            Dictionary<string, int> breakthroughsByThreshold = DiplomacyStore.SelectRulerRelationshipCrossings(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
                 .ToDictionary(row => "±" + ReadInt(row, "threshold", 0).ToString(CultureInfo.InvariantCulture),
                     row => ReadInt(row, "count", 0), StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, object> activitySummary = Program.QuerySql(connection, @"
-SELECT SUM(CASE WHEN event_type='relationship_incident' THEN 1 ELSE 0 END) AS feedback,
-MAX(CASE WHEN event_type='relationship_incident' THEN world_day ELSE -1 END) AS latest_feedback,
-MAX(CASE WHEN event_type IN ('proposal','response','native_receipt') THEN world_day ELSE -1 END) AS latest_diplomacy
-FROM ruler_diplomacy_activity WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
+            Dictionary<string, object> activitySummary = DiplomacyStore.SelectRulerDiplomacyActivity(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
                 .FirstOrDefault() ?? new Dictionary<string, object>();
             List<Dictionary<string, object>> matrix = new List<Dictionary<string, object>>();
             foreach (Dictionary<string, object> observerRow in rulers)
@@ -460,19 +343,13 @@ FROM ruler_diplomacy_activity WHERE campaign_id=$campaign AND timeline_id=$timel
                     || RelationshipsService.ReadPoliticalFlag(targetRow, "is_player", "isPlayer");
                 Dictionary<string, object> attitude = RelationshipsService.ResolveRulerDiplomaticAttitude(connection,
                     campaignId, timelineId, observer, target, "world_test_kingdom_leaders");
-                Dictionary<string, object> latestRoll = Program.QuerySql(connection, @"
-SELECT * FROM ruler_relationship_rolls WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND observer_id=$observer AND target_id=$target ORDER BY world_day DESC LIMIT 1;",
-                    new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId,
+                Dictionary<string, object> latestRoll = DiplomacyStore.SelectRulerRelationshipRolls(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["observer"] = observer, ["target"] = target }).FirstOrDefault() ?? new Dictionary<string, object>();
                 Dictionary<string, object> queued = opportunityRows.FirstOrDefault(row =>
                     ReadString(row, "observer_id", "").Equals(observer, StringComparison.OrdinalIgnoreCase)
                     && ReadString(row, "target_id", "").Equals(target, StringComparison.OrdinalIgnoreCase)
                     && Program.ContainsAny(ReadString(row, "status", ""), "queued", "waiting_cooldown"));
-                Dictionary<string, object> lastActivity = Program.QuerySql(connection, @"
-SELECT * FROM ruler_diplomacy_activity WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND observer_id=$observer AND target_id=$target ORDER BY world_day DESC,created_ts DESC LIMIT 1;",
-                    new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId,
+                Dictionary<string, object> lastActivity = DiplomacyStore.SelectRulerDiplomacyActivity2(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["observer"] = observer, ["target"] = target }).FirstOrDefault() ?? new Dictionary<string, object>();
                 int effective = ReadInt(attitude, "effectiveAttitude", 0);
                 matrix.Add(new Dictionary<string, object>
@@ -510,13 +387,7 @@ AND observer_id=$observer AND target_id=$target ORDER BY world_day DESC,created_
             int completed = DailyRulerRelationshipRollsEnabled
                 ? storedCompleted : 0;
             int missing = Math.Max(0, expectedRolls - completed);
-            int provenanceMissing = Program.QuerySql(connection, @"
-SELECT r.observer_id,r.target_id FROM ruler_relationship_rolls r
-LEFT JOIN relationship_pair_provenance p ON p.campaign_id=r.campaign_id AND p.timeline_id=r.timeline_id
- AND p.pair_key=CASE WHEN r.observer_id<r.target_id THEN r.observer_id||'|'||r.target_id ELSE r.target_id||'|'||r.observer_id END
- AND p.source='ruler_diplomacy_contact' AND p.active=1
-WHERE r.campaign_id=$campaign AND r.timeline_id=$timeline AND r.day_key=$day AND p.pair_key IS NULL;",
-                new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = day }).Count;
+            int provenanceMissing = DiplomacyStore.SelectRulerRelationshipRolls2(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = day }).Count;
             List<Dictionary<string, object>> anomalies = new List<Dictionary<string, object>>();
             if (missing > 0) anomalies.Add(new Dictionary<string, object> { ["code"] = "missing_directional_rolls", ["count"] = missing, ["severity"] = "warning" });
             if (provenanceMissing > 0) anomalies.Add(new Dictionary<string, object> { ["code"] = "missing_ruler_diplomacy_contact", ["count"] = provenanceMissing, ["severity"] = "error" });
@@ -527,17 +398,12 @@ WHERE r.campaign_id=$campaign AND r.timeline_id=$timeline AND r.day_key=$day AND
                 .Where(row => RelationshipsService.ReadPoliticalFlag(row, "is_player", "isPlayer"))
                 .Select(row => ReadFirstString(row, "hero_id", "heroStringId", "heroId")),
                 StringComparer.OrdinalIgnoreCase);
-            int playerRemoteRolls = Program.QuerySql(connection, @"SELECT observer_id,target_id
-FROM ruler_relationship_rolls WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
+            int playerRemoteRolls = DiplomacyStore.SelectRulerRelationshipRolls3(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
                 .Count(row => playerRulerIds.Contains(ReadString(row, "observer_id", ""))
                     || playerRulerIds.Contains(ReadString(row, "target_id", "")));
             if (playerRemoteRolls > 0) anomalies.Add(new Dictionary<string, object> { ["code"] = "remote_roll_involving_player", ["count"] = playerRemoteRolls, ["severity"] = "error" });
             int polarityMismatches = 0;
-            foreach (Dictionary<string, object> activity in Program.QuerySql(connection, @"SELECT polarity,payload_json
-FROM ruler_diplomacy_activity WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND event_type='proposal_response' AND status='accepted' AND polarity<>'';",
-                new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId }))
+            foreach (Dictionary<string, object> activity in DiplomacyStore.SelectRulerDiplomacyActivity3(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId }))
             {
                 Dictionary<string, object> activityPayload = TryParseJsonObject(
                     ReadString(activity, "payload_json", "{}")) ?? new Dictionary<string, object>();
@@ -551,67 +417,31 @@ AND event_type='proposal_response' AND status='accepted' AND polarity<>'';",
                     polarityMismatches++;
             }
             if (polarityMismatches > 0) anomalies.Add(new Dictionary<string, object> { ["code"] = "bonus_action_polarity_mismatch", ["count"] = polarityMismatches, ["severity"] = "error" });
-            int duplicateFeedback = Program.QuerySql(connection, @"SELECT event_kind,source_id,observer_id,target_id
-FROM ruler_diplomatic_incidents WHERE campaign_id=$campaign AND timeline_id=$timeline
-GROUP BY event_kind,source_id,observer_id,target_id HAVING COUNT(*)>1;", new Dictionary<string, object>
+            int duplicateFeedback = DiplomacyStore.SelectRulerDiplomaticIncidents(connection, new Dictionary<string, object>
                 { ["campaign"] = campaignId, ["timeline"] = timelineId }).Count;
             if (duplicateFeedback > 0) anomalies.Add(new Dictionary<string, object> { ["code"] = "duplicate_feedback_incident", ["count"] = duplicateFeedback, ["severity"] = "error" });
-            int overdueProjection = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
-FROM relationship_native_targets WHERE status IN ('pending','claimed') AND $day-world_day>1;",
-                new Dictionary<string, object> { ["day"] = latestDay }).FirstOrDefault(), "count", 0);
+            int overdueProjection = ReadInt(DiplomacyStore.CountRelationshipNativeTargets(connection, new Dictionary<string, object> { ["day"] = latestDay }).FirstOrDefault(), "count", 0);
             if (overdueProjection > 0) anomalies.Add(new Dictionary<string, object> { ["code"] = "projection_receipt_backlog", ["count"] = overdueProjection, ["severity"] = "warning" });
-            int belligerentPacts = Program.QuerySql(connection, @"SELECT a.agreement_id FROM ruler_agreement_history a
-JOIN ruler_war_origins w ON w.campaign_id=a.campaign_id AND w.timeline_id=a.timeline_id AND w.is_active=1
-AND ((w.aggressor_kingdom_id=a.actor_kingdom_id AND w.defender_kingdom_id=a.target_kingdom_id)
- OR (w.aggressor_kingdom_id=a.target_kingdom_id AND w.defender_kingdom_id=a.actor_kingdom_id))
-WHERE a.campaign_id=$campaign AND a.timeline_id=$timeline AND a.is_active=1
-AND a.kind IN ('trade_agreement','non_aggression_pact','defensive_pact','alliance','guarantee_independence');",
-                new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId }).Count;
+            int belligerentPacts = DiplomacyStore.SelectRulerAgreementHistory(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId }).Count;
             if (belligerentPacts > 0) anomalies.Add(new Dictionary<string, object>
                 { ["code"] = "active_pact_between_belligerents", ["count"] = belligerentPacts, ["severity"] = "error" });
-            int unfulfilledObligations = Program.QuerySql(connection, @"SELECT obligation_id FROM ruler_treaty_obligations
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND status IN ('pending','failed');",
-                new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId }).Count;
+            int unfulfilledObligations = DiplomacyStore.SelectRulerTreatyObligations(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId }).Count;
             if (unfulfilledObligations > 0) anomalies.Add(new Dictionary<string, object>
                 { ["code"] = "unfulfilled_defensive_obligation", ["count"] = unfulfilledObligations, ["severity"] = "error" });
-            int recursiveCascades = Program.QuerySql(connection, @"SELECT child.war_id FROM ruler_war_origins child
-JOIN ruler_war_origins parent ON parent.campaign_id=child.campaign_id AND parent.timeline_id=child.timeline_id
-AND parent.war_id=child.parent_war_id WHERE child.campaign_id=$campaign AND child.timeline_id=$timeline
-AND child.origin_kind='defensive_pact' AND parent.origin_kind='defensive_pact';",
-                new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId }).Count;
+            int recursiveCascades = DiplomacyStore.SelectRulerWarOrigins(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId }).Count;
             if (recursiveCascades > 0) anomalies.Add(new Dictionary<string, object>
                 { ["code"] = "recursive_defensive_pact_cascade", ["count"] = recursiveCascades, ["severity"] = "error" });
-            int missingBackingRolls = Program.QuerySql(connection, @"SELECT movement_id FROM rebellion_backing_requests
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND status<>'no_eligible_backer'
-AND (rebel_roll<1 OR parent_roll<1 OR military_roll<1);",
-                new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId }).Count;
+            int missingBackingRolls = DiplomacyStore.SelectRebellionBackingRequests(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId }).Count;
             if (missingBackingRolls > 0) anomalies.Add(new Dictionary<string, object>
                 { ["code"] = "rebellion_backing_missing_rolls", ["count"] = missingBackingRolls, ["severity"] = "error" });
-            int staleBacking = Program.QuerySql(connection, @"SELECT movement_id FROM rebellion_backing_requests
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='accepted' AND $day-world_day>1;",
-                new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = latestDay }).Count;
+            int staleBacking = DiplomacyStore.SelectRebellionBackingRequests2(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = latestDay }).Count;
             if (staleBacking > 0) anomalies.Add(new Dictionary<string, object>
                 { ["code"] = "stale_rebellion_backing_receipt", ["count"] = staleBacking, ["severity"] = "warning" });
             string status = anomalies.Any(row => ReadString(row, "severity", "") == "error") ? "error"
                 : anomalies.Count > 0 ? "warning" : expectedEdges == 0 ? "insufficient_data" : "healthy";
-            Dictionary<string, object> incidentSummary = Program.QuerySql(connection, @"SELECT COUNT(*) AS total,
-SUM(CASE WHEN event_kind='preexisting_war_seed' THEN 1 ELSE 0 END) AS initial_war_seeds,
-SUM(CASE WHEN event_kind='war_declaration' THEN 1 ELSE 0 END) AS war_incidents,
-SUM(CASE WHEN event_kind='treaty_breach' THEN 1 ELSE 0 END) AS treaty_breaches,
-SUM(CASE WHEN event_kind='defensive_pact_honored' THEN 1 ELSE 0 END) AS defensive_honors,
-SUM(CASE WHEN event_kind LIKE 'rebellion_backing_%' THEN 1 ELSE 0 END) AS backing_incidents,
-MAX(world_day) AS latest_day FROM ruler_diplomatic_incidents
-WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
+            Dictionary<string, object> incidentSummary = DiplomacyStore.CountRulerDiplomaticIncidents(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
                 .FirstOrDefault() ?? new Dictionary<string, object>();
-            Dictionary<string, object> backingSummary = Program.QuerySql(connection, @"SELECT COUNT(*) AS total,
-SUM(CASE WHEN status IN ('accepted','completed') THEN 1 ELSE 0 END) AS accepted,
-SUM(CASE WHEN status='refused' THEN 1 ELSE 0 END) AS refused,
-SUM(CASE WHEN status='no_eligible_backer' THEN 1 ELSE 0 END) AS no_eligible,
-SUM(CASE WHEN status='invalidated' THEN 1 ELSE 0 END) AS invalidated,
-MAX(world_day) AS latest_day FROM rebellion_backing_requests
-WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
+            Dictionary<string, object> backingSummary = DiplomacyStore.CountRebellionBackingRequests(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
                 .FirstOrDefault() ?? new Dictionary<string, object>();
             return new Dictionary<string, object>
             {
@@ -657,8 +487,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                 ["diplomacyIncidentsApplied"] = ReadInt(activitySummary, "feedback", 0),
                 ["relationshipIncidentSummary"] = incidentSummary,
                 ["rebellionBackingSummary"] = backingSummary,
-                ["projectionReceiptsPending"] = ReadInt(Program.QuerySql(connection, @"
-SELECT COUNT(*) AS count FROM relationship_native_targets WHERE status IN ('pending','claimed');")
+                ["projectionReceiptsPending"] = ReadInt(DiplomacyStore.CountRelationshipNativeTargets2(connection)
                     .FirstOrDefault(), "count", 0),
                 ["latestRulerRollDay"] = DailyRulerRelationshipRollsEnabled
                     ? ReadDouble(rollSummary, "latest_day", -1d) : -1d,
@@ -674,9 +503,7 @@ SELECT COUNT(*) AS count FROM relationship_native_targets WHERE status IN ('pend
         private static int HighestRulerThreshold(ReignDbConnection connection, string campaignId,
             string timelineId, string observer, string target)
         {
-            Dictionary<string, object> row = Program.QuerySql(connection, @"SELECT MAX(threshold) AS threshold
-FROM ruler_relationship_crossings WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND observer_id=$observer AND target_id=$target;", new Dictionary<string, object>
+            Dictionary<string, object> row = DiplomacyStore.SelectRulerRelationshipCrossings2(connection, new Dictionary<string, object>
             {
                 ["campaign"] = campaignId, ["timeline"] = timelineId, ["observer"] = observer, ["target"] = target
             }).FirstOrDefault();
@@ -711,16 +538,7 @@ AND observer_id=$observer AND target_id=$target;", new Dictionary<string, object
             string[] pairParts = pair.Split(new[] { '|', '>' }, StringSplitOptions.RemoveEmptyEntries);
             string pairA = pairParts.Length > 0 ? pairParts[0].Trim() : "";
             string pairB = pairParts.Length > 1 ? pairParts[pairParts.Length - 1].Trim() : "";
-            return Program.QuerySql(connection, @"SELECT * FROM ruler_diplomacy_activity
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND ($ruler='' OR observer_id=$ruler OR target_id=$ruler)
-AND ($pairA='' OR (observer_id=$pairA AND target_id=$pairB) OR (observer_id=$pairB AND target_id=$pairA))
-AND ($polarity='' OR polarity=$polarity) AND ($status='' OR status=$status)
-AND ($event='' OR event_type=$event)
-AND ($threshold=0 OR threshold=$threshold)
-AND world_day>=$fromDay AND world_day<=$toDay
-ORDER BY world_day DESC,created_ts DESC LIMIT " + Math.Max(1, Math.Min(1000, limit)).ToString(CultureInfo.InvariantCulture) + ";",
-                new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId,
+            return DiplomacyStore.SelectRulerDiplomacyActivity4(connection, Math.Max(1, Math.Min(1000, limit)).ToString(CultureInfo.InvariantCulture),                new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId,
                     ["ruler"] = observer, ["pairA"] = pairA, ["pairB"] = pairB,
                     ["polarity"] = polarity, ["status"] = status, ["event"] = eventType,
                     ["threshold"] = threshold, ["fromDay"] = fromDay, ["toDay"] = toDay });
@@ -730,14 +548,10 @@ ORDER BY world_day DESC,created_ts DESC LIMIT " + Math.Max(1, Math.Min(1000, lim
             string campaignId, string timelineId, double worldDay,
             List<Dictionary<string, object>> kingdoms, Dictionary<string, object> state)
         {
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureKingdomLeaderDiplomacySchema(connection);
-                foreach (Dictionary<string, object> opportunity in Program.QuerySql(connection, @"
-SELECT * FROM ruler_diplomacy_opportunities
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND status IN ('queued','waiting_cooldown') AND expiry_day>=$day
-ORDER BY threshold DESC,crossing_day,opportunity_id;", new Dictionary<string, object>
+                foreach (Dictionary<string, object> opportunity in DiplomacyStore.SelectRulerDiplomacyOpportunities4(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = worldDay
                 }))
@@ -761,8 +575,7 @@ ORDER BY threshold DESC,crossing_day,opportunity_id;", new Dictionary<string, ob
                         || worldDay < ReadDouble(pairCooldowns, ReadString(target, "kingdomId", ""), 0d);
                     if (cooling)
                     {
-                        Program.ExecuteSql(connection, @"UPDATE ruler_diplomacy_opportunities SET status='waiting_cooldown',updated_ts=$ts
-WHERE opportunity_id=$id AND status<>'waiting_cooldown';", new Dictionary<string, object>
+                        DiplomacyStore.UpdateRulerDiplomacyOpportunities3(connection, new Dictionary<string, object>
                         {
                             ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = ReadString(opportunity, "opportunity_id", "")
                         });
@@ -828,19 +641,19 @@ WHERE opportunity_id=$id AND status<>'waiting_cooldown';", new Dictionary<string
             string opportunityId, double worldDay, string status, string outcome, string actionId)
         {
             if (string.IsNullOrWhiteSpace(opportunityId)) return;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureKingdomLeaderDiplomacySchema(connection);
-                Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                DiplomacyStore.Begin(connection);
                 try
                 {
                     CompleteRulerOpportunity(connection, campaignId, timelineId,
                         opportunityId, worldDay, status, outcome, actionId);
-                    Program.ExecuteSql(connection, "COMMIT;");
+                    DiplomacyStore.Commit(connection);
                 }
                 catch
                 {
-                    try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { DiplomacyStore.Rollback(connection); } catch { }
                     throw;
                 }
             }
@@ -936,7 +749,7 @@ WHERE opportunity_id=$id AND status<>'waiting_cooldown';", new Dictionary<string
                 || string.IsNullOrWhiteSpace(target) || observer.Equals(target, StringComparison.OrdinalIgnoreCase)
                 || (affinityDelta == 0 && publicDelta == 0)) return;
             string stableIncidentId = campaignId + ":" + timelineId + ":" + incidentId;
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                 RelationshipsService.EnsureWorldRelationshipSchema(connection);
@@ -946,11 +759,9 @@ WHERE opportunity_id=$id AND status<>'waiting_cooldown';", new Dictionary<string
                     // Keep the idempotency check inside the same relationship writer
                     // critical section as the insert so duplicate action reports cannot
                     // both pass the preflight and apply the affinity delta twice.
-                    if (ReadInt(Program.QuerySql(connection,
-                        "SELECT COUNT(*) AS count FROM ruler_diplomatic_incidents WHERE incident_id=$id;",
-                        new Dictionary<string, object> { ["id"] = stableIncidentId })
+                    if (ReadInt(DiplomacyStore.CountRulerDiplomaticIncidents2(connection, new Dictionary<string, object> { ["id"] = stableIncidentId })
                         .FirstOrDefault(), "count", 0) > 0) return;
-                    Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                    DiplomacyStore.Begin(connection);
                     try
                     {
                         Dictionary<string, object> before = RelationshipsService.ResolveRulerDiplomaticAttitude(connection,
@@ -972,13 +783,7 @@ WHERE opportunity_id=$id AND status<>'waiting_cooldown';", new Dictionary<string
                             campaignId, timelineId, observer, target, eventKind);
                         int afterEffective = ReadInt(after, "effectiveAttitude", beforeEffective + affinityDelta);
                         long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                        Program.ExecuteSql(connection, @"INSERT INTO ruler_diplomatic_incidents(
-incident_id,campaign_id,timeline_id,world_day,event_kind,source_id,observer_id,target_id,
-observer_kingdom_id,target_kingdom_id,affinity_delta,public_subject_id,public_delta,before_effective,
-after_effective,breakthroughs_enabled,correlation_id,payload_json,created_ts)
-VALUES($id,$campaign,$timeline,$day,$kind,$source,$observer,$target,$observerKingdom,$targetKingdom,
-$delta,$publicSubject,$publicDelta,$before,$after,$breakthroughs,$correlation,$payload,$ts);",
-                            new Dictionary<string, object>
+                        DiplomacyStore.InsertRulerDiplomaticIncidents(connection, new Dictionary<string, object>
                             {
                                 ["id"] = stableIncidentId, ["campaign"] = campaignId, ["timeline"] = timelineId,
                                 ["day"] = worldDay, ["kind"] = eventKind ?? "", ["source"] = sourceId ?? "",
@@ -1003,11 +808,11 @@ $delta,$publicSubject,$publicDelta,$before,$after,$breakthroughs,$correlation,$p
                                 (int)Math.Floor(worldDay / 31.5d), worldDay, observer, target,
                                 observerKingdom ?? "", targetKingdom ?? "", beforeEffective, afterEffective,
                                 correlationId, ts);
-                        Program.ExecuteSql(connection, "COMMIT;");
+                        DiplomacyStore.Commit(connection);
                     }
                     catch
                     {
-                        try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                        try { DiplomacyStore.Rollback(connection); } catch { }
                         throw;
                     }
                 }
@@ -1117,17 +922,12 @@ $delta,$publicSubject,$publicDelta,$before,$after,$breakthroughs,$correlation,$p
         private static void MirrorNativeDiplomacyLedgers(string campaignId, string timelineId,
             Dictionary<string, object> payload)
         {
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureKingdomLeaderDiplomacySchema(connection);
                 foreach (Dictionary<string, object> origin in ReadDictionaryList(payload, "warOrigins"))
                 {
-                    Program.ExecuteSql(connection, @"INSERT INTO ruler_war_origins(campaign_id,timeline_id,war_id,
-aggressor_kingdom_id,defender_kingdom_id,aggressor_ruler_id,defender_ruler_id,declaration_day,origin_kind,
-cause,source_action_id,parent_war_id,is_active,ended_day,payload_json)
-VALUES($campaign,$timeline,$war,$aggressorKingdom,$defenderKingdom,$aggressor,$defender,$day,$kind,$cause,$action,$parent,$active,$ended,$payload)
-ON CONFLICT(campaign_id,timeline_id,war_id) DO UPDATE SET is_active=$active,ended_day=$ended,payload_json=$payload;",
-                        new Dictionary<string, object>
+                    DiplomacyStore.UpsertRulerWarOrigins(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId, ["war"] = ReadString(origin, "warId", ""),
                             ["aggressorKingdom"] = ReadString(origin, "aggressorKingdomId", ""),
@@ -1141,12 +941,7 @@ ON CONFLICT(campaign_id,timeline_id,war_id) DO UPDATE SET is_active=$active,ende
                 }
                 foreach (Dictionary<string, object> agreement in ReadDictionaryList(payload, "agreementHistory"))
                 {
-                    Program.ExecuteSql(connection, @"INSERT INTO ruler_agreement_history(campaign_id,timeline_id,agreement_id,kind,
-actor_kingdom_id,target_kingdom_id,created_day,expire_day,is_active,ended_day,end_reason,breaker_kingdom_id,triggering_war_id,payload_json)
-VALUES($campaign,$timeline,$id,$kind,$actor,$target,$created,$expire,$active,$ended,$reason,$breaker,$war,$payload)
-ON CONFLICT(campaign_id,timeline_id,agreement_id) DO UPDATE SET is_active=$active,ended_day=$ended,
-end_reason=$reason,breaker_kingdom_id=$breaker,triggering_war_id=$war,payload_json=$payload;",
-                        new Dictionary<string, object>
+                    DiplomacyStore.UpsertRulerAgreementHistory(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId, ["id"] = ReadString(agreement, "agreementId", ""),
                             ["kind"] = ReadString(agreement, "kind", ""), ["actor"] = ReadString(agreement, "actorKingdomId", ""),
@@ -1159,12 +954,7 @@ end_reason=$reason,breaker_kingdom_id=$breaker,triggering_war_id=$war,payload_js
                 }
                 foreach (Dictionary<string, object> obligation in ReadDictionaryList(payload, "treatyObligations"))
                 {
-                    Program.ExecuteSql(connection, @"INSERT INTO ruler_treaty_obligations(campaign_id,timeline_id,obligation_id,
-agreement_id,triggering_war_id,resulting_war_id,ally_kingdom_id,ally_ruler_id,defended_kingdom_id,
-defended_ruler_id,aggressor_kingdom_id,triggered_day,status,reason,payload_json)
-VALUES($campaign,$timeline,$id,$agreement,$trigger,$result,$allyKingdom,$ally,$defendedKingdom,$defended,$aggressor,$day,$status,$reason,$payload)
-ON CONFLICT(campaign_id,timeline_id,obligation_id) DO UPDATE SET resulting_war_id=$result,status=$status,reason=$reason,payload_json=$payload;",
-                        new Dictionary<string, object>
+                    DiplomacyStore.UpsertRulerTreatyObligations(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId, ["timeline"] = timelineId, ["id"] = ReadString(obligation, "obligationId", ""),
                             ["agreement"] = ReadString(obligation, "agreementId", ""), ["trigger"] = ReadString(obligation, "triggeringWarId", ""),
@@ -1213,14 +1003,7 @@ ON CONFLICT(campaign_id,timeline_id,obligation_id) DO UPDATE SET resulting_war_i
                 ["sourceActionId"] = actionId,
                 ["command"] = command ?? ""
             };
-            Program.ExecuteSql(connection, @"INSERT INTO character_reputations(
-campaign_id,timeline_id,subject_id,tag_id,source_occurrence_id,archetype_id,
-subject_role,description,reputation_value,acquired_day,catalog_revision,
-snapshot_json,status,updated_ts)
-VALUES($campaign,$timeline,$subject,$tag,$action,'diplomacy_incident','actor',
-$description,$value,$day,0,$snapshot,'active',$ts)
-ON CONFLICT(campaign_id,timeline_id,subject_id,tag_id) DO NOTHING;",
-                new Dictionary<string, object>
+            DiplomacyStore.InsertOrIgnoreCharacterReputations(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId,
                     ["subject"] = subjectId, ["tag"] = tag,
@@ -1241,12 +1024,11 @@ ON CONFLICT(campaign_id,timeline_id,subject_id,tag_id) DO NOTHING;",
             string opportunityId = ReadString(diplomaticEvent,
                 "relationshipOpportunityId", "");
             string correlation = ReadString(diplomaticEvent, "correlationId", "");
-            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureKingdomLeaderDiplomacySchema(connection);
                 Dictionary<string, object> opportunity = string.IsNullOrWhiteSpace(opportunityId)
-                    ? null : Program.QuerySql(connection, @"SELECT * FROM ruler_diplomacy_opportunities
-WHERE opportunity_id=$id LIMIT 1;", new Dictionary<string, object>
+                    ? null : DiplomacyStore.SelectRulerDiplomacyOpportunities5(connection, new Dictionary<string, object>
                     { ["id"] = opportunityId }).FirstOrDefault();
                 if (opportunity != null)
                     correlation = ReadString(opportunity, "correlation_id", correlation);

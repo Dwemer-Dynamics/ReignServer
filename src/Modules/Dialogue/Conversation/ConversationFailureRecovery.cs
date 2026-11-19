@@ -28,9 +28,9 @@ namespace ReignBetaServer
                 if (lease == null) return TestDict("ok", false, "errorCode", "conversation_original_still_running",
                     "error", "The original request is still running. Wait a moment, then select Retry.", "correlationId", correlation);
                 if (retry.Length > 0 && !string.IsNullOrWhiteSpace(ReadString(payload, "sceneTurnId", "")))
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var previous = Program.QuerySql(connection, "SELECT text FROM conversation_turns WHERE turn_id=$id AND role='npc' AND status='active';",
+                    var previous = ReignDatabase.QuerySql(connection, "SELECT text FROM conversation_turns WHERE turn_id=$id AND role='npc' AND status='active';",
                         TestDict("id", unit + "_npc")).FirstOrDefault();
                     if (previous != null && HasRecallableConversationSpeech(ReadString(previous, "text", "")))
                         return TestDict("ok", false, "errorCode", "conversation_response_already_saved",
@@ -38,7 +38,7 @@ namespace ReignBetaServer
                             "reloadConversationHistory", true, "correlationId", correlation, "additionalProviderCalls", 0);
                     if (retry.Length > 0)
                     {
-                        var original = Program.QuerySql(connection, "SELECT text FROM conversation_turns WHERE turn_id=$id AND role='player';",
+                        var original = ReignDatabase.QuerySql(connection, "SELECT text FROM conversation_turns WHERE turn_id=$id AND role='player';",
                             TestDict("id", unit + "_player")).FirstOrDefault();
                         if (original != null && ReadString(original, "text", "") != ReadString(payload, "playerText", ""))
                             return TestDict("ok", false, "errorCode", "retry_text_mismatch",
@@ -163,10 +163,10 @@ namespace ReignBetaServer
                         ? StorePartyConversationExchange(campaign, payload, hero, player, playerName, heroName, publicText, "", unitId, now, privateSource)
                         : StoreSocialEventConversationExchange(campaign, payload, hero, player, playerName, heroName, publicText, "", unitId, socialEvent, now, privateSource);
                 var ids = new List<string>();
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                     foreach (string id in ReadStringList(stored, "turnIds")
                         .Concat(ReadStringList(ReadDictionary(stored, "acceptedUnit"), "turnIds")))
-                        if (Program.QuerySql(connection, "SELECT turn_id FROM conversation_turns WHERE turn_id=$id AND role='player';",
+                        if (ReignDatabase.QuerySql(connection, "SELECT turn_id FROM conversation_turns WHERE turn_id=$id AND role='player';",
                             TestDict("id", id)).Count == 1) ids.Add(id);
                 return TestDict("status", ids.Count > 0 ? "player_input_retained" : "player_input_unavailable",
                     "sessionId", ReadString(stored, "sessionId", ""), "sourceIds", ids,

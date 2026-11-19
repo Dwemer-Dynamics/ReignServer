@@ -86,12 +86,12 @@ namespace ReignBetaServer
                 Dictionary<string, object> overview = BuildWorldTestOverview(
                     item.CampaignId, item.TimelineId, double.MinValue, double.MaxValue, 100);
                 Dictionary<string, object> rollup = CompactWorldTestRollup(overview);
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(item.CampaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(item.CampaignId))
                 using (ReignDbTransaction transaction = connection.BeginTransaction())
                 {
                     EnsureWorldTestSchema(connection);
                     EnsureWorldTestTelemetrySchema(connection);
-                    Dictionary<string, object> heartbeat = Program.QuerySql(connection, @"
+                    Dictionary<string, object> heartbeat = ReignDatabase.QuerySql(connection, @"
 SELECT world_day FROM world_test_native_heartbeats
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day LIMIT 1;",
                         new Dictionary<string, object>
@@ -103,7 +103,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day LIMIT 1;"
                     double worldDay = ReadDouble(heartbeat, "world_day", item.DayKey);
                     rollup["worldDay"] = worldDay;
                     long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                    Program.ExecuteSql(connection, @"INSERT INTO world_test_daily_rollups(
+                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_test_daily_rollups(
 campaign_id,timeline_id,day_key,world_day,overall_status,rollup_json,created_ts,updated_ts)
 VALUES($campaign,$timeline,$day,$worldDay,$status,$rollup,$ts,$ts)
 ON CONFLICT(campaign_id,timeline_id,day_key) DO UPDATE SET
@@ -115,7 +115,7 @@ world_day=$worldDay,overall_status=$status,rollup_json=$rollup,updated_ts=$ts;",
                             ["status"] = ReadString(overview, "overallStatus", "insufficient_data"),
                             ["rollup"] = Json.Serialize(rollup), ["ts"] = now
                         });
-                    Program.ExecuteSql(connection, @"UPDATE world_test_rollup_queue SET
+                    ReignDatabase.ExecuteSql(connection, @"UPDATE world_test_rollup_queue SET
 status='completed',attempt_count=attempt_count+1,last_error='',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day
 AND revision=$revision;",
@@ -129,7 +129,7 @@ AND revision=$revision;",
                     CleanupCompletedWorldTestTelemetry(
                         connection, item.CampaignId, item.TimelineId, item.DayKey);
                     transaction.Commit();
-                    Program.ExecuteSql(connection, "PRAGMA wal_checkpoint(PASSIVE);");
+                    ReignDatabase.ExecuteSql(connection, "PRAGMA wal_checkpoint(PASSIVE);");
                 }
                 stopwatch.Stop();
                 lock (WorldTestRollupStatusGate)
@@ -162,10 +162,10 @@ AND revision=$revision;",
                 }
                 try
                 {
-                    using (ReignDbConnection connection = Program.OpenCampaignConnection(item.CampaignId))
+                    using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(item.CampaignId))
                     {
                         EnsureWorldTestTelemetrySchema(connection);
-                        Program.ExecuteSql(connection, @"UPDATE world_test_rollup_queue SET
+                        ReignDatabase.ExecuteSql(connection, @"UPDATE world_test_rollup_queue SET
 status='pending',attempt_count=attempt_count+1,last_error=$error,updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
                             new Dictionary<string, object>
@@ -209,14 +209,14 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
                 ["queueCutoff"] = completedDayKey - 31,
                 ["evidenceCutoff"] = completedDayKey - 63
             };
-            Program.ExecuteSql(connection, @"DELETE FROM world_test_rollup_queue
+            ReignDatabase.ExecuteSql(connection, @"DELETE FROM world_test_rollup_queue
 WHERE rowid IN (
   SELECT rowid FROM world_test_rollup_queue
   WHERE campaign_id=$campaign AND timeline_id=$timeline
     AND status='completed' AND day_key<$queueCutoff
   ORDER BY day_key LIMIT 100
 );", parameters);
-            Program.ExecuteSql(connection, @"DELETE FROM world_test_diagnostic_evidence
+            ReignDatabase.ExecuteSql(connection, @"DELETE FROM world_test_diagnostic_evidence
 WHERE rowid IN (
   SELECT rowid FROM world_test_diagnostic_evidence
   WHERE campaign_id=$campaign AND timeline_id=$timeline
@@ -241,11 +241,11 @@ WHERE rowid IN (
                 try
                 {
                     using (ReignDbConnection connection =
-                        Program.OpenCampaignConnection(campaignId))
+                        ReignDatabase.OpenCampaignConnection(campaignId))
                     {
                         EnsureWorldTestTelemetrySchema(connection);
                         RelationshipsService.EnsureMbtiRelationshipSchema(connection);
-                        Dictionary<string, object> row = Program.QuerySql(connection, @"
+                        Dictionary<string, object> row = ReignDatabase.QuerySql(connection, @"
 SELECT queue.campaign_id,queue.timeline_id,queue.day_key,queue.revision,queue.updated_ts
 FROM world_test_rollup_queue queue WHERE queue.status='pending'
 AND NOT EXISTS (SELECT 1 FROM relationship_daily_inputs input
@@ -288,10 +288,10 @@ ORDER BY queue.day_key,queue.updated_ts LIMIT 1;").FirstOrDefault();
                 try
                 {
                     using (ReignDbConnection connection =
-                        Program.OpenCampaignConnection(campaignId))
+                        ReignDatabase.OpenCampaignConnection(campaignId))
                     {
                         EnsureWorldTestTelemetrySchema(connection);
-                        pending += ReadInt(Program.QuerySql(connection,
+                        pending += ReadInt(ReignDatabase.QuerySql(connection,
                             "SELECT COUNT(*) AS count FROM world_test_rollup_queue WHERE status='pending';")
                             .FirstOrDefault(), "count", 0);
                     }

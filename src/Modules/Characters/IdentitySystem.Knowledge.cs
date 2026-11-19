@@ -78,10 +78,7 @@ namespace ReignBetaServer
             List<string> aliases = existing == null ? new List<string>() : Program.TextListFromJson(ReadString(existing, "aliases_json", "[]"));
             string claimed = existing == null ? "" : ReadString(existing, "claimed_name", "");
             if (!string.IsNullOrWhiteSpace(claimed) && !aliases.Contains(claimed, StringComparer.OrdinalIgnoreCase)) aliases.Add(claimed);
-            Program.ExecuteSql(connection, @"INSERT INTO acquaintances(observer_id,subject_id,identity_state,canonical_name,claimed_name,aliases_json,verification_source,source_entity_id,confidence,first_met_day,last_met_day,updated_ts)
-VALUES($observer,$subject,'verified',$canonical,$claimed,$aliases,$source,$sourceEntity,1,$day,$day,$ts)
-ON CONFLICT(observer_id,subject_id) DO UPDATE SET identity_state='verified',canonical_name=CASE WHEN excluded.canonical_name<>'' THEN excluded.canonical_name ELSE acquaintances.canonical_name END,aliases_json=excluded.aliases_json,verification_source=excluded.verification_source,source_entity_id=excluded.source_entity_id,confidence=1,updated_ts=excluded.updated_ts;",
-                new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId, ["canonical"] = canonicalName, ["claimed"] = claimed, ["aliases"] = Json.Serialize(aliases), ["source"] = source ?? "", ["sourceEntity"] = sourceEntityId ?? "", ["day"] = worldDay, ["ts"] = ts });
+            CharactersStore.UpsertAcquaintances2(connection, new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId, ["canonical"] = canonicalName, ["claimed"] = claimed, ["aliases"] = Json.Serialize(aliases), ["source"] = source ?? "", ["sourceEntity"] = sourceEntityId ?? "", ["day"] = worldDay, ["ts"] = ts });
             if (result != "unchanged") AddIdentityEvidence(connection, observerId, subjectId, "verified", claimed, canonicalName, source, sourceEntityId, "", 1d, worldDay, new Dictionary<string, object> { ["correlationId"] = correlationId ?? "" });
             return result;
         }
@@ -105,10 +102,7 @@ ON CONFLICT(observer_id,subject_id) DO UPDATE SET identity_state='verified',cano
             aliases = PruneAmbiguousAddressAliases(connection, observerId, subjectId, aliases, claimedName);
             string state = aliases.Any(alias => !NormalizeIdentityName(alias).Equals(NormalizeIdentityName(claimedName), StringComparison.OrdinalIgnoreCase)) ? "disputed" : "claimed";
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Program.ExecuteSql(connection, @"INSERT INTO acquaintances(observer_id,subject_id,identity_state,canonical_name,claimed_name,aliases_json,verification_source,source_entity_id,confidence,first_met_day,last_met_day,last_encounter_id,payload_json,updated_ts)
-VALUES($observer,$subject,$state,$canonical,$claimed,$aliases,$source,$sourceEntity,0.6,$day,$day,$encounter,$payload,$ts)
-ON CONFLICT(observer_id,subject_id) DO UPDATE SET identity_state=$state,canonical_name=CASE WHEN acquaintances.canonical_name='' THEN excluded.canonical_name ELSE acquaintances.canonical_name END,claimed_name=$claimed,aliases_json=$aliases,verification_source=$source,source_entity_id=$sourceEntity,confidence=0.6,last_met_day=$day,last_encounter_id=CASE WHEN $encounter<>'' THEN $encounter ELSE acquaintances.last_encounter_id END,payload_json=$payload,updated_ts=$ts;",
-                new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId, ["state"] = state, ["canonical"] = canonicalName ?? "", ["claimed"] = claimedName, ["aliases"] = Json.Serialize(aliases), ["source"] = source ?? "", ["sourceEntity"] = sourceEntityId ?? "", ["day"] = worldDay, ["encounter"] = encounterId ?? "", ["payload"] = "{}", ["ts"] = ts });
+            CharactersStore.UpsertAcquaintances3(connection, new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId, ["state"] = state, ["canonical"] = canonicalName ?? "", ["claimed"] = claimedName, ["aliases"] = Json.Serialize(aliases), ["source"] = source ?? "", ["sourceEntity"] = sourceEntityId ?? "", ["day"] = worldDay, ["encounter"] = encounterId ?? "", ["payload"] = "{}", ["ts"] = ts });
             AddIdentityEvidence(connection, observerId, subjectId, state == "disputed" ? "disputed_claim" : "claimed_identity", claimedName, canonicalName, source, sourceEntityId, encounterId, 0.6d, worldDay, payload);
         }
 
@@ -123,9 +117,7 @@ ON CONFLICT(observer_id,subject_id) DO UPDATE SET identity_state=$state,canonica
                     result.Add(alias);
                     continue;
                 }
-                List<Dictionary<string, object>> evidence = Program.QuerySql(connection, @"SELECT evidence_type,claimed_name,source,payload_json FROM identity_evidence
-WHERE observer_id=$observer AND subject_id=$subject AND claimed_name=$alias ORDER BY created_ts;",
-                    new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId, ["alias"] = alias });
+                List<Dictionary<string, object>> evidence = CharactersStore.SelectIdentityEvidence2(connection, new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId, ["alias"] = alias });
                 bool supported = evidence.Any(row =>
                 {
                     string type = ReadString(row, "evidence_type", "");
@@ -770,11 +762,7 @@ WHERE observer_id=$observer AND subject_id=$subject AND claimed_name=$alias ORDE
                 ?? new Dictionary<string, object>();
             if (sourcePayload.Count == 0)
             {
-                Dictionary<string, object> evidence = Program.QuerySql(connection, @"SELECT payload_json
-FROM identity_evidence
-WHERE observer_id=$observer AND subject_id=$subject
-ORDER BY created_ts DESC LIMIT 1;",
-                    new Dictionary<string, object>
+                Dictionary<string, object> evidence = CharactersStore.SelectIdentityEvidence3(connection, new Dictionary<string, object>
                     {
                         ["observer"] = observerId,
                         ["subject"] = subjectId
@@ -795,10 +783,7 @@ ORDER BY created_ts DESC LIMIT 1;",
                 return false;
 
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Program.ExecuteSql(connection, @"UPDATE acquaintances SET identity_state='encountered_unknown',claimed_name='',aliases_json='[]',
-verification_source='quarantined_ambiguous_name_first_address',source_entity_id='',confidence=0,payload_json=$payload,updated_ts=$ts
-WHERE observer_id=$observer AND subject_id=$subject AND identity_state<>'verified';",
-                new Dictionary<string, object>
+            CharactersStore.UpdateAcquaintances(connection, new Dictionary<string, object>
                 {
                     ["observer"] = observerId, ["subject"] = subjectId, ["payload"] = Json.Serialize(sourcePayload), ["ts"] = ts
                 });
@@ -816,9 +801,7 @@ WHERE observer_id=$observer AND subject_id=$subject AND identity_state<>'verifie
         internal static Dictionary<string, object> ReadAcquaintance(ReignDbConnection connection, string observerId, string subjectId)
         {
             Dictionary<string, object> stored = ReadStoredAcquaintance(connection, observerId, subjectId);
-            List<Dictionary<string, object>> roster = Program.QuerySql(connection,
-                "SELECT * FROM identity_roster WHERE hero_id=$observer OR hero_id=$subject;",
-                new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId });
+            List<Dictionary<string, object>> roster = CharactersStore.SelectIdentityRoster(connection, new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId });
             Dictionary<string, object> observer = roster.FirstOrDefault(x =>
                 ReadString(x, "hero_id", "").Equals(observerId, StringComparison.OrdinalIgnoreCase));
             Dictionary<string, object> subject = roster.FirstOrDefault(x =>
@@ -848,15 +831,12 @@ WHERE observer_id=$observer AND subject_id=$subject AND identity_state<>'verifie
             string observerId,
             string subjectId)
         {
-            return Program.QuerySql(connection,
-                "SELECT * FROM acquaintances WHERE observer_id=$observer AND subject_id=$subject LIMIT 1;",
-                new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId }).FirstOrDefault();
+            return CharactersStore.SelectAcquaintances2(connection, new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId }).FirstOrDefault();
         }
 
         private static void InsertUnknownAcquaintance(ReignDbConnection connection, string observerId, string subjectId, string canonicalName, string encounterId, double worldDay, Dictionary<string, object> payload)
         {
-            Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO acquaintances(observer_id,subject_id,identity_state,canonical_name,first_met_day,last_met_day,encounter_count,last_encounter_id,payload_json,updated_ts)
-VALUES($observer,$subject,'encountered_unknown',$canonical,$day,$day,1,$encounter,$payload,$ts);", new Dictionary<string, object>
+            CharactersStore.InsertOrIgnoreAcquaintances(connection, new Dictionary<string, object>
             {
                 ["observer"] = observerId, ["subject"] = subjectId, ["canonical"] = canonicalName ?? "", ["day"] = worldDay,
                 ["encounter"] = encounterId ?? "", ["payload"] = "{}", ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
@@ -865,8 +845,7 @@ VALUES($observer,$subject,'encountered_unknown',$canonical,$day,$day,1,$encounte
 
         private static void AddIdentityEvidence(ReignDbConnection connection, string observerId, string subjectId, string evidenceType, string claimedName, string canonicalName, string source, string sourceEntityId, string encounterId, double confidence, double worldDay, Dictionary<string, object> payload)
         {
-            Program.ExecuteSql(connection, @"INSERT INTO identity_evidence(evidence_id,observer_id,subject_id,evidence_type,claimed_name,canonical_name,source,source_entity_id,encounter_id,confidence,world_day,payload_json,created_ts)
-VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$encounter,$confidence,$day,$payload,$ts);", new Dictionary<string, object>
+            CharactersStore.InsertIdentityEvidence(connection, new Dictionary<string, object>
             {
                 ["id"] = "identity_" + Guid.NewGuid().ToString("N"), ["observer"] = observerId, ["subject"] = subjectId, ["type"] = evidenceType,
                 ["claimed"] = claimedName ?? "", ["canonical"] = canonicalName ?? "", ["source"] = source ?? "", ["sourceEntity"] = sourceEntityId ?? "",
@@ -877,9 +856,9 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
 
         private static int MigrateLegacyIdentityKnowledge(ReignDbConnection connection, Dictionary<string, Dictionary<string, object>> heroes, double worldDay, string correlationId)
         {
-            if (string.Equals(ReadString(Program.QuerySql(connection, "SELECT value FROM schema_meta WHERE key='identity_legacy_dialogue_migrated' LIMIT 1;").FirstOrDefault(), "value", ""), "1", StringComparison.Ordinal)) return 0;
+            if (string.Equals(ReadString(CharactersStore.SelectSchemaMeta(connection).FirstOrDefault(), "value", ""), "1", StringComparison.Ordinal)) return 0;
             int count = 0;
-            foreach (Dictionary<string, object> session in Program.QuerySql(connection, "SELECT DISTINCT npc_id,player_id FROM conversation_sessions WHERE status<>'deleted' AND npc_id<>'' AND player_id<>'';"))
+            foreach (Dictionary<string, object> session in CharactersStore.SelectConversationSessions2(connection))
             {
                 string observerId = ReadString(session, "npc_id", ""), subjectId = ReadString(session, "player_id", "");
                 if (!heroes.TryGetValue(subjectId, out Dictionary<string, object> subject)) continue;
@@ -888,7 +867,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                 UpsertClaimedIdentity(connection, observerId, subjectId, ReadString(subject, "name", ""), ReadString(subject, "name", ""), "legacy_dialogue_migration", subjectId, "", worldDay, new Dictionary<string, object> { ["correlationId"] = correlationId });
                 count++;
             }
-            Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('identity_legacy_dialogue_migrated','1');");
+            CharactersStore.UpsertSchemaMeta(connection);
             return count;
         }
 

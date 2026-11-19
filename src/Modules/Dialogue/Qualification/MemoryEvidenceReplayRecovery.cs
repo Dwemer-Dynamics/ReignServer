@@ -50,7 +50,7 @@ namespace ReignBetaServer
         private static bool ReviewedRecoverySourceSuperseded(ReignDbConnection connection, Program.KnowledgeAccessContext access, string turnId)
         {
             // Check a replacement's existence without admitting its possibly private text to the prompt.
-            return Program.QuerySql(connection, @"SELECT 1 FROM conversation_continuity_versions v
+            return ReignDatabase.QuerySql(connection, @"SELECT 1 FROM conversation_continuity_versions v
 JOIN conversation_continuity c ON c.record_id=v.record_id
 WHERE c.owner_id=$observer AND c.timeline_id=$timeline AND c.revision>v.revision
  AND c.updated_ts<=$time AND COALESCE((c.payload_json::jsonb->>'worldDay')::double precision,0)<=$day
@@ -71,7 +71,7 @@ WHERE c.owner_id=$observer AND c.timeline_id=$timeline AND c.revision>v.revision
             foreach (var pair in recent) plan.SuppliedSources[pair.Key] = pair.Value;
             long oldestRecent = ReadLong(EvidenceReplayRecentSources(item, ReadDictionaryList(item, "sources")).First(), "sequence", 0);
             string[] audience = { observer, peer }; // The detached shared-party replay has its own initial-only binding.
-            using var connection = Program.OpenCampaignConnection(campaign);
+            using var connection = ReignDatabase.OpenCampaignConnection(campaign);
             using var transaction = connection.BeginTransaction(IsolationLevel.RepeatableRead);
             var pinnedExchanges = new HashSet<(string Session, string Exchange)>();
             foreach (var pin in ReadDictionaryList(projection, "factPins"))
@@ -89,7 +89,7 @@ WHERE c.owner_id=$observer AND c.timeline_id=$timeline AND c.revision>v.revision
                 .Where(key => key.Exchange.Length > 0 && pinnedExchanges.Contains(key)).Distinct().Take(2).ToList();
             if (anchors.Count != 1) return null;
             var anchor = anchors[0];
-            var rows = Program.QuerySql(connection, @"SELECT * FROM conversation_turns WHERE session_id=$session AND exchange_id=$exchange
+            var rows = ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_turns WHERE session_id=$session AND exchange_id=$exchange
 ORDER BY turn_order LIMIT 5;", TestDict("session", anchor.Session, "exchange", anchor.Exchange));
             if (rows.Count is < 1 or > 4) return null;
             var proofs = new List<Dictionary<string, object>>();

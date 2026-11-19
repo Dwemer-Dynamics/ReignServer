@@ -18,7 +18,7 @@ namespace ReignBetaServer
                 var motive = TestDict("conversationAgency", context);
                 var profile = TestDict("name", "Mira", "isFemale", true, "attributes", TestDict("endurance", 2));
                 string generation;
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     EnsureConversationAgencySchema(connection);
                     generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
@@ -38,9 +38,9 @@ namespace ReignBetaServer
                     payload, campaign, "atomic_effect_turn", "dialogue", "npc", request => { providerCalls++; throw new InvalidOperationException("No provider expected."); }, persist: false);
                 var prepared = TryParseJsonObject(ReadString(llm, "content", ""));
                 string reply = ApplyLegacyConversationDrinking(campaign, "npc", payload, profile, null, prepared, ReadString(prepared, "reply", ""), persist: false);
-                int Negotiations() { using var c = Program.OpenCampaignConnection(campaign); return Program.QuerySql(c, "SELECT * FROM conversation_negotiation_turns;").Count; }
-                int Drinks() { using var c = Program.OpenCampaignConnection(campaign); return Program.QuerySql(c, "SELECT * FROM conversation_drinking_turns;").Count; }
-                double Amount() { using var c = Program.OpenCampaignConnection(campaign); return ReadDouble(TryParseJsonObject(ReadString(Program.QuerySql(c,
+                int Negotiations() { using var c = ReignDatabase.OpenCampaignConnection(campaign); return ReignDatabase.QuerySql(c, "SELECT * FROM conversation_negotiation_turns;").Count; }
+                int Drinks() { using var c = ReignDatabase.OpenCampaignConnection(campaign); return ReignDatabase.QuerySql(c, "SELECT * FROM conversation_drinking_turns;").Count; }
+                double Amount() { using var c = ReignDatabase.OpenCampaignConnection(campaign); return ReadDouble(TryParseJsonObject(ReadString(ReignDatabase.QuerySql(c,
                     "SELECT state_json FROM conversation_intoxication WHERE hero_id='npc';").SingleOrDefault(), "state_json", "{}")), "drinks", 0); }
                 Check("prepare_has_no_negotiation_or_drink_effect", Negotiations() == 0 && Drinks() == 0 && Amount() == 0
                     && ReadString(ReadDictionary(payload, "conversationAgencyReceipt"), "commitState", "") == "prepared");
@@ -84,7 +84,7 @@ namespace ReignBetaServer
                     && Negotiations() == 1 && Drinks() == 1 && Amount() == .25
                     && ReadString(ReadDictionary(accepted, "agency"), "acceptedReplyHash", "") == PromptHash(finalReply)
                     && ReadString(ReadDictionary(accepted, "drinking"), "acceptedReplyHash", "") == PromptHash(finalReply), accepted);
-                using (var connection = Program.OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                     context["records"] = ReadConversationNegotiations(connection, "agency_timeline", "npc", "player");
                 var stalePayload = Payload("stale_drink_decision");
                 var staleDraft = Draft();

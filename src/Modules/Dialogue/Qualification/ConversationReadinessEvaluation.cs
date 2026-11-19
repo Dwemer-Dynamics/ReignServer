@@ -1020,7 +1020,7 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> chapters = new List<Dictionary<string, object>>();
             try
             {
-                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     RelationshipsService.EnsureSharedRelationshipHistorySchema(connection);
                     foreach (Dictionary<string, object> target in
@@ -1030,7 +1030,7 @@ namespace ReignBetaServer
                         foreach (string historyId in ReadStringList(
                             target, "sharedRelationshipHistoryIds"))
                         {
-                            Dictionary<string, object> row = Program.QuerySql(connection,
+                            Dictionary<string, object> row = ReignDatabase.QuerySql(connection,
                                 "SELECT * FROM shared_relationship_history_chapters WHERE history_id=$id LIMIT 1;",
                                 new Dictionary<string, object> { ["id"] = historyId })
                                 .FirstOrDefault();
