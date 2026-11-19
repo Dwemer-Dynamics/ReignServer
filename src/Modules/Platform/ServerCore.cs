@@ -277,7 +277,7 @@ namespace ReignBetaServer
             using (ReignDbCommand command = connection.CreateCommand())
             {
                 command.CommandText =
-                    "SELECT pg_advisory_xact_lock(hashtextextended(current_schema(), 9137));";
+                    PlatformStore.SelectSql;
                 command.CommandTimeout = 180;
                 if (transaction != null)
                     command.Transaction = transaction;

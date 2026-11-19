@@ -215,11 +215,10 @@ namespace ReignBetaServer
                 DialogueService.ApplyConversationDrinking(campaign, "npc", retryPayload, profile, null, accepted, ReadString(accepted, "reply", ""));
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var state = TryParseJsonObject(ReadString(ReignDatabase.QuerySql(connection,
-                        "SELECT state_json FROM conversation_intoxication WHERE hero_id='npc';").Single(), "state_json", "{}"));
+                    var state = TryParseJsonObject(ReadString(PlatformSelfTestStore.SelectConversationIntoxication(connection).Single(), "state_json", "{}"));
                     Check("recovered_drink_commits_exactly_once_across_retry", ReadDouble(state, "drinks", -1) == .25
                         && ReadLong(state, "alcoholConsumptionEvents", 0) == 1
-                        && ReignDatabase.QuerySql(connection, "SELECT turn_key FROM conversation_drinking_turns WHERE hero_id='npc';").Count == 1);
+                        && PlatformSelfTestStore.SelectConversationDrinkingTurns(connection).Count == 1);
                 }
             }
             catch (Exception ex)
