@@ -205,9 +205,7 @@ Do not expose a private relationship tag merely because it is supplied as behavi
                     }
 
                     string pairKey = AmbientPairKey(speakerHeroId, targetId);
-                    Dictionary<string, object> chemistry = ReignDatabase.QuerySql(connection,
-                        "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                        new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
+                    Dictionary<string, object> chemistry = RelationshipsStore.SelectRelationshipPairChemistry8(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
                     bool speakerIsA = chemistry != null && ReadString(chemistry, "hero_a_id", "")
                         .Equals(speakerHeroId, StringComparison.OrdinalIgnoreCase);
                     int affinity = chemistry == null ? 0 : ReputationService.EffectiveDirectionalAffinity(chemistry, speakerIsA, 0);
@@ -324,18 +322,9 @@ Do not expose a private relationship tag merely because it is supplied as behavi
                     EnsureMbtiRelationshipSchema(connection);
                     CharactersService.EnsureIdentitySchema(connection);
                     long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
-pair_key,hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts)
-VALUES($pair,'speaker','target',55,-35,1,1,$ts);",
-                        new Dictionary<string, object> { ["pair"] = pairKey, ["ts"] = ts });
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO acquaintances(
-observer_id,subject_id,identity_state,canonical_name,verification_source,confidence,updated_ts)
-VALUES('speaker','target','verified','Target Noble','same_kingdom',1,$ts);",
-                        new Dictionary<string, object> { ["ts"] = ts });
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_pair_lifecycle(
-pair_key,hero_a_id,hero_b_id,lover_active,affair_active,last_processed_day,updated_ts)
-VALUES($pair,'speaker','target',1,1,1,$ts);",
-                        new Dictionary<string, object> { ["pair"] = pairKey, ["ts"] = ts });
+                    RelationshipsStore.InsertRelationshipPairChemistry4(connection, new Dictionary<string, object> { ["pair"] = pairKey, ["ts"] = ts });
+                    RelationshipsStore.InsertAcquaintances(connection, new Dictionary<string, object> { ["ts"] = ts });
+                    RelationshipsStore.InsertRelationshipPairLifecycle(connection, new Dictionary<string, object> { ["pair"] = pairKey, ["ts"] = ts });
                 }
 
                 Dictionary<string, object> payload = new Dictionary<string, object>

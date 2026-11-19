@@ -10,13 +10,7 @@ namespace ReignBetaServer
     {
         private static void EnsurePregnancyContextSchema(ReignDbConnection c)
         {
-            ReignDatabase.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS conception_contexts (
-timeline_id TEXT NOT NULL,pregnancy_id TEXT NOT NULL,facts_json TEXT NOT NULL,world_day DOUBLE PRECISION NOT NULL,
-PRIMARY KEY(timeline_id,pregnancy_id));
-CREATE TABLE IF NOT EXISTS conception_knowledge (
-timeline_id TEXT NOT NULL,pregnancy_id TEXT NOT NULL,observer_id TEXT NOT NULL,
-knowledge_json TEXT NOT NULL,source_id TEXT NOT NULL,source_hash TEXT NOT NULL,world_day DOUBLE PRECISION NOT NULL,
-PRIMARY KEY(timeline_id,pregnancy_id,observer_id));");
+            RelationshipsSchema.CreateConceptionContexts(c);
         }
         private static PregnancyFacts PregnancyFactsFrom(Dictionary<string, object> value) =>
             Json.Deserialize<PregnancyFacts>(Json.Serialize(value)) ?? new PregnancyFacts();
@@ -30,17 +24,11 @@ PRIMARY KEY(timeline_id,pregnancy_id,observer_id));");
                 || ReadString(restored, "head_event_id", "") != head || requested == recovered) return;
             EnsurePregnancyContextSchema(c);
             var args = TestDict("old", requested, "new", recovered, "day", ReadDouble(restored, "world_day", -1));
-            ReignDatabase.ExecuteSql(c, @"INSERT INTO conception_contexts(timeline_id,pregnancy_id,facts_json,world_day)
-SELECT $new,pregnancy_id,facts_json,world_day FROM conception_contexts WHERE timeline_id=$old AND world_day<=$day
-ON CONFLICT(timeline_id,pregnancy_id) DO NOTHING;
-INSERT INTO conception_knowledge(timeline_id,pregnancy_id,observer_id,knowledge_json,source_id,source_hash,world_day)
-SELECT $new,pregnancy_id,observer_id,knowledge_json,source_id,source_hash,world_day FROM conception_knowledge
-WHERE timeline_id=$old AND world_day<=$day ON CONFLICT(timeline_id,pregnancy_id,observer_id) DO NOTHING;", args);
+            RelationshipsStore.InsertOrIgnoreConceptionContexts(c, args);
         }
         private static PregnancyKnowledge ReadPregnancyKnowledge(ReignDbConnection c, string timeline, string id, string observer, double asOfDay = double.MaxValue)
         {
-            var row = ReignDatabase.QuerySql(c, "SELECT knowledge_json FROM conception_knowledge WHERE timeline_id=$timeline AND pregnancy_id=$id AND observer_id=$observer AND world_day<=$day;",
-                TestDict("timeline", timeline, "id", id, "observer", observer, "day", asOfDay)).FirstOrDefault();
+            var row = RelationshipsStore.SelectConceptionKnowledge(c, TestDict("timeline", timeline, "id", id, "observer", observer, "day", asOfDay)).FirstOrDefault();
             return row == null ? new PregnancyKnowledge() : Json.Deserialize<PregnancyKnowledge>(ReadString(row, "knowledge_json", "{}")) ?? new PregnancyKnowledge();
         }
         private static void GrantPregnancyKnowledge(ReignDbConnection c, string timeline, PregnancyFacts facts, string observer,
@@ -52,10 +40,7 @@ WHERE timeline_id=$old AND world_day<=$day ON CONFLICT(timeline_id,pregnancy_id,
             known.Illicit |= illicit && facts.Illicit;
             known.Paternity |= father && facts.BiologicalFatherId.Length > 0;
             known.EvidenceId = sourceId;
-            ReignDatabase.ExecuteSql(c, @"INSERT INTO conception_knowledge(timeline_id,pregnancy_id,observer_id,knowledge_json,source_id,source_hash,world_day)
-VALUES($timeline,$id,$observer,$json,$source,$hash,$day) ON CONFLICT(timeline_id,pregnancy_id,observer_id) DO UPDATE SET
-knowledge_json=$json,source_id=$source,source_hash=$hash,world_day=$day;",
-                TestDict("timeline", timeline, "id", facts.PregnancyId, "observer", observer,
+            RelationshipsStore.UpsertConceptionKnowledge(c, TestDict("timeline", timeline, "id", facts.PregnancyId, "observer", observer,
                     "json", Json.Serialize(known), "source", sourceId, "hash", sourceHash, "day", day));
         }
         internal static Dictionary<string, object> FamilyPregnancySyncApi(Dictionary<string, object> payload)
@@ -79,25 +64,20 @@ knowledge_json=$json,source_id=$source,source_hash=$hash,world_day=$day;",
                 var observers = ReadStringList(payload, "observers").Where(id => id.Length > 0 && id.Length <= 256).Distinct().Take(65).ToList();
                 var present = ReadBool(payload, "physicalConversation", false) ? ReadStringList(payload, "presentMotherIds") : new List<string>();
                 using var transaction = c.BeginTransaction();
-                ReignDatabase.ExecuteSql(c, @"DELETE FROM world_history_knowledge_rules WHERE acquisition_mode='realm_news'
-AND event_id IN (SELECT event_id FROM world_history_events WHERE event_type='child_conceived' AND timeline_id=$timeline);",
-                    TestDict("timeline", timeline));
-                foreach (var old in ReignDatabase.QuerySql(c, "SELECT pregnancy_id,facts_json FROM conception_contexts WHERE timeline_id=$timeline;", TestDict("timeline", timeline)))
+                RelationshipsStore.DeleteWorldHistoryKnowledgeRules(c, TestDict("timeline", timeline));
+                foreach (var old in RelationshipsStore.SelectConceptionContexts(c, TestDict("timeline", timeline)))
                 {
                     if (facts.Any(f => f.PregnancyId == ReadString(old, "pregnancy_id", ""))) continue;
                     var ended = Json.Deserialize<PregnancyFacts>(ReadString(old, "facts_json", "{}"));
                     if (ended == null || !ended.Active) continue;
                     ended.Active = false;
-                    ReignDatabase.ExecuteSql(c, "UPDATE conception_contexts SET facts_json=$json,world_day=$day WHERE timeline_id=$timeline AND pregnancy_id=$id;",
-                        TestDict("json", Json.Serialize(ended), "day", day, "timeline", timeline, "id", ended.PregnancyId));
+                    RelationshipsStore.UpdateConceptionContexts(c, TestDict("json", Json.Serialize(ended), "day", day, "timeline", timeline, "id", ended.PregnancyId));
                 }
                 var rows = new List<Dictionary<string, object>>();
                 var views = new Dictionary<string, object>();
                 foreach (var f in facts)
                 {
-                    ReignDatabase.ExecuteSql(c, @"INSERT INTO conception_contexts(timeline_id,pregnancy_id,facts_json,world_day)
-VALUES($timeline,$id,$json,$day) ON CONFLICT(timeline_id,pregnancy_id) DO UPDATE SET facts_json=$json,world_day=$day;",
-                        TestDict("timeline", timeline, "id", f.PregnancyId, "json", Json.Serialize(f), "day", day));
+                    RelationshipsStore.UpsertConceptionContexts(c, TestDict("timeline", timeline, "id", f.PregnancyId, "json", Json.Serialize(f), "day", day));
                     GrantPregnancyKnowledge(c, timeline, f, f.MotherId, f.Illicit, f.BiologicalFatherId.Length > 0,
                         "native_pregnancy:" + f.PregnancyId, DialogueService.PromptHash(Json.Serialize(f)), day);
                     foreach (string observer in observers)
@@ -140,7 +120,7 @@ VALUES($timeline,$id,$json,$day) ON CONFLICT(timeline_id,pregnancy_id) DO UPDATE
         {
             using var c = ReignDatabase.OpenCampaignConnection(campaign);
             if (!WorldSimulationService.TableExists(c, "conception_contexts")) return BuildPregnancyPrompt(profile);
-            var records = ReignDatabase.QuerySql(c, "SELECT facts_json FROM conception_contexts WHERE timeline_id=$timeline AND world_day<=$day;", TestDict("timeline", timeline, "day", day));
+            var records = RelationshipsStore.SelectConceptionContexts2(c, TestDict("timeline", timeline, "day", day));
             if (records.Count == 0) return BuildPregnancyPrompt(profile);
             var parts = new List<string>();
             foreach (var row in records)
@@ -163,8 +143,7 @@ VALUES($timeline,$id,$json,$day) ON CONFLICT(timeline_id,pregnancy_id) DO UPDATE
                 string subject = ReadString(parent, "id", "");
                 if (subject.Length == 0) continue;
                 string eventId = f.PregnancyId + ":exposed:" + (subject == f.MotherId ? "mother" : "father");
-                if (ReignDatabase.QuerySql(c, "SELECT lifecycle_id FROM reputation_lifecycle_events WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND source_event_id=$event LIMIT 1;",
-                    TestDict("campaign", campaign, "timeline", timeline, "subject", subject, "event", eventId)).Count > 0) continue;
+                if (RelationshipsStore.SelectReputationLifecycleEvents(c, TestDict("campaign", campaign, "timeline", timeline, "subject", subject, "event", eventId)).Count > 0) continue;
                 var evidence = TestDict("pregnancyId", f.PregnancyId, "motherId", f.MotherId, "illicit", true,
                     "fatherNamed", f.FatherExposed, "biologicalFatherId", f.FatherExposed ? f.BiologicalFatherId : "");
                 ReputationService.ApplyCourtDynamicSocialOutcome(c, campaign, timeline, subject,
@@ -185,7 +164,7 @@ VALUES($timeline,$id,$json,$day) ON CONFLICT(timeline_id,pregnancy_id) DO UPDATE
             foreach (var disclosure in disclosures.Take(6))
             {
                 string id = ReadString(disclosure, "pregnancyId", ""), kind = ReadString(disclosure, "kind", ""), quote = ReadString(disclosure, "evidenceQuote", "");
-                var row = ReignDatabase.QuerySql(c, "SELECT facts_json FROM conception_contexts WHERE timeline_id=$timeline AND pregnancy_id=$id;", TestDict("timeline", timeline, "id", id)).FirstOrDefault();
+                var row = RelationshipsStore.SelectConceptionContexts3(c, TestDict("timeline", timeline, "id", id)).FirstOrDefault();
                 var f = row == null ? null : Json.Deserialize<PregnancyFacts>(ReadString(row, "facts_json", "{}"));
                 if (f == null || !f.Active || quote.Length < 5 || quote.Length > 2000 || !reply.Contains(quote, StringComparison.Ordinal)
                     || quote.Contains('*') || quote.Contains('?') || Regex.IsMatch(quote, @"\b(never|might|maybe|perhaps|if|rumou?r|suspect|guess|suppose|could|would)\b", RegexOptions.IgnoreCase)

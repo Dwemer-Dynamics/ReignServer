@@ -40,7 +40,7 @@ namespace ReignBetaServer
                         "npc_initiated", "fixture", "", "a", "b", 100d, 105.3893225703d,
                         TestDict("transitPolicyVersion", 99, "baseTransitDays", 0.01d));
                     originalId = ReadString(letter, "letterId", "");
-                    var persisted = ReignDatabase.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", originalId)).Single();
+                    var persisted = RelationshipsSelfTestStore.SelectLetters2(connection, TestDict("id", originalId)).Single();
                     Check("dispatch_persists_authoritative_unscaled_base", Near(ReadDouble(persisted, "base_transit_days", 0d), 5.3893225703d)
                         && ReadInt(persisted, "transit_policy_version", 0) == CorrespondenceTransitPolicy.Version
                         && Near(ReadDouble(persisted, "delivery_day", 0d), 101.347330642575d));
@@ -56,10 +56,9 @@ namespace ReignBetaServer
                         && Near(ReadDouble(retry, "deliveryDay", 0d), ReadDouble(reply, "deliveryDay", 0d)));
                     // Fixture representing a pre-upgrade row: schema extension
                     // must not retime it, including after another connection.
-                    ReignDatabase.ExecuteSql(connection, "UPDATE letters SET transit_policy_version=0,base_transit_days=0,delivery_day=105.3893225703 WHERE letter_id=$id;",
-                        TestDict("id", originalId));
+                    RelationshipsSelfTestStore.UpdateLetters(connection, TestDict("id", originalId));
                     EnsureRelationshipAndCorrespondenceSchema(connection);
-                    persisted = ReignDatabase.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", originalId)).Single();
+                    persisted = RelationshipsSelfTestStore.SelectLetters2(connection, TestDict("id", originalId)).Single();
                     Check("legacy_inflight_eta_unchanged", Near(ReadDouble(persisted, "delivery_day", 0d), 105.3893225703d));
                     double legacyReplyBase = CorrespondenceTransitPolicy.ReplyBaseDays(0, 0d, 5.3893225703d);
                     Check("reply_to_legacy_parent_uses_new_speed_once", Near(CorrespondenceTransitPolicy.NewTransitDays(legacyReplyBase), 1.347330642575d));
@@ -73,8 +72,7 @@ namespace ReignBetaServer
                     Check("central_policy_urgent", ReadDouble(urgent, "deliveryDay", -1d) == 200d);
                     var scaled = InsertLetter(connection, "scaled", "Scaled", "player", "Player", "Slower courier.",
                         "npc_initiated", "scaled", "", "a", "b", 300d, 303d, TestDict(), 2d);
-                    var persistedScaled = ReignDatabase.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;",
-                        TestDict("id", ReadString(scaled, "letterId", ""))).Single();
+                    var persistedScaled = RelationshipsSelfTestStore.SelectLetters2(connection, TestDict("id", ReadString(scaled, "letterId", ""))).Single();
                     double scaledBase = CorrespondenceTransitPolicy.ReplyBaseDays(ReadInt(persistedScaled, "transit_policy_version", 0),
                         ReadDouble(persistedScaled, "base_transit_days", 0), 1.5d);
                     var fasterReply = InsertLetter(connection, "player", "Player", "scaled", "Scaled", "Faster return.",
@@ -107,10 +105,8 @@ namespace ReignBetaServer
                     .Any(x => ReadString(x, "letter_id", "") == deliveredId));
                 using (var reports = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    Check("completion_report_retry_preserves_one_body", ReignDatabase.QuerySql(reports,
-                        "SELECT * FROM letters WHERE source='campaign_command_report' AND reason='scout_report_receipt';",
-                        TestDict()).Count == 1);
-                    ReignDatabase.ExecuteSql(reports, "UPDATE letters SET status='read' WHERE letter_id=$id;", TestDict("id", deliveredId));
+                    Check("completion_report_retry_preserves_one_body", RelationshipsSelfTestStore.SelectLetters3(reports, TestDict()).Count == 1);
+                    RelationshipsSelfTestStore.UpdateLetters2(reports, TestDict("id", deliveredId));
                     var guidance = QueueImmediateCampaignOrderGuidanceAction(reports, campaign,
                         TestDict("campaignId", campaign), "player", "commander", "continue");
                     Check("completion_report_cannot_become_guidance_order", guidance.Count == 0);
@@ -121,18 +117,13 @@ namespace ReignBetaServer
                     && ReadString(readReplay, "status", "") == "read");
                 using (var reopened = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var original = ReignDatabase.QuerySql(reopened, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", originalId)).Single();
-                    var reply = ReignDatabase.QuerySql(reopened, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", replyId)).Single();
+                    var original = RelationshipsSelfTestStore.SelectLetters2(reopened, TestDict("id", originalId)).Single();
+                    var reply = RelationshipsSelfTestStore.SelectLetters2(reopened, TestDict("id", replyId)).Single();
                     Check("reopened_ledger_preserves_both_policy_generations", ReadInt(original, "transit_policy_version", -1) == 0
                         && Near(ReadDouble(original, "delivery_day", 0d), 105.3893225703d)
                         && ReadInt(reply, "transit_policy_version", 0) == CorrespondenceTransitPolicy.Version
                         && Near(ReadDouble(reply, "delivery_day", 0d), 103.347330642575d));
-                    ReignDatabase.ExecuteSql(reopened, @"INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,source,dispatch_day,created_ts,updated_ts)
-SELECT 'bulk_'||i,'bulk_thread','player','bulk','Fixture read body','read','player',400+i,i,i FROM generate_series(1,1001) AS i;
-INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,source,dispatch_day,created_ts,updated_ts) VALUES
-('old_unread','old_thread','old_contact','player','Old unread body','delivered','npc_initiated',1,1,1),
-('hidden_mail','hidden_thread','hidden_contact','player','Unseen body','in_transit','npc_introduction',5000,5000,5000),
-('foreign_mail','foreign_thread','other_npc','other_player','Private body','delivered','npc_initiated',6000,6000,6000);");
+                    RelationshipsSelfTestStore.InsertLetters(reopened);
                 }
                 var archive = CorrespondenceThreadsApi(TestDict("campaignId", campaign, "playerId", "player",
                     "contactIds", new[] { "bulk", "old_contact" }));
@@ -147,8 +138,7 @@ INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,sourc
                 Check("selected_old_contact_loads_its_own_letters", ReadDictionaryList(oldThread, "letters").Count == 1
                     && ReadString(ReadDictionaryList(oldThread, "letters")[0], "letter_id", "") == "old_unread");
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
-                    ReignDatabase.ExecuteSql(connection, "UPDATE letters SET payload_json=$payload WHERE letter_id IN ('old_unread','bulk_1001');",
-                        TestDict("payload", System.Text.Json.JsonSerializer.Serialize(TestDict("privatePrompt", new string('x', 1000000)))));
+                    RelationshipsSelfTestStore.UpdateLetters3(connection, TestDict("payload", System.Text.Json.JsonSerializer.Serialize(TestDict("privatePrompt", new string('x', 1000000)))));
                 var summariesOnly = CorrespondenceThreadsApi(TestDict("campaignId", campaign, "playerId", "player",
                     "contactIds", new[] { "bulk", "old_contact" }, "summaryOnly", true));
                 Check("opening_mailbox_returns_summaries_without_bodies", ReadDictionaryList(summariesOnly, "letters").Count == 0
@@ -156,11 +146,7 @@ INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,sourc
                     && ReadDictionaryList(summariesOnly, "contactStates").Count == summaries.Count
                     && System.Text.Json.JsonSerializer.Serialize(summariesOnly).Length < 10000);
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,source,dispatch_day,created_ts,updated_ts) VALUES
-('arranged_arrived','arranged_thread','unmet_leader','player','Marriage terms','delivered','reign_marriage_offer',5001,5001,5001),
-('arranged_courier','arranged_other_thread','unmet_other_leader','player','In transit','in_transit','reign_marriage_offer',5002,5002,5002),
-('arranged_answer','arranged_thread','player','unmet_leader','Signed answer','in_transit','reign_marriage_answer',5003,5003,5003),
-('arranged_meeting','arranged_thread','player','unmet_leader','Request to meet','read','reign_marriage_meeting',5004,5004,5004);");
+                    RelationshipsSelfTestStore.InsertLetters2(connection);
                 var marriageInbox = CorrespondenceThreadsApi(TestDict("campaignId", campaign, "playerId", "player",
                     "contactIds", new[] { "bulk" }, "summaryOnly", true));
                 var marriageContacts = ReadDictionaryList(marriageInbox, "contactStates");
@@ -182,7 +168,7 @@ INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,sourc
                     "letterIds", new[] { "old_unread", "old_unread", "hidden_mail", "foreign_mail", "missing", "bulk_1001" }));
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var statuses = ReignDatabase.QuerySql(connection, "SELECT letter_id,status,read_day,payload_json FROM letters WHERE letter_id IN ('old_unread','hidden_mail','foreign_mail','bulk_1001');");
+                    var statuses = RelationshipsSelfTestStore.SelectLetters4(connection);
                     Check("batch_read_is_idempotent_and_recipient_scoped", ReadBool(batchRead, "ok", false)
                         && statuses.Any(row => ReadString(row, "letter_id", "") == "old_unread" && ReadString(row, "status", "") == "read" && ReadDouble(row, "read_day", 0) == 7000d)
                         && statuses.Any(row => ReadString(row, "letter_id", "") == "hidden_mail" && ReadString(row, "status", "") == "in_transit")
@@ -191,8 +177,7 @@ INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,sourc
                 }
                 CorrespondenceReadApi(TestDict("campaignId", campaign, "playerId", "player", "worldDay", 7001d, "letterIds", new[] { "old_unread" }));
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
-                    Check("batch_read_retry_preserves_original_read_day", ReadDouble(ReignDatabase.QuerySql(connection,
-                        "SELECT read_day FROM letters WHERE letter_id='old_unread';").Single(), "read_day", 0) == 7000d);
+                    Check("batch_read_retry_preserves_original_read_day", ReadDouble(RelationshipsSelfTestStore.SelectLetters5(connection).Single(), "read_day", 0) == 7000d);
             }
             catch (Exception ex) { Check("suite_exception", false, Program.LimitText(ex.ToString(), 2000)); }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }

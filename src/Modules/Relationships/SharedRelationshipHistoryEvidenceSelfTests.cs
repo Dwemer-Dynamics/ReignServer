@@ -19,8 +19,7 @@ namespace ReignBetaServer
                 using var connection = ReignDatabase.OpenCampaignConnection(campaign);
                 string generation = ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "");
                 EnsureSharedRelationshipHistorySchema(connection);
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-VALUES('history_sources',$campaign,'a','player','closed',1,2,'[""a"",""b"",""player""]','{""timelineId"":""main""}');", TestDict("campaign", campaign));
+                RelationshipsSelfTestStore.InsertConversationSessions(connection, TestDict("campaign", campaign));
                 void Turn(string id, string speaker, string words, List<string> audience, int order, double day = 3d, string timeline = "main") =>
                     DialogueService.InsertConversationTurn(connection, id, "history_sources", id, order, id, "npc", speaker, speaker.ToUpperInvariant(), words,
                         "party_chat", day, 2, "", audience, TestDict("timelineId", timeline));
@@ -59,7 +58,7 @@ VALUES('history_sources',$campaign,'a','player','closed',1,2,'[""a"",""b"",""pla
                 var sent = InsertLetter(connection, "a", "A", "b", "B", "The orchard letter proposes a visit; it does not confirm one.",
                     "npc_initiated", "visit", "", "", "", 3d, 5d, TestDict("timelineId", "main"));
                 string letterId = ReadString(sent, "letterId", "");
-                ReignDatabase.ExecuteSql(connection, "UPDATE letters SET status='read',read_day=5,delivery_timeline_id='main' WHERE letter_id=$id;", TestDict("id", letterId));
+                RelationshipsSelfTestStore.UpdateLetters4(connection, TestDict("id", letterId));
                 var bounded = Program.CloneDictionary(context);
                 bounded["memoryAsOfAcceptedSequence"] = DialogueService.ReadAcceptedMemorySourceWatermark(connection);
                 var withLetter = RelationshipHistorySourceEvidence(connection, "a", "b", bounded, true);

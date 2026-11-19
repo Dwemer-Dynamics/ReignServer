@@ -31,57 +31,15 @@ namespace ReignBetaServer
 
         internal static void EnsureRelationshipAndCorrespondenceSchema(ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_interaction_receipts (
-    event_id TEXT NOT NULL,
-    subject_id TEXT NOT NULL,
-    target_id TEXT NOT NULL,
-    native_delta INTEGER NOT NULL DEFAULT 0,
-    world_day REAL NOT NULL DEFAULT 0,
-    reason TEXT NOT NULL DEFAULT '',
-    source TEXT NOT NULL DEFAULT '',
-    created_ts INTEGER NOT NULL,
-    PRIMARY KEY(event_id,subject_id,target_id)
-);");
+            RelationshipsSchema.CreateRelationshipInteractionReceipts(connection);
 
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS correspondence_threads (
-    thread_id TEXT PRIMARY KEY,
-    participant_a TEXT NOT NULL,
-    participant_b TEXT NOT NULL,
-    last_letter_id TEXT NOT NULL DEFAULT '',
-    last_activity_day REAL NOT NULL DEFAULT 0,
-    created_ts INTEGER NOT NULL,
-    updated_ts INTEGER NOT NULL,
-    UNIQUE(participant_a,participant_b)
-);");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS letters (
-    letter_id TEXT PRIMARY KEY,
-    thread_id TEXT NOT NULL,
-    sender_id TEXT NOT NULL,
-    sender_name TEXT NOT NULL DEFAULT '',
-    recipient_id TEXT NOT NULL,
-    recipient_name TEXT NOT NULL DEFAULT '',
-    body TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'in_transit',
-    source TEXT NOT NULL DEFAULT 'player',
-    reason TEXT NOT NULL DEFAULT '',
-    parent_letter_id TEXT NOT NULL DEFAULT '',
-    origin_id TEXT NOT NULL DEFAULT '',
-    destination_id TEXT NOT NULL DEFAULT '',
-    dispatch_day REAL NOT NULL DEFAULT 0,
-    delivery_day REAL NOT NULL DEFAULT 0,
-    delivered_day REAL NOT NULL DEFAULT 0,
-    read_day REAL NOT NULL DEFAULT 0,
-    relationship_evaluated INTEGER NOT NULL DEFAULT 0,
-    history_written INTEGER NOT NULL DEFAULT 0,
-    payload_json TEXT NOT NULL DEFAULT '{}',
-    created_ts INTEGER NOT NULL,
-    updated_ts INTEGER NOT NULL
-);");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_letters_delivery ON letters(status,delivery_day);");
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_letters_recipient ON letters(recipient_id,status,delivery_day DESC);");
+            RelationshipsSchema.CreateCorrespondenceThreads(connection);
+            RelationshipsSchema.CreateLetters(connection);
+            RelationshipsSchema.CreateIndexLettersDelivery(connection);
+            RelationshipsSchema.CreateIndexLettersRecipient(connection);
             // Defaults identify existing rows without changing their accepted ETA.
-            ReignDatabase.EnsureDatabaseColumn(connection, "letters", "transit_policy_version", "INTEGER NOT NULL DEFAULT 0");
-            ReignDatabase.EnsureDatabaseColumn(connection, "letters", "base_transit_days", "REAL NOT NULL DEFAULT 0");
+            RelationshipsSchema.EnsureColumnLettersTransitPolicyVersion(connection);
+            RelationshipsSchema.EnsureColumnLettersBaseTransitDays(connection);
             DialogueService.EnsureCorrespondenceMemorySchema(connection);
             EnsureCorrespondenceDeliverySchema(connection);
             DialogueService.EnsureConversationMotiveSchema(connection);
@@ -127,9 +85,7 @@ namespace ReignBetaServer
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             double worldDay = ReadDouble(payload, "worldDay", ReadDouble(payload, "campaignDay", 0d));
             {
-                Dictionary<string, object> priorEvaluation = ReignDatabase.QuerySql(connection,
-                    "SELECT * FROM relationship_interaction_receipts WHERE event_id=$event AND subject_id=$subject AND target_id=$target LIMIT 1;",
-                    new Dictionary<string, object> { ["event"] = eventId, ["subject"] = subjectId, ["target"] = targetId }).FirstOrDefault();
+                Dictionary<string, object> priorEvaluation = RelationshipsStore.SelectRelationshipInteractionReceipts2(connection, new Dictionary<string, object> { ["event"] = eventId, ["subject"] = subjectId, ["target"] = targetId }).FirstOrDefault();
                 if (priorEvaluation != null)
                 {
                     return new Dictionary<string, object>
@@ -145,9 +101,7 @@ namespace ReignBetaServer
                 }
                 int nativeDelta = DetermineSmallNativeRelationshipDelta(payload);
                 string pairKey = AmbientPairKey(subjectId, targetId);
-                Dictionary<string, object> chemistry = ReignDatabase.QuerySql(connection,
-                    "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                    new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
+                Dictionary<string, object> chemistry = RelationshipsStore.SelectRelationshipPairChemistry8(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
                 if (chemistry != null && nativeDelta != 0)
                 {
                     string timelineId = ReadString(payload, "timelineId", "main");
@@ -178,10 +132,7 @@ namespace ReignBetaServer
                         ReadFirstString(payload, "eventType", "type"))
                 };
                 applied["eventId"] = eventId;
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_interaction_receipts(
-event_id,subject_id,target_id,native_delta,world_day,reason,source,created_ts)
-VALUES($event,$subject,$target,$delta,$day,$reason,$source,$ts);",
-                    new Dictionary<string, object>
+                RelationshipsStore.InsertRelationshipInteractionReceipts(connection, new Dictionary<string, object>
                     {
                         ["event"] = eventId, ["subject"] = subjectId, ["target"] = targetId,
                         ["delta"] = nativeDelta, ["day"] = worldDay,
@@ -263,9 +214,7 @@ VALUES($event,$subject,$target,$delta,$day,$reason,$source,$ts);",
 
         private static Dictionary<string, object> EnsureRelationshipState(ReignDbConnection connection, string campaignId, string subjectId, string targetId, Dictionary<string, object> payload, long ts)
         {
-            Dictionary<string, object> existing = ReignDatabase.QuerySql(connection,
-                "SELECT * FROM relationships WHERE subject_id=$subject AND target_id=$target LIMIT 1;",
-                new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId }).FirstOrDefault();
+            Dictionary<string, object> existing = RelationshipsStore.SelectRelationships3(connection, new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId }).FirstOrDefault();
             if (existing != null) return existing;
 
             Dictionary<string, object> subject = Program.ReadJsonObject(Program.CharacterFile(campaignId, subjectId, "profile.json"));
@@ -299,10 +248,8 @@ VALUES($event,$subject,$target,$delta,$day,$reason,$source,$ts);",
                 ["ts"] = ts, ["payload"] = Json.Serialize(new Dictionary<string, object> { ["initializedFrom"] = "evidence_weighted_prior" })
             };
             foreach (string key in RelationshipFacetKeys) args[key] = ClampRelationship(initial[key]);
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationships(subject_id,target_id,trust,fear,respect,resentment,loyalty,debt,affection,rivalry,envy,attraction,jealousy,dependence,interest_alignment,native_relation,confidence_json,evidence_json,initialized_ts,last_eval_ts,last_updated_from_json,updated_ts,payload_json)
-VALUES($subject,$target,$trust,$fear,$respect,$resentment,$loyalty,$debt,$affection,$rivalry,$envy,$attraction,$jealousy,$dependence,$interest_alignment,$native,$confidence,$evidence,$ts,0,'[]',$ts,$payload);", args);
-            return ReignDatabase.QuerySql(connection, "SELECT * FROM relationships WHERE subject_id=$subject AND target_id=$target LIMIT 1;",
-                new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId }).First();
+            RelationshipsStore.InsertRelationships(connection, args);
+            return RelationshipsStore.SelectRelationships3(connection, new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId }).First();
         }
 
         private static Dictionary<string, double> BuildInitialRelationshipFacets(string subjectId, string targetId,
@@ -587,24 +534,20 @@ VALUES($subject,$target,$trust,$fear,$respect,$resentment,$loyalty,$debt,$affect
                 string kind = ReadString(item, "kind", "");
                 string operation = ReadString(item, "operation", "reinforce").ToLowerInvariant();
                 if (!RelationshipPressureKinds.Contains(kind)) continue;
-                Dictionary<string, object> existing = ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_pressures WHERE subject_id=$subject AND target_id=$target AND kind=$kind AND status='active' ORDER BY updated_ts DESC LIMIT 1;",
-                    new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId, ["kind"] = kind }).FirstOrDefault();
+                Dictionary<string, object> existing = RelationshipsStore.SelectRelationshipPressures2(connection, new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId, ["kind"] = kind }).FirstOrDefault();
                 double delta = Program.ClampDouble(ReadDouble(item, "intensityDelta", operation == "create" ? 25d : operation == "resolve" ? -100d : 10d), -100d, 100d);
                 if (existing == null && operation != "resolve")
                 {
                     string id = "rpr_" + Guid.NewGuid().ToString("N");
                     double intensity = Program.ClampDouble(Math.Max(0d, delta), 0d, 100d);
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_pressures(pressure_id,subject_id,target_id,kind,status,intensity,secrecy,summary,related_entities_json,trigger_json,evidence_json,created_day,updated_day,updated_ts,payload_json)
-VALUES($id,$subject,$target,$kind,'active',$intensity,$secrecy,$summary,$entities,$trigger,$evidence,$day,$day,$ts,$payload);",
-                        new Dictionary<string, object> { ["id"] = id, ["subject"] = subjectId, ["target"] = targetId, ["kind"] = kind, ["intensity"] = intensity, ["secrecy"] = Program.ClampDouble(ReadDouble(item, "secrecy", 0.5d), 0d, 1d), ["summary"] = ReadString(item, "summary", ""), ["entities"] = Json.Serialize(ReadStringList(item, "relatedEntityIds")), ["trigger"] = Json.Serialize(new Dictionary<string, object> { ["triggered"] = ReadBool(item, "triggered", false) }), ["evidence"] = Json.Serialize(new[] { eventId }), ["day"] = day, ["ts"] = ts, ["payload"] = Json.Serialize(item) });
+                    RelationshipsStore.InsertRelationshipPressures2(connection, new Dictionary<string, object> { ["id"] = id, ["subject"] = subjectId, ["target"] = targetId, ["kind"] = kind, ["intensity"] = intensity, ["secrecy"] = Program.ClampDouble(ReadDouble(item, "secrecy", 0.5d), 0d, 1d), ["summary"] = ReadString(item, "summary", ""), ["entities"] = Json.Serialize(ReadStringList(item, "relatedEntityIds")), ["trigger"] = Json.Serialize(new Dictionary<string, object> { ["triggered"] = ReadBool(item, "triggered", false) }), ["evidence"] = Json.Serialize(new[] { eventId }), ["day"] = day, ["ts"] = ts, ["payload"] = Json.Serialize(item) });
                     results.Add(new Dictionary<string, object> { ["kind"] = kind, ["operation"] = "created", ["intensity"] = intensity, ["pressureId"] = id });
                 }
                 else if (existing != null)
                 {
                     double intensity = Program.ClampDouble(ReadDouble(existing, "intensity", 0d) + delta, 0d, 100d);
                     string status = operation == "resolve" || intensity <= 0d ? "resolved" : "active";
-                    ReignDatabase.ExecuteSql(connection, "UPDATE relationship_pressures SET status=$status,intensity=$intensity,summary=$summary,updated_day=$day,updated_ts=$ts,payload_json=$payload WHERE pressure_id=$id;",
-                        new Dictionary<string, object> { ["status"] = status, ["intensity"] = intensity, ["summary"] = FirstNonEmpty(ReadString(item, "summary", ""), ReadString(existing, "summary", "")), ["day"] = day, ["ts"] = ts, ["payload"] = Json.Serialize(item), ["id"] = ReadString(existing, "pressure_id", "") });
+                    RelationshipsStore.UpdateRelationshipPressures(connection, new Dictionary<string, object> { ["status"] = status, ["intensity"] = intensity, ["summary"] = FirstNonEmpty(ReadString(item, "summary", ""), ReadString(existing, "summary", "")), ["day"] = day, ["ts"] = ts, ["payload"] = Json.Serialize(item), ["id"] = ReadString(existing, "pressure_id", "") });
                     results.Add(new Dictionary<string, object> { ["kind"] = kind, ["operation"] = status == "resolved" ? "resolved" : operation, ["intensity"] = intensity, ["pressureId"] = ReadString(existing, "pressure_id", "") });
                 }
             }
@@ -626,9 +569,7 @@ VALUES($id,$subject,$target,$kind,'active',$intensity,$secrecy,$summary,$entitie
                     ? day
                     : WorldSimulationService.LatestKnownWorldDay(connection, campaignId);
                 string pairKey = AmbientPairKey(subjectId, targetId);
-                Dictionary<string, object> chemistry = ReignDatabase.QuerySql(connection,
-                    "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                    new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
+                Dictionary<string, object> chemistry = RelationshipsStore.SelectRelationshipPairChemistry8(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
                 bool subjectIsA = chemistry != null && ReadString(chemistry, "hero_a_id", "")
                     .Equals(subjectId, StringComparison.OrdinalIgnoreCase);
                 Dictionary<string, object> effectiveAttitude = ResolveEffectiveAttitude(
@@ -645,9 +586,7 @@ VALUES($id,$subject,$target,$kind,'active',$intensity,$secrecy,$summary,$entitie
                 int compatibility = chemistry == null ? 0
                     : ReadInt(chemistry, subjectIsA ? "chance_a_to_b" : "chance_b_to_a", 0);
                 Dictionary<string, object> lifecycle = RelationshipLifecycleView(connection, subjectId, targetId);
-                List<Dictionary<string, object>> incidents = ReignDatabase.QuerySql(connection, @"SELECT kind,world_day,summary,rumor_id
-FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created_ts DESC LIMIT 12;",
-                    new Dictionary<string, object> { ["pair"] = pairKey });
+                List<Dictionary<string, object>> incidents = RelationshipsStore.SelectRelationshipIncidents(connection, new Dictionary<string, object> { ["pair"] = pairKey });
                 return new Dictionary<string, object>
                 {
                     ["ok"] = true, ["subjectId"] = subjectId, ["targetId"] = targetId,
@@ -795,7 +734,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
             string playerId = ReadFirstString(payload, "playerId", "playerHeroStringId");
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                List<Dictionary<string, object>> candidates = ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_developments WHERE status='ready' AND available_day<=$day AND (expires_day=0 OR expires_day>=$day) ORDER BY priority DESC,updated_ts ASC LIMIT 30;", new Dictionary<string, object> { ["day"] = day });
+                List<Dictionary<string, object>> candidates = RelationshipsStore.SelectRelationshipDevelopments2(connection, new Dictionary<string, object> { ["day"] = day });
                 Dictionary<string, object> selected = candidates.FirstOrDefault(row =>
                 {
                     string mode = ReadString(row, "delivery_mode", "in_person");
@@ -806,7 +745,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
                     return mode == "offscreen" && !subject.Equals(playerId, StringComparison.OrdinalIgnoreCase) && !target.Equals(playerId, StringComparison.OrdinalIgnoreCase);
                 });
                 if (selected == null) return new Dictionary<string, object> { ["ok"] = true, ["development"] = new Dictionary<string, object>() };
-                ReignDatabase.ExecuteSql(connection, "UPDATE relationship_developments SET status='claimed',claimed_day=$day,updated_ts=$ts WHERE development_id=$id AND status='ready';", new Dictionary<string, object> { ["day"] = day, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = ReadString(selected, "development_id", "") });
+                RelationshipsStore.UpdateRelationshipDevelopments(connection, new Dictionary<string, object> { ["day"] = day, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = ReadString(selected, "development_id", "") });
                 selected["status"] = "claimed";
                 return new Dictionary<string, object> { ["ok"] = true, ["development"] = selected };
             }
@@ -821,7 +760,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
             if (status != "resolved" && status != "deferred" && status != "cancelled") status = "resolved";
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                ReignDatabase.ExecuteSql(connection, "UPDATE relationship_developments SET status=$status,resolved_day=$day,payload_json=$payload,updated_ts=$ts WHERE development_id=$id;", new Dictionary<string, object> { ["status"] = status, ["day"] = ReadDouble(payload, "worldDay", 0d), ["payload"] = Json.Serialize(payload), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = id });
+                RelationshipsStore.UpdateRelationshipDevelopments2(connection, new Dictionary<string, object> { ["status"] = status, ["day"] = ReadDouble(payload, "worldDay", 0d), ["payload"] = Json.Serialize(payload), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = id });
             }
             return new Dictionary<string, object> { ["ok"] = true, ["developmentId"] = id, ["status"] = status };
         }
@@ -850,9 +789,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
                         || campaignReport || IsDeterministicMarriageLetter(source))
                     && !string.IsNullOrWhiteSpace(reason))
                 {
-                    Dictionary<string, object> existing = ReignDatabase.QuerySql(connection,
-                        "SELECT * FROM letters WHERE sender_id=$sender AND recipient_id=$recipient AND source=$source AND reason=$reason ORDER BY created_ts DESC,letter_id;",
-                        new Dictionary<string, object> { ["sender"] = senderId, ["recipient"] = recipientId, ["source"] = source, ["reason"] = reason })
+                    Dictionary<string, object> existing = RelationshipsStore.SelectLetters8(connection, new Dictionary<string, object> { ["sender"] = senderId, ["recipient"] = recipientId, ["source"] = source, ["reason"] = reason })
                         .FirstOrDefault(row => !IsDeterministicMarriageLetter(source)
                             || CorrespondenceDispatchOnTimeline(connection, row, ReadString(payload, "timelineId", "main")));
                     if (existing != null)
@@ -874,9 +811,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
                 if (campaignReport)
                 {
                     string letterId = ReadString(inserted, "letterId", "");
-                    ReignDatabase.ExecuteSql(connection,
-                        "UPDATE letters SET status='delivered',delivery_day=$day,delivered_day=$day,updated_ts=$ts WHERE letter_id=$id;",
-                        new Dictionary<string, object>
+                    RelationshipsStore.UpdateLetters2(connection, new Dictionary<string, object>
                         {
                             ["day"] = dispatchDay,
                             ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
@@ -885,9 +820,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
                     inserted["status"] = "delivered";
                     inserted["deliveryDay"] = dispatchDay;
                     inserted["deliveredDay"] = dispatchDay;
-                    Dictionary<string, object> delivered = ReignDatabase.QuerySql(connection,
-                        "SELECT * FROM letters WHERE letter_id=$id LIMIT 1;",
-                        new Dictionary<string, object> { ["id"] = letterId }).FirstOrDefault();
+                    Dictionary<string, object> delivered = RelationshipsStore.SelectLetters9(connection, new Dictionary<string, object> { ["id"] = letterId }).FirstOrDefault();
                     if (delivered != null) AppendDeliveredLetterHistory(campaignId, recipientId, delivered, dispatchDay);
                 }
                 List<Dictionary<string, object>> queuedActions = !DialogueService.UsesStructuredActions(payload) && source.Equals("player", StringComparison.OrdinalIgnoreCase)
@@ -945,12 +878,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
         {
             string response = NormalizeCampaignOrderGuidance(body);
             if (string.IsNullOrWhiteSpace(response)) return new List<Dictionary<string, object>>();
-            Dictionary<string, object> report = ReignDatabase.QuerySql(connection,
-                @"SELECT * FROM letters
-WHERE sender_id=$commander AND recipient_id=$player
-  AND source='campaign_command_urgent_report'
-ORDER BY dispatch_day DESC,created_ts DESC LIMIT 1;",
-                new Dictionary<string, object>
+            Dictionary<string, object> report = RelationshipsStore.SelectLetters10(connection, new Dictionary<string, object>
                 {
                     ["commander"] = commanderId,
                     ["player"] = playerId
@@ -1014,8 +942,7 @@ ORDER BY dispatch_day DESC,created_ts DESC LIMIT 1;",
             {
             if (source == "npc_reply" && !string.IsNullOrWhiteSpace(parentLetterId))
             {
-                var existing = ReignDatabase.QuerySql(connection, "SELECT * FROM letters WHERE parent_letter_id=$parent AND sender_id=$sender AND recipient_id=$recipient AND source='npc_reply' LIMIT 1;",
-                    new Dictionary<string, object> { ["parent"] = parentLetterId, ["sender"] = senderId, ["recipient"] = recipientId }).FirstOrDefault();
+                var existing = RelationshipsStore.SelectLetters11(connection, new Dictionary<string, object> { ["parent"] = parentLetterId, ["sender"] = senderId, ["recipient"] = recipientId }).FirstOrDefault();
                 if (existing != null)
                 {
                     transaction.Commit();
@@ -1027,11 +954,11 @@ ORDER BY dispatch_day DESC,created_ts DESC LIMIT 1;",
             }
             string a = string.Compare(senderId, recipientId, StringComparison.OrdinalIgnoreCase) <= 0 ? senderId : recipientId;
             string b = a == senderId ? recipientId : senderId;
-            Dictionary<string, object> thread = ReignDatabase.QuerySql(connection, "SELECT * FROM correspondence_threads WHERE participant_a=$a AND participant_b=$b LIMIT 1;", new Dictionary<string, object> { ["a"] = a, ["b"] = b }).FirstOrDefault();
+            Dictionary<string, object> thread = RelationshipsStore.SelectCorrespondenceThreads(connection, new Dictionary<string, object> { ["a"] = a, ["b"] = b }).FirstOrDefault();
             string threadId = thread == null ? "thread_" + Guid.NewGuid().ToString("N") : ReadString(thread, "thread_id", "");
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             if (thread == null)
-                ReignDatabase.ExecuteSql(connection, "INSERT INTO correspondence_threads(thread_id,participant_a,participant_b,last_activity_day,created_ts,updated_ts) VALUES($id,$a,$b,$day,$ts,$ts);", new Dictionary<string, object> { ["id"] = threadId, ["a"] = a, ["b"] = b, ["day"] = dispatchDay, ["ts"] = ts });
+                RelationshipsStore.InsertCorrespondenceThreads(connection, new Dictionary<string, object> { ["id"] = threadId, ["a"] = a, ["b"] = b, ["day"] = dispatchDay, ["ts"] = ts });
             string letterId = "letter_" + Guid.NewGuid().ToString("N");
             if (double.IsNaN(dispatchDay) || double.IsInfinity(dispatchDay)) throw new InvalidOperationException("Letter dispatch day must be finite.");
             bool immediate = string.Equals(source, "campaign_command_urgent_report", StringComparison.OrdinalIgnoreCase)
@@ -1039,13 +966,10 @@ ORDER BY dispatch_day DESC,created_ts DESC LIMIT 1;",
             double baseTransit = immediate ? 0d : CorrespondenceTransitPolicy.NormalizeBaseDays(deliveryDay - dispatchDay);
             deliveryDay = dispatchDay + CorrespondenceTransitPolicy.NewTransitDays(baseTransit, immediate,
                 travelTimeMultiplier ?? Program.CorrespondenceOption(Program.LoadSettings(), "correspondenceTravelTimeMultiplier"));
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO letters(letter_id,thread_id,sender_id,sender_name,recipient_id,recipient_name,body,status,source,reason,parent_letter_id,origin_id,destination_id,dispatch_day,delivery_day,payload_json,created_ts,updated_ts,transit_policy_version,base_transit_days)
-VALUES($id,$thread,$sender,$senderName,$recipient,$recipientName,$body,'in_transit',$source,$reason,$parent,$origin,$destination,$dispatch,$delivery,$payload,$ts,$ts,$policy,$baseTransit);",
-                new Dictionary<string, object> { ["id"] = letterId, ["thread"] = threadId, ["sender"] = senderId, ["senderName"] = senderName, ["recipient"] = recipientId, ["recipientName"] = recipientName, ["body"] = body, ["source"] = source, ["reason"] = reason, ["parent"] = parentLetterId, ["origin"] = originId, ["destination"] = destinationId, ["dispatch"] = dispatchDay, ["delivery"] = deliveryDay, ["payload"] = Json.Serialize(payload ?? new Dictionary<string, object>()), ["ts"] = ts,
+            RelationshipsStore.InsertLetters(connection, new Dictionary<string, object> { ["id"] = letterId, ["thread"] = threadId, ["sender"] = senderId, ["senderName"] = senderName, ["recipient"] = recipientId, ["recipientName"] = recipientName, ["body"] = body, ["source"] = source, ["reason"] = reason, ["parent"] = parentLetterId, ["origin"] = originId, ["destination"] = destinationId, ["dispatch"] = dispatchDay, ["delivery"] = deliveryDay, ["payload"] = Json.Serialize(payload ?? new Dictionary<string, object>()), ["ts"] = ts,
                     ["policy"] = CorrespondenceTransitPolicy.Version, ["baseTransit"] = baseTransit });
-            ReignDatabase.ExecuteSql(connection, "UPDATE correspondence_threads SET last_letter_id=$letter,last_activity_day=$day,updated_ts=$ts WHERE thread_id=$thread;", new Dictionary<string, object> { ["letter"] = letterId, ["day"] = dispatchDay, ["ts"] = ts, ["thread"] = threadId });
-            ReignDatabase.ExecuteSql(connection, "UPDATE letters SET timeline_id=$timeline,dispatch_sequence=nextval('memory_accepted_turn_sequence') WHERE letter_id=$id;",
-                new Dictionary<string, object> { ["timeline"] = WorldSimulationService.ActiveWorldHistoryTimeline(connection), ["id"] = letterId });
+            RelationshipsStore.UpdateCorrespondenceThreads(connection, new Dictionary<string, object> { ["letter"] = letterId, ["day"] = dispatchDay, ["ts"] = ts, ["thread"] = threadId });
+            RelationshipsStore.UpdateLetters3(connection, new Dictionary<string, object> { ["timeline"] = WorldSimulationService.ActiveWorldHistoryTimeline(connection), ["id"] = letterId });
             if ((source == "npc_reply" || source == "npc_initiated" || source == "npc_introduction" || source == "relationship_development") && ReadDictionaryList(payload, "continuityWrites").Count > 0)
             {
                 // Accepted composition belongs to the author. Recipient knowledge
@@ -1063,8 +987,7 @@ VALUES($id,$thread,$sender,$senderName,$recipient,$recipientName,$body,'in_trans
                     FirstNonEmpty(ReadString(payload, "agencyTurnId", ""), letterId), false);
                 if (!ReadBool(agencyReceipt, "ok", false)) throw new InvalidOperationException("The letter's negotiation became stale before dispatch.");
                 payload["conversationAgencyReceipt"] = agencyReceipt;
-                ReignDatabase.ExecuteSql(connection, "UPDATE letters SET payload_json=$payload WHERE letter_id=$id;",
-                    new Dictionary<string, object> { ["id"] = letterId, ["payload"] = Json.Serialize(payload) });
+                RelationshipsStore.UpdateLetters4(connection, new Dictionary<string, object> { ["id"] = letterId, ["payload"] = Json.Serialize(payload) });
             }
             transaction.Commit();
             return new Dictionary<string, object> { ["letterId"] = letterId, ["threadId"] = threadId, ["status"] = "in_transit", ["dispatchDay"] = dispatchDay, ["deliveryDay"] = deliveryDay,
@@ -1093,10 +1016,7 @@ VALUES($id,$thread,$sender,$senderName,$recipient,$recipientName,$body,'in_trans
                         + ") OR source IN ('campaign_command_urgent_report','campaign_command_report','npc_introduction',"
                         + "'reign_marriage_offer','reign_marriage_answer','reign_marriage_meeting'))";
                 }
-                var states = ReignDatabase.QuerySql(connection, @"SELECT DISTINCT ON (contact_id) contact_id,
-SUM(CASE WHEN recipient_id=$player AND status='delivered' THEN 1 ELSE 0 END) OVER (PARTITION BY contact_id) AS unread_count,status
-FROM (SELECT sender_id,recipient_id,status,dispatch_day,created_ts,letter_id,CASE WHEN sender_id=$player THEN recipient_id ELSE sender_id END AS contact_id
-FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,created_ts DESC,letter_id DESC;", parameters)
+                var states = RelationshipsStore.SelectLetters12(connection, where,parameters)
                     .Select(row => TestDict("contactId", ReadString(row, "contact_id", ""), "hasCorrespondence", true,
                         "unreadCount", ReadInt(row, "unread_count", 0), "status", ReadString(row, "status", ""))).ToList();
                 string correspondent = ReadString(payload, "correspondentId", "");
@@ -1109,8 +1029,7 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
                 // diagnostics stored in payload_json. Keep those in the ledger.
                 const string displayColumns = "letter_id,thread_id,sender_id,sender_name,recipient_id,recipient_name,body,status,source,reason,dispatch_day,delivery_day,delivered_day,read_day,created_ts";
                 var letters = ReadBool(payload, "summaryOnly", false) ? new List<Dictionary<string, object>>()
-                    : ReignDatabase.QuerySql(connection, "SELECT * FROM (SELECT " + displayColumns + " FROM letters WHERE " + where
-                        + " ORDER BY dispatch_day DESC,created_ts DESC,letter_id DESC LIMIT 1000) recent ORDER BY dispatch_day ASC,created_ts ASC,letter_id ASC;", parameters);
+                    : RelationshipsStore.SelectLetters13(connection, displayColumns, where,parameters);
                 return TestDict("ok", true, "letters", letters, "contactStates", states,
                     "unreadCount", states.Sum(row => ReadInt(row, "unreadCount", 0)));
             }
@@ -1323,15 +1242,14 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 if (letterIds.Count == 0)
-                    ReignDatabase.ExecuteSql(connection, "UPDATE letters SET status='read',read_day=$day,updated_ts=$ts WHERE letter_id=$id AND status='delivered';", new Dictionary<string, object> { ["day"] = day, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = letterId });
+                    RelationshipsStore.UpdateLetters5(connection, new Dictionary<string, object> { ["day"] = day, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = letterId });
                 else
                 {
                     string playerId = ReadString(payload, "playerId", "");
                     if (playerId.Length == 0) return TestDict("ok", false, "error", "A recipient is required for a batch read acknowledgment.");
                     var parameters = TestDict("day", day, "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds(), "player", playerId);
                     var ids = letterIds.Select((id, i) => { parameters["id" + i] = id; return "$id" + i; });
-                    ReignDatabase.ExecuteSql(connection, "UPDATE letters SET status='read',read_day=$day,updated_ts=$ts WHERE recipient_id=$player AND status='delivered' AND letter_id IN ("
-                        + string.Join(",", ids) + ");", parameters);
+                    RelationshipsStore.UpdateLetters6(connection, string.Join(",", ids),parameters);
                 }
             }
             return new Dictionary<string, object> { ["ok"] = true, ["letterId"] = letterId, ["status"] = "read" };

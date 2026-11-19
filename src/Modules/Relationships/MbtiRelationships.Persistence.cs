@@ -127,48 +127,13 @@ namespace ReignBetaServer
             }
             if (nativeTargetRows != null && nativeTargetRows.Count > 0)
             {
-                ExecutePostgreSqlJsonCommand(connection, @"
-WITH x AS (
-    SELECT * FROM jsonb_to_recordset(@rows) AS r(
-        pair text,actor text,targethero text,targetrelation integer,
-        observed integer,day double precision,ts bigint,requiresobservation integer)
-)
-INSERT INTO relationship_native_targets(
-pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,status,
-world_day,last_sync_day,attempt_count,claimed_ts,last_error,updated_ts,requires_observation)
-SELECT pair,actor,targethero,targetrelation,observed,'pending',day,
--1000,0,0,'',ts,COALESCE(requiresobservation,0) FROM x
-ON CONFLICT(pair_key) DO UPDATE SET
-hero_a_id=excluded.hero_a_id,hero_b_id=excluded.hero_b_id,
-observed_relation=excluded.observed_relation,world_day=excluded.world_day,
-requires_observation=GREATEST(relationship_native_targets.requires_observation,excluded.requires_observation),
-status='pending',
-revision=CASE
-    WHEN relationship_native_targets.target_relation
-        = excluded.target_relation
-    THEN relationship_native_targets.revision
-    ELSE relationship_native_targets.revision+1 END,
-attempt_count=CASE
-    WHEN relationship_native_targets.target_relation
-        = excluded.target_relation
-    THEN relationship_native_targets.attempt_count ELSE 0 END,
-claimed_ts=0,target_relation=excluded.target_relation,last_error='',
-updated_ts=excluded.updated_ts
-WHERE relationship_native_targets.target_relation
-        <> excluded.target_relation
-   OR relationship_native_targets.observed_relation
-         <> excluded.observed_relation
-   OR relationship_native_targets.requires_observation < excluded.requires_observation
-   OR relationship_native_targets.status NOT IN ('pending','claimed');",
+                ExecutePostgreSqlJsonCommand(connection, RelationshipsStore.SelectXSql,
                     PostgreSqlRelationshipRowsJson(nativeTargetRows));
             }
             if (nativeTargetDeletes != null
                 && nativeTargetDeletes.Count > 0)
             {
-                ExecutePostgreSqlJsonCommand(connection, @"
-DELETE FROM relationship_native_targets AS target
-USING jsonb_to_recordset(@rows) AS x(pair text)
-WHERE target.pair_key=x.pair;",
+                ExecutePostgreSqlJsonCommand(connection, RelationshipsStore.DeleteRelationshipNativeTargetsSql,
                     PostgreSqlRelationshipRowsJson(nativeTargetDeletes));
             }
         }
@@ -185,26 +150,7 @@ WHERE target.pair_key=x.pair;",
             using (NpgsqlCommand setup = postgreSql.CreateCommand())
             {
                 setup.CommandTimeout = 60;
-                setup.CommandText = @"
-CREATE TEMP TABLE IF NOT EXISTS relationship_pair_chemistry_stage(
-pair text NOT NULL,a text NOT NULL,b text NOT NULL,
-typea text NOT NULL,typeb text NOT NULL,axesa text NOT NULL,
-axesb text NOT NULL,baseab bigint NOT NULL,baseba bigint NOT NULL,
-chanceab bigint NOT NULL,chanceba bigint NOT NULL,
-affinityab bigint NOT NULL,affinityba bigint NOT NULL,
-signalab bigint NOT NULL,signalba bigint NOT NULL,
-tagab text NOT NULL,tagba text NOT NULL,shared text NOT NULL,
-firstday bigint NOT NULL,lastday bigint NOT NULL,
-consecutive bigint NOT NULL,weighted double precision NOT NULL,
-kind text NOT NULL,contextid text NOT NULL,rollab bigint NOT NULL,
-rollba bigint NOT NULL,deltaab bigint NOT NULL,deltaba bigint NOT NULL,
-projected bigint NOT NULL,nativeday double precision NOT NULL,
-pending bigint NOT NULL,actionid text NOT NULL,shard bigint NOT NULL,
-presenceday bigint NOT NULL,batchsize bigint NOT NULL,
-presencemask bigint NOT NULL,decayperiod bigint NOT NULL,
-version bigint NOT NULL,updatedts bigint NOT NULL)
-ON COMMIT DELETE ROWS;
-TRUNCATE relationship_pair_chemistry_stage;";
+                setup.CommandText = RelationshipsSchema.CreateRelationshipPairChemistryStageSql;
                 setup.ExecuteNonQuery();
             }
 
@@ -314,119 +260,7 @@ FROM STDIN (FORMAT BINARY)"))
             using (NpgsqlCommand merge = postgreSql.CreateCommand())
             {
                 merge.CommandTimeout = 60;
-                merge.CommandText = @"
-INSERT INTO relationship_pair_chemistry(
-pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,axes_a_json,axes_b_json,
-base_chance_a_to_b,base_chance_b_to_a,chance_a_to_b,chance_b_to_a,
-affinity_a_to_b,affinity_b_to_a,signal_a_to_b,signal_b_to_a,
-tag_a_to_b,tag_b_to_a,shared_tag,first_day,last_day,consecutive_days,
-weighted_exposure,last_context_kind,last_context_id,last_roll_a_to_b,
-last_roll_b_to_a,last_delta_a_to_b,last_delta_b_to_a,
-projected_native_relation,last_native_sync_day,native_action_pending,
-native_action_id,processing_shard,last_presence_day,last_batch_size,
-last_presence_mask,last_decay_period,compatibility_version,state_revision,
-updated_ts)
-SELECT pair,a,b,typea,typeb,axesa,axesb,baseab,baseba,chanceab,chanceba,
-affinityab,affinityba,signalab,signalba,tagab,tagba,shared,
-firstday,lastday,consecutive,weighted,kind,contextid,rollab,rollba,
-deltaab,deltaba,projected,nativeday,pending,actionid,shard,presenceday,
-batchsize,presencemask,decayperiod,version,1,updatedts
-FROM relationship_pair_chemistry_stage
-ON CONFLICT(pair_key) DO UPDATE SET
-mbti_a=excluded.mbti_a,mbti_b=excluded.mbti_b,
-axes_a_json=excluded.axes_a_json,axes_b_json=excluded.axes_b_json,
-base_chance_a_to_b=excluded.base_chance_a_to_b,
-base_chance_b_to_a=excluded.base_chance_b_to_a,
-chance_a_to_b=excluded.chance_a_to_b,
-chance_b_to_a=excluded.chance_b_to_a,
-affinity_a_to_b=excluded.affinity_a_to_b,
-affinity_b_to_a=excluded.affinity_b_to_a,
-signal_a_to_b=excluded.signal_a_to_b,
-signal_b_to_a=excluded.signal_b_to_a,
-tag_a_to_b=excluded.tag_a_to_b,tag_b_to_a=excluded.tag_b_to_a,
-shared_tag=excluded.shared_tag,last_day=excluded.last_day,
-consecutive_days=excluded.consecutive_days,
-weighted_exposure=excluded.weighted_exposure,
-last_context_kind=excluded.last_context_kind,
-last_context_id=excluded.last_context_id,
-last_roll_a_to_b=excluded.last_roll_a_to_b,
-last_roll_b_to_a=excluded.last_roll_b_to_a,
-last_delta_a_to_b=excluded.last_delta_a_to_b,
-last_delta_b_to_a=excluded.last_delta_b_to_a,
-projected_native_relation=excluded.projected_native_relation,
-last_native_sync_day=excluded.last_native_sync_day,
-native_action_pending=excluded.native_action_pending,
-native_action_id=excluded.native_action_id,
-processing_shard=excluded.processing_shard,
-last_presence_day=excluded.last_presence_day,
-last_batch_size=excluded.last_batch_size,
-last_presence_mask=excluded.last_presence_mask,
-last_decay_period=CASE
-    WHEN relationship_pair_chemistry.affinity_a_to_b
-            <> excluded.affinity_a_to_b
-      OR relationship_pair_chemistry.affinity_b_to_a
-            <> excluded.affinity_b_to_a
-    THEN excluded.last_decay_period
-    ELSE relationship_pair_chemistry.last_decay_period END,
-compatibility_version=excluded.compatibility_version,
-state_revision=relationship_pair_chemistry.state_revision+1,
-updated_ts=excluded.updated_ts
-WHERE (relationship_pair_chemistry.mbti_a,
-       relationship_pair_chemistry.mbti_b,
-       relationship_pair_chemistry.axes_a_json,
-       relationship_pair_chemistry.axes_b_json,
-       relationship_pair_chemistry.base_chance_a_to_b,
-       relationship_pair_chemistry.base_chance_b_to_a,
-       relationship_pair_chemistry.chance_a_to_b,
-       relationship_pair_chemistry.chance_b_to_a,
-       relationship_pair_chemistry.affinity_a_to_b,
-       relationship_pair_chemistry.affinity_b_to_a,
-       relationship_pair_chemistry.signal_a_to_b,
-       relationship_pair_chemistry.signal_b_to_a,
-       relationship_pair_chemistry.tag_a_to_b,
-       relationship_pair_chemistry.tag_b_to_a,
-       relationship_pair_chemistry.shared_tag,
-       relationship_pair_chemistry.last_day,
-       relationship_pair_chemistry.consecutive_days,
-       relationship_pair_chemistry.weighted_exposure,
-       relationship_pair_chemistry.last_context_kind,
-       relationship_pair_chemistry.last_context_id,
-       relationship_pair_chemistry.last_roll_a_to_b,
-       relationship_pair_chemistry.last_roll_b_to_a,
-       relationship_pair_chemistry.last_delta_a_to_b,
-       relationship_pair_chemistry.last_delta_b_to_a,
-       relationship_pair_chemistry.projected_native_relation,
-       relationship_pair_chemistry.last_native_sync_day,
-       relationship_pair_chemistry.native_action_pending,
-       relationship_pair_chemistry.native_action_id,
-       relationship_pair_chemistry.processing_shard,
-       relationship_pair_chemistry.last_presence_day,
-       relationship_pair_chemistry.last_batch_size,
-       relationship_pair_chemistry.last_presence_mask,
-       relationship_pair_chemistry.compatibility_version)
-IS DISTINCT FROM
-      (excluded.mbti_a,excluded.mbti_b,excluded.axes_a_json,
-       excluded.axes_b_json,excluded.base_chance_a_to_b,
-       excluded.base_chance_b_to_a,excluded.chance_a_to_b,
-       excluded.chance_b_to_a,excluded.affinity_a_to_b,
-       excluded.affinity_b_to_a,excluded.signal_a_to_b,
-       excluded.signal_b_to_a,excluded.tag_a_to_b,
-       excluded.tag_b_to_a,excluded.shared_tag,excluded.last_day,
-       excluded.consecutive_days,excluded.weighted_exposure,
-       excluded.last_context_kind,excluded.last_context_id,
-       excluded.last_roll_a_to_b,excluded.last_roll_b_to_a,
-       excluded.last_delta_a_to_b,excluded.last_delta_b_to_a,
-       excluded.projected_native_relation,
-       excluded.last_native_sync_day,excluded.native_action_pending,
-       excluded.native_action_id,excluded.processing_shard,
-       excluded.last_presence_day,excluded.last_batch_size,
-       excluded.last_presence_mask,excluded.compatibility_version)
-OR ((relationship_pair_chemistry.affinity_a_to_b
-        <> excluded.affinity_a_to_b
-     OR relationship_pair_chemistry.affinity_b_to_a
-        <> excluded.affinity_b_to_a)
-    AND relationship_pair_chemistry.last_decay_period
-        IS DISTINCT FROM excluded.last_decay_period);";
+                merge.CommandText = RelationshipsStore.UpsertRelationshipPairChemistrySql;
                 written = merge.ExecuteNonQuery();
             }
             mergeTimer.Stop();
@@ -455,52 +289,13 @@ OR ((relationship_pair_chemistry.affinity_a_to_b
                     item => item.Key.ToLowerInvariant(),
                     item => item.Value,
                     StringComparer.OrdinalIgnoreCase)).ToList());
-            ReignDatabase.ExecuteSql(connection, @"
-WITH x AS (
-    SELECT * FROM jsonb_to_recordset(CAST($rows AS jsonb)) AS r(
-        campaign text,timeline text,pair text,source text,required integer,
-        day double precision,details text,ts bigint)
-)
-INSERT INTO relationship_pair_provenance(
-campaign_id,timeline_id,pair_key,source,active,required,first_day,last_day,
-details_json,updated_ts)
-SELECT campaign,timeline,pair,source,1,required,day,day,details,ts FROM x
-ON CONFLICT(campaign_id,timeline_id,pair_key,source) DO UPDATE SET
-active=1,required=excluded.required,last_day=excluded.last_day,
-details_json=excluded.details_json,updated_ts=excluded.updated_ts
-WHERE relationship_pair_provenance.active<>1
-OR relationship_pair_provenance.required<>excluded.required
-OR relationship_pair_provenance.last_day<>excluded.last_day
-OR relationship_pair_provenance.details_json<>excluded.details_json;",
-                new Dictionary<string, object> { ["rows"] = json });
+            RelationshipsStore.SelectX(connection, new Dictionary<string, object> { ["rows"] = json });
             rows.Clear();
         }
 
         private static ReignDbCommand CreateRelationshipPairUpsertCommand(ReignDbConnection connection)
         {
-            return CreatePreparedRelationshipCommand(connection, @"INSERT INTO relationship_pair_chemistry(
-pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,axes_a_json,axes_b_json,base_chance_a_to_b,base_chance_b_to_a,
-chance_a_to_b,chance_b_to_a,affinity_a_to_b,affinity_b_to_a,signal_a_to_b,signal_b_to_a,tag_a_to_b,tag_b_to_a,
- shared_tag,first_day,last_day,consecutive_days,weighted_exposure,last_context_kind,last_context_id,last_roll_a_to_b,
- last_roll_b_to_a,last_delta_a_to_b,last_delta_b_to_a,projected_native_relation,last_native_sync_day,native_action_pending,
- native_action_id,processing_shard,last_presence_day,last_batch_size,last_presence_mask,last_decay_period,compatibility_version,
- state_revision,updated_ts)
- VALUES($pair,$a,$b,$typeA,$typeB,$axesA,$axesB,$baseAB,$baseBA,$chanceAB,$chanceBA,$affinityAB,$affinityBA,$signalAB,
- $signalBA,$tagAB,$tagBA,$shared,$first,$last,$consecutive,$weighted,$kind,$context,$rollAB,$rollBA,$deltaAB,$deltaBA,
- $projected,$nativeDay,$pending,$action,$shard,$presenceDay,$batchSize,$presenceMask,$decayPeriod,$version,1,$ts)
-ON CONFLICT(pair_key) DO UPDATE SET mbti_a=$typeA,mbti_b=$typeB,axes_a_json=$axesA,axes_b_json=$axesB,
-base_chance_a_to_b=$baseAB,base_chance_b_to_a=$baseBA,chance_a_to_b=$chanceAB,chance_b_to_a=$chanceBA,
-affinity_a_to_b=$affinityAB,affinity_b_to_a=$affinityBA,signal_a_to_b=$signalAB,signal_b_to_a=$signalBA,
-tag_a_to_b=$tagAB,tag_b_to_a=$tagBA,shared_tag=$shared,last_day=$last,consecutive_days=$consecutive,
-weighted_exposure=$weighted,last_context_kind=$kind,last_context_id=$context,last_roll_a_to_b=$rollAB,
- last_roll_b_to_a=$rollBA,last_delta_a_to_b=$deltaAB,last_delta_b_to_a=$deltaBA,
- projected_native_relation=$projected,last_native_sync_day=$nativeDay,native_action_pending=$pending,native_action_id=$action,
- processing_shard=$shard,last_presence_day=$presenceDay,last_batch_size=$batchSize,last_presence_mask=$presenceMask,
- last_decay_period=CASE WHEN relationship_pair_chemistry.affinity_a_to_b<>$affinityAB
- OR relationship_pair_chemistry.affinity_b_to_a<>$affinityBA
- THEN $decayPeriod ELSE relationship_pair_chemistry.last_decay_period END,
- compatibility_version=$version,
- state_revision=relationship_pair_chemistry.state_revision+1,updated_ts=$ts;",
+            return CreatePreparedRelationshipCommand(connection, RelationshipsStore.UpsertRelationshipPairChemistrySql2,
                 "$pair", "$a", "$b", "$typeA", "$typeB", "$axesA", "$axesB",
                 "$baseAB", "$baseBA", "$chanceAB", "$chanceBA", "$affinityAB", "$affinityBA",
                 "$signalAB", "$signalBA", "$tagAB", "$tagBA", "$shared", "$first", "$last",
@@ -513,49 +308,7 @@ weighted_exposure=$weighted,last_context_kind=$kind,last_context_id=$context,las
         private static ReignDbCommand CreateOpeningRelationshipPairUpsertCommand(
             ReignDbConnection connection)
         {
-            return CreatePreparedRelationshipCommand(connection, @"INSERT INTO relationship_pair_chemistry(
-pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,base_chance_a_to_b,
-base_chance_b_to_a,chance_a_to_b,chance_b_to_a,affinity_a_to_b,
-affinity_b_to_a,social_modifier_a_to_b,social_modifier_b_to_a,
-effective_affinity_a_to_b,effective_affinity_b_to_a,tag_a_to_b,tag_b_to_a,
-first_day,last_day,processing_shard,last_presence_day,
-projected_native_relation,native_action_pending,native_action_id,
-compatibility_version,opening_seed_version,opening_seed_baseline,
-opening_seed_chance_a_to_b,opening_seed_chance_b_to_a,
-opening_seed_sign_roll_a_to_b,opening_seed_sign_roll_b_to_a,
-opening_seed_magnitude_roll_a_to_b,opening_seed_magnitude_roll_b_to_a,
-opening_seed_delta_a_to_b,opening_seed_delta_b_to_a,
-opening_seed_affinity_a_to_b,opening_seed_affinity_b_to_a,
-  opening_seed_eligible,opening_seed_provenance,last_decay_period,
-  state_revision,updated_ts)
-VALUES($pair,$a,$b,$typeA,$typeB,$baseAB,$baseBA,$chanceAB,$chanceBA,
-$affinityAB,$affinityBA,$standingB,$standingA,$effectiveAB,$effectiveBA,
-$tagAB,$tagBA,$day,$last,$shard,-1,$projected,$pending,$action,$version,
-$seedVersion,$baseline,$chanceAB,$chanceBA,$signAB,$signBA,$magnitudeAB,
-$magnitudeBA,$deltaAB,$deltaBA,$affinityAB,$affinityBA,$eligible,
- $provenance,$decayPeriod,1,$ts)
-ON CONFLICT(pair_key) DO UPDATE SET
-mbti_a=$typeA,mbti_b=$typeB,base_chance_a_to_b=$baseAB,
-base_chance_b_to_a=$baseBA,chance_a_to_b=$chanceAB,chance_b_to_a=$chanceBA,
-affinity_a_to_b=$affinityAB,affinity_b_to_a=$affinityBA,
-social_modifier_a_to_b=$standingB,social_modifier_b_to_a=$standingA,
-effective_affinity_a_to_b=$effectiveAB,effective_affinity_b_to_a=$effectiveBA,
-tag_a_to_b=$tagAB,tag_b_to_a=$tagBA,last_day=$last,
-processing_shard=$shard,projected_native_relation=$projected,
-native_action_pending=$pending,native_action_id=$action,
-compatibility_version=$version,opening_seed_version=$seedVersion,
-opening_seed_baseline=$baseline,opening_seed_chance_a_to_b=$chanceAB,
-opening_seed_chance_b_to_a=$chanceBA,opening_seed_sign_roll_a_to_b=$signAB,
-opening_seed_sign_roll_b_to_a=$signBA,
-opening_seed_magnitude_roll_a_to_b=$magnitudeAB,
-opening_seed_magnitude_roll_b_to_a=$magnitudeBA,
-opening_seed_delta_a_to_b=$deltaAB,opening_seed_delta_b_to_a=$deltaBA,
-opening_seed_affinity_a_to_b=$affinityAB,
-opening_seed_affinity_b_to_a=$affinityBA,
- opening_seed_eligible=$eligible,opening_seed_provenance=$provenance,
- last_decay_period=$decayPeriod,
-state_revision=relationship_pair_chemistry.state_revision+1,updated_ts=$ts
-WHERE relationship_pair_chemistry.opening_seed_version<$seedVersion;",
+            return CreatePreparedRelationshipCommand(connection, RelationshipsStore.UpsertRelationshipPairChemistrySql3,
                 "$pair", "$a", "$b", "$typeA", "$typeB", "$baseAB",
                 "$baseBA", "$chanceAB", "$chanceBA", "$affinityAB",
                 "$affinityBA", "$standingA", "$standingB", "$effectiveAB",
@@ -570,17 +323,7 @@ WHERE relationship_pair_chemistry.opening_seed_version<$seedVersion;",
             CreateOpeningRelationshipProvenanceUpsertCommand(
                 ReignDbConnection connection)
         {
-            return CreatePreparedRelationshipCommand(connection, @"
-INSERT INTO relationship_pair_provenance(
-campaign_id,timeline_id,pair_key,source,active,required,first_day,last_day,
-details_json,updated_ts)
-VALUES($campaign,$timeline,$pair,$source,1,$required,$day,$day,$details,$ts)
-ON CONFLICT(campaign_id,timeline_id,pair_key,source) DO UPDATE SET
-active=1,required=$required,last_day=$day,details_json=$details,updated_ts=$ts
-WHERE relationship_pair_provenance.active<>1
-OR relationship_pair_provenance.required<>$required
-OR relationship_pair_provenance.last_day<>$day
-OR relationship_pair_provenance.details_json<>$details;",
+            return CreatePreparedRelationshipCommand(connection, RelationshipsStore.UpsertRelationshipPairProvenanceSql,
                 "$campaign", "$timeline", "$pair", "$source", "$required",
                 "$day", "$details", "$ts");
         }
@@ -656,143 +399,28 @@ OR relationship_pair_provenance.details_json<>$details;",
                         StringComparer.OrdinalIgnoreCase)).ToList());
             if (pairRows != null && pairRows.Count > 0)
             {
-                ReignDatabase.ExecuteSql(connection, @"
-WITH x AS (
-    SELECT * FROM jsonb_to_recordset(CAST($rows AS jsonb)) AS r(
-        pair text,a text,b text,typea text,typeb text,baseab integer,
-        baseba integer,chanceab integer,chanceba integer,affinityab integer,
-        affinityba integer,standinga integer,standingb integer,
-        effectiveab integer,effectiveba integer,tagab text,tagba text,
-        day integer,last integer,shard integer,projected integer,
-        pending integer,action text,version integer,seedversion integer,
-        baseline integer,signab integer,signba integer,magnitudeab integer,
-        magnitudeba integer,deltaab integer,deltaba integer,eligible integer,
-        provenance text,decayperiod integer,ts bigint)
-)
-INSERT INTO relationship_pair_chemistry(
-pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,base_chance_a_to_b,
-base_chance_b_to_a,chance_a_to_b,chance_b_to_a,affinity_a_to_b,
-affinity_b_to_a,social_modifier_a_to_b,social_modifier_b_to_a,
-effective_affinity_a_to_b,effective_affinity_b_to_a,tag_a_to_b,tag_b_to_a,
-first_day,last_day,processing_shard,last_presence_day,
-projected_native_relation,native_action_pending,native_action_id,
-compatibility_version,opening_seed_version,opening_seed_baseline,
-opening_seed_chance_a_to_b,opening_seed_chance_b_to_a,
-opening_seed_sign_roll_a_to_b,opening_seed_sign_roll_b_to_a,
-opening_seed_magnitude_roll_a_to_b,opening_seed_magnitude_roll_b_to_a,
-opening_seed_delta_a_to_b,opening_seed_delta_b_to_a,
-opening_seed_affinity_a_to_b,opening_seed_affinity_b_to_a,
- opening_seed_eligible,opening_seed_provenance,last_decay_period,
- state_revision,updated_ts)
-SELECT pair,a,b,typea,typeb,baseab,baseba,chanceab,chanceba,affinityab,
-affinityba,standingb,standinga,effectiveab,effectiveba,tagab,tagba,
-day,last,shard,-1,projected,pending,action,version,seedversion,baseline,
-chanceab,chanceba,signab,signba,magnitudeab,magnitudeba,deltaab,deltaba,
- affinityab,affinityba,eligible,provenance,decayperiod,1,ts
-FROM x
-ON CONFLICT(pair_key) DO UPDATE SET
-mbti_a=excluded.mbti_a,mbti_b=excluded.mbti_b,
-base_chance_a_to_b=excluded.base_chance_a_to_b,
-base_chance_b_to_a=excluded.base_chance_b_to_a,
-chance_a_to_b=excluded.chance_a_to_b,chance_b_to_a=excluded.chance_b_to_a,
-affinity_a_to_b=excluded.affinity_a_to_b,
-affinity_b_to_a=excluded.affinity_b_to_a,
-social_modifier_a_to_b=excluded.social_modifier_a_to_b,
-social_modifier_b_to_a=excluded.social_modifier_b_to_a,
-effective_affinity_a_to_b=excluded.effective_affinity_a_to_b,
-effective_affinity_b_to_a=excluded.effective_affinity_b_to_a,
-tag_a_to_b=excluded.tag_a_to_b,tag_b_to_a=excluded.tag_b_to_a,
-last_day=excluded.last_day,processing_shard=excluded.processing_shard,
-projected_native_relation=excluded.projected_native_relation,
-native_action_pending=excluded.native_action_pending,
-native_action_id=excluded.native_action_id,
-compatibility_version=excluded.compatibility_version,
-opening_seed_version=excluded.opening_seed_version,
-opening_seed_baseline=excluded.opening_seed_baseline,
-opening_seed_chance_a_to_b=excluded.opening_seed_chance_a_to_b,
-opening_seed_chance_b_to_a=excluded.opening_seed_chance_b_to_a,
-opening_seed_sign_roll_a_to_b=excluded.opening_seed_sign_roll_a_to_b,
-opening_seed_sign_roll_b_to_a=excluded.opening_seed_sign_roll_b_to_a,
-opening_seed_magnitude_roll_a_to_b=excluded.opening_seed_magnitude_roll_a_to_b,
-opening_seed_magnitude_roll_b_to_a=excluded.opening_seed_magnitude_roll_b_to_a,
-opening_seed_delta_a_to_b=excluded.opening_seed_delta_a_to_b,
-opening_seed_delta_b_to_a=excluded.opening_seed_delta_b_to_a,
-opening_seed_affinity_a_to_b=excluded.opening_seed_affinity_a_to_b,
-opening_seed_affinity_b_to_a=excluded.opening_seed_affinity_b_to_a,
- opening_seed_eligible=excluded.opening_seed_eligible,
- opening_seed_provenance=excluded.opening_seed_provenance,
- last_decay_period=excluded.last_decay_period,
-state_revision=relationship_pair_chemistry.state_revision+1,
-updated_ts=excluded.updated_ts
-WHERE relationship_pair_chemistry.opening_seed_version
-    < excluded.opening_seed_version;",
-                    new Dictionary<string, object>
+                RelationshipsStore.SelectX2(connection, new Dictionary<string, object>
                     {
                         ["rows"] = jsonRows(pairRows)
                     });
             }
             if (provenanceRows != null && provenanceRows.Count > 0)
             {
-                ReignDatabase.ExecuteSql(connection, @"
-WITH x AS (
-    SELECT * FROM jsonb_to_recordset(CAST($rows AS jsonb)) AS r(
-        campaign text,timeline text,pair text,source text,required integer,
-        day double precision,details text,ts bigint)
-)
-INSERT INTO relationship_pair_provenance(
-campaign_id,timeline_id,pair_key,source,active,required,first_day,last_day,
-details_json,updated_ts)
-SELECT campaign,timeline,pair,source,1,required,day,day,details,ts FROM x
-ON CONFLICT(campaign_id,timeline_id,pair_key,source) DO UPDATE SET
-active=1,required=excluded.required,last_day=excluded.last_day,
-details_json=excluded.details_json,updated_ts=excluded.updated_ts
-WHERE relationship_pair_provenance.active<>1
-OR relationship_pair_provenance.required<>excluded.required
-OR relationship_pair_provenance.last_day<>excluded.last_day
-OR relationship_pair_provenance.details_json<>excluded.details_json;",
-                    new Dictionary<string, object>
+                RelationshipsStore.SelectX(connection, new Dictionary<string, object>
                     {
                         ["rows"] = jsonRows(provenanceRows)
                     });
             }
             if (nativeTargetRows != null && nativeTargetRows.Count > 0)
             {
-                ReignDatabase.ExecuteSql(connection, @"
-WITH x AS (
-    SELECT * FROM jsonb_to_recordset(CAST($rows AS jsonb)) AS r(
-        pair text,actor text,targethero text,targetrelation integer,
-        observed integer,day double precision,ts bigint)
-)
-INSERT INTO relationship_native_targets(
-pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,status,
-world_day,last_sync_day,attempt_count,claimed_ts,last_error,updated_ts)
-SELECT pair,actor,targethero,targetrelation,observed,'pending',day,
--1000,0,0,'',ts FROM x
-ON CONFLICT(pair_key) DO UPDATE SET
-hero_a_id=excluded.hero_a_id,hero_b_id=excluded.hero_b_id,
-observed_relation=excluded.observed_relation,world_day=excluded.world_day,
-status='pending',
-revision=CASE
-    WHEN relationship_native_targets.target_relation=excluded.target_relation
-    THEN relationship_native_targets.revision
-    ELSE relationship_native_targets.revision+1 END,
-attempt_count=CASE
-    WHEN relationship_native_targets.target_relation=excluded.target_relation
-    THEN relationship_native_targets.attempt_count ELSE 0 END,
-claimed_ts=0,target_relation=excluded.target_relation,last_error='',
-updated_ts=excluded.updated_ts;",
-                    new Dictionary<string, object>
+                RelationshipsStore.SelectX3(connection, new Dictionary<string, object>
                     {
                         ["rows"] = jsonRows(nativeTargetRows)
                     });
             }
             if (nativeTargetDeletes != null && nativeTargetDeletes.Count > 0)
             {
-                ReignDatabase.ExecuteSql(connection, @"
-DELETE FROM relationship_native_targets
-WHERE pair_key IN (
-    SELECT value FROM jsonb_array_elements_text(CAST($pairs AS jsonb)));",
-                    new Dictionary<string, object>
+                RelationshipsStore.DeleteRelationshipNativeTargets(connection, new Dictionary<string, object>
                     {
                         ["pairs"] = Json.Serialize(nativeTargetDeletes)
                     });
@@ -814,8 +442,7 @@ WHERE pair_key IN (
                     {
                         cached = new ConcurrentDictionary<string,
                             Dictionary<string, object>>(
-                                ReignDatabase.QuerySql(connection,
-                                    "SELECT * FROM relationship_pair_chemistry;")
+                                RelationshipsStore.SelectRelationshipPairChemistry9(connection)
                                 .Where(row => !string.IsNullOrWhiteSpace(
                                     ReadString(row, "pair_key", "")))
                                 .ToDictionary(row => ReadString(row,
@@ -1011,23 +638,7 @@ WHERE pair_key IN (
         private static ReignDbCommand CreateRelationshipNativeTargetUpsertCommand(
             ReignDbConnection connection)
         {
-            return CreatePreparedRelationshipCommand(connection, @"INSERT INTO relationship_native_targets(
-pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,status,world_day,last_sync_day,
-attempt_count,claimed_ts,last_error,updated_ts,requires_observation)
-VALUES($pair,$actor,$targetHero,$targetRelation,$observed,'pending',$day,-1000,0,0,'',$ts,COALESCE($requiresObservation,0))
-ON CONFLICT(pair_key) DO UPDATE SET
-hero_a_id=excluded.hero_a_id,hero_b_id=excluded.hero_b_id,
-observed_relation=excluded.observed_relation,world_day=excluded.world_day,
-requires_observation=CASE WHEN relationship_native_targets.requires_observation=1 OR excluded.requires_observation=1 THEN 1 ELSE 0 END,
-status='pending',
-revision=CASE WHEN relationship_native_targets.target_relation=excluded.target_relation
-    THEN relationship_native_targets.revision ELSE relationship_native_targets.revision+1 END,
-attempt_count=CASE
-    WHEN relationship_native_targets.target_relation=excluded.target_relation
-    THEN relationship_native_targets.attempt_count ELSE 0
-END,
-claimed_ts=0,
-target_relation=excluded.target_relation,last_error='',updated_ts=excluded.updated_ts;",
+            return CreatePreparedRelationshipCommand(connection, RelationshipsStore.UpsertRelationshipNativeTargetsSql,
                 "$pair", "$actor", "$targetHero", "$targetRelation", "$observed", "$day", "$ts", "$requiresObservation");
         }
 
@@ -1050,24 +661,7 @@ target_relation=excluded.target_relation,last_error='',updated_ts=excluded.updat
             else if (preparedCommand != null)
                 ExecutePreparedRelationshipCommand(preparedCommand, parameters);
             else
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
-pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,status,world_day,last_sync_day,
-attempt_count,claimed_ts,last_error,updated_ts,requires_observation)
-VALUES($pair,$actor,$targetHero,$targetRelation,$observed,'pending',$day,-1000,0,0,'',$ts,$requiresObservation)
-ON CONFLICT(pair_key) DO UPDATE SET
-hero_a_id=excluded.hero_a_id,hero_b_id=excluded.hero_b_id,
-observed_relation=excluded.observed_relation,world_day=excluded.world_day,
-requires_observation=CASE WHEN relationship_native_targets.requires_observation=1 OR excluded.requires_observation=1 THEN 1 ELSE 0 END,
-status='pending',
-revision=CASE WHEN relationship_native_targets.target_relation=excluded.target_relation
-    THEN relationship_native_targets.revision ELSE relationship_native_targets.revision+1 END,
-attempt_count=CASE
-    WHEN relationship_native_targets.target_relation=excluded.target_relation
-    THEN relationship_native_targets.attempt_count ELSE 0
-END,
-claimed_ts=0,
-target_relation=excluded.target_relation,last_error='',updated_ts=excluded.updated_ts;",
-                    parameters);
+                RelationshipsStore.UpsertRelationshipNativeTargets(connection, parameters);
             return id;
         }
 
@@ -1095,16 +689,7 @@ target_relation=excluded.target_relation,last_error='',updated_ts=excluded.updat
                 ? "affinity_a_to_b" : "affinity_b_to_a";
             int day = (int)Math.Floor(worldDay + 0.000001d);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            List<Dictionary<string, object>> updated = ReignDatabase.QuerySql(connection,
-                @"UPDATE relationship_pair_chemistry SET "
-                + affinityColumn + @"=MAX(-100,MIN(100,"
-                + affinityColumn + @"+$delta)),
-last_day=MAX(last_day,$day),last_context_kind=$kind,
-last_context_id=$context,state_revision=state_revision+1,
-updated_ts=$ts
-WHERE pair_key=$pair
-RETURNING *;",
-                new Dictionary<string, object>
+            List<Dictionary<string, object>> updated = RelationshipsStore.UpdateRelationshipPairChemistry2(connection, affinityColumn, affinityColumn,                new Dictionary<string, object>
                 {
                     ["delta"] = delta, ["day"] = day,
                     ["kind"] = "consequence",
@@ -1122,12 +707,7 @@ RETURNING *;",
                 connection, campaignId, timelineId, pairHeroA, pairHeroB), "value", 0), -100, 100);
             int effectiveBA = Clamp(affinityBA + ReadInt(ResolveObserverPublicStanding(
                 connection, campaignId, timelineId, pairHeroB, pairHeroA), "value", 0), -100, 100);
-            ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
-effective_affinity_a_to_b=$effectiveAB,
-effective_affinity_b_to_a=$effectiveBA,
-tag_a_to_b=$tagAB,tag_b_to_a=$tagBA
-WHERE pair_key=$pair AND state_revision=$revision;",
-                new Dictionary<string, object>
+            RelationshipsStore.UpdateRelationshipPairChemistry3(connection, new Dictionary<string, object>
                 {
                     ["effectiveAB"] = effectiveAB,
                     ["effectiveBA"] = effectiveBA,
@@ -1146,9 +726,7 @@ WHERE pair_key=$pair AND state_revision=$revision;",
                 pairKey, "b_to_a", affinityBA, affinityAB);
             RefreshEffectivePairProjection(connection, campaignId,
                 timelineId, pair, worldDay, reason);
-            Dictionary<string, object> committed = ReignDatabase.QuerySql(connection,
-                "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                new Dictionary<string, object> { ["pair"] = pairKey })
+            Dictionary<string, object> committed = RelationshipsStore.SelectRelationshipPairChemistry8(connection, new Dictionary<string, object> { ["pair"] = pairKey })
                 .FirstOrDefault() ?? pair;
             // This helper may run inside a caller-owned transaction. Never expose
             // uncommitted rows through RAM; the next read reloads committed state.
@@ -1178,9 +756,7 @@ WHERE pair_key=$pair AND state_revision=$revision;",
             string heroB = observerIsA ? targetId : observerId;
             int day = (int)Math.Floor(worldDay + 0.000001d);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Dictionary<string, object> existing = ReignDatabase.QuerySql(connection,
-                "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
+            Dictionary<string, object> existing = RelationshipsStore.SelectRelationshipPairChemistry8(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
             if (existing != null)
             {
                 ApplyAtomicDirectionalRelationshipDelta(connection,
@@ -1208,9 +784,7 @@ WHERE pair_key=$pair AND state_revision=$revision;",
             int baseBA = existing == null ? MbtiCompatibility(typeB, typeA) : ReadInt(existing, "base_chance_b_to_a", 50);
             int projected = ProjectNativeRelation(connection, heroA, heroB,
                 affinityAB, affinityBA, effectiveAB, effectiveBA);
-            Dictionary<string, object> existingNativeTarget = ReignDatabase.QuerySql(connection,
-                "SELECT observed_relation,requires_observation FROM relationship_native_targets WHERE pair_key=$pair LIMIT 1;",
-                new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
+            Dictionary<string, object> existingNativeTarget = RelationshipsStore.SelectRelationshipNativeTargets(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
             int observedNative = existingNativeTarget != null
                 ? ReadInt(existingNativeTarget, "observed_relation", 0)
                 : existing != null && ReadInt(existing, "native_action_pending", 0) == 0
@@ -1218,23 +792,7 @@ WHERE pair_key=$pair AND state_revision=$revision;",
                     : 0;
             bool requiresNativeTarget = projected != observedNative || RelationshipNativeObservationRequired(existing, existingNativeTarget);
             string nativeActionId = requiresNativeTarget ? "native_target:" + pairKey : "";
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
-pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,base_chance_a_to_b,base_chance_b_to_a,
-chance_a_to_b,chance_b_to_a,affinity_a_to_b,affinity_b_to_a,social_modifier_a_to_b,social_modifier_b_to_a,
-effective_affinity_a_to_b,effective_affinity_b_to_a,tag_a_to_b,tag_b_to_a,
-first_day,last_day,projected_native_relation,native_action_pending,native_action_id,
-compatibility_version,updated_ts)
-VALUES($pair,$a,$b,$typeA,$typeB,$baseAB,$baseBA,$chanceAB,$chanceBA,$affinityAB,$affinityBA,0,0,$affinityAB,$affinityBA,
-$tagAB,$tagBA,$day,$day,$projected,$pending,$action,$version,$ts)
-ON CONFLICT(pair_key) DO UPDATE SET
-affinity_a_to_b=$affinityAB,affinity_b_to_a=$affinityBA,
-social_modifier_a_to_b=0,social_modifier_b_to_a=0,
-effective_affinity_a_to_b=$affinityAB,effective_affinity_b_to_a=$affinityBA,
-tag_a_to_b=$tagAB,tag_b_to_a=$tagBA,
-last_day=MAX(relationship_pair_chemistry.last_day,$day),
-projected_native_relation=$projected,native_action_pending=$pending,
-native_action_id=$action,updated_ts=$ts;",
-                new Dictionary<string, object>
+            RelationshipsStore.UpsertRelationshipPairChemistry(connection, new Dictionary<string, object>
                 {
                     ["pair"] = pairKey, ["a"] = heroA, ["b"] = heroB,
                     ["typeA"] = typeA, ["typeB"] = typeB,
@@ -1253,9 +811,7 @@ native_action_id=$action,updated_ts=$ts;",
                 RecordRelationshipPairProvenance(connection, campaignId, timelineId,
                     pairKey, "consequential_event", false, worldDay,
                     new Dictionary<string, object> { ["reason"] = reason ?? string.Empty });
-            Dictionary<string, object> current = ReignDatabase.QuerySql(connection,
-                "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                new Dictionary<string, object> { ["pair"] = pairKey })
+            Dictionary<string, object> current = RelationshipsStore.SelectRelationshipPairChemistry8(connection, new Dictionary<string, object> { ["pair"] = pairKey })
                 .FirstOrDefault();
             RefreshEffectivePairProjection(connection, campaignId, timelineId,
                 current, worldDay, reason);
@@ -1265,9 +821,7 @@ native_action_id=$action,updated_ts=$ts;",
         private static string ResolvePermanentMbtiTypeById(
             ReignDbConnection connection, string campaignId, string heroId, int day)
         {
-            Dictionary<string, object> stored = ReignDatabase.QuerySql(connection,
-                "SELECT mbti_type FROM relationship_personalities WHERE hero_id=$hero LIMIT 1;",
-                new Dictionary<string, object> { ["hero"] = heroId }).FirstOrDefault();
+            Dictionary<string, object> stored = RelationshipsStore.SelectRelationshipPersonalities(connection, new Dictionary<string, object> { ["hero"] = heroId }).FirstOrDefault();
             string storedType = ReadString(stored, "mbti_type", "");
             if (MbtiDefinitions.ContainsKey(storedType)) return storedType;
             // A cold library load logs under FileLock; a file-input scope supplies the
@@ -1293,32 +847,25 @@ native_action_id=$action,updated_ts=$ts;",
 
         private static void CompactNoisyNativeRelationBacklog(ReignDbConnection connection)
         {
-            if (ReadString(ReignDatabase.QuerySql(connection,
-                "SELECT value FROM schema_meta WHERE key='mbti_native_relation_bulk_projection_v1' LIMIT 1;")
+            if (ReadString(RelationshipsStore.SelectSchemaMeta(connection)
                 .FirstOrDefault(), "value", "") == "1") return;
 
-            ReignDatabase.ExecuteSql(connection, "SAVEPOINT compact_native_relation_backlog;");
+            RelationshipsStore.Savepoint(connection);
             try
             {
-                ReignDatabase.ExecuteSql(connection, "UPDATE relationship_native_targets SET status='pending',claimed_ts=0,last_error='';");
-                if (ReadInt(ReignDatabase.QuerySql(connection,
-                    "SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name='relationship_director_actions';")
+                RelationshipsStore.UpdateRelationshipNativeTargets(connection);
+                if (ReadInt(RelationshipsStore.CountSqliteMaster(connection)
                     .FirstOrDefault(), "count", 0) > 0)
                 {
-                    ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_director_actions
-SET status='superseded',resolved_ts=$ts,
-result_json='{""status"":""superseded"",""reason"":""native_relation_bulk_projection""}'
-WHERE action_type='native_relation' AND status IN ('pending','claimed');",
-                        new Dictionary<string, object> { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
+                    RelationshipsStore.UpdateRelationshipDirectorActions2(connection, new Dictionary<string, object> { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                 }
-                ReignDatabase.ExecuteSql(connection,
-                    "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('mbti_native_relation_bulk_projection_v1','1');");
-                ReignDatabase.ExecuteSql(connection, "RELEASE compact_native_relation_backlog;");
+                RelationshipsStore.UpsertSchemaMeta(connection);
+                RelationshipsStore.Release(connection);
             }
             catch
             {
-                try { ReignDatabase.ExecuteSql(connection, "ROLLBACK TO compact_native_relation_backlog;"); } catch { }
-                try { ReignDatabase.ExecuteSql(connection, "RELEASE compact_native_relation_backlog;"); } catch { }
+                try { RelationshipsStore.Rollback2(connection); } catch { }
+                try { RelationshipsStore.Release(connection); } catch { }
                 throw;
             }
         }

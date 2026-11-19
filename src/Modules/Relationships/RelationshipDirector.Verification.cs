@@ -33,7 +33,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> preview=VerifyPlayerConceptionAttemptApi(request("attempt_preview_cancel","preview"));
                 int previewRows;
                 using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(campaign))
-                    previewRows=ReadInt(ReignDatabase.QuerySql(connection,"SELECT COUNT(*) AS count FROM conception_attempts;").FirstOrDefault(),"count",-1);
+                    previewRows=ReadInt(RelationshipsStore.CountConceptionAttempts(connection).FirstOrDefault(),"count",-1);
                 add("preview_is_stateless",
                     ReadBool(preview,"ok",false)&&ReadBool(preview,"eligible",false)&&!ReadBool(preview,"rollPerformed",true)&&ReadDouble(preview,"roll",0d)==-1d&&previewRows==0,
                     "Opening the popup reports eligibility and chance without consuming or storing a pregnancy roll.");
@@ -42,7 +42,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> cancelledThenProceed=VerifyPlayerConceptionAttemptApi(request("attempt_preview_cancel","proceed"));
                 Dictionary<string, object> cancelledRow;
                 using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(campaign))
-                    cancelledRow=ReignDatabase.QuerySql(connection,"SELECT * FROM conception_attempts WHERE attempt_id='attempt_preview_cancel' LIMIT 1;").FirstOrDefault();
+                    cancelledRow=RelationshipsStore.SelectConceptionAttempts(connection).FirstOrDefault();
                 add("pull_out_never_rolls",
                     ReadBool(cancelled,"cancelled",false)&&!ReadBool(cancelled,"rollPerformed",true)&&ReadDouble(cancelled,"roll",0d)==-1d
                     &&ReadString(cancelledRow,"status","")=="cancelled"&&ReadDouble(cancelledRow,"roll",0d)==-1d,
@@ -172,16 +172,13 @@ namespace ReignBetaServer
                     "Persisted major courtships apply the exact 50% third-party arrangement penalty.");
                 int displaced=ConvertDisplacedCourtshipsToTemptation(storyConnection,"story_a","story_c",22d,"story_arranged");
                 Dictionary<string,object> displacedThread=LoadStoryThread(storyConnection,"story_a","story_b","romance",22d);
-                int displacementPressures=ReadInt(ReignDatabase.QuerySql(storyConnection,
-                    "SELECT COUNT(*) AS count FROM relationship_pressures WHERE ((subject_id='story_a' AND target_id='story_b' AND kind='divided_loyalty') OR (subject_id='story_b' AND target_id='story_a' AND kind='romantic_displacement')) AND status='active';").FirstOrDefault(),"count",0);
+                int displacementPressures=ReadInt(RelationshipsStore.CountRelationshipPressures2(storyConnection).FirstOrDefault(),"count",0);
                 add("production_displaced_courtship",displaced==1&&ReadString(displacedThread,"route","")=="temptation"&&displacementPressures==2,
                     "An overriding arranged marriage preserves the persisted romance as temptation and creates only private directional pressures.");
                 for(int i=0;i<4;i++)ApplyStoryEventToDatabase(storyConnection,"political_rivalry_argument","rivalry_"+i,"story_a","story_b",20+i*7,false,false);
-                int feuds=ReadInt(ReignDatabase.QuerySql(storyConnection,"SELECT COUNT(DISTINCT pair_key) AS count FROM relationship_story_threads WHERE kind='rivalry' AND intensity>=75;").FirstOrDefault(),"count",0);
+                int feuds=ReadInt(RelationshipsStore.CountRelationshipStoryThreads(storyConnection).FirstOrDefault(),"count",0);
                 add("persistent_feud_progression",feuds==1,"Repeated political conflicts create one pair-level feud state.");
-                ReignDatabase.ExecuteSql(storyConnection,@"INSERT INTO relationship_pressures(pressure_id,subject_id,target_id,kind,status,intensity,secrecy,summary,related_entities_json,trigger_json,evidence_json,created_day,updated_day,updated_ts,payload_json)
-VALUES('story_pressure','story_c','story_d','strategic_seduction','active',60,.8,'','[]','{}','[]',40,55,$ts,'{}');",
-                    new Dictionary<string,object>{{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});
+                RelationshipsStore.InsertRelationshipPressures(storyConnection, new Dictionary<string,object>{{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});
                 LoadPairStorySummary(storyConnection,"story_c","story_d",60d);
                 add("lazy_story_seed_from_pressure",PairStoryKindIntensity(storyConnection,"story_c","story_d","romance",60d,false)>=60d,
                     "Existing active relationship pressures lazily seed storyline state without rewriting facets or narrative data.");

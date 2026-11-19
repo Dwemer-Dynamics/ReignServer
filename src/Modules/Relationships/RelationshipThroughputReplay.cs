@@ -255,9 +255,9 @@ namespace ReignBetaServer
                 {
                     connection.Open();
                     bool tls;
-                    using (var security = new Npgsql.NpgsqlCommand("SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid();", connection))
+                    using (var security = new Npgsql.NpgsqlCommand(RelationshipsStore.SelectPgStatSslSql, connection))
                         tls = Convert.ToBoolean(security.ExecuteScalar(), CultureInfo.InvariantCulture);
-                    using (var command = new Npgsql.NpgsqlCommand("SELECT length(@payload);", connection))
+                    using (var command = new Npgsql.NpgsqlCommand(RelationshipsStore.SelectSql4, connection))
                     {
                         var parameter = command.Parameters.Add("payload", NpgsqlTypes.NpgsqlDbType.Text);
                         foreach (int payloadBytes in new[] { 128, 1024, 4096, 8192, 16384, 32768, 65536, 131072 })
@@ -307,8 +307,8 @@ namespace ReignBetaServer
         private static Dictionary<string, object> ReadRelationshipReplaySemanticState(ReignDbConnection connection, int? day = null)
         {
             var state = new Dictionary<string, object>();
-            var conceptions = ReignDatabase.QuerySql(connection, "SELECT * FROM conceptions;");
-            var actions = ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_director_actions;");
+            var conceptions = RelationshipsStore.SelectConceptions6(connection);
+            var actions = RelationshipsStore.SelectRelationshipDirectorActions21(connection);
             var identities = BuildRelationshipReplayIdentityMap(conceptions, actions);
             string identityJson = Json.Serialize(identities);
             foreach (string table in new[] { "relationship_pair_chemistry", "relationship_pair_lifecycle", "relationship_native_targets",
@@ -320,15 +320,13 @@ namespace ReignBetaServer
                 if (table == "relationship_pair_lifecycle")
                     row = "(" + row + ") || jsonb_build_object(" + string.Join(",", new[] { "marriage_action_id", "divorce_action_id", "conception_action_id" }
                         .Select(column => "'" + column + "',COALESCE(CAST($identities AS jsonb)->>t." + column + ",t." + column + ")")) + ")";
-                state[table] = ReadString(ReignDatabase.QuerySql(connection, @"SELECT md5(COALESCE(string_agg(value,'' ORDER BY value),'')) AS hash FROM (
- SELECT md5((" + row + ")::text) AS value FROM " + table + " t" + filter + ") rows;",
-                    new Dictionary<string, object> { ["day"] = day ?? 0, ["identities"] = identityJson })
+                state[table] = ReadString(RelationshipsStore.SelectDynamic(connection, row, table, filter,                    new Dictionary<string, object> { ["day"] = day ?? 0, ["identities"] = identityJson })
                     .FirstOrDefault(), "hash", "");
             }
             state["conceptions"] = RelationshipReplayRowsHash(conceptions, identities);
             state["relationship_director_actions"] = RelationshipReplayRowsHash(actions, identities);
             foreach (string table in new[] { "relationship_marriage_reservations", "relationship_conception_commitments", "relationship_affair_commitments" })
-                state[table] = RelationshipReplayRowsHash(ReignDatabase.QuerySql(connection, "SELECT * FROM " + table + ";"), identities);
+                state[table] = RelationshipReplayRowsHash(RelationshipsStore.SelectDynamic2(connection, table), identities);
             return state;
         }
 
@@ -337,12 +335,12 @@ namespace ReignBetaServer
             File.WriteAllText(Path.Combine(artifact, routeName + "-referenced-state.json"), Json.Serialize(
                 new Dictionary<string, object>
                 {
-                    ["actions"] = ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_director_actions;"),
-                    ["conceptions"] = ReignDatabase.QuerySql(connection, "SELECT * FROM conceptions;"),
-                    ["conceptionCommitments"] = ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_conception_commitments;"),
-                    ["marriageReservations"] = ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_marriage_reservations;"),
-                    ["affairCommitments"] = ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_affair_commitments;"),
-                    ["lifecycle"] = ReignDatabase.QuerySql(connection, "SELECT * FROM relationship_pair_lifecycle WHERE marriage_action_id<>'' OR divorce_action_id<>'' OR conception_action_id<>'';")
+                    ["actions"] = RelationshipsStore.SelectRelationshipDirectorActions21(connection),
+                    ["conceptions"] = RelationshipsStore.SelectConceptions6(connection),
+                    ["conceptionCommitments"] = RelationshipsStore.SelectRelationshipConceptionCommitments5(connection),
+                    ["marriageReservations"] = RelationshipsStore.SelectRelationshipMarriageReservations2(connection),
+                    ["affairCommitments"] = RelationshipsStore.SelectRelationshipAffairCommitments3(connection),
+                    ["lifecycle"] = RelationshipsStore.SelectRelationshipPairLifecycle11(connection)
                 }));
         }
 
@@ -405,27 +403,11 @@ namespace ReignBetaServer
                 CharactersService.EnsureIdentitySchema(connection);
                 ReputationService.EnsureSocialReputationSchema(connection);
                 CharactersService.UpsertIdentityRosterHeroesBatch(connection, heroes, 1);
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_personalities(hero_id,mbti_type,title,description,source,assignment_day,template_version,traits_json,created_ts,updated_ts)
-SELECT hero_id,CASE mod(CAST(substring(hero_id FROM 8) AS integer),4) WHEN 0 THEN 'ENFP' WHEN 1 THEN 'ISTJ' WHEN 2 THEN 'INTJ' ELSE 'ESFJ' END,
-'Replay personality','Replay fixture','persisted',1,1,'{}',1,1 FROM identity_roster;");
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO notable_mbti_profiles(hero_id,mbti_type,title,description,foundation_json,percentages_json,native_traits_json,template_version,first_observed_day,native_sync_status,updated_ts)
-SELECT hero_id,CASE mod(CAST(substring(hero_id FROM 8) AS integer),4) WHEN 0 THEN 'ENFP' WHEN 1 THEN 'ISTJ' WHEN 2 THEN 'INTJ' ELSE 'ESFJ' END,
-'Replay personality','Replay fixture','{}',$percentages,$native,1,1,'synchronized',1 FROM identity_roster WHERE is_notable=1;",
-                    new Dictionary<string, object> { ["percentages"] = Json.Serialize(heroes[0]["traitPercentages"]), ["native"] = Json.Serialize(heroes[0]["traits"]) });
-                ReignDatabase.ExecuteSql(connection, @"WITH numbers AS (
- SELECT a,mod(a+101*d,4305) AS b FROM generate_series(0,4304) a CROSS JOIN generate_series(1,40) d
- UNION SELECT a,a+d FROM generate_series(0,4304) a CROSS JOIN generate_series(1,3) d WHERE a+d<4305
-), pairs AS (SELECT a,b FROM numbers WHERE a<b ORDER BY a,b LIMIT $count), named AS (
- SELECT 'replay_'||lpad(a::text,4,'0') AS a,'replay_'||lpad(b::text,4,'0') AS b,
- CASE WHEN b-a<=3 AND mod(a+b,7)=0 THEN 40 ELSE 0 END AS affinity FROM pairs)
-INSERT INTO relationship_pair_chemistry(pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,affinity_a_to_b,affinity_b_to_a,first_day,last_day,last_decay_period,updated_ts)
-SELECT named.a||'|'||named.b,named.a,named.b,pa.mbti_type,pb.mbti_type,affinity,affinity,1,999,199,1 FROM named
-JOIN relationship_personalities pa ON pa.hero_id=named.a JOIN relationship_personalities pb ON pb.hero_id=named.b;", new Dictionary<string, object> { ["count"] = pairCount });
-                ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_pair_lifecycle(pair_key,hero_a_id,hero_b_id,last_processed_day,version,updated_ts)
-SELECT pair_key,hero_a_id,hero_b_id,999,$version,1 FROM relationship_pair_chemistry;",
-                    new Dictionary<string, object> { ["version"] = RelationshipLifecycleVersion });
-                ReignDatabase.ExecuteSql(connection, @"UPDATE relationship_pair_lifecycle SET flirt_attempted=1,flirt_passed=0
-WHERE mod(CAST(substring(hero_a_id FROM 8) AS integer)+CAST(substring(hero_b_id FROM 8) AS integer),29)=0;");
+                RelationshipsStore.InsertRelationshipPersonalities3(connection);
+                RelationshipsStore.InsertNotableMbtiProfiles(connection, new Dictionary<string, object> { ["percentages"] = Json.Serialize(heroes[0]["traitPercentages"]), ["native"] = Json.Serialize(heroes[0]["traits"]) });
+                RelationshipsStore.SelectNamed(connection, new Dictionary<string, object> { ["count"] = pairCount });
+                RelationshipsStore.InsertRelationshipPairLifecycle2(connection, new Dictionary<string, object> { ["version"] = RelationshipLifecycleVersion });
+                RelationshipsStore.UpdateRelationshipPairLifecycle10(connection);
                 if (WorldSimulationService.TableCount(connection, "relationship_pair_chemistry") != pairCount)
                     throw new InvalidOperationException("Replay historical-pair fixture size differs from its declared population.");
             }

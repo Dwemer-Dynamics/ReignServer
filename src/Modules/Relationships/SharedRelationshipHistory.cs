@@ -28,11 +28,7 @@ namespace ReignBetaServer
             EnsureSharedRelationshipHistorySchemaCore(connection);
             if (ReignPostgreSqlDialect.IsPostgreSql(connection))
             {
-                ReignDatabase.ExecuteSql(connection, @"
-INSERT INTO schema_meta(key,value)
-VALUES('postgresql_shared_relationship_history_schema_revision',$revision)
-ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
-                    new Dictionary<string, object>
+                RelationshipsStore.UpsertSchemaMeta16(connection, new Dictionary<string, object>
                     {
                         ["revision"] =
                             PostgreSqlSharedRelationshipHistorySchemaRevision
@@ -46,19 +42,9 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
         private static void EnsureSharedRelationshipHistorySchemaCore(
             ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS shared_relationship_history_chapters (
-history_id TEXT PRIMARY KEY,pair_key TEXT NOT NULL,hero_a_id TEXT NOT NULL,hero_b_id TEXT NOT NULL,
-chapter_ordinal INTEGER NOT NULL,state_fingerprint TEXT NOT NULL,
-objective_summary TEXT NOT NULL DEFAULT '',a_interpretation TEXT NOT NULL DEFAULT '',
-b_interpretation TEXT NOT NULL DEFAULT '',canon_status TEXT NOT NULL DEFAULT 'soft_relational_canon',
-source_kind TEXT NOT NULL DEFAULT 'lazy_dialogue_generation',source_basis_json TEXT NOT NULL DEFAULT '{}',
-generation_status TEXT NOT NULL DEFAULT 'generated',provider TEXT NOT NULL DEFAULT '',model TEXT NOT NULL DEFAULT '',
-created_world_day REAL NOT NULL DEFAULT 0,created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
-UNIQUE(pair_key,chapter_ordinal));");
-            ReignDatabase.ExecuteSql(connection,
-                "CREATE INDEX IF NOT EXISTS idx_shared_relationship_history_pair ON shared_relationship_history_chapters(pair_key,chapter_ordinal DESC);");
-            ReignDatabase.ExecuteSql(connection,
-                "CREATE INDEX IF NOT EXISTS idx_shared_relationship_history_heroes ON shared_relationship_history_chapters(hero_a_id,hero_b_id,chapter_ordinal DESC);");
+            RelationshipsSchema.CreateSharedRelationshipHistoryChapters(connection);
+            RelationshipsSchema.CreateIndexSharedRelationshipHistoryPair(connection);
+            RelationshipsSchema.CreateIndexSharedRelationshipHistoryHeroes(connection);
         }
 
         private static object SharedRelationshipHistoryGenerationLock(string campaignId)
@@ -117,9 +103,7 @@ UNIQUE(pair_key,chapter_ordinal));");
                 List<Dictionary<string, object>> rows;
                 if (!string.IsNullOrWhiteSpace(heroId) && !string.IsNullOrWhiteSpace(otherId))
                 {
-                    rows = ReignDatabase.QuerySql(connection, @"SELECT * FROM shared_relationship_history_chapters
-WHERE pair_key=$pair ORDER BY chapter_ordinal DESC LIMIT 100;",
-                        new Dictionary<string, object> { ["pair"] = AmbientPairKey(heroId, otherId) });
+                    rows = RelationshipsStore.SelectSharedRelationshipHistoryChapters(connection, new Dictionary<string, object> { ["pair"] = AmbientPairKey(heroId, otherId) });
                 }
                 else if (!string.IsNullOrWhiteSpace(heroId))
                 {
@@ -127,8 +111,7 @@ WHERE pair_key=$pair ORDER BY chapter_ordinal DESC LIMIT 100;",
                 }
                 else
                 {
-                    rows = ReignDatabase.QuerySql(connection, @"SELECT * FROM shared_relationship_history_chapters
-ORDER BY created_ts DESC LIMIT 250;");
+                    rows = RelationshipsStore.SelectSharedRelationshipHistoryChapters2(connection);
                 }
                 return new Dictionary<string, object>
                 {
@@ -235,9 +218,7 @@ ORDER BY created_ts DESC LIMIT 250;");
                     foreach (Dictionary<string, object> request in requests.Take(10))
                     {
                         string pairKey = ReadString(request, "pairKey", "");
-                        Dictionary<string, object> chemistry = ReignDatabase.QuerySql(connection,
-                            "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                            new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
+                        Dictionary<string, object> chemistry = RelationshipsStore.SelectRelationshipPairChemistry8(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
                         if (chemistry == null) continue;
                         Dictionary<string, object> latest = ReadScopedRelationshipHistoryChapters(connection, pairKey, context, 1).FirstOrDefault();
                         Dictionary<string, object> basis = BuildSharedRelationshipHistoryBasis(
@@ -320,9 +301,7 @@ ORDER BY created_ts DESC LIMIT 250;");
             Dictionary<string, object> profileB = SharedRelationshipHistoryProfile(
                 campaignId, heroBId, profiles.TryGetValue(heroBId, out Dictionary<string, object> suppliedB) ? suppliedB : null);
             Dictionary<string, object> lifecycle = RelationshipLifecycleView(connection, heroAId, heroBId);
-            Dictionary<string, object> latestIncident = ReignDatabase.QuerySql(connection, @"SELECT incident_id,kind,world_day,summary
-FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created_ts DESC LIMIT 1;",
-                new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault()
+            Dictionary<string, object> latestIncident = RelationshipsStore.SelectRelationshipIncidents2(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault()
                 ?? new Dictionary<string, object>();
             var evidenceContext = Program.CloneDictionary(context);
             evidenceContext["worldDay"] = ReadDouble(context, "worldDay", ReadDouble(chemistry, "last_day", 0d));
@@ -618,9 +597,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
         {
             ValidateSharedRelationshipHistorySources(connection, basis);
             string pairKey = ReadString(basis, "pairKey", "");
-            int ordinal = ReadInt(ReignDatabase.QuerySql(connection, @"SELECT COALESCE(MAX(chapter_ordinal),0) value
-FROM shared_relationship_history_chapters WHERE pair_key=$pair;",
-                new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault(), "value", 0) + 1;
+            int ordinal = ReadInt(RelationshipsStore.SelectSharedRelationshipHistoryChapters3(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault(), "value", 0) + 1;
             string historyId = "relhist_" + Guid.NewGuid().ToString("N");
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             Dictionary<string, object> args = new Dictionary<string, object>
@@ -643,15 +620,8 @@ FROM shared_relationship_history_chapters WHERE pair_key=$pair;",
                 ["day"] = ReadDouble(basis, "worldDay", ReadDouble(basis, "lastDay", 0)),
                 ["ts"] = ts
             };
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO shared_relationship_history_chapters(
-history_id,pair_key,hero_a_id,hero_b_id,chapter_ordinal,state_fingerprint,
-objective_summary,a_interpretation,b_interpretation,canon_status,source_kind,source_basis_json,
-generation_status,provider,model,created_world_day,created_ts,updated_ts)
-VALUES($id,$pair,$a,$b,$ordinal,$fingerprint,$objective,$aView,$bView,
-'soft_relational_canon','lazy_dialogue_generation',$basis,$status,$provider,$model,$day,$ts,$ts);", args);
-            return ReignDatabase.QuerySql(connection,
-                "SELECT * FROM shared_relationship_history_chapters WHERE history_id=$id LIMIT 1;",
-                new Dictionary<string, object> { ["id"] = historyId }).FirstOrDefault()
+            RelationshipsStore.InsertSharedRelationshipHistoryChapters(connection, args);
+            return RelationshipsStore.SelectSharedRelationshipHistoryChapters4(connection, new Dictionary<string, object> { ["id"] = historyId }).FirstOrDefault()
                 ?? new Dictionary<string, object>();
         }
 
@@ -757,10 +727,7 @@ VALUES($id,$pair,$a,$b,$ordinal,$fingerprint,$objective,$aView,$bView,
             string campaignId, string heroId, ReignDbConnection connection)
         {
             EnsureSharedRelationshipHistorySchema(connection);
-            List<Dictionary<string, object>> rows = ReignDatabase.QuerySql(connection, @"SELECT *
-FROM shared_relationship_history_chapters WHERE hero_a_id=$id OR hero_b_id=$id
-ORDER BY created_world_day DESC,chapter_ordinal DESC LIMIT 500;",
-                new Dictionary<string, object> { ["id"] = heroId });
+            List<Dictionary<string, object>> rows = RelationshipsStore.SelectSharedRelationshipHistoryChapters5(connection, new Dictionary<string, object> { ["id"] = heroId });
             foreach (Dictionary<string, object> row in rows)
             {
                 bool isA = ReadString(row, "hero_a_id", "").Equals(heroId, StringComparison.OrdinalIgnoreCase);
@@ -976,13 +943,7 @@ ORDER BY created_world_day DESC,chapter_ordinal DESC LIMIT 500;",
                     ReignDatabase.OpenCampaignConnection(fixtureCampaignId))
                 {
                     EnsureMbtiRelationshipSchema(connection);
-                    ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
-pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,
-affinity_a_to_b,affinity_b_to_a,tag_a_to_b,tag_b_to_a,
-first_day,last_day,projected_native_relation,updated_ts)
-VALUES('fixture_a|fixture_b','fixture_a','fixture_b','INTJ','ESFP',
-5,-3,'neutral','neutral',1,1,1,$ts);",
-                        new Dictionary<string, object>
+                    RelationshipsStore.InsertRelationshipPairChemistry5(connection, new Dictionary<string, object>
                         {
                             ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                         });
@@ -1013,8 +974,7 @@ VALUES('fixture_a|fixture_b','fixture_a','fixture_b','INTJ','ESFP',
                 using (ReignDbConnection connection =
                     ReignDatabase.OpenCampaignConnection(fixtureCampaignId))
                 {
-                    finalRow = ReignDatabase.QuerySql(connection,
-                        "SELECT * FROM relationship_pair_chemistry WHERE pair_key='fixture_a|fixture_b' LIMIT 1;")
+                    finalRow = RelationshipsStore.SelectRelationshipPairChemistry20(connection)
                         .FirstOrDefault();
                 }
                 add("qualification_fixture_is_reversible",

@@ -14,15 +14,8 @@ namespace ReignBetaServer
 
         private static void EnsureAutonomousCorrespondenceSchema(ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS autonomous_correspondence_checks (
-timeline_id TEXT NOT NULL, slot_day INTEGER NOT NULL, sender_id TEXT NOT NULL,
-chance INTEGER NOT NULL, roll INTEGER NOT NULL, status TEXT NOT NULL,
-letter_id TEXT NOT NULL DEFAULT '', updated_ts INTEGER NOT NULL,
-PRIMARY KEY(timeline_id,slot_day,sender_id));");
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS autonomous_correspondence_cooldowns (
-sender_id TEXT PRIMARY KEY, last_sent_day REAL NOT NULL,
-next_eligible_day REAL NOT NULL, cooldown_days INTEGER NOT NULL,
-letter_id TEXT NOT NULL, updated_ts INTEGER NOT NULL);");
+            RelationshipsSchema.CreateAutonomousCorrespondenceChecks(connection);
+            RelationshipsSchema.CreateAutonomousCorrespondenceCooldowns(connection);
         }
 
         internal static Dictionary<string, object> AutonomousCorrespondenceCandidatesApi(
@@ -35,11 +28,7 @@ letter_id TEXT NOT NULL, updated_ts INTEGER NOT NULL);");
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureMbtiRelationshipSchema(connection);
-                var rows = ReignDatabase.QuerySql(connection, @"SELECT hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a
-FROM relationship_pair_chemistry
-WHERE (hero_a_id=$player AND affinity_b_to_a>=10)
-   OR (hero_b_id=$player AND affinity_a_to_b>=10);",
-                    new Dictionary<string, object> { ["player"] = playerId });
+                var rows = RelationshipsStore.SelectRelationshipPairChemistry6(connection, new Dictionary<string, object> { ["player"] = playerId });
                 return new Dictionary<string, object>
                 {
                     ["ok"] = true,
@@ -76,11 +65,7 @@ WHERE (hero_a_id=$player AND affinity_b_to_a>=10)
                     EnsureRelationshipAndCorrespondenceSchema(connection);
                     EnsureAutonomousCorrespondenceSchema(connection);
                     string timeline = WorldSimulationService.ActiveWorldHistoryTimeline(connection);
-                    var pairs = ReignDatabase.QuerySql(connection, @"SELECT hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a
-FROM relationship_pair_chemistry
-WHERE (hero_a_id=$player AND affinity_b_to_a>=10)
-   OR (hero_b_id=$player AND affinity_a_to_b>=10);",
-                        new Dictionary<string, object> { ["player"] = playerId });
+                    var pairs = RelationshipsStore.SelectRelationshipPairChemistry6(connection, new Dictionary<string, object> { ["player"] = playerId });
                     var scores = pairs.ToDictionary(row =>
                         ReadString(row, "hero_a_id", "").Equals(playerId, StringComparison.OrdinalIgnoreCase)
                             ? ReadString(row, "hero_b_id", "") : ReadString(row, "hero_a_id", ""),
@@ -90,10 +75,7 @@ WHERE (hero_a_id=$player AND affinity_b_to_a>=10)
                     var candidates = ReadDictionaryList(payload, "candidates")
                         .Where(row => scores.ContainsKey(ReadString(row, "heroId", "")))
                         .OrderBy(_ => Guid.NewGuid()).ToList();
-                    var lastIntroduction = ReignDatabase.QuerySql(connection, @"SELECT dispatch_day FROM letters
-WHERE source='npc_introduction' AND reason LIKE $prefix
-ORDER BY dispatch_day DESC LIMIT 1;",
-                        new Dictionary<string, object> { ["prefix"] = "autonomous_relationship:" + timeline + ":%" })
+                    var lastIntroduction = RelationshipsStore.SelectLetters(connection, new Dictionary<string, object> { ["prefix"] = "autonomous_relationship:" + timeline + ":%" })
                         .FirstOrDefault();
                     bool introductionSent = lastIntroduction != null
                         && (ReadDouble(lastIntroduction, "dispatch_day", 0d) >= slotDay
@@ -103,27 +85,20 @@ ORDER BY dispatch_day DESC LIMIT 1;",
                         string senderId = ReadString(candidate, "heroId", "");
                         int affinity = scores[senderId];
                         int chance = Program.AutonomousLetterChance(affinity, frequency);
-                        var introductionsForSender = ReignDatabase.QuerySql(connection, @"SELECT status FROM letters
-WHERE sender_id=$sender AND recipient_id=$player AND source='npc_introduction'
-ORDER BY dispatch_day DESC LIMIT 1;", new Dictionary<string, object> { ["sender"] = senderId, ["player"] = playerId });
+                        var introductionsForSender = RelationshipsStore.SelectLetters2(connection, new Dictionary<string, object> { ["sender"] = senderId, ["player"] = playerId });
                         if (introductionsForSender.Any(row => ReadString(row, "status", "") == "in_transit")) continue;
                         bool known = ReadBool(candidate, "known", false) || introductionsForSender.Count > 0;
                         if ((!known && affinity < 20) || (!known && introductionSent)) continue;
-                        var cooldown = ReignDatabase.QuerySql(connection, @"SELECT next_eligible_day FROM autonomous_correspondence_cooldowns
-WHERE sender_id=$sender LIMIT 1;", new Dictionary<string, object> { ["sender"] = senderId }).FirstOrDefault();
+                        var cooldown = RelationshipsStore.SelectAutonomousCorrespondenceCooldowns(connection, new Dictionary<string, object> { ["sender"] = senderId }).FirstOrDefault();
                         if (cooldown != null && day < ReadDouble(cooldown, "next_eligible_day", 0d)) continue;
                         var key = new Dictionary<string, object> { ["timeline"] = timeline, ["slot"] = slotDay, ["sender"] = senderId };
-                        var check = ReignDatabase.QuerySql(connection, @"SELECT * FROM autonomous_correspondence_checks
-WHERE timeline_id=$timeline AND slot_day=$slot AND sender_id=$sender LIMIT 1;", key).FirstOrDefault();
+                        var check = RelationshipsStore.SelectAutonomousCorrespondenceChecks(connection, key).FirstOrDefault();
                         if (check != null && ReadString(check, "status", "") != "triggered") continue;
                         if (check != null) chance = ReadInt(check, "chance", chance);
                         int roll = check == null ? RandomNumberGenerator.GetInt32(1, 101) : ReadInt(check, "roll", 101);
                         if (check == null)
                         {
-                            ReignDatabase.ExecuteSql(connection, @"INSERT INTO autonomous_correspondence_checks
-(timeline_id,slot_day,sender_id,chance,roll,status,updated_ts)
-VALUES($timeline,$slot,$sender,$chance,$roll,$status,$ts);",
-                                new Dictionary<string, object> {
+                            RelationshipsStore.InsertAutonomousCorrespondenceChecks(connection, new Dictionary<string, object> {
                                     ["timeline"] = timeline, ["slot"] = slotDay, ["sender"] = senderId,
                                     ["chance"] = chance, ["roll"] = roll,
                                     ["status"] = roll <= chance ? "triggered" : "missed",
@@ -132,9 +107,7 @@ VALUES($timeline,$slot,$sender,$chance,$roll,$status,$ts);",
                         if (roll > chance) continue;
                         string source = known ? "npc_initiated" : "npc_introduction";
                         string reason = "autonomous_relationship:" + timeline + ":" + slotDay.ToString(CultureInfo.InvariantCulture) + ":" + senderId;
-                        var existing = ReignDatabase.QuerySql(connection, @"SELECT letter_id FROM letters
-WHERE sender_id=$sender AND recipient_id=$player AND source=$source AND reason=$reason LIMIT 1;",
-                            new Dictionary<string, object> { ["sender"] = senderId, ["player"] = playerId, ["source"] = source, ["reason"] = reason }).FirstOrDefault();
+                        var existing = RelationshipsStore.SelectLetters3(connection, new Dictionary<string, object> { ["sender"] = senderId, ["player"] = playerId, ["source"] = source, ["reason"] = reason }).FirstOrDefault();
                         string letterId = existing == null ? "" : ReadString(existing, "letter_id", "");
                         if (existing == null)
                         {
@@ -174,9 +147,7 @@ WHERE sender_id=$sender AND recipient_id=$player AND source=$source AND reason=$
                             }
                             catch (Exception ex)
                             {
-                                ReignDatabase.ExecuteSql(connection, @"UPDATE autonomous_correspondence_checks
-SET status='generation_failed',updated_ts=$ts WHERE timeline_id=$timeline AND slot_day=$slot AND sender_id=$sender;",
-                                    new Dictionary<string, object> { ["timeline"] = timeline, ["slot"] = slotDay,
+                                RelationshipsStore.UpdateAutonomousCorrespondenceChecks(connection, new Dictionary<string, object> { ["timeline"] = timeline, ["slot"] = slotDay,
                                         ["sender"] = senderId, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                                 Program.LogOperational("correspondence.autonomous_generation_failed",
                                     new Dictionary<string, object> { ["campaignId"] = campaignId,
@@ -185,19 +156,10 @@ SET status='generation_failed',updated_ts=$ts WHERE timeline_id=$timeline AND sl
                             }
                         }
                         int cooldownDays = RandomNumberGenerator.GetInt32(3, 16);
-                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO autonomous_correspondence_cooldowns
-(sender_id,last_sent_day,next_eligible_day,cooldown_days,letter_id,updated_ts)
-VALUES($sender,$day,$next,$days,$letter,$ts)
-ON CONFLICT(sender_id) DO UPDATE SET last_sent_day=excluded.last_sent_day,
-next_eligible_day=excluded.next_eligible_day,cooldown_days=excluded.cooldown_days,
-letter_id=excluded.letter_id,updated_ts=excluded.updated_ts;",
-                            new Dictionary<string, object> { ["sender"] = senderId, ["day"] = day,
+                        RelationshipsStore.UpsertAutonomousCorrespondenceCooldowns(connection, new Dictionary<string, object> { ["sender"] = senderId, ["day"] = day,
                                 ["next"] = day + cooldownDays, ["days"] = cooldownDays,
                                 ["letter"] = letterId, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
-                        ReignDatabase.ExecuteSql(connection, @"UPDATE autonomous_correspondence_checks
-SET status='sent',letter_id=$letter,updated_ts=$ts
-WHERE timeline_id=$timeline AND slot_day=$slot AND sender_id=$sender;",
-                            new Dictionary<string, object> { ["timeline"] = timeline, ["slot"] = slotDay,
+                        RelationshipsStore.UpdateAutonomousCorrespondenceChecks2(connection, new Dictionary<string, object> { ["timeline"] = timeline, ["slot"] = slotDay,
                                 ["sender"] = senderId, ["letter"] = letterId,
                                 ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                     }
@@ -226,10 +188,7 @@ WHERE timeline_id=$timeline AND slot_day=$slot AND sender_id=$sender;",
                     EnsureRelationshipAndCorrespondenceSchema(connection);
                     foreach (var pair in new[] { ("known", 100), ("intro_a", 100),
                         ("intro_b", 100), ("unmet_low", 19), ("failing", 100) })
-                        ReignDatabase.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry
-(pair_key,hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts)
-VALUES($key,$sender,'player', $affinity,0,1,12,$ts);",
-                            new Dictionary<string, object> { ["key"] = pair.Item1 + "|player",
+                        RelationshipsStore.InsertRelationshipPairChemistry(connection, new Dictionary<string, object> { ["key"] = pair.Item1 + "|player",
                                 ["sender"] = pair.Item1, ["affinity"] = pair.Item2,
                                 ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                 }
@@ -250,9 +209,7 @@ VALUES($key,$sender,'player', $affinity,0,1,12,$ts);",
                     {
                         generatedCount++;
                         using (ReignDbConnection inspection = ReignDatabase.OpenCampaignConnection(campaign))
-                            noPlaceholderDuringGeneration &= ReignDatabase.QuerySql(inspection,
-                                "SELECT letter_id FROM letters WHERE sender_id=$sender;",
-                                new Dictionary<string, object> { ["sender"] = sender }).Count == 0;
+                            noPlaceholderDuringGeneration &= RelationshipsStore.SelectLetters4(inspection, new Dictionary<string, object> { ["sender"] = sender }).Count == 0;
                         if (sender == "failing") throw new InvalidOperationException("Injected model failure.");
                         return new Dictionary<string, object> { ["shouldReply"] = true,
                             ["body"] = introduction ? "I am " + sender + ". I write to introduce myself."
@@ -263,19 +220,17 @@ VALUES($key,$sender,'player', $affinity,0,1,12,$ts);",
                 {
                     EnsureAutonomousCorrespondenceSchema(disabledInspection);
                     add("autonomous_mail_zero_frequency_no_generation", ReadInt(disabled, "sent", -1) == 0 && generatedCount == 0
-                        && ReignDatabase.QuerySql(disabledInspection, "SELECT * FROM autonomous_correspondence_checks;").Count == 0
-                        && ReignDatabase.QuerySql(disabledInspection, "SELECT * FROM autonomous_correspondence_cooldowns;").Count == 0,
+                        && RelationshipsStore.SelectAutonomousCorrespondenceChecks2(disabledInspection).Count == 0
+                        && RelationshipsStore.SelectAutonomousCorrespondenceCooldowns2(disabledInspection).Count == 0,
                         "Zero frequency returns before rolls, generation or cooldown writes; ordinary delivery has its independent path.");
                 }
                 var first = AutonomousCorrespondenceEvaluateApi(request, generate, Program.DefaultSettings());
                 var second = AutonomousCorrespondenceEvaluateApi(request, generate, TestDict("correspondenceFrequencyMultiplier", .25d));
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    var letters = ReignDatabase.QuerySql(connection, "SELECT * FROM letters ORDER BY source, sender_id;");
-                    var cooldowns = ReignDatabase.QuerySql(connection,
-                        "SELECT * FROM autonomous_correspondence_cooldowns;");
-                    var low = ReignDatabase.QuerySql(connection, @"SELECT * FROM autonomous_correspondence_checks
-WHERE sender_id='unmet_low';");
+                    var letters = RelationshipsStore.SelectLetters5(connection);
+                    var cooldowns = RelationshipsStore.SelectAutonomousCorrespondenceCooldowns2(connection);
+                    var low = RelationshipsStore.SelectAutonomousCorrespondenceChecks3(connection);
                     add("autonomous_mail_directional_threshold_and_intro_cap",
                         ReadInt(first, "sent", -1) == 2
                         && ReadInt(first, "introductions", -1) == 1

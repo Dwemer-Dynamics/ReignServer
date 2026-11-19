@@ -24,9 +24,7 @@ namespace ReignBetaServer
             string status = "applied";
             if (tier == "harmful_lie" || actKind.Contains("lie"))
             {
-                Dictionary<string, object> lie = string.IsNullOrWhiteSpace(lieCheckId) ? null : ReignDatabase.QuerySql(connection,
-                    "SELECT * FROM world_history_lie_checks WHERE lie_check_id=$id LIMIT 1;",
-                    new Dictionary<string, object> { ["id"] = lieCheckId }).FirstOrDefault();
+                Dictionary<string, object> lie = string.IsNullOrWhiteSpace(lieCheckId) ? null : RelationshipsStore.SelectWorldHistoryLieChecks(connection, new Dictionary<string, object> { ["id"] = lieCheckId }).FirstOrDefault();
                 string verdict = ReadString(lie, "objective_verdict", "").ToLowerInvariant();
                 string basis = ReadString(lie, "knowledge_basis", "none").ToLowerInvariant();
                 string outcome = ReadString(lie, "outcome", "").ToLowerInvariant();
@@ -246,9 +244,7 @@ namespace ReignBetaServer
                         ReadFirstString(assessment,
                             "targetHeroStringId", "targetId"),
                         assessment, out recoveryReason)
-                    : ReignDatabase.QuerySql(connection,
-                        "SELECT * FROM conversation_relationship_benefits WHERE benefit_id=$id LIMIT 1;",
-                        new Dictionary<string, object>
+                    : RelationshipsStore.SelectConversationRelationshipBenefits(connection, new Dictionary<string, object>
                         {
                             ["id"] = benefitId
                         }).FirstOrDefault();
@@ -334,16 +330,8 @@ namespace ReignBetaServer
                 && evidenceIds.Count == 0)
                 return null;
 
-            List<Dictionary<string, object>> candidates = ReignDatabase.QuerySql(
-                connection,
-                @"SELECT *
-FROM conversation_relationship_benefits
-WHERE campaign_id=$campaign
-AND giver_id=$giver
-AND recipient_id=$recipient
-ORDER BY updated_ts DESC, benefit_id ASC
-LIMIT 20;",
-                new Dictionary<string, object>
+            List<Dictionary<string, object>> candidates = RelationshipsStore.SelectConversationRelationshipBenefits2(
+                connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId,
                     ["giver"] = targetId,
@@ -497,14 +485,7 @@ LIMIT 20;",
                 || string.IsNullOrWhiteSpace(recipientId)
                 || supplied.Count == 0)
                 return null;
-            return ReignDatabase.QuerySql(connection, @"SELECT *
-FROM conversation_relationship_benefits
-WHERE campaign_id=$campaign
-AND giver_id=$giver
-AND recipient_id=$recipient
-ORDER BY updated_ts DESC, benefit_id ASC
-LIMIT 50;",
-                    new Dictionary<string, object>
+            return RelationshipsStore.SelectConversationRelationshipBenefits3(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId,
                         ["giver"] = giverId,
@@ -617,14 +598,10 @@ LIMIT 50;",
             Dictionary<string, object> assessment)
         {
             if (connection == null || string.IsNullOrWhiteSpace(sourceId)) return false;
-            Dictionary<string, object> evidence = ReignDatabase.QuerySql(connection,
-                "SELECT event_type,summary,payload_json,'' AS category,'completed' AS phase,participants_json,'events' AS source_table FROM events WHERE event_id=$id LIMIT 1;",
-                new Dictionary<string, object> { ["id"] = sourceId }).FirstOrDefault();
+            Dictionary<string, object> evidence = RelationshipsStore.SelectEvents(connection, new Dictionary<string, object> { ["id"] = sourceId }).FirstOrDefault();
             if (evidence == null)
             {
-                evidence = ReignDatabase.QuerySql(connection,
-                    "SELECT event_type,summary,payload_json,category,phase,'[]' AS participants_json,'world_history_events' AS source_table FROM world_history_events WHERE event_id=$id LIMIT 1;",
-                    new Dictionary<string, object> { ["id"] = sourceId }).FirstOrDefault();
+                evidence = RelationshipsStore.SelectWorldHistoryEvents(connection, new Dictionary<string, object> { ["id"] = sourceId }).FirstOrDefault();
             }
             if (evidence == null) return false;
             string phase = ReadString(evidence, "phase", "completed").ToLowerInvariant();
@@ -651,9 +628,7 @@ LIMIT 50;",
                 .Equals("world_history_events", StringComparison.OrdinalIgnoreCase))
             {
                 HashSet<string> entities = new HashSet<string>(
-                    ReignDatabase.QuerySql(connection,
-                        "SELECT entity_id FROM world_history_entities WHERE event_id=$id AND entity_id<>'';",
-                        new Dictionary<string, object> { ["id"] = sourceId })
+                    RelationshipsStore.SelectWorldHistoryEntities(connection, new Dictionary<string, object> { ["id"] = sourceId })
                         .Select(row => ReadString(row, "entity_id", "")),
                     StringComparer.OrdinalIgnoreCase);
                 pairMatches = entities.Contains(observerId) && entities.Contains(targetId);
@@ -691,14 +666,10 @@ LIMIT 50;",
             string actKind, Dictionary<string, object> assessment)
         {
             if (string.IsNullOrWhiteSpace(sourceId)) return false;
-            Dictionary<string, object> evidence = ReignDatabase.QuerySql(connection,
-                "SELECT event_type,summary,payload_json,'' AS category,'completed' AS phase,participants_json,'events' AS source_table FROM events WHERE event_id=$id LIMIT 1;",
-                new Dictionary<string, object> { ["id"] = sourceId }).FirstOrDefault();
+            Dictionary<string, object> evidence = RelationshipsStore.SelectEvents(connection, new Dictionary<string, object> { ["id"] = sourceId }).FirstOrDefault();
             if (evidence == null)
             {
-                evidence = ReignDatabase.QuerySql(connection,
-                    "SELECT event_type,summary,payload_json,category,phase,'[]' AS participants_json,'world_history_events' AS source_table FROM world_history_events WHERE event_id=$id LIMIT 1;",
-                    new Dictionary<string, object> { ["id"] = sourceId }).FirstOrDefault();
+                evidence = RelationshipsStore.SelectWorldHistoryEvents(connection, new Dictionary<string, object> { ["id"] = sourceId }).FirstOrDefault();
             }
             if (evidence == null) return false;
 
@@ -714,11 +685,7 @@ LIMIT 50;",
                     StringComparison.OrdinalIgnoreCase))
             {
                 HashSet<string> entities = new HashSet<string>(
-                    ReignDatabase.QuerySql(connection,
-                        @"SELECT entity_id
-FROM world_history_entities
-WHERE event_id=$id AND entity_id<>'';",
-                        new Dictionary<string, object>
+                    RelationshipsStore.SelectWorldHistoryEntities2(connection, new Dictionary<string, object>
                         {
                             ["id"] = sourceId
                         }).Select(row =>
@@ -776,21 +743,8 @@ WHERE event_id=$id AND entity_id<>'';",
                 return string.Empty;
             long cutoff =
                 DateTimeOffset.UtcNow.ToUnixTimeSeconds() - 1800;
-            foreach (Dictionary<string, object> row in ReignDatabase.QuerySql(
-                connection,
-                @"SELECT event_id
-FROM events
-WHERE campaign_id=$campaign
-AND ts>=$cutoff
-AND (
-    event_type LIKE '%gift%'
-    OR event_type LIKE '%transfer%'
-    OR event_type LIKE '%rescue%'
-    OR event_type LIKE '%saved%'
-)
-ORDER BY ts DESC
-LIMIT 50;",
-                new Dictionary<string, object>
+            foreach (Dictionary<string, object> row in RelationshipsStore.SelectEvents2(
+                connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId,
                     ["cutoff"] = cutoff
@@ -901,25 +855,18 @@ LIMIT 50;",
                 adjudicated["benefitEventId"] = benefitId;
                 if (existing == null)
                 {
-                    ReignDatabase.ExecuteSql(connection, @"INSERT OR IGNORE INTO conversation_relationship_benefits(
-benefit_id,campaign_id,timeline_id,giver_id,recipient_id,benefit_kind,description,source_event_id,source_turn_id,
-original_delta,retained_appreciation,continued_utility,status,created_ts,updated_ts,source_evidence_json,payload_json)
-VALUES($id,$campaign,$timeline,$giver,$recipient,$kind,$description,$event,$turn,$delta,1,$utility,'retained',$ts,$ts,$evidence,$payload);",
-                        new Dictionary<string, object> { ["id"] = benefitId, ["campaign"] = campaignId, ["timeline"] = timelineId,
+                    RelationshipsStore.InsertOrIgnoreConversationRelationshipBenefits(connection, new Dictionary<string, object> { ["id"] = benefitId, ["campaign"] = campaignId, ["timeline"] = timelineId,
                             ["giver"] = targetId, ["recipient"] = observerId, ["kind"] = act, ["description"] = ReadString(assessment, "summary", ""),
                             ["event"] = exchangeId, ["turn"] = sourceTurnId, ["delta"] = delta,
                             ["utility"] = ReadDouble(assessment, "continuedUtility", 1d), ["ts"] = ts,
                             ["evidence"] = Json.Serialize(evidenceIds), ["payload"] = Json.Serialize(assessment) });
                 }
-                ReignDatabase.ExecuteSql(connection, "UPDATE conversation_relationship_receipts SET benefit_event_id=$benefit WHERE receipt_id=$receipt;",
-                    new Dictionary<string, object> { ["benefit"] = benefitId, ["receipt"] = receiptId });
+                RelationshipsStore.UpdateConversationRelationshipReceipts(connection, new Dictionary<string, object> { ["benefit"] = benefitId, ["receipt"] = receiptId });
             }
             else if (tier == "gift_leverage" && !string.IsNullOrWhiteSpace(benefitId))
             {
                 double retained = Program.ClampDouble(ReadDouble(assessment, "retainedAppreciation", 1d), 0d, 1d);
-                ReignDatabase.ExecuteSql(connection, @"UPDATE conversation_relationship_benefits SET retained_appreciation=$retained,
-status=$status,updated_ts=$ts,payload_json=$payload WHERE benefit_id=$id;",
-                    new Dictionary<string, object> { ["retained"] = retained, ["status"] = retained <= 0.01d ? "repudiated" : retained < 0.999d ? "diminished" : "retained",
+                RelationshipsStore.UpdateConversationRelationshipBenefits(connection, new Dictionary<string, object> { ["retained"] = retained, ["status"] = retained <= 0.01d ? "repudiated" : retained < 0.999d ? "diminished" : "retained",
                         ["ts"] = ts, ["payload"] = Json.Serialize(assessment), ["id"] = benefitId });
             }
         }
@@ -976,8 +923,8 @@ status=$status,updated_ts=$ts,payload_json=$payload WHERE benefit_id=$id;",
                 return new Dictionary<string, object>
                 {
                     ["ok"] = true, ["campaignId"] = campaignId,
-                    ["receipts"] = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_relationship_receipts ORDER BY created_ts DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";"),
-                    ["benefits"] = ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_relationship_benefits ORDER BY updated_ts DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";")
+                    ["receipts"] = RelationshipsStore.SelectConversationRelationshipReceipts(connection, limit.ToString(CultureInfo.InvariantCulture)),
+                    ["benefits"] = RelationshipsStore.SelectConversationRelationshipBenefits4(connection, limit.ToString(CultureInfo.InvariantCulture))
                 };
             }
         }
