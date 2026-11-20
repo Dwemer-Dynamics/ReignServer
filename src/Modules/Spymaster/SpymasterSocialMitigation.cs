@@ -100,6 +100,12 @@ namespace ReignBetaServer
             var existing = ReadMitigationReceipt(connection, terms, transaction);
             if (existing != null) return existing;
 
+            // Older clients did not send this transport fence. New clients bind
+            // first admission to the world-history generation loaded at dispatch.
+            if (payload.ContainsKey("restoreGeneration") && ReadString(payload, "restoreGeneration", "")
+                != ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", ""))
+                return MitigationError("mitigation_generation_changed");
+
             // A closed branch can still have active rumor rows and a previously valid court session.
             // Lock the registered timeline across first apply so a branch switch cannot overtake it.
             var timelines = SpymasterStore.LockMitigationTimelines(connection, terms, transaction);

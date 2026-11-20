@@ -486,6 +486,7 @@ namespace ReignBetaServer
 
                 string id = PartialId("scoped_partial_", 0.82d);
                 var request = Payload(id);
+                request["restoreGeneration"] = ReadString(DialogueService.ReadMemoryPrecisionState(fixture), "restore_generation", "");
                 add("mitigation_missing_id_or_receipt",
                     ReadString(Apply(Payload("")), "error", "") == "invalid_mitigation_terms"
                     && ReadString(Status(request), "error", "") == "mitigation_receipt_missing" && Value("older_live") == -20,
@@ -560,6 +561,15 @@ namespace ReignBetaServer
                     && Json.Serialize(reputationTasks[0].Result) == Json.Serialize(reputationTasks[1].Result)
                     && ReadInt(projectedReputation, "rawValue", 0) == -7,
                     "Concurrent partial reputation mitigation returns one original receipt and publishes one standing change.", projectedReputation);
+
+                var staleGeneration = Payload("first_apply_from_replaced_generation");
+                staleGeneration["restoreGeneration"] = ReadString(DialogueService.ReadMemoryPrecisionState(fixture), "restore_generation", "");
+                DialogueService.AdvanceMemoryRestoreGeneration(campaign);
+                var generationRejected = Apply(staleGeneration);
+                add("mitigation_first_apply_fenced_after_same_timeline_restore",
+                    ReadString(generationRejected, "error", "") == "mitigation_generation_changed"
+                    && Value("older_live") == -7 && Json.Serialize(Status(request)) == original,
+                    "A new-client request from a replaced generation cannot mutate the same timeline. Receipt lookup still returns the original result.", generationRejected);
 
                 OpenTimeline("other_fixture");
                 var stale = Apply(Payload("first_apply_after_switch"));
