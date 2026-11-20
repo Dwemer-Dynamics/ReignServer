@@ -495,8 +495,20 @@ ON CONFLICT(pair_key) DO NOTHING
 RETURNING pair_key;", parameters, transaction);
         }
 
-        internal const string SelectBatchChemistrySql = "SELECT pair_key,hero_a_id,affinity_a_to_b,affinity_b_to_a FROM relationship_pair_chemistry";
-        internal const string SelectBatchProvenanceSql = "SELECT pair_key,source FROM relationship_pair_provenance WHERE campaign_id=$campaign AND timeline_id=$timeline AND active=1";
+        internal static List<Dictionary<string, object>> SelectEffectiveAttitudePairs(
+            ReignDbConnection connection, Dictionary<string, object> parameters)
+        {
+            string keys = ReignPostgreSqlDialect.IsPostgreSql(connection)
+                ? "SELECT jsonb_array_elements_text(CAST($pairs AS jsonb))"
+                : "SELECT value FROM json_each($pairs)";
+            return ReignDatabase.QuerySql(connection, @"
+SELECT c.pair_key,c.hero_a_id,c.affinity_a_to_b,c.affinity_b_to_a,p.source
+FROM relationship_pair_chemistry c
+LEFT JOIN relationship_pair_provenance p ON p.pair_key=c.pair_key
+    AND p.campaign_id=$campaign AND p.timeline_id=$timeline AND p.active=1
+WHERE c.pair_key IN (" + keys + @")
+ORDER BY c.pair_key,p.source;", parameters);
+        }
 
         internal const string SelectCharacterPublicStandingSql = "SELECT subject_id,standing_value,sources_json,revision,last_changed_day,updated_ts,calculation_status,last_error FROM character_public_standing WHERE campaign_id=$campaign AND timeline_id=$timeline";
 

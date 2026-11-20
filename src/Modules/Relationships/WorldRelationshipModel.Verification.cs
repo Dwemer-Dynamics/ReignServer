@@ -366,6 +366,21 @@ namespace ReignBetaServer
                     add("effective_batch_malformed_pair_is_not_dropped",
                         !ReadBool(EffectiveAttitudeBatchApi(payload), "ok", true),
                         "A malformed element cannot disappear from a successful result.");
+                    foreach (string source in new[] { "lower_fixture", "Upper_fixture" })
+                        RecordRelationshipPairProvenance(connection, campaignId, "main", AmbientPairKey("noop_a", "noop_b"),
+                            source, false, 7);
+                    var spellings = new[] { Direction("NOOP_A", "NOOP_B"), Direction("noop_a", "noop_b"),
+                        Direction("noop_a", "NOOP_B"), Direction("noop_b", "noop_a") };
+                    payload["pairs"] = spellings;
+                    var spellingBatch = EffectiveAttitudeBatchApi(payload);
+                    var spellingRows = ReadDictionaryList(spellingBatch, "attitudes");
+                    add("effective_batch_exact_case_and_provenance_match_scalar",
+                        ReadBool(spellingBatch, "ok", false) && spellingRows.Count == spellings.Length
+                        && !ReadBool(spellingRows[0], "hasPair", true) && ReadBool(spellingRows[1], "hasPair", false)
+                        && spellingRows.Zip(spellings, (row, pair) => Json.Serialize(row) == Json.Serialize(
+                            ResolveEffectiveAttitude(connection, campaignId, "main", ReadString(pair, "observerId", ""),
+                                ReadString(pair, "targetId", ""), "batch"))).All(match => match),
+                        "Case-distinct inputs preserve scalar presence, standing and database-ordered provenance in both directions.");
                     RelationshipsStore.UpdateRelationshipPairProvenance(connection);
                     RelationshipsStore.UpdateRelationshipPairChemistry29(connection);
                     Dictionary<string, object> secondPolitical =

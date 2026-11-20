@@ -22,10 +22,8 @@ namespace ReignBetaServer
             private readonly string campaignId;
             private readonly string timelineId;
             private readonly RelationshipStandingContext previous;
-            private readonly Dictionary<string, Dictionary<string, object>> standing =
-                new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
-            private readonly Dictionary<string, Dictionary<string, object>> roster =
-                new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
+            private readonly Dictionary<string, Dictionary<string, object>> standing;
+            private readonly Dictionary<string, Dictionary<string, object>> roster;
             private readonly Dictionary<Dictionary<string, object>, List<Dictionary<string, object>>> sources =
                 new Dictionary<Dictionary<string, object>, List<Dictionary<string, object>>>();
             private HashSet<string> playerIds;
@@ -40,12 +38,15 @@ namespace ReignBetaServer
             public int PlayerReads;
 
             public RelationshipStandingContext(ReignDbConnection connection,
-                string campaignId, string timelineId, RelationshipFileSnapshot files = null)
+                string campaignId, string timelineId, RelationshipFileSnapshot files = null,
+                StringComparer idComparer = null)
             {
                 this.connection = connection;
                 this.campaignId = campaignId;
                 this.timelineId = timelineId;
                 this.files = files;
+                standing = new Dictionary<string, Dictionary<string, object>>(idComparer ?? StringComparer.OrdinalIgnoreCase);
+                roster = new Dictionary<string, Dictionary<string, object>>(standing.Comparer);
                 previous = CurrentRelationshipStandingContext;
                 CurrentRelationshipStandingContext = this;
             }
@@ -81,7 +82,7 @@ namespace ReignBetaServer
             public void Prefetch(IEnumerable<string> heroIds)
             {
                 List<string> ids = heroIds.Where(id => !string.IsNullOrWhiteSpace(id))
-                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    .Distinct(standing.Comparer).ToList();
                 if (ids.Count == 0) return;
                 PrefetchStanding(standingStale ? standing.Keys.Concat(ids) : ids);
                 PrefetchRoster(rosterStale ? roster.Keys.Concat(ids) : ids);
@@ -90,14 +91,14 @@ namespace ReignBetaServer
             private void PrefetchStanding(IEnumerable<string> heroIds)
             {
                 List<string> ids = heroIds.Where(id => !string.IsNullOrWhiteSpace(id))
-                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    .Distinct(standing.Comparer).ToList();
                 if (standingStale) standing.Clear();
                 foreach (string id in ids) standing[id] = null;
                 StandingReads++;
                 foreach (Dictionary<string, object> row in QueryRelationshipHeroRows(connection,
                     RelationshipsStore.SelectCharacterPublicStandingSql,
                     "subject_id", ids, new Dictionary<string, object>
-                    { ["campaign"] = campaignId, ["timeline"] = timelineId }))
+                    { ["campaign"] = campaignId, ["timeline"] = timelineId }, standing.Comparer))
                     standing[ReadString(row, "subject_id", "")] = row;
                 standingStale = false;
             }
@@ -105,13 +106,13 @@ namespace ReignBetaServer
             private void PrefetchRoster(IEnumerable<string> heroIds)
             {
                 List<string> ids = heroIds.Where(id => !string.IsNullOrWhiteSpace(id))
-                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    .Distinct(roster.Comparer).ToList();
                 if (rosterStale) roster.Clear();
                 foreach (string id in ids) roster[id] = null;
                 RosterReads++;
                 foreach (Dictionary<string, object> row in QueryRelationshipHeroRows(connection,
                     RelationshipsStore.SelectIdentityRosterSql,
-                    "hero_id", ids))
+                    "hero_id", ids, idComparer: roster.Comparer))
                     roster[ReadString(row, "hero_id", "")] = row;
                 rosterStale = false;
             }
@@ -244,10 +245,11 @@ namespace ReignBetaServer
 
         private static List<Dictionary<string, object>> QueryRelationshipHeroRows(
             ReignDbConnection connection, string query, string idColumn,
-            IEnumerable<string> heroIds, Dictionary<string, object> parameters = null)
+            IEnumerable<string> heroIds, Dictionary<string, object> parameters = null,
+            IEqualityComparer<string> idComparer = null)
         {
-            HashSet<string> ids = new HashSet<string>(heroIds
-                .Where(id => !string.IsNullOrWhiteSpace(id)), StringComparer.OrdinalIgnoreCase);
+            var ids = new HashSet<string>(heroIds.Where(id => !string.IsNullOrWhiteSpace(id)),
+                idComparer ?? StringComparer.OrdinalIgnoreCase);
             if (ids.Count == 0) return new List<Dictionary<string, object>>();
             if (!ReignPostgreSqlDialect.IsPostgreSql(connection))
                 return RelationshipsStore.QuerySql(connection, query, parameters)
@@ -1040,23 +1042,21 @@ namespace ReignBetaServer
             {
                 EnsureMbtiRelationshipSchema(connection);
                 EnsureWorldRelationshipSchema(connection);
-                var keys = requested.Select(pair => pair.Key).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                var chemistry = QueryRelationshipHeroRows(connection, RelationshipsStore.SelectBatchChemistrySql, "pair_key", keys)
-                    .ToDictionary(row => ReadString(row, "pair_key", ""), StringComparer.OrdinalIgnoreCase);
-                var sources = QueryRelationshipHeroRows(connection, RelationshipsStore.SelectBatchProvenanceSql, "pair_key", keys,
-                    new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
-                    .ToLookup(row => ReadString(row, "pair_key", ""), row => ReadString(row, "source", ""),
-                        StringComparer.OrdinalIgnoreCase);
-                using (var standing = new RelationshipStandingContext(connection, campaignId, timelineId))
+                // Match the scalar SQL predicates, including exact spelling of public API inputs.
+                var keys = requested.Select(pair => pair.Key).Distinct(StringComparer.Ordinal).ToList();
+                var pairRows = RelationshipsStore.SelectEffectiveAttitudePairs(connection, new Dictionary<string, object>
+                {
+                    ["campaign"] = campaignId, ["timeline"] = timelineId, ["pairs"] = Json.Serialize(keys)
+                }).ToLookup(row => ReadString(row, "pair_key", ""), StringComparer.Ordinal);
+                using (var standing = new RelationshipStandingContext(connection, campaignId, timelineId, idComparer: StringComparer.Ordinal))
                 {
                     standing.Prefetch(requested.Select(pair => pair.Observer).Concat(requested.Select(pair => pair.Target)));
                     var attitudes = requested.Select(pair =>
                     {
-                        chemistry.TryGetValue(pair.Key, out var row);
+                        var rows = pairRows[pair.Key];
                         return DescribeEffectiveAttitude(connection, campaignId, timelineId, pair.Observer, pair.Target,
-                            pair.Context, pair.Key, row, row == null ? new List<string>()
-                                : sources[pair.Key].Where(source => !string.IsNullOrWhiteSpace(source))
-                                    .OrderBy(source => source, StringComparer.Ordinal).ToList());
+                            pair.Context, pair.Key, rows.FirstOrDefault(), rows.Select(row => ReadString(row, "source", ""))
+                                .Where(source => !string.IsNullOrWhiteSpace(source)).ToList());
                     }).ToList();
                     return new Dictionary<string, object>
                     {
