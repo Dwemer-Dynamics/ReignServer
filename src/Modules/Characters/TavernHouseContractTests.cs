@@ -192,6 +192,12 @@ namespace ReignBetaServer
                     state = ReadTavernHouseSession(path);
                     response = DispatchTavernHouseDialogue(state, "request", "hash", chat, provider, pending => RecoverTavernHouseDialogueRow(state, pending, exchange), () => SaveTavernHouseSession(path, state));
                     Require(providerCalls == 1 && ReadString(response, "reply", "") == "Welcome." && ReadBool(response, "recoveredDialogue", false), "Recovery repeated the provider or changed the committed reply.");
+                    Require(!DialogueService.IsDelimitedSpeechOnlyResponse(response), "A legacy venue exchange acquired a new disposition.");
+                    exchange["accepted_output_contract"] = DialogueService.OllamaDelimitedSpeechContract;
+                    var recoveredSpeech = DispatchTavernHouseDialogue(state, "request", "hash", chat, provider,
+                        pending => RecoverTavernHouseDialogueRow(state, pending, exchange), () => SaveTavernHouseSession(path, state));
+                    Require(providerCalls == 1 && DialogueService.IsDelimitedSpeechOnlyResponse(recoveredSpeech)
+                        && ReadString(recoveredSpeech, "reply", "") == "Welcome.", "Venue recovery lost the speech-only receipt or repeated generation.");
                     Require(ReadDictionaryList(state, "transcript").Count == 0, "Recovery fabricated a player turn before the completed response is checkpointed.");
                     var unknown = DispatchTavernHouseDialogue(state, "request", "hash", chat, provider, _ => null, () => SaveTavernHouseSession(path, state));
                     Require(providerCalls == 1 && ReadString(unknown, "code", "") == "uncertain_dialogue", "An uncertain provider outcome was repeated.");

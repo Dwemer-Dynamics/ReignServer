@@ -92,6 +92,7 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> playerRows;
             var staged = new List<Dictionary<string, object>>();
             Dictionary<string, object> response;
+            bool speechOnly = false;
             _playerActionTurn = payload; _stagedTurnActions = staged; _playerActionGeneration = publicationGeneration;
             try
             {
@@ -99,10 +100,11 @@ namespace ReignBetaServer
                 try
                 {
                     response = respond();
+                    speechOnly = IsDelimitedSpeechOnlyResponse(response);
                     if (UsesStructuredActions(payload))
-                        response["structuredActionDecision"] = ReadDictionary(payload, "validatedStructuredActionDecision")
+                        response["structuredActionDecision"] = (speechOnly ? null : ReadDictionary(payload, "validatedStructuredActionDecision"))
                             ?? TestDict("version", 1, "kind", "none", "valid", false, "error", "No explicit action decision was returned.");
-                    var recruited = !ReadBool(payload, "conversationGroundingFailed", false) && !UsesStructuredActions(payload) && ReadBool(response, "ok", false)
+                    var recruited = !speechOnly && !ReadBool(payload, "conversationGroundingFailed", false) && !UsesStructuredActions(payload) && ReadBool(response, "ok", false)
                         ? CharactersService.QueueExplicitResidentCompanion(payload, response) : null;
                     if (recruited != null)
                     {
@@ -117,7 +119,7 @@ namespace ReignBetaServer
             finally { _playerActionTurn = null; _stagedTurnActions = null; _playerActionGeneration = null; }
             // A separately authorized player handover can survive an NPC failure.
             // NPC-owned actions cannot: the failed response never accepted them.
-            if (!ReadBool(response, "ok", false) || ReadBool(payload, "conversationGroundingFailed", false))
+            if (speechOnly || !ReadBool(response, "ok", false) || ReadBool(payload, "conversationGroundingFailed", false))
             {
                 var independent = new HashSet<string>(playerRows.Select(r => ReadString(r, "id", "")), StringComparer.Ordinal);
                 staged.RemoveAll(row => !independent.Contains(ReadString(row, "id", "")));
@@ -125,7 +127,7 @@ namespace ReignBetaServer
                     if (response.ContainsKey(key)) response[key] = new List<Dictionary<string, object>>();
             }
             string refusal = ReadString(response, "reply", "");
-            if (Regex.IsMatch(refusal, @"\bi (?:will not|won't|cannot|can't|refuse to|do not|don't) (?:accept|take|keep) (?:your |the |this )?(?:gold|coins|money|payment|gift|item)\b", RegexOptions.IgnoreCase))
+            if (!speechOnly && Regex.IsMatch(refusal, @"\bi (?:will not|won't|cannot|can't|refuse to|do not|don't) (?:accept|take|keep) (?:your |the |this )?(?:gold|coins|money|payment|gift|item)\b", RegexOptions.IgnoreCase))
             {
                 foreach (var row in playerRows.Where(r => ReadString(r, "status", "") == "queued").ToList())
                 {

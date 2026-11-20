@@ -288,6 +288,13 @@ VALUES($id,$campaign,$npc,$player,$channel,'open',$ts,0,$day,0,$location,$partic
             return ReignDatabase.QuerySql(connection, "SELECT payload_json FROM summaries WHERE summary_id=$id;", parameters, transaction);
         }
 
+        internal static List<Dictionary<string, object>> SelectSpeechOnlyNpcTurns(ReignDbConnection connection, Dictionary<string, object> parameters)
+        {
+            return ReignDatabase.QuerySql(connection, @"SELECT t.turn_id FROM conversation_turns t
+JOIN conversation_accepted_units u ON u.unit_id=t.event_id
+WHERE t.session_id=$id AND t.status='active' AND t.role='npc' AND u.receipt_json::jsonb->>'outputContract'=$contract;", parameters);
+        }
+
         internal static void UpdateConversationSessions4(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             ReignDatabase.ExecuteSql(connection, "UPDATE conversation_sessions SET status=$status,end_ts=$ts,end_world_day=$day,close_reason=$reason WHERE session_id=$id;", parameters, transaction);

@@ -9,6 +9,12 @@ namespace ReignBetaServer
         internal delegate Dictionary<string, object> ConversationSourceAcceptance(
             ReignDbConnection connection, Dictionary<string, object> source);
 
+        internal const string OllamaDelimitedSpeechContract = "ollama_delimited_speech";
+
+        // Only read the disposition issued with the server's accepted source, including on replay.
+        internal static bool IsDelimitedSpeechOnlyResponse(Dictionary<string, object> response) =>
+            ReadString(ReadDictionary(ReadDictionary(response, "conversationExchange"), "acceptedUnit"), "outputContract", "") == OllamaDelimitedSpeechContract;
+
         internal sealed class AcceptedConversationUnit
         {
             internal string Campaign, Hero, Player, Location, EventId, EventType, PlayerText, Reply, Generation;
@@ -66,7 +72,7 @@ namespace ReignBetaServer
                     var responseIdentity = TestDict("reply", unit.Reply, "playerText", unit.PlayerText,
                         "hero", unit.Hero, "player", unit.Player, "timeline", ContinuityTimeline(unit.Payload),
                         "sourceIds", ReadStringList(source, "turnIds"));
-                    if (unit.DelimitedSpeechOnly) responseIdentity["outputContract"] = "ollama_delimited_speech";
+                    if (unit.DelimitedSpeechOnly) responseIdentity["outputContract"] = OllamaDelimitedSpeechContract;
                     string hash = PromptHash(CanonicalJson(responseIdentity));
                     var previous = DialogueStore.SelectConversationAcceptedUnits2(connection, TestDict("unit", unit.EventId)).SingleOrDefault();
                     if (previous != null)
@@ -165,6 +171,7 @@ namespace ReignBetaServer
                         "effectPayload", TestDict("conversationAgencyReceipt", ReadDictionary(effectPayload, "conversationAgencyReceipt"),
                             "intoxicationReceipt", ReadDictionary(effectPayload, "intoxicationReceipt")));
                     boundary?.Invoke("before_unit_receipt");
+                    if (unit.DelimitedSpeechOnly) receipt["outputContract"] = OllamaDelimitedSpeechContract;
                     receipt["politicalReflection"] = CharactersService.AcceptedPoliticalReflection(unit, suppressReplyEffects);
                     // Optional, non-gating: binds the one exact displayed NPC source row.
                     var viewInsertion = unit.ViewInsertionRequested && !technicalNotice && !intentionalSilence && !unit.GroupConversation
@@ -180,6 +187,12 @@ namespace ReignBetaServer
                 if (!ReadBool(exchange, "ok", false) || !ReadBool(accepted, "ok", false))
                     throw new InvalidOperationException("The conversation's source publication did not accept its dependent records.");
                 var effectReceipt = ReadDictionary(accepted, "effects");
+                if (unit.DelimitedSpeechOnly)
+                {
+                    unit.Payload.Remove("conversationAgencyReceipt");
+                    unit.Payload.Remove("intoxicationReceipt");
+                    unit.Payload.Remove("validatedStructuredActionDecision");
+                }
                 foreach (var item in ReadDictionary(accepted, "effectPayload") ?? TestDict())
                     if (item.Value is Dictionary<string, object> value && value.Count > 0) unit.Payload[item.Key] = CloneDictionary(value);
                 if (!unit.DelimitedSpeechOnly && unit.Parsed != null && ReadDictionary(unit.Payload, "conversationAgencyReceipt") is { } agency && agency.Count > 0)

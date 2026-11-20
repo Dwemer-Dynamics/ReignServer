@@ -901,8 +901,9 @@ ORDER BY created_ts,unit_id;", parameters, transaction);
 
         internal static List<Dictionary<string, object>> SelectConversationTurns8(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
-            return ReignDatabase.QuerySql(connection, @"SELECT text,payload_json,event_id FROM conversation_turns
-WHERE session_id=$session AND exchange_id=$exchange AND speaker_id=$speaker AND role='npc' AND turn_id=$turn LIMIT 1;", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, @"SELECT t.text,t.payload_json,t.event_id,u.receipt_json::jsonb->>'outputContract' AS accepted_output_contract
+FROM conversation_turns t LEFT JOIN conversation_accepted_units u ON u.unit_id=t.event_id
+WHERE t.session_id=$session AND t.exchange_id=$exchange AND t.speaker_id=$speaker AND t.role='npc' AND t.turn_id=$turn LIMIT 1;", parameters, transaction);
         }
 
         internal static List<Dictionary<string, object>> SelectConversationTurns9(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)

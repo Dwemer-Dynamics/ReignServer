@@ -88,7 +88,7 @@ namespace ReignBetaServer
             response["conversationEffectsUnavailable"] = speechOnly;
             var delivery = TestDict("policy", "single_pass", "additionalProviderCalls", 0,
                 "metadataDefaults", fields, "speechOnlyRecovery", speechOnly);
-            if (ollamaSpeech) delivery["outputContract"] = "ollama_delimited_speech";
+            if (ollamaSpeech) delivery["outputContract"] = OllamaDelimitedSpeechContract;
             response["conversationDelivery"] = delivery;
             response = letter ? response : EnsureConversationDelivery(response, allowQuiet);
             delimitedSpeechOnly = ollamaSpeech && ReadBool(response, "ok", false);

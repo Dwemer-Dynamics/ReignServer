@@ -255,7 +255,8 @@ namespace ReignBetaServer
         internal static void ProcessFamilyReconciliationReply(Dictionary<string, object> payload, Dictionary<string, object> response)
         {
             if (!ReadBool(payload, "familyChambers", false) || ReadBool(payload, "familyVisitDocket", false)
-                || !ReadBool(response, "ok", false) || ReadBool(response, "fallback", false)) return;
+                || !ReadBool(response, "ok", false) || ReadBool(response, "fallback", false)
+                || DialogueService.IsDelimitedSpeechOnlyResponse(response)) return;
             string campaign = ReadString(payload, "campaignId", "default"), timeline = ReadString(payload, "timelineId", "main");
             string player = ReadFirstString(payload, "playerHeroStringId", "playerId"), hero = CampaignFileService.CharacterIdFrom(ReadDictionary(payload, "speaker"));
             string playerText = ReadString(payload, "playerText", ""), reply = ReadString(response, "reply", "");

@@ -187,7 +187,7 @@ namespace ReignBetaServer
                         () => DialogueService.PartyChatRespond(chat), pending => RecoverTavernHouseDialogue(state, pending),
                         () => SaveTavernHouseSession(path, state));
                     if (!ReadBool(response, "ok", false)) return response;
-                    PrepareTavernVisitAction(state, chat, response);
+                    if (!DialogueService.IsDelimitedSpeechOnlyResponse(response)) PrepareTavernVisitAction(state, chat, response);
                     var transcript = ReadDictionaryList(state, "transcript");
                     string playerTurn = ReadString(payload, "playerTurnId", requestId);
                     string playerText = ReadString(payload, "playerText", "");
@@ -291,6 +291,7 @@ namespace ReignBetaServer
                 throw new InvalidDataException("The saved pending dialogue does not match this exact phase and revision.");
             using (var connection = ReignDatabase.OpenCampaignConnection(ReadString(state, "campaignId", "")))
             {
+                DialogueService.EnsureAcceptedConversationUnitSchema(connection);
                 var row = CharactersStore.SelectConversationTurns8(connection, new Dictionary<string, object> { ["session"] = phaseSession, ["exchange"] = turn, ["speaker"] = speaker,
                         ["turn"] = turn + "_npc_" + DialogueService.SafeMemoryKey(speaker) }).FirstOrDefault();
                 return RecoverTavernHouseDialogueRow(state, pending, row);
@@ -307,10 +308,12 @@ namespace ReignBetaServer
                 || ReadString(source, "sceneTurnId", "") != ReadString(pending, "sceneTurnId", "")
                 || ReadString(source, "speakerHeroStringId", "") != ReadString(pending, "speakerId", ""))
                 throw new InvalidDataException("The completed dialogue exchange belongs to another request identity.");
+            var exchange = TestDict("sessionId", ReadString(pending, "phaseSessionId", ""), "exchangeId", ReadString(pending, "sceneTurnId", ""));
+            if (ReadString(row, "accepted_output_contract", "") == DialogueService.OllamaDelimitedSpeechContract)
+                exchange["acceptedUnit"] = TestDict("outputContract", DialogueService.OllamaDelimitedSpeechContract);
             return new Dictionary<string, object> { ["ok"] = true, ["reply"] = ReadString(row, "text", ""), ["mode"] = "party_chat",
                 ["campaignId"] = ReadString(state, "campaignId", ""), ["heroStringId"] = ReadString(pending, "speakerId", ""),
-                ["recoveredDialogue"] = true, ["conversationExchange"] = new Dictionary<string, object> {
-                    ["sessionId"] = ReadString(pending, "phaseSessionId", ""), ["exchangeId"] = ReadString(pending, "sceneTurnId", "") } };
+                ["recoveredDialogue"] = true, ["conversationExchange"] = exchange };
         }
 
         internal static bool ApplyTavernHouseOpening(Dictionary<string, object> state, Dictionary<string, object> chat)
@@ -366,6 +369,7 @@ namespace ReignBetaServer
 
         private static void FinalizeTavernHouseTerms(Dictionary<string, object> state, Dictionary<string, object> response, string speakerId, string requestId, bool visiting)
         {
+            if (DialogueService.IsDelimitedSpeechOnlyResponse(response)) return;
             try
             {
                 if (!visiting && !DialogueService.UsesStructuredActions(state))
