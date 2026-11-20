@@ -56,11 +56,17 @@ namespace ReignBetaServer
             string postgresSnapshotPointId = point == null
                 ? savePointId
                 : SaveSyncPostgreSqlSnapshotPointId(point);
-            bool registeredSnapshot = point != null
-                && ReignPostgreSqlStorage.SnapshotExists(campaignId,
-                    postgresSnapshotPointId)
-                && Directory.Exists(Path.Combine(pointRoot, "campaign"))
-                && File.Exists(Path.Combine(pointRoot, "manifest.json"));
+            string manifestPath = Path.Combine(pointRoot, "manifest.json");
+            var manifest = point != null && Directory.Exists(Path.Combine(pointRoot, "campaign")) && File.Exists(manifestPath)
+                ? CampaignFileService.ReadJsonObject(manifestPath) : null;
+            if (manifest != null && (!ReadString(manifest, "campaignId", "").Equals(campaignId, StringComparison.OrdinalIgnoreCase)
+                || !ReadString(manifest, "fingerprint", "").Equals(ReadString(point, "snapshotFingerprint", ""), StringComparison.OrdinalIgnoreCase)
+                || !ReadString(manifest, "databaseProvider", "").Equals("postgresql", StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidDataException("Save Sync snapshot identity is inconsistent; campaign data was left untouched.");
+
+            // Reject a damaged or unbound calendar before any SQL initialization, recovery copy, or active-state change.
+            string calendarSha = manifest == null || dryRun ? null : VerifySaveSyncCalendarCheckpoint(campaignId, pointRoot, point, manifest, payload);
+            bool registeredSnapshot = manifest != null && ReignPostgreSqlStorage.SnapshotExists(campaignId, postgresSnapshotPointId);
             if (!registeredSnapshot)
             {
                 if (!ReadBool(payload, "registrationConfirmed", true))
@@ -98,31 +104,20 @@ namespace ReignBetaServer
                 return missing;
             }
 
-            Dictionary<string, object> manifest =
-                CampaignFileService.ReadJsonObject(Path.Combine(pointRoot, "manifest.json"));
-            if (!ReadString(manifest, "campaignId", "")
-                    .Equals(campaignId, StringComparison.OrdinalIgnoreCase)
-                || !ReadString(manifest, "fingerprint", "")
-                    .Equals(
-                        ReadString(point, "snapshotFingerprint", ""),
-                        StringComparison.OrdinalIgnoreCase)
-                || !ReadString(manifest, "databaseProvider", "")
-                    .Equals("postgresql", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidDataException(
-                    "Save Sync snapshot identity is inconsistent; campaign data was left untouched.");
-            }
-
             if (!dryRun)
             {
                 Dictionary<string, object> replay =
                     TryReplaySaveSyncLoadReceipt(ledger, savePointId, loadSessionId, timer);
                 if (replay != null)
+                {
+                    RequireSaveSyncCalendarDigest(calendarSha, SaveSyncCalendarDigest(ReadSaveSyncCalendar(StrictCampaignDirectory(campaignId))));
                     return replay;
+                }
             }
 
             bool activeClean =
-                IsSaveSyncActiveStateCleanForPoint(campaignId, savePointId);
+                IsSaveSyncActiveStateCleanForPoint(campaignId, savePointId)
+                && (dryRun || calendarSha == SaveSyncCalendarDigest(ReadSaveSyncCalendar(StrictCampaignDirectory(campaignId))));
             string currentToken =
                 ReignPostgreSqlStorage.CampaignStateToken(campaignId);
             string targetToken =
@@ -255,6 +250,7 @@ namespace ReignBetaServer
                     Path.Combine(pointRoot, "campaign"),
                     stagedCampaign,
                     path => !IsLiveSqliteSidecar(path));
+                RequireSaveSyncCalendarDigest(calendarSha, SaveSyncCalendarDigest(ReadSaveSyncCalendar(stagedCampaign)));
                 int retainedAssets = MergeSaveSyncRetainedAssets(
                     campaignDir, stagedCampaign);
 
