@@ -575,6 +575,38 @@ namespace ReignBetaServer
                 Check("view_insertion_skips_group_and_silence", ReadDictionary(ReadDictionary(Publish(groupView), "acceptedUnit"), "viewInsertion") == null
                     && ReadDictionary(ReadDictionary(Publish(silentView), "acceptedUnit"), "viewInsertion") == null);
 
+                foreach (bool group in new[] { false, true })
+                {
+                    string channel = group ? "party_chat" : "dialogue";
+                    var fallback = Unit("ollama_speech_" + channel, effects: true, group: group);
+                    bool preparedDrink = ReadString(ReadDictionary(fallback.Payload, "intoxicationReceipt"), "commitState", "") == "prepared";
+                    int drinks = Count("conversation_drinking_turns"), negotiations = Count("conversation_negotiation_turns");
+                    int storedMemories = Count("memories");
+                    var delivered = GenerateSinglePassConversation(TestDict("requestType", channel), fallback.Payload, channel,
+                        out fallback.DelimitedSpeechOnly, responder: request => LlmProviderService.OllamaConversationFixtureResult(request,
+                            "<<<REIGN_SPEECH>>>*She takes a sip.* I agree to those terms.<<<END_REIGN_SPEECH>>>"));
+                    fallback.Parsed = TryParseJsonObject(ReadString(delivered, "content", ""));
+                    fallback.Reply = ReadString(fallback.Parsed, "reply", "");
+                    fallback.PublishScene = fallback.PublishSocial = fallback.PublishIntroductions = true;
+                    fallback.ViewInsertionRequested = true;
+                    var receipt = ReadDictionary(Publish(fallback), "acceptedUnit");
+                    Check("ollama_speech_keeps_sources_and_discards_prepared_effects_" + channel,
+                        preparedDrink && fallback.DelimitedSpeechOnly && fallback.Reply == "*She takes a sip.* I agree to those terms."
+                        && ReadBool(receipt, "ok", false) && Count("conversation_turns", "event_id", fallback.EventId) >= 2
+                        && ReadString(ReadDictionary(receipt, "effects"), "status", "") == "suppressed_by_route"
+                        && new[] { "memory", "playerAttention", "npcLives", "communications" }.All(key =>
+                            ReadString(ReadDictionary(receipt, key), "status", "") == "speech_only_excluded")
+                        && ReadDictionary(ReadDictionary(receipt, "effectPayload"), "conversationAgencyReceipt") == null
+                        && ReadDictionary(ReadDictionary(receipt, "effectPayload"), "intoxicationReceipt") == null
+                        && Count("conversation_drinking_turns") == drinks && Count("conversation_negotiation_turns") == negotiations
+                        && Count("memories") == storedMemories && (group || ReadDictionary(receipt, "viewInsertion") != null));
+                    Check("ollama_speech_idempotent_replay_" + channel, ReadBool(ReadDictionary(Publish(fallback), "acceptedUnit"), "idempotentReplay", false));
+                    fallback.DelimitedSpeechOnly = false;
+                    bool differentContractRefused = false;
+                    try { Publish(fallback); }
+                    catch (InvalidOperationException) { differentContractRefused = true; }
+                    Check("ollama_speech_cannot_replay_as_structured_" + channel, differentContractRefused);
+                }
                 var staleView = Unit("view_insertion_before_restore"); staleView.ViewInsertionRequested = true;
                 var staleDescriptor = ReadDictionary(ReadDictionary(Publish(staleView), "acceptedUnit"), "viewInsertion");
                 string beforeRestore = StoredReceipt(staleView.EventId);

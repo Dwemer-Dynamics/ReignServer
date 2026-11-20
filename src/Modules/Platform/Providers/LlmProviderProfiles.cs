@@ -71,6 +71,10 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> BuildChatRequestBody(Dictionary<string, object> settings,
             Dictionary<string, object> payload, List<Dictionary<string, object>> messages, string model)
+            => BuildChatRequestBody(settings, payload, messages, model, out _);
+
+        private static Dictionary<string, object> BuildChatRequestBody(Dictionary<string, object> settings,
+            Dictionary<string, object> payload, List<Dictionary<string, object>> messages, string model, out bool ollamaConversation)
         {
             var body = new Dictionary<string, object> { ["model"] = model, ["messages"] = messages,
                 ["temperature"] = ReadDouble(payload, "temperature", ReadDouble(settings, "temperature", 0.7d)),
@@ -78,11 +82,14 @@ namespace ReignBetaServer
             foreach (string key in new[] { "response_format", "tools", "tool_choice", "stop", "seed" }) ActionPipelineService.CopyOptional(payload, body, key);
             var extra = ReadDictionary(payload, "extra");
             if (extra != null) foreach (var pair in extra) body[pair.Key] = pair.Value;
-            body["messages"] = CharactersService.RequiredPoliticalMessages(payload, ReadDictionaryList(body, "messages"));
-            // Ollama Cloud currently has no structured-output support. Reign's
-            // existing JSON instructions and response validation remain authoritative.
+            var wireMessages = CharactersService.RequiredPoliticalMessages(payload, ReadDictionaryList(body, "messages"));
+            body["messages"] = wireMessages;
+            ollamaConversation = false;
             if (NormalizeLlmProvider(ReadString(settings, "llmProvider", "")) == OllamaCloudProvider)
+            {
                 body.Remove("response_format");
+                ollamaConversation = AppendOllamaConversationContract(payload, wireMessages);
+            }
             return body;
         }
 

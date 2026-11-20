@@ -14,6 +14,7 @@ namespace ReignBetaServer
             internal string Campaign, Hero, Player, Location, EventId, EventType, PlayerText, Reply, Generation;
             internal long Timestamp;
             internal bool CommitEffects = true, RetrievalEligible = true, GroupConversation, PrivateWhisper;
+            internal bool DelimitedSpeechOnly;
             internal bool PublishScene, PublishSocial, PublishIntroductions;
             // Only ordinary individual /dialogue/respond sets this, from an exact client opt-in.
             internal bool ViewInsertionRequested;
@@ -62,9 +63,11 @@ namespace ReignBetaServer
                     string generation = ReadString(DialogueStore.SelectMemoryPrecisionState(connection).Single(), "restore_generation", "");
                     if (generation != unit.Generation)
                         throw new InvalidOperationException("The campaign changed before the conversation could be accepted.");
-                    string hash = PromptHash(CanonicalJson(TestDict("reply", unit.Reply, "playerText", unit.PlayerText,
+                    var responseIdentity = TestDict("reply", unit.Reply, "playerText", unit.PlayerText,
                         "hero", unit.Hero, "player", unit.Player, "timeline", ContinuityTimeline(unit.Payload),
-                        "sourceIds", ReadStringList(source, "turnIds"))));
+                        "sourceIds", ReadStringList(source, "turnIds"));
+                    if (unit.DelimitedSpeechOnly) responseIdentity["outputContract"] = "ollama_delimited_speech";
+                    string hash = PromptHash(CanonicalJson(responseIdentity));
                     var previous = DialogueStore.SelectConversationAcceptedUnits2(connection, TestDict("unit", unit.EventId)).SingleOrDefault();
                     if (previous != null)
                     {
@@ -78,7 +81,7 @@ namespace ReignBetaServer
                     boundary?.Invoke("after_sources");
                     // Commit methods may update their request-local receipts. Keep
                     // those changes private until the outer source transaction wins.
-                    var effectPayload = CloneDictionary(unit.Payload);
+                    var effectPayload = unit.DelimitedSpeechOnly ? TestDict() : CloneDictionary(unit.Payload);
                     if (ReadString(ReadDictionary(unit.Payload, "npcLeaveResponseGuard"), "repair", "") == "bounded_local")
                     {
                         unit.Memories = unit.Beliefs = unit.Relationships = unit.Obligations = unit.Comprehensions = unit.Continuity = new List<Dictionary<string, object>>();
@@ -87,8 +90,9 @@ namespace ReignBetaServer
                     CopyPlayerInputSource(unit.Payload, effectPayload);
                     var effectParsed = CloneDictionary(unit.Parsed);
                     bool technicalNotice = IsTechnicalConversationNotice(unit.Reply) || groundingFailed;
-                    bool suppressReplyEffects = technicalNotice || intentionalSilence;
-                    string excludedStatus = intentionalSilence ? "intentional_silence_excluded" : "technical_notice_excluded";
+                    bool suppressReplyEffects = technicalNotice || intentionalSilence || unit.DelimitedSpeechOnly;
+                    string excludedStatus = unit.DelimitedSpeechOnly ? "speech_only_excluded"
+                        : intentionalSilence ? "intentional_silence_excluded" : "technical_notice_excluded";
                     var effects = unit.CommitEffects && !suppressReplyEffects
                         ? CommitFinalConversationEffects(unit.Campaign, unit.Hero, effectPayload, unit.Motive,
                             unit.Profile, unit.Characteristics, effectParsed, unit.Reply, unit.Generation, existingConnection: connection)
@@ -163,7 +167,7 @@ namespace ReignBetaServer
                     boundary?.Invoke("before_unit_receipt");
                     receipt["politicalReflection"] = CharactersService.AcceptedPoliticalReflection(unit, suppressReplyEffects);
                     // Optional, non-gating: binds the one exact displayed NPC source row.
-                    var viewInsertion = unit.ViewInsertionRequested && !suppressReplyEffects && !unit.GroupConversation
+                    var viewInsertion = unit.ViewInsertionRequested && !technicalNotice && !intentionalSilence && !unit.GroupConversation
                         && !unit.PrivateWhisper && unit.EventType == "dialogue_turn"
                         ? IndividualViewInsertionDescriptor(unit, session, generation, sourceRows) : null;
                     if (viewInsertion != null) receipt["viewInsertion"] = viewInsertion;
@@ -178,7 +182,7 @@ namespace ReignBetaServer
                 var effectReceipt = ReadDictionary(accepted, "effects");
                 foreach (var item in ReadDictionary(accepted, "effectPayload") ?? TestDict())
                     if (item.Value is Dictionary<string, object> value && value.Count > 0) unit.Payload[item.Key] = CloneDictionary(value);
-                if (unit.Parsed != null && ReadDictionary(unit.Payload, "conversationAgencyReceipt") is { } agency && agency.Count > 0)
+                if (!unit.DelimitedSpeechOnly && unit.Parsed != null && ReadDictionary(unit.Payload, "conversationAgencyReceipt") is { } agency && agency.Count > 0)
                     unit.Parsed["conversationAgencyReceipt"] = CloneDictionary(agency);
                 unit.Payload["conversationEffectAcceptance"] = effectReceipt;
                 unit.Payload["conversationAcceptedUnit"] = accepted;

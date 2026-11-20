@@ -95,7 +95,124 @@ namespace ReignBetaServer
             string html = Program.ControlCenterHtml();
             check("webui_settings", html.Contains("value='ollama_cloud'>Ollama Cloud") && html.Contains("id='ollamaCloudApiKey' type='password'")
                 && html.Contains("https://ollama.com/settings/keys") && html.Contains("https://ollama.com/search?c=cloud"));
+            RunOllamaConversationCompatibilityTests(rows);
             return rows;
+        }
+
+        internal static Dictionary<string, object> OllamaConversationFixtureResult(Dictionary<string, object> request,
+            string content, string provider = OllamaCloudProvider, string reasoning = "")
+        {
+            BuildChatRequestBody(TestDict("llmProvider", provider), request, ReadDictionaryList(request, "messages"), "fixture-model", out bool contract);
+            var message = TestDict("content", content, "reasoning", reasoning);
+            var raw = TestDict("choices", new[] { TestDict("message", message, "finish_reason", "stop") });
+            return CheckConversationProviderResult(TestDict("ok", true, "finishReason", ExtractFinishReason(raw),
+                "content", DialogueService.SanitizeReasoningContent(ExtractAssistantContent(raw))), ReadString(request, "requestType", ""), contract);
+        }
+
+        private static void RunOllamaConversationCompatibilityTests(List<Dictionary<string, object>> rows)
+        {
+            void Check(string id, bool passed) => rows.Add(TestDict("id", "ollama_conversation_" + id, "passed", passed, "summary", id));
+            string Wrap(string text) => OllamaSpeechStart + text + OllamaSpeechEnd;
+            const string speech = "*She sets down the basket.* Shall we walk to the gate?";
+            var request = TestDict("requestType", "social_event", "response_format", TestDict("type", "json_object"));
+            var cloud = TestDict("llmProvider", OllamaCloudProvider);
+            Dictionary<string, object> Deliver(Dictionary<string, object> result) =>
+                DialogueService.GenerateSinglePassConversation(request, TestDict(), "social_event", responder: _ => result);
+            bool Accepted(string text) => ReadBool(Deliver(OllamaConversationFixtureResult(request, text)), "ok", false);
+
+            foreach (string mode in new[] { "selective", "off" })
+            {
+                cloud["reasoningMode"] = mode;
+                var history = new List<Dictionary<string, object>> { TestDict("role", "system", "content", "Full response schema."),
+                    TestDict("role", "user", "content", new string('x', 180000)), TestDict("role", "assistant", "content", speech),
+                    TestDict("role", "user", "content", "Meet me by the gate.") };
+                string original = Json.Serialize(history);
+                var body = BuildChatRequestBody(cloud, request, history, "fixture-model", out bool contract);
+                DialogueService.ConfigurePromptCacheRouting(cloud, request, body, OllamaCloudChatUrl, "fixture-model", "social_event");
+                DialogueService.ConfigureReasoningRouting(cloud, request, body, OllamaCloudChatUrl, "fixture-model", "social_event");
+                var wire = ReadDictionaryList(body, "messages");
+                string last = ReadString(wire.Last(), "content", "");
+                Check(mode + "_final_wire_contract", contract && wire.Count == history.Count + 1 && !body.ContainsKey("response_format")
+                    && Json.Serialize(wire.Take(history.Count).ToList()) == original && Json.Serialize(history) == original
+                    && ReadString(wire.Last(), "role", "") == "system" && last.Contains("{\"reply\"")
+                    && last.Contains(OllamaSpeechStart) && last.Contains(OllamaSpeechEnd));
+                var capacity = DialogueService.BuildContinuityProviderPreflight(cloud, request, body, OllamaCloudChatUrl, "fixture-model");
+                string serialized = Json.Serialize(body);
+                Check(mode + "_capacity_uses_complete_wire", ReadString(capacity, "finalSerializedRequestHash", "") == DialogueService.PromptHash(serialized)
+                    && ReadInt(capacity, "requestCharacters", 0) == serialized.Length
+                    && ReadInt(capacity, "inputTokenByteUpperBound", 0) == System.Text.Encoding.UTF8.GetByteCount(serialized) + 128);
+                int calls = 0;
+                var delivered = DialogueService.GenerateSinglePassConversation(request, TestDict(), "social_event", out bool speechOnly, responder: _ =>
+                {
+                    calls++;
+                    return CheckConversationProviderResult(TestDict("ok", true, "content", Wrap(speech)), "social_event", contract);
+                });
+                var parsed = TryParseJsonObject(ReadString(delivered, "content", ""));
+                var delivery = ReadDictionary(delivered, "conversationDelivery");
+                Check(mode + "_one_call_speech_without_effects", calls == 1 && ReadBool(delivered, "ok", false) && speechOnly
+                    && ReadString(parsed, "reply", "") == speech && ReadBool(delivered, "conversationEffectsUnavailable", false)
+                    && ReadString(delivery, "outputContract", "") == "ollama_delimited_speech" && ReadInt(delivery, "additionalProviderCalls", -1) == 0
+                    && !parsed.ContainsKey("structuredActionDecision") && !parsed.ContainsKey("drinkActions")
+                    && !ActionPipelineService.ActionGateShouldPlan(ReadDictionary(parsed, "actionGate")) && ReadDictionary(parsed, "stateUpdates")?.Count == 0
+                    && new[] { "suggestedActions", "relationshipAssessments", "memoryWrites", "beliefWrites", "obligationWrites" }.All(key => ReadDictionaryList(parsed, key).Count == 0));
+            }
+
+            var fixtures = new (string Name, string Text)[] {
+                ("untagged_speech", speech), ("untagged_narration", "*The guard looks up.*"),
+                ("untagged_scene", "Rain dampens the market road."), ("untagged_question", "Who sent you?"),
+                ("redacted", "[private material omitted]"), ("empty_object", "{}"), ("nested_reply", "{\"private\":{\"reply\":\"hidden\"}}"),
+                ("unfinished_json", "{\"reply\":\"unfinished"), ("duplicate_reply", "{\"reply\":\"one\",\"reply\":\"two\"}"),
+                ("multiple_json", "{\"reply\":\"one\"} {\"reply\":\"two\"}"), ("empty_speech", Wrap(" ")),
+                ("embedded_json", Wrap("{\"reply\":\"hidden\"}")), ("metadata", Wrap("memoryReferences: hidden")),
+                ("private_field_alias", Wrap("decision_brief: hidden")), ("reasoning_tag", Wrap("<think>hidden")),
+                ("meta_instruction", Wrap("The player wants me to respond.")), ("private_plan", Wrap("I should agree.")),
+                ("reserved_notice", Wrap(ConversationResponseService.DialogueActionQueuedNoticePrefix + " invalid]")),
+                ("code_fence", Wrap("```json hidden```")), ("oversize", Wrap(new string('x', OllamaSpeechLimit + 1))),
+                ("repeated", Wrap(speech) + Wrap(speech)), ("preamble", "Preamble " + Wrap(speech)), ("trailing", Wrap(speech) + " tail"),
+                ("unclosed", OllamaSpeechStart + speech), ("nested", Wrap(Wrap(speech))), ("placeholder", Wrap("[private material omitted]")) };
+            foreach (var fixture in fixtures) Check("reject_" + fixture.Name, !Accepted(fixture.Text));
+            Check("exact_limit", Accepted(Wrap(new string('x', OllamaSpeechLimit))));
+
+            var trusted = OllamaConversationFixtureResult(request, Wrap(speech));
+            var forged = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(trusted));
+            forged["provider"] = OllamaCloudProvider;
+            forged["ollamaConversationOutput"] = true;
+            Check("serialized_and_copied_results_have_no_receipt", !ReadBool(Deliver(forged), "ok", true)
+                && !ReadBool(Deliver(CloneDictionary(trusted)), "ok", true));
+            trusted["ok"] = false;
+            Check("transport_error_preserved", !ReadBool(Deliver(trusted), "ok", true));
+            var reserved = TestDict("ok", true, "content", Json.Serialize(TestDict("reply", ConversationResponseService.DialogueActionFailureNotice)));
+            var rejected = CheckConversationProviderResult(reserved, "social_event", true);
+            Check("replacement_fence_keeps_failure", !ReferenceEquals(reserved, rejected) && !ReadBool(Deliver(rejected), "ok", true)
+                && !OllamaConversationResults.TryGetValue(reserved, out _) && !OllamaConversationResults.TryGetValue(rejected, out _));
+            var decision = TestDict("kind", "none");
+            var ordinary = Deliver(OllamaConversationFixtureResult(request, Json.Serialize(TestDict("reply", "Hello.", "structuredActionDecision", decision))));
+            var ordinaryJson = TryParseJsonObject(ReadString(ordinary, "content", ""));
+            Check("valid_json_preserves_decision", ReadBool(ordinary, "ok", false) && !ReadBool(ordinary, "conversationEffectsUnavailable", true)
+                && ReadString(ordinaryJson, "reply", "") == "Hello." && Json.Serialize(ReadDictionary(ordinaryJson, "structuredActionDecision")) == Json.Serialize(decision));
+            var cleaned = Deliver(OllamaConversationFixtureResult(request, "<think>private preamble</think>" + Wrap(speech)));
+            Check("only_visible_content", ReadString(TryParseJsonObject(ReadString(cleaned, "content", "")), "reply", "") == speech
+                && !Accepted("<think>unclosed" + Wrap(speech))
+                && !ReadBool(Deliver(OllamaConversationFixtureResult(request, "", reasoning: Wrap(speech))), "ok", true));
+            var originalMessages = new List<Dictionary<string, object>> { TestDict("role", "user", "content", "Hello.") };
+            foreach (string provider in ChatProviders.Where(id => id != OllamaCloudProvider))
+            {
+                var body = BuildChatRequestBody(TestDict("llmProvider", provider), request, originalMessages, "fixture-model", out bool contract);
+                Check("other_provider_" + provider, !contract && body.ContainsKey("response_format")
+                    && Json.Serialize(ReadDictionaryList(body, "messages")) == Json.Serialize(originalMessages)
+                    && !ReadBool(Deliver(OllamaConversationFixtureResult(request, Wrap(speech), provider)), "ok", true));
+            }
+            foreach (string type in new[] { "dialogue", "social_event", "party_chat", "castle_chat" })
+                Check("writer_" + type, ReadBool(Deliver(OllamaConversationFixtureResult(TestDict("requestType", type), Wrap(speech))), "ok", false));
+            foreach (string type in new[] { "", "diagnostics", "character_construction", "memory", "correspondence", "action_router",
+                "npc_approach", "party_banter", "dialogue_integrity_repair", "social_event_continuity_repair", "party_chat_agency_repair" })
+            {
+                var other = TestDict("requestType", type);
+                var body = BuildChatRequestBody(cloud, other, originalMessages, "fixture-model", out bool contract);
+                Check("nonwriter_" + (type.Length == 0 ? "unspecified" : type), !contract
+                    && Json.Serialize(ReadDictionaryList(body, "messages")) == Json.Serialize(originalMessages)
+                    && !ReadBool(Deliver(OllamaConversationFixtureResult(other, Wrap(speech))), "ok", true));
+            }
         }
     }
 }
