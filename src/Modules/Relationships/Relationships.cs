@@ -632,8 +632,9 @@ namespace ReignBetaServer
             string campaignId = ReadString(directions[0], "campaignId", "default");
             lock (CampaignRelationshipWriteLock(campaignId))
             {
-                // The action-report route holds the campaign read lease across this check
-                // and both writes. Keep the verified timeline and reported day on both directions.
+                // The action-report route's campaign read lease excludes restores. World history
+                // can switch its active timeline independently, so both directions use the
+                // timeline verified at admission and the day captured in the report.
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                     scopeError = CompletedActionRelationshipScopeError(connection, payload, timelineId, scoped);
                 if (scopeError.Length > 0) return changes;

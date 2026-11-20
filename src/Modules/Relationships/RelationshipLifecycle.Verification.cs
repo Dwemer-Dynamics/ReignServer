@@ -135,6 +135,14 @@ namespace ReignBetaServer
                     .Select(row => ReadString(row, "source", "")).ToList();
                 int ReceiptCount() => RelationshipsStore.SelectRelationshipInteractionReceipts(connection).Count;
 
+                var noActiveTimeline = Report("before_history");
+                noActiveTimeline["timelineId"] = "main";
+                noActiveTimeline["sharedActivityGeneration"] = generation;
+                var beforeHistory = ActionPipelineService.ReportAction(noActiveTimeline);
+                Check("legacy_action_scoped_main_requires_an_active_timeline", ReadString(beforeHistory, "relationshipScopeError", "") == "timeline_not_active"
+                    && beforeHistory.ContainsKey("nativeRelationChanges") && ReadDictionaryList(beforeHistory, "nativeRelationChanges").Count == 0,
+                    beforeHistory);
+
                 Activate("main", "");
                 var old = ActionPipelineService.ReportAction(Report("old_unscoped", "old_actor", "old_target"));
                 Check("legacy_action_unscoped_main_compatible", !old.ContainsKey("relationshipScopeError")
@@ -170,7 +178,8 @@ namespace ReignBetaServer
                 string targetBeforeReplay = Json.Serialize(NativeTarget());
                 var replay = ActionPipelineService.ReportAction(scoped);
                 Check("legacy_action_fork_replay_preserves_receipts_and_projection", !replay.ContainsKey("relationshipScopeError")
-                    && ReadDictionaryList(replay, "nativeRelationChanges").Count == 0 && ReceiptCount() == 4
+                    && replay.ContainsKey("nativeRelationChanges") && ReadDictionaryList(replay, "nativeRelationChanges").Count == 0
+                    && ReceiptCount() == 4
                     && Json.Serialize(Chemistry()) == chemistryBeforeReplay && Json.Serialize(NativeTarget()) == targetBeforeReplay, replay);
 
                 const string restored = "restored_c5_generation";
@@ -187,7 +196,7 @@ namespace ReignBetaServer
                 var mainReplay = ActionPipelineService.ReportAction(new Dictionary<string, object>(scoped) { ["timelineId"] = "main" });
                 Check("legacy_action_retained_receipts_deduplicate_across_restore_and_fork", ReceiptCount() == 4
                     && new[] { restoredReplay, mainReplay }.All(r => !r.ContainsKey("relationshipScopeError")
-                        && ReadDictionaryList(r, "nativeRelationChanges").Count == 0)
+                        && r.ContainsKey("nativeRelationChanges") && ReadDictionaryList(r, "nativeRelationChanges").Count == 0)
                     && Json.Serialize(Chemistry()) == chemistryBeforeReplay && Json.Serialize(NativeTarget()) == targetBeforeReplay,
                     mainReplay);
 
