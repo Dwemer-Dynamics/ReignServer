@@ -20,6 +20,8 @@ $check=Invoke-ReignSourceVerifier $verifier $Workspace $ValidationReport $LinuxB
 if(-not $check.ServerRoot){throw 'Paired source check is required.'}
 if($MigrateRoots){
     Assert-ReignAuthorityRoots $check $migration.ToWorkspaceRoot $migration.ToServerRoot
+    $migration.ToWorkspaceRoot=$check.WorkspaceRoot
+    $migration.ToServerRoot=$check.ServerRoot
 }elseif($prior){Assert-ReignAuthorityRoots $prior $check.WorkspaceRoot $check.ServerRoot}
 $inventory=@(Get-ReignSourceInventory $check.WorkspaceRoot $check.ServerRoot)
 $old=if($prior){$prior.SourceFiles}else{@()}

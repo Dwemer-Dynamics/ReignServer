@@ -108,8 +108,8 @@ function Assert-ReignPrimaryPair([string]$Workspace,[string]$ServerRoot) {
         $gitDir=Join-Path $repo.FullName '.git'
         if(-not [IO.Directory]::Exists($gitDir)){throw 'Root migration requires primary Git checkouts with .git directories.'}
         Assert-ReignPhysicalPath $gitDir
-        $paths=(Invoke-SourceGit $repo.FullName @('rev-parse','--path-format=absolute','--show-toplevel','--absolute-git-dir','--git-common-dir')).TrimEnd() -split '\r?\n'
-        if($paths.Count -ne 3 -or -not (Test-ReignSamePath $paths[0] $repo.FullName) -or
+        $paths=(Invoke-SourceGit $repo.FullName @('rev-parse','--path-format=absolute','--show-toplevel','--absolute-git-dir','--git-common-dir','--verify','HEAD^{commit}')).TrimEnd() -split '\r?\n'
+        if($paths.Count -ne 4 -or -not (Test-ReignSamePath $paths[0] $repo.FullName) -or
             -not (Test-ReignSamePath $paths[1] $gitDir) -or -not (Test-ReignSamePath $paths[2] $gitDir)){
             throw 'Root migration requires each primary checkout to own its Git directory.'
         }
@@ -210,8 +210,8 @@ function Assert-ReignCheckpointReview($Content,$Review,[string]$CandidatePath) {
         (Get-ReignJsonSha $Content.Diff) -ne $Content.DiffSha256 -or [string]::IsNullOrWhiteSpace($Review.Reason) -or $Review.Reason.Length -lt 15){throw 'Review receipt is stale, incomplete, or does not bind this exact candidate/diff.'}
     $expected=@($Content.Diff|ForEach-Object path);$reviewed=@($Review.ReviewedPaths)
     if(-not (Test-ReignStringSet $expected $reviewed)){throw 'Every added, modified and removed path needs explicit source review.'}
-    $migration=$Content.PSObject.Properties['RootMigration']
-    $scopeHash=$Review.PSObject.Properties['RootMigrationSha256']
+    $migration=([pscustomobject]$Content).PSObject.Properties['RootMigration']
+    $scopeHash=([pscustomobject]$Review).PSObject.Properties['RootMigrationSha256']
     if($migration -or $scopeHash){
         if(-not $migration -or -not $migration.Value -or -not $scopeHash -or $scopeHash.Value -cne (Get-ReignJsonSha $migration.Value)){
             throw 'Review receipt does not bind the root migration scope.'
