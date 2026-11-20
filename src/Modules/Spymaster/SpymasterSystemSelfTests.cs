@@ -428,19 +428,39 @@ namespace ReignBetaServer
             Dictionary<string, object> Payload(string id, string tag = "claim", string subject = "hero",
                 string branch = timeline, string operation = type) => new Dictionary<string, object>
             {
-                ["campaignId"] = campaign, ["timelineId"] = branch,
+                ["campaignId"] = campaign, ["timelineId"] = branch, ["sessionId"] = "capital_" + branch,
                 ["mission"] = new Dictionary<string, object>
                 {
                     ["MissionId"] = id, ["MissionType"] = operation, ["TargetStringId"] = subject,
                     ["SocialItemId"] = tag, ["StartedDay"] = 24d, ["DueDay"] = day, ["ResolvedDay"] = day
                 }
             };
+            Dictionary<string, object> Apply(Dictionary<string, object> request)
+                => CourtService.CapitalCourtApi(request, SpymasterSocialApplyApi);
             Dictionary<string, object> Status(Dictionary<string, object> request)
-                => SpymasterSocialStatusApi(new Dictionary<string, object>(request) { ["readMitigationReceipt"] = true });
+                => CourtService.CapitalCourtApi(
+                    new Dictionary<string, object>(request) { ["readMitigationReceipt"] = true }, SpymasterSocialStatusApi);
             try
             {
                 using var fixture = ReignDatabase.OpenCampaignConnection(campaign);
                 ReputationService.EnsureSocialReputationSchema(fixture);
+                void OpenTimeline(string branch) => WorldSimulationService.WorldHistoryOpenTimelineApi(
+                    new Dictionary<string, object> { ["campaignId"] = campaign, ["timelineId"] = branch });
+                void OpenCourt(string branch)
+                {
+                    var opened = CourtService.CourtSessionOpenApi(new Dictionary<string, object>
+                    {
+                        ["campaignId"] = campaign, ["timelineId"] = branch, ["commandId"] = "open_" + branch,
+                        ["expectedRevision"] = 0L, ["sessionId"] = "capital_" + branch, ["authority"] = "royal",
+                        ["playerIsKingdomRuler"] = true, ["playerHeroStringId"] = "player",
+                        ["hostSettlementStringId"] = "town_capital", ["capitalSettlementStringId"] = "town_capital",
+                        ["scope"] = "capital", ["worldDay"] = day
+                    });
+                    if (!ReadBool(opened, "ok", false)) throw new InvalidOperationException("The mitigation fixture could not open capital court.");
+                }
+                OpenTimeline(timeline);
+                OpenCourt(timeline);
+                OpenCourt("other_fixture");
                 void Seed(string occurrence, string branch, double started, double expires,
                     string tag = "claim", string subject = "hero", int value = -20, string owner = null)
                 {
@@ -467,13 +487,13 @@ namespace ReignBetaServer
                 string id = PartialId("scoped_partial_", 0.82d);
                 var request = Payload(id);
                 add("mitigation_missing_id_or_receipt",
-                    ReadString(SpymasterSocialApplyApi(Payload("")), "error", "") == "invalid_mitigation_terms"
+                    ReadString(Apply(Payload("")), "error", "") == "invalid_mitigation_terms"
                     && ReadString(Status(request), "error", "") == "mitigation_receipt_missing" && Value("older_live") == -20,
                     "A missing stable ID is rejected, and a status lookup alone leaves rumor rows untouched.", null);
-                var result = SpymasterSocialApplyApi(request);
+                var result = Apply(request);
                 string original = Json.Serialize(result);
                 Seed("later_backfilled", timeline, 29d, 50d);
-                var replay = SpymasterSocialApplyApi(request);
+                var replay = Apply(request);
                 var recovered = Status(request);
                 add("mitigation_frozen_tag_scope_and_exact_replay",
                     ReadString(result, "outcome", "") == "mitigated" && ReadInt(result, "matchedCount", -1) == 2
@@ -487,19 +507,19 @@ namespace ReignBetaServer
                     Value("expired_at_resolution") == -20 && Value("foreign_timeline") == -20
                     && Value("foreign_campaign") == -20 && Value("later_occurrence") == -20
                     && Value("different_subject") == -20 && Value("different_tag") == -20
-                    && ReadString(SpymasterSocialApplyApi(Payload(id, branch: "other_fixture")), "error", "") == "mitigation_terms_conflict"
+                    && ReadString(Apply(Payload(id, branch: "other_fixture")), "error", "") == "mitigation_terms_conflict"
                     && ReadString(Status(Payload(id, branch: "other_fixture")), "error", "") == "mitigation_terms_conflict"
-                    && ReadString(SpymasterSocialApplyApi(Payload(id, tag: "other_claim")), "error", "") == "mitigation_terms_conflict",
+                    && ReadString(Apply(Payload(id, tag: "other_claim")), "error", "") == "mitigation_terms_conflict",
                     "The first apply ignores expired, future, unrelated, and foreign rows. A conflicting replay cannot mutate or recover someone else's scope.", null);
 
                 var missingRequest = Payload("no_match", "missing_claim");
-                var missing = SpymasterSocialApplyApi(missingRequest);
+                var missing = Apply(missingRequest);
                 Seed("missing_claim_added_later", timeline, 26d, 40d, tag: "missing_claim");
                 Seed("already_zero", timeline, 26d, 40d, tag: "zero_claim", value: 0);
-                var zero = SpymasterSocialApplyApi(Payload(PartialId("zero_", 0.82d), "zero_claim"));
+                var zero = Apply(Payload(PartialId("zero_", 0.82d), "zero_claim"));
                 add("mitigation_missing_and_valid_zero_distinguished",
                     ReadString(missing, "disposition", "") == "no_match"
-                    && ReadString(SpymasterSocialApplyApi(missingRequest), "disposition", "") == "no_match"
+                    && ReadString(Apply(missingRequest), "disposition", "") == "no_match"
                     && Value("missing_claim_added_later") == -20
                     && ReadString(zero, "disposition", "") == "no_change" && ReadInt(zero, "matchedCount", -1) == 1,
                     "A missing record and a real zero-value record get different durable dispositions.", null);
@@ -508,12 +528,12 @@ namespace ReignBetaServer
                 var failure = Payload(PartialId("rollback_", 0.82d), subject: "blocked_fixture");
                 SpymasterSelfTestStore.SetMitigationProjectionFailure(fixture, true);
                 bool rejected = false;
-                try { SpymasterSocialApplyApi(failure); }
+                try { Apply(failure); }
                 catch (Npgsql.PostgresException ex) when (ex.SqlState == Npgsql.PostgresErrorCodes.CheckViolation) { rejected = true; }
                 finally { SpymasterSelfTestStore.SetMitigationProjectionFailure(fixture, false); }
                 bool rolledBack = Value("rollback_rumor") == -20
                     && ReadString(Status(failure), "error", "") == "mitigation_receipt_missing";
-                var repaired = SpymasterSocialApplyApi(failure);
+                var repaired = Apply(failure);
                 add("mitigation_projection_failure_rolls_back_effect_and_receipt",
                     rejected && rolledBack && ReadString(repaired, "disposition", "") == "applied" && Value("rollback_rumor") == -7,
                     "A failed standing reconciliation leaves no committed rumor change or receipt. A fresh identical apply then changes the value once.", repaired);
@@ -527,8 +547,8 @@ namespace ReignBetaServer
                 var reputation = Payload(PartialId("reputation_", 0.15d), "reputation", operation: "mitigate_target_reputation");
                 var reputationTasks = new[]
                 {
-                    System.Threading.Tasks.Task.Run(() => SpymasterSocialApplyApi(reputation)),
-                    System.Threading.Tasks.Task.Run(() => SpymasterSocialApplyApi(reputation))
+                    System.Threading.Tasks.Task.Run(() => Apply(reputation)),
+                    System.Threading.Tasks.Task.Run(() => Apply(reputation))
                 };
                 System.Threading.Tasks.Task.WaitAll(reputationTasks);
                 var projected = ReputationService.ReadPublicStandingTrait(fixture, campaign, timeline, "hero", day);
@@ -540,6 +560,14 @@ namespace ReignBetaServer
                     && Json.Serialize(reputationTasks[0].Result) == Json.Serialize(reputationTasks[1].Result)
                     && ReadInt(projectedReputation, "rawValue", 0) == -7,
                     "Concurrent partial reputation mitigation returns one original receipt and publishes one standing change.", projectedReputation);
+
+                OpenTimeline("other_fixture");
+                var stale = Apply(Payload("first_apply_after_switch"));
+                add("mitigation_first_apply_fenced_after_timeline_switch",
+                    ReadString(stale, "error", "") == "mitigation_inactive_timeline"
+                    && Value("older_live") == -7
+                    && Json.Serialize(Status(request)) == original,
+                    "A request first reaching the old branch after a switch cannot mutate it. A committed receipt remains readable.", stale);
             }
             finally
             {

@@ -92,12 +92,20 @@ namespace ReignBetaServer
             else SpymasterSchema.CreateMitigationReceipts(connection);
             ReputationService.EnsureSocialReputationSchema(connection);
             RelationshipsService.EnsureWorldRelationshipSchema(connection);
+            WorldSimulationService.EnsureWorldHistorySchema(connection);
 
             using var transaction = connection.BeginTransaction();
             // Serialize first admission and projection with other transactional campaign writers.
             AcquirePostgreSqlTransactionMutationLock(connection, transaction);
             var existing = ReadMitigationReceipt(connection, terms, transaction);
             if (existing != null) return existing;
+
+            // A closed branch can still have active rumor rows and a previously valid court session.
+            // Lock the registered timeline across first apply so a branch switch cannot overtake it.
+            var timelines = SpymasterStore.LockMitigationTimelines(connection, terms, transaction);
+            if (timelines.Count > 0 && (timelines.Count != 1 ||
+                ReadString(timelines[0], "timeline_id", "") != timeline || ReadInt(timelines[0], "is_active", 0) != 1))
+                return MitigationError("mitigation_inactive_timeline");
 
             bool rumor = type.EndsWith("_rumor", StringComparison.Ordinal);
             double roll = RelationshipsService.StableUnit(string.Join("|", campaign, timeline, missionId, "social_apply"));

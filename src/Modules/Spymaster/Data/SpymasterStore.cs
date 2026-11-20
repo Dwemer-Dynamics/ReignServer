@@ -44,6 +44,13 @@ WHERE campaign_id=$campaign AND mission_id=$mission;", parameters, transaction);
 VALUES($campaign,$mission,$terms,$response);", parameters, transaction);
         }
 
+        internal static List<Dictionary<string, object>> LockMitigationTimelines(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
+        {
+            return ReignDatabase.QuerySql(connection, @"SELECT timeline_id,is_active FROM world_history_timelines
+WHERE campaign_id=$campaign AND (is_active=1 OR timeline_id=$timeline) ORDER BY timeline_id FOR SHARE;", parameters, transaction);
+        }
+
         internal static List<Dictionary<string, object>> MitigateRumorTags(ReignDbConnection connection,
             Dictionary<string, object> parameters, ReignDbTransaction transaction)
         {
