@@ -327,7 +327,6 @@ namespace ReignBetaServer
                 });
             }
 
-            if (recoverDiplomaticMarriages) ScheduleDiplomaticMarriageRecovery(campaignId);
             List<object> records = selected.Select(x => x.ContainsKey("record") ? x["record"] : x).ToList();
             OperationsService.LogOperational("action.next", new Dictionary<string, object> { ["campaignId"] = campaignId, ["count"] = records.Count });
             foreach (Dictionary<string, object> row in selected)
@@ -338,6 +337,7 @@ namespace ReignBetaServer
                     ["row"] = row
                 });
             }
+            if (recoverDiplomaticMarriages) ScheduleDiplomaticMarriageRecovery(campaignId);
             return new Dictionary<string, object>
             {
                 ["ok"] = true,
@@ -359,6 +359,12 @@ namespace ReignBetaServer
             if (string.IsNullOrWhiteSpace(id))
             {
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "serverActionId/actionId is required." };
+            }
+            if (reportedStatus == "completed" && RelationshipsService.ReportsNativeDiplomaticMarriageSettlement(payload))
+            {
+                using var connection = ReignDatabase.OpenCampaignConnection(campaignId);
+                if (!RelationshipsService.CurrentDiplomaticMarriageScope(connection, payload))
+                    return TestDict("ok", false, "error", "The diplomatic marriage report belongs to a different campaign load or timeline.");
             }
 
             bool found = false;
@@ -530,6 +536,7 @@ namespace ReignBetaServer
             if (!DiplomaticMarriageRecoveryWorkers.TryAdd(campaignId, 0)) return;
             _ = Task.Run(() =>
             {
+                Program.CampaignDataGate.EnterReadLock();
                 try
                 {
                     List<Dictionary<string, object>> pending;
@@ -553,7 +560,11 @@ namespace ReignBetaServer
                 {
                     Console.Error.WriteLine("Reign diplomatic marriage recovery read: " + error.GetType().Name);
                 }
-                finally { DiplomaticMarriageRecoveryWorkers.TryRemove(campaignId, out _); }
+                finally
+                {
+                    Program.CampaignDataGate.ExitReadLock();
+                    DiplomaticMarriageRecoveryWorkers.TryRemove(campaignId, out _);
+                }
             });
         }
 

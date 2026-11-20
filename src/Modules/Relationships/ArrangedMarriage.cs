@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Reign.Core.Contracts.Actions;
 using Reign.Relationships;
 
 namespace ReignBetaServer
@@ -170,11 +171,39 @@ namespace ReignBetaServer
                 ? terms : null;
         }
 
+        internal static bool ReportsNativeDiplomaticMarriageSettlement(Dictionary<string, object> report)
+            => ReadString(report, "source", "") == "world_diplomacy_director"
+                && ReadDictionaryList(ReadDictionary(report, "result"), "effects").Any(effect =>
+                    ReadString(effect, "effectType", "") == "diplomatic_marriage_settled");
+
+        internal static bool CurrentDiplomaticMarriageScope(ReignDbConnection connection, Dictionary<string, object> evidence)
+            => ReadString(evidence, "sharedActivityGeneration", "").Length > 0
+                && DialogueService.SharedActivityGenerationMatches(connection, evidence)
+                && WorldSimulationService.TableExists(connection, "world_history_timelines")
+                && WorldSimulationService.ActiveWorldHistoryTimeline(connection) == ReadString(evidence, "timelineId", "");
+
+        private static bool RestoredDiplomaticMarriageScope(ReignDbConnection connection, Dictionary<string, object> admission)
+        {
+            // Only a server-admitted row from the current restored queue can use snapshot provenance.
+            string timeline = ReadString(admission, "timelineId", ""), source = ReadString(admission, "sharedActivityGeneration", "");
+            if (timeline.Length == 0 || source.Length == 0
+                || !WorldSimulationService.TableExists(connection, "world_history_timelines")
+                || WorldSimulationService.ActiveWorldHistoryTimeline(connection) != timeline
+                || !WorldSimulationService.TableExists(connection, "memory_restored_source_context")) return false;
+            var context = DialogueService.RestoredMemorySourceContext(connection, timeline);
+            string session = ReadString(context, "load_session_id", "");
+            return TerminalActionReportProtocol.IsTrustedIdentifier(session)
+                && !session.StartsWith(TerminalActionReportProtocol.ImportedLoadSession, StringComparison.Ordinal)
+                && TerminalActionReportProtocol.IsTrustedIdentifier(ReadString(context, "save_point_id", ""))
+                && ReadString(context, "source_generation", "") == source
+                && ReadDouble(admission, "worldDay", 0d) <= ReadDouble(context, "world_day", 0d);
+        }
+
         internal static Dictionary<string, object> NativeDiplomaticMarriageCompletion(string actionId, string status,
             Dictionary<string, object> record, Dictionary<string, object> report)
         {
             var terms = CompletedDiplomaticMarriageTerms(status, record);
-            if (terms == null) return null;
+            if (terms == null || !ReportsNativeDiplomaticMarriageSettlement(report)) return null;
             var result = ReadDictionary(report, "result");
             if (!ReadBool(result, "success", false) || !ReadBool(result, "completed", false)) return null;
 
@@ -225,10 +254,8 @@ namespace ReignBetaServer
             double day = ReadDouble(admittedCompletion ?? report, "worldDay", 0d);
             string leaderA = ReadString(quote, "leaderAId", ""), leaderB = ReadString(quote, "leaderBId", "");
             using var tx = c.BeginTransaction();
-            if (admittedCompletion != null && (ReadString(admittedCompletion, "sharedActivityGeneration", "").Length == 0
-                || !DialogueService.SharedActivityGenerationMatches(c, admittedCompletion)
-                || !WorldSimulationService.TableExists(c, "world_history_timelines")
-                || WorldSimulationService.ActiveWorldHistoryTimeline(c) != timeline)) return false;
+            if (admittedCompletion != null && !CurrentDiplomaticMarriageScope(c, admittedCompletion)
+                && !RestoredDiplomaticMarriageScope(c, admittedCompletion)) return false;
             ApplyMarriageLeaderEffect(c, campaign, timeline, "diplomatic_" + id, leaderA, leaderB, 20, day);
             ApplyMarriageLeaderEffect(c, campaign, timeline, "diplomatic_" + id, leaderB, leaderA, 20, day);
             tx.Commit();
@@ -518,6 +545,7 @@ namespace ReignBetaServer
                     effects.Add(TestDict("effectType", "diplomatic_marriage_settled", "entityType", "action", "id", id,
                         "detail", paidFee.Value.ToString(CultureInfo.InvariantCulture)));
                 return TestDict("campaignId", campaign, "actionId", id, "status", "completed", "type", "DiplomacyPackage",
+                    "source", "world_diplomacy_director",
                     "message", "Wedding concluded.", "actorHeroStringId", "report_actor", "targetHeroStringId", "report_target",
                     "worldDay", 22d, "timelineId", timeline, "sharedActivityGeneration", generation,
                     "result", TestDict("success", true, "completed", true, "effects", effects,
@@ -538,7 +566,7 @@ namespace ReignBetaServer
             ActionPipelineService.WriteActionQueueUnlocked(campaign, new List<Dictionary<string, object>> {
                 completed, Row("native_marriage_historical", "completed"), Row("native_marriage_wrong_couple", "queued"),
                 Row("native_marriage_unsettled", "queued"), Row("native_marriage_wrong_fee", "queued"),
-                Row("native_marriage_malformed_fee", "queued"), Row("native_marriage_stale_generation", "queued"),
+                Row("native_marriage_malformed_fee", "queued"),
                 Row("native_marriage_stale_timeline", "queued"), pendingEffect
             });
 
@@ -557,14 +585,19 @@ namespace ReignBetaServer
             var payment = ReadDictionaryList(ReadDictionary(malformedFee, "result"), "effects")[1];
             payment["detail"] = "unverified " + ReadString(payment, "detail", "");
             ActionPipelineService.ReportAction(malformedFee);
-            var staleGeneration = NativeReport("native_marriage_stale_generation", second, fee);
+            var staleGeneration = NativeReport("native_marriage_completed", second, fee);
             staleGeneration["sharedActivityGeneration"] = "prior_restore_generation";
-            ActionPipelineService.ReportAction(staleGeneration);
+            var rejectedGeneration = ActionPipelineService.ReportAction(staleGeneration);
             var staleTimeline = NativeReport("native_marriage_stale_timeline", second, fee);
             staleTimeline["timelineId"] = "prior_world_timeline";
-            ActionPipelineService.ReportAction(staleTimeline);
+            var rejectedTimeline = ActionPipelineService.ReportAction(staleTimeline);
             check("diplomatic_wrong_couple_and_unverified_settlement_have_no_effect",
                 Json.Serialize(Pair(leaderA, leaderB)) == Json.Serialize(before));
+            check("diplomatic_stale_report_cannot_retire_a_queued_marriage",
+                !ReadBool(rejectedGeneration, "ok", true) && !ReadBool(rejectedTimeline, "ok", true)
+                && ActionPipelineService.ReadActionQueueUnlocked(campaign)
+                    .Where(row => ReadString(row, "id", "") is "native_marriage_completed" or "native_marriage_stale_timeline")
+                    .All(row => ReadString(row, "status", "") == "queued"));
 
             ActionPipelineService.ReportAction(currentReport);
             var after = Pair(leaderA, leaderB);
@@ -587,6 +620,13 @@ namespace ReignBetaServer
                 ActionPipelineService.WriteActionQueueUnlocked(campaign, queue);
             }
             ActionPipelineService.QueueAction(campaign, TestDict("serverActionId", "unrelated_new_action"));
+            // Reproduce the server-owned provenance of a snapshot that contained the queued admission.
+            string restoredGeneration = Guid.NewGuid().ToString("N");
+            DialogueStore.UpdateMemoryPrecisionState2(connection, TestDict("generation", restoredGeneration,
+                "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+            DialogueStore.UpsertMemoryRestoredSourceContext(connection, TestDict("generation", restoredGeneration,
+                "timeline", timeline, "point", "diplomatic_fixture_save", "day", 25d, "sequence", 0L,
+                "head", "", "source", generation, "session", "diplomatic_fixture_load"));
             var offered = ActionPipelineService.NextActions(TestDict("campaignId", campaign), null);
             Dictionary<string, object> ReadSavedAdmission()
             {
