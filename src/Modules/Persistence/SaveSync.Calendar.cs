@@ -59,9 +59,7 @@ namespace ReignBetaServer
             }
             // The original pre-Reign native save can be loaded again after its first launch
             // has created an active sidecar. Its registered baseline positively captured absence.
-            bool legacyBaseline = ReadString(payload, "savePointKind", "").Equals("legacy_baseline", StringComparison.OrdinalIgnoreCase)
-                && !ReadBool(payload, "registrationConfirmed", true);
-            bool firstUse = ReadBool(payload, "calendarFirstUse", legacyBaseline);
+            bool firstUse = ReadBool(payload, "calendarFirstUse", false);
             if (!bound || (calendar == null && !firstUse))
             {
                 string active = SaveSyncCalendarDigest(ReadSaveSyncCalendar(StrictCampaignDirectory(campaignId)));

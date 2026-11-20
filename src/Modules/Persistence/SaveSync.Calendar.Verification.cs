@@ -162,6 +162,9 @@ namespace ReignBetaServer
                 MarkSaveSyncActiveStateDirty(campaignId);
                 var established = new Dictionary<string, object>(vanilla) { ["calendarFirstUse"] = false };
                 ExpectRefusal("calendar_bound_absence_protects_established_native_save", established, "no calendar", vanillaTarget);
+                var flagless = new Dictionary<string, object>(vanilla);
+                flagless.Remove("calendarFirstUse");
+                ExpectRefusal("calendar_bound_absence_requires_native_first_use_evidence", flagless, "no calendar", vanillaTarget);
                 var reload = SaveSyncLoadApi(vanilla, false);
                 string backup = ReadString(reload, "backupPath", "");
                 add("calendar_vanilla_reload_reinstalls_captured_absence",
