@@ -24,28 +24,63 @@ ON CONFLICT(campaign_id,timeline_id,mission_id) DO UPDATE SET phase=$phase,resol
 result_summary=$result,payload_json=$payload,updated_ts=$ts;", parameters, transaction);
         }
 
-        internal static void UpdateRumorSubjectTags(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static bool MitigationReceiptTableExists(ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, @"UPDATE rumor_subject_tags SET status='disproven',updated_ts=$ts
-WHERE subject_id=$subject AND tag_id=$tag AND status='active';", parameters, transaction);
+            return (bool)ReignDatabase.QuerySql(connection,
+                "SELECT to_regclass(current_schema() || '.spymaster_mitigation_receipts') IS NOT NULL AS present;")[0]["present"];
         }
 
-        internal static void UpdateRumorSubjectTags2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static List<Dictionary<string, object>> SelectMitigationReceipt(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction = null)
         {
-            ReignDatabase.ExecuteSql(connection, @"UPDATE rumor_subject_tags SET rumor_value=CAST(rumor_value*$factor AS INTEGER),updated_ts=$ts
-WHERE subject_id=$subject AND tag_id=$tag AND status='active';", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, @"SELECT terms_hash,response_json FROM spymaster_mitigation_receipts
+WHERE campaign_id=$campaign AND mission_id=$mission;", parameters, transaction);
         }
 
-        internal static void UpdateCharacterReputations(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static void InsertMitigationReceipt(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
         {
-            ReignDatabase.ExecuteSql(connection, @"UPDATE character_reputations SET status='mitigated',updated_ts=$ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND tag_id=$tag AND status='active';", parameters, transaction);
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO spymaster_mitigation_receipts(campaign_id,mission_id,terms_hash,response_json)
+VALUES($campaign,$mission,$terms,$response);", parameters, transaction);
         }
 
-        internal static void UpdateCharacterReputations2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static List<Dictionary<string, object>> MitigateRumorTags(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
         {
-            ReignDatabase.ExecuteSql(connection, @"UPDATE character_reputations SET reputation_value=CAST(reputation_value*$factor AS INTEGER),updated_ts=$ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND tag_id=$tag AND status='active';", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, @"WITH eligible AS (
+    SELECT ro.occurrence_id,ro.catalog_revision FROM rumor_subject_tags rst
+    JOIN rumor_occurrences ro ON ro.occurrence_id=rst.occurrence_id
+    WHERE ro.campaign_id=$campaign AND ro.timeline_id=$timeline AND ro.status='active'
+      AND ro.world_day<=$day AND ro.expires_day>$day
+      AND rst.subject_id=$subject AND rst.tag_id=$tag AND rst.status='active'
+    ORDER BY ro.occurrence_id FOR UPDATE OF ro,rst
+), changed AS (
+    UPDATE rumor_subject_tags rst SET status=CASE WHEN $remove THEN 'disproven' ELSE rst.status END,
+        rumor_value=CASE WHEN $remove THEN rst.rumor_value ELSE CAST(rst.rumor_value*$factor AS INTEGER) END,updated_ts=$ts
+    FROM eligible WHERE rst.occurrence_id=eligible.occurrence_id AND rst.subject_id=$subject AND rst.tag_id=$tag
+      AND ($remove OR rst.rumor_value<>CAST(rst.rumor_value*$factor AS INTEGER))
+    RETURNING rst.occurrence_id
+)
+SELECT eligible.occurrence_id,eligible.catalog_revision,(changed.occurrence_id IS NOT NULL) AS changed
+FROM eligible LEFT JOIN changed USING(occurrence_id) ORDER BY eligible.occurrence_id;", parameters, transaction);
+        }
+
+        internal static List<Dictionary<string, object>> MitigateReputationTag(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
+        {
+            return ReignDatabase.QuerySql(connection, @"WITH eligible AS (
+    SELECT tag_id,source_occurrence_id,catalog_revision FROM character_reputations
+    WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject
+      AND tag_id=$tag AND status='active' AND acquired_day<=$day FOR UPDATE
+), changed AS (
+    UPDATE character_reputations cr SET status=CASE WHEN $remove THEN 'mitigated' ELSE cr.status END,
+        reputation_value=CASE WHEN $remove THEN cr.reputation_value ELSE CAST(cr.reputation_value*$factor AS INTEGER) END,updated_ts=$ts
+    FROM eligible WHERE cr.campaign_id=$campaign AND cr.timeline_id=$timeline AND cr.subject_id=$subject
+      AND cr.tag_id=eligible.tag_id AND ($remove OR cr.reputation_value<>CAST(cr.reputation_value*$factor AS INTEGER))
+    RETURNING cr.tag_id
+)
+SELECT eligible.tag_id,eligible.source_occurrence_id,eligible.catalog_revision,(changed.tag_id IS NOT NULL) AS changed
+FROM eligible LEFT JOIN changed USING(tag_id);", parameters, transaction);
         }
 
         internal static void UpsertCharacterReputations(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)

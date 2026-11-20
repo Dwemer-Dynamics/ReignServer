@@ -6,6 +6,13 @@ namespace ReignBetaServer
     /// <summary>The Spymaster module's schema statements (tables, indexes and columns); every statement runs through <see cref="ReignDatabase"/>.</summary>
     internal static partial class SpymasterSchema
     {
+        internal static void CreateMitigationReceipts(ReignDbConnection connection)
+        {
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS spymaster_mitigation_receipts (
+campaign_id TEXT NOT NULL, mission_id TEXT NOT NULL, terms_hash TEXT NOT NULL, response_json TEXT NOT NULL,
+PRIMARY KEY(campaign_id,mission_id));");
+        }
+
         internal static void CreateSpymasterMissionMemory(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS spymaster_mission_memory (

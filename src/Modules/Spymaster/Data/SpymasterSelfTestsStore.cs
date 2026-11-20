@@ -6,6 +6,20 @@ namespace ReignBetaServer
     /// <summary>The Spymaster module's SQL statements used only by its self-tests (verification build only); every statement runs through <see cref="ReignDatabase"/>.</summary>
     internal static partial class SpymasterSelfTestStore
     {
+        internal static int ReadMitigationFixtureValue(ReignDbConnection connection, string occurrence)
+        {
+            var parameters = new Dictionary<string, object> { ["occurrence"] = occurrence };
+            return (int)ReignDatabase.QuerySql(connection,
+                "SELECT rumor_value FROM rumor_subject_tags WHERE occurrence_id=$occurrence;", parameters)[0]["rumor_value"];
+        }
+
+        internal static void SetMitigationProjectionFailure(ReignDbConnection connection, bool enabled)
+        {
+            ReignDatabase.ExecuteSql(connection, enabled
+                ? "ALTER TABLE character_public_standing ADD CONSTRAINT spymaster_projection_failure CHECK (subject_id<>'blocked_fixture');"
+                : "ALTER TABLE character_public_standing DROP CONSTRAINT spymaster_projection_failure;");
+        }
+
         internal static List<Dictionary<string, object>> SelectForeignAgentAssignments(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             return ReignDatabase.QuerySql(connection, "SELECT agent_hero_id FROM foreign_agent_assignments WHERE campaign_id=$campaign AND timeline_id=$timeline;", parameters, transaction);
