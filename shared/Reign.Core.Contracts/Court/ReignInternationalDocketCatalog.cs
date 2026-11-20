@@ -52,14 +52,20 @@ namespace Reign.Core.Contracts.Court
             if (!string.Equals(optionId, "accept", StringComparison.OrdinalIgnoreCase)) return false;
             return !string.Equals(remedy, "prisoner", StringComparison.OrdinalIgnoreCase) || ransom;
         }
-        public static ReignInternationalReplyDisposition ReadSovereignReplyDisposition(string status)
+        public static ReignInternationalReplyDisposition ReadSovereignReplyDisposition(
+            string status, string outcome, bool hasNormalizedAction)
         {
             switch (status)
             {
-                case "accepted_awaiting_court": return ReignInternationalReplyDisposition.Accepted;
-                case "countered": return ReignInternationalReplyDisposition.Countered;
-                case "refused": return ReignInternationalReplyDisposition.Refused;
-                default: return ReignInternationalReplyDisposition.Unavailable;
+                // Accepting a counter in another route does not accept the original offer.
+                case "accepted_awaiting_court" when outcome == "accept" && hasNormalizedAction:
+                    return ReignInternationalReplyDisposition.Accepted;
+                case "countered" when outcome == "counter" && hasNormalizedAction:
+                    return ReignInternationalReplyDisposition.Countered;
+                case "refused" when outcome == "refuse":
+                    return ReignInternationalReplyDisposition.Refused;
+                default:
+                    return ReignInternationalReplyDisposition.Unavailable;
             }
         }
 
