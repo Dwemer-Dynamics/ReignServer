@@ -560,14 +560,19 @@ namespace ReignBetaServer
             var currentReport = NativeReport("native_marriage_completed", second, fee);
             currentReport["message"] = "Verified agreement: Marriage completed: Paid Son married Paid Daughter.";
             const string pendingId = "native_marriage_pending_effect";
+            const string unprovenId = "native_marriage_pending_older_source";
             var pendingEffect = Row(pendingId, "completed");
             pendingEffect["diplomaticMarriageCompletion"] =
                 NativeDiplomaticMarriageCompletion(pendingId, "completed", record, NativeReport(pendingId, second, fee));
+            var unproven = Row(unprovenId, "completed");
+            var unprovenAdmission = NativeDiplomaticMarriageCompletion(unprovenId, "completed", record, NativeReport(unprovenId, second, fee));
+            unprovenAdmission["sharedActivityGeneration"] = "unproven_older_source";
+            unproven["diplomaticMarriageCompletion"] = unprovenAdmission;
             ActionPipelineService.WriteActionQueueUnlocked(campaign, new List<Dictionary<string, object>> {
                 completed, Row("native_marriage_historical", "completed"), Row("native_marriage_wrong_couple", "queued"),
                 Row("native_marriage_unsettled", "queued"), Row("native_marriage_wrong_fee", "queued"),
                 Row("native_marriage_malformed_fee", "queued"),
-                Row("native_marriage_stale_timeline", "queued"), pendingEffect
+                Row("native_marriage_stale_timeline", "queued"), pendingEffect, unproven
             });
 
             ActionPipelineService.ReportAction(NativeReport("native_marriage_historical", second, fee));
@@ -628,23 +633,26 @@ namespace ReignBetaServer
                 "timeline", timeline, "point", "diplomatic_fixture_save", "day", 25d, "sequence", 0L,
                 "head", "", "source", generation, "session", "diplomatic_fixture_load"));
             var offered = ActionPipelineService.NextActions(TestDict("campaignId", campaign), null);
-            Dictionary<string, object> ReadSavedAdmission()
+            Dictionary<string, object> ReadSavedAdmission(string id)
             {
                 lock (Program.FileLock)
                 {
                     var saved = ActionPipelineService.ReadActionQueueUnlocked(campaign)
-                        .SingleOrDefault(row => ReadString(row, "id", "") == pendingId);
+                        .SingleOrDefault(row => ReadString(row, "id", "") == id);
                     return ReadDictionary(saved, "diplomaticMarriageCompletion");
                 }
             }
-            bool recoveredViaPoll = SpinWait.SpinUntil(() => ReadString(ReadSavedAdmission(), "outcome", "") == "applied",
-                TimeSpan.FromSeconds(10));
+            bool recoveredViaPoll = SpinWait.SpinUntil(() => ReadString(ReadSavedAdmission(pendingId), "outcome", "") == "applied"
+                && ReadLong(ReadSavedAdmission(unprovenId), "retryAfterUtc", 0) > 0, TimeSpan.FromSeconds(10));
             var recovered = Pair(leaderA, leaderB);
             var retry = NativeReport(pendingId, "other_spouse", null);
             retry["timelineId"] = "different_retry_timeline";
             retry["worldDay"] = 99d;
             ActionPipelineService.ReportAction(retry);
-            var savedAdmission = ReadSavedAdmission();
+            var savedAdmission = ReadSavedAdmission(pendingId);
+            check("diplomatic_unproven_snapshot_lineage_remains_pending",
+                ReadString(ReadSavedAdmission(unprovenId), "outcome", "") == ""
+                && ReadLong(ReadSavedAdmission(unprovenId), "retryAfterUtc", 0) > 0);
             check("diplomatic_completion_recovers_from_persisted_admission",
                 recoveredViaPoll && ReadDictionaryList(offered, "actions").Count == 1
                 && ReadInt(recovered, "affinity_a_to_b", 0) - ReadInt(after, "affinity_a_to_b", 0) == 20

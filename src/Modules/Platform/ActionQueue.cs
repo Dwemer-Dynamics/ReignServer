@@ -242,7 +242,7 @@ namespace ReignBetaServer
             lock (Program.FileLock)
             {
                 List<Dictionary<string, object>> queue = ReadActionQueueUnlocked(campaignId);
-                recoverDiplomaticMarriages = queue.Any(row => PendingDiplomaticMarriage(row) != null);
+                recoverDiplomaticMarriages = queue.Any(row => DiplomaticMarriageRecoveryDue(row, nowTs));
                 // Read at most once per poll, and only when a durable row needs it.
                 string deliveryGeneration = null;
                 Func<string> generation = () => deliveryGeneration ?? (deliveryGeneration = DialogueService.ActionDeliveryGeneration(campaignId));
@@ -531,6 +531,12 @@ namespace ReignBetaServer
                 && ReadString(completion, "outcome", "").Length == 0 ? completion : null;
         }
 
+        private static bool DiplomaticMarriageRecoveryDue(Dictionary<string, object> row, long now)
+        {
+            var pending = PendingDiplomaticMarriage(row);
+            return pending != null && ReadLong(pending, "retryAfterUtc", 0) <= now;
+        }
+
         private static void ScheduleDiplomaticMarriageRecovery(string campaignId)
         {
             if (!DiplomaticMarriageRecoveryWorkers.TryAdd(campaignId, 0)) return;
@@ -540,9 +546,10 @@ namespace ReignBetaServer
                 try
                 {
                     List<Dictionary<string, object>> pending;
+                    long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                     lock (Program.FileLock)
                         pending = ReadActionQueueUnlocked(campaignId)
-                            .Where(row => PendingDiplomaticMarriage(row) != null).Take(4).ToList();
+                            .Where(row => DiplomaticMarriageRecoveryDue(row, now)).Take(4).ToList();
                     foreach (var row in pending)
                     {
                         try
@@ -579,7 +586,10 @@ namespace ReignBetaServer
                 var row = queue.FirstOrDefault(existing => ReadString(existing, "id", "") == id);
                 var pending = PendingDiplomaticMarriage(row);
                 if (pending == null || Json.Serialize(pending) != Json.Serialize(admission)) return;
-                pending["outcome"] = applied ? "applied" : "stale";
+                if (applied) pending["outcome"] = "applied";
+                // A concurrent timeline switch or missing snapshot lineage does not invalidate
+                // first admission. Preserve it and let later polls recheck without blocking siblings.
+                else pending["retryAfterUtc"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 30;
                 WriteActionQueueUnlocked(campaignId, queue);
             }
         }
