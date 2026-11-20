@@ -50,6 +50,8 @@ namespace ReignBetaServer
                     string schema = SaveSyncTestSqlValue(campaignId, "SELECT current_schema()::regnamespace::oid::text AS oid", "oid");
                     string ledgerSha = FileSha256(Path.Combine(syncRoot, "ledger.json"));
                     string targetSha = SaveSyncCalendarDigest(ReadSaveSyncCalendar(targetCampaign));
+                    string targetManifest = Path.Combine(Path.GetDirectoryName(targetCampaign), "manifest.json");
+                    string manifestSha = FileSha256(targetManifest);
                     string recovery = Path.Combine(syncRoot, "r");
                     string[] backups = Directory.Exists(recovery) ? Directory.GetDirectories(recovery) : Array.Empty<string>();
                     string message = "";
@@ -60,8 +62,9 @@ namespace ReignBetaServer
                         && schema == SaveSyncTestSqlValue(campaignId, "SELECT current_schema()::regnamespace::oid::text AS oid", "oid")
                         && ledgerSha == FileSha256(Path.Combine(syncRoot, "ledger.json"))
                         && targetSha == SaveSyncCalendarDigest(ReadSaveSyncCalendar(targetCampaign))
+                        && manifestSha == FileSha256(targetManifest)
                         && backups.SequenceEqual(Directory.Exists(recovery) ? Directory.GetDirectories(recovery) : Array.Empty<string>()),
-                        "The rejected load preserves the active campaign, SQL schema, ledger, stored calendar and recovery inventory.");
+                        "The rejected load preserves the active campaign, SQL schema, ledger, stored calendar, manifest and recovery inventory.");
                 }
 
                 File.WriteAllBytes(stored, newerBytes);
@@ -139,11 +142,21 @@ namespace ReignBetaServer
 
                 ledger = ReadSaveSyncLedger(campaignId);
                 point = SaveSyncPoint(ledger, "older");
+                var calendarEntry = files.Single(f => ReadString(f, "path", "").Replace('\\', '/') == "world/calendar.json");
+                calendarEntry["sha256"] = "";
+                File.Delete(stored);
+                optimized["fingerprint"] = SaveSyncManifestFingerprint(files);
+                point["snapshotFingerprint"] = optimized["fingerprint"];
+                UpsertSaveSyncPoint(ledger, point);
+                WriteSaveSyncLedger(campaignId, ledger);
+                CampaignFileService.WriteJsonObject(manifestPath, optimized);
+                var firstUse = new Dictionary<string, object>(oldNative) { ["calendarFirstUse"] = true };
+                ExpectRefusal("calendar_declared_file_cannot_certify_absence", firstUse, "file table lists a calendar");
+
                 point["snapshotFingerprint"] = manifest["fingerprint"];
                 UpsertSaveSyncPoint(ledger, point);
                 WriteSaveSyncLedger(campaignId, ledger);
                 CampaignFileService.WriteJsonObject(manifestPath, manifest);
-                File.Delete(stored);
                 File.Delete(calendar);
                 MarkSaveSyncActiveStateDirty(campaignId);
                 var absent = SaveSyncLoadApi(oldNative, false);
@@ -156,8 +169,10 @@ namespace ReignBetaServer
                 vanilla["registrationConfirmed"] = false;
                 vanilla["calendarFirstUse"] = true;
                 var baseline = SaveSyncLoadApi(vanilla, false);
-                var vanillaPoint = SaveSyncPoint(ReadSaveSyncLedger(campaignId), "vanilla");
-                string vanillaTarget = Path.Combine(SaveSyncSnapshotRoot(campaignId, vanillaPoint), "campaign");
+                var vanillaLedger = ReadSaveSyncLedger(campaignId);
+                var vanillaPoint = SaveSyncPoint(vanillaLedger, "vanilla");
+                string vanillaRoot = SaveSyncSnapshotRoot(campaignId, vanillaPoint);
+                string vanillaTarget = Path.Combine(vanillaRoot, "campaign");
                 File.WriteAllBytes(calendar, olderBytes);
                 MarkSaveSyncActiveStateDirty(campaignId);
                 var established = new Dictionary<string, object>(vanilla) { ["calendarFirstUse"] = false };
@@ -165,6 +180,21 @@ namespace ReignBetaServer
                 var flagless = new Dictionary<string, object>(vanilla);
                 flagless.Remove("calendarFirstUse");
                 ExpectRefusal("calendar_bound_absence_requires_native_first_use_evidence", flagless, "no calendar", vanillaTarget);
+                vanillaPoint["calendarSha256"] = null;
+                UpsertSaveSyncPoint(vanillaLedger, vanillaPoint);
+                WriteSaveSyncLedger(campaignId, vanillaLedger);
+                ExpectRefusal("calendar_null_point_digest_cannot_certify_absence", vanilla, "invalid recorded calendar SHA-256", vanillaTarget);
+                vanillaPoint["calendarSha256"] = "";
+                UpsertSaveSyncPoint(vanillaLedger, vanillaPoint);
+                WriteSaveSyncLedger(campaignId, vanillaLedger);
+
+                string vanillaManifestPath = Path.Combine(vanillaRoot, "manifest.json");
+                byte[] originalManifest = File.ReadAllBytes(vanillaManifestPath);
+                var badManifest = CampaignFileService.ReadJsonObject(vanillaManifestPath);
+                badManifest["calendarSha256"] = null;
+                CampaignFileService.WriteJsonObject(vanillaManifestPath, badManifest);
+                ExpectRefusal("calendar_null_manifest_digest_cannot_certify_absence", vanilla, "invalid recorded calendar SHA-256", vanillaTarget);
+                File.WriteAllBytes(vanillaManifestPath, originalManifest);
                 var reload = SaveSyncLoadApi(vanilla, false);
                 string backup = ReadString(reload, "backupPath", "");
                 add("calendar_vanilla_reload_reinstalls_captured_absence",

@@ -23,6 +23,8 @@ namespace ReignBetaServer
 
         private static void RequireSaveSyncCalendarDigest(string expected, string actual)
         {
+            if (expected == null)
+                throw new InvalidDataException("The checkpoint has an invalid recorded calendar SHA-256. Restore the matching checkpoint before loading this save.");
             if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("The checkpoint calendar differs from its recorded SHA-256. Restore the matching checkpoint bytes before loading this save.");
         }
@@ -37,15 +39,15 @@ namespace ReignBetaServer
             string nativeDigest = ReadString(payload, "calendarSha256", "");
             bool bound = nativeDigest.Length != 0;
             if (bound) RequireSaveSyncCalendarDigest(nativeDigest, actual);
-            if (point.ContainsKey("calendarSha256"))
+            if (point.TryGetValue("calendarSha256", out object recorded))
             {
-                RequireSaveSyncCalendarDigest(ReadString(point, "calendarSha256", ""), actual);
+                RequireSaveSyncCalendarDigest(recorded as string, actual);
                 bound = true;
             }
             // A raw manifest travels with the stored file. Its own hash can corroborate
             // the ledger/native evidence, but cannot authenticate a replacement by itself.
-            if (manifest.ContainsKey("calendarSha256"))
-                RequireSaveSyncCalendarDigest(ReadString(manifest, "calendarSha256", ""), actual);
+            if (manifest.TryGetValue("calendarSha256", out object corroborating))
+                RequireSaveSyncCalendarDigest(corroborating as string, actual);
             var files = ReadDictionaryList(manifest, "files");
             if (!bound && (files.Count != 0 || !ReadBool(manifest, "integrityDeferred", true)))
             {
@@ -54,7 +56,9 @@ namespace ReignBetaServer
                     throw new InvalidDataException("The recorded checkpoint file hashes do not match the save point.");
                 var entry = files.SingleOrDefault(f => ReadString(f, "path", "").Replace('\\', '/')
                     .Equals("world/calendar.json", StringComparison.OrdinalIgnoreCase));
-                RequireSaveSyncCalendarDigest(entry == null ? "" : ReadString(entry, "sha256", ""), actual);
+                if (entry != null && calendar == null)
+                    throw new InvalidDataException("The checkpoint file table lists a calendar whose bytes are missing. Restore the matching checkpoint before loading this save.");
+                RequireSaveSyncCalendarDigest(entry == null ? "" : entry.GetValueOrDefault("sha256") as string, actual);
                 bound = true;
             }
             // The original pre-Reign native save can be loaded again after its first launch
