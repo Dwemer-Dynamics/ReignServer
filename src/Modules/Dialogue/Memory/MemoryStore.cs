@@ -1212,7 +1212,7 @@ namespace ReignBetaServer
                     ["retryable"] = ReadBool(compact, "retryable", false),
                     ["compactionDiagnostic"] = ReadDictionary(compact, "compactionDiagnostic") ?? TestDict(),
                     ["sourceHash"] = DialogueService.MemorySourceHash(rows), ["processingVersion"] = DialogueService.MemoryPrecisionVersion,
-                    ["sourceItemCount"] = rows.Count,
+                    ["sourceItemCount"] = ReadInt(compact, "sourceItemCount", rows.Count),
                     ["correlationId"] = summaryCorrelationId
                 };
 
@@ -1295,16 +1295,23 @@ namespace ReignBetaServer
                 ["campaignId"] = campaignId,
                 ["npcId"] = npcId,
                 ["summaryCount"] = created.Count,
-                ["compactionStatus"] = created.Any(r => ReadString(r, "compactionStatus", "") == "incomplete") ? "incomplete" : "complete",
+                ["compactionStatus"] = ConsolidatedMemoryCompactionStatus(created),
                 ["retryable"] = created.Any(r => ReadString(r, "compactionStatus", "") == "incomplete" && ReadBool(r, "retryable", true)),
                 ["summaries"] = created
             };
         }
 
+        private static string ConsolidatedMemoryCompactionStatus(List<Dictionary<string, object>> summaries)
+        {
+            if (summaries.Any(summary => ReadString(summary, "compactionStatus", "") == "incomplete")) return "incomplete";
+            return summaries.Any(summary => ReadString(summary, "compactionStatus", "") == "partial") ? "partial" : "complete";
+        }
+
         internal static Dictionary<string, object> BuildMiddleTermSummary(Dictionary<string, object> settings, string npcId, string groupKey,
             List<Dictionary<string, object>> rows, int sourceCharacterLimit = 60000, string sourceInstructions = "",
             string correlationId = "", Func<Dictionary<string, object>, Dictionary<string, object>> responder = null,
-            Action<IReadOnlyList<string>> captureSourceRecords = null, string campaignId = "")
+            Action<IReadOnlyList<string>> captureSourceRecords = null, string campaignId = "",
+            Func<string, string> publicationText = null)
         {
             if (responder != null && string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value))
                 throw new InvalidOperationException("Compaction response fixtures require isolated Verification Lab state.");
@@ -1331,10 +1338,15 @@ namespace ReignBetaServer
                 return ReadString(originalPayload, "method", "") == "model_attributed_digest"
                     && ReadStringList(originalPayload, "originalSourceRecords").Count == 0;
             })) return DialogueService.MemoryCompactionOutcome(retained, "digest_original_sources_unavailable");
+            var localSelection = new Dictionary<string, object>();
             var complete = DialogueService.AcceptMemorySummarySelection(TestDict("sourceIndices", Enumerable.Range(1, sourceText.Count).ToArray()),
-                rows, sourceText, topics, maxChars);
+                rows, sourceText, topics, maxChars, localSelection, publicationText);
             if (complete != null) return DialogueService.MemoryCompactionOutcome(complete, "complete_sources_fit_locally");
             if (!useLlm) return DialogueService.MemoryCompactionOutcome(retained, "generation_disabled");
+            // A stricter publication budget must not turn an existing local-only
+            // compaction into a new provider request.
+            if (ReadInt(localSelection, "selectedCharactersWithFraming", int.MaxValue) <= maxChars)
+                return DialogueService.MemoryCompactionOutcome(retained, "local_sources_exceed_serialized_budget");
             if (joined != string.Join("\n---\n", sourceText))
                 return DialogueService.MemoryCompactionOutcome(retained, "source_input_exceeds_budget");
             if (responder == null && !LlmProviderService.LlmProviderConfigured(settings))
@@ -1371,7 +1383,8 @@ namespace ReignBetaServer
                     ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
                 };
                 var llm = responder == null ? LlmProviderService.ChatWithLlm(request) : responder(request);
-                return DialogueService.EvaluateMemoryCompactionResponse(llm, rows, sourceText, topics, maxChars, dialogueDerived);
+                return DialogueService.EvaluateMemoryCompactionResponse(llm, rows, sourceText, topics, maxChars,
+                    dialogueDerived, publicationText);
             }
         }
 

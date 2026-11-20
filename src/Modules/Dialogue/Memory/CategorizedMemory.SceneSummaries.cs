@@ -14,7 +14,8 @@ namespace ReignBetaServer
     {
         internal static Dictionary<string, object> CreateConversationSceneSummary(string campaignId, Dictionary<string, object> session,
             List<Dictionary<string, object>> turns, long now, Dictionary<string, object> settingsOverride = null,
-            bool retrievalEligible = true, Action<IReadOnlyList<string>> captureSourceRecords = null)
+            bool retrievalEligible = true, Action<IReadOnlyList<string>> captureSourceRecords = null,
+            Func<Dictionary<string, object>, Dictionary<string, object>> responder = null)
         {
             turns = turns ?? new List<Dictionary<string, object>>();
             turns = turns.Where(t => ReadString(t, "status", "active") == "active").ToList();
@@ -76,6 +77,16 @@ namespace ReignBetaServer
                 ["ts"] = ReadLong(item, "created_ts", now)
             }));
             Dictionary<string, object> summarySettings = settingsOverride ?? SettingsService.LoadSettings();
+            string PublishSceneText(string text, out bool continuityNormalized)
+            {
+                text = DialogueService.EnsureConversationSummaryProvenance(text,
+                    Math.Clamp(ReadInt(summarySettings, "memoryConsolidationMaxSummaryChars", 1800), 500, 5000));
+                text = DialogueService.SanitizeUnknownIdentityEvidenceText(text, identityKnowledge);
+                string normalized = NormalizeHistoricalRoleplayContinuityText(text,
+                    Math.Max(text.Length + 4096, 5000), false, purpose: HistoricalTextPurpose.StoredArchive);
+                continuityNormalized = !string.Equals(text, normalized, StringComparison.Ordinal);
+                return normalized;
+            }
             string summaryCorrelationId = ReadFirstString(
                 identitySource,
                 "correlationId",
@@ -95,19 +106,12 @@ namespace ReignBetaServer
                     ? "The player remains unidentified to this memory owner. Use only 'the unidentified interlocutor' or 'the stranger'; do not restore a canonical player name, clan, realm, title, tier, fiefs, wealth, inventory, or political status from speaker metadata or an NPC reconstruction. "
                     : "")
                 + "Narrated gifts, payments, item handoffs, orders, or other gameplay actions prove only what was proposed or said unless a supplied production action receipt confirms completion; never convert narrated acceptance into a completed native transfer.",
-                summaryCorrelationId, captureSourceRecords: captureSourceRecords, campaignId: campaignId);
+                summaryCorrelationId, responder: responder, captureSourceRecords: captureSourceRecords, campaignId: campaignId,
+                publicationText: value => PublishSceneText(value, out _));
             string summaryText = ReadString(compact, "summary", "");
             if (string.IsNullOrWhiteSpace(summaryText))
                 summaryText = string.Join("\n---\n", pseudoRows.Select(row => ReadString(row, "summary", "")));
-            summaryText = DialogueService.EnsureConversationSummaryProvenance(summaryText,
-                Math.Max(500, Math.Min(5000, ReadInt(summarySettings, "memoryConsolidationMaxSummaryChars", 1800))));
-            summaryText = DialogueService.SanitizeUnknownIdentityEvidenceText(summaryText, identityKnowledge);
-            string originalSummaryText = summaryText;
-            summaryText = NormalizeHistoricalRoleplayContinuityText(summaryText,
-                Math.Max(summaryText.Length + 4096, 5000),
-                false, purpose: HistoricalTextPurpose.StoredArchive);
-            bool continuityNormalized = !string.Equals(
-                originalSummaryText, summaryText, StringComparison.Ordinal);
+            summaryText = PublishSceneText(summaryText, out bool continuityNormalized);
             string routingText = RemoveNegatedSceneCommitmentTerms(summaryText);
             Dictionary<string, object> sceneRoute = BuildMemoryRetrievalRoute(summarySettings, routingText,
                 new Dictionary<string, object> { ["worldDay"] = ReadDouble(session, "end_world_day", ReadDouble(session, "start_world_day", 0d)) });
@@ -158,6 +162,7 @@ namespace ReignBetaServer
                             ["compactionStatus"] = ReadString(compact, "compactionStatus", "incomplete"),
                             ["sourceCoverage"] = ReadString(compact, "sourceCoverage", "unverified"),
                             ["selectedSourceIndices"] = compact.TryGetValue("selectedSourceIndices", out object selectedIndices) ? selectedIndices : Array.Empty<int>(),
+                            ["sourceItemCount"] = ReadInt(compact, "sourceItemCount", pseudoRows.Count),
                             ["retryable"] = ReadBool(compact, "retryable", true),
                             ["compactionDiagnostic"] = ReadDictionary(compact, "compactionDiagnostic") ?? TestDict(),
                             ["candidatePublication"] = ReadString(compact, "candidatePublication", ""),
@@ -343,6 +348,15 @@ namespace ReignBetaServer
             }
             scenes = scenes.Take(8).OrderBy(row => ReadLong(row, "updated_ts", 0)).ToList();
             Dictionary<string, object> arcSettings = SettingsService.LoadSettings();
+            string PublishArcText(string value, out bool continuityNormalized)
+            {
+                if (identityUnknown)
+                    value = DialogueService.SanitizeUnknownIdentityEvidenceText(value, identityKnowledge);
+                string normalized = NormalizeHistoricalRoleplayContinuityText(value,
+                    Math.Max(value.Length + 4096, 5000), true, purpose: HistoricalTextPurpose.StoredArchive);
+                continuityNormalized = !string.Equals(value, normalized, StringComparison.Ordinal);
+                return normalized;
+            }
             string arcCorrelationId = scenes
                 .Select(DialogueService.StoredConversationArtifactCorrelationId)
                 .LastOrDefault(value =>
@@ -350,18 +364,8 @@ namespace ReignBetaServer
             Dictionary<string, object> compact = DialogueService.BuildMiddleTermSummary(arcSettings, npcId,
                 "arc:" + npcId + ":" + playerId + ":" + memoryLane, scenes, 60000,
                 "These records are chronological closed conversation scenes. A departure, silence, refusal, or closure in an older scene applies only to that scene. If a later scene exists, it proves the participants subsequently re-engaged; never preserve an older scene ending as current physical absence or permanent non-engagement.",
-                arcCorrelationId, campaignId: campaignId);
-            string text = ReadString(compact, "summary", "");
-            if (identityUnknown)
-            {
-                text = DialogueService.SanitizeUnknownIdentityEvidenceText(text, identityKnowledge);
-            }
-            string originalArcText = text;
-            text = NormalizeHistoricalRoleplayContinuityText(text,
-                Math.Max(text.Length + 4096, 5000),
-                true, purpose: HistoricalTextPurpose.StoredArchive);
-            bool continuityNormalized = !string.Equals(
-                originalArcText, text, StringComparison.Ordinal);
+                arcCorrelationId, campaignId: campaignId, publicationText: value => PublishArcText(value, out _));
+            string text = PublishArcText(ReadString(compact, "summary", ""), out bool continuityNormalized);
             if (string.IsNullOrWhiteSpace(text))
             {
                 return new Dictionary<string, object> { ["ok"] = true, ["updated"] = false, ["reason"] = "empty_summary" };
@@ -390,6 +394,7 @@ namespace ReignBetaServer
                             ["compactionStatus"] = ReadString(compact, "compactionStatus", "incomplete"),
                             ["sourceCoverage"] = ReadString(compact, "sourceCoverage", "unverified"),
                             ["selectedSourceIndices"] = compact.TryGetValue("selectedSourceIndices", out object selectedIndices) ? selectedIndices : Array.Empty<int>(),
+                            ["sourceItemCount"] = ReadInt(compact, "sourceItemCount", scenes.Count),
                             ["retryable"] = ReadBool(compact, "retryable", false),
                             ["compactionDiagnostic"] = ReadDictionary(compact, "compactionDiagnostic") ?? TestDict(),
                             ["sourceHash"] = MemorySourceHash(scenes), ["processingVersion"] = MemoryPrecisionVersion,
@@ -414,6 +419,8 @@ namespace ReignBetaServer
                 ["updated"] = true,
                 ["summaryId"] = arcId,
                 ["summary"] = text,
+                ["compactionStatus"] = ReadString(compact, "compactionStatus", "incomplete"),
+                ["compactionDiagnostic"] = ReadDictionary(compact, "compactionDiagnostic") ?? TestDict(),
                 ["roleplayContinuityNormalized"] = continuityNormalized,
                 ["identityBoundaryWithheldScenes"] = withheldScenes
             };
