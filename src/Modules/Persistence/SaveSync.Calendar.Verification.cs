@@ -153,6 +153,14 @@ namespace ReignBetaServer
                 var firstUse = new Dictionary<string, object>(oldNative) { ["calendarFirstUse"] = true };
                 ExpectRefusal("calendar_declared_file_cannot_certify_absence", firstUse, "file table lists a calendar");
 
+                point["calendarSha256"] = "";
+                optimized["calendarSha256"] = "";
+                UpsertSaveSyncPoint(ledger, point);
+                WriteSaveSyncLedger(campaignId, ledger);
+                CampaignFileService.WriteJsonObject(manifestPath, optimized);
+                ExpectRefusal("calendar_bound_absence_cannot_override_declared_file", firstUse, "file table lists a calendar");
+
+                point.Remove("calendarSha256");
                 point["snapshotFingerprint"] = manifest["fingerprint"];
                 UpsertSaveSyncPoint(ledger, point);
                 WriteSaveSyncLedger(campaignId, ledger);

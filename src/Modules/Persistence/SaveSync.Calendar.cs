@@ -49,10 +49,11 @@ namespace ReignBetaServer
             if (manifest.TryGetValue("calendarSha256", out object corroborating))
                 RequireSaveSyncCalendarDigest(corroborating as string, actual);
             var files = ReadDictionaryList(manifest, "files");
-            if (!bound && (files.Count != 0 || !ReadBool(manifest, "integrityDeferred", true)))
+            if (files.Count != 0 || !ReadBool(manifest, "integrityDeferred", true))
             {
-                // An older optimized manifest binds its file table to the point's fingerprint.
-                if (!string.Equals(SaveSyncManifestFingerprint(files), ReadString(point, "snapshotFingerprint", ""), StringComparison.OrdinalIgnoreCase))
+                // A declared calendar must agree with the other receipts. A legacy file
+                // table used as the sole witness must also match the point's fingerprint.
+                if (!bound && !string.Equals(SaveSyncManifestFingerprint(files), ReadString(point, "snapshotFingerprint", ""), StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("The recorded checkpoint file hashes do not match the save point.");
                 var entry = files.SingleOrDefault(f => ReadString(f, "path", "").Replace('\\', '/')
                     .Equals("world/calendar.json", StringComparison.OrdinalIgnoreCase));
