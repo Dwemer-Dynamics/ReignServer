@@ -31,7 +31,8 @@ namespace ReignBetaServer
             string targetKingdomId = ReadFirstString(payload, "targetKingdomId", "speakerKingdomId", "npcKingdomId");
             string claim = ReadFirstString(payload, "claim", "claimText", "playerText", "text", "message");
             double worldDay = ReadDouble(payload, "worldDay", ReadDouble(payload, "currentWorldDay", 0d));
-            bool lookupOnly = ReadBool(payload, "lookupOnly", false) || DialogueService.IsWorldHistoryLookupRequest(claim);
+            var spans = WorldSimulationService.ExtractAssertedWorldHistorySpans(claim);
+            bool lookupOnly = ReadBool(payload, "lookupOnly", false) || (spans.Count == 0 && IsWorldHistoryLookupRequest(claim));
             if (string.IsNullOrWhiteSpace(claim) || string.IsNullOrWhiteSpace(targetId) || (!lookupOnly && string.IsNullOrWhiteSpace(claimantId)))
             {
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = lookupOnly ? "claim and targetId are required." : "claim, claimantId, and targetId are required." };
@@ -56,14 +57,13 @@ namespace ReignBetaServer
             if (lookupOnly) verifyPayload["claimantId"] = string.Empty;
             Dictionary<string, object> verification = lookupOnly
                 ? null
-                : VerifySelfAdmittedFalsehood(payload, claim, claimantId, targetId);
+                : VerifySelfAdmittedFalsehood(payload, claim, claimantId, targetId, spans);
             if (verification == null && !lookupOnly)
             {
                 verification = VerifyNativeCurrentLocationClaim(payload, claim, claimantId, targetId);
             }
             if (verification == null && !lookupOnly)
             {
-                var spans = WorldSimulationService.ExtractAssertedWorldHistorySpans(claim);
                 if (spans.Count != 1)
                     return new Dictionary<string, object> { ["ok"] = true, ["recorded"] = false,
                         ["outcome"] = "not_adjudicable", ["reason"] = spans.Count == 0 ? "no_asserted_claimant_deed" : "multiple_claims_require_separate_evidence",
@@ -127,13 +127,13 @@ namespace ReignBetaServer
             {
                 WorldSimulationService.EnsureWorldHistorySchema(connection);
                 EnsureWorldHistoryLieDetectionSchema(connection);
-                Dictionary<string, object> knowledge = ReadBool(verification, "nativeContextEvidence", false)
-                    ? ReadDictionary(verification, "speakerKnowledge") ?? new Dictionary<string, object>()
-                    : DetermineWorldHistoryKnowledge(connection, evidenceIds, targetId, targetKingdomId, worldDay);
+                Dictionary<string, object> knowledge = ReadDictionary(verification, "speakerKnowledge") ?? new Dictionary<string, object>();
                 string knowledgeBasis = ReadString(knowledge, "basis", "none");
                 List<string> knownIds = ReadStringList(knowledge, "eventIds");
-                ReconcileWorldHistoryClaimBeliefs(connection, targetId, knownIds, worldDay);
-                string episodeKey = StableLieEpisodeKey(campaignId, timelineId, claimantId, targetId, normalizedClaim, evidenceIds, knowledgeBasis);
+                string speakerVerdict = ReadString(verification, "speakerVerdict", "unknown");
+                // Pre-component episodes can contain a stored truthful packet for a different proof.
+                string episodeKey = Sha256Hex(Json.Serialize(new object[] { "scoped_claim_v1", campaignId, timelineId, claimantId,
+                    targetId, normalizedClaim, evidenceIds, objectiveVerdict, knownIds.OrderBy(id => id, StringComparer.OrdinalIgnoreCase).ToList(), knowledgeBasis, speakerVerdict }));
                 Dictionary<string, object> existing = DialogueStore.SelectWorldHistoryLieChecks(connection, new Dictionary<string, object> { ["key"] = episodeKey }).FirstOrDefault();
                 if (existing != null) return BuildLieCheckResponse(existing, verification, true);
 
@@ -141,15 +141,12 @@ namespace ReignBetaServer
                 Dictionary<string, object> targetSkills = ResolveLieSkills(payload, "targetSkills", campaignId, targetId);
                 bool claimantSkillsReady = ReadBool(claimantSkills, "available", false);
                 bool targetSkillsReady = ReadBool(targetSkills, "available", false);
-                bool materiallyFalse = string.Equals(objectiveVerdict, "contradicted", StringComparison.OrdinalIgnoreCase)
-                    || (string.Equals(objectiveVerdict, "partially_verified", StringComparison.OrdinalIgnoreCase) && mismatched.Count > 0);
-
                 double? chance = null;
                 double? roll = null;
                 string outcome;
-                if (!materiallyFalse)
+                if (objectiveVerdict != "contradicted" || (speakerVerdict != "contradicted" && knowledgeBasis != "none"))
                 {
-                    outcome = string.Equals(objectiveVerdict, "verified", StringComparison.OrdinalIgnoreCase) ? "truthful" : "not_adjudicable";
+                    outcome = objectiveVerdict == "verified" && speakerVerdict == "verified" ? "truthful" : "not_adjudicable";
                 }
                 else if (string.Equals(knowledgeBasis, "firsthand", StringComparison.OrdinalIgnoreCase))
                 {
@@ -241,20 +238,33 @@ namespace ReignBetaServer
         }
 
         private static Dictionary<string, object> VerifySelfAdmittedFalsehood(
-            Dictionary<string, object> payload, string claim, string claimantId, string targetId)
+            Dictionary<string, object> payload, string claim, string claimantId, string targetId, List<Dictionary<string, object>> spans)
         {
-            string q = ActionPipelineService.NormalizeLookup(claim);
+            // A separate admission about another subject cannot disprove this historical deed.
+            if (spans.Count > 0)
+            {
+                int end = ReadInt(spans[0], "start", 0) + ReadInt(spans[0], "length", 0);
+                if (spans.Count != 1 || !Regex.IsMatch(claim.Substring(end),
+                    @"\A\s*[.!;]\s*(?:what I (?:just )?said is false|I know (?:this|that) (?:account|claim) is false|I admit (?:that )?I lied)(?=\s*(?:[.!;]|$))",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)) return null;
+            }
+            else if (WorldSimulationService.MentionsFirstPersonDeed(claim))
+            {
+                // A deed mentioned inside a report or quotation was never asserted by this claimant.
+                return null;
+            }
+            string spoken = claim;
+            foreach (Match aside in WorldSimulationService.HistoryQuotationAndNarration(claim).AsEnumerable().Reverse())
+                spoken = spoken.Remove(aside.Index, aside.Length).Insert(aside.Index, " ");
+            string q = ActionPipelineService.NormalizeLookup(spoken);
             if (string.IsNullOrWhiteSpace(q)
                 || DialogueService.ContainsAny(q, "if i said", "if i were", "suppose i", "hypothetically", "as an example"))
             {
                 return null;
             }
 
-            bool directAdmission = DialogueService.ContainsExplicitDeceptionAdmission(q) || DialogueService.ContainsAny(q,
-                "i know that account is false", "i know this account is false",
-                "i know that claim is false", "i know this claim is false",
-                "what i just said is false", "what i said is false",
-                "that account is false", "this account is false");
+            bool directAdmission = spans.Count == 1 || ContainsExplicitDeceptionAdmission(q)
+                || Regex.IsMatch(spoken.Trim(), @"\Awhat I (?:just )?said is false[.!]?\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
             if (!directAdmission) return null;
 
             string evidenceId = "native_self_admitted_falsehood_" + PromptHash(claimantId + "|" + targetId + "|" + q).Substring(0, 20).ToLowerInvariant();
@@ -315,16 +325,7 @@ namespace ReignBetaServer
                 || !claimantSettlementId.Equals(targetSettlementId, StringComparison.OrdinalIgnoreCase)
                 || string.IsNullOrWhiteSpace(settlementName)) return null;
 
-            string q = ActionPipelineService.NormalizeLookup(claim);
-            string normalizedSettlement = ActionPipelineService.NormalizeLookup(settlementName);
             if (!ContradictsNativeCurrentSettlement(claim, settlementName)) return null;
-            bool deniedPresent = DialogueService.ContainsAny(q, "i am not presently in", "im not presently in", "i am not currently in", "im not currently in", "i am not in", "im not in",
-                    "we are not presently in", "were not presently in", "we are not currently in", "were not currently in", "we are not in", "were not in")
-                || q.Contains("not " + normalizedSettlement)
-                || q.Contains("rather than " + normalizedSettlement);
-            bool deniedEver = DialogueService.ContainsAny(q, "i never entered", "i have never entered", "ive never entered", "i never went to", "i have never been to", "ive never been to", "i was never in",
-                "we never entered", "we have never entered", "weve never entered", "we never went to", "we have never been to", "weve never been to", "we were never in");
-            if (!deniedPresent && !deniedEver) return null;
             bool deceptiveIntent = ContainsConversationDeceptiveIntentEvidence(claim);
 
             string evidenceId = "native_current_settlement_" + PromptHash(claimantId + "|" + targetId + "|" + claimantSettlementId).Substring(0, 20).ToLowerInvariant();
@@ -352,12 +353,12 @@ namespace ReignBetaServer
                 ["objectiveVerdict"] = "contradicted",
                 ["speakerVerdict"] = "contradicted",
                 ["deceptiveIntent"] = deceptiveIntent,
-                ["directAdmission"] = DialogueService.ContainsExplicitDeceptionAdmission(q),
+                ["directAdmission"] = false,
                 ["explanation"] = "The claimant and observer are presently together in " + settlementName + "; this directly contradicts the location denial.",
                 ["evidenceEventIds"] = new List<string> { evidenceId },
                 ["speakerEvidenceEventIds"] = new List<string> { evidenceId },
                 ["matchedComponents"] = new List<string>(),
-                ["mismatchedComponents"] = new List<string> { deniedEver ? "never entered current settlement" : "present location" },
+                ["mismatchedComponents"] = new List<string> { "present location" },
                 ["speakerKnowledge"] = new Dictionary<string, object>
                 {
                     ["basis"] = "firsthand",
@@ -377,29 +378,20 @@ namespace ReignBetaServer
 
         internal static bool ContradictsNativeCurrentSettlement(string claim, string settlementName)
         {
-            string normalizedSettlement = ActionPipelineService.NormalizeLookup(settlementName);
-            if (string.IsNullOrWhiteSpace(claim) || string.IsNullOrWhiteSpace(normalizedSettlement))
+            if (string.IsNullOrWhiteSpace(claim) || string.IsNullOrWhiteSpace(settlementName)) return false;
+            string place = Regex.Escape(settlementName.Trim());
+            const string subject = @"(?:I\s+am|we\s+are|I['’]m|we['’]re)";
+            string denial = subject + @"\s+(?:not\s+(?:(?:presently|currently)\s+)?|(?:presently|currently)\s+not\s+)(?:in|at)\s+" + place;
+            string alternative = subject + @"\s+(?:(?:presently|currently)\s+)?(?:in|at)\s+[\p{L}][\p{L}'’ -]*?,\s*(?:not|rather\s+than)\s+(?:(?:in|at)\s+)?" + place;
+            string preface = @"(?:(?:I|we)\s+have\s+never\s+entered\s+" + place + @"(?:\s+at\s+any\s+time)?,\s+and\s+)?";
+            var nonAssertions = WorldSimulationService.HistoryQuotationAndNarration(claim);
+            foreach (Match sentence in Regex.Matches(claim, @"[^.!?;\r\n]+(?:[.!?;]+|$)"))
             {
-                return false;
-            }
-            foreach (string clause in Regex.Split(claim, @"(?<=[.!?;\r\n])\s*"))
-            {
-                string q = ActionPipelineService.NormalizeLookup(clause);
-                if (string.IsNullOrWhiteSpace(q) || !ActionPipelineService.ContainsNormalizedPhrase(q, normalizedSettlement)
-                    || DialogueService.ContainsAny(q, "if i said", "if i were", "suppose i", "hypothetically", "as an example"))
-                    continue;
-                string place = Regex.Escape(normalizedSettlement).Replace("\\ ", @"\s+");
-                if (Regex.IsMatch(q,
-                    @"\b(?:i|we)\s+(?:am|are|was|were)\s+(?:not\s+)?(?:(?:presently|currently)\s+)?(?:not\s+)?(?:in|at)\s+(?:the\s+)?" + place + @"\b",
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
-                    && Regex.IsMatch(q, @"\bnot\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
-                    return true;
-                if (Regex.IsMatch(q,
-                    @"\b(?:i|we)\s+(?:(?:have|had)\s+)?never\s+(?:entered|went\s+to|been\s+(?:in|to)|was\s+in|were\s+in)\s+(?:the\s+)?" + place + @"\b",
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
-                    return true;
-                if (Regex.IsMatch(q, @"\b(?:not|rather\s+than)\s+(?:in|at\s+)?(?:the\s+)?" + place + @"\b",
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                if (sentence.Value.Contains('?')) continue;
+                int start = sentence.Index + sentence.Value.Length - sentence.Value.TrimStart().Length;
+                if (nonAssertions.Any(span => start >= span.Index && start < span.Index + span.Length)) continue;
+                string text = sentence.Value.Trim().TrimEnd('.', '!', ';');
+                if (Regex.IsMatch(text, @"\A(?:" + preface + denial + "|" + alternative + @")\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
                     return true;
             }
             return false;
@@ -526,11 +518,6 @@ namespace ReignBetaServer
                 "bride", "groom", "spouse", "mother", "father", "child", "tournament competitor", "governor", "owner hero", "recipient", "payer", "payee");
         }
 
-        private static string StableLieEpisodeKey(string campaignId, string timelineId, string claimantId, string targetId, string claim, List<string> evidenceIds, string basis)
-        {
-            return Sha256Hex(string.Join("|", new[] { campaignId, timelineId, claimantId, targetId, claim, string.Join(",", evidenceIds ?? new List<string>()), basis }));
-        }
-
         private static double StableLieRoll(string episodeKey)
         {
             using (SHA256 sha = SHA256.Create())
@@ -575,14 +562,19 @@ namespace ReignBetaServer
                 ["purpose"] = ReadString(verification, "purpose", ""), ["detectionOutcome"] = outcome, ["knowledgeBasis"] = basis,
                 ["privacyRule"] = "Use only this target-safe packet. Never infer or reveal objective history that is omitted here."
             };
+            if (knownIds.Count > 0 && !ReadBool(verification, "nativeContextEvidence", false))
+                packet["assessedClaim"] = ReadString(verification, "claim", "");
+            if (knownIds.Count > 0 && (outcome is "truthful" or "not_adjudicable" or "detected_firsthand" or "detected_secondhand")
+                && verification.TryGetValue("speakerPrisonerCountEvidence", out object countEvidence))
+                packet["prisonerCountEvidence"] = countEvidence;
             if (outcome == "detected_firsthand" || outcome == "detected_secondhand")
             {
                 packet["speakerVerdict"] = "contradicted";
                 packet["deceptiveIntent"] = ReadBool(verification, "deceptiveIntent", false);
                 packet["directAdmission"] = ReadBool(verification, "directAdmission", false);
                 packet["knownEvidenceEventIds"] = knownIds;
-                packet["mismatchedComponents"] = ReadStringList(verification, "mismatchedComponents");
-                packet["factualExplanation"] = ReadString(verification, "explanation", "The claim conflicts with evidence this character knows.");
+                packet["mismatchedComponents"] = ReadStringList(verification, verification.ContainsKey("speakerMismatchedComponents") ? "speakerMismatchedComponents" : "mismatchedComponents");
+                packet["factualExplanation"] = ReadFirstString(verification, "speakerExplanation", "explanation");
                 packet["reactionStrategy"] = reaction;
                 packet["exploitOpening"] = exploit;
                 packet["behaviorRule"] = reaction == "feign_belief"
@@ -601,6 +593,14 @@ namespace ReignBetaServer
             else
             {
                 packet["speakerVerdict"] = "unknown";
+                if (ReadString(verification, "speakerVerdict", "") == "partially_verified" && knownIds.Count > 0)
+                {
+                    packet["supportedComponents"] = ReadStringList(verification, "speakerMatchedComponents");
+                    packet["unverifiedComponents"] = ReadStringList(verification, "speakerUnverifiedComponents");
+                    packet["knownEvidenceEventIds"] = knownIds;
+                    packet["behaviorRule"] = "Use only the listed supported facts. The rest of the claim remains uncertain.";
+                    return packet;
+                }
                 packet["behaviorRule"] = outcome == "deception_succeeded"
                     ? "The character cannot establish the claim as false and finds it plausible despite uncertain secondhand reports. Do not accuse the claimant."
                     : "The character lacks a reliable basis to call this false. Do not accuse the claimant from missing or hidden evidence.";
@@ -638,19 +638,23 @@ namespace ReignBetaServer
             }
         }
 
-        internal static List<string> ReconcileWorldHistoryClaimBeliefs(ReignDbConnection connection, string believerId, List<string> selectedEventIds, double worldDay)
+        internal static List<string> ReconcileWorldHistoryClaimBeliefs(ReignDbConnection connection, string believerId, List<Dictionary<string, object>> visibleEvents, double worldDay)
         {
             EnsureWorldHistoryLieDetectionSchema(connection);
-            if (string.IsNullOrWhiteSpace(believerId) || selectedEventIds == null || selectedEventIds.Count == 0) return new List<string>();
-            HashSet<string> selected = new HashSet<string>(selectedEventIds, StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(believerId) || visibleEvents.Count == 0) return new List<string>();
             List<Dictionary<string, object>> rows = DialogueStore.SelectWorldHistoryClaimBeliefs(connection, new Dictionary<string, object> { ["believer"] = believerId });
             List<string> reconciled = new List<string>();
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             foreach (Dictionary<string, object> row in rows)
             {
                 List<string> linked = DialogueService.TextListFromJson(ReadString(row, "evidence_event_ids_json", "[]"));
-                List<string> discovered = linked.Where(selected.Contains).ToList();
-                if (discovered.Count == 0) continue;
+                var evidence = visibleEvents.Where(e => linked.Contains(ReadString(e, "event_id", ""), StringComparer.OrdinalIgnoreCase)).ToList();
+                if (evidence.Count == 0) continue;
+                string assertion = ReadString(row, "raw_claim", "");
+                string family = ReadString(WorldSimulationService.ClassifyWorldHistoryClaim(assertion), "claimFamily", "");
+                var proof = WorldSimulationService.AdjudicateWorldHistoryClaim(assertion, family, ReadString(row, "claimant_id", ""), evidence, 0, -1);
+                if (ReadString(proof, "verdict", "") != "contradicted") continue;
+                List<string> discovered = ReadStringList(proof, "evidenceEventIds");
                 string beliefId = ReadString(row, "belief_id", "");
                 string lieCheckId = ReadString(row, "lie_check_id", "");
                 DialogueStore.UpdateWorldHistoryClaimBeliefs(connection, new Dictionary<string, object> { ["day"] = worldDay, ["events"] = Json.Serialize(discovered), ["ts"] = ts, ["id"] = beliefId });
@@ -726,11 +730,6 @@ namespace ReignBetaServer
                 && ReadInt(splitSource[0], "start", 0) == 12, "Only the asserted actor/action/event span is eligible for lasting claim storage.");
             add("substring_is_not_leadership", ReadString(WorldSimulationService.ClassifyWorldHistoryClaim("I smiled and settled beside her."), "claimFamily", "") != "leadership", "led inside other words is not a claim.");
             add("toast_is_not_military_command", ReadString(WorldSimulationService.ClassifyWorldHistoryClaim("I led a toast."), "claimFamily", "") != "leadership", "Whole word led still requires a military object.");
-            add("event_location_must_match", !WorldSimulationService.HistoryClaimMatchesNamedLocation("I led the battle at Different Field.",
-                new Dictionary<string, object> { ["location_name"] = "Test Field" }), "A different complete battle cannot contradict the claimed battle.");
-            add("complete_roster_database_integer", WorldSimulationService.HistoryEventRosterComplete(TestDict("is_complete", 1L))
-                && !WorldSimulationService.HistoryEventRosterComplete(TestDict("is_complete", 0L))
-                && !WorldSimulationService.HistoryEventRosterComplete(TestDict()), "PostgreSQL integer flags preserve both complete and incomplete roster semantics.");
             add("entered_town_is_completed_travel", WorldSimulationService.ExtractAssertedWorldHistorySpans("I entered the town on day one.").Count == 1,
                 "An asserted completed arrival remains eligible for historical verification and retention checks.");
 
@@ -748,11 +747,11 @@ namespace ReignBetaServer
 
             Dictionary<string, object> firsthand = WorldHistoryLieCheckApi(new Dictionary<string, object>
             {
-                ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["claim"] = "I led the battle at Test Field.",
+                ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["claim"] = "I rescued exactly two prisoners in my entire career.",
                 ["claimantId"] = "main_hero", ["targetId"] = "lord_a", ["targetKingdomId"] = "kingdom_a", ["worldDay"] = 101d
             });
             add("firsthand_auto_detection", ReadString(firsthand, "outcome", "") == "detected_firsthand" && ReadNullableDouble(firsthand, "successChance") == null,
-                "A direct participant catches the false leadership claim without a roll.");
+                "A witness to three distinct rescues can refute a career total of two without a roll.");
 
             Dictionary<string, object> nativeLocation = WorldHistoryLieCheckApi(new Dictionary<string, object>
             {
@@ -822,7 +821,7 @@ namespace ReignBetaServer
 
             Dictionary<string, object> beforeNewsPayload = new Dictionary<string, object>
             {
-                ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["claim"] = "I led the battle at Test Field.",
+                ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["claim"] = "I rescued exactly two prisoners in my entire career.",
                 ["claimantId"] = "main_hero", ["targetId"] = "observer_a", ["targetKingdomId"] = "kingdom_a", ["worldDay"] = 101d,
                 ["claimantSkills"] = equalSkills, ["targetSkills"] = equalSkills
             };
@@ -842,7 +841,7 @@ namespace ReignBetaServer
 
             Dictionary<string, object> outsider = WorldHistoryLieCheckApi(new Dictionary<string, object>
             {
-                ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["claim"] = "I led the battle at Test Field.",
+                ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["claim"] = "I rescued exactly two prisoners in my entire career.",
                 ["claimantId"] = "main_hero", ["targetId"] = "observer_b", ["targetKingdomId"] = "kingdom_b", ["worldDay"] = 104d,
                 ["claimantSkills"] = strongSkills, ["targetSkills"] = weakSkills
             });
@@ -850,14 +849,14 @@ namespace ReignBetaServer
 
             Dictionary<string, object> missingSkills = WorldHistoryLieCheckApi(new Dictionary<string, object>
             {
-                ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["claim"] = "I led the battle at Test Field.",
+                ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["claim"] = "I rescued exactly two prisoners in my entire career.",
                 ["claimantId"] = "main_hero", ["targetId"] = "observer_missing_skills", ["targetKingdomId"] = "kingdom_a", ["worldDay"] = 104d
             });
             add("missing_skills_safe", ReadString(missingSkills, "outcome", "") == "insufficient_skill_data", "Missing native skills cannot produce an accusation.");
 
             Dictionary<string, object> truthful = WorldHistoryLieCheckApi(new Dictionary<string, object>
             {
-                ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["claim"] = "I was at the battle at Test Field.",
+                ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["claim"] = "I was at a battle at Test Field.",
                 ["claimantId"] = "main_hero", ["targetId"] = "lord_a", ["targetKingdomId"] = "kingdom_a", ["worldDay"] = 101d,
                 ["claimantSkills"] = weakSkills, ["targetSkills"] = strongSkills
             });
@@ -866,9 +865,12 @@ namespace ReignBetaServer
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureWorldHistoryLieDetectionSchema(connection);
-                Dictionary<string, object> belief = DialogueStore.SelectWorldHistoryClaimBeliefs2(connection).FirstOrDefault();
-                add("later_reconciliation", belief != null && ReadString(belief, "state", "") == "disproven" && ReadDouble(belief, "disproven_day", -1d) == 104d,
-                    "Relevant regional evidence disproves the earlier accepted claim on retrieval.");
+                var belief = DialogueStore.SelectWorldHistoryClaimBeliefForLieCheck(connection, TestDict("id", ReadString(beforeNews, "lieCheckId", ""))).SingleOrDefault();
+                var reconciledIds = ReadStringList(ReadDictionary(afterNews, "verification"), "reconciledBeliefIds");
+                add("later_reconciliation", belief != null && ReadString(belief, "state", "") == "disproven" && ReadDouble(belief, "disproven_day", -1d) == 104d
+                    && reconciledIds.Contains(ReadString(belief, "belief_id", ""))
+                    && TextListFromJson(ReadString(belief, "discovered_event_ids_json", "[]")).Contains("rescue_test"),
+                    "Day-104 regional news reconciles the day-101 lie-check episode with the recorded rescue as counterproof.");
 
                 string characterDir = Path.GetDirectoryName(CampaignFileService.CharacterFile(campaignId, "reaction_feign", "traits.json"));
                 Directory.CreateDirectory(characterDir);
@@ -896,7 +898,104 @@ namespace ReignBetaServer
                 add("reaction_probe", ReadString(probe, "strategy", "") == "probe", "Curious tactful characters probe.");
                 add("reaction_quiet", ReadString(quiet, "strategy", "") == "quietly_record", "Guarded neutral characters quietly remember.");
             }
+            AddPrisonerClaimAssertions(campaignId, timelineId, add);
             return assertions;
+        }
+
+        private static void AddPrisonerClaimAssertions(string campaignId, string timelineId, Action<string, bool, string> add)
+        {
+            void Check(string id, string claim, int day, string listener, string objective, string outcome, string prompt,
+                string kingdom = "", string expectedBasis = "", string assessedClaim = "")
+            {
+                var response = WorldHistoryLieCheckApi(TestDict("campaignId", campaignId, "timelineId", timelineId, "worldDay", day,
+                    "claimantId", "main_hero", "targetId", listener, "targetKingdomId", kingdom, "claim", claim));
+                var packet = ReadDictionary(response, "promptPacket");
+                string actual = ReadString(response, "objectiveVerdict", "") + "/" + ReadString(response, "outcome", "") + "/" + ReadString(packet, "speakerVerdict", "");
+                string rendered = BuildContextPullText(claim, "", null, null, null, null, null, null,
+                    new List<Dictionary<string, object>> { TestDict("id", "verify_world_history", "ok", true, "data", packet) }, false);
+                string expectedVerdict = Json.Serialize(TestDict("speakerVerdict", prompt)).Trim('{', '}');
+                add(id, actual == objective + "/" + outcome + "/" + prompt
+                    && rendered.Contains(expectedVerdict) && !rendered.Contains("objectiveVerdict")
+                    && (expectedBasis.Length == 0 || ReadString(packet, "knowledgeBasis", "") == expectedBasis)
+                    && (assessedClaim.Length == 0 || ReadString(packet, "assessedClaim", "") == assessedClaim && rendered.Contains(assessedClaim))
+                    && (outcome != "not_adjudicable" || ReadNullableDouble(response, "roll") == null)
+                    && (id != "five_claim_three_recorded" || ReadStringList(packet, "supportedComponents").Contains("direct rescue")
+                        && ReadInt(ReadDictionary(packet, "prisonerCountEvidence"), "observedMinimum", -1) == 3
+                        && ReadString(ReadDictionary(packet, "prisonerCountEvidence"), "quantifier", "") == "unspecified"
+                        && ReadStringList(packet, "unverifiedComponents").Contains("prisoner count")), claim + " => " + actual);
+            }
+            const string partial = "partially_verified", unknown = "unknown", uncertain = "not_adjudicable";
+            Check("five_claim_three_recorded", "I rescued five prisoners.", 101, "lord_a", partial, uncertain, unknown);
+            Check("three_known_minimum", "I rescued at least 3 prisoners in one battle at Sargot on day 101.", 101, "lord_a", "verified", "truthful", "verified");
+            Check("verified_scope_in_prompt", "I rescued at least three prisoners, but she rescued five prisoners.", 101, "lord_a",
+                "verified", "truthful", "verified", assessedClaim: "I rescued at least three prisoners");
+            Check("incomplete_census", "I rescued exactly three prisoners in one battle.", 101, "lord_a", partial, uncertain, unknown);
+            Check("unresolved_identity", "I rescued Rhagaea and her son.", 101, "lord_a", partial, uncertain, unknown);
+            Check("rank_unproved", "I rescued several captured lords.", 101, "lord_a", partial, uncertain, unknown);
+            Check("other_place", "I rescued at least 3 prisoners at Lageta.", 101, "lord_a", partial, uncertain, unknown);
+            Check("leading_date", "Yesterday, I rescued several prisoners.", 101, "lord_a", partial, uncertain, unknown);
+            Check("third_party_rescue", "She said, \"I rescued five prisoners.\"", 101, "lord_a", "", uncertain, unknown);
+            Check("quoted_rescue_after_period", "She said, “I remember. I rescued at least three prisoners.”", 101, "lord_a", "", uncertain, unknown);
+            Check("quoted_admission", "She said, “I rescued five prisoners. I deliberately lied.”", 101, "lord_a", "", uncertain, unknown);
+            Check("reported_rescue_denied", "He said I rescued five prisoners. That account is false.", 101, "lord_a", "", uncertain, unknown);
+            Check("reported_rescue_and_admission", "He said I rescued five prisoners and that I deliberately lied.", 101, "lord_a", "", uncertain, unknown);
+            Check("unrelated_admission", "I rescued five prisoners. I deliberately lied about the horses.", 101, "lord_a", partial, uncertain, unknown);
+            Check("relative_clause_rescuer", "I killed the man who rescued my son.", 101, "lord_a", "insufficient_evidence", uncertain, unknown);
+            Check("other_battle", "I led the battle at Different Field.", 101, "lord_a", partial, uncertain, unknown);
+            Check("unbound_specific_battle", "I won the battle at Test Field.", 101, "lord_a", partial, uncertain, unknown);
+            Check("roster_only_fighter", "I fought at the battle at Test Field.", 101, "lord_a", partial, uncertain, unknown);
+
+            Dictionary<string, object> Battle(int day, string claimantRole, params string[] prisoners)
+            {
+                var entities = new List<Dictionary<string, object>> {
+                    TestDict("entityType", "hero", "entityId", "main_hero", "role", claimantRole),
+                    TestDict("entityType", "hero", "entityId", "lord_a", "role", "participant")
+                };
+                entities.AddRange(prisoners.Select(id => TestDict("entityType", "hero", "entityId", id, "role", "rescued_prisoner beneficiary")));
+                return TestDict("eventId", "rescue_scope_" + day, "sequence", day, "worldDay", day, "eventType", "battle_completed",
+                    "phase", "completed", "source", "bannerlord_native", "isComplete", true, "entities", entities);
+            }
+            WorldSimulationService.WorldHistoryIngestBatchApi(TestDict("campaignId", campaignId, "timelineId", timelineId, "events", new[] {
+                Battle(102, "assisting_rescuer rescuing_side_participant", "other_a", "other_b"),
+                Battle(103, "direct_rescuer", "lord_3", "lord_4", "lord_5"),
+                Battle(104, "direct_rescuer", "lord_6"),
+                Battle(105, "direct_rescuer", "lord_1", "lord_2", "lord_3", "lord_4", "lord_5"),
+                TestDict("eventId", "release_choice", "sequence", 106, "worldDay", 106, "eventType", "hero_prisoner_released", "phase", "completed",
+                    "source", "bannerlord_native", "payload", TestDict("endCaptivityDetail", "ReleasedByChoice"), "entities", new[] {
+                        TestDict("entityType", "hero", "entityId", "main_hero", "role", "releaser former_captor"),
+                        TestDict("entityType", "hero", "entityId", "lord_a", "role", "released_prisoner beneficiary")
+                    }),
+                TestDict("eventId", "marriage_scope", "sequence", 107, "worldDay", 107, "eventType", "heroes_married", "phase", "completed",
+                    "source", "bannerlord_native", "entities", new[] {
+                        TestDict("entityType", "hero", "entityId", "main_hero", "role", "spouse participant"),
+                        TestDict("entityType", "hero", "entityId", "lord_a", "role", "spouse participant")
+                    })
+            }));
+            const string minimumFive = "I rescued at least five prisoners in my career.";
+            const string exactFive = "I rescued exactly five prisoners in my entire career.";
+            Check("assistance_excluded", minimumFive, 102, "lord_a", partial, uncertain, unknown);
+            Check("distinct_career_minimum", minimumFive, 103, "lord_a", "verified", "truthful", "verified");
+            Check("career_minimum_partial_observer", minimumFive, 103, "lord_1", "verified", uncertain, unknown);
+            Check("career_minimum_unknown_observer", minimumFive, 103, "stranger", "verified", uncertain, unknown);
+            Check("single_battle_no_pool", "I rescued at least five prisoners in one battle.", 103, "lord_a", partial, uncertain, unknown);
+            Check("career_exact_five_observed", exactFive, 103, "lord_a", partial, uncertain, unknown);
+            Check("career_exact_six_observed", exactFive, 104, "lord_a", "contradicted", "detected_firsthand", "contradicted");
+            Check("career_plain_five_six_observed", "I rescued five prisoners in my career.", 104, "lord_a", partial, uncertain, unknown);
+            Check("career_plain_numeral_six_observed", "I have rescued 5 prisoners in my career.", 104, "lord_a", partial, uncertain, unknown);
+            Check("career_claim_partial_witness", exactFive, 104, "lord_1", "contradicted", uncertain, unknown);
+            Check("career_verified_mixed_witness", minimumFive, 104, "lord_4", "verified", "truthful", "verified", "kingdom_a", "secondhand");
+            Check("career_contradicted_mixed_witness", "I rescued exactly three prisoners in my career.", 104, "lord_6",
+                "contradicted", "insufficient_skill_data", unknown, "kingdom_a", "secondhand");
+            Check("unbound_exact_six_observed", "I rescued exactly five prisoners in one battle.", 104, "lord_a", partial, uncertain, unknown);
+            Check("single_battle_five_observed", "I rescued at least five prisoners in one battle.", 105, "lord_a", "verified", "truthful", "verified");
+            Check("single_battle_six_unproved", "I rescued at least six prisoners in one battle.", 105, "lord_a", partial, uncertain, unknown);
+            Check("release_facilitator_unknown", "I released a prisoner.", 106, "lord_a", partial, uncertain, unknown);
+            Check("spouse_role_does_not_identify_partner", "I married Rhagaea last winter.", 107, "lord_a", partial, uncertain, unknown);
+            add("past_location_unproved", !ContradictsNativeCurrentSettlement("I never entered Danustica before yesterday.", "Danustica")
+                && !ContradictsNativeCurrentSettlement("I was not in Danustica last winter.", "Danustica")
+                && !ContradictsNativeCurrentSettlement("I am in Danustica, not injured.", "Danustica")
+                && !ContradictsNativeCurrentSettlement("She said, 'Ask around. I am not in Danustica.'", "Danustica"),
+                "Present co-location establishes only a present contradiction.");
         }
     }
 }

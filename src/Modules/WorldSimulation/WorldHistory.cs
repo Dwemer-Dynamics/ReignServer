@@ -645,7 +645,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> timeline = WorldSimulationStore.SelectWorldHistoryTimelines(connection, new Dictionary<string, object> { ["id"] = timelineId }).FirstOrDefault()
                     ?? new Dictionary<string, object>();
                 long head = ReadLong(timeline, "head_sequence", 0);
-                string cacheKey = "source_claim_v3|" + campaignId + "|" + ActionPipelineService.NormalizeLookup(claim) + "|" + claimantId + "|" + speakerId + "|" + speakerKingdomId + "|" + timelineId + "|" + head
+                string cacheKey = "source_claim_v4|" + campaignId + "|" + DialogueService.PromptHash(claim) + "|" + claimantId + "|" + speakerId + "|" + speakerKingdomId + "|" + timelineId + "|" + head
                     + "|" + worldDay.ToString("R", CultureInfo.InvariantCulture) + "|lookup=" + lookupOnly
                     + "|" + ReadDouble(payload, "fromDay", -1d).ToString("R", CultureInfo.InvariantCulture)
                     + "|" + ReadDouble(payload, "toDay", worldDay > 0 ? worldDay : double.MaxValue).ToString("R", CultureInfo.InvariantCulture)
@@ -718,7 +718,11 @@ namespace ReignBetaServer
                 }
                 else
                 {
-                    verdict = AdjudicateWorldHistoryClaim(claim, family, claimantId, candidates, completeFrom, fromDay, toDay);
+                    // FTS and correlation expansion can return rows outside the original constraints.
+                    double lastDay = toDay <= 0 ? double.MaxValue : toDay;
+                    candidates = candidates.Where(row => (locationId.Length == 0 || ReadString(row, "location_id", "") == locationId)
+                        && (fromDay < 0 || ReadDouble(row, "world_day", -1) >= fromDay) && ReadDouble(row, "world_day", -1) <= lastDay).ToList();
+                    verdict = AdjudicateWorldHistoryClaim(claim, family, claimantId, candidates, completeFrom, fromDay);
                 }
                 bool requestedPeriodWasCompacted =
                     WorldHistoryPeriodWasCompacted(connection, timelineId, fromDay, toDay);
@@ -730,16 +734,28 @@ namespace ReignBetaServer
                     verdict["evidenceEventIds"] = new List<string>();
                     verdict["matchedComponents"] = new List<string>();
                     verdict["mismatchedComponents"] = new List<string>();
+                    verdict["unverifiedComponents"] = new List<string>();
+                    verdict.Remove("prisonerCountEvidence");
                 }
                 List<string> evidenceIds = ReadStringList(verdict, "evidenceEventIds");
-                List<string> speakerIds = evidenceIds.Where(id => WorldHistoryEventVisibleToSpeaker(connection, id, speakerId, speakerKingdomId, worldDay)).ToList();
+                var knowledge = DialogueService.BuildWorldHistoryKnowledgeSummary(connection, string.IsNullOrWhiteSpace(speakerId) ? new List<string>() : evidenceIds,
+                    speakerId, speakerKingdomId, worldDay);
+                List<string> speakerIds = ReadStringList(knowledge, "eventIds");
                 foreach (string visibleEventId in speakerIds)
                 {
                     DialogueService.UpsertKnowledgeReceipt(connection, visibleEventId, speakerId, "world_history_rule", 1d, 1d, worldDay, "world_history_verification", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
                 }
-                List<string> reconciledBeliefIds = DialogueService.ReconcileWorldHistoryClaimBeliefs(connection, speakerId, speakerIds, worldDay);
+                List<string> reconciledBeliefIds = DialogueService.ReconcileWorldHistoryClaimBeliefs(connection, speakerId,
+                    candidates.Where(row => speakerIds.Contains(ReadString(row, "event_id", ""), StringComparer.OrdinalIgnoreCase)).ToList(), worldDay);
                 string objectiveVerdict = ReadString(verdict, "verdict", "insufficient_evidence");
-                string speakerVerdict = string.IsNullOrWhiteSpace(speakerId) ? "unknown" : speakerIds.Count == 0 ? "unknown" : objectiveVerdict;
+                Dictionary<string, object> AssessKnown(List<string> ids) => AdjudicateWorldHistoryClaim(claim, family, claimantId,
+                    candidates.Where(row => ids.Contains(ReadString(row, "event_id", ""), StringComparer.OrdinalIgnoreCase)).ToList(), completeFrom, fromDay);
+                var speakerFinding = speakerIds.Count == evidenceIds.Count || lookupOnly ? verdict : AssessKnown(speakerIds);
+                string speakerVerdict = string.IsNullOrWhiteSpace(speakerId) || speakerIds.Count == 0 ? "unknown" : ReadString(speakerFinding, "verdict", "");
+                if (!lookupOnly && (speakerVerdict is "verified" or "contradicted") && ReadStringList(knowledge, "secondhandEventIds").Count > 0
+                    && ReadString(knowledge, "basis", "") == "firsthand"
+                    && ReadString(AssessKnown(ReadStringList(knowledge, "firsthandEventIds")), "verdict", "") != speakerVerdict)
+                    knowledge["basis"] = "secondhand";
                 string checkId = "whc_" + Guid.NewGuid().ToString("N");
                 timer.Stop();
                 Dictionary<string, object> result = new Dictionary<string, object>
@@ -751,7 +767,12 @@ namespace ReignBetaServer
                     ["explanation"] = ReadString(verdict, "explanation", ""), ["evidenceEventIds"] = evidenceIds,
                     ["speakerEvidenceEventIds"] = speakerIds, ["matchedComponents"] = ReadStringList(verdict, "matchedComponents"),
                     ["mismatchedComponents"] = ReadStringList(verdict, "mismatchedComponents"),
-                    ["speakerKnowledge"] = DialogueService.BuildWorldHistoryKnowledgeSummary(connection, speakerIds, speakerId, speakerKingdomId, worldDay),
+                    ["unverifiedComponents"] = ReadStringList(verdict, "unverifiedComponents"),
+                    ["speakerMatchedComponents"] = ReadStringList(speakerFinding, "matchedComponents"),
+                    ["speakerUnverifiedComponents"] = ReadStringList(speakerFinding, "unverifiedComponents"),
+                    ["speakerExplanation"] = ReadString(speakerFinding, "explanation", ""),
+                    ["speakerMismatchedComponents"] = ReadStringList(speakerFinding, "mismatchedComponents"),
+                    ["speakerKnowledge"] = knowledge,
                     ["reconciledBeliefIds"] = reconciledBeliefIds,
                     ["coverage"] = new Dictionary<string, object> { ["historyCompleteFromWorldDay"] = completeFrom, ["requestedFromDay"] = fromDay, ["complete"] = fromDay < 0 || completeFrom <= 0 || fromDay >= completeFrom },
                     ["minime"] = new Dictionary<string, object> { ["route"] = minimeRoute, ["rerank"] = minimeRerank },
@@ -764,6 +785,8 @@ namespace ReignBetaServer
                     ["candidateCount"] = candidates.Count, ["candidateEventIds"] = candidates.Select(x => ReadString(x, "event_id", "")).ToList(),
                     ["durationMs"] = timer.ElapsedMilliseconds, ["cached"] = false
                 };
+                if (verdict.TryGetValue("prisonerCountEvidence", out object countEvidence)) result["prisonerCountEvidence"] = countEvidence;
+                if (speakerIds.Count > 0 && speakerFinding.TryGetValue("prisonerCountEvidence", out object speakerCount)) result["speakerPrisonerCountEvidence"] = speakerCount;
                 WorldSimulationStore.InsertWorldHistoryClaimChecks(connection, new Dictionary<string, object>
                     {
                         ["id"] = checkId, ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = worldDay,
@@ -819,67 +842,48 @@ namespace ReignBetaServer
             return rows.OrderByDescending(x => ReadDouble(x, "deterministicScore", 0d)).Take(limit).ToList();
         }
 
-        private static Dictionary<string, object> AdjudicateWorldHistoryClaim(string claim, string family, string claimantId,
-            List<Dictionary<string, object>> candidates, double completeFrom, double fromDay, double toDay)
+        internal static Dictionary<string, object> AdjudicateWorldHistoryClaim(string claim, string family, string claimantId,
+            List<Dictionary<string, object>> candidates, double completeFrom, double fromDay)
         {
-            List<string> matched = new List<string>();
-            List<string> mismatched = new List<string>();
-            double bestDeterministic = candidates.Count == 0 ? 0d : candidates.Max(x => ReadDouble(x, "deterministicScore", 0d));
-            List<Dictionary<string, object>> familyMatches = candidates.Where(x => HistoryClaimMatchesNamedLocation(claim, x)
-                && EventMatchesFamily(ReadString(x, "event_type", ""), ReadDictionaryList(x, "entities"), family)
-                && ReadDouble(x, "deterministicScore", 0d) >= Math.Max(1d, bestDeterministic - 4d)).ToList();
-            List<Dictionary<string, object>> claimantMatches = familyMatches.Where(x => ReadDictionaryList(x, "entities").Any(e => string.Equals(ReadString(e, "entity_id", ""), claimantId, StringComparison.OrdinalIgnoreCase))).ToList();
-            string verdict;
-            string explanation;
-            bool incomplete = fromDay >= 0 && completeFrom > 0 && fromDay < completeFrom;
-            if (familyMatches.Count == 0)
+            var native = candidates.Where(row => ReadString(row, "source", "") == "bannerlord_native" && ReadString(row, "phase", "") == "completed").ToList();
+            string verb = ClaimantDeed.Match(claim).Groups["verb"].Value.ToLowerInvariant();
+            if (verb is "rescued" or "freed") return AssessPrisonerClaim(claim, true, claimantId, native);
+            if (verb == "released" || verb.StartsWith("set ", StringComparison.Ordinal)) return AssessPrisonerClaim(claim, false, claimantId, native);
+            if (family is "rescue" or "release") return HistoryFinding("insufficient_evidence", "The claimant did not assert this rescue or release.", Array.Empty<Dictionary<string, object>>());
+
+            var related = native.Where(row => EventMatchesFamily(ReadString(row, "event_type", ""), ReadDictionaryList(row, "entities"), family)
+                && ReadDictionaryList(row, "entities").Any(e => IsHero(e) && string.Equals(ReadString(e, "entity_id", ""), claimantId, StringComparison.OrdinalIgnoreCase))).ToList();
+            if (related.Count == 0)
+                return HistoryFinding(fromDay >= 0 && completeFrom > fromDay ? "history_incomplete" : "insufficient_evidence",
+                    "No matching native record establishes this claimant's deed.", related);
+
+            // A retrieved battle can witness an existential claim. Its rank/location cannot bind "the battle".
+            Match battle = BattleClaim.Match(claim);
+            if (battle.Success)
             {
-                verdict = incomplete ? "history_incomplete" : "not_found";
-                explanation = incomplete ? "The requested period begins before reliable world-history capture." : "No canonical event matched the claim within the complete requested period.";
+                string action = battle.Groups["action"].Value.ToLowerInvariant();
+                string[] roles = action switch
+                {
+                    "led" or "commanded" => new[] { "side_leader", "army_leader" },
+                    "won" => new[] { "winner" },
+                    "lost" => new[] { "loser" },
+                    _ => new[] { "participant" }
+                };
+                var witnesses = related.Where(row => ReadString(row, "event_type", "") == "battle_completed" && MatchesClaimScope(battle, row)
+                    && HasClaimantRole(row, claimantId, roles)).ToList();
+                if (witnesses.Count > 0)
+                    return HistoryFinding("verified", "A completed battle records the claimant in the stated role and scope.", witnesses, action + " in recorded battle");
             }
-            else if (string.IsNullOrWhiteSpace(claimantId))
+            if (verb is "married" or "killed")
             {
-                verdict = "ambiguous_identity";
-                explanation = "The claimant could not be resolved to a canonical character id.";
+                var (type, role) = verb == "married" ? ("heroes_married", "spouse") : ("hero_killed", "killer");
+                var witnesses = related.Where(row => ReadString(row, "event_type", "") == type && HasClaimantRole(row, claimantId, role)).ToList();
+                if (witnesses.Count > 0)
+                    return HistoryFinding("partially_verified", "The native record identifies the claimant's role. The stated counterpart or other qualifiers remain unverified.",
+                        witnesses, role, "counterpart or qualifiers");
             }
-            else if (family == "presence")
-            {
-                bool present = claimantMatches.Any(x => HasHistoryRole(x, claimantId, "participant", "leader", "commander", "attacker", "defender", "winner", "loser"));
-                verdict = present ? "verified" : familyMatches.All(HistoryEventRosterComplete) ? "contradicted" : "insufficient_evidence";
-                explanation = present ? "The claimant appears in the complete participant roster." : verdict == "contradicted" ? "Complete matching event rosters do not include the claimant." : "Matching events exist, but their participant evidence is incomplete.";
-                (present ? matched : mismatched).Add("battle presence");
-            }
-            else if (family == "leadership")
-            {
-                bool led = claimantMatches.Any(x => HasHistoryRole(x, claimantId, "leader", "commander", "army_leader", "side_leader"));
-                bool participated = claimantMatches.Any();
-                verdict = led ? "verified" : !familyMatches.All(HistoryEventRosterComplete) ? "insufficient_evidence"
-                    : participated ? "partially_verified" : "contradicted";
-                explanation = led ? "The claimant is recorded as the relevant leader or commander." : participated ? "The claimant participated but is not recorded as the leader." : "No complete matching record assigns the claimant a command role.";
-                if (participated) matched.Add("participation");
-                if (!led && verdict != "insufficient_evidence") mismatched.Add("leadership");
-            }
-            else if (family == "rescue" || family == "release")
-            {
-                bool direct = claimantMatches.Any(x => HasHistoryRole(x, claimantId, "direct_rescuer", "rescuer", "releaser"));
-                bool assisted = claimantMatches.Any(x => HasHistoryRole(x, claimantId, "assisting_rescuer", "rescuing_side_participant", "participant"));
-                int beneficiaries = claimantMatches.SelectMany(x => ReadDictionaryList(x, "entities")).Where(x => RoleContains(ReadString(x, "role", ""), "beneficiary", "rescued_prisoner", "released_prisoner")).Select(x => ReadString(x, "entity_id", "")).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Count();
-                bool severalClaim = DialogueService.ContainsAny(ActionPipelineService.NormalizeLookup(claim), "several", "many", "multiple", "three", "four", "five");
-                verdict = direct && (!severalClaim || beneficiaries >= 3) ? "verified" : direct || assisted ? "partially_verified" : familyMatches.All(HistoryEventRosterComplete) ? "contradicted" : "insufficient_evidence";
-                explanation = direct ? "The claimant is connected to a direct release; beneficiary quantity was checked." : assisted ? "The claimant assisted the rescuing side but is not the direct recorded rescuer." : "No complete matching event credits the claimant with the rescue.";
-                if (direct || assisted) matched.Add("rescue participation");
-                if (severalClaim && beneficiaries < 3) mismatched.Add("several beneficiaries");
-                if (!direct && assisted) mismatched.Add("direct rescue credit");
-            }
-            else
-            {
-                bool involved = claimantMatches.Any(x => HasFamilyRole(x, claimantId, family));
-                verdict = involved ? "verified" : claimantMatches.Any() ? "partially_verified" : familyMatches.All(HistoryEventRosterComplete) ? "contradicted" : "insufficient_evidence";
-                explanation = involved ? "Canonical event roles support the material claim." : claimantMatches.Any() ? "The claimant is connected to the event, but the claimed role is not fully supported." : "No complete matching event assigns the claimed role to the claimant.";
-                (involved ? matched : mismatched).Add(family);
-            }
-            List<string> evidence = (claimantMatches.Count > 0 ? claimantMatches : familyMatches).Select(x => ReadString(x, "event_id", "")).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Take(20).ToList();
-            return new Dictionary<string, object> { ["verdict"] = verdict, ["explanation"] = explanation, ["evidenceEventIds"] = evidence, ["matchedComponents"] = matched, ["mismatchedComponents"] = mismatched };
+            return HistoryFinding("partially_verified", "The claimant appears in a related event. Its roles do not establish the full assertion.",
+                related, "recorded event involvement", "claimed role or qualifiers");
         }
 
         internal static Dictionary<string, object> ClassifyWorldHistoryClaim(string claim)
@@ -1007,13 +1011,6 @@ namespace ReignBetaServer
             }
         }
 
-        private static bool WorldHistoryEventVisibleToSpeaker(ReignDbConnection connection, string eventId, string speakerId, string speakerKingdomId, double worldDay)
-        {
-            if (string.IsNullOrWhiteSpace(speakerId)) return false;
-            Dictionary<string, object> knowledge = DialogueService.DetermineWorldHistoryKnowledge(connection, new List<string> { eventId }, speakerId, speakerKingdomId, worldDay);
-            return !string.Equals(ReadString(knowledge, "basis", "none"), "none", StringComparison.OrdinalIgnoreCase);
-        }
-
         private static void ExpandHistoryCorrelations(ReignDbConnection connection, string timelineId, List<Dictionary<string, object>> candidates)
         {
             HashSet<string> present = new HashSet<string>(candidates.Select(x => ReadString(x, "event_id", "")), StringComparer.OrdinalIgnoreCase);
@@ -1085,25 +1082,6 @@ namespace ReignBetaServer
             }
         }
 
-        private static bool HasHistoryRole(Dictionary<string, object> evt, string entityId, params string[] roles)
-        {
-            return ReadDictionaryList(evt, "entities").Any(x => string.Equals(ReadString(x, "entity_id", ""), entityId, StringComparison.OrdinalIgnoreCase) && RoleContains(ReadString(x, "role", ""), roles));
-        }
-
-        private static bool HasFamilyRole(Dictionary<string, object> evt, string entityId, string family)
-        {
-            string[] roles = family == "victory" ? new[] { "winner", "winning_side_participant", "leader", "participant" }
-                : family == "defeat" ? new[] { "loser", "defeated", "losing_side_participant" }
-                : family == "capture" ? new[] { "captor" }
-                : family == "killing" ? new[] { "killer", "executor" }
-                : family == "wounding" ? new[] { "attacker", "wounder" }
-                : family == "raid" ? new[] { "raider", "attacker" }
-                : family == "siege" || family == "conquest" ? new[] { "besieger", "attacker", "conqueror", "winner" }
-                : family == "defense" ? new[] { "defender", "defending_leader", "winner" }
-                : new[] { "actor", "participant", family };
-            return HasHistoryRole(evt, entityId, roles);
-        }
-
         internal static bool RoleContains(string role, params string[] values)
         {
             string q = ActionPipelineService.NormalizeLookup(role);
@@ -1143,7 +1121,7 @@ namespace ReignBetaServer
             {
                 new Dictionary<string, object>
                 {
-                    ["eventId"]="battle_test",["sequence"]=1,["worldDay"]=100d,["eventType"]="battle_completed",["phase"]="completed",["isComplete"]=true,
+                    ["eventId"]="battle_test",["sequence"]=1,["worldDay"]=100d,["eventType"]="battle_completed",["phase"]="completed",["isComplete"]=true,["source"]="bannerlord_native",
                     ["locationId"]="settlement_test",["locationName"]="Test Field",["summary"]="The player fought and won a battle.",
                     ["entities"]=new List<Dictionary<string, object>>
                     {
@@ -1154,11 +1132,13 @@ namespace ReignBetaServer
                 },
                 new Dictionary<string, object>
                 {
-                    ["eventId"]="rescue_test",["sequence"]=2,["worldDay"]=101d,["eventType"]="hero_prisoner_released rescue",["phase"]="completed",["isComplete"]=true,
+                    ["eventId"]="rescue_test",["sequence"]=2,["worldDay"]=101d,["eventType"]="battle_completed",["phase"]="completed",["isComplete"]=true,["source"]="bannerlord_native",
+                    ["locationId"]="town_a",["locationName"]="Sargot",
                     ["summary"]="The player directly rescued three captured lords.",
                     ["entities"]=new List<Dictionary<string, object>>
                     {
                         new Dictionary<string, object>{{"entityId","main_hero"},{"entityType","hero"},{"name","Player"},{"role","direct_rescuer"},{"kingdomId","kingdom_a"}},
+                        new Dictionary<string, object>{{"entityId","lord_a"},{"entityType","hero"},{"name","Witness"},{"role","participant"},{"kingdomId","kingdom_a"}},
                         new Dictionary<string, object>{{"entityId","lord_1"},{"entityType","hero"},{"name","Lord One"},{"role","rescued_prisoner beneficiary"}},
                         new Dictionary<string, object>{{"entityId","lord_2"},{"entityType","hero"},{"name","Lord Two"},{"role","rescued_prisoner beneficiary"}},
                         new Dictionary<string, object>{{"entityId","lord_3"},{"entityType","hero"},{"name","Lord Three"},{"role","rescued_prisoner beneficiary"}}
@@ -1167,9 +1147,9 @@ namespace ReignBetaServer
             };
             Dictionary<string, object> ingest = WorldHistoryIngestBatchApi(new Dictionary<string, object>{{"campaignId",campaignId},{"timelineId",timelineId},{"historyCompleteFromWorldDay",90d},{"events",events}});
             Dictionary<string, object> duplicateIngest = WorldHistoryIngestBatchApi(new Dictionary<string, object>{{"campaignId",campaignId},{"timelineId",timelineId},{"historyCompleteFromWorldDay",90d},{"events",events}});
-            Dictionary<string, object> presence = WorldHistoryVerifyApi(new Dictionary<string, object>{{"campaignId",campaignId},{"timelineId",timelineId},{"claim","I was at the battle at Test Field."},{"claimantId","main_hero"},{"speakerId","main_hero"},{"worldDay",101d}});
+            Dictionary<string, object> presence = WorldHistoryVerifyApi(new Dictionary<string, object>{{"campaignId",campaignId},{"timelineId",timelineId},{"claim","I was at a battle at Test Field."},{"claimantId","main_hero"},{"speakerId","main_hero"},{"worldDay",101d}});
             Dictionary<string, object> leadership = WorldHistoryVerifyApi(new Dictionary<string, object>{{"campaignId",campaignId},{"timelineId",timelineId},{"claim","I led the battle at Test Field."},{"claimantId","main_hero"},{"speakerId","main_hero"},{"worldDay",101d}});
-            Dictionary<string, object> rescue = WorldHistoryVerifyApi(new Dictionary<string, object>{{"campaignId",campaignId},{"timelineId",timelineId},{"claim","I rescued several captured lords."},{"claimantId","main_hero"},{"speakerId","main_hero"},{"worldDay",101d}});
+            Dictionary<string, object> rescue = WorldHistoryVerifyApi(new Dictionary<string, object>{{"campaignId",campaignId},{"timelineId",timelineId},{"claim","I rescued several prisoners."},{"claimantId","main_hero"},{"speakerId","main_hero"},{"worldDay",101d}});
             Dictionary<string, object> lookup = WorldHistoryVerifyApi(new Dictionary<string, object>{{"campaignId",campaignId},{"timelineId",timelineId},{"claim","What happened in the battle at Test Field according to canonical campaign history?"},{"claimantId",""},{"speakerId","main_hero"},{"worldDay",101d},{"lookupOnly",true}});
             List<Dictionary<string, object>> assertions = new List<Dictionary<string, object>>
             {
@@ -1178,7 +1158,7 @@ namespace ReignBetaServer
                     && ReadInt(duplicateIngest,"duplicates",0)==2}},
                 new Dictionary<string, object>{{"name","presence"},{"passed",ReadString(presence,"objectiveVerdict","")=="verified"}},
                 new Dictionary<string, object>{{"name","leadership_not_granted"},{"passed",ReadString(leadership,"objectiveVerdict","")=="partially_verified"}},
-                new Dictionary<string, object>{{"name","multi_lord_rescue"},{"passed",ReadString(rescue,"objectiveVerdict","")=="verified"}},
+                new Dictionary<string, object>{{"name","multi_prisoner_rescue"},{"passed",ReadString(rescue,"objectiveVerdict","")=="verified"}},
                 new Dictionary<string, object>{{"name","generic_lookup"},{"passed",ReadString(lookup,"objectiveVerdict","")=="found"
                     && ReadStringList(lookup,"evidenceEventIds").Contains("battle_test",StringComparer.OrdinalIgnoreCase)
                     && ReadDictionaryList(ReadDictionary(lookup,"speakerKnowledge"),"events").Any(x=>ReadString(x,"event_id","")=="battle_test")}}
