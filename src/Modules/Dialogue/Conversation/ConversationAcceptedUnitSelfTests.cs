@@ -582,16 +582,17 @@ namespace ReignBetaServer
                     bool preparedDrink = ReadString(ReadDictionary(fallback.Payload, "intoxicationReceipt"), "commitState", "") == "prepared";
                     int drinks = Count("conversation_drinking_turns"), negotiations = Count("conversation_negotiation_turns");
                     int storedMemories = Count("memories");
+                    const string words = "I am Mira. *She takes a sip.* I agree to those terms.";
                     var delivered = GenerateSinglePassConversation(TestDict("requestType", channel), fallback.Payload, channel,
                         out fallback.DelimitedSpeechOnly, responder: request => LlmProviderService.OllamaConversationFixtureResult(request,
-                            "<<<REIGN_SPEECH>>>*She takes a sip.* I agree to those terms.<<<END_REIGN_SPEECH>>>"));
+                            "<<<REIGN_SPEECH>>>" + words + "<<<END_REIGN_SPEECH>>>"));
                     fallback.Parsed = TryParseJsonObject(ReadString(delivered, "content", ""));
                     fallback.Reply = ReadString(fallback.Parsed, "reply", "");
                     fallback.PublishScene = fallback.PublishSocial = fallback.PublishIntroductions = true;
                     fallback.ViewInsertionRequested = true;
                     var receipt = ReadDictionary(Publish(fallback), "acceptedUnit");
                     Check("ollama_speech_keeps_sources_and_discards_prepared_effects_" + channel,
-                        preparedDrink && fallback.DelimitedSpeechOnly && fallback.Reply == "*She takes a sip.* I agree to those terms."
+                        preparedDrink && fallback.DelimitedSpeechOnly && fallback.Reply == words
                         && ReadBool(receipt, "ok", false) && Count("conversation_turns", "event_id", fallback.EventId) >= 2
                         && ReadString(ReadDictionary(receipt, "effects"), "status", "") == "suppressed_by_route"
                         && new[] { "memory", "playerAttention", "npcLives", "communications" }.All(key =>
@@ -600,6 +601,22 @@ namespace ReignBetaServer
                         && ReadDictionary(ReadDictionary(receipt, "effectPayload"), "intoxicationReceipt") == null
                         && Count("conversation_drinking_turns") == drinks && Count("conversation_negotiation_turns") == negotiations
                         && Count("memories") == storedMemories && (group || ReadDictionary(receipt, "viewInsertion") != null));
+                    if (group)
+                    {
+                        var shared = CloneDictionary(fallback.Payload);
+                        shared["mode"] = "party_chat";
+                        shared["playerHeroStringId"] = "ollama_identity_listener";
+                        string session = "ollama_group_identity";
+                        int evidenceBefore = Count("identity_evidence");
+                        UpdateSharedGroupConversationState(campaign, shared, fallback.Hero, fallback.HeroName, fallback.Reply,
+                            session, fallback.Timestamp, fallback.EventId, allowSelfIntroduction: !fallback.DelimitedSpeechOnly);
+                        Check("ollama_group_transcript_without_identity_effect", Count("identity_evidence") == evidenceBefore
+                            && Count("group_conversation_contributions", "source_event_id", fallback.EventId) == 1);
+                        shared["sceneTurnId"] = "ordinary_group_introduction";
+                        UpdateSharedGroupConversationState(campaign, shared, fallback.Hero, fallback.HeroName, fallback.Reply,
+                            session, fallback.Timestamp + 1, "ordinary_group_introduction");
+                        Check("ordinary_group_introduction_still_witnessed", Count("identity_evidence") > evidenceBefore);
+                    }
                     Check("ollama_speech_idempotent_replay_" + channel, ReadBool(ReadDictionary(Publish(fallback), "acceptedUnit"), "idempotentReplay", false));
                     fallback.DelimitedSpeechOnly = false;
                     bool differentContractRefused = false;

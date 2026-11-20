@@ -714,7 +714,8 @@ namespace ReignBetaServer
             Dictionary<string, object> sharedConversationPayload = new Dictionary<string, object>(payload,
                 StringComparer.OrdinalIgnoreCase) { ["playerText"] = sharedPlayerText };
             DialogueService.UpdateSharedGroupConversationState(campaignId, sharedConversationPayload, heroId, heroName, sharedReply,
-                FirstNonEmpty(partySessionId, DialogueService.GroupConversationSessionId(payload), eventId), ts, decisionId);
+                FirstNonEmpty(partySessionId, DialogueService.GroupConversationSessionId(payload), eventId), ts, decisionId,
+                allowSelfIntroduction: !delimitedSpeechOnly);
             Dictionary<string, object> motiveOutcome = participation == "quiet" || delimitedSpeechOnly
                 ? TestDict("status", delimitedSpeechOnly ? "speech_only_excluded" : "intentional_silence_excluded")
                 : DialogueService.ApplyConversationMotiveOutcome(campaignId, motiveDecision, payload, reply, intent, decisionId, decisionBrief);

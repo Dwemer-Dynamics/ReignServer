@@ -799,7 +799,7 @@ namespace ReignBetaServer
             if (ActionPipelineService.ShouldPersistGovernmentCertificationConversationSideEffects(
                     governmentCertificationMemoryIsolation))
                 DialogueService.UpdateSharedGroupConversationState(campaignId, payload, heroId,
-                    heroName, reply, conversationSessionId, ts, decisionId);
+                    heroName, reply, conversationSessionId, ts, decisionId, allowSelfIntroduction: !delimitedSpeechOnly);
             Dictionary<string, object> motiveOutcome =
                 !delimitedSpeechOnly && ActionPipelineService.ShouldPersistGovernmentCertificationConversationSideEffects(
                     governmentCertificationMemoryIsolation)

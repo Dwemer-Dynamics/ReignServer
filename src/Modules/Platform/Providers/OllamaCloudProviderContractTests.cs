@@ -164,6 +164,7 @@ namespace ReignBetaServer
                 ("unfinished_json", "{\"reply\":\"unfinished"), ("duplicate_reply", "{\"reply\":\"one\",\"reply\":\"two\"}"),
                 ("multiple_json", "{\"reply\":\"one\"} {\"reply\":\"two\"}"), ("empty_speech", Wrap(" ")),
                 ("embedded_json", Wrap("{\"reply\":\"hidden\"}")), ("metadata", Wrap("memoryReferences: hidden")),
+                ("flat_relationship_metadata", Wrap("relationship_updates: hidden")), ("quoted_intent", Wrap("\"intent\": hidden")),
                 ("private_field_alias", Wrap("decision_brief: hidden")), ("reasoning_tag", Wrap("<think>hidden")),
                 ("meta_instruction", Wrap("The player wants me to respond.")), ("private_plan", Wrap("I should agree.")),
                 ("reserved_notice", Wrap(ConversationResponseService.DialogueActionQueuedNoticePrefix + " invalid]")),

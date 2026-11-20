@@ -15,7 +15,8 @@ namespace ReignBetaServer
         private static readonly Regex OllamaPrivateSpeech = new(
             @"memory[_ -]?references|private[_ -]?assessment|decision[_ -]?brief|internal[_ -]?thoughts|reasoning[_ -]?content|structured[_ -]?action|state[_ -]?updates|suggested[_ -]?actions|drink[_ -]?actions"
             + @"|(?:memory|belief|obligation|comprehension|continuity|dynamic[_ -]?characteristic)[_ -]?writes|\b(?:the player|the user|JSON|prompt|system message|I should|chain.of.thought)\b"
-            + @"|\b(?:reasoning|analysis|thoughts|reply|consent|action[_ -]?gate)\s*:",
+            + @"|\b(?:reasoning|analysis|thoughts|reply|emotion|intent|participation|consent|action[_ -]?gate"
+            + @"|relationship[_ -]?(?:assessments|updates|signal)|identity[_ -]?introduction[_ -]?writes)\b[""']?\s*[:=]",
             RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
         private static bool AppendOllamaConversationContract(Dictionary<string, object> request, List<Dictionary<string, object>> wireMessages)
