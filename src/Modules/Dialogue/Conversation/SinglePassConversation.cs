@@ -19,21 +19,38 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> GenerateSinglePassConversation(Dictionary<string, object> request,
             Dictionary<string, object> payload, string mode, bool allowQuiet = false,
             Func<Dictionary<string, object>, Dictionary<string, object>> responder = null)
+            => GenerateSinglePassConversation(request, payload, mode, out _, allowQuiet, responder);
+
+        internal static Dictionary<string, object> GenerateSinglePassConversation(Dictionary<string, object> request,
+            Dictionary<string, object> payload, string mode, out bool delimitedSpeechOnly, bool allowQuiet = false,
+            Func<Dictionary<string, object>, Dictionary<string, object>> responder = null)
         {
             BeginSinglePassConversation(payload);
-            return PrepareSinglePassConversationResponse((responder ?? LlmProviderService.ChatWithLlm)(request), mode, allowQuiet);
+            return PrepareSinglePassConversationResponse((responder ?? LlmProviderService.ChatWithLlm)(request), mode, out delimitedSpeechOnly, allowQuiet);
         }
 
         // Decode the one authored answer. No judge, rewrite, missing-metadata
         // model call or content-driven regeneration is dispatched here.
         private static Dictionary<string, object> PrepareSinglePassConversationResponse(Dictionary<string, object> result,
             string mode, bool allowQuiet = false)
+            => PrepareSinglePassConversationResponse(result, mode, out _, allowQuiet);
+
+        private static Dictionary<string, object> PrepareSinglePassConversationResponse(Dictionary<string, object> result,
+            string mode, out bool delimitedSpeechOnly, bool allowQuiet)
         {
+            delimitedSpeechOnly = false;
             if (!ReadBool(result, "ok", false)) return EnsureConversationDelivery(result, allowQuiet);
             var response = CloneDictionary(result);
             string content = ReadString(response, "content", "");
             var parsed = TryParseStrictJsonObject(content);
             bool speechOnly = false;
+            bool ollamaSpeech = false;
+            if (parsed == null)
+            {
+                parsed = LlmProviderService.ReadOllamaSpeechFallback(result, content);
+                ollamaSpeech = parsed != null;
+                speechOnly = ollamaSpeech;
+            }
             if (parsed == null)
             {
                 var envelope = ConversationResponseService.ReadConversationResponseEnvelope(content);
@@ -69,9 +86,13 @@ namespace ReignBetaServer
             // participants, proposal identity, terms, resources and replay receipts.
             response["content"] = Json.Serialize(parsed);
             response["conversationEffectsUnavailable"] = speechOnly;
-            response["conversationDelivery"] = TestDict("policy", "single_pass", "additionalProviderCalls", 0,
+            var delivery = TestDict("policy", "single_pass", "additionalProviderCalls", 0,
                 "metadataDefaults", fields, "speechOnlyRecovery", speechOnly);
-            return letter ? response : EnsureConversationDelivery(response, allowQuiet);
+            if (ollamaSpeech) delivery["outputContract"] = OllamaDelimitedSpeechContract;
+            response["conversationDelivery"] = delivery;
+            response = letter ? response : EnsureConversationDelivery(response, allowQuiet);
+            delimitedSpeechOnly = ollamaSpeech && ReadBool(response, "ok", false);
+            return response;
         }
     }
 }

@@ -598,6 +598,7 @@ namespace ReignBetaServer
         {
             Dictionary<string, object> session;
             List<Dictionary<string, object>> turns;
+            List<Dictionary<string, object>> effectTurns;
             string sceneJobId;
             lock (ConversationStartGate)
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
@@ -627,6 +628,7 @@ namespace ReignBetaServer
                         ["sceneSummaryId"] = ReadString(session, "scene_summary_id", "")
                     };
                 }
+                effectTurns = ConversationTurnsForMechanicalEffects(connection, sessionId, turns);
                 sceneJobId = EnqueueMemoryJob(connection, campaignId, "scene_summary", ReadString(session, "npc_id", ""), "scene:" + sessionId, sessionId);
                 ReleaseCommunicationSession(connection, session, reason, worldDay);
                 DialogueStore.UpdateConversationSessions5(connection, new Dictionary<string, object>
@@ -680,7 +682,7 @@ namespace ReignBetaServer
             try
             {
                 courtSocial = ReputationService.ProcessCompletedConversationCourtStanding(
-                    campaignId, session, turns, worldDay, interrupted);
+                    campaignId, session, effectTurns, worldDay, interrupted);
             }
             catch (Exception ex)
             {
@@ -699,7 +701,9 @@ namespace ReignBetaServer
             Dictionary<string, object> ambassadorReport;
             try
             {
-                ambassadorReport = CourtService.FinalizeOfficialAmbassadorScene(campaignId, session, turns, scene, worldDay, ts);
+                ambassadorReport = effectTurns.Count != turns.Count && !effectTurns.Any(turn => ReadString(turn, "role", "") == "npc")
+                    ? TestDict("processed", false, "reason", "speech_only")
+                    : CourtService.FinalizeOfficialAmbassadorScene(campaignId, session, effectTurns, scene, worldDay, ts);
             }
             catch (Exception ex)
             {
@@ -771,6 +775,15 @@ namespace ReignBetaServer
                 transaction.Commit();
                 return result;
             }
+        }
+
+        private static List<Dictionary<string, object>> ConversationTurnsForMechanicalEffects(ReignDbConnection connection,
+            string sessionId, List<Dictionary<string, object>> turns)
+        {
+            if (!WorldSimulationService.TableExists(connection, "conversation_accepted_units")) return turns;
+            var excluded = DialogueStore.SelectSpeechOnlyNpcTurns(connection, TestDict("id", sessionId, "contract", OllamaDelimitedSpeechContract))
+                .Select(row => ReadString(row, "turn_id", "")).ToHashSet(StringComparer.Ordinal);
+            return excluded.Count == 0 ? turns : turns.Where(turn => !excluded.Contains(ReadString(turn, "turn_id", ""))).ToList();
         }
 
         internal static Dictionary<string, object> StorePartyConversationExchange(

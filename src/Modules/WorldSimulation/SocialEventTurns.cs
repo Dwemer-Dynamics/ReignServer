@@ -404,7 +404,8 @@ namespace ReignBetaServer
         }
 
         internal static bool SocialConversationResultAllowsEffects(Dictionary<string, object> result) =>
-            !ReadBool(result, "conversationGroundingFailed", false)
+            !DialogueService.IsDelimitedSpeechOnlyResponse(result)
+            && !ReadBool(result, "conversationGroundingFailed", false)
             && ReadString(ReadDictionary(result, "conversationGrounding"), "status", "") != "unresolved"
             && ReadBool(ReadDictionary(result, "repairStatus"), "allChecksCleared", true);
 

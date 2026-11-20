@@ -189,16 +189,12 @@ namespace ReignBetaServer
         }
 
         internal static void UpdateSharedGroupConversationState(string campaignId, Dictionary<string, object> payload,
-            string npcId, string npcName, string reply, string sessionId, long ts, string acceptedEventId = "")
+            string npcId, string npcName, string reply, string sessionId, long ts, string acceptedEventId = "",
+            bool allowSelfIntroduction = true)
         {
             if (!IsSharedGroupConversation(payload) || string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(reply)) return;
-            CharactersService.RecordPresentNpcSelfIntroduction(
-                campaignId,
-                payload,
-                npcId,
-                npcName,
-                reply,
-                sessionId);
+            if (allowSelfIntroduction)
+                CharactersService.RecordPresentNpcSelfIntroduction(campaignId, payload, npcId, npcName, reply, sessionId);
             List<string> participants = GroupConversationParticipantIds(payload);
             List<string> addressed = participants.Where(id => !id.Equals(npcId, StringComparison.OrdinalIgnoreCase)
                 && (reply ?? "").IndexOf(id, StringComparison.OrdinalIgnoreCase) >= 0).ToList();

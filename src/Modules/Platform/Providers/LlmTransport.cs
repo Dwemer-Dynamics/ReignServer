@@ -102,7 +102,7 @@ namespace ReignBetaServer
                 }
             }
 
-            Dictionary<string, object> requestBody = BuildChatRequestBody(settings, payload, messages, model);
+            Dictionary<string, object> requestBody = BuildChatRequestBody(settings, payload, messages, model, out bool ollamaConversation);
             if (contentDelta != null && !codexSubscription) requestBody["stream"] = true;
             if (codexSubscription) DialogueService.EnrichCodexGenerationContext(settings, payload, requestType, model, codexContext, requestBody);
 
@@ -122,7 +122,8 @@ namespace ReignBetaServer
             if (codexContext != null && ReadBool(continuityPreflight, "capacityVerified", false))
                 codexContext["contextInputLimitTokens"] = ReadInt(continuityPreflight, "inputAllowance", 0);
             int totalRequestChars = outboundJson.Length;
-            int messageChars = messages.Sum(message => ReadString(message, "content", "").Length);
+            var countedMessages = ollamaConversation ? ReadDictionaryList(requestBody, "messages") : messages;
+            int messageChars = countedMessages.Sum(message => ReadString(message, "content", "").Length);
             int warningCharacterLimit = ReadInt(settings, "promptWarningCharacterLimit", 100000);
             int hardCharacterLimit = DialogueService.ConversationPromptHardCharacterLimit(settings, continuityPreflight);
             Dictionary<string, object> promptPreflight = new Dictionary<string, object>
@@ -278,8 +279,7 @@ namespace ReignBetaServer
                     ["reasoning"] = reasoningRouting,
                     ["raw"] = safeRaw
                 };
-                if (ConversationResponseService.IsConversationStructuredMode(requestType) || requestType.StartsWith("dialogue_", StringComparison.OrdinalIgnoreCase))
-                    result = ConversationResponseService.RejectProviderReservedSpeech(result, TryParseStrictJsonObject(content));
+                result = CheckConversationProviderResult(result, requestType, ollamaConversation);
                 providerTrace.Set("ok", true);
                 if (codexSubscription)
                 {

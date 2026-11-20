@@ -385,7 +385,7 @@ namespace ReignBetaServer
                 ReadFirstString(payload, "conversationSessionId", "sessionId", "conversationId"), identityView, profile, state, relationships, summary,
                 conversationSceneState, null, contextBundles, eventLines, promptTurnText);
             DialogueService.AttachStructuredActionResponseContract(eventLlmRequest, payload);
-            Dictionary<string, object> llm = DialogueService.GenerateSinglePassConversation(eventLlmRequest, payload, auditMode, allowQuiet: true);
+            Dictionary<string, object> llm = DialogueService.GenerateSinglePassConversation(eventLlmRequest, payload, auditMode, out bool delimitedSpeechOnly, allowQuiet: true);
             if (ReadBool(ReadDictionary(llm, "conversationAgency"), "replayed", false)) return DialogueService.ConversationAgencyReplayResponse(llm, heroId);
             DialogueService.PreserveConversationVerification(payload, llm);
             LlmProviderService.RecordCodexFinalRepairEvidence(llm);
@@ -514,7 +514,7 @@ namespace ReignBetaServer
             Dictionary<string, object> pendingAddressConvention =
                 ReadDictionary(politicalRiskPosture,
                     "pendingAddressConvention");
-            if (pendingAddressConvention != null
+            if (!delimitedSpeechOnly && pendingAddressConvention != null
                 && pendingAddressConvention.Count > 0)
                 stateUpdates["politicalAddressConvention"] =
                     CloneDictionary(pendingAddressConvention);
@@ -641,7 +641,7 @@ namespace ReignBetaServer
                 Beliefs = beliefWrites, Relationships = relationshipUpdates, Obligations = obligationWrites,
                 Comprehensions = comprehensionWrites, Continuity = ReadDictionaryList(parsed, "continuityWrites"),
                 Participants = privatePlayerInputForSpeaker ? new List<string> { heroId, socialPlayerId } : partyChatTurn ? sharedParticipants : null,
-                RetrievalEligible = !recallOnlyTurn, CommitEffects = !agencyVisibleFailure && participation != "quiet",
+                DelimitedSpeechOnly = delimitedSpeechOnly, RetrievalEligible = !recallOnlyTurn, CommitEffects = !agencyVisibleFailure && participation != "quiet",
                 PublishScene = !agencyVisibleFailure && participation != "quiet",
                 PublishIntroductions = !agencyVisibleFailure && participation != "quiet",
                 SceneMode = ReadString(payload, "mode", "social_event"),
@@ -659,7 +659,7 @@ namespace ReignBetaServer
             identityIntroductionResults = ReadDictionaryList(ReadDictionary(conversationExchange, "acceptedUnit"), "introductions");
             Dictionary<string, object> gossipExchange = privatePlayerInputForSpeaker
                 ? ReadDictionary(ReadDictionary(conversationExchange, "acceptedUnit"), "privateExchange") : conversationExchange;
-            if (!ReadBool(payload, "conversationGroundingFailed", false) && participation != "quiet" && !recallOnlyTurn)
+            if (!delimitedSpeechOnly && !ReadBool(payload, "conversationGroundingFailed", false) && participation != "quiet" && !recallOnlyTurn)
                 DialogueService.AcceptPersonalGossip(campaignId, payload, parsed, gossipExchange, heroId, socialPlayerId, playerText, reply, conversationExchange);
             if (partyChatTurn || !string.IsNullOrWhiteSpace(ReadString(conversationExchange, "sessionId", "")))
             {
@@ -714,9 +714,10 @@ namespace ReignBetaServer
             Dictionary<string, object> sharedConversationPayload = new Dictionary<string, object>(payload,
                 StringComparer.OrdinalIgnoreCase) { ["playerText"] = sharedPlayerText };
             DialogueService.UpdateSharedGroupConversationState(campaignId, sharedConversationPayload, heroId, heroName, sharedReply,
-                FirstNonEmpty(partySessionId, DialogueService.GroupConversationSessionId(payload), eventId), ts, decisionId);
-            Dictionary<string, object> motiveOutcome = participation == "quiet"
-                ? TestDict("status", "intentional_silence_excluded")
+                FirstNonEmpty(partySessionId, DialogueService.GroupConversationSessionId(payload), eventId), ts, decisionId,
+                allowSelfIntroduction: !delimitedSpeechOnly);
+            Dictionary<string, object> motiveOutcome = participation == "quiet" || delimitedSpeechOnly
+                ? TestDict("status", delimitedSpeechOnly ? "speech_only_excluded" : "intentional_silence_excluded")
                 : DialogueService.ApplyConversationMotiveOutcome(campaignId, motiveDecision, payload, reply, intent, decisionId, decisionBrief);
             if (stateUpdates.Count > 0)
             {

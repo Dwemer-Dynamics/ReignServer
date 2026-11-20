@@ -391,7 +391,7 @@ namespace ReignBetaServer
                 identityView, profile, state, relationships, summary, conversationSceneState, memories, contextBundles, priorLines, promptPlayerText);
             DialogueService.AttachStructuredActionResponseContract(dialogueLlmRequest, payload);
             CharactersService.ConfigureNpcApproachGeneration(dialogueLlmRequest, payload);
-            Dictionary<string, object> llm = DialogueService.GenerateSinglePassConversation(dialogueLlmRequest, payload, "dialogue");
+            Dictionary<string, object> llm = DialogueService.GenerateSinglePassConversation(dialogueLlmRequest, payload, "dialogue", out bool delimitedSpeechOnly);
             if (ReadBool(ReadDictionary(llm, "conversationAgency"), "replayed", false)) return DialogueService.ConversationAgencyReplayResponse(llm, heroId);
             DialogueService.PreserveConversationVerification(payload, llm);
             LlmProviderService.RecordCodexFinalRepairEvidence(llm);
@@ -492,15 +492,15 @@ namespace ReignBetaServer
                 ? new Dictionary<string, object> { ["allowed"] = false, ["reason"] = "npc_approach_opening" }
                 : ActionPipelineService.NormalizeActionGate(parsed == null ? null : ReadDictionary(parsed, "actionGate") ?? ReadDictionary(parsed, "action_gate"), playerText, reply);
             bool actionAcceptanceGateRepaired = ActionPipelineService.EnforceActionAcceptanceCooperationGate(
-                actionAcceptanceCooperation, actionGate, playerText, ref reply,
+                actionAcceptanceCooperation && !delimitedSpeechOnly, actionGate, playerText, ref reply,
                 DialogueService.UsesStructuredActions(payload));
             Dictionary<string, object> chancellorDecision = CourtService.NormalizeChancellorDecision(
-                parsed, payload, playerText, reply, correlationId);
+                parsed, delimitedSpeechOnly ? null : payload, playerText, reply, correlationId);
             Dictionary<string, object> nobleDocketTurn = CourtService.NormalizeNobleDocketTurn(
                 parsed, payload, reply);
             Dictionary<string, object> conceptionGate = ActionPipelineService.NormalizeConceptionGate(
                 parsed == null ? null : ReadDictionary(parsed, "conceptionGate") ?? ReadDictionary(parsed, "conception_gate"),
-                reply,
+                delimitedSpeechOnly ? "" : reply,
                 playerPromptLabel == "pull_out" || ReadBool(payload, "suppressConceptionGate", false));
             string socialPlayerId = FirstNonEmpty(ReadFirstString(payload, "playerHeroStringId", "playerId", "mainHeroStringId"),
                 ReadFirstString(profile, "mainHeroStringId", "playerHeroStringId"));
@@ -508,7 +508,7 @@ namespace ReignBetaServer
             Dictionary<string, object> socialSignalValidation =
                 ActionPipelineService.ShouldPersistGovernmentCertificationConversationSideEffects(
                     governmentCertificationMemoryIsolation)
-                    && !actionAcceptanceCooperation
+                    && !actionAcceptanceCooperation && !delimitedSpeechOnly
                     ? ReputationService.NormalizeAndPersistConversationSocialSignals(
                         campaignId, parsed, payload, heroId, socialPlayerId,
                         playerText, reply, conceptionGate, decisionId,
@@ -520,7 +520,7 @@ namespace ReignBetaServer
                         ["signals"] = new List<Dictionary<string, object>>(),
                         ["rejected"] = new List<Dictionary<string, object>>(),
                         ["suppressed"] = true,
-                        ["reason"] = actionAcceptanceCooperation
+                        ["reason"] = delimitedSpeechOnly ? "speech_only" : actionAcceptanceCooperation
                             ? "action_acceptance_cooperation"
                             : "government_certification_memory_isolation"
                     };
@@ -553,7 +553,7 @@ namespace ReignBetaServer
             Dictionary<string, object> pendingAddressConvention =
                 ReadDictionary(politicalRiskPosture,
                     "pendingAddressConvention");
-            if (pendingAddressConvention != null
+            if (!delimitedSpeechOnly && pendingAddressConvention != null
                 && pendingAddressConvention.Count > 0)
                 stateUpdates["politicalAddressConvention"] =
                     CloneDictionary(pendingAddressConvention);
@@ -636,8 +636,9 @@ namespace ReignBetaServer
             List<string> dialogueActionErrors = new List<string>();
             List<Dictionary<string, object>> queuedDialogueActions = new List<Dictionary<string, object>>();
             string actionShadowPreview = "";
-            DialogueService.ApplyAgencyRelationshipAssessment(relationshipAssessments, payload, heroId, socialPlayerId);
-            if (ActionPipelineService.ShouldRouteGuardedPromptOverrideActions(isTestDirective,
+            if (!delimitedSpeechOnly)
+                DialogueService.ApplyAgencyRelationshipAssessment(relationshipAssessments, payload, heroId, socialPlayerId);
+            if (!delimitedSpeechOnly && ActionPipelineService.ShouldRouteGuardedPromptOverrideActions(isTestDirective,
                     governmentCertificationMemoryIsolation,
                     actionAcceptanceCooperation))
             {
@@ -707,7 +708,7 @@ namespace ReignBetaServer
             // Only the final accepted prose can ground social evidence; previewing
             // a draft must never make an intimacy event durable.
             conceptionGate = ActionPipelineService.NormalizeConceptionGate(parsed == null ? null : ReadDictionary(parsed, "conceptionGate") ?? ReadDictionary(parsed, "conception_gate"),
-                reply, playerPromptLabel == "pull_out" || ReadBool(payload, "suppressConceptionGate", false));
+                delimitedSpeechOnly ? "" : reply, playerPromptLabel == "pull_out" || ReadBool(payload, "suppressConceptionGate", false));
             bool publishContextEffects = !agencyVisibleFailure && !governmentCertificationMemoryIsolation && !actionAcceptanceCooperation;
             if (publishContextEffects)
                 socialSignalValidation = ReputationService.NormalizeAndPersistConversationSocialSignals(campaignId, parsed, payload,
@@ -746,7 +747,7 @@ namespace ReignBetaServer
                 Relationships = relationshipUpdates, Obligations = obligationWrites, Comprehensions = comprehensionWrites,
                 Continuity = actionAcceptanceCooperation ? null : ReadDictionaryList(parsed, "continuityWrites"),
                 RetrievalEligible = !recallOnlyTurn && ActionPipelineService.ShouldPersistGovernmentCertificationConversationSideEffects(governmentCertificationMemoryIsolation),
-                CommitEffects = publishContextEffects, PublishScene = publishContextEffects,
+                DelimitedSpeechOnly = delimitedSpeechOnly, CommitEffects = publishContextEffects, PublishScene = publishContextEffects,
                 PublishSocial = publishContextEffects && !recallOnlyTurn, PublishIntroductions = publishContextEffects,
                 ViewInsertionRequested = !officialAmbassador && DialogueService.IndividualViewInsertionRequested(payload),
                 SceneMode = ReadString(payload, "mode", "dialogue"), ConceptionGate = conceptionGate };
@@ -759,7 +760,7 @@ namespace ReignBetaServer
             conversationSceneResolution = ReadDictionary(ReadDictionary(conversationExchange, "acceptedUnit"), "scene");
             socialSignalValidation = ReadDictionary(ReadDictionary(conversationExchange, "acceptedUnit"), "social");
             identityIntroductionResults = ReadDictionaryList(ReadDictionary(conversationExchange, "acceptedUnit"), "introductions");
-            if (!ReadBool(payload, "conversationGroundingFailed", false) && !recallOnlyTurn && ActionPipelineService.ShouldPersistGovernmentCertificationConversationSideEffects(governmentCertificationMemoryIsolation))
+            if (!delimitedSpeechOnly && !ReadBool(payload, "conversationGroundingFailed", false) && !recallOnlyTurn && ActionPipelineService.ShouldPersistGovernmentCertificationConversationSideEffects(governmentCertificationMemoryIsolation))
                 DialogueService.AcceptPersonalGossip(campaignId, payload, parsed, conversationExchange, heroId, dialoguePlayerId, playerText, reply);
             string conversationSessionId = ReadString(conversationExchange, "sessionId", "");
             double dialogueWorldDay = ReadDouble(payload, "worldDay", 0d);
@@ -778,7 +779,7 @@ namespace ReignBetaServer
             npcLine["exchangeId"] = decisionId;
             npcLine["worldDay"] = dialogueWorldDay;
             npcLine["locationId"] = dialogueLocationId;
-            Dictionary<string, object> ambassadorDecision = officialAmbassador
+            Dictionary<string, object> ambassadorDecision = officialAmbassador && !delimitedSpeechOnly
                 ? CourtService.PersistOfficialAmbassadorDecision(campaignId, payload, conversationExchange, ts)
                 : new Dictionary<string, object>();
             if (officialAmbassador)
@@ -798,16 +799,16 @@ namespace ReignBetaServer
             if (ActionPipelineService.ShouldPersistGovernmentCertificationConversationSideEffects(
                     governmentCertificationMemoryIsolation))
                 DialogueService.UpdateSharedGroupConversationState(campaignId, payload, heroId,
-                    heroName, reply, conversationSessionId, ts, decisionId);
+                    heroName, reply, conversationSessionId, ts, decisionId, allowSelfIntroduction: !delimitedSpeechOnly);
             Dictionary<string, object> motiveOutcome =
-                ActionPipelineService.ShouldPersistGovernmentCertificationConversationSideEffects(
+                !delimitedSpeechOnly && ActionPipelineService.ShouldPersistGovernmentCertificationConversationSideEffects(
                     governmentCertificationMemoryIsolation)
                     ? DialogueService.ApplyConversationMotiveOutcome(campaignId, motiveDecision,
                         payload, reply, intent, decisionId, decisionBrief)
                     : new Dictionary<string, object>
                     {
                         ["suppressed"] = true,
-                        ["reason"] = "government_certification_memory_isolation"
+                        ["reason"] = delimitedSpeechOnly ? "speech_only" : "government_certification_memory_isolation"
                     };
 
             if (stateUpdates.Count > 0)
