@@ -192,6 +192,7 @@ namespace ReignBetaServer
                     && ReadString(preexistingMetadata, "campaignId", "") == preexistingId
                     && ReadString(preexistingMetadata, "campaignLabel", "") == "Preexisting World History",
                     "Save registration creates campaign metadata even when world-history traffic created the campaign directory first.");
+                VerifyLegacySaveSyncPreview(preexistingId, token, add);
                 Dictionary<string, object> missingUnregisteredPayload =
                     SaveSyncTestPointPayload(preexistingId, "missing_unregistered_" + token, 2d, "Unregistered Save");
                 missingUnregisteredPayload["registrationConfirmed"] = false;
@@ -353,6 +354,13 @@ namespace ReignBetaServer
                 string preRollbackGeneration = SaveSyncTestSqlValue(campaignId,
                     PersistenceStore.SelectMemoryPrecisionStateSql2, "restore_generation");
                 Dictionary<string, object> rolledBack = SaveSyncLoadApi(loadSessionPayload, false);
+                Dictionary<string, object> previewAfterLoad = SaveSyncLoadApi(loadSessionPayload, true);
+                add("preview_does_not_replay_a_completed_load",
+                    ReadString(previewAfterLoad, "result", "") == "preview"
+                    && ReadBool(previewAfterLoad, "dryRun", false)
+                    && !previewAfterLoad.ContainsKey("idempotentReplay")
+                    && !previewAfterLoad.ContainsKey("restoreGeneration"),
+                    "A preview using a completed load session compares the current state without returning the applied load receipt.");
                 string rollbackSourceGeneration = SaveSyncTestSqlValue(campaignId,
                     PersistenceStore.SelectMemoryRestoredSourceContextSql, "source_generation");
                 string rollbackLoadSession = SaveSyncTestSqlValue(campaignId,
@@ -955,6 +963,102 @@ namespace ReignBetaServer
             return results;
         }
 #endif
+
+        private static void VerifyLegacySaveSyncPreview(
+            string campaignId, string token, Action<string, bool, string> add)
+        {
+            const string previewPath = "/api/save-sync/preview";
+            const string loadPath = "/save-sync/load";
+            string pointId = "legacy_" + token;
+            var legacy = SaveSyncTestPointPayload(campaignId, pointId, 2d, "Legacy Save");
+            legacy["savePointKind"] = "legacy_baseline";
+
+            Dictionary<string, object> Post(string path, Dictionary<string, object> payload)
+            {
+                var request = new Program.HttpRequest { Method = "POST", Path = path, JsonBody = payload };
+                return (Dictionary<string, object>)Program.ServerRoutes.Value.Resolve(request.Method, path).Handler(request, null);
+            }
+
+            string State()
+            {
+                string[] queued;
+                lock (SaveSyncOptimizationQueued)
+                    queued = SaveSyncOptimizationQueued.Where(key => key.StartsWith(campaignId + "|", StringComparison.Ordinal))
+                        .OrderBy(key => key, StringComparer.Ordinal).ToArray();
+                return Json.Serialize(TestDict(
+                    "campaignFiles", BackupFileManifest(StrictCampaignDirectory(campaignId)),
+                    "saveSyncFiles", BackupFileManifest(SaveSyncCampaignRoot(campaignId)),
+                    "snapshotSchemas", ReignPostgreSqlStorage.ListSnapshots(campaignId),
+                    "uniqueStates", SaveSyncUniqueStateCount(ReadSaveSyncLedger(campaignId)),
+                    "queued", queued));
+            }
+
+            void CheckPreview(string id, string path, Dictionary<string, object> payload, string expectedResult, bool expectedOk = true)
+            {
+                string before = State();
+                var response = Post(path, payload);
+                add(id, ReadBool(response, "ok", !expectedOk) == expectedOk
+                    && ReadBool(response, "dryRun", false)
+                    && ReadString(response, "result", "") == expectedResult
+                    && ReadString(response, "campaignId", "") == campaignId
+                    && ReadString(response, "savePointId", "") == ReadString(payload, "savePointId", "")
+                    && State() == before,
+                    "Preview preserves campaign and Save Sync file hashes, snapshot schemas, capacity and queued optimizations. Expected "
+                    + expectedResult + ", received " + ReadString(response, "result", "") + ".");
+            }
+
+            // Keep a scheduled optimization observable even if its worker runs immediately.
+            bool previousDisable = SaveSyncDisableBackgroundOptimizationForTests;
+            SaveSyncOptimizationSemaphore.Wait();
+            try
+            {
+                SaveSyncDisableBackgroundOptimizationForTests = false;
+                legacy["dryRun"] = false;
+                CheckPreview("legacy_preview_does_not_share_clean_generation", previewPath, legacy, "legacy_baseline_registration_required");
+
+                MarkSaveSyncActiveStateDirty(campaignId);
+                legacy["dryRun"] = true;
+                CheckPreview("legacy_dry_load_does_not_capture_dirty_generation", loadPath, legacy, "legacy_baseline_registration_required");
+
+                var missing = SaveSyncTestPointPayload(campaignId, "missing_" + token, 3d, "Missing Save");
+                missing["registrationConfirmed"] = false;
+                CheckPreview("unregistered_preview_does_not_append_load_audit", previewPath, missing, "unregistered_save_baseline");
+                missing["registrationConfirmed"] = true;
+                CheckPreview("missing_preview_does_not_append_load_audit", previewPath, missing, "snapshot_missing", false);
+
+                legacy["dryRun"] = false;
+                legacy["worldHistoryOutboxDrained"] = false;
+                string beforeFailure = State();
+                var failed = Post(loadPath, legacy);
+                add("legacy_load_preserves_registration_refusal",
+                    !ReadBool(failed, "ok", true) && ReadString(failed, "result", "") == "critical_history_pending"
+                    && ReadString(failed, "error", "").Length > 0 && !failed.ContainsKey("noOp")
+                    && State() == beforeFailure,
+                    "A failed legacy registration reports the pending history and keeps the checkpoint available for a retry.");
+
+                legacy["worldHistoryOutboxDrained"] = true;
+                int previousCount = SaveSyncUniqueStateCount(ReadSaveSyncLedger(campaignId));
+                var registered = Post(loadPath, legacy);
+                var ledger = ReadSaveSyncLedger(campaignId);
+                var point = SaveSyncPoint(ledger, pointId);
+                bool scheduled;
+                lock (SaveSyncOptimizationQueued)
+                    scheduled = SaveSyncOptimizationQueued.Contains(campaignId + "|" + pointId);
+                add("legacy_load_captures_baseline_after_refusal",
+                    ReadBool(registered, "ok", false) && ReadString(registered, "result", "") == "legacy_baseline_registered"
+                    && !ReadBool(registered, "dryRun", true) && point != null && scheduled
+                    && ReignPostgreSqlStorage.SnapshotExists(campaignId, pointId)
+                    && File.Exists(Path.Combine(SaveSyncSnapshotRoot(campaignId, point), "manifest.json"))
+                    && SaveSyncUniqueStateCount(ledger) == previousCount + 1,
+                    "The real load captures a load-ready baseline, consumes one unique state and schedules its optimization.");
+                CheckPreview("registered_legacy_point_previews_existing_snapshot", previewPath, legacy, "preview");
+            }
+            finally
+            {
+                SaveSyncDisableBackgroundOptimizationForTests = previousDisable;
+                SaveSyncOptimizationSemaphore.Release();
+            }
+        }
 
         private static void PrepareCampaignRetirementTestPoint(
             string campaignId,

@@ -30,10 +30,23 @@ namespace ReignBetaServer
                 && ReadString(payload, "savePointKind", "")
                     .Equals("legacy_baseline", StringComparison.OrdinalIgnoreCase))
             {
+                if (dryRun)
+                    return new Dictionary<string, object>
+                    {
+                        ["ok"] = true,
+                        ["result"] = "legacy_baseline_registration_required",
+                        ["dryRun"] = true,
+                        ["campaignId"] = campaignId,
+                        ["savePointId"] = savePointId
+                    };
+
                 Dictionary<string, object> registered = SaveSyncRegisterCore(payload);
-                registered["result"] = "legacy_baseline_registered";
-                registered["noOp"] = true;
-                registered["dryRun"] = dryRun;
+                registered["dryRun"] = false;
+                if (ReadBool(registered, "ok", false))
+                {
+                    registered["result"] = "legacy_baseline_registered";
+                    registered["noOp"] = true;
+                }
                 return registered;
             }
 
@@ -57,6 +70,7 @@ namespace ReignBetaServer
                         {
                             ["ok"] = true,
                             ["result"] = "unregistered_save_baseline",
+                            ["dryRun"] = dryRun,
                             ["campaignId"] = campaignId,
                             ["savePointId"] = savePointId,
                             ["noOp"] = true,
@@ -64,8 +78,8 @@ namespace ReignBetaServer
                             ["warning"] =
                                 "This native save was not registered with Save Sync. Reign kept the current campaign state and released the alignment gate."
                         };
-                    AppendSaveSyncAudit(
-                        campaignId, "load.unregistered_save_baseline", baseline);
+                    if (!dryRun)
+                        AppendSaveSyncAudit(campaignId, "load.unregistered_save_baseline", baseline);
                     return baseline;
                 }
                 Dictionary<string, object> missing =
@@ -73,12 +87,14 @@ namespace ReignBetaServer
                     {
                         ["ok"] = false,
                         ["result"] = "snapshot_missing",
+                        ["dryRun"] = dryRun,
                         ["campaignId"] = campaignId,
                         ["savePointId"] = savePointId,
                         ["error"] =
                             "Reign has no PostgreSQL snapshot for this native save. Campaign data was left untouched."
                     };
-                AppendSaveSyncAudit(campaignId, "load.snapshot_missing", missing);
+                if (!dryRun)
+                    AppendSaveSyncAudit(campaignId, "load.snapshot_missing", missing);
                 return missing;
             }
 
@@ -97,11 +113,13 @@ namespace ReignBetaServer
                     "Save Sync snapshot identity is inconsistent; campaign data was left untouched.");
             }
 
-            Dictionary<string, object> replay =
-                TryReplaySaveSyncLoadReceipt(
-                    ledger, savePointId, loadSessionId, timer);
-            if (replay != null)
-                return replay;
+            if (!dryRun)
+            {
+                Dictionary<string, object> replay =
+                    TryReplaySaveSyncLoadReceipt(ledger, savePointId, loadSessionId, timer);
+                if (replay != null)
+                    return replay;
+            }
 
             bool activeClean =
                 IsSaveSyncActiveStateCleanForPoint(campaignId, savePointId);
