@@ -45,20 +45,7 @@ function Invoke-ReignDistroPython([string]$User, [string]$Script, [string[]]$Arg
     return (@($output) -join "`n").Trim()
 }
 
-# Reviewed shell programs also travel on stdin, so a CRLF checkout (core.autocrlf)
-# runs unchanged. Each argument stays its own argument; the caller reads $LASTEXITCODE.
-function Invoke-ReignDistroShell([string]$Program, [string[]]$Arguments) {
-    $OutputEncoding = [Text.UTF8Encoding]::new($false)
-    $Program | & wsl.exe -d $Distro -u root --exec /bin/sh -s -- @Arguments
-}
-
-# LF-normalize once, before activation. The brace group makes sh parse the whole
-# program before running any of it, so no child command can read its remaining text.
-function Get-ReignDistroShellProgram([string]$Path) {
-    $text = [IO.File]::ReadAllText($Path, [Text.UTF8Encoding]::new($false, $true)).Replace("`r`n", "`n")
-    if (-not $text.EndsWith("`n")) { $text += "`n" }
-    return "{`n$text}`n"
-}
+. (Join-Path $PSScriptRoot 'ReignDistroShell.ps1')
 
 function Assert-BannerlordClosed([string]$GameRoot) {
     $gamePrefix = [IO.Path]::GetFullPath($GameRoot).TrimEnd('\') + '\'
@@ -542,8 +529,8 @@ try {
     if (-not $SkipServer) {
         # Until commit, the installer's handle keeps the exact prior controls, Apache
         # configuration and PostgreSQL/Apache states; it restores them itself if this step fails.
-        Invoke-ReignDistroShell $installerProgram @('--begin', $transactionId, $control, $versions, $service)
-        if ($LASTEXITCODE -ne 0) { throw 'Could not install the dedicated ReignServer service controls or start PostgreSQL and Apache; the installer restored their prior state or reported the evidence it retained. No runtime or client was selected.' }
+        $controlExit = Invoke-ReignDistroShell $installerProgram @('--begin', $transactionId, $control, $versions, $service)
+        if ($controlExit -ne 0) { throw 'Could not install the dedicated ReignServer service controls or start PostgreSQL and Apache; the installer restored their prior state or reported the evidence it retained. No runtime or client was selected.' }
         $controlsHandle = $true
         # Recheck ownership and listeners after the controls and proxy changed.
         Assert-ReignDistroReady $probeMode '-' | Out-Null
@@ -569,8 +556,8 @@ try {
     # ---- Commit: only after every selected half verified. Backups go last. ----
     if ($controlsHandle) {
         $controlsHandle = $false
-        Invoke-ReignDistroShell $installerProgram @('--commit', $transactionId)
-        if ($LASTEXITCODE -ne 0) { Write-Warning "ReignServer is deployed and verified, but control recovery handle /var/lib/reign-control/$transactionId was not released. Run: sed 's/\r`$//' `"$installer`" | sudo sh -s -- --commit $transactionId inside $Distro before the next deployment." }
+        $controlExit = Invoke-ReignDistroShell $installerProgram @('--commit', $transactionId)
+        if ($controlExit -ne 0) { Write-Warning "ReignServer is deployed and verified, but control recovery handle /var/lib/reign-control/$transactionId was not released. Run: sed 's/\r`$//' `"$installer`" | sudo sh -s -- --commit $transactionId inside $Distro before the next deployment." }
     }
     if ($script:transaction.Server) {
         & wsl.exe -d $Distro -u root --exec /usr/local/bin/reignctl commit-activation $script:transaction.Server.version
@@ -606,8 +593,8 @@ try {
         # Runs after the transaction restored the record, bridge and runtime and the
         # module was restored: return the exact prior controls, proxy configuration
         # and support service states, without reapplying any control.
-        Invoke-ReignDistroShell $installerProgram @('--restore', $transactionId)
-        if ($LASTEXITCODE -ne 0) { throw "$($failure.Exception.Message) The prior service controls, proxy configuration and support service states were not fully restored (see the installer output); recovery evidence /var/lib/reign-control/$transactionId was retained for review." }
+        $controlExit = Invoke-ReignDistroShell $installerProgram @('--restore', $transactionId)
+        if ($controlExit -ne 0) { throw "$($failure.Exception.Message) The prior service controls, proxy configuration and support service states were not fully restored (see the installer output); recovery evidence /var/lib/reign-control/$transactionId was retained for review." }
     }
     throw $failure
 } finally {
