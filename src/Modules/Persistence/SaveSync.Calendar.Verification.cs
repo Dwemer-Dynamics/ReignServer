@@ -43,12 +43,13 @@ namespace ReignBetaServer
                     && olderSha == ReadString(manifest, "calendarSha256", "") && FileSha256(stored) == olderSha,
                     "The captured calendar, raw manifest, point and native save agree.");
 
-                void ExpectRefusal(string test, Dictionary<string, object> payload, string reason)
+                void ExpectRefusal(string test, Dictionary<string, object> payload, string reason, string targetCampaign = null)
                 {
+                    targetCampaign ??= storedCampaign;
                     string active = SaveSyncActiveFingerprintForTests(campaignId);
                     string schema = SaveSyncTestSqlValue(campaignId, "SELECT current_schema()::regnamespace::oid::text AS oid", "oid");
                     string ledgerSha = FileSha256(Path.Combine(syncRoot, "ledger.json"));
-                    string targetSha = SaveSyncCalendarDigest(ReadSaveSyncCalendar(storedCampaign));
+                    string targetSha = SaveSyncCalendarDigest(ReadSaveSyncCalendar(targetCampaign));
                     string recovery = Path.Combine(syncRoot, "r");
                     string[] backups = Directory.Exists(recovery) ? Directory.GetDirectories(recovery) : Array.Empty<string>();
                     string message = "";
@@ -58,7 +59,7 @@ namespace ReignBetaServer
                         && active == SaveSyncActiveFingerprintForTests(campaignId)
                         && schema == SaveSyncTestSqlValue(campaignId, "SELECT current_schema()::regnamespace::oid::text AS oid", "oid")
                         && ledgerSha == FileSha256(Path.Combine(syncRoot, "ledger.json"))
-                        && targetSha == SaveSyncCalendarDigest(ReadSaveSyncCalendar(storedCampaign))
+                        && targetSha == SaveSyncCalendarDigest(ReadSaveSyncCalendar(targetCampaign))
                         && backups.SequenceEqual(Directory.Exists(recovery) ? Directory.GetDirectories(recovery) : Array.Empty<string>()),
                         "The rejected load preserves the active campaign, SQL schema, ledger, stored calendar and recovery inventory.");
                 }
@@ -149,6 +150,26 @@ namespace ReignBetaServer
                 add("calendar_legacy_absence_remains_absent", ReadString(absent, "result", "") == "rolled_back"
                     && ReadSaveSyncCalendar(campaign) == null && ReadSaveSyncCalendar(storedCampaign) == null,
                     "A genuine first-use pair installs without fabricating a calendar.");
+
+                var vanilla = SaveSyncTestPointPayload(campaignId, "vanilla", 8, "Original pre-Reign native save");
+                vanilla["savePointKind"] = "legacy_baseline";
+                vanilla["registrationConfirmed"] = false;
+                vanilla["calendarFirstUse"] = true;
+                var baseline = SaveSyncLoadApi(vanilla, false);
+                var vanillaPoint = SaveSyncPoint(ReadSaveSyncLedger(campaignId), "vanilla");
+                string vanillaTarget = Path.Combine(SaveSyncSnapshotRoot(campaignId, vanillaPoint), "campaign");
+                File.WriteAllBytes(calendar, olderBytes);
+                MarkSaveSyncActiveStateDirty(campaignId);
+                var established = new Dictionary<string, object>(vanilla) { ["calendarFirstUse"] = false };
+                ExpectRefusal("calendar_bound_absence_protects_established_native_save", established, "no calendar", vanillaTarget);
+                var reload = SaveSyncLoadApi(vanilla, false);
+                string backup = ReadString(reload, "backupPath", "");
+                add("calendar_vanilla_reload_reinstalls_captured_absence",
+                    ReadString(baseline, "result", "") == "legacy_baseline_registered"
+                    && vanillaPoint.ContainsKey("calendarSha256") && ReadString(vanillaPoint, "calendarSha256", "missing") == ""
+                    && ReadString(reload, "result", "") == "rolled_back" && ReadSaveSyncCalendar(campaign) == null
+                    && backup.Length > 0 && (ReadSaveSyncCalendar(Path.Combine(backup, "campaign")) ?? Array.Empty<byte>()).SequenceEqual(olderBytes),
+                    "Reloading the original vanilla save restores its witnessed first-use absence and retains the displaced calendar in recovery.");
             }
             finally
             {
