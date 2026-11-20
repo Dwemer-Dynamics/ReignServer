@@ -281,7 +281,7 @@ namespace ReignBetaServer
                         && observers.All(row => new[] { "npc", "player" }.Contains(ReadString(row, "owner_id", ""))), observers);
                     Check("practice_has_no_automatic_relationship_effect_" + playerWon,
                         ReadDictionaryList(report, "nativeRelationChanges").Count == 0
-                        && RelationshipsService.EvaluateCompletedActionRelationships(practice).Count == 0);
+                        && RelationshipsService.EvaluateCompletedActionRelationships(practice, out _).Count == 0);
                     Check("practice_creates_no_public_or_social_history_" + playerWon,
                         DialogueSelfTestStore.SelectWorldHistoryEvents(connection, TestDict("action", action)).Count == 0
                         && DialogueSelfTestStore.SelectCharacterPerformanceEvents(connection, TestDict("event", "action_" + action)).Count == 0);

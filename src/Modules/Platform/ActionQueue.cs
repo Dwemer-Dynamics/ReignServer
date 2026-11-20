@@ -482,7 +482,12 @@ namespace ReignBetaServer
             if (found) DialogueService.RecordSharedActionReceipt(campaignId, payload, matchedRecord, authoritativeStatus);
             if(found)RelationshipsService.FinalizeDiplomaticMarriageEffects(campaignId,id,authoritativeStatus,matchedRecord,payload);
             Dictionary<string, object> memoryStore = DialogueService.StoreActionResultMemory(payload, "actions_report");
-            List<Dictionary<string, object>> nativeRelationChanges = RelationshipsService.EvaluateCompletedActionRelationships(payload);
+            List<Dictionary<string, object>> nativeRelationChanges = RelationshipsService.EvaluateCompletedActionRelationships(payload, out string relationshipScopeError);
+            if (relationshipScopeError.Length > 0)
+                OperationsService.LogOperational("action.relationship_scope_unverified", new Dictionary<string, object>
+                {
+                    ["campaignId"] = campaignId, ["actionId"] = id, ["reason"] = relationshipScopeError
+                });
             DiplomacyService.UpdateDiplomaticEventForAction(campaignId, id, status, payload);
             RebellionService.UpdateNegotiationFromActionReport(campaignId, id, status, payload);
             RebellionService.UpdateRebellionBackingFromActionReport(campaignId, id, status, payload);
@@ -491,7 +496,9 @@ namespace ReignBetaServer
                 ["record"] = matchedRecord ?? new Dictionary<string, object>()
             };
             CourtService.UpdateAmbassadorReferralActionReceipt(campaignId, ambassadorReceiptPayload, status);
-            return new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaignId, ["correlationId"] = correlationId, ["id"] = id, ["status"] = status, ["reportedStatus"] = reportedStatus, ["found"] = found, ["memoryStore"] = memoryStore, ["nativeRelationChanges"] = nativeRelationChanges };
+            var response = new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaignId, ["correlationId"] = correlationId, ["id"] = id, ["status"] = status, ["reportedStatus"] = reportedStatus, ["found"] = found, ["memoryStore"] = memoryStore, ["nativeRelationChanges"] = nativeRelationChanges };
+            if (relationshipScopeError.Length > 0) response["relationshipScopeError"] = relationshipScopeError;
+            return response;
         }
 
         internal static string NormalizeActionReportStatus(

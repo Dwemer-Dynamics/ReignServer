@@ -17,6 +17,7 @@ namespace ReignBetaServer
             results.AddRange(RunRelationshipFlingSelfTests());
             results.AddRange(RunArrangedMarriageSelfTests());
             results.AddRange(RunWorldRelationshipModelSelfTests());
+            results.AddRange(RunLegacyActionRelationshipScopeSelfTests());
             results.AddRange(RunNpcRelationshipPromptSelfTests());
             results.AddRange(RunSharedRelationshipHistorySelfTests());
             results.AddRange(RunConversationRelationshipSelfTests());
@@ -96,6 +97,136 @@ namespace ReignBetaServer
             finally
             {
                 PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(correspondenceCampaignId));
+            }
+            return results;
+        }
+
+        private static List<Dictionary<string, object>> RunLegacyActionRelationshipScopeSelfTests()
+        {
+            var results = new List<Dictionary<string, object>>();
+            void Check(string id, bool passed, object detail) => results.Add(TestDict("caseId", id,
+                "suite", "relationship_system", "name", id, "passed", passed, "summary", Json.Serialize(detail)));
+            string campaign = "__action_scope_" + Guid.NewGuid().ToString("N").Substring(0, 12);
+            const string fork = "main_branch_c5", actor = "scope_actor", target = "scope_target";
+            const double day = 42.25d;
+            try
+            {
+                using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                WorldSimulationService.EnsureWorldHistorySchema(connection);
+                DialogueService.EnsureMemoryPrecisionSchema(connection);
+                ReputationService.EnsurePublicStandingSchema(connection);
+                string generation = ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "");
+                long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                void Activate(string timeline, string parent)
+                {
+                    WorldSimulationStore.UpsertWorldHistoryTimelines2(connection, TestDict("id", timeline,
+                        "campaign", campaign, "parent", parent, "fork", "", "complete", 1d,
+                        "sequence", 0L, "head", "", "now", DateTime.UtcNow.ToString("o")));
+                    WorldSimulationStore.UpdateWorldHistoryTimelines3(connection, TestDict("id", timeline, "campaign", campaign));
+                }
+                Dictionary<string, object> Report(string id, string from = actor, string to = target) => TestDict(
+                    "campaignId", campaign, "serverActionId", id, "status", "completed", "type", "RegularTransferGold",
+                    "actorHeroStringId", from, "targetHeroStringId", to, "message", "Thank you for the gift.", "worldDay", day);
+                var pair = TestDict("pair", AmbientPairKey(actor, target));
+                Dictionary<string, object> Chemistry() => RelationshipsStore.SelectRelationshipPairChemistry8(connection, pair).Single();
+                Dictionary<string, object> NativeTarget() => RelationshipsStore.SelectRelationshipNativeTargets8(connection, pair).Single();
+                List<string> Provenance(string timeline) => RelationshipsStore.SelectRelationshipPairProvenance3(connection,
+                    TestDict("campaign", campaign, "timeline", timeline, "pair", pair["pair"]))
+                    .Select(row => ReadString(row, "source", "")).ToList();
+                int ReceiptCount() => RelationshipsStore.SelectRelationshipInteractionReceipts(connection).Count;
+
+                Activate("main", "");
+                var old = ActionPipelineService.ReportAction(Report("old_unscoped", "old_actor", "old_target"));
+                Check("legacy_action_unscoped_main_compatible", !old.ContainsKey("relationshipScopeError")
+                    && ReadDictionaryList(old, "nativeRelationChanges").Count == 1 && ReceiptCount() == 2, old);
+
+                Activate(fork, "main");
+                foreach (var (timeline, hero, value) in new[] { ("main", actor, -12), ("main", target, -8), (fork, actor, 18), (fork, target, 22) })
+                    ReputationStore.UpsertCharacterPublicStanding(connection, TestDict("campaign", campaign,
+                        "timeline", timeline, "subject", hero, "value", value, "sources", "[]", "revision", 1, "day", 30d, "ts", now));
+
+                const string actionId = "fork_action";
+                ActionPipelineService.QueueAction(campaign, TestDict("serverActionId", actionId,
+                    "command", "give_gold_to_player", "actorHeroStringId", actor, "targetHeroStringId", target));
+                var scoped = Report(actionId);
+                scoped["timelineId"] = fork;
+                scoped["sharedActivityGeneration"] = generation;
+                var first = ActionPipelineService.ReportAction(scoped);
+                var directions = CompletedActionRelationshipDirections(scoped, fork);
+                bool exactReceipts = directions.All(direction =>
+                {
+                    var receipt = RelationshipsStore.SelectRelationshipInteractionReceipts2(connection, TestDict(
+                        "event", direction["eventId"], "subject", direction["subjectId"], "target", direction["targetId"])).Single();
+                    return ReadDouble(receipt, "world_day", 0d) == day && ReadInt(receipt, "native_delta", 0) == 1;
+                });
+                var change = ReadDictionaryList(first, "nativeRelationChanges").SingleOrDefault();
+                Check("legacy_action_first_pair_uses_fork_standing", ReadBool(first, "found", false) && exactReceipts
+                    && ReadInt(change, "delta", 0) == 1 && ReadString(change, "eventId", "") == "action_relationship_" + actionId
+                    && ReadInt(NativeTarget(), "target_relation", 0) == 21
+                    && Provenance(fork).SequenceEqual(new[] { "consequential_event", "direct_interaction" })
+                    && Provenance("main").Count == 0, first);
+
+                string chemistryBeforeReplay = Json.Serialize(Chemistry());
+                string targetBeforeReplay = Json.Serialize(NativeTarget());
+                var replay = ActionPipelineService.ReportAction(scoped);
+                Check("legacy_action_fork_replay_preserves_receipts_and_projection", !replay.ContainsKey("relationshipScopeError")
+                    && ReadDictionaryList(replay, "nativeRelationChanges").Count == 0 && ReceiptCount() == 4
+                    && Json.Serialize(Chemistry()) == chemistryBeforeReplay && Json.Serialize(NativeTarget()) == targetBeforeReplay, replay);
+
+                const string restored = "restored_c5_generation";
+                DialogueStore.UpdateMemoryPrecisionState2(connection, TestDict("generation", restored, "ts", now));
+                var stale = ActionPipelineService.ReportAction(scoped);
+                var staleNew = ActionPipelineService.ReportAction(new Dictionary<string, object>(scoped) { ["serverActionId"] = "late_action" });
+                Check("legacy_action_stale_generation_skips_relationships", ReadString(stale, "relationshipScopeError", "") == "restore_generation_mismatch"
+                    && ReadString(staleNew, "relationshipScopeError", "") == "restore_generation_mismatch"
+                    && ReadDictionaryList(staleNew, "nativeRelationChanges").Count == 0 && ReceiptCount() == 4, staleNew);
+
+                scoped["sharedActivityGeneration"] = restored;
+                var restoredReplay = ActionPipelineService.ReportAction(scoped);
+                Activate("main", "");
+                var mainReplay = ActionPipelineService.ReportAction(new Dictionary<string, object>(scoped) { ["timelineId"] = "main" });
+                Check("legacy_action_retained_receipts_deduplicate_across_restore_and_fork", ReceiptCount() == 4
+                    && new[] { restoredReplay, mainReplay }.All(r => !r.ContainsKey("relationshipScopeError")
+                        && ReadDictionaryList(r, "nativeRelationChanges").Count == 0)
+                    && Json.Serialize(Chemistry()) == chemistryBeforeReplay && Json.Serialize(NativeTarget()) == targetBeforeReplay,
+                    mainReplay);
+
+                Activate(fork, "main");
+                var partial = new Dictionary<string, object>(scoped) { ["serverActionId"] = "second_direction_retry" };
+                // Recreate the committed state left by an interruption between directions.
+                RelationshipEvaluateApi(CompletedActionRelationshipDirections(partial, fork)[0]);
+                var resumed = ActionPipelineService.ReportAction(partial);
+                var finished = Chemistry();
+                Check("legacy_action_retry_applies_only_missing_direction_in_fork", ReceiptCount() == 6
+                    && ReadInt(ReadDictionaryList(resumed, "nativeRelationChanges").SingleOrDefault(), "delta", 0) == 1
+                    && ReadInt(finished, "affinity_a_to_b", 0) == 2 && ReadInt(finished, "affinity_b_to_a", 0) == 2
+                    && ReadInt(NativeTarget(), "target_relation", 0) == 22 && Provenance("main").Count == 0, resumed);
+
+                var unresolved = Report("unresolved_scope");
+                var unscopedFork = ActionPipelineService.ReportAction(unresolved);
+                unresolved["timelineId"] = fork;
+                var missingGeneration = ActionPipelineService.ReportAction(unresolved);
+                unresolved["sharedActivityGeneration"] = restored;
+                unresolved["timelineId"] = "main";
+                var inactive = ActionPipelineService.ReportAction(unresolved);
+                unresolved.Remove("timelineId");
+                var missingTimeline = ActionPipelineService.ReportAction(unresolved);
+                unresolved["timelineId"] = fork;
+                unresolved.Remove("worldDay");
+                var undated = ActionPipelineService.ReportAction(unresolved);
+                Check("legacy_action_unverified_scope_cannot_fall_back_to_main", ReceiptCount() == 6
+                    && ReadString(unscopedFork, "relationshipScopeError", "") == "timeline_required_on_fork"
+                    && ReadString(missingGeneration, "relationshipScopeError", "") == "restore_generation_required"
+                    && ReadString(inactive, "relationshipScopeError", "") == "timeline_not_active"
+                    && ReadString(missingTimeline, "relationshipScopeError", "") == "timeline_required"
+                    && ReadString(undated, "relationshipScopeError", "") == "world_day_required"
+                    && Json.Serialize(Chemistry()) == Json.Serialize(finished), undated);
+            }
+            catch (Exception ex) { Check("legacy_action_scope_fixture_exception", false, ex.ToString()); }
+            finally
+            {
+                ReignPostgreSqlStorage.DropCampaign(campaign);
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaign));
             }
             return results;
         }
