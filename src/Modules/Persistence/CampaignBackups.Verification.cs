@@ -126,6 +126,8 @@ namespace ReignBetaServer
                 archivePath = ReadString(export, "path", "");
                 add("export_archive_created", ReadBool(export, "ok", false) && File.Exists(archivePath), "A complete campaign archive is created.");
                 if (!ReadBool(export, "ok", false)) throw new InvalidOperationException("Export failed: " + ReadString(export, "error", "unknown error"));
+                VerifyBackupDirectoryRenames(purgeFixture, add);
+                VerifyBackupImportFailures(campaignId, archivePath, nativeSavePath, purgeFixture, add);
                 string uploadCopy = Path.Combine(Program.DataDir, "backups", "importing", Guid.NewGuid().ToString("N") + ".reignbackup");
                 Directory.CreateDirectory(Path.GetDirectoryName(uploadCopy));
                 File.Copy(archivePath, uploadCopy, true);
@@ -135,6 +137,37 @@ namespace ReignBetaServer
                 TryDeleteDirectory(SaveSyncCampaignRoot(campaignId));
                 ReignPostgreSqlStorage.DropCampaign(campaignId);
                 if (Directory.Exists(campaignDir) || Directory.Exists(portraitDir)) throw new IOException("The disposable source campaign could not be cleared before the import round trip.");
+                string orphan = SaveSyncCampaignRoot(campaignId);
+                Directory.CreateDirectory(orphan);
+                File.WriteAllText(Path.Combine(orphan, "orphan"), "original");
+                string orphanUpload = Path.Combine(purgeFixture, "orphan.reignbackup");
+                File.Copy(archivePath, orphanUpload);
+                var orphanResult = ImportCampaignBackup(orphanUpload, new Dictionary<string, string>());
+                add("import_orphan_conflict", ReadBool(orphanResult, "conflict", false)
+                    && File.ReadAllText(Path.Combine(orphan, "orphan")) == "original"
+                    && !Directory.Exists(campaignDir) && !Directory.Exists(portraitDir)
+                    && !ReignPostgreSqlStorage.CampaignExists(campaignId),
+                    "A non-replace conflict preserves the orphan Save Sync tree and never creates the absent campaign.");
+                TryDeleteDirectory(orphan);
+                string newUpload = Path.Combine(purgeFixture, "new.reignbackup");
+                File.Copy(archivePath, newUpload);
+                string newOperation = "";
+                var failedNew = ImportCampaignBackup(newUpload, new Dictionary<string, string>(), (step, operation) =>
+                {
+                    if (step != "finalize") return;
+                    newOperation = operation;
+                    throw new IOException("new install failed");
+                });
+                bool retainedNew = ReadBool(failedNew, "recoveryRequired", false) && ReadString(failedNew, "recoveryPath", "") == newOperation
+                    && ReadString(failedNew, "databaseState", "") == "new_install_retained";
+                add("import_new_database_retained", retainedNew
+                    && !Directory.Exists(campaignDir) && !Directory.Exists(portraitDir) && !Directory.Exists(orphan)
+                    && !File.Exists(nativeSavePath) && ReignPostgreSqlStorage.CampaignExists(campaignId)
+                    && File.Exists(Path.Combine(newOperation, "recovery-required.json")),
+                    "A failed first import rolls back its files and identifies the retained SQL installation for recovery without guessing what it owns.");
+                if (!retainedNew) throw new IOException("Missing isolated new-campaign recovery evidence.");
+                ReignPostgreSqlStorage.DropCampaign(campaignId);
+                TryDeleteDirectory(newOperation);
                 Dictionary<string, object> imported = ImportCampaignBackup(uploadCopy, new Dictionary<string, string> { ["replace"] = "false" });
                 bool importRoundTrip = ReadBool(imported, "ok", false) && File.Exists(Path.Combine(campaignDir, "characters", "hero_test", "memory", "memories.jsonl")) && File.Exists(Path.Combine(portraitDir, "hero_test", "custom.png"))
                     && File.Exists(nativeSavePath)
@@ -198,9 +231,221 @@ namespace ReignBetaServer
                 try { ReignPostgreSqlStorage.DropCampaign(campaignId); } catch { }
                 TryDeleteDirectory(campaignDir);
                 TryDeleteDirectory(portraitDir);
+                TryDeleteDirectory(SaveSyncCampaignRoot(campaignId));
                 TryDeleteDirectory(purgeFixture);
             }
             return results;
+        }
+
+        private static void VerifyBackupDirectoryRenames(string fixture, Action<string, bool, string> add)
+        {
+            string root = Path.Combine(fixture, "directory-states");
+            string destination = Path.Combine(root, "destination"), source = Path.Combine(root, "archive", "optional");
+            Directory.CreateDirectory(destination);
+            File.WriteAllText(Path.Combine(destination, "old"), "old");
+            var missingSource = new ImportDirectory(source, destination, root);
+            missingSource.Install(true, null);
+            bool retired = !Directory.Exists(destination);
+            missingSource.Restore();
+            add("import_optional_directory_rollback", retired && File.ReadAllText(Path.Combine(destination, "old")) == "old",
+                "An absent optional archive tree can retire an old tree and restore it on failure.");
+            Directory.CreateDirectory(source);
+            File.WriteAllText(Path.Combine(source, "new"), "new");
+            string absent = Path.Combine(root, "absent");
+            var newDirectory = new ImportDirectory(source, absent, root);
+            newDirectory.Install(false, null);
+            newDirectory.Restore();
+            add("import_originally_absent_rollback", !Directory.Exists(absent)
+                && File.ReadAllText(Path.Combine(root, "incoming", "optional", "new")) == "new",
+                "Rolling back a newly installed tree restores the original absence.");
+            string moveRoot = Path.Combine(fixture, "move-failure");
+            Directory.CreateDirectory(Path.Combine(moveRoot, "original"));
+            File.WriteAllText(Path.Combine(moveRoot, "original", "optional"), "occupied");
+            var blockedMove = new ImportDirectory(source, destination, moveRoot);
+            bool moveFailed = false;
+            try { blockedMove.Install(true, null); }
+            catch (IOException) { moveFailed = true; }
+            blockedMove.Restore();
+            add("import_failed_original_rename", moveFailed && File.ReadAllText(Path.Combine(destination, "old")) == "old",
+                "An actual failed move-aside never authorizes displacement of the untouched destination.");
+            string uncertainRoot = Path.Combine(fixture, "uncertain-rename");
+            var uncertain = new ImportDirectory(source, destination, uncertainRoot);
+            try
+            {
+                uncertain.Install(true, (step, path) =>
+                {
+                    if (step != "install_directory") return;
+                    Directory.Move(Path.Combine(uncertainRoot, "incoming", "optional"), path);
+                    throw new IOException("rename result unavailable");
+                });
+            }
+            catch (IOException) { }
+            bool refused = false;
+            try { uncertain.Restore(); }
+            catch (IOException) { refused = true; }
+            add("import_unconfirmed_rename", refused && File.ReadAllText(Path.Combine(destination, "new")) == "new"
+                && File.ReadAllText(Path.Combine(uncertainRoot, "original", "optional", "old")) == "old",
+                "An uncertain rename retains both versions and refuses a second move.");
+        }
+
+        private static void VerifyBackupImportFailures(string campaignId, string archive, string nativeSave, string fixture,
+            Action<string, bool, string> add)
+        {
+            string[] destinations = { StrictCampaignDirectory(campaignId), CampaignPortraitCacheDirectory(campaignId), SaveSyncCampaignRoot(campaignId) };
+            foreach (string directory in destinations)
+                File.WriteAllText(Path.Combine(directory, "original-only.txt"), Path.GetFileName(directory));
+            File.WriteAllText(nativeSave, "original native bytes");
+            string nativeHash = FileSha256(nativeSave);
+            string[] manifests = destinations.Select(dir => Json.Serialize(BackupFileManifest(dir))).ToArray();
+            bool OriginalDirectories() => destinations.All(Directory.Exists) &&
+                manifests.SequenceEqual(destinations.Select(dir => Json.Serialize(BackupFileManifest(dir))));
+            long DatabaseOid()
+            {
+                using var connection = ReignPostgreSqlStorage.OpenCampaignConnection(campaignId);
+                using var command = connection.CreateCommand();
+                command.CommandText = "SELECT oid::bigint FROM pg_namespace WHERE nspname=@schema";
+                command.Parameters.AddWithValue("schema", ReignPostgreSqlStorage.CampaignSchemaName(campaignId));
+                return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+            }
+            long originalOid = DatabaseOid();
+            using (var connection = ReignPostgreSqlStorage.OpenCampaignConnection(campaignId))
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "CREATE TABLE import_original_marker AS SELECT 1 AS value";
+                command.ExecuteNonQuery();
+            }
+            Dictionary<string, object> Import(Action<string, string> step)
+            {
+                string upload = Path.Combine(fixture, Guid.NewGuid().ToString("N") + ".reignbackup");
+                File.Copy(archive, upload);
+                return ImportCampaignBackup(upload, new Dictionary<string, string> { ["replace"] = "true", ["replaceNativeSaves"] = "true" }, step);
+            }
+            void CheckEarlyFailure(string id, string phase, string target = null)
+            {
+                var result = Import((step, path) =>
+                {
+                    if (step != phase || (target != null && path != target)) return;
+                    if (step == "export_recovery") File.WriteAllText(path, "partial export");
+                    throw new IOException(id);
+                });
+                add(id, ReadString(result, "error", "") == id && !ReadBool(result, "recoveryRequired", false)
+                    && OriginalDirectories() && FileSha256(nativeSave) == nativeHash && DatabaseOid() == originalOid,
+                    "The injected failure preserves every original file and the original PostgreSQL schema OID.");
+            }
+            CheckEarlyFailure("import_list_snapshots_failure", "list_snapshots");
+            CheckEarlyFailure("import_partial_export_failure", "export_recovery");
+            using (var connection = ReignPostgreSqlStorage.OpenCampaignConnection(campaignId))
+            using (var command = connection.CreateCommand())
+            {
+                command.Parameters.AddWithValue("campaign", campaignId);
+                command.Parameters.AddWithValue("schema", ReignPostgreSqlStorage.SnapshotSchemaName(campaignId, "missing_fixture"));
+                command.CommandText = "INSERT INTO reign_meta.save_sync_snapshots(campaign_id,save_point_id,schema_name) VALUES(@campaign,'missing_fixture',@schema)";
+                command.ExecuteNonQuery();
+                try
+                {
+                    var incomplete = Import(null);
+                    command.CommandText = "SELECT count(*) FROM reign_meta.save_sync_snapshots WHERE campaign_id=@campaign AND schema_name=@schema";
+                    add("import_incomplete_original_registry", ReadString(incomplete, "error", "").Contains("cannot be fully backed up")
+                        && Convert.ToInt64(command.ExecuteScalar()) == 1 && OriginalDirectories() && DatabaseOid() == originalOid,
+                        "A registered snapshot with no physical schema blocks replacement and preserves the existing registry.");
+                }
+                finally
+                {
+                    command.CommandText = "DELETE FROM reign_meta.save_sync_snapshots WHERE campaign_id=@campaign AND schema_name=@schema";
+                    command.ExecuteNonQuery();
+                }
+            }
+            string[] names = { "campaign", "portraits", "save_sync" };
+            for (int index = 0; index < destinations.Length; index++)
+            {
+                CheckEarlyFailure("import_move_aside_failure_" + names[index], "move_original", destinations[index]);
+                CheckEarlyFailure("import_install_failure_" + names[index], "install_directory", destinations[index]);
+            }
+            bool truncated = false;
+            var invalidRecovery = Import((step, path) =>
+            {
+                if (step != "verify_recovery") return;
+                using var dump = File.OpenWrite(path);
+                // The custom archive's TOC precedes the data blocks. Remove the tail of the last block.
+                dump.SetLength(dump.Length - 32);
+                truncated = true;
+            });
+            add("import_unreadable_recovery_export", truncated && !ReadBool(invalidRecovery, "ok", true)
+                && ReadString(invalidRecovery, "error", "").StartsWith("PostgreSQL could not read all campaign archive data.", StringComparison.Ordinal)
+                && !ReadBool(invalidRecovery, "recoveryRequired", false) && OriginalDirectories() && DatabaseOid() == originalOid,
+                "A recovery export with a readable TOC and truncated table data is rejected before the existing campaign is touched.");
+
+            string ownedOperation = "";
+            var blocked = Import((step, path) =>
+            {
+                if (step == "export_recovery") ownedOperation = Path.GetDirectoryName(path);
+                if (step == "install_directory" && path == destinations[2]) File.WriteAllText(path, "other owner");
+            });
+            string displaced = Path.Combine(ownedOperation, "original", "save_sync");
+            bool retained = ReadBool(blocked, "recoveryRequired", false) && ReadString(blocked, "recoveryPath", "") == ownedOperation;
+            add("import_blocked_directory_recovery", retained && File.ReadAllText(destinations[2]) == "other owner"
+                && Json.Serialize(BackupFileManifest(displaced)) == manifests[2] && DatabaseOid() == originalOid
+                && File.Exists(Path.Combine(ownedOperation, "original.dump")) && File.Exists(Path.Combine(ownedOperation, "recovery-required.json"))
+                && manifests.Take(2).SequenceEqual(destinations.Take(2).Select(dir => Json.Serialize(BackupFileManifest(dir)))),
+                "A blocked rename keeps the unowned occupant, the displaced original and the operation evidence while other directories recover.");
+            if (!retained) throw new IOException("Missing isolated directory recovery evidence.");
+            File.Delete(destinations[2]);
+            Directory.Move(displaced, destinations[2]);
+            TryDeleteDirectory(ownedOperation);
+
+            var rolledBack = Import((step, operation) =>
+            {
+                if (step != "finalize") return;
+                ownedOperation = operation;
+                throw new IOException("after install");
+            });
+            retained = ReadBool(rolledBack, "recoveryRequired", false) && ReadString(rolledBack, "recoveryPath", "") == ownedOperation;
+            add("import_installed_resources_rollback", retained && ReadString(rolledBack, "databaseState", "") == "archive_reapplied"
+                && File.Exists(Path.Combine(ownedOperation, "original.dump")) && OriginalDirectories()
+                && FileSha256(nativeSave) == nativeHash && ReignPostgreSqlStorage.TableRowCount(campaignId, "import_original_marker") == 1,
+                "After a completed installation, rollback restores prior campaign contents, verifies original files, and retains the dump for metadata reconciliation.");
+            if (!retained) throw new IOException("Missing isolated replay evidence.");
+            TryDeleteDirectory(ownedOperation);
+
+            var nativeBlocked = Import((step, operation) =>
+            {
+                if (step != "finalize") return;
+                ownedOperation = operation;
+                File.Move(nativeSave, Path.Combine(operation, "installed-native.sav"));
+                Directory.CreateDirectory(nativeSave);
+                throw new IOException("blocked native copy-back");
+            });
+            string nativeBackup = Path.Combine(ownedOperation, "original-native", Path.GetFileName(nativeSave));
+            retained = ReadBool(nativeBlocked, "recoveryRequired", false) && ReadString(nativeBlocked, "recoveryPath", "") == ownedOperation;
+            add("import_failed_native_copy_back", retained && Directory.Exists(nativeSave) && FileSha256(nativeBackup) == nativeHash
+                && ((List<string>)nativeBlocked["recoveryErrors"]).Any(error => error.StartsWith(nativeSave, StringComparison.Ordinal))
+                && ReadDictionaryList(nativeBlocked, "nativeSaves").Any(save => ReadString(save, "installation", "") == "Completed")
+                && File.Exists(Path.Combine(ownedOperation, "original.dump")) && File.Exists(Path.Combine(ownedOperation, "inventory.json"))
+                && OriginalDirectories() && ReignPostgreSqlStorage.TableRowCount(campaignId, "import_original_marker") == 1,
+                "Failed native copy-back preserves its verified original, database recovery export and inventory while independent resources recover.");
+            if (!retained) throw new IOException("Missing isolated native recovery evidence.");
+            Directory.Delete(nativeSave);
+            File.Copy(nativeBackup, nativeSave);
+            TryDeleteDirectory(ownedOperation);
+
+            var stoppedDatabase = Import((step, path) =>
+            {
+                if (step == "export_recovery") ownedOperation = Path.GetDirectoryName(path);
+                if (step == "database_mutation") File.Move(path, path + ".unavailable");
+            });
+            bool indeterminate = ReadBool(stoppedDatabase, "recoveryRequired", false)
+                && ReadString(stoppedDatabase, "recoveryPath", "") == ownedOperation
+                && ReadString(stoppedDatabase, "databaseState", "") == "recovery_required";
+            if (!indeterminate) throw new IOException("Missing isolated database recovery evidence.");
+            var inventory = CampaignFileService.ReadJsonObject(Path.Combine(ownedOperation, "inventory.json"));
+            string recoveryDump = Path.Combine(ownedOperation, "original.dump");
+            bool verified = FileSha256(recoveryDump) == ReadString(inventory, "originalDatabaseSha256", "");
+            if (!verified) throw new IOException("Unexpected recovery dump identity in the isolated database fixture.");
+            ReignPostgreSqlStorage.ImportCampaignArchive(campaignId, recoveryDump, ReadDictionaryList(inventory, "originalSnapshots"), true);
+            add("import_interrupted_database_recovery", OriginalDirectories() && FileSha256(nativeSave) == nativeHash
+                && ReignPostgreSqlStorage.TableRowCount(campaignId, "import_original_marker") == 1,
+                "A failed database import retains a hash-bound recovery export that restores the prior contents on this disposable database.");
+            TryDeleteDirectory(ownedOperation);
         }
     }
 }

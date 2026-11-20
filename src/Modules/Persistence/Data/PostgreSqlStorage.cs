@@ -668,11 +668,38 @@ ORDER BY created_utc,save_point_id;", connection))
                     "PostgreSQL campaign export did not produce an archive.");
         }
 
+        internal static void VerifyCampaignArchive(string campaignId, string path,
+            IEnumerable<Dictionary<string, object>> snapshots)
+        {
+            var expected = new HashSet<string>(StringComparer.Ordinal) { CampaignSchemaName(campaignId) };
+            foreach (var snapshot in snapshots)
+                expected.Add(SnapshotSchemaName(campaignId, Convert.ToString(snapshot["savePointId"], CultureInfo.InvariantCulture)));
+
+            bool nativeBin = !string.IsNullOrWhiteSpace(NativePostgreSqlBin());
+            string archive = PostgreSqlTools.ArchivePath(path, nativeBin);
+            string toc = RunPostgreSqlTool(new List<string> { "pg_restore", "--list", archive }, 600000);
+            var schemas = System.Text.RegularExpressions.Regex.Matches(toc,
+                @"(?m)^\d+;[ \t]+\d+[ \t]+\d+[ \t]+SCHEMA[ \t]+-[ \t]+(\S+)")
+                .Select(entry => entry.Groups[1].Value);
+            if (!expected.SetEquals(schemas))
+                throw new InvalidDataException("PostgreSQL archive schema inventory does not match the campaign and its snapshots.");
+
+            // Reading the TOC alone does not read the compressed table data. Decode the
+            // entire custom archive to the PostgreSQL host's null device without applying SQL.
+            string sink = OperatingSystem.IsWindows() && nativeBin ? "NUL" : "/dev/null";
+            try { RunPostgreSqlTool(new List<string> { "pg_restore", "--file", sink, archive }, 600000); }
+            catch (InvalidOperationException ex)
+            {
+                throw new InvalidDataException("PostgreSQL could not read all campaign archive data. " + ex.Message, ex);
+            }
+        }
+
         public static void ImportCampaignArchive(
             string campaignId,
             string archivePath,
             IEnumerable<Dictionary<string, object>> snapshots,
-            bool replace)
+            bool replace,
+            Action startingMutation = null)
         {
             EnsureInfrastructure();
             string normalizedCampaignId = NormalizeCampaignId(campaignId);
@@ -686,6 +713,7 @@ ORDER BY created_utc,save_point_id;", connection))
             if (exists && !replace)
                 throw new InvalidOperationException(
                     "This campaign already exists in PostgreSQL.");
+            startingMutation?.Invoke();
             if (exists)
                 DropCampaign(normalizedCampaignId);
             ClaimInternalCampaignOwnership(normalizedCampaignId);

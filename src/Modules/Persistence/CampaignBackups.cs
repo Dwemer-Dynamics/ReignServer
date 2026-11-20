@@ -819,14 +819,23 @@ namespace ReignBetaServer
             }
         }
 
+        private enum DatabaseImportPhase { Untouched, MutationAttempted, Installed }
+        private enum ImportRename { Untouched, Attempted, Completed }
+
         internal static Dictionary<string, object> ImportCampaignBackup(string uploadPath, Dictionary<string, string> query)
+            => ImportCampaignBackup(uploadPath, query, null);
+
+        // The optional callback belongs to a single isolated self-test invocation.
+        private static Dictionary<string, object> ImportCampaignBackup(string uploadPath, Dictionary<string, string> query,
+            Action<string, string> beforeStep)
         {
             Program.CampaignDataGate.EnterWriteLock();
-            try { return ImportCampaignBackupCore(uploadPath, query); }
+            try { return ImportCampaignBackupCore(uploadPath, query, beforeStep); }
             finally { Program.CampaignDataGate.ExitWriteLock(); }
         }
 
-        private static Dictionary<string, object> ImportCampaignBackupCore(string uploadPath, Dictionary<string, string> query)
+        private static Dictionary<string, object> ImportCampaignBackupCore(string uploadPath, Dictionary<string, string> query,
+            Action<string, string> beforeStep)
         {
             bool replace = query != null && query.TryGetValue("replace", out string replaceText) && replaceText.Equals("true", StringComparison.OrdinalIgnoreCase);
             bool replaceNativeSaves = query != null
@@ -837,7 +846,9 @@ namespace ReignBetaServer
             if (string.IsNullOrWhiteSpace(uploadPath) || !File.Exists(uploadPath)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "No backup archive was uploaded." };
             string running = CampaignMutationBlockReason();
             if (!string.IsNullOrWhiteSpace(running)) { TryDeleteFile(uploadPath); return new Dictionary<string, object> { ["ok"] = false, ["error"] = running }; }
-            string extractRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ".x", Guid.NewGuid().ToString("N").Substring(0, 12));
+            string operationRoot = Path.Combine(Program.DataDir, "backups", "import-recovery", Guid.NewGuid().ToString("N"));
+            string extractRoot = Path.Combine(operationRoot, "archive");
+            bool retainOperation = false;
             try
             {
                 ExtractCampaignBackupSecurely(uploadPath, extractRoot);
@@ -850,19 +861,17 @@ namespace ReignBetaServer
                 string sourceSaveSync = Path.Combine(extractRoot, "save_sync");
                 string sourceNativeSaves = Path.Combine(
                     extractRoot, "native_saves");
-                string sourceDatabase =
-                    Path.Combine(extractRoot,
-                        ReadString(manifest, "databaseArchive",
-                            "postgresql.dump"));
+                string sourceDatabase = SafeBackupPath(extractRoot, ReadString(manifest, "databaseArchive", "postgresql.dump"));
                 string destinationCampaign = StrictCampaignDirectory(campaignId);
                 string destinationPortraits = CampaignPortraitCacheDirectory(campaignId);
                 string destinationSaveSync = SaveSyncCampaignRoot(campaignId);
-                bool databaseExists =
-                    ReignPostgreSqlStorage.ListCampaignMetadata().Any(row =>
+                var originalMetadata =
+                    ReignPostgreSqlStorage.ListCampaignMetadata().FirstOrDefault(row =>
                         ReadString(row, "campaignId", "")
                             .Equals(
                                 campaignId,
                                 StringComparison.OrdinalIgnoreCase));
+                bool databaseExists = originalMetadata != null;
                 if (databaseExists && !replace)
                     return new Dictionary<string, object> { ["ok"] = false, ["conflict"] = true, ["campaignId"] = campaignId, ["error"] = "This campaign already exists. Enable Replace existing campaign to restore over it." };
 
@@ -901,50 +910,64 @@ namespace ReignBetaServer
                         ["error"] = "Native Bannerlord save files with the same names already exist. Enable Replace native saves to import this diagnostic bundle without silently overwriting them."
                     };
 
-                string oldCampaign = "", oldPortraits = "", oldSaveSync = "";
-                string oldDatabase = Path.Combine(
-                    extractRoot, "recovery-postgresql.dump");
-                List<Dictionary<string, object>> oldSnapshots =
-                    new List<Dictionary<string, object>>();
-                string nativeSaveRecoveryRoot = Path.Combine(
-                    nativeSaveRoot,
-                    ".reign-import-" + Guid.NewGuid().ToString("N")
-                        .Substring(0, 12));
-                List<Dictionary<string, object>> nativeSaveRollback =
-                    new List<Dictionary<string, object>>();
-                List<Dictionary<string, object>> nativeSaveResults =
-                    new List<Dictionary<string, object>>();
+                var directories = new[]
+                {
+                    new ImportDirectory(sourceCampaign, destinationCampaign, operationRoot),
+                    new ImportDirectory(sourcePortraits, destinationPortraits, operationRoot),
+                    new ImportDirectory(sourceSaveSync, destinationSaveSync, operationRoot)
+                };
+                if (!replace && directories.Any(dir => Directory.Exists(dir.Destination) || File.Exists(dir.Destination)))
+                    return new Dictionary<string, object> { ["ok"] = false, ["conflict"] = true, ["campaignId"] = campaignId,
+                        ["error"] = "A destination directory already exists. Enable Replace existing campaign to restore over it." };
+
+                var snapshots = ReadDictionaryList(manifest, "saveSyncSnapshots");
+                ReignPostgreSqlStorage.VerifyCampaignArchive(campaignId, sourceDatabase, snapshots);
+                string oldDatabase = Path.Combine(operationRoot, "original.dump");
+                string oldDatabaseHash = null;
+                var oldSnapshots = new List<Dictionary<string, object>>();
+                var databasePhase = DatabaseImportPhase.Untouched;
+                var nativeSaves = new List<ImportNativeSave>();
+                List<Dictionary<string, object>> nativeSaveResults;
                 try
                 {
                     if (databaseExists)
                     {
-                        oldSnapshots =
-                            ReignPostgreSqlStorage.ListSnapshots(campaignId);
-                        ReignPostgreSqlStorage.ExportCampaignArchive(
-                            campaignId, oldDatabase);
+                        beforeStep?.Invoke("list_snapshots", campaignId);
+                        oldSnapshots = ReignPostgreSqlStorage.ListSnapshots(campaignId);
+                        if (ReadString(originalMetadata, "schemaName", "") != ReignPostgreSqlStorage.CampaignSchemaName(campaignId)
+                            || ReadLong(originalMetadata, "snapshotCount", -1) != oldSnapshots.Count)
+                            throw new InvalidDataException("The existing PostgreSQL campaign and snapshot registry cannot be fully backed up.");
+                        string partial = oldDatabase + ".partial";
+                        beforeStep?.Invoke("export_recovery", partial);
+                        ReignPostgreSqlStorage.ExportCampaignArchive(campaignId, partial);
+                        beforeStep?.Invoke("verify_recovery", partial);
+                        ReignPostgreSqlStorage.VerifyCampaignArchive(campaignId, partial, oldSnapshots);
+                        oldDatabaseHash = FileSha256(partial);
+                        File.Move(partial, oldDatabase);
                     }
-                    oldCampaign = InstallImportedDirectory(sourceCampaign, destinationCampaign, replace);
-                    if (Directory.Exists(sourcePortraits)) oldPortraits = InstallImportedDirectory(sourcePortraits, destinationPortraits, replace);
-                    else if (replace && Directory.Exists(destinationPortraits))
+                    CampaignFileService.WriteJsonObject(Path.Combine(operationRoot, "inventory.json"), new Dictionary<string, object>
                     {
-                        oldPortraits = MoveImportedDirectoryAside(destinationPortraits);
-                    }
-                    if (Directory.Exists(sourceSaveSync)) oldSaveSync = InstallImportedDirectory(sourceSaveSync, destinationSaveSync, replace);
-                    else if (replace && Directory.Exists(destinationSaveSync))
-                    {
-                        oldSaveSync = MoveImportedDirectoryAside(destinationSaveSync);
-                    }
-                    ReignPostgreSqlStorage.ImportCampaignArchive(
-                        campaignId,
-                        sourceDatabase,
-                        ReadDictionaryList(manifest, "saveSyncSnapshots"),
-                        replace);
-                    nativeSaveResults = InstallImportedNativeSaves(
-                        nativeSaveSources,
-                        nativeSaveRoot,
-                        replaceNativeSaves,
-                        nativeSaveRecoveryRoot,
-                        nativeSaveRollback);
+                        ["campaignId"] = campaignId,
+                        ["directories"] = directories.Select(dir => dir.Inventory()).ToArray(),
+                        ["nativeSaveRoot"] = nativeSaveRoot,
+                        ["originalRegisteredCampaignFound"] = databaseExists,
+                        ["originalCampaign"] = originalMetadata,
+                        ["originalDatabaseSha256"] = oldDatabaseHash,
+                        ["originalDatabaseBytes"] = databaseExists ? new FileInfo(oldDatabase).Length : 0,
+                        ["originalSnapshots"] = oldSnapshots
+                    });
+                    foreach (ImportDirectory directory in directories)
+                        directory.Install(replace, beforeStep);
+                    ReignPostgreSqlStorage.ImportCampaignArchive(campaignId, sourceDatabase, snapshots, databaseExists,
+                        () =>
+                        {
+                            databasePhase = DatabaseImportPhase.MutationAttempted;
+                            beforeStep?.Invoke("database_mutation", sourceDatabase);
+                        });
+                    databasePhase = DatabaseImportPhase.Installed;
+                    nativeSaveResults = InstallImportedNativeSaves(nativeSaveSources, nativeSaveRoot, replaceNativeSaves,
+                        Path.Combine(operationRoot, "original-native"), nativeSaves);
+                    beforeStep?.Invoke("finalize", operationRoot);
                     int importedSavePoints = ReadDictionaryList(
                         ReadSaveSyncLedger(campaignId), "points").Count;
                     MarkCampaignSaveSyncLifecycle(
@@ -955,31 +978,68 @@ namespace ReignBetaServer
                         importedSavePoints > 0);
                     CancelPendingCampaignRetirement(
                         campaignId, "campaign_backup_imported");
-                    TryDeleteDirectory(oldCampaign);
-                    TryDeleteDirectory(oldPortraits);
-                    TryDeleteDirectory(oldSaveSync);
-                    TryDeleteDirectory(nativeSaveRecoveryRoot);
                 }
-                catch
+                catch (Exception failure)
                 {
-                    RestoreImportedNativeSaves(nativeSaveRollback);
-                    TryDeleteDirectory(nativeSaveRecoveryRoot);
-                    RestoreImportedDirectory(destinationCampaign, oldCampaign);
-                    RestoreImportedDirectory(destinationPortraits, oldPortraits);
-                    RestoreImportedDirectory(destinationSaveSync, oldSaveSync);
-                    if (File.Exists(oldDatabase))
+                    retainOperation = true;
+                    var errors = new List<string>();
+                    void Recover(string resource, Action restore)
                     {
-                        try
-                        {
-                            ReignPostgreSqlStorage.ImportCampaignArchive(
-                                campaignId,
-                                oldDatabase,
-                                oldSnapshots,
-                                true);
-                        }
-                        catch { }
+                        try { restore(); }
+                        catch (Exception ex) { errors.Add(resource + ": " + ex.Message); }
                     }
-                    throw;
+                    foreach (ImportNativeSave save in nativeSaves.AsEnumerable().Reverse())
+                        Recover(save.Destination, save.Restore);
+                    string databaseState = "untouched";
+                    if (databasePhase == DatabaseImportPhase.Installed && databaseExists)
+                    {
+                        databaseState = "recovery_required";
+                        Recover("PostgreSQL", () =>
+                        {
+                            if (oldDatabaseHash == null || FileSha256(oldDatabase) != oldDatabaseHash)
+                                throw new InvalidDataException("The verified recovery export has changed.");
+                            ReignPostgreSqlStorage.ImportCampaignArchive(campaignId, oldDatabase, oldSnapshots, true);
+                            databaseState = "archive_reapplied";
+                            // Archive import rebuilds registry metadata and stamps the restored load context.
+                            // Keep the original even when pg_restore and that metadata transaction both succeed.
+                            errors.Add("The original PostgreSQL archive was reapplied. Its prior registry and load context require reconciliation.");
+                        });
+                    }
+                    else if (databasePhase == DatabaseImportPhase.Installed)
+                    {
+                        // A missing joined campaign-registry row does not establish that every
+                        // snapshot DropCampaign would delete was created by this import.
+                        databaseState = "new_install_retained";
+                        errors.Add("The installed PostgreSQL campaign was retained for reconciliation.");
+                    }
+                    else if (databasePhase == DatabaseImportPhase.MutationAttempted)
+                    {
+                        databaseState = "recovery_required";
+                        errors.Add("PostgreSQL import stopped during mutation. Its schema and registry state require inspection.");
+                    }
+                    foreach (ImportDirectory directory in directories.AsEnumerable().Reverse())
+                        Recover(directory.Destination, directory.Restore);
+                    if (errors.Count == 0)
+                    {
+                        retainOperation = false;
+                        throw;
+                    }
+                    var recovery = new Dictionary<string, object>
+                    {
+                        ["ok"] = false,
+                        ["campaignId"] = campaignId,
+                        ["error"] = failure.Message + " Backup import requires recovery. Retained operation files are at " + operationRoot + ".",
+                        ["recoveryRequired"] = true,
+                        ["recoveryPath"] = operationRoot,
+                        ["recoveryErrors"] = errors,
+                        ["databaseState"] = databaseState,
+                        ["directories"] = directories.Select(dir => dir.Inventory()).ToArray(),
+                        ["nativeSaves"] = nativeSaves.Select(save => save.Inventory()).ToArray()
+                    };
+                    Recover("recovery receipt", () =>
+                        CampaignFileService.WriteJsonObject(Path.Combine(operationRoot, "recovery-required.json"), recovery));
+                    OperationsService.LogOperational("campaign.backup_import_failed", recovery);
+                    return recovery;
                 }
                 Dictionary<string, object> result = new Dictionary<string, object>
                 {
@@ -1010,115 +1070,111 @@ namespace ReignBetaServer
             finally
             {
                 TryDeleteFile(uploadPath);
-                TryDeleteDirectory(extractRoot);
+                if (!retainOperation) TryDeleteDirectory(operationRoot);
+            }
+        }
+
+        private sealed class ImportNativeSave
+        {
+            internal readonly string Destination;
+            private readonly string backup, originalHash, incomingHash;
+            private ImportRename installation;
+
+            internal ImportNativeSave(string destination, string backup, string originalHash, string incomingHash)
+            {
+                Destination = destination;
+                this.backup = backup;
+                this.originalHash = originalHash;
+                this.incomingHash = incomingHash;
+            }
+
+            internal void Install(string source)
+            {
+                if (originalHash != null)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(backup));
+                    string partial = backup + ".partial";
+                    File.Copy(Destination, partial, false);
+                    if (FileSha256(partial) != originalHash)
+                        throw new IOException("Original native save changed during backup: " + Destination);
+                    File.Move(partial, backup);
+                }
+                installation = ImportRename.Attempted;
+                CopyVerified(source, incomingHash, originalHash != null);
+                installation = ImportRename.Completed;
+                if (FileSha256(Destination) != incomingHash)
+                    throw new InvalidDataException("Imported native save verification failed: " + Destination);
+            }
+
+            internal void Restore()
+            {
+                if (installation == ImportRename.Untouched) return;
+                bool present = File.Exists(Destination);
+                if (Directory.Exists(Destination))
+                    throw new IOException("A directory occupies the native save path. Recovery copy retained.");
+                if (installation == ImportRename.Attempted)
+                {
+                    if ((present ? FileSha256(Destination) : null) != originalHash)
+                        throw new IOException("Native installation did not complete and the original state cannot be confirmed.");
+                    return;
+                }
+                if (present && FileSha256(Destination) != incomingHash)
+                    throw new IOException("Native save changed since installation. Recovery copy retained.");
+                if (originalHash != null)
+                    CopyVerified(backup, originalHash, present);
+                else if (present)
+                    File.Delete(Destination);
+                installation = ImportRename.Untouched;
+            }
+
+            internal Dictionary<string, object> Inventory() => new Dictionary<string, object>
+            {
+                ["destination"] = Destination, ["original"] = backup, ["originalSha256"] = originalHash,
+                ["incomingSha256"] = incomingHash, ["installation"] = installation.ToString()
+            };
+
+            private void CopyVerified(string source, string hash, bool overwrite)
+            {
+                string temporary = Path.Combine(Path.GetDirectoryName(Destination), ".ri-" + Guid.NewGuid().ToString("N") + ".tmp");
+                try
+                {
+                    File.Copy(source, temporary, false);
+                    if (FileSha256(temporary) != hash)
+                        throw new InvalidDataException("Native save copy failed hash verification: " + source);
+                    File.Move(temporary, Destination, overwrite);
+                }
+                finally { TryDeleteFile(temporary); }
             }
         }
 
         private static List<Dictionary<string, object>> InstallImportedNativeSaves(
-            IEnumerable<string> sourceFiles,
-            string destinationRoot,
-            bool replace,
-            string recoveryRoot,
-            List<Dictionary<string, object>> rollback)
+            List<string> sources, string destinationRoot, bool replace, string recoveryRoot, List<ImportNativeSave> rollback)
         {
-            List<Dictionary<string, object>> results =
-                new List<Dictionary<string, object>>();
-            List<string> sources = (sourceFiles ?? Enumerable.Empty<string>())
-                .ToList();
+            var results = new List<Dictionary<string, object>>();
             if (sources.Count == 0) return results;
             Directory.CreateDirectory(destinationRoot);
             foreach (string source in sources)
             {
-                string fileName = ValidateNativeSaveFileName(
-                    Path.GetFileName(source));
+                string fileName = ValidateNativeSaveFileName(Path.GetFileName(source));
                 string destination = Path.Combine(destinationRoot, fileName);
-                if (File.Exists(destination)
-                    && FileSha256(destination).Equals(
-                        FileSha256(source),
-                        StringComparison.OrdinalIgnoreCase))
+                string incomingHash = FileSha256(source);
+                string originalHash = File.Exists(destination) ? FileSha256(destination) : null;
+                string result = "already_present";
+                if (incomingHash != originalHash)
                 {
-                    results.Add(new Dictionary<string, object>
-                    {
-                        ["fileName"] = fileName,
-                        ["result"] = "already_present",
-                        ["bytes"] = new FileInfo(destination).Length
-                    });
-                    continue;
+                    if (originalHash != null && !replace)
+                        throw new IOException("Native Bannerlord save conflict: " + fileName);
+                    var save = new ImportNativeSave(destination, Path.Combine(recoveryRoot, fileName), originalHash, incomingHash);
+                    rollback.Add(save);
+                    save.Install(source);
+                    result = originalHash == null ? "installed" : "replaced";
                 }
-                if (File.Exists(destination) && !replace)
-                    throw new IOException(
-                        "Native Bannerlord save conflict: " + fileName);
-
-                Directory.CreateDirectory(recoveryRoot);
-                string backup = Path.Combine(recoveryRoot, fileName);
-                bool existed = File.Exists(destination);
-                if (existed) File.Copy(destination, backup, false);
-                rollback.Add(new Dictionary<string, object>
-                {
-                    ["destination"] = destination,
-                    ["backup"] = backup,
-                    ["existed"] = existed
-                });
-                string temporary = Path.Combine(destinationRoot,
-                    ".ri-" + Guid.NewGuid().ToString("N")
-                        .Substring(0, 12) + ".tmp");
-                try
-                {
-                    File.Copy(source, temporary, true);
-                    if (existed)
-                    {
-                        // Use the same atomic rename primitive as profile persistence. The
-                        // separate recovery copy above retains the original native save.
-                        const uint replaceExisting = 0x1;
-                        const uint writeThrough = 0x8;
-                        if (!MoveFileEx(ExtendedLengthPath(temporary), ExtendedLengthPath(destination),
-                            replaceExisting | writeThrough))
-                            throw new IOException("Atomic native-save replacement failed for " + fileName + ".",
-                                new System.ComponentModel.Win32Exception(
-                                    System.Runtime.InteropServices.Marshal.GetLastWin32Error()));
-                    }
-                    else
-                        File.Move(temporary, destination);
-                }
-                finally
-                {
-                    TryDeleteFile(temporary);
-                }
-                if (!FileSha256(destination).Equals(
-                    FileSha256(source), StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException(
-                        "Imported native save hash verification failed: " +
-                        fileName);
                 results.Add(new Dictionary<string, object>
                 {
-                    ["fileName"] = fileName,
-                    ["result"] = existed ? "replaced" : "installed",
-                    ["bytes"] = new FileInfo(destination).Length
+                    ["fileName"] = fileName, ["result"] = result, ["bytes"] = new FileInfo(destination).Length
                 });
             }
             return results;
-        }
-
-        private static void RestoreImportedNativeSaves(
-            IEnumerable<Dictionary<string, object>> rollback)
-        {
-            foreach (Dictionary<string, object> item in
-                (rollback ?? Enumerable.Empty<Dictionary<string, object>>())
-                    .Reverse())
-            {
-                string destination = ReadString(
-                    item, "destination", "");
-                string backup = ReadString(item, "backup", "");
-                try
-                {
-                    if (ReadBool(item, "existed", false)
-                        && File.Exists(backup))
-                        File.Copy(backup, destination, true);
-                    else
-                        TryDeleteFile(destination);
-                }
-                catch { }
-            }
         }
 
         private static void ValidateCampaignBackupManifest(string root, Dictionary<string, object> manifest)
@@ -1144,9 +1200,7 @@ namespace ReignBetaServer
             string campaignId = ReadString(manifest, "campaignId", "");
             ValidateSaveSyncId(campaignId, "campaignId");
             if (!Directory.Exists(Path.Combine(root, "campaign"))) throw new InvalidDataException("The backup does not contain campaign data.");
-            string databaseArchive = Path.Combine(
-                root,
-                ReadString(manifest, "databaseArchive", "postgresql.dump"));
+            string databaseArchive = SafeBackupPath(root, ReadString(manifest, "databaseArchive", "postgresql.dump"));
             if (!File.Exists(databaseArchive)
                 || new FileInfo(databaseArchive).Length <= 0)
                 throw new InvalidDataException(
@@ -1205,46 +1259,67 @@ namespace ReignBetaServer
             }
         }
 
-        private static string InstallImportedDirectory(string source, string destination, bool replace)
+        private sealed class ImportDirectory
         {
-            if (!Directory.Exists(source)) return "";
-            Directory.CreateDirectory(Path.GetDirectoryName(destination));
-            string incoming = Path.Combine(Program.DataDir, ".i", Guid.NewGuid().ToString("N").Substring(0, 12));
-            Directory.CreateDirectory(Path.GetDirectoryName(incoming));
-            CopyDirectoryTree(source, incoming, null);
-            string old = "";
-            if (Directory.Exists(destination))
+            internal readonly string Destination;
+            private readonly string source, incoming, original;
+            private ImportRename moveAside, installation;
+
+            internal ImportDirectory(string source, string destination, string operationRoot)
             {
-                if (!replace) { TryDeleteDirectory(incoming); throw new IOException("Destination campaign already exists."); }
-                old = MoveImportedDirectoryAside(destination);
+                this.source = source;
+                Destination = destination;
+                incoming = Path.Combine(operationRoot, "incoming", Path.GetFileName(source));
+                original = Path.Combine(operationRoot, "original", Path.GetFileName(source));
             }
-            MoveDirectoryWithRetries(incoming, destination);
-            return old;
-        }
 
-        private static string MoveImportedDirectoryAside(string destination)
-        {
-            string old = Path.Combine(Program.DataDir, ".r", Guid.NewGuid().ToString("N").Substring(0, 12));
-            Directory.CreateDirectory(Path.GetDirectoryName(old));
-            MoveDirectoryWithRetries(destination, old);
-            return old;
-        }
-
-        private static void RestoreImportedDirectory(string destination, string old)
-        {
-            string failed = "";
-            try
+            internal void Install(bool replace, Action<string, string> beforeStep)
             {
-                if (Directory.Exists(destination))
+                bool hasSource = Directory.Exists(source);
+                if (hasSource) CopyDirectoryTree(source, incoming, null);
+                if (Directory.Exists(Destination))
                 {
-                    failed = Path.Combine(Program.DataDir, ".f", Guid.NewGuid().ToString("N").Substring(0, 12));
-                    Directory.CreateDirectory(Path.GetDirectoryName(failed));
-                    MoveDirectoryWithRetries(destination, failed);
+                    if (!replace) throw new IOException("Destination campaign already exists: " + Destination);
+                    Directory.CreateDirectory(Path.GetDirectoryName(original));
+                    moveAside = ImportRename.Attempted;
+                    beforeStep?.Invoke("move_original", Destination);
+                    MoveDirectoryWithRetries(Destination, original);
+                    moveAside = ImportRename.Completed;
                 }
-                if (!string.IsNullOrWhiteSpace(old) && Directory.Exists(old)) MoveDirectoryWithRetries(old, destination);
+                // Missing optional directories in a replacement intentionally retire the old tree.
+                if (!hasSource) return;
+                Directory.CreateDirectory(Path.GetDirectoryName(Destination));
+                installation = ImportRename.Attempted;
+                beforeStep?.Invoke("install_directory", Destination);
+                MoveDirectoryWithRetries(incoming, Destination);
+                installation = ImportRename.Completed;
             }
-            catch { }
-            finally { TryDeleteDirectory(failed); }
+
+            internal void Restore()
+            {
+                // If a rename failed and its source is gone, ownership is uncertain.
+                // Preserve both paths for inspection instead of issuing another rename.
+                if (moveAside == ImportRename.Attempted && (!Directory.Exists(Destination) || Directory.Exists(original)))
+                    throw new IOException("The original directory move has an unconfirmed outcome.");
+                if (installation == ImportRename.Attempted && !Directory.Exists(incoming))
+                    throw new IOException("The incoming directory move has an unconfirmed outcome.");
+                if (installation == ImportRename.Completed)
+                {
+                    MoveDirectoryWithRetries(Destination, incoming);
+                    installation = ImportRename.Untouched;
+                }
+                if (moveAside == ImportRename.Completed)
+                {
+                    MoveDirectoryWithRetries(original, Destination);
+                    moveAside = ImportRename.Untouched;
+                }
+            }
+
+            internal Dictionary<string, object> Inventory() => new Dictionary<string, object>
+            {
+                ["destination"] = Destination, ["incoming"] = incoming, ["original"] = original,
+                ["moveAside"] = moveAside.ToString(), ["installation"] = installation.ToString()
+            };
         }
 
         private static List<Dictionary<string, object>> BackupFileManifest(string root)
