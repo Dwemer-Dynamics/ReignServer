@@ -170,7 +170,7 @@ namespace ReignBetaServer
                 ? terms : null;
         }
 
-        internal static Dictionary<string, object> NativeDiplomaticMarriageCompletion(string status,
+        internal static Dictionary<string, object> NativeDiplomaticMarriageCompletion(string actionId, string status,
             Dictionary<string, object> record, Dictionary<string, object> report)
         {
             var terms = CompletedDiplomaticMarriageTerms(status, record);
@@ -185,9 +185,15 @@ namespace ReignBetaServer
             var spouses = ReadDictionaryList(result, "changedEntities")
                 .Where(change => ReadString(change, "entityType", "") == "hero" && ReadString(change, "changeType", "") == "spouse_changed")
                 .Select(change => ReadString(change, "id", "")).ToHashSet(StringComparer.Ordinal);
-            if (!spouses.SetEquals(new[] { first, second }) || !ReadDictionaryList(result, "effects").Any(effect =>
+            var effects = ReadDictionaryList(result, "effects");
+            if (!spouses.SetEquals(new[] { first, second }) || !effects.Any(effect =>
                 ReadString(effect, "effectType", "") == "marriage_completed" && ReadString(effect, "entityType", "") == "hero"
                 && spouses.Contains(ReadString(effect, "id", "")))) return null;
+
+            int fee = ReadInt(ReadDictionary(terms, "marriageTerms"), "fee", -1);
+            if (fee < 0 || !effects.Any(effect => ReadString(effect, "effectType", "") == "diplomatic_marriage_settled"
+                && ReadString(effect, "entityType", "") == "action" && ReadString(effect, "id", "") == actionId
+                && ReadInt(effect, "detail", -1) == fee)) return null;
 
             string timeline = ReadString(report, "timelineId", "");
             string recordedTimeline = ReadString(record, "timelineId", "");
@@ -493,30 +499,45 @@ namespace ReignBetaServer
             var record = TestDict("source", "world_diplomacy_director", "type", "DiplomacyPackage",
                 "termsJson", Json.Serialize(TestDict("marriageTerms", quote, "marriageHero1StringId", first, "marriageHero2StringId", second)));
             Dictionary<string, object> Row(string id, string status) => TestDict("id", id, "status", status, "record", record);
-            Dictionary<string, object> NativeReport(string id, string spouse) => TestDict("campaignId", campaign, "actionId", id,
-                "status", "completed", "type", "DiplomacyPackage", "message", "Wedding concluded.",
-                "actorHeroStringId", "report_actor", "targetHeroStringId", "report_target", "worldDay", 22d, "timelineId", timeline,
-                "result", TestDict("success", true, "completed", true,
-                    "effects", new[] { TestDict("effectType", "marriage_completed", "entityType", "hero", "id", spouse) },
-                    "changedEntities", new[] { TestDict("entityType", "hero", "changeType", "spouse_changed", "id", first),
-                        TestDict("entityType", "hero", "changeType", "spouse_changed", "id", spouse) }));
+            int fee = ReadInt(quote, "fee", -1);
+            Dictionary<string, object> NativeReport(string id, string spouse, int? paidFee)
+            {
+                var effects = new List<Dictionary<string, object>>
+                    { TestDict("effectType", "marriage_completed", "entityType", "hero", "id", spouse) };
+                if (paidFee.HasValue)
+                    effects.Add(TestDict("effectType", "diplomatic_marriage_settled", "entityType", "action", "id", id,
+                        "detail", paidFee.Value.ToString(CultureInfo.InvariantCulture)));
+                return TestDict("campaignId", campaign, "actionId", id, "status", "completed", "type", "DiplomacyPackage",
+                    "message", "Wedding concluded.", "actorHeroStringId", "report_actor", "targetHeroStringId", "report_target",
+                    "worldDay", 22d, "timelineId", timeline,
+                    "result", TestDict("success", true, "completed", true, "effects", effects,
+                        "changedEntities", new[] { TestDict("entityType", "hero", "changeType", "spouse_changed", "id", first),
+                            TestDict("entityType", "hero", "changeType", "spouse_changed", "id", spouse) }));
+            }
             Dictionary<string, object> Pair(string a, string b)
                 => RelationshipsStore.SelectRelationshipPairChemistry5(connection, TestDict("p", AmbientPairKey(a, b))).FirstOrDefault();
             var before = Pair(leaderA, leaderB);
             string spousesBefore = Json.Serialize(Pair(first, second));
             var completed = Row("native_marriage_completed", "queued");
-            var currentReport = NativeReport("native_marriage_completed", second);
-            var pendingEffect = Row("native_marriage_pending_effect", "completed");
-            pendingEffect["diplomaticMarriageCompletion"] = NativeDiplomaticMarriageCompletion("completed", record, currentReport);
+            var currentReport = NativeReport("native_marriage_completed", second, fee);
+            const string pendingId = "native_marriage_pending_effect";
+            var pendingEffect = Row(pendingId, "completed");
+            pendingEffect["diplomaticMarriageCompletion"] =
+                NativeDiplomaticMarriageCompletion(pendingId, "completed", record, NativeReport(pendingId, second, fee));
             ActionPipelineService.WriteActionQueueUnlocked(campaign, new List<Dictionary<string, object>> {
-                completed, Row("native_marriage_historical", "completed"), Row("native_marriage_wrong_couple", "queued"), pendingEffect
+                completed, Row("native_marriage_historical", "completed"), Row("native_marriage_wrong_couple", "queued"),
+                Row("native_marriage_unsettled", "queued"), Row("native_marriage_wrong_fee", "queued"), pendingEffect
             });
 
-            ActionPipelineService.ReportAction(NativeReport("native_marriage_historical", second));
-            ActionPipelineService.ReportAction(NativeReport("native_marriage_wrong_couple", "other_spouse"));
+            ActionPipelineService.ReportAction(NativeReport("native_marriage_historical", second, fee));
+            check("diplomatic_historical_completion_has_no_effect",
+                Json.Serialize(Pair(leaderA, leaderB)) == Json.Serialize(before));
+            ActionPipelineService.ReportAction(NativeReport("native_marriage_wrong_couple", "other_spouse", fee));
             // A later same-status report cannot replace evidence on an already completed row.
-            ActionPipelineService.ReportAction(NativeReport("native_marriage_wrong_couple", second));
-            check("diplomatic_historical_and_wrong_couple_have_no_effect",
+            ActionPipelineService.ReportAction(NativeReport("native_marriage_wrong_couple", second, fee));
+            ActionPipelineService.ReportAction(NativeReport("native_marriage_unsettled", second, null));
+            ActionPipelineService.ReportAction(NativeReport("native_marriage_wrong_fee", second, fee + 1));
+            check("diplomatic_wrong_couple_and_unverified_settlement_have_no_effect",
                 Json.Serialize(Pair(leaderA, leaderB)) == Json.Serialize(before));
 
             ActionPipelineService.ReportAction(currentReport);
@@ -528,14 +549,14 @@ namespace ReignBetaServer
                 deltaAB == 20 && deltaBA == 20 && Json.Serialize(Pair(leaderA, leaderB)) == Json.Serialize(after)
                 && Pair("report_actor", "report_target") == null && Json.Serialize(Pair(first, second)) == spousesBefore);
 
-            var retry = NativeReport("native_marriage_pending_effect", "other_spouse");
+            var retry = NativeReport(pendingId, "other_spouse", null);
             retry["timelineId"] = "different_retry_timeline";
             retry["worldDay"] = 99d;
             ActionPipelineService.ReportAction(retry);
             var recovered = Pair(leaderA, leaderB);
             ActionPipelineService.ReportAction(retry);
             var savedRecovery = ActionPipelineService.ReadActionQueueUnlocked(campaign)
-                .Single(row => ReadString(row, "id", "") == "native_marriage_pending_effect");
+                .Single(row => ReadString(row, "id", "") == pendingId);
             var savedAdmission = ReadDictionary(savedRecovery, "diplomaticMarriageCompletion");
             check("diplomatic_completion_recovers_from_persisted_admission",
                 ReadInt(recovered, "affinity_a_to_b", 0) - ReadInt(after, "affinity_a_to_b", 0) == 20

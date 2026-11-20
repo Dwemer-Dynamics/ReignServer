@@ -401,7 +401,7 @@ namespace ReignBetaServer
                             // retry can finish its effects without reopening historical reports.
                             if (!IsTerminalActionReportStatus(currentStatus))
                             {
-                                var completion = RelationshipsService.NativeDiplomaticMarriageCompletion(status, matchedRecord, payload);
+                                var completion = RelationshipsService.NativeDiplomaticMarriageCompletion(id, status, matchedRecord, payload);
                                 if (completion != null) row[diplomaticMarriageCompletion] = completion;
                             }
                             row["status"] = status;
