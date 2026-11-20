@@ -357,6 +357,8 @@ namespace ReignBetaServer
             // report returns that canonical status and writes no evidence, audit or projection.
             bool protocolOwned = false;
             string authoritativeStatus = status;
+            const string diplomaticMarriageCompletion = "diplomaticMarriageCompletion";
+            Dictionary<string, object> admittedDiplomaticMarriage = null;
             lock (Program.FileLock)
             {
                 List<Dictionary<string, object>> queue = ReadActionQueueUnlocked(campaignId);
@@ -395,6 +397,13 @@ namespace ReignBetaServer
                         if (ShouldAcceptActionStatusTransition(currentStatus, status)
                             || legacyRefusalCorrection)
                         {
+                            // Freeze native marriage evidence with first acceptance so a
+                            // retry can finish its effects without reopening historical reports.
+                            if (!IsTerminalActionReportStatus(currentStatus))
+                            {
+                                var completion = RelationshipsService.NativeDiplomaticMarriageCompletion(status, matchedRecord, payload);
+                                if (completion != null) row[diplomaticMarriageCompletion] = completion;
+                            }
                             row["status"] = status;
                             row["reportTs"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                             row["report"] = payload;
@@ -411,6 +420,7 @@ namespace ReignBetaServer
                             protocolOwned = true;
                             authoritativeStatus = status = ReadString(row, "status", "");
                         }
+                        else admittedDiplomaticMarriage = ReadDictionary(row, diplomaticMarriageCompletion);
                         break;
                     }
                 }
@@ -480,7 +490,8 @@ namespace ReignBetaServer
                 };
             }
             if (found) DialogueService.RecordSharedActionReceipt(campaignId, payload, matchedRecord, authoritativeStatus);
-            if(found)RelationshipsService.FinalizeDiplomaticMarriageEffects(campaignId,id,authoritativeStatus,matchedRecord,payload);
+            if (found) RelationshipsService.FinalizeDiplomaticMarriageEffects(
+                campaignId, id, authoritativeStatus, matchedRecord, payload, admittedDiplomaticMarriage);
             Dictionary<string, object> memoryStore = DialogueService.StoreActionResultMemory(payload, "actions_report");
             List<Dictionary<string, object>> nativeRelationChanges = RelationshipsService.EvaluateCompletedActionRelationships(payload);
             DiplomacyService.UpdateDiplomaticEventForAction(campaignId, id, status, payload);
