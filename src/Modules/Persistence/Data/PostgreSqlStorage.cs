@@ -10,6 +10,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using Npgsql;
 using Reign.Core.Contracts.Platform;
@@ -673,16 +674,25 @@ ORDER BY created_utc,save_point_id;", connection))
         {
             var expected = new HashSet<string>(StringComparer.Ordinal) { CampaignSchemaName(campaignId) };
             foreach (var snapshot in snapshots)
-                expected.Add(SnapshotSchemaName(campaignId, Convert.ToString(snapshot["savePointId"], CultureInfo.InvariantCulture)));
+            {
+                string savePointId = snapshot.TryGetValue("savePointId", out object value)
+                    ? Convert.ToString(value, CultureInfo.InvariantCulture) : null;
+                if (string.IsNullOrWhiteSpace(savePointId))
+                    throw new InvalidDataException("PostgreSQL archive snapshot inventory is missing a save point ID.");
+                expected.Add(SnapshotSchemaName(campaignId, savePointId));
+            }
 
             bool nativeBin = !string.IsNullOrWhiteSpace(NativePostgreSqlBin());
             string archive = PostgreSqlTools.ArchivePath(path, nativeBin);
             string toc = RunPostgreSqlTool(new List<string> { "pg_restore", "--list", archive }, 600000);
-            var schemas = System.Text.RegularExpressions.Regex.Matches(toc,
-                @"(?m)^\d+;[ \t]+\d+[ \t]+\d+[ \t]+SCHEMA[ \t]+-[ \t]+(\S+)")
-                .Select(entry => entry.Groups[1].Value);
-            if (!expected.SetEquals(schemas))
-                throw new InvalidDataException("PostgreSQL archive schema inventory does not match the campaign and its snapshots.");
+            var scopedList = new List<string> { "pg_restore", "--list" };
+            foreach (string schema in expected)
+            {
+                scopedList.Add("--schema");
+                scopedList.Add(schema);
+            }
+            scopedList.Add(archive);
+            VerifyCampaignArchiveInventory(toc, RunPostgreSqlTool(scopedList, 600000), expected);
 
             // Reading the TOC alone does not read the compressed table data. Decode the
             // entire custom archive to the PostgreSQL host's null device without applying SQL.
@@ -692,6 +702,37 @@ ORDER BY created_utc,save_point_id;", connection))
             {
                 throw new InvalidDataException("PostgreSQL could not read all campaign archive data. " + ex.Message, ex);
             }
+        }
+
+        internal static void VerifyCampaignArchiveInventory(string toc, string scopedToc, HashSet<string> expected)
+        {
+            static IEnumerable<string> Entries(string listing) => listing.Split('\n')
+                .Select(row => row.TrimEnd('\r')).Where(row => !string.IsNullOrWhiteSpace(row) && !row.StartsWith(';'));
+
+            // pg_restore matches the actual namespace. The printed columns are unquoted,
+            // and type names such as TABLE DATA and SEQUENCE OWNED BY include spaces.
+            var scoped = Entries(scopedToc).ToHashSet(StringComparer.Ordinal);
+            var definitions = new HashSet<string>(StringComparer.Ordinal);
+            const string prefix = @"\A[0-9]+; [0-9]+ [0-9]+ ";
+            foreach (string row in Entries(toc))
+            {
+                if (Regex.IsMatch(row, prefix + "SCHEMA "))
+                {
+                    // Schema definitions have no namespace and never appear in the filtered list.
+                    // Require an unambiguous generated schema name and one owner field.
+                    Match definition = Regex.Match(row, prefix + @"SCHEMA - (\S+) \S+\z");
+                    if (!definition.Success || !expected.Contains(definition.Groups[1].Value) || !definitions.Add(definition.Groups[1].Value))
+                        throw new InvalidDataException("PostgreSQL archive has an unexpected or ambiguous schema definition.");
+                    continue;
+                }
+                // pg_restore selects these annotations by parent dependency. Check their
+                // displayed namespace as well before admitting them with that parent.
+                Match annotation = Regex.Match(row, prefix + @"(?:COMMENT|ACL|SECURITY LABEL) ([^ ]*)");
+                if (!scoped.Remove(row) || (annotation.Success && !expected.Contains(annotation.Groups[1].Value)))
+                    throw new InvalidDataException("PostgreSQL archive contains an entry outside the campaign and its snapshots.");
+            }
+            if (scoped.Count != 0 || !expected.SetEquals(definitions))
+                throw new InvalidDataException("PostgreSQL archive schema inventory does not match the campaign and its snapshots.");
         }
 
         public static void ImportCampaignArchive(

@@ -127,6 +127,8 @@ namespace ReignBetaServer
                 add("export_archive_created", ReadBool(export, "ok", false) && File.Exists(archivePath), "A complete campaign archive is created.");
                 if (!ReadBool(export, "ok", false)) throw new InvalidOperationException("Export failed: " + ReadString(export, "error", "unknown error"));
                 VerifyBackupDirectoryRenames(purgeFixture, add);
+                VerifyBackupNativeStaging(purgeFixture, add);
+                VerifyBackupArchiveInventory(campaignId, add);
                 VerifyBackupImportFailures(campaignId, archivePath, nativeSavePath, purgeFixture, add);
                 string uploadCopy = Path.Combine(Program.DataDir, "backups", "importing", Guid.NewGuid().ToString("N") + ".reignbackup");
                 Directory.CreateDirectory(Path.GetDirectoryName(uploadCopy));
@@ -220,6 +222,7 @@ namespace ReignBetaServer
                     replacementVerified
                         ? "A separately confirmed native-save replacement restores the archive bytes and verifies their hash before completing import."
                         : "Confirmed native-save replacement failed: " + Json.Serialize(replacedImport));
+                VerifyVersionTwoBackupImport(campaignId, nativeSavePath, purgeFixture, add);
             }
             catch (Exception ex) { add("campaign_backup_exception", false, ex.Message); }
             finally
@@ -235,6 +238,81 @@ namespace ReignBetaServer
                 TryDeleteDirectory(purgeFixture);
             }
             return results;
+        }
+
+        private static void VerifyBackupArchiveInventory(string campaignId, Action<string, bool, string> add)
+        {
+            string campaign = ReignPostgreSqlStorage.CampaignSchemaName(campaignId);
+            string snapshot = ReignPostgreSqlStorage.SnapshotSchemaName(campaignId, "fixture");
+            var expected = new HashSet<string>(StringComparer.Ordinal) { campaign, snapshot };
+            string definitions = $"; Selected TOC Entries:\n1; 2615 10 SCHEMA - {campaign} owner\n2; 2615 11 SCHEMA - {snapshot} owner\n";
+            string objects = $"3; 0 12 TABLE DATA {campaign} fixture owner\n4; 0 0 SEQUENCE OWNED BY {snapshot} fixture_seq owner\n";
+            bool Accepted(string complete, string scoped)
+            {
+                try { ReignPostgreSqlStorage.VerifyCampaignArchiveInventory(complete, scoped, expected); return true; }
+                catch (InvalidDataException) { return false; }
+            }
+            add("import_scoped_archive_inventory", Accepted(definitions + objects, objects),
+                "The inventory admits multiword entries selected by PostgreSQL for both the campaign and its snapshot.");
+            string other = "5; 0 13 TABLE DATA separate_fixture sample owner\n";
+            add("import_foreign_archive_entry", !Accepted(definitions + objects + other, objects),
+                "A table-data entry outside the selected namespaces invalidates an otherwise complete inventory.");
+            string unscoped = "6; 0 0 COMMENT - fixture owner\n";
+            string emptyScope = "6; 0 0 COMMENT  fixture owner\n";
+            add("import_unscoped_archive_annotation", !Accepted(definitions + objects + unscoped, objects + unscoped)
+                && !Accepted(definitions + objects + emptyScope, objects + emptyScope),
+                "An annotation selected by a parent still needs an owned namespace of its own.");
+            add("import_duplicate_archive_definition", !Accepted(definitions + objects + $"7; 2615 14 SCHEMA - {campaign} owner\n", objects),
+                "A repeated namespace definition invalidates the inventory.");
+        }
+
+        private static void VerifyVersionTwoBackupImport(string campaignId, string nativeSave, string fixture, Action<string, bool, string> add)
+        {
+            const string point = "diagnostic_backup_point";
+            string root = Path.Combine(fixture, "version-two");
+            string campaign = Path.Combine(root, "campaign");
+            Directory.CreateDirectory(campaign);
+            File.Copy(Path.Combine(StrictCampaignDirectory(campaignId), "campaign.json"), Path.Combine(campaign, "campaign.json"));
+            File.WriteAllText(Path.Combine(campaign, "v2.txt"), "version two");
+            ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaignId, point);
+            ReignPostgreSqlStorage.ExportCampaignArchive(campaignId, Path.Combine(root, "postgresql.dump"));
+            // Version 2 permits an archive without the version 3 native-save inventory.
+            CampaignFileService.WriteJsonObject(Path.Combine(root, "manifest.json"), new Dictionary<string, object>
+            {
+                ["format"] = CampaignBackupFormat, ["version"] = 2, ["campaignId"] = campaignId,
+                ["databaseProvider"] = "postgresql", ["databaseName"] = ReignPostgreSqlOptions.RequiredDatabaseName,
+                ["databaseEncoding"] = ReignPostgreSqlOptions.RequiredEncoding, ["databaseArchive"] = "postgresql.dump",
+                ["saveSyncSnapshots"] = ReignPostgreSqlStorage.ListSnapshots(campaignId), ["files"] = BackupFileManifest(root)
+            });
+            string upload = Path.Combine(fixture, "v2.reignbackup");
+            ZipFile.CreateFromDirectory(root, upload);
+            string nativeHash = FileSha256(nativeSave);
+            ReignPostgreSqlStorage.DropSnapshot(campaignId, point);
+            var imported = ImportCampaignBackup(upload, new Dictionary<string, string> { ["replace"] = "true" });
+            add("import_version_two_snapshot", ReadBool(imported, "ok", false) && ReadInt(imported, "nativeSavesRestored", -1) == 0
+                && ReignPostgreSqlStorage.SnapshotExists(campaignId, point) && FileSha256(nativeSave) == nativeHash
+                && File.ReadAllText(Path.Combine(StrictCampaignDirectory(campaignId), "v2.txt")) == "version two",
+                "A version 2 archive restores its campaign files and PostgreSQL snapshot while preserving the existing native save.");
+        }
+
+        private static void VerifyBackupNativeStaging(string fixture, Action<string, bool, string> add)
+        {
+            string root = Path.Combine(fixture, "native-staging");
+            Directory.CreateDirectory(root);
+            string source = Path.Combine(root, "incoming.sav"), target = Path.Combine(root, "existing.sav");
+            string original = Path.Combine(root, "original", "existing.sav");
+            File.WriteAllText(source, "complete incoming save");
+            File.WriteAllText(target, "original save");
+            string priorHash = FileSha256(target);
+            var install = new ImportNativeSave(target, original, priorHash, FileSha256(source));
+            using (var truncated = File.OpenWrite(source)) truncated.SetLength(2);
+            bool rejected = false;
+            try { install.Install(source); }
+            catch (InvalidDataException) { rejected = true; }
+            install.Restore();
+            add("import_native_staging_hash_mismatch", rejected && FileSha256(target) == priorHash && FileSha256(original) == priorHash
+                && !Directory.EnumerateFiles(root, ".ri-*.tmp").Any(),
+                "A short staged copy fails hash verification before replacement and leaves the verified original intact.");
         }
 
         private static void VerifyBackupDirectoryRenames(string fixture, Action<string, bool, string> add)
@@ -397,13 +475,17 @@ namespace ReignBetaServer
             {
                 if (step != "finalize") return;
                 ownedOperation = operation;
-                throw new IOException("after install");
+                // Let the real lifecycle metadata write fail after all installations finish.
+                string metadata = Path.Combine(destinations[0], "campaign.json");
+                File.Move(metadata, Path.Combine(operation, "installed-campaign.json"));
+                Directory.CreateDirectory(metadata);
             });
             retained = ReadBool(rolledBack, "recoveryRequired", false) && ReadString(rolledBack, "recoveryPath", "") == ownedOperation;
             add("import_installed_resources_rollback", retained && ReadString(rolledBack, "databaseState", "") == "archive_reapplied"
                 && File.Exists(Path.Combine(ownedOperation, "original.dump")) && OriginalDirectories()
+                && Directory.Exists(Path.Combine(ownedOperation, "incoming", "campaign", "campaign.json"))
                 && FileSha256(nativeSave) == nativeHash && ReignPostgreSqlStorage.TableRowCount(campaignId, "import_original_marker") == 1,
-                "After a completed installation, rollback restores prior campaign contents, verifies original files, and retains the dump for metadata reconciliation.");
+                "A failed lifecycle metadata write restores prior campaign contents and retains the dump and displaced incoming tree.");
             if (!retained) throw new IOException("Missing isolated replay evidence.");
             TryDeleteDirectory(ownedOperation);
 
