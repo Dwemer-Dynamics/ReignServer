@@ -324,6 +324,7 @@ namespace ReignBetaServer
                         capacityLedger,
                         unrelatedIncoming) == 15,
                     "Overwriting a known native save can register safely at capacity while an unrelated sixteenth state remains blocked.");
+                VerifyLegacySaveSyncCapacity(preexistingId, token, capacityLedger, add);
 
                 AppendSaveSyncTestFutureState(campaignId);
                 Dictionary<string, object> newPayload = SaveSyncTestPointPayload(campaignId, newPoint, 20d, "Newest Save");
@@ -979,18 +980,21 @@ namespace ReignBetaServer
                 return (Dictionary<string, object>)Program.ServerRoutes.Value.Resolve(request.Method, path).Handler(request, null);
             }
 
+            string[] QueuedOptimizations()
+            {
+                lock (SaveSyncOptimizationQueued)
+                    return SaveSyncOptimizationQueued.Where(key => key.StartsWith(campaignId + "|", StringComparison.Ordinal))
+                        .OrderBy(key => key, StringComparer.Ordinal).ToArray();
+            }
+
             string State()
             {
-                string[] queued;
-                lock (SaveSyncOptimizationQueued)
-                    queued = SaveSyncOptimizationQueued.Where(key => key.StartsWith(campaignId + "|", StringComparison.Ordinal))
-                        .OrderBy(key => key, StringComparer.Ordinal).ToArray();
                 return Json.Serialize(TestDict(
                     "campaignFiles", BackupFileManifest(StrictCampaignDirectory(campaignId)),
                     "saveSyncFiles", BackupFileManifest(SaveSyncCampaignRoot(campaignId)),
                     "snapshotSchemas", ReignPostgreSqlStorage.ListSnapshots(campaignId),
                     "uniqueStates", SaveSyncUniqueStateCount(ReadSaveSyncLedger(campaignId)),
-                    "queued", queued));
+                    "queued", QueuedOptimizations()));
             }
 
             void CheckPreview(string id, string path, Dictionary<string, object> payload, string expectedResult, bool expectedOk = true)
@@ -1034,30 +1038,75 @@ namespace ReignBetaServer
                     !ReadBool(failed, "ok", true) && ReadString(failed, "result", "") == "critical_history_pending"
                     && ReadString(failed, "error", "").Length > 0 && !failed.ContainsKey("noOp")
                     && State() == beforeFailure,
-                    "A failed legacy registration reports the pending history and keeps the checkpoint available for a retry.");
+                    "A refused legacy registration reports pending history and allows a later retry.");
 
                 legacy["worldHistoryOutboxDrained"] = true;
                 int previousCount = SaveSyncUniqueStateCount(ReadSaveSyncLedger(campaignId));
                 var registered = Post(loadPath, legacy);
                 var ledger = ReadSaveSyncLedger(campaignId);
                 var point = SaveSyncPoint(ledger, pointId);
-                bool scheduled;
-                lock (SaveSyncOptimizationQueued)
-                    scheduled = SaveSyncOptimizationQueued.Contains(campaignId + "|" + pointId);
                 add("legacy_load_captures_baseline_after_refusal",
                     ReadBool(registered, "ok", false) && ReadString(registered, "result", "") == "legacy_baseline_registered"
-                    && !ReadBool(registered, "dryRun", true) && point != null && scheduled
+                    && !ReadBool(registered, "dryRun", true) && ReadBool(registered, "noOp", false) && point != null
+                    && QueuedOptimizations().Contains(campaignId + "|" + pointId)
                     && ReignPostgreSqlStorage.SnapshotExists(campaignId, pointId)
                     && File.Exists(Path.Combine(SaveSyncSnapshotRoot(campaignId, point), "manifest.json"))
                     && SaveSyncUniqueStateCount(ledger) == previousCount + 1,
                     "The real load captures a load-ready baseline, consumes one unique state and schedules its optimization.");
                 CheckPreview("registered_legacy_point_previews_existing_snapshot", previewPath, legacy, "preview");
+
+                string aliasId = "legacy_shared_" + token;
+                var alias = new Dictionary<string, object>(legacy) { ["savePointId"] = aliasId };
+                var shared = Post(loadPath, alias);
+                var sharedLedger = ReadSaveSyncLedger(campaignId);
+                var sharedPoint = SaveSyncPoint(sharedLedger, aliasId);
+                add("legacy_load_shares_clean_baseline",
+                    ReadBool(shared, "ok", false) && ReadString(shared, "result", "") == "legacy_baseline_registered"
+                    && ReadBool(shared, "noOp", false) && point != null && sharedPoint != null
+                    && SaveSyncPostgreSqlSnapshotPointId(sharedPoint) == pointId
+                    && SaveSyncSnapshotRoot(campaignId, sharedPoint) == SaveSyncSnapshotRoot(campaignId, point)
+                    && SaveSyncUniqueStateCount(sharedLedger) == previousCount + 1
+                    && !ReignPostgreSqlStorage.SnapshotExists(campaignId, aliasId)
+                    && !QueuedOptimizations().Contains(campaignId + "|" + aliasId),
+                    "A real legacy load can register an alias of the clean baseline without consuming a slot or scheduling another optimization.");
             }
             finally
             {
                 SaveSyncDisableBackgroundOptimizationForTests = previousDisable;
                 SaveSyncOptimizationSemaphore.Release();
+                if (!SpinWait.SpinUntil(() => QueuedOptimizations().Length == 0, TimeSpan.FromSeconds(30)))
+                    throw new TimeoutException("The legacy Save Sync fixture did not finish its queued optimization.");
             }
+        }
+
+        private static void VerifyLegacySaveSyncCapacity(
+            string campaignId, string token, Dictionary<string, object> capacityLedger, Action<string, bool, string> add)
+        {
+            var originalLedger = ReadSaveSyncLedger(campaignId);
+            string root = SaveSyncCampaignRoot(campaignId);
+            string ledgerPath = Path.Combine(root, "ledger.json");
+            string auditPath = Path.Combine(root, "audit.jsonl");
+            try
+            {
+                WriteSaveSyncLedger(campaignId, capacityLedger);
+                string ledgerHash = FileSha256(ledgerPath);
+                int auditLines = File.ReadLines(auditPath).Count();
+                string pointId = "legacy_at_limit_" + token;
+                var payload = SaveSyncTestPointPayload(campaignId, pointId, 3d, "Unrelated Legacy Save");
+                payload["savePointKind"] = "legacy_baseline";
+                var refused = SaveSyncLoadApi(payload, false);
+                var addedAudit = File.ReadLines(auditPath).Skip(auditLines)
+                    .Select(line => Json.Deserialize<Dictionary<string, object>>(line)).ToArray();
+                add("legacy_load_preserves_capacity_refusal",
+                    !ReadBool(refused, "ok", true) && ReadString(refused, "result", "") == "snapshot_limit_reached"
+                    && ReadString(refused, "error", "").Length > 0 && !refused.ContainsKey("noOp")
+                    && ReadInt(refused, "remainingUniqueStates", -1) == 0 && FileSha256(ledgerPath) == ledgerHash
+                    && !ReignPostgreSqlStorage.SnapshotExists(campaignId, pointId)
+                    && addedAudit.Length == 1 && ReadString(addedAudit[0], "eventType", "") == "save_point.limit_reached"
+                    && ReadString(addedAudit[0], "savePointId", "") == pointId,
+                    "At the unique-state limit the real legacy load preserves the refusal, records the limit audit and leaves the ledger intact.");
+            }
+            finally { WriteSaveSyncLedger(campaignId, originalLedger); }
         }
 
         private static void PrepareCampaignRetirementTestPoint(
