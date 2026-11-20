@@ -21,6 +21,14 @@ namespace Reign.Core.Contracts.Court
         public string[] ResolutionIds { get; set; } = Array.Empty<string>();
     }
 
+    public enum ReignInternationalReplyDisposition
+    {
+        Unavailable,
+        Refused,
+        Accepted,
+        Countered
+    }
+
     public static class ReignInternationalDocketRules
     {
         public static ReignNobleMatterSeverity SeverityForRoll(int roll)
@@ -44,6 +52,17 @@ namespace Reign.Core.Contracts.Court
             if (!string.Equals(optionId, "accept", StringComparison.OrdinalIgnoreCase)) return false;
             return !string.Equals(remedy, "prisoner", StringComparison.OrdinalIgnoreCase) || ransom;
         }
+        public static ReignInternationalReplyDisposition ReadSovereignReplyDisposition(string status)
+        {
+            switch (status)
+            {
+                case "accepted_awaiting_court": return ReignInternationalReplyDisposition.Accepted;
+                case "countered": return ReignInternationalReplyDisposition.Countered;
+                case "refused": return ReignInternationalReplyDisposition.Refused;
+                default: return ReignInternationalReplyDisposition.Unavailable;
+            }
+        }
+
         public static int NpcPressureDelta(ReignNobleMatterSeverity severity, bool favorsPlayer, bool hostile)
             => favorsPlayer || !hostile ? -PressureMagnitude(severity) : PressureMagnitude(severity);
 
