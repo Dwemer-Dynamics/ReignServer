@@ -18,21 +18,25 @@ function Get-ReignPhysicalDirectory([string]$Path) {
     $target=$directory.ResolveLinkTarget($true)
     if($target){$target.FullName}else{$directory.FullName}
 }
-function Invoke-ReignInventoryGit([string]$Root) {
+function Invoke-SourceGit([string]$Root,[string[]]$Arguments) {
     $git=Join-Path $env:ProgramFiles 'Git/cmd/git.exe'
     if(-not (Test-Path -LiteralPath $git)){$git=(Get-Command git -ErrorAction Stop).Source}
     $info=[Diagnostics.ProcessStartInfo]::new($git)
     $info.UseShellExecute=$false; $info.CreateNoWindow=$true
     $info.RedirectStandardInput=$true; $info.RedirectStandardOutput=$true; $info.RedirectStandardError=$true
     $info.StandardOutputEncoding=[Text.Encoding]::UTF8
-    foreach($arg in @('-C',$Root,'ls-files','-co','--exclude-standard','-z')){[void]$info.ArgumentList.Add($arg)}
+    foreach($arg in @('-C',$Root)+$Arguments){[void]$info.ArgumentList.Add($arg)}
     foreach($key in @($info.Environment.Keys | Where-Object {$_ -like 'GIT_*'})){$info.Environment.Remove($key)|Out-Null}
     $info.Environment['GIT_TERMINAL_PROMPT']='0'
     $p=[Diagnostics.Process]::Start($info); $p.StandardInput.Close()
     $stdout=$p.StandardOutput.ReadToEndAsync(); $stderr=$p.StandardError.ReadToEndAsync()
-    if(-not $p.WaitForExit(60000)){$p.Kill($true);throw 'Source inventory Git timed out.'}
+    if(-not $p.WaitForExit(60000)){$p.Kill($true);throw 'Source Git timed out.'}
     $text=$stdout.GetAwaiter().GetResult(); $errorText=$stderr.GetAwaiter().GetResult()
-    if($p.ExitCode -ne 0){throw ('Source inventory Git failed: '+$errorText)}
+    if($p.ExitCode -ne 0){throw ('Source Git failed: '+$errorText)}
+    $text
+}
+function Invoke-ReignInventoryGit([string]$Root) {
+    $text=Invoke-SourceGit $Root @('ls-files','-co','--exclude-standard','-z')
     $text.Split([char]0,[StringSplitOptions]::RemoveEmptyEntries) | Sort-Object -CaseSensitive -Unique
 }
 function Get-ReignSourceInventory([string]$Workspace,[string]$ServerRoot) {
@@ -78,13 +82,85 @@ function Test-ReignStringSet($Expected,$Actual) {
     $set.SetEquals([string[]]@($Actual|Where-Object {$null -ne $_}))
 }
 function Get-ReignOriginalReport([string]$Path,[string]$Workspace,[string]$Kind) {
-    $report=Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-    if(-not $report.Ok -or $report.RunId -notmatch '^\d{8}-\d{6}-[0-9a-f]{8}$'){throw 'An original successful canonical report is required.'}
     $name=if($Kind -eq 'validation'){'validation-report.json'}else{'linux-build-report.json'}
-    $root=Join-Path $Workspace ('.codex-build/reign-mcp/'+$Kind+'/'+$report.RunId)
+    $runId=[IO.Path]::GetFileName([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Path)))
+    $root=Join-Path $Workspace ('.codex-build/reign-mcp/'+$Kind+'/'+$runId)
+    if($runId -notmatch '^\d{8}-\d{6}-[0-9a-f]{8}$' -or -not (Test-ReignSamePath $Path (Join-Path $root $name))){throw 'Foreign/copied report is not a deployment source.'}
+    $report=Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    if(-not $report.Ok -or $report.RunId -ne $runId){throw 'An original successful canonical report is required.'}
     $artifact=if($Kind -eq 'validation'){$root}else{Join-Path $root 'publish'}
-    if(-not (Test-ReignSamePath $Path (Join-Path $root $name)) -or -not (Test-ReignSamePath $report.ReportPath $Path) -or -not (Test-ReignSamePath $report.ArtifactRoot $artifact)){throw 'Foreign/copied report or artifact root is not a deployment source.'}
+    if(-not (Test-ReignSamePath $report.ReportPath $Path) -or -not (Test-ReignSamePath $report.ArtifactRoot $artifact)){throw 'Foreign/copied report or artifact root is not a deployment source.'}
     $report
+}
+function Assert-ReignPhysicalPath([string]$Path) {
+    $item=Get-Item -LiteralPath $Path -Force
+    while($item){
+        if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){throw "Root migration rejects redirected paths: $($item.FullName)"}
+        $item=if($item -is [IO.FileInfo]){$item.Directory}else{$item.Parent}
+    }
+}
+function Assert-ReignPrimaryPair([string]$Workspace,[string]$ServerRoot) {
+    $client=[IO.DirectoryInfo]::new($Workspace)
+    $server=[IO.DirectoryInfo]::new($ServerRoot)
+    if($client.Name -cne 'Reign' -or $server.Name -cne 'ReignServer' -or
+        -not (Test-ReignSamePath $client.Parent.FullName $server.Parent.FullName)){throw 'Root migration requires the physical Reign and ReignServer siblings.'}
+    foreach($repo in @($client,$server)){
+        $gitDir=Join-Path $repo.FullName '.git'
+        if(-not [IO.Directory]::Exists($gitDir)){throw 'Root migration requires primary Git checkouts with .git directories.'}
+        Assert-ReignPhysicalPath $gitDir
+        $paths=(Invoke-SourceGit $repo.FullName @('rev-parse','--path-format=absolute','--show-toplevel','--absolute-git-dir','--git-common-dir','--verify','HEAD^{commit}')).TrimEnd() -split '\r?\n'
+        if($paths.Count -ne 4 -or -not (Test-ReignSamePath $paths[0] $repo.FullName) -or
+            -not (Test-ReignSamePath $paths[1] $gitDir) -or -not (Test-ReignSamePath $paths[2] $gitDir)){
+            throw 'Root migration requires each primary checkout to own its Git directory.'
+        }
+        $origin="https://github.com/Dwemer-Dynamics/$($repo.Name).git"
+        if((Invoke-SourceGit $repo.FullName @('remote','get-url','--all','origin')).TrimEnd() -cne $origin -or
+            (Invoke-SourceGit $repo.FullName @('remote','get-url','--push','--all','origin')).TrimEnd() -cne $origin){
+            throw 'Root migration requires the canonical fetch and push origins.'
+        }
+    }
+    $junction=Get-Item -LiteralPath (Join-Path $Workspace 'ReignServer') -Force
+    if($junction.LinkType -cne 'Junction' -or -not (Test-ReignSamePath $junction.LinkTarget $server.FullName)){
+        throw 'Root migration requires the direct ReignServer sibling junction.'
+    }
+}
+function Get-ReignRootMigration($Prior,[string]$Workspace,[string]$ServerRoot,[string]$ValidationReport,[string]$LinuxBuildReport) {
+    if(-not $Prior){throw 'Root migration requires an existing reviewed prior authority.'}
+    if(-not $ValidationReport -or -not $LinuxBuildReport){throw 'Root migration requires both original qualification reports from the new workspace.'}
+    if((Test-ReignSamePath $Prior.WorkspaceRoot $Workspace) -or (Test-ReignSamePath $Prior.ServerRoot $ServerRoot)){
+        throw 'Root migration requires two distinct primary pairs.'
+    }
+    Assert-ReignPrimaryPair $Prior.WorkspaceRoot $Prior.ServerRoot
+    Assert-ReignPrimaryPair $Workspace $ServerRoot
+    foreach($reportPath in @($ValidationReport,$LinuxBuildReport)){Assert-ReignPhysicalPath $reportPath}
+    [ordered]@{FromWorkspaceRoot=$Prior.WorkspaceRoot;FromServerRoot=$Prior.ServerRoot
+        ToWorkspaceRoot=[IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($Workspace))
+        ToServerRoot=[IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($ServerRoot))}
+}
+function Get-ReignReportVerifier($Client,[switch]$MigrateRoots) {
+    $files=@($Client.DeploymentArtifactHashes.PSObject.Properties | Where-Object Name -Like 'mcp/out/*' | ForEach-Object {[ordered]@{path=$_.Name.Substring(8);sha256=$_.Value}})
+    if(-not $files.Count){throw 'Qualification predates verifier artifact binding.'}
+    $root=Join-Path $Client.ArtifactRoot 'mcp/out'
+    if($MigrateRoots){
+        $expected=@($files | ForEach-Object { $_.path })
+        if('Reign.Mcp.Server.dll' -cnotin $expected){throw 'Root migration requires the report-bound verifier executable.'}
+        if(-not @(Get-ReignClientArtifacts $Client).Count){throw 'Root migration requires report-bound client artifacts.'}
+        $actual=@(Get-ChildItem -LiteralPath $root -File -Recurse -Force | ForEach-Object {[IO.Path]::GetRelativePath($root,$_.FullName).Replace('\','/')})
+        if(-not (Test-ReignStringSet $expected $actual)){throw 'Root migration requires the exact qualified verifier file set.'}
+        foreach($file in $files){
+            if([IO.Path]::IsPathRooted($file.path) -or '..' -in $file.path.Replace('\','/').Split('/')){throw 'Verifier file escapes the qualified output.'}
+            Assert-ReignPhysicalPath (Join-Path $root $file.path)
+        }
+    }
+    [ordered]@{root=$root;files=$files}
+}
+function Get-ReignClientArtifacts($Client) {
+    $Client.DeploymentArtifactHashes.PSObject.Properties | Where-Object Name -Like 'client/out/*' | ForEach-Object {[ordered]@{path=$_.Name.Substring(11);sha256=$_.Value}}
+}
+function Assert-ReignRootMigration($Prior,$Content,[string]$CandidatePath) {
+    $scope=Get-ReignRootMigration $Prior $Content.WorkspaceRoot $Content.ServerRoot $Content.ValidationReportSelection $Content.LinuxBuildReportSelection
+    if((Get-ReignJsonSha $scope) -cne (Get-ReignJsonSha $Content.RootMigration)){throw 'Root migration scope differs from the current prior or the destination pair.'}
+    if((Get-ReignFileSha ($CandidatePath+'.previous-authority.json')) -ne $Content.PriorAuthoritySha256){throw 'Root migration requires the exact retained prior pointer.'}
 }
 function Invoke-ReignSourceVerifier($Verifier,[string]$Workspace,[string]$ValidationReport='', [string]$LinuxBuildReport='') {
     foreach($row in @($Verifier.files)){
@@ -134,6 +210,13 @@ function Assert-ReignCheckpointReview($Content,$Review,[string]$CandidatePath) {
         (Get-ReignJsonSha $Content.Diff) -ne $Content.DiffSha256 -or [string]::IsNullOrWhiteSpace($Review.Reason) -or $Review.Reason.Length -lt 15){throw 'Review receipt is stale, incomplete, or does not bind this exact candidate/diff.'}
     $expected=@($Content.Diff|ForEach-Object path);$reviewed=@($Review.ReviewedPaths)
     if(-not (Test-ReignStringSet $expected $reviewed)){throw 'Every added, modified and removed path needs explicit source review.'}
+    $migration=([pscustomobject]$Content).PSObject.Properties['RootMigration']
+    $scopeHash=([pscustomobject]$Review).PSObject.Properties['RootMigrationSha256']
+    if($migration -or $scopeHash){
+        if(-not $migration -or -not $migration.Value -or -not $scopeHash -or $scopeHash.Value -cne (Get-ReignJsonSha $migration.Value)){
+            throw 'Review receipt does not bind the root migration scope.'
+        }
+    }
 }
 function Assert-ReignCheckpointDelta($Prior,$Content) {
     $before=if($Prior){$Prior.SourceFiles}else{@()}
