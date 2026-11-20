@@ -320,6 +320,52 @@ namespace ReignBetaServer
                     Dictionary<string, object> firstPolitical =
                         ReconcilePoliticalRelationshipNetwork(connection,
                             campaignId, "main", 7, "self_test_first");
+                    Dictionary<string, object> Leader(string hero, string kingdom, bool player, bool ruler) =>
+                        new Dictionary<string, object> { ["heroStringId"] = hero, ["kingdomId"] = kingdom,
+                            ["isClanLeader"] = true, ["isPlayer"] = player, ["isRuler"] = ruler };
+                    foreach (bool playerRules in new[] { false, true })
+                    {
+                        var topology = BuildRequiredPoliticalPairDefinitions(new[] {
+                            Leader("player", "home", true, playerRules), Leader("npc", "home", false, !playerRules),
+                            Leader("vassal", "home", false, false), Leader("foreign", "away", false, true) });
+                        add(playerRules ? "player_ruler_has_domestic_political_pairs" : "player_vassal_keeps_existing_network_scope",
+                            topology.ContainsKey(AmbientPairKey("vassal", "npc"))
+                            && topology.ContainsKey(AmbientPairKey("player", "vassal")) == playerRules
+                            && !topology.ContainsKey(AmbientPairKey("player", "foreign"))
+                            && !topology.ContainsKey(AmbientPairKey("vassal", "foreign")),
+                            "Domestic political relationships cover the player as ruler, with ordinary vassals and foreign rulers in their existing scopes.");
+                    }
+                    Dictionary<string, object> Direction(string observer, string target) =>
+                        new Dictionary<string, object> { ["observerId"] = observer, ["targetId"] = target };
+                    var requested = Enumerable.Range(0, 4997).Select(i => Direction("absent_" + i, "political_ruler")).ToList();
+                    requested.Add(Direction("noop_a", "noop_b"));
+                    requested.Add(Direction("noop_b", "noop_a"));
+                    requested.Add(Direction("political_leader_a", "political_ruler"));
+                    var payload = new Dictionary<string, object>
+                    {
+                        ["campaignId"] = campaignId, ["timelineId"] = "main", ["pairs"] = requested
+                    };
+                    var batch = EffectiveAttitudeBatchApi(payload);
+                    var rows = ReadDictionaryList(batch, "attitudes");
+                    add("effective_batch_5000_preserves_every_directed_identity",
+                        ReadBool(batch, "ok", false) && rows.Count == requested.Count
+                        && rows.Zip(requested, (row, pair) => ReadString(row, "observerId", "") == ReadString(pair, "observerId", "")
+                            && ReadString(row, "targetId", "") == ReadString(pair, "targetId", "")).All(match => match)
+                        && !ReadBool(rows[0], "hasPair", true) && ReadInt(rows[0], "effectiveAttitude", -1) == 0
+                        && ReadBool(rows[4999], "hasPair", false) && ReadInt(rows[4999], "effectiveAttitude", -1) == 0
+                        && new[] { 4997, 4998, 4999 }.All(i => Json.Serialize(rows[i]) == Json.Serialize(
+                            ResolveEffectiveAttitude(connection, campaignId, "main", ReadString(requested[i], "observerId", ""),
+                                ReadString(requested[i], "targetId", ""), "batch"))),
+                        "The final player-ruler pair is present and neutral. Missing chemistry is explicit and both directions match the scalar API.");
+                    requested.Add(Direction("overflow", "political_ruler"));
+                    var oversized = EffectiveAttitudeBatchApi(payload);
+                    add("effective_batch_5001_refused_without_partial_results",
+                        !ReadBool(oversized, "ok", true) && !oversized.ContainsKey("attitudes"),
+                        "An oversized request returns an error without a successful prefix.");
+                    payload["pairs"] = new object[] { requested[0], "invalid" };
+                    add("effective_batch_malformed_pair_is_not_dropped",
+                        !ReadBool(EffectiveAttitudeBatchApi(payload), "ok", true),
+                        "A malformed element cannot disappear from a successful result.");
                     RelationshipsStore.UpdateRelationshipPairProvenance(connection);
                     RelationshipsStore.UpdateRelationshipPairChemistry29(connection);
                     Dictionary<string, object> secondPolitical =

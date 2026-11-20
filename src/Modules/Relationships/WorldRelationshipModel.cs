@@ -406,6 +406,22 @@ namespace ReignBetaServer
             EnsureWorldRelationshipSchema(connection);
             string pairKey = AmbientPairKey(observerId, targetId);
             Dictionary<string, object> pair = RelationshipsStore.SelectRelationshipPairChemistry8(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
+            List<string> provenance = pair != null
+                ? RelationshipsStore.SelectRelationshipPairProvenance3(connection, new Dictionary<string, object>
+                {
+                    ["campaign"] = campaignId, ["timeline"] = timelineId,
+                    ["pair"] = pairKey
+                }).Select(row => ReadString(row, "source", ""))
+                  .Where(value => !string.IsNullOrWhiteSpace(value)).ToList()
+                : new List<string>();
+            return DescribeEffectiveAttitude(connection, campaignId, timelineId, observerId, targetId,
+                context, pairKey, pair, provenance);
+        }
+
+        private static Dictionary<string, object> DescribeEffectiveAttitude(
+            ReignDbConnection connection, string campaignId, string timelineId, string observerId, string targetId,
+            string context, string pairKey, Dictionary<string, object> pair, List<string> provenance)
+        {
             Dictionary<string, object> standing = ReadPublicStandingRow(connection,
                 campaignId, timelineId, targetId);
             bool hasPair = pair != null;
@@ -420,14 +436,6 @@ namespace ReignBetaServer
                 : new Dictionary<string, object> { ["value"] = 0 };
             int standingValue = ReadInt(standingResolution, "value", 0);
             int effective = hasPair ? Clamp(personal + standingValue, -100, 100) : 0;
-            List<string> provenance = hasPair
-                ? RelationshipsStore.SelectRelationshipPairProvenance3(connection, new Dictionary<string, object>
-                {
-                    ["campaign"] = campaignId, ["timeline"] = timelineId,
-                    ["pair"] = pairKey
-                }).Select(row => ReadString(row, "source", ""))
-                  .Where(value => !string.IsNullOrWhiteSpace(value)).ToList()
-                : new List<string>();
             return new Dictionary<string, object>
             {
                 ["observerId"] = observerId, ["targetId"] = targetId,
@@ -877,6 +885,8 @@ namespace ReignBetaServer
                 .Where(row => ReadPoliticalFlag(row, "is_clan_leader",
                         "isClanLeader")
                     || ReadPoliticalFlag(row, "is_ruler", "isRuler"))
+                .Where(row => !ReadPoliticalFlag(row, "is_player", "isPlayer")
+                    || ReadPoliticalFlag(row, "is_ruler", "isRuler"))
                 .ToList();
             Dictionary<string, List<Dictionary<string, object>>> desired =
                 new Dictionary<string, List<Dictionary<string, object>>>(
@@ -903,6 +913,7 @@ namespace ReignBetaServer
             }
             List<Dictionary<string, object>> rulers = leaders
                 .Where(row => ReadPoliticalFlag(row, "is_ruler", "isRuler"))
+                .Where(row => !ReadPoliticalFlag(row, "is_player", "isPlayer"))
                 .GroupBy(row => ReadFirstString(row, "hero_id",
                         "heroStringId", "heroId"),
                     StringComparer.OrdinalIgnoreCase)
@@ -1003,22 +1014,61 @@ namespace ReignBetaServer
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
             string timelineId = ReadString(payload, "timelineId", "main");
-            List<Dictionary<string, object>> requested = ReadDictionaryList(payload, "pairs");
+            var requested = new List<(string Observer, string Target, string Context, string Key)>();
+            payload.TryGetValue("pairs", out object raw);
+            // Retain the single-pair request shape accepted by earlier servers.
+            IEnumerable<object> items = raw switch
+            {
+                null => Enumerable.Empty<object>(),
+                Dictionary<string, object> single => new object[] { single },
+                System.Collections.IEnumerable list when !(raw is string) => list.Cast<object>(),
+                _ => null
+            };
+            if (items == null) return BatchError("pairs must contain relationship objects.");
+            foreach (var item in items)
+            {
+                if (requested.Count == 5000) return BatchError("At most 5000 directed pairs are allowed per batch.");
+                if (!(item is Dictionary<string, object> pair)) return BatchError("Invalid relationship pair.");
+                string observer = ReadFirstString(pair, "observerId", "subjectId", "actorHeroId");
+                string target = ReadFirstString(pair, "targetId", "targetHeroId");
+                if (string.IsNullOrWhiteSpace(observer) || string.IsNullOrWhiteSpace(target))
+                    return BatchError("Each pair requires observerId and targetId.");
+                requested.Add((observer, target, ReadString(pair, "context", "batch"), AmbientPairKey(observer, target)));
+            }
+
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureMbtiRelationshipSchema(connection);
-                return new Dictionary<string, object>
+                EnsureWorldRelationshipSchema(connection);
+                var keys = requested.Select(pair => pair.Key).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                var chemistry = QueryRelationshipHeroRows(connection, RelationshipsStore.SelectBatchChemistrySql, "pair_key", keys)
+                    .ToDictionary(row => ReadString(row, "pair_key", ""), StringComparer.OrdinalIgnoreCase);
+                var sources = QueryRelationshipHeroRows(connection, RelationshipsStore.SelectBatchProvenanceSql, "pair_key", keys,
+                    new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
+                    .ToLookup(row => ReadString(row, "pair_key", ""), row => ReadString(row, "source", ""),
+                        StringComparer.OrdinalIgnoreCase);
+                using (var standing = new RelationshipStandingContext(connection, campaignId, timelineId))
                 {
-                    ["ok"] = true,
-                    ["campaignId"] = campaignId,
-                    ["timelineId"] = timelineId,
-                    ["attitudes"] = requested.Take(5000).Select(pair =>
-                        ResolveEffectiveAttitude(connection, campaignId, timelineId,
-                            ReadFirstString(pair, "observerId", "subjectId", "actorHeroId"),
-                            ReadFirstString(pair, "targetId", "targetHeroId"),
-                            ReadString(pair, "context", "batch"))).ToList()
-                };
+                    standing.Prefetch(requested.Select(pair => pair.Observer).Concat(requested.Select(pair => pair.Target)));
+                    var attitudes = requested.Select(pair =>
+                    {
+                        chemistry.TryGetValue(pair.Key, out var row);
+                        return DescribeEffectiveAttitude(connection, campaignId, timelineId, pair.Observer, pair.Target,
+                            pair.Context, pair.Key, row, row == null ? new List<string>()
+                                : sources[pair.Key].Where(source => !string.IsNullOrWhiteSpace(source))
+                                    .OrderBy(source => source, StringComparer.Ordinal).ToList());
+                    }).ToList();
+                    return new Dictionary<string, object>
+                    {
+                        ["ok"] = true, ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["attitudes"] = attitudes
+                    };
+                }
             }
+
+            Dictionary<string, object> BatchError(string message) => new Dictionary<string, object>
+            {
+                ["ok"] = false, ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["error"] = message
+            };
         }
     }
 }

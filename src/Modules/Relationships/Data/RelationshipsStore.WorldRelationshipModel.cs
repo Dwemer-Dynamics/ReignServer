@@ -165,7 +165,7 @@ WHERE pair_key='race_pair_a|race_pair_b';", parameters, transaction);
 hero_id,canonical_name,clan_id,kingdom_id,is_lord,is_ruler,
 family_ids_json,updated_ts,is_alive,is_adult,is_player,is_clan_leader)
 VALUES
-('political_ruler','Ruler','clan_r','kingdom_test',1,1,'[]',1,1,1,0,1),
+('political_ruler','Ruler','clan_r','kingdom_test',1,1,'[]',1,1,1,1,1),
 ('political_leader_a','Leader A','clan_a','kingdom_test',1,0,'[]',1,1,1,0,1),
 ('political_leader_b','Leader B','clan_b','kingdom_test',1,0,'[]',1,1,1,0,1);", parameters, transaction);
         }
@@ -283,7 +283,7 @@ AND active=1 AND required=1;", parameters, transaction);
         {
             return ReignDatabase.QuerySql(connection, @"
 SELECT * FROM identity_roster
-WHERE is_alive=1 AND is_adult=1 AND is_player=0
+WHERE is_alive=1 AND is_adult=1 AND (is_player=0 OR is_ruler=1)
 AND (is_clan_leader=1 OR is_ruler=1) AND hero_id<>'';", parameters, transaction);
         }
 
@@ -455,7 +455,7 @@ ELSE relationship_native_targets.revision+1 END,updated_ts=$ts;", parameters, tr
         {
             return ReignDatabase.QuerySql(connection, @"
 SELECT * FROM identity_roster
-WHERE is_alive=1 AND is_adult=1 AND is_player=0
+WHERE is_alive=1 AND is_adult=1 AND (is_player=0 OR is_ruler=1)
 AND (is_clan_leader=1 OR is_ruler=1)
 AND hero_id<>'';", parameters, transaction);
         }
@@ -494,6 +494,9 @@ VALUES($pair,$a,$b,$typeA,$typeB,$baseAB,$baseBA,$chanceAB,$chanceBA,
 ON CONFLICT(pair_key) DO NOTHING
 RETURNING pair_key;", parameters, transaction);
         }
+
+        internal const string SelectBatchChemistrySql = "SELECT pair_key,hero_a_id,affinity_a_to_b,affinity_b_to_a FROM relationship_pair_chemistry";
+        internal const string SelectBatchProvenanceSql = "SELECT pair_key,source FROM relationship_pair_provenance WHERE campaign_id=$campaign AND timeline_id=$timeline AND active=1";
 
         internal const string SelectCharacterPublicStandingSql = "SELECT subject_id,standing_value,sources_json,revision,last_changed_day,updated_ts,calculation_status,last_error FROM character_public_standing WHERE campaign_id=$campaign AND timeline_id=$timeline";
 
