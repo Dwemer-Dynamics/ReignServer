@@ -9,8 +9,9 @@ namespace ReignBetaServer
         internal static int ReadMitigationFixtureValue(ReignDbConnection connection, string occurrence)
         {
             var parameters = new Dictionary<string, object> { ["occurrence"] = occurrence };
-            return (int)ReignDatabase.QuerySql(connection,
-                "SELECT rumor_value FROM rumor_subject_tags WHERE occurrence_id=$occurrence;", parameters)[0]["rumor_value"];
+            var row = ReignDatabase.QuerySql(connection,
+                "SELECT rumor_value FROM rumor_subject_tags WHERE occurrence_id=$occurrence;", parameters)[0];
+            return ReadInt(row, "rumor_value", int.MinValue);
         }
 
         internal static void SetMitigationProjectionFailure(ReignDbConnection connection, bool enabled)
