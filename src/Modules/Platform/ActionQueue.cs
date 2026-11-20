@@ -21,6 +21,9 @@ namespace ReignBetaServer
 {
     internal static partial class ActionPipelineService
     {
+        private const string DiplomaticMarriageCompletionField = "diplomaticMarriageCompletion";
+        private static readonly ConcurrentDictionary<string, byte> DiplomaticMarriageRecoveryWorkers = new(StringComparer.Ordinal);
+
         internal static Dictionary<string, object> ProposeAction(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -200,11 +203,15 @@ namespace ReignBetaServer
                 }
                 DialogueService.SaveDurableConversationAction(campaignId, row);
                 List<Dictionary<string, object>> queue = ReadActionQueueUnlocked(campaignId);
+                var pendingMarriage = queue.FirstOrDefault(existing => ReadString(existing, "id", "") == id
+                    && PendingDiplomaticMarriage(existing) != null);
+                if (pendingMarriage != null) return pendingMarriage;
                 queue.RemoveAll(x => ReadString(x, "id", "") == id);
                 queue.Add(row);
                 if (queue.Count > 500)
                 {
-                    queue = queue.Skip(queue.Count - 500).ToList();
+                    queue = queue.Where((existing, index) => index >= queue.Count - 500
+                        || PendingDiplomaticMarriage(existing) != null).ToList();
                 }
 
                 WriteActionQueueUnlocked(campaignId, queue);
@@ -225,6 +232,7 @@ namespace ReignBetaServer
             string campaignId = query.TryGetValue("campaignId", out string campaignQuery) ? campaignQuery : ReadString(payload, "campaignId", "default");
             int limit = query.TryGetValue("limit", out string limitText) && int.TryParse(limitText, out int parsedLimit) ? parsedLimit : ReadInt(payload, "limit", 10);
             limit = Math.Max(1, Math.Min(50, limit));
+            bool recoverDiplomaticMarriages;
             List<Dictionary<string, object>> selected = new List<Dictionary<string, object>>();
             long nowTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             const long deliveryMaxAgeSeconds = 6 * 60 * 60;
@@ -234,6 +242,7 @@ namespace ReignBetaServer
             lock (Program.FileLock)
             {
                 List<Dictionary<string, object>> queue = ReadActionQueueUnlocked(campaignId);
+                recoverDiplomaticMarriages = queue.Any(row => PendingDiplomaticMarriage(row) != null);
                 // Read at most once per poll, and only when a durable row needs it.
                 string deliveryGeneration = null;
                 Func<string> generation = () => deliveryGeneration ?? (deliveryGeneration = DialogueService.ActionDeliveryGeneration(campaignId));
@@ -318,6 +327,7 @@ namespace ReignBetaServer
                 });
             }
 
+            if (recoverDiplomaticMarriages) ScheduleDiplomaticMarriageRecovery(campaignId);
             List<object> records = selected.Select(x => x.ContainsKey("record") ? x["record"] : x).ToList();
             OperationsService.LogOperational("action.next", new Dictionary<string, object> { ["campaignId"] = campaignId, ["count"] = records.Count });
             foreach (Dictionary<string, object> row in selected)
@@ -357,8 +367,8 @@ namespace ReignBetaServer
             // report returns that canonical status and writes no evidence, audit or projection.
             bool protocolOwned = false;
             string authoritativeStatus = status;
-            const string diplomaticMarriageCompletion = "diplomaticMarriageCompletion";
             Dictionary<string, object> admittedDiplomaticMarriage = null;
+            bool firstCompletion = false;
             lock (Program.FileLock)
             {
                 List<Dictionary<string, object>> queue = ReadActionQueueUnlocked(campaignId);
@@ -401,8 +411,9 @@ namespace ReignBetaServer
                             // retry can finish its effects without reopening historical reports.
                             if (!IsTerminalActionReportStatus(currentStatus))
                             {
+                                firstCompletion = status == "completed";
                                 var completion = RelationshipsService.NativeDiplomaticMarriageCompletion(id, status, matchedRecord, payload);
-                                if (completion != null) row[diplomaticMarriageCompletion] = completion;
+                                if (completion != null) row[DiplomaticMarriageCompletionField] = completion;
                             }
                             row["status"] = status;
                             row["reportTs"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -420,7 +431,7 @@ namespace ReignBetaServer
                             protocolOwned = true;
                             authoritativeStatus = status = ReadString(row, "status", "");
                         }
-                        else admittedDiplomaticMarriage = ReadDictionary(row, diplomaticMarriageCompletion);
+                        else admittedDiplomaticMarriage = PendingDiplomaticMarriage(row);
                         break;
                     }
                 }
@@ -490,8 +501,10 @@ namespace ReignBetaServer
                 };
             }
             if (found) DialogueService.RecordSharedActionReceipt(campaignId, payload, matchedRecord, authoritativeStatus);
-            if (found) RelationshipsService.FinalizeDiplomaticMarriageEffects(
-                campaignId, id, authoritativeStatus, matchedRecord, payload, admittedDiplomaticMarriage);
+            if (admittedDiplomaticMarriage != null)
+                CompletePendingDiplomaticMarriage(campaignId, id, matchedRecord, admittedDiplomaticMarriage);
+            else if (firstCompletion && found)
+                RelationshipsService.FinalizeDiplomaticMarriageEffects(campaignId, id, authoritativeStatus, matchedRecord, payload);
             Dictionary<string, object> memoryStore = DialogueService.StoreActionResultMemory(payload, "actions_report");
             List<Dictionary<string, object>> nativeRelationChanges = RelationshipsService.EvaluateCompletedActionRelationships(payload);
             DiplomacyService.UpdateDiplomaticEventForAction(campaignId, id, status, payload);
@@ -503,6 +516,61 @@ namespace ReignBetaServer
             };
             CourtService.UpdateAmbassadorReferralActionReceipt(campaignId, ambassadorReceiptPayload, status);
             return new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaignId, ["correlationId"] = correlationId, ["id"] = id, ["status"] = status, ["reportedStatus"] = reportedStatus, ["found"] = found, ["memoryStore"] = memoryStore, ["nativeRelationChanges"] = nativeRelationChanges };
+        }
+
+        private static Dictionary<string, object> PendingDiplomaticMarriage(Dictionary<string, object> row)
+        {
+            var completion = ReadDictionary(row, DiplomaticMarriageCompletionField);
+            return ReadString(row, "status", "") == "completed" && completion != null
+                && ReadString(completion, "outcome", "").Length == 0 ? completion : null;
+        }
+
+        private static void ScheduleDiplomaticMarriageRecovery(string campaignId)
+        {
+            if (!DiplomaticMarriageRecoveryWorkers.TryAdd(campaignId, 0)) return;
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    List<Dictionary<string, object>> pending;
+                    lock (Program.FileLock)
+                        pending = ReadActionQueueUnlocked(campaignId)
+                            .Where(row => PendingDiplomaticMarriage(row) != null).Take(4).ToList();
+                    foreach (var row in pending)
+                    {
+                        try
+                        {
+                            CompletePendingDiplomaticMarriage(campaignId, ReadString(row, "id", ""),
+                                ReadDictionary(row, "record"), PendingDiplomaticMarriage(row));
+                        }
+                        catch (Exception error)
+                        {
+                            Console.Error.WriteLine("Reign diplomatic marriage recovery: " + error.GetType().Name);
+                        }
+                    }
+                }
+                catch (Exception error)
+                {
+                    Console.Error.WriteLine("Reign diplomatic marriage recovery read: " + error.GetType().Name);
+                }
+                finally { DiplomaticMarriageRecoveryWorkers.TryRemove(campaignId, out _); }
+            });
+        }
+
+        private static void CompletePendingDiplomaticMarriage(string campaignId, string id,
+            Dictionary<string, object> record, Dictionary<string, object> admission)
+        {
+            bool applied = RelationshipsService.FinalizeDiplomaticMarriageEffects(campaignId, id,
+                "completed", record, report: null, admittedCompletion: admission);
+            lock (Program.FileLock)
+            {
+                List<Dictionary<string, object>> queue = ReadActionQueueUnlocked(campaignId);
+                var row = queue.FirstOrDefault(existing => ReadString(existing, "id", "") == id);
+                var pending = PendingDiplomaticMarriage(row);
+                if (pending == null || Json.Serialize(pending) != Json.Serialize(admission)) return;
+                pending["outcome"] = applied ? "applied" : "stale";
+                WriteActionQueueUnlocked(campaignId, queue);
+            }
         }
 
         internal static string NormalizeActionReportStatus(
@@ -786,8 +854,7 @@ namespace ReignBetaServer
         internal static void WriteActionQueueUnlocked(string campaignId, List<Dictionary<string, object>> queue)
         {
             string path = CampaignFileService.CampaignFile(campaignId, "actions", "action-queue.json");
-            Directory.CreateDirectory(Path.GetDirectoryName(path));
-            File.WriteAllText(path, Json.Serialize(queue ?? new List<Dictionary<string, object>>()), Encoding.UTF8);
+            CampaignFileService.WriteJsonObject(path, queue ?? new List<Dictionary<string, object>>());
         }
 
         internal static string ModelForRequest(Dictionary<string, object> settings, string requestType)
