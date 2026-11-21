@@ -27,6 +27,9 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> ApproachState(ReignDbConnection c, string timeline, string key) =>
             TryParseJsonObject(ReadString(RelationshipsStore.SelectPlayerApproachState(c, TestDict("timeline", timeline, "key", key)).FirstOrDefault(), "value_json", "{}")) ?? TestDict();
 
+        private static bool HasRecordedApproachContact(Dictionary<string, object> contact) =>
+            !string.IsNullOrWhiteSpace(ReadString(contact, "exchange", ""));
+
         private static void PutApproachState(ReignDbConnection c, string timeline, string key, Dictionary<string, object> value) =>
             RelationshipsStore.UpsertPlayerApproachState(c, TestDict("timeline", timeline, "key", key, "value", Json.Serialize(value)));
 
@@ -117,6 +120,9 @@ namespace ReignBetaServer
                             || ReadBool(candidate, "protected", true))) continue;
                         string check = "check:" + kind + ":" + player + ":" + hero + ":" + day;
                         if (ApproachState(c, timeline, check).Count > 0) continue;
+                        var contact = ApproachState(c, timeline, "contact:" + player + ":" + hero);
+                        // Native familiarity alone does not establish contact with this NPC.
+                        if (kind == "shared" && !HasRecordedApproachContact(contact)) continue;
                         var traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "traits.json"));
                         if (traits == null || traits.Count == 0) traits = CharactersService.BuildTraitDocument(ReadDictionary(candidate, "profile"));
                         double jealousy = RelationshipTraitPercent(traits, "jealousy"), patience = RelationshipTraitPercent(traits, "patience");
@@ -124,7 +130,6 @@ namespace ReignBetaServer
                         var pair = RelationshipsStore.SelectRelationshipPairChemistry18(c, TestDict("pair", AmbientPairKey(hero, player))).FirstOrDefault();
                         int affinity = pair == null ? ReadInt(candidate, "nativeRelation", 0)
                             : ReadInt(pair, ReadString(pair, "hero_a_id", "") == hero ? "affinity_a_to_b" : "affinity_b_to_a", 0);
-                        var contact = ApproachState(c, timeline, "contact:" + player + ":" + hero);
                         var rivals = RelationshipsStore.SelectPlayerAttentionEvents2(c, TestDict("timeline", timeline, "player", player, "hero", hero,
                             "sequence", ReadLong(contact, "sequence", 0), "exchange", ReadString(contact, "exchange", "")))
                             .Select(r => TestDict("heroId", ReadString(r, "target_id", ""), "name", ReadString(r, "target_name", ""), "days", ReadInt(r, "days", 0),
@@ -245,8 +250,12 @@ namespace ReignBetaServer
                     options ??= SettingsService.ReadPlayerApproachOptions();
                     if (!options.Allows(ReadString(request, "kind", ""))) choice = "cancel";
                     if (ReadString(request, "kind", "") == "shared" && ReadDictionaryList(request, "heroes").Any(h =>
-                        CanonicalJson(ApproachState(c, timeline, "contact:" + ReadString(request, "playerId", "") + ":" + ReadString(h, "heroId", "")))
-                            != CanonicalJson(ReadDictionary(h, "lastContact") ?? TestDict()))) choice = "cancel";
+                    {
+                        var lastContact = ReadDictionary(h, "lastContact");
+                        return !HasRecordedApproachContact(lastContact)
+                            || CanonicalJson(ApproachState(c, timeline, "contact:" + ReadString(request, "playerId", "") + ":" + ReadString(h, "heroId", "")))
+                                != CanonicalJson(lastContact);
+                    })) choice = "cancel";
                     var receipts = new List<Dictionary<string, object>>();
                     if (choice == "refuse") foreach (var hero in ReadDictionaryList(request, "heroes"))
                     {
