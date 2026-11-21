@@ -1150,7 +1150,8 @@ namespace ReignBetaServer
             {
                 ["savePointId"] = "inventory_" + index.ToString(CultureInfo.InvariantCulture),
                 ["nativeSaveName"] = "Inventory " + index.ToString(CultureInfo.InvariantCulture),
-                ["capturedUtc"] = "2026-01-01T00:00:00Z"
+                ["capturedUtc"] = "2026-01-01T00:00:00Z",
+                ["snapshotFingerprint"] = "unavailable-inventory-generation"
             }).ToList();
             points.Add(archivedPoint);
 
@@ -1171,12 +1172,13 @@ namespace ReignBetaServer
                 add("guarded_checkpoint_slot_reads_beyond_status_cap",
                     projected.Count == 50 && !projected.Any(point => MatchesCheckpointSlot(point, slot))
                     && ReadInt(owned, "registrationCount", -1) == 1
-                    && ReadInt(owned, "uniqueStateCount", -1) == 1
+                    && ReadInt(owned, "registrationUniqueStateCount", -1) == 2
+                    && ReadInt(ReadDictionary(summary, "saveSync"), "uniqueStateCount", -1) == 1
                     && !ReadBool(owned, "foreignRegistration", true) && ownedPoint != null
                     && ReadString(ownedPoint, "savePointId", "") == ReadString(oldStoredPoint, "savePointId", "")
                     && ReadString(ownedPoint, "status", "") == "ready"
                     && ReadBool(ownedPoint, "snapshotAvailable", false),
-                    "An exact lookup returns the available finalized checkpoint even when the ordinary status summary omits it.");
+                    "An exact lookup returns the finalized checkpoint beyond the status cap and counts unavailable generations still charged at registration.");
 
                 var foreign = Lookup(siblingId, slot);
                 var vacant = Lookup(siblingId, "ReignTest_Vacant_Current");

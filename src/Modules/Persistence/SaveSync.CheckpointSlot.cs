@@ -24,7 +24,8 @@ namespace ReignBetaServer
             Program.CampaignDataGate.EnterReadLock();
             try
             {
-                List<Dictionary<string, object>> points = ReadDictionaryList(ReadSaveSyncLedger(campaignId), "points");
+                Dictionary<string, object> ledger = ReadSaveSyncLedger(campaignId);
+                List<Dictionary<string, object>> points = ReadDictionaryList(ledger, "points");
                 List<Dictionary<string, object>> matchingPoints = points
                     .Where(point => MatchesCheckpointSlot(point, slot)).ToList();
                 bool foreignRegistration = SaveSyncCampaignIds()
@@ -32,16 +33,12 @@ namespace ReignBetaServer
                     .Any(id => ReadDictionaryList(ReadSaveSyncLedger(id), "points")
                         .Any(point => MatchesCheckpointSlot(point, slot)));
 
-                var availableLedger = new Dictionary<string, object>
-                {
-                    ["points"] = points.Where(point => SaveSyncPointSnapshotAvailable(campaignId, point)).ToList()
-                };
                 var result = new Dictionary<string, object>
                 {
                     ["ok"] = true, ["enabled"] = IsSaveSyncEnabled(), ["campaignId"] = campaignId,
                     ["checkpointSlot"] = slot, ["foreignRegistration"] = foreignRegistration,
                     ["registrationCount"] = matchingPoints.Count,
-                    ["uniqueStateCount"] = SaveSyncUniqueStateCount(availableLedger)
+                    ["registrationUniqueStateCount"] = SaveSyncUniqueStateCount(ledger)
                 };
                 if (matchingPoints.Count == 1)
                     result["point"] = PublicSaveSyncPoint(campaignId, matchingPoints[0]);
