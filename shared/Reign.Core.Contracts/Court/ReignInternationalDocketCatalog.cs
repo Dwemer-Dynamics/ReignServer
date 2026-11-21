@@ -53,7 +53,7 @@ namespace Reign.Core.Contracts.Court
             if (!string.Equals(optionId, "accept", StringComparison.OrdinalIgnoreCase)) return false;
             return !string.Equals(remedy, "prisoner", StringComparison.OrdinalIgnoreCase) || ransom;
         }
-        public static bool HasHistoricalSovereignResponder(string frozenRulerId, string responderHeroId, string expectedRulerId)
+        public static bool HasHistoricalSovereignResponder(string? frozenRulerId, string? responderHeroId, string? expectedRulerId)
             => !string.IsNullOrWhiteSpace(responderHeroId) && responderHeroId == expectedRulerId
                 && (string.IsNullOrEmpty(frozenRulerId) || responderHeroId == frozenRulerId);
 
