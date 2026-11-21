@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using ReignBeta.Shared.Dialogue;
@@ -684,22 +685,27 @@ namespace ReignBetaServer
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                     generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
                 var edited = Unit("view_insertion_edited_source"); edited.ViewInsertionRequested = true;
-                var editedDescriptor = ReadDictionary(ReadDictionary(Publish(edited), "acceptedUnit"), "viewInsertion");
-                string beforeEdit = StoredReceipt(edited.EventId);
-                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                edited.Payload["timelineId"] = "main";
+                var editedExchange = Publish(edited);
+                var editedDescriptor = ReadDictionary(ReadDictionary(editedExchange, "acceptedUnit"), "viewInsertion");
+                var line = DialogueLine(edited.Timestamp, "npc", edited.HeroName, edited.Reply);
+                AttachAcceptedTranscriptSourceIds(null, line, editedExchange);
+                string historyPath = CampaignFileService.CharacterFile(campaign, "npc", "history", "dialogue.jsonl");
+                try
                 {
-                    // The real editor statements; every active npc-session row is listed so only the target text changes.
-                    var rows = DialogueSelfTestStore.SelectConversationTurns9(connection).Select(row => TestDict("id", ReadString(row, "turn_id", ""),
-                        "text", ReadString(row, "turn_id", "") == ReadString(editedDescriptor, "sourceTurnId", "")
-                            ? ReadString(row, "text", "") + " Edited." : ReadString(row, "text", ""),
-                        "speaker", ReadString(row, "speaker_name", ""), "role", ReadString(row, "role", ""),
-                        "worldDay", ReadDouble(row, "world_day", 0d))).ToList();
-                    CharactersService.SyncEditorConversationTurns(connection, "npc", rows);
+                    CampaignFileService.AppendJsonLineToPath(historyPath, line);
+                    line["text"] = edited.Reply + " Edited.";
+                    using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                    var issues = CharactersService.ApplyEditorHistory(campaign, "npc", connection,
+                        TestDict("dialogue", new[] { line }));
+                    var editedAck = editedDescriptor == null ? null : Ack(editedDescriptor);
+                    Check("view_insertion_editor_projection_preserves_accepted_source", issues.Count == 0
+                        && editedDescriptor != null && ReadString(editedAck, "disposition", "") == "inserted", editedAck);
                 }
-                var editedAck = editedDescriptor == null ? null : Ack(editedDescriptor);
-                Check("view_insertion_edited_source_rejects_matching_descriptor_without_mutation", editedDescriptor != null
-                    && ReadString(editedAck, "disposition", "") == "conflict" && ReadString(editedAck, "reason", "") == "source_mismatch"
-                    && StoredReceipt(edited.EventId) == beforeEdit, editedAck);
+                finally
+                {
+                    if (File.Exists(historyPath)) File.Delete(historyPath);
+                }
             }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             return results;
