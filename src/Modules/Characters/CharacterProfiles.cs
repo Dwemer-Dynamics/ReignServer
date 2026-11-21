@@ -407,7 +407,7 @@ namespace ReignBetaServer
             bool inventoryReady = inventory.Count > 0;
             bool appearanceReady = appearance.Count > 0 && !string.IsNullOrWhiteSpace(ReadString(appearance, "firstView", ""));
             bool traitDescriptorsReady = TraitDocumentReady(traits);
-            bool backgroundReady = !string.IsNullOrWhiteSpace(ReadString(background, "encyclopediaText", "")) || !string.IsNullOrWhiteSpace(ReadString(background, "summary", ""));
+            bool backgroundReady = !string.IsNullOrWhiteSpace(ReadPublicEncyclopediaText(background));
             bool hiddenReady = ObjectHasAnyContent(hiddenHistory, "privateBackstory", "secretWounds", "privateEntanglements", "knownOnlyTo");
             bool voiceReady = ObjectHasAnyContent(voice, "speechStyle", "socialMask", "tells");
             bool motivationsReady = ObjectHasAnyContent(motivations, "dreams", "fears", "desires", "linesTheyWillNotCross");
@@ -880,7 +880,7 @@ Return exactly this JSON shape:
             };
         }
 
-        internal static void EnsureEncyclopediaText(Dictionary<string, object> background, Dictionary<string, object> hero, Dictionary<string, object> traits)
+        internal static void EnsureEncyclopediaText(Dictionary<string, object> background, Dictionary<string, object> hero)
         {
             if (background == null)
             {
@@ -891,7 +891,7 @@ Return exactly this JSON shape:
             if (!string.IsNullOrWhiteSpace(nativeText))
             {
                 string generatedSummary = ReadString(background, "summary", "").Trim();
-                string generatedPublic = ReadString(background, "encyclopediaText", "").Trim();
+                string generatedPublic = ReadPublicEncyclopediaText(background).Trim();
                 string priorNative = ReadString(background, "nativeEncyclopediaText", "").Trim();
                 generatedSummary = RemoveLeadingNativeBackground(priorNative, generatedSummary);
                 generatedPublic = RemoveLeadingNativeBackground(priorNative, generatedPublic);
@@ -902,12 +902,7 @@ Return exactly this JSON shape:
                 return;
             }
 
-            if (!string.IsNullOrWhiteSpace(ReadString(background, "encyclopediaText", "")))
-            {
-                return;
-            }
-
-            background["encyclopediaText"] = ReadString(background, "summary", ReadString(DefaultBackground(hero, traits), "summary", ""));
+            background["encyclopediaText"] = ReadPublicEncyclopediaText(background);
         }
 
         internal static string BuildAroundNativeBackground(string nativeText, string generatedText)
@@ -931,7 +926,19 @@ Return exactly this JSON shape:
         internal static string BuildEncyclopediaBackstoryText(string campaignId, string heroId)
         {
             Dictionary<string, object> background = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "background.json"));
-            return ReadString(background, "encyclopediaText", ReadString(background, "summary", ""));
+            return ReadPublicEncyclopediaText(background);
+        }
+
+        internal static string ReadPublicEncyclopediaText(Dictionary<string, object> background)
+        {
+            string publicText = ReadString(background, "encyclopediaText", "");
+            string summary = ReadString(background, "summary", "");
+            // Older construction copied the general summary into a blank public field.
+            bool copiedLegacySummary = ReadInt(background, "version", 0) != 5
+                && publicText.Trim().Equals(summary.Trim(), StringComparison.Ordinal);
+            if (string.IsNullOrWhiteSpace(publicText) || copiedLegacySummary)
+                return ReadString(background, "nativeEncyclopediaText", "");
+            return publicText;
         }
 
         internal static Dictionary<string, object> LoadCharacterStack(string campaignId, string heroId)

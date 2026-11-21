@@ -23,6 +23,7 @@ namespace ReignBetaServer
                 var basis = DeepCloneProfileDictionary(fixture); basis["heroStringId"] = hero;
                 CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, hero, "narrative.json"), basis);
                 CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, hero, "profile.json"), new Dictionary<string, object> { ["heroStringId"] = hero, ["narrativeVersion"] = 5 });
+                CheckNarrativePublication(campaign, hero, basis, check);
                 var target = ReadDictionaryList(basis, "items").First(x => ReadString(x, "category", "") == "fear");
                 var proposal = new Dictionary<string, object> { ["itemId"] = ReadString(target, "id", ""), ["influence"] = 8,
                     ["description"] = "Approaches the familiar concern with deliberate calm and careful preparation.",
@@ -74,6 +75,67 @@ namespace ReignBetaServer
                 ReignPostgreSqlStorage.DropCampaign(campaign);
                 if (Directory.Exists(directory)) Directory.Delete(directory, true);
             }
+        }
+
+        private static void CheckNarrativePublication(string campaign, string heroId, Dictionary<string, object> narrative, Action<string, bool, string> check)
+        {
+            const string native = "Mira is a town notable.";
+            const string approved = "Neighbors see Mira checking the market scales.";
+            const string conflicting = "The old account calls her Sabra, a queen aged 72 and the daughter of Oren.";
+            var profile = TestDict("heroStringId", heroId, "name", "Mira", "occupation", "Town notable", "isNotable", true,
+                "isFemale", true, "age", 41, "fatherId", "native_father", "fatherName", "Beren", "nativeEncyclopediaText", native);
+            var authored = DeepCloneProfileDictionary(narrative);
+            var life = ReadDictionary(authored, "life");
+            life["summary"] = conflicting;
+            life["publicSummary"] = approved;
+            string privateBackstory = ReadString(life, "privateBackstory", "");
+            string narrativePath = CampaignFileService.CharacterFile(campaign, heroId, "narrative.json");
+            string backgroundPath = CampaignFileService.CharacterFile(campaign, heroId, "background.json");
+            var original = File.ReadAllBytes(narrativePath);
+            var stack = TestDict("narrative", authored, "background", TestDict("nativeEncyclopediaText", native));
+            ApplyNarrativePromptProjection(stack);
+            CampaignFileService.WriteJsonObject(backgroundPath, ReadDictionary(stack, "background"));
+            string publicText = BuildEncyclopediaBackstoryText(campaign, heroId);
+            check("publication_encyclopedia_uses_public_projection", publicText == native + "\n\n" + approved,
+                "The shipped encyclopedia response builder returns the native biography and the intentional public summary, excluding the conflicting life account and private backstory.");
+            check("publication_conflicting_prose_does_not_fail_schema", NarrativeDocumentReady(authored),
+                "Narrative readiness checks the document contract. Native factual authority is checked separately.");
+            DialogueService.CheckNarrativePromptPublication(profile, stack, privateBackstory, conflicting, check);
+
+            var legacy = TestDict("summary", privateBackstory);
+            CampaignFileService.WriteJsonObject(backgroundPath, legacy);
+            byte[] legacyBytes = File.ReadAllBytes(backgroundPath);
+            check("publication_missing_public_field_keeps_private_legacy_summary", BuildEncyclopediaBackstoryText(campaign, heroId) == ""
+                && File.ReadAllBytes(backgroundPath).SequenceEqual(legacyBytes)
+                && File.ReadAllBytes(narrativePath).SequenceEqual(original),
+                "Reading a legacy background without a public field excludes its private-capable summary and preserves both files byte for byte.");
+            EnsureEncyclopediaText(legacy, TestDict());
+            check("publication_construction_cannot_promote_summary", ReadString(legacy, "encyclopediaText", "") == ""
+                && ReadString(legacy, "summary", "") == privateBackstory,
+                "Legacy construction keeps general history for the owner and leaves the public field empty when no public material is available.");
+            legacy["nativeEncyclopediaText"] = native;
+            CampaignFileService.WriteJsonObject(backgroundPath, legacy);
+            check("publication_blank_public_field_falls_back_to_native_text", BuildEncyclopediaBackstoryText(campaign, heroId) == native,
+                "An explicit blank public field can fall back to the retained native encyclopedia text.");
+            legacy["encyclopediaText"] = privateBackstory;
+            legacy.Remove("nativeEncyclopediaText");
+            CampaignFileService.WriteJsonObject(backgroundPath, legacy);
+            byte[] promotedBytes = File.ReadAllBytes(backgroundPath);
+            check("publication_older_duplicated_summary_stays_private", BuildEncyclopediaBackstoryText(campaign, heroId) == ""
+                && File.ReadAllBytes(backgroundPath).SequenceEqual(promotedBytes),
+                "The old construction path could copy private narrative into the public field. Reading it causes no rewrite or publication.");
+            EnsureEncyclopediaText(legacy, TestDict("nativeEncyclopediaText", native));
+            check("publication_native_refresh_excludes_older_duplicated_summary",
+                ReadString(legacy, "encyclopediaText", "") == native && ReadString(legacy, "summary", "").Contains(privateBackstory),
+                "Refreshing a native biography preserves the owner-only summary and publishes only the supplied native text.");
+
+            var intentionallyPublic = DeepCloneProfileDictionary(authored);
+            ReadDictionary(intentionallyPublic, "life")["summary"] = approved;
+            var currentProjection = TestDict("narrative", intentionallyPublic, "background", TestDict());
+            ApplyNarrativePromptProjection(currentProjection);
+            CampaignFileService.WriteJsonObject(backgroundPath, ReadDictionary(currentProjection, "background"));
+            check("publication_v5_explicit_public_text_can_equal_summary", BuildEncyclopediaBackstoryText(campaign, heroId) == approved,
+                "Version-five publication deliberately supplies a public summary even when the general summary uses the same words.");
         }
     }
 }

@@ -425,15 +425,19 @@ namespace ReignBetaServer
             builder.AppendLine("Apply this character's stable identity and disposition. Never expose trait labels in visible dialogue.");
             builder.AppendLine(CharactersService.BuildCommonerPromptBlock(profile));
             builder.AppendLine();
+            string nativeName = FirstNonEmpty(ReadString(profile, "name", ""), heroName, heroId);
             DialogueService.AppendPromptLine(builder, "Hero id", heroId);
-            DialogueService.AppendPromptLine(builder, "Name", FirstNonEmpty(ReadString(profile, "name", ""), heroName, heroId));
+            DialogueService.AppendPromptLine(builder, "Name", nativeName);
             DialogueService.AppendPromptLine(builder, "Role", FirstNonEmpty(ReadString(profile, "occupation", ""), CharactersService.CharacterArchetype(profile)));
             if (profile.TryGetValue("isFemale", out object nativeGender) && nativeGender != null
                 && bool.TryParse(Convert.ToString(nativeGender, CultureInfo.InvariantCulture), out bool nativeFemale))
                 DialogueService.AppendPromptLine(builder, "Native gender and pronouns", nativeFemale ? "female; she/her" : "male; he/him");
             else
                 DialogueService.AppendPromptLine(builder, "Native gender and pronouns", "unknown; they/them");
-            builder.AppendLine("Use these native pronouns for this character. Titles such as Lord, personality, earlier event descriptions and transcript wording never override native identity; unknown gender stays neutral.");
+            double age = ReadDouble(profile, "age", -1d);
+            if (double.IsFinite(age) && age >= 0d)
+                DialogueService.AppendPromptLine(builder, "Native age (years)", age.ToString("0.##", CultureInfo.InvariantCulture));
+            builder.AppendLine("Use the current native identity, age, station and family facts wherever supplied. Authored background and past dialogue cannot change native facts or establish that a campaign event occurred. Unknown gender stays neutral.");
             DialogueService.AppendPromptLine(builder, "Culture", FirstNonEmpty(ReadString(profile, "cultureId", ""), ReadString(profile, "cultureName", "")));
             AppendPromptSection(builder, "CULTURAL SPEECH - THIS SPEAKER", CulturalVoicePrompt(profile));
             builder.AppendLine();
@@ -443,7 +447,7 @@ namespace ReignBetaServer
             Dictionary<string, object> traits = ReadDictionary(characteristics, "traits") ?? new Dictionary<string, object>();
             Dictionary<string, object> foundations = ReadDictionary(traits, "foundationTraits") ?? ReadDictionary(traits, "hiddenReignTraits") ?? new Dictionary<string, object>();
             string personality = ReadString(traits, "basePersonalitySummary", "");
-            if (string.IsNullOrWhiteSpace(personality)) personality = CharactersService.BuildRuleBasedPersonalitySummary(FirstNonEmpty(heroName, heroId), foundations);
+            if (string.IsNullOrWhiteSpace(personality)) personality = CharactersService.BuildRuleBasedPersonalitySummary(nativeName, foundations);
             AppendPromptSection(builder, "BASE PERSONALITY", personality);
             AppendPromptSection(builder, "BACKGROUND", DialogueService.FormatNamedObjectForPrompt(ReadDictionary(characteristics, "background") ?? new Dictionary<string, object>(), new[] { "summary", "encyclopediaText", "origin", "upbringing", "formativeEvents" }));
             AppendPromptSection(builder, "PUBLIC REPUTATION", CharacterFoundationReputation(characteristics));
@@ -558,6 +562,10 @@ namespace ReignBetaServer
             else rules.Omit("world_tone", "Correspondence uses its written-voice contract; the commoner world-tone supplement is not selected by the resident resolver.");
             var composition = new Dictionary<string, object>();
             string character = BuildStableCharacterPrompt(senderId, senderName, profile, characteristics);
+            var nativeFamily = new StringBuilder();
+            DialogueService.AppendPromptLine(nativeFamily, "Native father", ReadString(profile, "fatherName", ""));
+            DialogueService.AppendPromptLine(nativeFamily, "Native mother", ReadString(profile, "motherName", ""));
+            if (nativeFamily.Length > 0) character += "\n\n" + nativeFamily;
             string relevantDynamicCharacteristics = CharactersService.FormatDynamicCharacteristicsForPrompt(
                 ReadDictionary(characteristics, "dynamicCharacteristics") ?? new Dictionary<string, object>(),
                 receivedLetter ?? "");

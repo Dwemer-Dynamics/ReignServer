@@ -8,6 +8,47 @@ namespace ReignBetaServer
 {
     internal static partial class DialogueService
     {
+        internal static void CheckNarrativePromptPublication(Dictionary<string, object> profile,
+            Dictionary<string, object> stack, string privateBackstory, string conflicting, Action<string, bool, string> check)
+        {
+            string heroId = CampaignFileService.CharacterIdFrom(profile);
+            var observer = TestDict("heroStringId", "unrelated_observer", "name", "Anja");
+            var payload = TestDict("hero", profile, "participantProfiles", new[] { profile, observer });
+            string own = BuildStableCharacterPrompt(heroId, "Stale display name", profile, stack);
+            string ownRoles = BuildInteractionRoleAttribution(payload, heroId, "Mira", "the traveler");
+            check("publication_native_facts_override_authored_conflicts", own.Contains("Name: Mira")
+                && own.Contains("Role: Town notable") && own.Contains("Native age (years): 41")
+                && own.Contains("Use the current native identity, age, station and family facts")
+                && own.Contains(conflicting) && ownRoles.Contains("father=Beren [native_father]")
+                && !ownRoles.Contains("Oren") && !own.Contains("Stale display name"),
+                "The owner's foundation retains authored history as context while its own name, age and station and the existing family block explicitly supply native authority.");
+
+            var privateContext = new StringBuilder();
+            AppendServerContextFallback(privateContext, "relevant_memory", stack, TestDict(), TestDict(),
+                new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(), "What shaped you?", false);
+            check("publication_owner_memory_has_labeled_private_history", privateBackstory.Length > 0
+                && privateContext.ToString().Contains("Hidden history and private wounds")
+                && privateContext.ToString().Contains(privateBackstory),
+                "The owner's selected memory context can receive their private history.");
+
+            string other = BuildStableCharacterPrompt("unrelated_observer", "Anja", observer, TestDict())
+                + BuildInteractionRoleAttribution(payload, "unrelated_observer", "Anja", "the traveler");
+            check("publication_other_npc_gets_observer_safe_identity", other.Contains("OTHER NPC PARTICIPANT")
+                && other.Contains("family links withheld") && !other.Contains("Beren")
+                && !other.Contains(privateBackstory) && !other.Contains(conflicting),
+                "Another NPC receives scoped participant facts without the owner's private history or unrecognized family.");
+
+            const string allowedSource = "The market opened at sunrise.";
+            var brief = PersonalGossipCompositionBrief(TestDict("speakerId", heroId, "speaker", profile,
+                "recipientId", "unrelated_observer", "recipient", observer, "sourceQuoteSpeakerId", heroId,
+                "sourceQuote", allowedSource, "narrative", ReadDictionary(stack, "narrative"),
+                "background", ReadDictionary(stack, "background"), "hiddenHistory", ReadDictionary(stack, "hiddenHistory")));
+            string gossip = Json.Serialize(brief);
+            check("publication_gossip_only_reads_supplied_source", ReadString(brief, "allowedSource", "") == allowedSource
+                && !gossip.Contains(privateBackstory) && !gossip.Contains(conflicting),
+                "The gossip composition input carries the accepted quote and leaves authoring fields outside its source projection.");
+        }
+
         private static List<Dictionary<string, object>> RunPromptCompositionSelfTests()
         {
             var results = new List<Dictionary<string, object>>();
@@ -192,11 +233,13 @@ namespace ReignBetaServer
                         new Dictionary<string, object> { ["messageCount"] = messages.Count, ["messageCharacters"] = messages.Sum(row => ReadString(row, "content", "").Length),
                             ["diagnostics"] = diagnostics });
                 }
+                var letterProfile = new Dictionary<string, object>(profile) { ["fatherName"] = "Native Letter Parent" };
                 var letter = BuildCorrespondencePromptEnvelope("verify_prompt_composition", id, "Fixture Speaker", "ruler", "Ruler", 1,
-                    "RECEIVED_LETTER_HISTORY_SENTINEL", profile, character, empty,
+                    "RECEIVED_LETTER_HISTORY_SENTINEL", letterProfile, character, empty,
                     "Fixture Speaker previously wrote: NPC_LETTER_HISTORY_SENTINEL");
                 add("production_correspondence_" + id, ReadDictionary(letter.Diagnostics, "composition") != null
                     && letter.Messages.Any(message => ReadString(message, "content", "").Contains(expectedVoice))
+                    && letter.Messages.Any(message => ReadString(message, "content", "").Contains("Native father: Native Letter Parent"))
                     && ReadString(letter.Messages.Last(), "content", "").Contains("visible letter body")
                     && ReadString(letter.Messages[0], "content", "").Contains("REBELLION DECISION CONTRACT")
                     && ReadString(letter.Messages.Last(), "content", "").Contains("RECEIVED_LETTER_HISTORY_SENTINEL")

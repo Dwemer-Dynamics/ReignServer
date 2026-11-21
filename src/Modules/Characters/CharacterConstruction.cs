@@ -761,7 +761,7 @@ namespace ReignBetaServer
                 CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"), traits);
 
                 Dictionary<string, object> background = DictionaryOrDefault(generated, "background", DefaultBackground(hero, traits));
-                EnsureEncyclopediaText(background, hero, traits);
+                EnsureEncyclopediaText(background, hero);
                 CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "background.json"), background);
                 CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "voice.json"), DictionaryOrDefault(generated, "voice", DefaultVoice(hero, traits)));
                 CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "motivations.json"), DictionaryOrDefault(generated, "motivations", DefaultMotivations(hero)));
