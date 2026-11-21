@@ -72,18 +72,21 @@ try {
   assert.equal(await page.evaluate(() => typeof runDirectorSample), 'undefined');
   assert.equal(html.includes('/relationships/simulation/'), false);
   const logRequests = [];
+  let latestLogCampaign = 'fixture-first-campaign';
   await page.route('**/api/logs?*', async route => {
     assert.equal(route.request().method(), 'GET');
     const query = Object.fromEntries(new URL(route.request().url()).searchParams);
     logRequests.push(query);
     const older = !!query.cursor;
-    await route.fulfill({ json: { ok: true, file: query.file, returnedCount: 1, elidedCount: older ? 0 : 1,
+    await route.fulfill({ json: { ok: true, file: query.file, campaignId: query.campaignId || latestLogCampaign,
+      returnedCount: 1, elidedCount: older ? 0 : 1,
       hasMore: !older, nextCursor: older ? null : 'fixture-next', responseLimitReached: !older,
       entries: older ? [{ eventType: 'older-row' }] : [{ eventType: 'first-row', elided: true, unabridgedRow: 'unavailable_from_this_response' }] } });
   });
   await page.evaluate(() => selectControlCenterTab('logs'));
   await page.locator('#logOutput').filter({ hasText: 'first-row' }).waitFor();
   const initialLogCount = logRequests.length;
+  await page.locator('#logFile').selectOption('audit.jsonl');
   await page.locator('#logSearch').fill('body & 雪');
   await page.locator('#logEventType').fill('fixture');
   await page.locator('#logSeverity').fill('warning');
@@ -92,9 +95,12 @@ try {
   await page.getByRole('button', { name: 'Load Latest' }).click();
   await page.waitForFunction(() => !logLoadPending);
   assert.match(await page.locator('#logPageStatus').innerText(), /Payload omitted.*size limit.*Older matches/);
+  assert.equal(logRequests.at(-1).campaignId, '');
+  latestLogCampaign = 'fixture-second-campaign';
   await page.locator('#olderLogs').click();
   await page.locator('#logOutput').filter({ hasText: 'older-row' }).waitFor();
-  assert.deepEqual(logRequests.at(-1), { ...logRequests.at(-2), cursor: 'fixture-next' });
+  assert.deepEqual(logRequests.at(-1), { ...logRequests.at(-2), cursor: 'fixture-next', campaignId: 'fixture-first-campaign' });
+  assert.match(await page.locator('#logOutput').innerText(), /fixture-first-campaign/);
   assert.equal(logRequests.at(-1).search, 'body & 雪');
   assert.equal(logRequests.at(-1).eventType, 'fixture');
   assert.equal(logRequests.at(-1).severity, 'warning');
@@ -105,6 +111,8 @@ try {
   await page.getByRole('button', { name: 'Load Latest' }).click();
   await page.locator('#logOutput').filter({ hasText: 'first-row' }).waitFor();
   assert.equal(logRequests.at(-1).cursor, undefined);
+  assert.equal(logRequests.at(-1).campaignId, '');
+  assert.match(await page.locator('#logOutput').innerText(), /fixture-second-campaign/);
   await page.locator('#mainNavigation [data-tab="general"]').click();
   await page.evaluate(names => {
     window.navigationLoads = [];

@@ -20,7 +20,7 @@ namespace ReignBetaServer
             """
             (?<label> \b (?: [a-z0-9_-]*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|client[_-]?secret|password)
                           | authorization | token | secret ) ["']? \s* [:=] \s* )
-            (?<value> "(?:\\.|[^"\\])*(?:"|$) | '(?:\\.|[^'\\])*(?:'|$) | (?:(?:Bearer|Basic)\s+)?[^\s,;}"']+ )
+            (?<value> "(?:\\.|[^"\\])*(?:"|$) | '(?:\\.|[^'\\])*(?:'|$) | (?:(?:Bearer|Basic)\s+)?[^\s,}"]+ )
             """,
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.IgnorePatternWhitespace | RegexOptions.NonBacktracking);
         private static readonly Regex SupportBearer = new Regex(

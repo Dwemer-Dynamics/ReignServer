@@ -28,8 +28,9 @@ namespace ReignBetaServer
                 string id = Guid.NewGuid().ToString("N"), credential = "fixture-" + "credential-value";
                 string privateText = "prompt-only\nÉlan雪🦊";
                 string inlineCredential = "fixture-" + "header-value";
+                const string bareAssignment = "password=O'fixture-suffix;fixture-tail";
                 var data = TestDict("apiKey", credential, "reply", "A retained fixture reply.", "messages", privateText,
-                    "header", "Authorization: Bearer " + inlineCredential, "line", "token='fixture labeled value'",
+                    "header", "Authorization: Bearer " + inlineCredential, "line", "token='fixture labeled value'", "bare", bareAssignment,
                     "memoryReferences", TestDict("quote", "hidden-reference-only"));
                 var huge = TestDict("phase", "fixture.response", "severity", "warning", "campaignId", campaign,
                     "correlationId", "fixture-correlation", "auditId", id, "data", data);
@@ -55,10 +56,11 @@ namespace ReignBetaServer
                     && ReadBool(first, "hasMore", false) && !ReadBool(first, "responseLimitReached", true) && !ReadBool(first, "truncated", true)
                     && !Json.Serialize(first).Contains("prompt-only") && !Json.Serialize(first).Contains(credential),
                     TestDict("storedCharacters", largeLine.Length, "entryBytes", WireBytes(entry), "bodyBytes", WireBytes(first)));
-                Check("redacted_search", new[] { credential, inlineCredential, "fixture labeled value", "hidden-reference-only" }.All(term => {
+                Check("redacted_search", new[] { credential, inlineCredential, "fixture labeled value", "fixture-suffix", "fixture-tail", "hidden-reference-only" }.All(term => {
                     var result = OperationsService.ReadLogApi(new(query) { ["search"] = term });
                     return ReadInt(result, "returnedCount", -1) == 0 && !Json.Serialize(result).Contains(term);
                 })
+                    && OperationsService.RedactSupportText(bareAssignment) == "password=[REDACTED]"
                     && ReadInt(OperationsService.ReadLogApi(new(query) { ["severity"] = "error" }), "returnedCount", -1) == 0
                     && ReadInt(OperationsService.ReadLogApi(new(query) { ["eventType"] = "absent" }), "returnedCount", -1) == 0
                     && File.ReadAllText(path) == original);
@@ -158,6 +160,34 @@ namespace ReignBetaServer
                 Check("pinned_payload", ReadString(diagnostic, "route", "") == "/api/diagnostics/conversations/payload"
                     && ReadString(diagnostic, "traceId", "") == traceId && ReadString(diagnostic, "payloadId", "") == payloadId
                     && ReadInt(OperationsService.ReadLogApi(new(query) { ["severity"] = "error" }), "returnedCount", -1) == 1);
+
+                File.WriteAllLines(path, new[] {
+                    Json.Serialize(TestDict("eventType", "diagnostics.test_llm", "data", TestDict("ok", false))),
+                    Json.Serialize(TestDict("eventType", "diagnostics.test_llm", "data", TestDict("ok", true))),
+                    Json.Serialize(TestDict("eventType", "fixture", "data", TestDict("status", "warn"))) });
+                var failed = ReadDictionaryList(OperationsService.ReadLogApi(new(query) { ["severity"] = "error" }), "entries");
+                var succeeded = ReadDictionaryList(OperationsService.ReadLogApi(new(query) { ["severity"] = "info" }), "entries");
+                Check("operational_severity", failed.Count == 1 && !ReadBool(ReadDictionary(failed[0], "data"), "ok", true)
+                    && succeeded.Count == 1 && ReadBool(ReadDictionary(succeeded[0], "data"), "ok", false)
+                    && ReadInt(OperationsService.ReadLogApi(new(query) { ["severity"] = "warning" }), "returnedCount", -1) == 1
+                    && ReadInt(OperationsService.ReadLogApi(new(query) { ["severity"] = "unclassified" }), "returnedCount", -1) == 0);
+
+                string queuePath = CampaignFileService.CampaignFile(campaign, "actions", "action-queue.json");
+                Directory.CreateDirectory(Path.GetDirectoryName(queuePath));
+                var queueQuery = new Dictionary<string, string> { ["campaignId"] = campaign, ["file"] = "action-queue.json",
+                    ["search"] = "QUEUE-ONLY", ["limit"] = "1" };
+                var missing = OperationsService.ReadLogApi(queueQuery);
+                string queueText = Json.Serialize(new[] {
+                    TestDict("id", "old", "payload", TestDict("text", "queue-only", "apiKey", credential)),
+                    TestDict("id", "new", "payload", TestDict("text", "queue-only", "apiKey", credential)) });
+                File.WriteAllText(queuePath, queueText);
+                var queuePage = OperationsService.ReadLogApi(queueQuery);
+                var queueTail = OperationsService.ReadLogApi(new(queueQuery) { ["cursor"] = ReadString(queuePage, "nextCursor", "") });
+                Check("action_queue_array", ReadInt(missing, "returnedCount", -1) == 0 && ReadBool(queuePage, "hasMore", false)
+                    && ReadString(ReadDictionaryList(queuePage, "entries").Single(), "id", "") == "new"
+                    && ReadString(ReadDictionaryList(queueTail, "entries").Single(), "id", "") == "old" && !ReadBool(queueTail, "hasMore", true)
+                    && WireBytes(queuePage) <= 262144 && !Json.Serialize(queuePage).Contains("queue-only") && !Json.Serialize(queuePage).Contains(credential)
+                    && File.ReadAllText(queuePath) == queueText);
 
                 string preview = Path.Combine(VerificationDir, "log-query-ui", "control-center.html");
                 Directory.CreateDirectory(Path.GetDirectoryName(preview));

@@ -2962,7 +2962,7 @@
       try{const j=await (await fetch('/api/campaigns/delete-all',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmation})})).json();if(!j.ok)throw new Error(j.error||'Delete all failed.');status.className='editorStatus good';status.textContent=j.message;if(j.serverStopping)return;await loadCampaignManager();await loadCampaigns();}catch(e){status.className='editorStatus error';status.textContent=e.message;}
     }
 
-    let logNextCursor = '', logQueryKey = '', viewingOlderLogs = false, logLoadPending = false, logLoadVersion = 0;
+    let logContinuation = null, logQueryKey = '', viewingOlderLogs = false, logLoadPending = false, logLoadVersion = 0;
     function logQuery() {
       return new URLSearchParams({
         file: document.getElementById('logFile').value, limit: document.getElementById('logLimit').value || '250',
@@ -2973,24 +2973,27 @@
     async function loadLogs(older = false, live = false) {
       const query = logQuery(), key = query.toString();
       if (live && (viewingOlderLogs || logLoadPending || (logQueryKey && key !== logQueryKey))) return;
-      const cursor = older && key === logQueryKey ? logNextCursor : '';
+      const continuation = older && key === logQueryKey ? logContinuation : null;
       const version = ++logLoadVersion, more = document.getElementById('olderLogs');
       const status = document.getElementById('logPageStatus'), output = document.getElementById('logOutput');
-      if (cursor) query.set('cursor', cursor);
+      if (continuation) {
+        query.set('cursor', continuation.cursor);
+        query.set('campaignId', continuation.campaignId);
+      }
       logLoadPending = true;
       more.disabled = true;
       try {
         const r = await fetch('/api/logs?' + query), j = await r.json();
         if (version !== logLoadVersion || key !== logQuery().toString()) return;
         if (!r.ok || !j.ok) throw new Error(j.error || 'Could not load logs.');
-        viewingOlderLogs = !!cursor;
+        viewingOlderLogs = !!continuation;
         logQueryKey = key;
-        logNextCursor = j.hasMore ? j.nextCursor : '';
-        more.disabled = !logNextCursor;
+        logContinuation = j.hasMore && j.nextCursor ? { cursor: j.nextCursor, campaignId: j.campaignId || query.get('campaignId') } : null;
+        more.disabled = !logContinuation;
         const notes = [];
         if (j.elidedCount) notes.push(`Payload omitted for ${j.elidedCount} ${j.elidedCount === 1 ? 'entry' : 'entries'}.`);
         if (j.responseLimitReached) notes.push('Response size limit reached.');
-        if (logNextCursor) notes.push('Older matches are available.');
+        if (logContinuation) notes.push('Older matches are available.');
         if (viewingOlderLogs) notes.push('Load Latest to resume live refresh.');
         status.textContent = notes.join(' ');
         output.textContent = j.entries && j.entries.length
@@ -2998,7 +3001,7 @@
           : `No matches in ${j.file} for ${j.campaignId || 'global'}.`;
       } catch (error) {
         if (version !== logLoadVersion || key !== logQuery().toString()) return;
-        logNextCursor = '';
+        logContinuation = null;
         status.textContent = error.message;
         output.textContent = '';
       } finally {

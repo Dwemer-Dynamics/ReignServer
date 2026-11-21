@@ -52,7 +52,7 @@ namespace ReignBetaServer
             if (eventType.Length > 160 || severity.Length > 32 || cursor.Length > LogCursorLength)
                 return LogQueryError("Invalid log filter or continuation.");
 
-            var source = Program.ReadJsonLinesFromPath(path); // A single ordered snapshot under FileLock.
+            var source = ReadLogSnapshot(path);
             int index = source.Count - 1;
             if (cursor.Length > 0)
             {
@@ -127,6 +127,14 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> LogQueryError(string error) => new() { ["ok"] = false, ["error"] = error };
 
+        private static List<Dictionary<string, object>> ReadLogSnapshot(string path)
+        {
+            if (!Path.GetFileName(path).Equals("action-queue.json", StringComparison.OrdinalIgnoreCase))
+                return Program.ReadJsonLinesFromPath(path);
+            lock (Program.FileLock)
+                return File.Exists(path) ? ActionPipelineService.ReadActionQueueFromPath(path) : new();
+        }
+
         private static bool LogTextMatches(object value, string search) => value switch
         {
             string text => text.Contains(search, StringComparison.OrdinalIgnoreCase),
@@ -140,16 +148,16 @@ namespace ReignBetaServer
         {
             string level = FirstNonEmpty(ReadFirstString(row, "severity", "level"), ReadFirstString(data, "severity", "level"));
             if (level.Length > 0) return level.Equals("warn", StringComparison.OrdinalIgnoreCase) ? "warning" : level;
-            string status = ReadString(row, "status", "").ToLowerInvariant();
+            string status = FirstNonEmpty(ReadString(row, "status", ""), data?.GetValueOrDefault("status") as string).ToLowerInvariant();
             if (status is "warn" or "warning" || eventType.EndsWith("_warning", StringComparison.OrdinalIgnoreCase)
                 || eventType.EndsWith(".warning", StringComparison.OrdinalIgnoreCase)) return "warning";
             if (status is "failed" or "error" || eventType.EndsWith(".error", StringComparison.OrdinalIgnoreCase)
                 || eventType.EndsWith("_failed", StringComparison.OrdinalIgnoreCase)
                 || eventType.EndsWith(".failed", StringComparison.OrdinalIgnoreCase)) return "error";
-            if (row.TryGetValue("ok", out var ok) && ok is bool success) return success ? "info" : "error";
             int code = ReadInt(data, "status", 0);
             if (eventType == "http.request" && code >= 100)
                 return code >= 500 ? "error" : code >= 400 ? "warning" : "info";
+            if ((row.GetValueOrDefault("ok") ?? data?.GetValueOrDefault("ok")) is bool success) return success ? "info" : "error";
             return status.Length == 0 ? "unclassified" : status;
         }
 
