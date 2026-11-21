@@ -14,8 +14,9 @@ namespace ReignBetaServer
         private static readonly UTF8Encoding EditorHistoryUtf8 = new UTF8Encoding(false, true);
 
         private sealed record EditorHistoryLine(int Start, int TextEnd, int End, Dictionary<string, object> Row);
-        private sealed record EditorHistorySource(string Event, string Turn, string Timeline, string Speaker,
-            string Role, string SpeakerName, long Timestamp, double Day, string Location, HashSet<string> Audience);
+        private sealed record EditorHistorySource(string Event, string Turn, string Session, string Exchange,
+            string Timeline, string Speaker, string Role, string SpeakerName, string OriginalText, bool? HasOppositeLine,
+            long Timestamp, double Day, string Location, HashSet<string> Audience);
 
         private static Dictionary<string, object> ReadEditorHistory(string directory)
         {
@@ -51,7 +52,7 @@ namespace ReignBetaServer
             CanonicalJson(left) == CanonicalJson(right);
 
         private static string EditorHistoryIssueMessage(List<Dictionary<string, object>> issues) =>
-            issues.Count == 0 ? "" : " Some history changes were skipped because their source or current version could not be verified.";
+            issues.Count == 0 ? "" : " Some history edits or memory updates were skipped because their source or current version could not be verified.";
 
         internal static List<Dictionary<string, object>> ApplyEditorHistory(string campaign, string hero,
             ReignDbConnection connection, Dictionary<string, object> history, Dictionary<string, object> revisionAfter = null)
@@ -133,8 +134,9 @@ namespace ReignBetaServer
                                 Issue(id, "unverified_history_source");
                                 continue;
                             }
-                            RebuildEditedHistoryProjection(connection, hero, source,
-                                replacement == null ? "" : ReadString(replacement, textKey, ""));
+                            if (!RebuildEditedHistoryProjection(connection, campaign, hero, source,
+                                replacement == null ? "" : ReadString(replacement, textKey, "")))
+                                Issue(id, "unverified_shared_exchange_projection");
                         }
 
                         if (line != null) patches.Add(line.Start, replacement);
@@ -200,6 +202,14 @@ namespace ReignBetaServer
             if ((turn.Length == 0 && group != "dialogue") || session.Length == 0 || exchange.Length == 0
                 || (role != "player" && role != "npc") || (rowTimeline.Length > 0 && rowTimeline != timeline)) return null;
 
+            var source = ReadEditorHistorySource(connection, campaign, hero, timeline, session, exchange, role, turn);
+            string expectedSpeaker = ReadString(row, "speakerHeroStringId", "");
+            return expectedSpeaker.Length == 0 || source?.Speaker == expectedSpeaker ? source : null;
+        }
+
+        private static EditorHistorySource ReadEditorHistorySource(ReignDbConnection connection, string campaign,
+            string hero, string timeline, string session, string exchange, string role, string turn)
+        {
             var sources = CharactersStore.SelectEditorHistorySources(connection, new Dictionary<string, object>
                 { ["campaign"] = campaign, ["hero"] = hero, ["turn"] = turn, ["session"] = session, ["exchange"] = exchange, ["role"] = role });
             if (sources.Count != 1) return null;
@@ -209,31 +219,41 @@ namespace ReignBetaServer
             var ownerPayload = TryParseJsonObject(ReadString(source, "owner_payload_json", ""));
             string eventTimeline = ReadString(eventPayload, "timelineId", "");
             string speaker = ReadString(source, "speaker_id", "");
-            string expectedSpeaker = ReadString(row, "speakerHeroStringId", "");
             if (turnPayload == null || eventPayload == null || ownerPayload == null
                 || DialogueService.ContinuityTimeline(turnPayload) != timeline || DialogueService.ContinuityTimeline(ownerPayload) != timeline
-                || (eventTimeline.Length > 0 && eventTimeline != timeline) || speaker.Length == 0
-                || (expectedSpeaker.Length > 0 && expectedSpeaker != speaker)) return null;
+                || (eventTimeline.Length > 0 && eventTimeline != timeline) || speaker.Length == 0) return null;
 
             var audience = EditorHistoryAudience(source, "participants_json");
             var eventAudience = EditorHistoryAudience(source, "event_participants_json", "event_witnesses_json");
             audience.IntersectWith(eventAudience);
             audience.ExceptWith(EditorHistoryAudience(source, "event_hidden_from_json"));
             if (!audience.Contains(hero)) return null;
-            return new EditorHistorySource(ReadString(source, "event_id", ""), ReadString(source, "turn_id", ""), timeline,
-                speaker, role, ReadString(source, "speaker_name", ""), ReadLong(source, "ts", 0),
-                ReadDouble(source, "world_day", 0d), ReadString(source, "location_id", ""), audience);
+
+            // StoreTurnMemoryLayers keeps the accepted input and reply in the event.
+            // An explicit empty string proves that this was a one-sided exchange.
+            var words = ReadDictionary(eventPayload, "payload");
+            string oppositeKey = role == "npc" ? "playerText" : "reply";
+            bool? hasOpposite = words != null && words.TryGetValue(oppositeKey, out object opposite) && opposite is string line
+                ? !string.IsNullOrWhiteSpace(line) : null;
+            return new EditorHistorySource(ReadString(source, "event_id", ""), ReadString(source, "turn_id", ""), session, exchange,
+                timeline, speaker, role, ReadString(source, "speaker_name", ""), ReadString(source, "text", ""), hasOpposite,
+                ReadLong(source, "ts", 0), ReadDouble(source, "world_day", 0d), ReadString(source, "location_id", ""), audience);
         }
 
         private static HashSet<string> EditorHistoryAudience(Dictionary<string, object> row, params string[] fields) =>
             fields.SelectMany(field => DialogueService.TextListFromJson(ReadString(row, field, "[]")))
                 .Where(id => !string.IsNullOrWhiteSpace(id)).ToHashSet(StringComparer.Ordinal);
 
-        private static void RebuildEditedHistoryProjection(ReignDbConnection connection, string hero, EditorHistorySource source, string text)
+        private static bool RebuildEditedHistoryProjection(ReignDbConnection connection, string campaign,
+            string hero, EditorHistorySource source, string text)
         {
             var observers = new HashSet<string>(StringComparer.Ordinal) { hero };
-            foreach (var memory in CharactersStore.SelectEditorHistoryMemories(connection,
-                new Dictionary<string, object> { ["event"] = source.Event }))
+            var retainedObservers = new HashSet<string>(StringComparer.Ordinal);
+            var memories = CharactersStore.SelectEditorHistoryMemories(connection,
+                new Dictionary<string, object> { ["event"] = source.Event });
+            EditorHistorySource otherSide = null;
+            bool checkedOtherSide = false, complete = true;
+            foreach (var memory in memories)
             {
                 var payload = TryParseJsonObject(ReadString(memory, "payload_json", ""));
                 if (ReadString(payload, "timelineId", "") != source.Timeline
@@ -243,6 +263,7 @@ namespace ReignBetaServer
                 audience.Add(owner);
                 audience.ExceptWith(EditorHistoryAudience(memory, "hidden_from_json"));
                 string scope = ReadString(payload, "observerScope", "");
+                bool active = ReadString(memory, "status", "") == "active";
                 if (ReadString(memory, "source", "") == EditorHistoryProjectionSource)
                 {
                     if (ReadString(payload, "editorOwnerId", "") != hero || ReadString(payload, "sourceTurnId", "") != source.Turn
@@ -265,31 +286,79 @@ namespace ReignBetaServer
                         || (memoryTurn.Length > 0 && memoryTurn != source.Turn)
                         || !audience.Contains(owner)
                         || (scope != "observable_source_spans" && (owner != hero || !audience.SetEquals(new[] { hero })))) continue;
+
+                    bool wholeExchange = scope == "observable_source_spans" && evidenceTurn.Length == 0 && memoryTurn.Length == 0;
+                    if (wholeExchange && active)
+                    {
+                        if (!audience.IsSubsetOf(source.Audience))
+                        {
+                            complete = false;
+                            continue;
+                        }
+                        if (source.HasOppositeLine != false)
+                        {
+                            if (!checkedOtherSide)
+                            {
+                                string oppositeRole = source.Role == "npc" ? "player" : "npc";
+                                otherSide = ReadEditorHistorySource(connection, campaign, hero, source.Timeline,
+                                    source.Session, source.Exchange, oppositeRole, "");
+                                checkedOtherSide = true;
+                            }
+                            if (otherSide == null || otherSide.Event != source.Event || !audience.IsSubsetOf(otherSide.Audience))
+                            {
+                                complete = false;
+                                continue;
+                            }
+                            retainedObservers.UnionWith(audience);
+                        }
+                    }
                 }
 
                 if (!audience.IsSubsetOf(source.Audience)) continue;
                 observers.UnionWith(audience);
-                CharactersStore.SupersedeEditorHistoryMemory(connection,
-                    new Dictionary<string, object> { ["id"] = ReadString(memory, "memory_id", ""), ["event"] = source.Event });
+                if (active)
+                    CharactersStore.SupersedeEditorHistoryMemory(connection,
+                        new Dictionary<string, object> { ["id"] = ReadString(memory, "memory_id", ""), ["event"] = source.Event });
             }
 
-            foreach (string observer in observers)
+            // A combined observer memory is split only when first retired. Later
+            // corrections can update or remove either exact turn independently.
+            if (otherSide != null && retainedObservers.Count > 0)
             {
-                string visible = DialogueService.ObserverConversationText(text, source.Speaker, observer, source.Role == "player");
-                if (string.IsNullOrWhiteSpace(visible)) continue;
-                var payload = new Dictionary<string, object>
+                foreach (var memory in memories.Where(row => ReadString(row, "status", "") == "active"
+                    && ReadString(row, "source", "") == EditorHistoryProjectionSource))
                 {
-                    ["editorOwnerId"] = hero, ["timelineId"] = source.Timeline, ["sourceEventId"] = source.Event,
-                    ["sourceTurnId"] = source.Turn, ["evidenceClass"] = "editor_annotation"
-                };
-                string summary = "Character Editor correction to " + source.SpeakerName + "'s history: " + visible;
-                var audience = new List<string> { observer };
-                DialogueService.InsertMemoryRow(connection, "mem_editor_" + Guid.NewGuid().ToString("N"), source.Event,
-                    observer, "interpersonal_experience", source.Timestamp, source.Day, source.Location, summary,
-                    audience, new List<string>(), "[]", audience, new List<string>(), new List<string>(), "private",
-                    0.6d, 0d, 1d, new List<string> { "conversation", "character_editor" }, "active", EditorHistoryProjectionSource,
-                    Json.Serialize(payload), "", "not_indexed");
+                    var scope = TryParseJsonObject(ReadString(memory, "payload_json", ""));
+                    if (ReadString(scope, "editorOwnerId", "") == hero && ReadString(scope, "sourceTurnId", "") == otherSide.Turn
+                        && ReadString(scope, "timelineId", "") == otherSide.Timeline && ReadString(scope, "sourceEventId", "") == otherSide.Event)
+                        retainedObservers.Remove(ReadString(memory, "owner_id", ""));
+                }
+                foreach (string observer in retainedObservers)
+                    InsertEditorHistoryProjection(connection, hero, otherSide, observer, otherSide.OriginalText, corrected: false);
             }
+            foreach (string observer in observers)
+                InsertEditorHistoryProjection(connection, hero, source, observer, text, corrected: true);
+
+            return complete;
+        }
+
+        private static void InsertEditorHistoryProjection(ReignDbConnection connection, string hero, EditorHistorySource source,
+            string observer, string text, bool corrected)
+        {
+            string visible = DialogueService.ObserverConversationText(text, source.Speaker, observer, source.Role == "player");
+            if (string.IsNullOrWhiteSpace(visible)) return;
+            var payload = new Dictionary<string, object>
+            {
+                ["editorOwnerId"] = hero, ["timelineId"] = source.Timeline, ["sourceEventId"] = source.Event,
+                ["sourceTurnId"] = source.Turn, ["evidenceClass"] = corrected ? "editor_annotation" : "reported"
+            };
+            string summary = (corrected ? "Character Editor correction for " : "Recorded words from ") + source.SpeakerName + "\n" + visible;
+            var audience = new List<string> { observer };
+            DialogueService.InsertMemoryRow(connection, "mem_editor_" + Guid.NewGuid().ToString("N"), source.Event,
+                observer, "interpersonal_experience", source.Timestamp, source.Day, source.Location, summary,
+                audience, new List<string>(), "[]", audience, new List<string>(), new List<string>(), "private",
+                0.6d, 0d, 1d, new List<string> { "conversation", "character_editor" }, "active", EditorHistoryProjectionSource,
+                Json.Serialize(payload), "", "not_indexed");
         }
     }
 }

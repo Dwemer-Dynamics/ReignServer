@@ -627,6 +627,7 @@ namespace ReignBetaServer
             const long sameSecond = 120;
             try
             {
+                string sharedPlayerTurn = "";
                 Dictionary<string, object> Seed(string eventId, string speaker, string timeline, bool shared)
                 {
                     var audience = shared ? new List<string> { speaker, player, listener } : new List<string> { speaker, player };
@@ -641,13 +642,15 @@ namespace ReignBetaServer
                     var exchange = shared
                         ? DialogueService.StorePartyConversationExchange(campaign, context, speaker, player, "Player", speaker, "Where?", text, eventId, sameSecond)
                         : DialogueService.StoreConversationExchange(campaign, context, speaker, player, "Player", speaker, "Where?", text, eventId, sameSecond);
+                    var turnIds = ReadStringList(exchange, "turnIds");
+                    if (eventId == "source_shared") sharedPlayerTurn = turnIds[0];
                     DialogueService.StoreTurnMemoryLayers(campaign, eventId, shared ? "party_chat_turn" : "dialogue_turn", speaker, player,
                         "town", "Where?", text, new List<Dictionary<string, object>> { new Dictionary<string, object>
                             { ["memoryId"] = "result_" + eventId, ["text"] = text, ["evidenceQuote"] = text } },
                         null, null, null, null, "conversation", sameSecond, audience, continuityPayload: context);
                     return new Dictionary<string, object>
                     {
-                        ["id"] = "row_" + eventId, ["sourceTurnId"] = ReadStringList(exchange, "turnIds")[1],
+                        ["id"] = "row_" + eventId, ["sourceTurnId"] = turnIds[1],
                         ["sessionId"] = ReadString(exchange, "sessionId", ""), ["exchangeId"] = ReadString(exchange, "exchangeId", ""),
                         ["eventId"] = "displayed_event_" + eventId,
                         ["role"] = "npc", ["speakerHeroStringId"] = speaker, ["ts"] = sameSecond, ["text"] = text
@@ -655,6 +658,11 @@ namespace ReignBetaServer
                 }
 
                 var shared = Seed("source_shared", hero, "main", true);
+                var sharedPlayer = new Dictionary<string, object>(shared)
+                {
+                    ["id"] = "row_shared_player", ["role"] = "player", ["speakerHeroStringId"] = player,
+                    ["sourceTurnId"] = sharedPlayerTurn, ["text"] = "Where?"
+                };
                 var separateHero = Seed("source_other_hero", other, "main", false);
                 var otherEvent = Seed("source_same_hero", hero, "main", false);
                 var olderExact = Seed("source_older_exact", hero, "main", false);
@@ -672,7 +680,8 @@ namespace ReignBetaServer
                 string spacedLegacy = "  " + Json.Serialize(legacy) + "    \n";
                 Directory.CreateDirectory(Path.GetDirectoryName(aEvents));
                 Directory.CreateDirectory(Path.GetDirectoryName(bHistory));
-                File.WriteAllText(aEvents, Json.Serialize(shared) + "\n" + malformed + spacedOther + spacedLegacy + Json.Serialize(separateHero));
+                File.WriteAllText(aEvents, Json.Serialize(sharedPlayer) + "\n" + Json.Serialize(shared)
+                    + "\n" + malformed + spacedOther + spacedLegacy + Json.Serialize(separateHero));
                 string guardedDialogue = Json.Serialize(wrongBranch) + "\r\n  " + Json.Serialize(publicLine);
                 File.WriteAllText(aDialogue, Json.Serialize(olderExact) + "\r\n" + guardedDialogue);
                 File.WriteAllText(bHistory, "  " + Json.Serialize(separateHero) + "\r\n", new UTF8Encoding(true));
@@ -705,6 +714,9 @@ namespace ReignBetaServer
                 string OtherMemories() => CanonicalJson(new[] { "source_other_hero", "source_same_hero", "source_other_branch", "source_public_with_whisper" }
                     .Select(id => Memories(id).OrderBy(row => ReadString(row, "memory_id", "")).ToList()));
                 string unrelated = OtherMemories();
+                bool IsSharedPlayerProjection(Dictionary<string, object> row) =>
+                    ReadString(row, "source", "") == EditorHistoryProjectionSource
+                    && ReadString(TryParseJsonObject(ReadString(row, "payload_json", "")), "sourceTurnId", "") == sharedPlayerTurn;
 
                 var sameSource = Memories("source_shared").Single(row =>
                     ReadString(TryParseJsonObject(ReadString(row, "payload_json", "{}")), "observerScope", "") == "observable_source_spans");
@@ -713,7 +725,8 @@ namespace ReignBetaServer
 
                 var loaded = CharacterEditorLoadApi(new Dictionary<string, object> { ["campaignId"] = campaign, ["heroStringId"] = hero });
                 var edits = ReadDictionary(loaded, "history");
-                foreach (var row in ReadDictionaryList(edits, "events").Where(row => EditorHistoryRowId(row) != "row_source_same_hero"))
+                foreach (var row in ReadDictionaryList(edits, "events").Where(row =>
+                    EditorHistoryRowId(row) != "row_source_same_hero" && EditorHistoryRowId(row) != "row_shared_player"))
                     row["text"] = "Meet beside the vineyard.";
                 foreach (var row in ReadDictionaryList(edits, "dialogue"))
                     row["text"] = "Meet beside the vineyard.";
@@ -733,6 +746,10 @@ namespace ReignBetaServer
                         && ReadString(row, "status", "") == "active" && ReadString(row, "summary", "").Contains("vineyard"))
                     && !memory.Any(row => ReadString(row, "owner_id", "") == other && ReadString(row, "source", "") == EditorHistoryProjectionSource),
                     "Only proven observers of the shared accepted source get corrected memory.");
+                Check("history_shared_other_side_retained",
+                    memory.Count(row => IsSharedPlayerProjection(row) && ReadString(row, "status", "") == "active"
+                        && ReadString(row, "owner_id", "") == listener && ReadString(row, "summary", "").Contains("Where?")) == 1,
+                    "Editing the NPC line carries the unchanged player line to the existing listener exactly once.");
                 Check("history_unrelated_same_second", OtherMemories() == unrelated && Originals() == originals
                     && File.ReadAllBytes(bHistory).SequenceEqual(bOriginal)
                     && File.ReadAllText(aEvents).EndsWith(malformed + spacedOther + spacedLegacy + Json.Serialize(separateHero), StringComparison.Ordinal),
@@ -750,21 +767,29 @@ namespace ReignBetaServer
 
                 var current = CharacterEditorLoadApi(new Dictionary<string, object> { ["campaignId"] = campaign, ["heroStringId"] = hero });
                 var history = ReadDictionary(current, "history");
-                history["events"] = ReadDictionaryList(history, "events").Where(row => EditorHistoryRowId(row) != "row_source_shared").ToList();
+                var remainingEvents = ReadDictionaryList(history, "events").Where(row => EditorHistoryRowId(row) != "row_source_shared").ToList();
+                remainingEvents.Single(row => EditorHistoryRowId(row) == "row_shared_player")["text"] = "Which grove?";
+                history["events"] = remainingEvents;
                 request["history"] = history;
                 request["records"] = ReadDictionary(current, "records");
                 request["revisionToken"] = ReadString(current, "revisionToken", "");
                 var deleted = CharacterEditorSaveApi(request);
-                Check("history_exact_delete", ReadBool(deleted, "ok", false) && Memories("source_shared").All(row => ReadString(row, "status", "") != "active")
+                var afterDelete = Memories("source_shared").Where(row => ReadString(row, "status", "") == "active").ToList();
+                Check("history_exact_delete", ReadBool(deleted, "ok", false) && ReadDictionaryList(deleted, "historyProjectionIssues").Count == 0
+                    && afterDelete.Any(row => ReadString(row, "owner_id", "") == listener)
+                    && afterDelete.All(row => IsSharedPlayerProjection(row) && ReadString(row, "summary", "").Contains("Which grove?"))
                     && OtherMemories() == unrelated && Originals() == originals,
-                    "Deleting the exact history row retires its memory projection and retains source originals.");
+                    "Deleting the NPC line retains the separately edited player line and the canonical originals.");
 
                 var rollback = CharacterEditorRollbackApi(new Dictionary<string, object>
                     { ["campaignId"] = campaign, ["heroStringId"] = hero, ["revisionId"] = ReadString(deleted, "revisionId", "") });
+                var listenerAfterRollback = Memories("source_shared").Where(row =>
+                    ReadString(row, "status", "") == "active" && ReadString(row, "owner_id", "") == listener).ToList();
                 Check("history_exact_rollback", ReadBool(rollback, "ok", false) && ReadDictionaryList(rollback, "historyProjectionIssues").Count == 0
-                    && Memories("source_shared").Any(row => ReadString(row, "owner_id", "") == listener && ReadString(row, "status", "") == "active"
-                        && ReadString(row, "summary", "").Contains("vineyard")) && OtherMemories() == unrelated && Originals() == originals,
-                    "Rollback restores this exact edit and keeps the original observers and unrelated history.");
+                    && listenerAfterRollback.Count == 2 && listenerAfterRollback.Any(row => ReadString(row, "summary", "").Contains("vineyard"))
+                    && listenerAfterRollback.Any(row => IsSharedPlayerProjection(row) && ReadString(row, "summary", "").Contains("Where?"))
+                    && OtherMemories() == unrelated && Originals() == originals,
+                    "Rollback restores both exact lines once for the original observer and preserves unrelated history.");
             }
             catch (Exception ex)
             {
