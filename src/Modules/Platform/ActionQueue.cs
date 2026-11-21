@@ -347,8 +347,13 @@ namespace ReignBetaServer
             };
         }
 
+        internal static Dictionary<string, object> ReportAction(Dictionary<string, object> payload)
+        {
+            return ReportAction(payload, null, null);
+        }
+
         internal static Dictionary<string, object> ReportAction(Dictionary<string, object> payload,
-            Action beforeMarriageAdmissionCommit = null, Action beforeMarriageEffectCommit = null)
+            Action beforeMarriageAdmissionCommit, Action beforeMarriageEffectCommit)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");

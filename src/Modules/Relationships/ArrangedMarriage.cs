@@ -695,7 +695,8 @@ namespace ReignBetaServer
             bool interruptedLegacy = false;
             try
             {
-                ActionPipelineService.ReportAction(legacy, beforeMarriageEffectCommit: () => throw new IOException("legacy affinity interrupted"));
+                ActionPipelineService.ReportAction(legacy, beforeMarriageAdmissionCommit: null,
+                    beforeMarriageEffectCommit: () => throw new IOException("legacy affinity interrupted"));
             }
             catch (IOException error) when (error.Message == "legacy affinity interrupted") { interruptedLegacy = true; }
             var interruptedRow = ActionPipelineService.ReadActionQueueUnlocked(campaign).Single(row => ReadString(row, "id", "") == legacyId);
@@ -765,7 +766,7 @@ namespace ReignBetaServer
                 ActionPipelineService.WriteActionQueueUnlocked(campaign, new List<Dictionary<string, object>> { Row(id, "queued") });
                 check("diplomatic_" + activation + "_waits_for_admission_commit",
                     MarriageTimelineActivationWaits(campaign, id + "_other", ingest, beforeCommit =>
-                        ActionPipelineService.ReportAction(scopeReport, beforeMarriageAdmissionCommit: beforeCommit))
+                        ActionPipelineService.ReportAction(scopeReport, beforeMarriageAdmissionCommit: beforeCommit, beforeMarriageEffectCommit: null))
                     && ReadString(ReadSavedAdmission(id), "timelineId", "") == timeline);
 
                 WorldSimulationService.WorldHistoryOpenTimelineApi(TestDict("campaignId", campaign, "timelineId", timeline));
