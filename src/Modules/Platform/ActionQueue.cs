@@ -225,6 +225,8 @@ namespace ReignBetaServer
             return row;
         }
 
+        private const long OrdinaryDeliveryWindowSeconds = 6 * 60 * 60;
+
         internal static Dictionary<string, object> NextActions(Dictionary<string, object> payload, Dictionary<string, string> query)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -235,9 +237,9 @@ namespace ReignBetaServer
             bool recoverDiplomaticMarriages;
             List<Dictionary<string, object>> selected = new List<Dictionary<string, object>>();
             long nowTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            const long deliveryMaxAgeSeconds = 6 * 60 * 60;
 
             List<Dictionary<string, object>> enteredBackoff = new List<Dictionary<string, object>>();
+            List<Dictionary<string, object>> unconfirmedDeliveries = new List<Dictionary<string, object>>();
 
             lock (Program.FileLock)
             {
@@ -249,36 +251,53 @@ namespace ReignBetaServer
                 bool changed = false;
                 foreach (Dictionary<string, object> row in queue)
                 {
-                    string status = ReadString(row, "status", "queued");
-                    if (selected.Count >= limit)
+                    if (row == null || !ReadString(row, "campaignId", "default").Equals(campaignId, StringComparison.OrdinalIgnoreCase))
                     {
-                        break;
+                        continue;
                     }
 
-                    if (!ReadString(row, "campaignId", "default").Equals(campaignId, StringComparison.OrdinalIgnoreCase))
+                    string status = ReadString(row, "status", "queued");
+                    string id = ReadString(row, "id", "");
+                    bool durable = DialogueService.DurableConversationAction(id);
+                    bool waitingForDispatch = status.Equals("queued", StringComparison.OrdinalIgnoreCase)
+                        || status.Equals("proposed", StringComparison.OrdinalIgnoreCase);
+                    bool ordinaryDispatchRecorded = !durable && (ReadLong(row, "deliveredTs", 0) > 0
+                        || ReadLong(row, "deliveryUnconfirmedTs", 0) > 0
+                        || status.Equals("delivered", StringComparison.OrdinalIgnoreCase));
+                    long queuedTs = ReadLong(row, "ts", 0);
+                    if (!durable && queuedTs > 0 && nowTs - queuedTs >= OrdinaryDeliveryWindowSeconds
+                        && (waitingForDispatch || status.Equals("delivered", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        if (!ordinaryDispatchRecorded)
+                        {
+                            row["status"] = "expired";
+                            row["expiredTs"] = nowTs;
+                            row["expiryReason"] = "Undelivered action exceeded the six-hour delivery window.";
+                            changed = true;
+                        }
+                        else if (!row.ContainsKey("deliveryUnconfirmedTs"))
+                        {
+                            // The poll may have reached native code and its report may still arrive.
+                            // Record the unknown outcome without closing the action's result status.
+                            row["deliveryUnconfirmedTs"] = nowTs;
+                            unconfirmedDeliveries.Add(row);
+                            changed = true;
+                        }
+                        continue;
+                    }
+
+                    if (selected.Count >= limit || ordinaryDispatchRecorded)
                     {
                         continue;
                     }
 
                     // Durable rows without a terminal report stay deliverable forever; repeated
                     // redeliveries back off (capped) instead of costing a rewrite every 30 s.
-                    bool durable = DialogueService.DurableConversationAction(ReadString(row, "id", ""));
                     bool retryDelivery = durable
                         && !IsTerminalActionReportStatus(status)
                         && DialogueService.DurableRedeliveryDue(row, nowTs, generation);
-                    if (!retryDelivery && !status.Equals("queued", StringComparison.OrdinalIgnoreCase) && !status.Equals("proposed", StringComparison.OrdinalIgnoreCase))
+                    if (!retryDelivery && !waitingForDispatch)
                     {
-                        continue;
-                    }
-
-                    long queuedTs = ReadLong(row, "ts", 0);
-                    if (!DialogueService.DurableConversationAction(ReadString(row, "id", "")) && queuedTs > 0 && nowTs - queuedTs > deliveryMaxAgeSeconds)
-                    {
-                        row["status"] = "expired";
-                        row["expiredTs"] = nowTs;
-                        row["expiryReason"] = "Undelivered action exceeded the six-hour delivery window.";
-                        DialogueService.SaveDurableConversationAction(campaignId, row);
-                        changed = true;
                         continue;
                     }
 
@@ -315,6 +334,18 @@ namespace ReignBetaServer
                 }
             }
 
+            foreach (Dictionary<string, object> row in unconfirmedDeliveries)
+            {
+                OperationsService.LogOperational("action.ordinary_delivery_unconfirmed", new Dictionary<string, object>
+                {
+                    ["campaignId"] = campaignId,
+                    ["actionId"] = ReadString(row, "id", ""),
+                    ["correlationId"] = ReadString(row, "correlationId", ""),
+                    ["deliveredTs"] = ReadLong(row, "deliveredTs", 0),
+                    ["deliveryUnconfirmedTs"] = ReadLong(row, "deliveryUnconfirmedTs", 0)
+                });
+            }
+
             foreach (Dictionary<string, object> row in enteredBackoff)
             {
                 OperationsService.LogOperational("action.redelivery_backoff", new Dictionary<string, object>
@@ -327,12 +358,12 @@ namespace ReignBetaServer
                 });
             }
 
-            List<object> records = selected.Select(x => x.ContainsKey("record") ? x["record"] : x).ToList();
+            List<object> records = selected.Select(ActionPollRecord).ToList();
             OperationsService.LogOperational("action.next", new Dictionary<string, object> { ["campaignId"] = campaignId, ["count"] = records.Count });
             foreach (Dictionary<string, object> row in selected)
             {
                 Dictionary<string, object> record = ReadDictionary(row, "record") ?? row;
-                OperationsService.WriteAudit(campaignId, FirstNonEmpty(ReadString(row, "correlationId", ""), ReadString(record, "correlationId", "")), "server", "action", "action.delivered", ReadFirstString(record, "actorHeroStringId", "targetHeroStringId"), ReadString(row, "id", ReadString(record, "serverActionId", "")), "", "delivered", 0, "Action delivered to game client.", new Dictionary<string, object>
+                OperationsService.WriteAudit(campaignId, FirstNonEmpty(ReadString(row, "correlationId", ""), ReadString(record, "correlationId", "")), "server", "action", "action.delivered", ReadFirstString(record, "actorHeroStringId", "targetHeroStringId"), ReadString(row, "id", ReadString(record, "serverActionId", "")), "", "delivered", 0, "Action selected for delivery to game client.", new Dictionary<string, object>
                 {
                     ["row"] = row
                 });
@@ -345,6 +376,20 @@ namespace ReignBetaServer
                 ["count"] = records.Count,
                 ["actions"] = records
             };
+        }
+
+        private static object ActionPollRecord(Dictionary<string, object> row)
+        {
+            object value = row.TryGetValue("record", out object nested) ? nested : row;
+            string rowId = ReadString(row, "id", "");
+            if (string.IsNullOrWhiteSpace(rowId) || DialogueService.DurableConversationAction(rowId)
+                || !(value is Dictionary<string, object> record)
+                || !string.IsNullOrWhiteSpace(ReadFirstString(record, "actionId", "serverActionId")))
+                return value;
+
+            // Some legacy queue envelopes hold the stable ID only on the outer row.
+            // Supply that exact identity without changing the original queued terms.
+            return new Dictionary<string, object>(record, record.Comparer) { ["serverActionId"] = rowId };
         }
 
         internal static Dictionary<string, object> ReportAction(Dictionary<string, object> payload)
