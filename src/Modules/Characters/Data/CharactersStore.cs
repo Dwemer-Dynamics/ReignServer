@@ -189,25 +189,27 @@ last_native_observed_json=$observed,updated_ts=$ts
 WHERE hero_id=$hero;", parameters, transaction);
         }
 
-        internal static List<Dictionary<string, object>> SelectConversationTurns2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static List<Dictionary<string, object>> SelectEditorHistorySources(ReignDbConnection connection, Dictionary<string, object> parameters)
         {
-            return ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id LIMIT 1;", parameters, transaction);
-        }
-
-        internal static void UpdateConversationTurns(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
-        {
-            ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET text=$text,speaker_name=$speaker,role=$role,world_day=$day,status='active' WHERE turn_id=$id;", parameters, transaction);
-        }
-
-        internal static List<Dictionary<string, object>> SelectConversationTurns3(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
-        {
-            return ReignDatabase.QuerySql(connection, @"SELECT t.turn_id FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id
-WHERE s.npc_id=$id AND t.status='active';", parameters, transaction);
-        }
-
-        internal static void UpdateConversationTurns2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
-        {
-            ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET status='superseded' WHERE turn_id=$id;", parameters, transaction);
+            // An accepted group event can own both a public placeholder and a private
+            // turn for the same role and speaker. Event-scoped memories cannot prove
+            // which one they project when those canonical rows coexist.
+            return ReignDatabase.QuerySql(connection, @"SELECT t.*, owner_turn.payload_json AS owner_payload_json, e.payload_json AS event_payload_json,
+e.participants_json AS event_participants_json, e.witnesses_json AS event_witnesses_json,
+e.hidden_from_json AS event_hidden_from_json
+FROM conversation_turns t
+JOIN conversation_sessions s ON s.session_id=t.session_id
+JOIN events e ON e.event_id=t.event_id AND e.campaign_id=s.campaign_id
+JOIN conversation_turns owner_turn ON owner_turn.event_id=t.event_id AND owner_turn.session_id=t.session_id
+AND owner_turn.exchange_id=t.exchange_id AND owner_turn.role='npc' AND owner_turn.speaker_id=$hero AND owner_turn.status='active'
+WHERE s.campaign_id=$campaign AND s.session_id=$session AND s.legacy_inferred=0
+AND t.exchange_id=$exchange AND t.role=$role AND t.status='active'
+AND ($turn='' OR t.turn_id=$turn)
+AND e.visibility='private' AND e.event_type IN ('dialogue_turn','party_chat_turn','social_event_turn')
+AND NOT EXISTS (SELECT 1 FROM conversation_turns sibling
+    WHERE sibling.event_id=t.event_id AND sibling.role=t.role AND sibling.speaker_id=t.speaker_id
+    AND sibling.turn_id<>t.turn_id)
+LIMIT 2;", parameters);
         }
 
         internal static List<Dictionary<string, object>> SelectDynamic(ReignDbConnection connection, object table, object key, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
@@ -245,14 +247,16 @@ WHERE s.npc_id=$id AND t.status='active';", parameters, transaction);
             ReignDatabase.ExecuteSql(connection, "UPDATE character_editor_reconciliation SET status='failed',summary=$summary,result_json=$result,updated_ts=$ts WHERE job_id=$job;", parameters, transaction);
         }
 
-        internal static List<Dictionary<string, object>> SelectEvents(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static List<Dictionary<string, object>> SelectEditorHistoryMemories(ReignDbConnection connection, Dictionary<string, object> parameters)
         {
-            return ReignDatabase.QuerySql(connection, "SELECT event_id FROM events WHERE ts=$ts;", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, @"SELECT * FROM memories
+WHERE event_id=$event AND visibility='private' AND status IN ('active','superseded');", parameters);
         }
 
-        internal static void UpdateMemories(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static void SupersedeEditorHistoryMemory(ReignDbConnection connection, Dictionary<string, object> parameters)
         {
-            ReignDatabase.ExecuteSql(connection, "UPDATE memories SET status='superseded' WHERE event_id=$event;", parameters, transaction);
+            ReignDatabase.ExecuteSql(connection, @"UPDATE memories SET status='superseded'
+WHERE memory_id=$id AND event_id=$event AND status='active';", parameters);
         }
 
         internal static void InsertRelationshipPairChemistry(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)

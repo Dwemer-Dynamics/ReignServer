@@ -785,6 +785,7 @@ namespace ReignBetaServer
                 : new Dictionary<string, object>();
             if (officialAmbassador)
                 CourtService.RecordOfficialAmbassadorExchange(campaignId, payload, heroId, dialoguePlayerId, playerLine, npcLine, conversationExchange, ts);
+            AttachAcceptedTranscriptSourceIds(playerLine, npcLine, conversationExchange);
             if (playerLine != null) CampaignFileService.AppendJsonLineToPath(CampaignFileService.CharacterFile(campaignId, heroId, "history", "dialogue.jsonl"), playerLine);
             CampaignFileService.AppendJsonLineToPath(CampaignFileService.CharacterFile(campaignId, heroId, "history", "dialogue.jsonl"), npcLine);
             foreach (Dictionary<string, object> memoryWrite in memoryWrites)

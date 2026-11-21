@@ -548,6 +548,8 @@ namespace ReignBetaServer
                 AddSubsystemListSummary(checks, "contracts.npc_lives", "contracts", CharactersService.RunNpcLivesSelfTests());
                 AddSubsystemListSummary(checks, "contracts.communications", "contracts", DialogueService.RunCommunicationSelfTests());
                 AddSubsystemListSummary(checks, "contracts.rulers", "contracts", RelationshipsService.RunRulerJudgmentSelfTests());
+                AddSubsystemListSummary(checks, "contracts.character_editor_history", "characters",
+                    CharactersService.RunCharacterEditorHistoryProjectionSelfTests(), caseResultLimit: 16);
                 RunBuildAndContractChecks(checks, includeExpensiveSubsystems: explicitSuite);
             }
             if (ShouldStop(checks, failFast)) return;
