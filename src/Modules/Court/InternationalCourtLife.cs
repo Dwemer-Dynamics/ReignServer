@@ -104,6 +104,7 @@ namespace ReignBetaServer
                 return CourtError("The case, posting, and exact proposed terms are required.");
             string command = ReadString(candidate, "command", "");
             if (!DiplomacyService.DirectorSupportedCommands.Contains(command)) return CourtError("The requested diplomatic action is unsupported.");
+            string actionId = CanonicalAmbassadorActionId(command);
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
                 EnsureForeignAmbassadorSchema(connection);
@@ -116,10 +117,15 @@ namespace ReignBetaServer
                 string target = ReadFirstString(candidate, "targetKingdomId", "targetKingdomStringId");
                 if (!((actor == host && target == foreign) || (actor == foreign && target == host)))
                     return CourtError("The referred terms must involve exactly the host and represented kingdoms.");
+
+                EnsureInternationalCourtLifeSchema(connection);
+                Dictionary<string, object> unavailable = FindUnavailableInternationalCourtReferral(
+                    connection, ctx.CampaignId, ctx.TimelineId, postingId, actionId, candidate);
+                if (unavailable != null) return UnavailableInternationalCourtReferralResult(unavailable);
             }
             string hash = CourtHash(CourtCanonicalJson(candidate));
             Dictionary<string, object> referral = CreateAmbassadorReferral(ctx.CampaignId, ctx.TimelineId, postingId,
-                CanonicalAmbassadorActionId(command), candidate, hash, ctx.WorldDay);
+                actionId, candidate, hash, ctx.WorldDay);
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(ctx.CampaignId))
             {
                 EnsureInternationalCourtLifeSchema(connection);
@@ -129,6 +135,38 @@ namespace ReignBetaServer
             referral["ok"] = true;
             return referral;
         }
+
+        private static string InternationalCourtReferralMaterial(Dictionary<string, object> candidate)
+        {
+            // D51 suppresses repeats on the executable proposal. The frozen original
+            // remains intact for typed replies, including its Court and director context.
+            var material = new Dictionary<string, object>(candidate);
+            foreach (string key in new[]
+            {
+                "courtMatterId", "courtOptionId", "courtRulerId",
+                "correlationId", "publicReason", "reason", "decisionFactors", "confidence",
+                "initiativeDiagnostics", "intentFamily", "requiredPolarity",
+                "relationshipOpportunityId", "relationshipThreshold",
+                "politicalPressureId", "politicalPressureValue", "politicalPressureChannel",
+                "actorEffectiveAttitude", "targetEffectiveAttitude"
+            })
+                material.Remove(key);
+            return CourtCanonicalJson(material);
+        }
+
+        private static Dictionary<string, object> FindUnavailableInternationalCourtReferral(ReignDbConnection connection,
+            string campaignId, string timelineId, string postingId, string actionId, Dictionary<string, object> candidate)
+        {
+            string material = InternationalCourtReferralMaterial(candidate);
+            var scope = TestDict("campaign", campaignId, "timeline", timelineId, "posting", postingId, "action", actionId);
+            return CourtStore.SelectUnavailableInternationalCourtReferrals(connection, scope).FirstOrDefault(row =>
+                ReadBool(ParseAmbassadorJsonObject(ReadString(row, "authoritative_receipt_json", "{}")), "technicalFailure", false)
+                && InternationalCourtReferralMaterial(ParseAmbassadorJsonObject(ReadString(row, "exact_terms_json", "{}"))) == material);
+        }
+
+        private static Dictionary<string, object> UnavailableInternationalCourtReferralResult(Dictionary<string, object> row)
+            => TestDict("ok", true, "referralId", ReadString(row, "referral_id", ""), "termsHash", ReadString(row, "terms_hash", ""),
+                "dueDay", ReadDouble(row, "due_day", 0d), "status", "model_output_unusable", "outcome", "format_failure", "technicalFailure", true);
 
         internal static Dictionary<string, object> InternationalCourtResolutionApi(Dictionary<string, object> payload)
         {
