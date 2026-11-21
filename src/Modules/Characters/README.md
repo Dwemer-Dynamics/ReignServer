@@ -46,6 +46,8 @@ native poll/report; `GET /character-editor/portrait`), `/government/political-pr
 CLI commands: `--author-character-narratives`, `--generate-profile-library`, `--validate-profile-library`,
 `--migrate-character-profiles`, `--regenerate-character-personalities`, `--audit-foundation-traits-vnext`.
 
+Profile migration and personality regeneration match `--campaign-id` by exact spelling. A targeted campaign with unfinished Save Sync recovery returns its operation ID. An all-campaign run skips that campaign.
+
 ## Tables
 
 `EnsureIdentitySchema`: `acquaintances`, `identity_evidence`, `identity_roster`. `EnsureCharacterEditorSchema`:

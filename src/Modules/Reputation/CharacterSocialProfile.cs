@@ -94,7 +94,7 @@ namespace ReignBetaServer
         {
             string root = CampaignFileService.CampaignsRoot();
             if (!Directory.Exists(root)) return "completed";
-            foreach (string directory in Directory.GetDirectories(root))
+            foreach (string directory in Directory.GetDirectories(root).Where(CampaignFileService.CanScanCampaignDirectory))
             {
                 if (OperationsService.PriorityBackgroundWorkShouldYield()) return "yielded";
                 string campaignId = Path.GetFileName(directory);

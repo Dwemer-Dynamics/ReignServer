@@ -335,6 +335,31 @@ namespace ReignBetaServer
                 Dictionary<string, object> newest = SaveSyncLoadApi(newPayload, false);
                 add("newest_save_no_op", ReadBool(newest, "ok", false) && ReadBool(newest, "noOp", false) && ReadString(newest, "result", "") == "no_op", "Loading the newest unchanged save is a zero-write no-op.");
 
+                RunSaveSyncFencedRecoveryTests(add, token, campaignId);
+                RunSaveSyncCommitJournalTest(add, token);
+                string legacyRecovery = Path.Combine(SaveSyncCampaignRoot(campaignId), "r", "legacy-unowned");
+                Directory.CreateDirectory(legacyRecovery);
+                File.WriteAllText(Path.Combine(legacyRecovery, "original"), "legacy");
+                SaveSyncRecoveryObserver = boundary =>
+                {
+                    if (boundary == "journal.restoring_target_database") throw new IOException("fixture journal write");
+                };
+                var unchanged = SaveSyncLoadApi(oldPayload, false);
+                SaveSyncRecoveryObserver = null;
+                add("prepare_journal_failure_preserves_current_state", ReadString(unchanged, "outcome", "") == "unchanged"
+                    && SaveSyncTestMarkerExists(campaignId, "future") && !IsSaveSyncSemanticBlocked(campaignId),
+                    "Failure to publish target-restore intent leaves the current campaign in place.");
+
+                SaveSyncRecoveryObserver = boundary =>
+                {
+                    if (boundary == "target_restored") throw new IOException("fixture target acknowledgement");
+                };
+                var failedTarget = SaveSyncLoadApi(oldPayload, false);
+                SaveSyncRecoveryObserver = null;
+                add("target_sql_failure_recovers_before_file_swap", ReadString(failedTarget, "outcome", "") == "recovered"
+                    && SaveSyncTestMarkerExists(campaignId, "future") && SaveSyncTestFutureSqlRows(campaignId) > 0,
+                    "A failure immediately after target SQL restore recovers the pre-load database and files.");
+
                 SaveSyncFailureInjectionForTests = "after_install";
                 Dictionary<string, object> failed = SaveSyncLoadApi(oldPayload, false);
                 SaveSyncFailureInjectionForTests = "";
@@ -355,6 +380,18 @@ namespace ReignBetaServer
                 DialogueService.AdvanceMemoryRestoreGeneration(campaignId);
                 string preRollbackGeneration = SaveSyncTestSqlValue(campaignId,
                     PersistenceStore.SelectMemoryPrecisionStateSql2, "restore_generation");
+                bool partialCleanup = false;
+                SaveSyncRecoveryObserver = boundary =>
+                {
+                    if (boundary == "audit.load.rolled_back") throw new IOException("fixture audit write");
+                    if (boundary != "cleanup_deleting_work") return;
+                    string id = ReadString(ReadSaveSyncLedger(campaignId), "lastBackupId", "");
+                    var operation = ReadSaveSyncOperation(campaignId, Path.Combine(SaveSyncJournalDirectory(campaignId), id + ".json"));
+                    string file = Path.Combine(operation.DisplacedPath, "characters", "hero_a", "state.json");
+                    partialCleanup = operation.WorkReleaseStarted && File.Exists(file);
+                    File.Delete(file);
+                    throw new IOException("fixture interrupted recursive cleanup");
+                };
                 Dictionary<string, object> rolledBack = SaveSyncLoadApi(loadSessionPayload, false);
                 Dictionary<string, object> previewAfterLoad = SaveSyncLoadApi(loadSessionPayload, true);
                 add("preview_does_not_replay_a_completed_load",
@@ -367,6 +404,27 @@ namespace ReignBetaServer
                     PersistenceStore.SelectMemoryRestoredSourceContextSql, "source_generation");
                 string rollbackLoadSession = SaveSyncTestSqlValue(campaignId,
                     PersistenceStore.SelectMemoryRestoredSourceContextSql2, "load_session_id");
+                SaveSyncRecoveryObserver = null;
+                var pendingReplay = SaveSyncLoadApi(loadSessionPayload, false);
+                add("verified_commit_survives_audit_and_cleanup_failure",
+                    ReadString(rolledBack, "outcome", "") == "committed" && ReadBool(rolledBack, "cleanupPending", false)
+                    && ReadBool(pendingReplay, "idempotentReplay", false) && ReadBool(pendingReplay, "cleanupPending", false)
+                    && partialCleanup && !IsSaveSyncSemanticBlocked(campaignId),
+                    "The committed load replays after interrupted removal of its verified displaced tree.");
+                string committedJournal = Path.Combine(SaveSyncJournalDirectory(campaignId), ReadString(rolledBack, "backupId", "") + ".json");
+                byte[] committedReceipt = File.ReadAllBytes(committedJournal);
+                RequireOfflineSaveSyncCampaignAvailable(campaignId, CampaignFileService.CampaignsRoot());
+                add("offline_maintenance_allows_terminal_pending_cleanup",
+                    committedReceipt.SequenceEqual(File.ReadAllBytes(committedJournal))
+                    && Directory.Exists(ReadSaveSyncOperation(campaignId, committedJournal).WorkPath),
+                    "A settled campaign stays eligible for maintenance while its terminal receipt and pending cleanup remain intact.");
+                CleanupSaveSyncRecovery(campaignId);
+                add("retention_releases_only_owned_terminal_pairs",
+                    !Directory.Exists(ReadString(unchanged, "backupPath", "")) && Directory.Exists(ReadString(failed, "backupPath", ""))
+                    && !ReignPostgreSqlStorage.SnapshotExists(campaignId, "recovery:" + ReadString(unchanged, "backupId", ""))
+                    && ReignPostgreSqlStorage.SnapshotExists(campaignId, "recovery:" + ReadString(failed, "backupId", ""))
+                    && File.ReadAllText(Path.Combine(legacyRecovery, "original")) == "legacy",
+                    "Two verified recovery pairs survive pruning together with unjournaled historical evidence.");
                 add("rollback_context_records_snapshot_generation",
                     ReadString(rolledBack, "result", "") == "rolled_back"
                     && oldSnapshotGeneration.Length > 0 && preRollbackGeneration.Length > 0
@@ -469,14 +527,30 @@ namespace ReignBetaServer
                 archivePath = ReadString(export, "path", "");
                 bool archiveReady = ReadBool(export, "ok", false) && File.Exists(archivePath);
                 string upload = Path.Combine(Program.DataDir, "backups", "uploads", Guid.NewGuid().ToString("N") + ".reignbackup");
-                Directory.CreateDirectory(Path.GetDirectoryName(upload));
-                if (archiveReady) File.Copy(archivePath, upload, true);
-                TryDeleteFile(oldNativeSavePath);
-                TryDeleteFile(newestNativeSavePath);
-                TryDeleteDirectory(StrictCampaignDirectory(campaignId));
-                TryDeleteDirectory(SaveSyncCampaignRoot(campaignId));
-                ReignPostgreSqlStorage.DropCampaign(campaignId);
-                Dictionary<string, object> imported = archiveReady ? ImportCampaignBackup(upload, new Dictionary<string, string> { ["replace"] = "false" }) : new Dictionary<string, object>();
+                Dictionary<string, object> imported = TestDict("ok", false, "error", "Fixture backup export failed.");
+                if (archiveReady)
+                {
+                    TryDeleteFile(oldNativeSavePath);
+                    TryDeleteFile(newestNativeSavePath);
+                    // Retire the fixture through the same transaction that settles its local journals.
+                    Dictionary<string, object> removed = DeleteCampaignBackupData(
+                        TestDict("campaignId", campaignId, "confirmation", campaignId));
+                    bool destinationCleared = ReadBool(removed, "ok", false)
+                        && ReadBool(removed, "campaignDeleted", false)
+                        && ReadBool(removed, "cleanupComplete", false)
+                        && !Path.Exists(SaveSyncJournalDirectory(campaignId));
+                    if (destinationCleared)
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(upload));
+                        File.Copy(archivePath, upload, true);
+                        imported = ImportCampaignBackup(upload, new Dictionary<string, string> { ["replace"] = "false" });
+                    }
+                    else
+                    {
+                        imported = TestDict("ok", false, "error",
+                            "Fixture campaign retirement did not clear the destination.", "removal", removed);
+                    }
+                }
                 Dictionary<string, object> importedLedger = ReadSaveSyncLedger(campaignId);
                 bool roundTrip = ReadBool(imported, "ok", false) && SaveSyncPoint(importedLedger, oldPoint) != null && SaveSyncPoint(importedLedger, newPoint) != null
                     && Directory.Exists(Path.Combine(oldStoredRoot, "campaign"))
@@ -811,6 +885,23 @@ namespace ReignBetaServer
                     "The confirmed zero-save cleanup also removes verified orphan campaign, Save Sync, and portrait roots while preserving the shared library.");
 
                 PrepareSaveSyncTestCampaign(recoveredFailureId, "recover");
+                var retirementPoint = SaveSyncTestPointPayload(recoveredFailureId, "retire_" + token, 1d, "Retirement " + token);
+                SaveSyncRegisterApi(retirementPoint);
+                AppendSaveSyncTestFutureState(recoveredFailureId);
+                SaveSyncRecoveryObserver = phase =>
+                {
+                    if (phase == "cleanup_deleting_work") throw new IOException("fixture retirement cleanup");
+                };
+                var pendingRetirementLoad = SaveSyncLoadApi(retirementPoint, false);
+                string terminalId = ReadString(pendingRetirementLoad, "backupId", "");
+                var terminal = ReadSaveSyncOperation(recoveredFailureId, Path.Combine(SaveSyncJournalDirectory(recoveredFailureId), terminalId + ".json"));
+                var deferred = DeleteCampaignOwnedDataCore(recoveredFailureId, "Deferred Cleanup", true, "test_deferred");
+                SaveSyncRecoveryObserver = null;
+                add("retirement_waits_for_verified_terminal_work",
+                    ReadString(deferred, "result", "") == "delete_deferred" && terminal.WorkReleaseStarted
+                    && Directory.Exists(terminal.DisplacedPath) && Directory.Exists(terminal.BackupPath)
+                    && ReignPostgreSqlStorage.SnapshotExists(recoveredFailureId, terminal.RecoverySnapshotId),
+                    "A failed terminal cleanup defers retirement while its SQL and file recovery resources remain verifiable.");
                 CampaignRetirementFailureInjectionForTests = "after_stage";
                 Dictionary<string, object> recoveredFailure =
                     DeleteCampaignOwnedDataCore(recoveredFailureId,
@@ -819,9 +910,17 @@ namespace ReignBetaServer
                 add("interrupted_retirement_restores_active_roots",
                     !ReadBool(recoveredFailure, "campaignDeleted", true)
                     && Directory.Exists(StrictCampaignDirectory(recoveredFailureId))
+                    && File.Exists(terminal.JournalPath) && !Directory.Exists(terminal.WorkPath)
                     && ReignPostgreSqlStorage.ListCampaignMetadata().Any(row =>
                         ReadString(row, "campaignId", "") == recoveredFailureId),
                     "A pre-commit staging failure rolls campaign-owned roots back and leaves the PostgreSQL campaign active.");
+                var retired = VerifyCaseDistinctSaveSyncRetirement(add, terminal);
+                add("retirement_releases_owned_terminal_journals_and_work",
+                    ReadBool(retired, "campaignDeleted", false) && ReadBool(retired, "cleanupComplete", false)
+                    && !Directory.Exists(SaveSyncJournalDirectory(recoveredFailureId)) && !Directory.Exists(terminal.WorkPath)
+                    && !Directory.Exists(terminal.BackupPath)
+                    && !ReignPostgreSqlStorage.SnapshotExists(recoveredFailureId, terminal.RecoverySnapshotId),
+                    "Confirmed campaign retirement releases the previously settled work and its terminal journal, SQL and file backup.");
 
                 PrepareSaveSyncTestCampaign(residualCleanupId, "residual");
                 string longResidualDirectory =
@@ -925,6 +1024,7 @@ namespace ReignBetaServer
             catch (Exception ex) { add("save_sync_test_exception", false, ex.ToString()); }
             finally
             {
+                SaveSyncRecoveryObserver = null;
                 SaveSyncFailureInjectionForTests = "";
                 SaveSyncEnabledOverrideForTests = null;
                 SaveSyncSkipSemanticForTests = false;
@@ -958,6 +1058,7 @@ namespace ReignBetaServer
                 TryDeleteDirectory(SaveSyncCampaignRoot(campaignId));
                 TryDeleteDirectory(SaveSyncCampaignRoot(siblingId));
                 TryDeleteDirectory(SaveSyncCampaignRoot(preexistingId));
+                TryDeleteDirectory(SaveSyncJournalDirectory(campaignId));
                 TryDeleteDirectory(StrictCampaignDirectory(orphanRootId));
                 TryDeleteDirectory(SaveSyncCampaignRoot(orphanRootId));
                 TryDeleteDirectory(CampaignPortraitCacheDirectory(orphanRootId));
@@ -1050,7 +1151,7 @@ namespace ReignBetaServer
                 add("legacy_load_captures_baseline_after_refusal",
                     ReadBool(registered, "ok", false) && ReadString(registered, "result", "") == "legacy_baseline_registered"
                     && !ReadBool(registered, "dryRun", true) && ReadBool(registered, "noOp", false) && point != null
-                    && QueuedOptimizations().Contains(campaignId + "|" + pointId)
+                    && QueuedOptimizations().Contains(campaignId + "|" + pointId, StringComparer.OrdinalIgnoreCase)
                     && ReignPostgreSqlStorage.SnapshotExists(campaignId, pointId)
                     && File.Exists(Path.Combine(SaveSyncSnapshotRoot(campaignId, point), "manifest.json"))
                     && SaveSyncUniqueStateCount(ledger) == previousCount + 1,
@@ -1069,7 +1170,7 @@ namespace ReignBetaServer
                     && SaveSyncSnapshotRoot(campaignId, sharedPoint) == SaveSyncSnapshotRoot(campaignId, point)
                     && SaveSyncUniqueStateCount(sharedLedger) == previousCount + 1
                     && !ReignPostgreSqlStorage.SnapshotExists(campaignId, aliasId)
-                    && !QueuedOptimizations().Contains(campaignId + "|" + aliasId),
+                    && !QueuedOptimizations().Contains(campaignId + "|" + aliasId, StringComparer.OrdinalIgnoreCase),
                     "A real legacy load can register an alias of the clean baseline without consuming a slot or scheduling another optimization.");
             }
             finally
@@ -1189,6 +1290,26 @@ namespace ReignBetaServer
                     && !ReadBool(vacant, "foreignRegistration", true)
                     && ReadInt(vacant, "registrationCount", -1) == 0 && !vacant.ContainsKey("point"),
                     "A case-insensitive foreign native slot remains occupied beyond the public summary cap, while an unrelated slot is vacant.");
+
+                var distinctOwner = Lookup(campaignId.ToUpperInvariant(), slot);
+                add("guarded_checkpoint_slot_recognizes_case_distinct_campaign",
+                    ReadBool(distinctOwner, "ok", false) && ReadBool(distinctOwner, "foreignRegistration", false)
+                    && ReadInt(distinctOwner, "registrationCount", -1) == 0 && !distinctOwner.ContainsKey("point"),
+                    "The case-distinct registration owner is foreign even though native slot names are case-insensitive.");
+
+                string journalRoot = SaveSyncJournalDirectory(campaignId);
+                string operation = Guid.NewGuid().ToString("N");
+                Dictionary<string, object> unresolved;
+                FenceSaveSyncRecovery(journalRoot, operation);
+                try { unresolved = Lookup(siblingId, slot); }
+                finally { ReleaseSaveSyncFence(journalRoot, operation); }
+                var restored = Lookup(siblingId, slot);
+                add("guarded_checkpoint_slot_requires_unfenced_occupancy",
+                    !ReadBool(unresolved, "ok", true)
+                    && ReadString(unresolved, "result", "") == "checkpoint_occupancy_unverified"
+                    && !unresolved.ContainsKey("foreignRegistration") && !unresolved.ContainsKey("backupId")
+                    && ReadBool(restored, "ok", false) && ReadBool(restored, "foreignRegistration", false),
+                    "A hidden foreign registration cannot prove vacancy, and settlement restores exact occupancy lookup.");
 
                 points.Add(new Dictionary<string, object>(archivedPoint) { ["savePointId"] = "duplicate_inventory" });
                 WriteSaveSyncLedger(campaignId, expanded);
@@ -1388,6 +1509,427 @@ namespace ReignBetaServer
             }
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
+        private static void RunSaveSyncFencedRecoveryTests(Action<string, bool, string> add, string token, string sibling)
+        {
+            string campaign = "save_recovery_" + token;
+            string parentRoot = Program.CampaignsRootOverride.Value;
+            string previousNativeRoot = CampaignNativeSaveRootOverrideForTests;
+            string siblingMetadata = Path.Combine(StrictCampaignDirectory(sibling), "campaign.json");
+            string fixtureRoot = Path.Combine(Path.GetTempPath(), "ReignSaveSyncRecovery_" + Guid.NewGuid().ToString("N"));
+            Program.CampaignsRootOverride.Value = Path.Combine(fixtureRoot, "campaigns");
+            try
+            {
+                CampaignNativeSaveRootOverrideForTests = Directory.CreateDirectory(Path.Combine(fixtureRoot, "native-saves")).FullName;
+                string siblingDirectory = StrictCampaignDirectory(sibling);
+                Directory.CreateDirectory(siblingDirectory);
+                File.Copy(siblingMetadata, Path.Combine(siblingDirectory, "campaign.json"));
+                CampaignFileService.WriteJsonObject(Path.Combine(siblingDirectory, "characters", "hero_a", "enrichment.json"),
+                    TestDict("status", "pending"));
+                VerifySaveSyncFencedRecovery(add, token, campaign, sibling);
+            }
+            finally
+            {
+                CampaignNativeSaveRootOverrideForTests = previousNativeRoot;
+                Program.CampaignsRootOverride.Value = parentRoot;
+                TryDeleteDirectory(fixtureRoot);
+            }
+        }
+
+        private static void VerifySaveSyncFencedRecovery(Action<string, bool, string> add, string token, string campaign, string sibling)
+        {
+            string directory = StrictCampaignDirectory(campaign);
+            string sync = SaveSyncCampaignRoot(campaign);
+            string journals = SaveSyncJournalDirectory(campaign);
+            SaveSyncOperation op = null;
+            try
+            {
+                bool identityRejected = false;
+                try { RequireSaveSyncJournalCampaign(campaign + "\n"); }
+                catch (InvalidDataException) { identityRejected = true; }
+                add("journal_campaign_uses_exact_sql_identity", identityRejected,
+                    "A recovery journal rejects a campaign identifier that PostgreSQL would normalize to another spelling.");
+                PrepareSaveSyncTestCampaign(campaign, "target");
+                string enrichment = Path.Combine("characters", "hero_a", "enrichment.json");
+                CampaignFileService.WriteJsonObject(Path.Combine(directory, enrichment), TestDict("status", "pending"));
+                var payload = SaveSyncTestPointPayload(campaign, "point_" + token, 1d, "Recovery fixture " + token);
+                SaveSyncRegisterApi(payload);
+                AppendSaveSyncTestFutureState(campaign);
+                using var heldConnection = ReignPostgreSqlStorage.OpenCampaignConnection(campaign);
+                string sourceHash = InventoryHash(SaveSyncTreeInventory(directory));
+                string sqlHash = SaveSyncDatabaseHash(ReignPostgreSqlStorage.CampaignSchemaName(campaign));
+                string missingSchema = ReignPostgreSqlStorage.SnapshotSchemaName(campaign, "absent_" + token);
+                bool missingDenied = false;
+                try { SaveSyncDatabaseHash(missingSchema); }
+                catch (InvalidDataException) { missingDenied = true; }
+                using (var metadata = ReignPostgreSqlStorage.OpenMetadataConnection())
+                {
+                    var count = ReignDatabase.QuerySql(metadata, "SELECT count(*) AS total FROM pg_namespace WHERE nspname=@schema;",
+                        TestDict("schema", missingSchema)).Single();
+                    add("sql_receipt_never_creates_missing_schema", missingDenied && ReadLong(count, "total", -1) == 0,
+                        "A missing SQL schema cannot acquire a recovery hash or be created by verification.");
+                }
+                SaveSyncRecoveryObserver = boundary =>
+                {
+                    if (boundary is "target_installed" or "rollback_database" or "journal.recovery_required")
+                        throw new IOException("fixture " + boundary);
+                };
+                var failed = SaveSyncLoadApi(payload, false);
+                SaveSyncRecoveryObserver = null;
+                string id = ReadString(failed, "backupId", "");
+                op = ReadSaveSyncOperation(campaign, Path.Combine(journals, id + ".json"));
+                string backup = Path.Combine(op.BackupPath, "campaign");
+                add("failed_compensation_retains_sql_and_both_originals",
+                    ReadString(failed, "result", "") == "recovery_required" && op.Phase == "restoring_original_database"
+                    && ReignPostgreSqlStorage.SnapshotExists(campaign, op.RecoverySnapshotId)
+                    && op.SourceDatabaseSha256 == sqlHash
+                    && SaveSyncDatabaseHash(ReignPostgreSqlStorage.SnapshotSchemaName(campaign, op.RecoverySnapshotId)) == sqlHash
+                    && InventoryHash(SaveSyncTreeInventory(backup)) == sourceHash
+                    && InventoryHash(SaveSyncTreeInventory(op.DisplacedPath)) == sourceHash,
+                    "Both original file trees and the exact recovery schema survive failed SQL compensation and journal update.");
+
+                ReleaseSaveSyncFence(journals, id);
+                VerifyOfflineSaveSyncRecoveryFence(add, op, sibling);
+                File.Move(Path.Combine(sync, "ledger.json"), Path.Combine(sync, "fixture-ledger"));
+                bool blockedAtEveryPhase = true;
+                foreach (string phase in new[] { "preparing", "restoring_target_database", "moving_active_files",
+                    "installing_target_files", "publishing_receipt", "restoring_original_database", "restoring_original_files", "recovery_required" })
+                {
+                    PublishSaveSyncPhase(op, phase);
+                    ReleaseSaveSyncFence(journals, id);
+                    CleanupAllSaveSyncRecoveryAtStartup();
+                    blockedAtEveryPhase &= FencedSaveSyncOperation(campaign) == id
+                        && ReadString(SaveSyncStatusSummary(campaign), "result", "") == "recovery_required"
+                        && ReadString(SaveSyncLoadApi(payload, false), "result", "") == "recovery_required";
+                }
+                bool sqlDenied = false, heldSqlDenied = false, fileDenied = false;
+                try { using var connection = ReignPostgreSqlStorage.OpenCampaignConnection(campaign); }
+                catch (InvalidOperationException e) when (e.Message.Contains(id)) { sqlDenied = true; }
+                try { ReignDatabase.QuerySql(heldConnection, "SELECT 1"); }
+                catch (InvalidOperationException e) when (e.Message.Contains(id)) { heldSqlDenied = true; }
+                try { CampaignFileService.WriteJsonObject(Path.Combine(directory, "blocked.json"), TestDict()); }
+                catch (InvalidOperationException e) when (e.Message.Contains(id)) { fileDenied = true; }
+                add("startup_reconstructs_campaign_fence_without_ledger", blockedAtEveryPhase && sqlDenied && heldSqlDenied && fileDenied
+                    && !File.Exists(Path.Combine(directory, "blocked.json")) && !IsSaveSyncSemanticBlocked(sibling)
+                    && Directory.Exists(CampaignFileService.CampaignDirectory(sibling)),
+                    "Reloading each nonterminal journal phase fences SQL, campaign files, indexing and retry for this campaign alone.");
+                VerifyCaseDistinctSaveSyncFences(add, op);
+                CharactersService.InitializeCharacterProfileLibrary();
+                add("startup_enrichment_preserves_displaced_and_fenced_files",
+                    InventoryHash(SaveSyncTreeInventory(op.DisplacedPath)) == sourceHash
+                    && ReadString(CampaignFileService.ReadJsonObject(Path.Combine(directory, enrichment)), "status", "") == "pending"
+                    && ReadString(CampaignFileService.ReadJsonObject(Path.Combine(StrictCampaignDirectory(sibling), enrichment)),
+                        "status", "") == "deferred_until_interaction"
+                    && !CampaignFileService.HasLocalCampaignMetadata(campaign) && CampaignFileService.HasLocalCampaignMetadata(sibling),
+                    "Startup migrates eligible sibling enrichment while the fenced campaign and its displaced original remain intact.");
+                var listed = ReadDictionaryList(CampaignListApi(), "campaigns");
+                var statuses = ReadDictionaryList(SaveSyncStatusApi(null), "campaigns");
+                add("fenced_campaign_keeps_sibling_listings_available",
+                    new[] { listed, statuses }.All(rows => rows.Any(row => ReadString(row, "campaignId", "") == sibling)
+                        && rows.Any(row => ReadString(row, "campaignId", "") == campaign
+                            && ReadString(row, "result", "") == "recovery_required")),
+                    "Both campaign and Save Sync listings expose the fenced operation alongside the healthy sibling.");
+                var applying = new SaveSyncFence(Guid.NewGuid().ToString("N"), Applying: true);
+                string siblingJournals = SaveSyncJournalDirectory(sibling);
+                try
+                {
+                    SaveSyncRecoveryObserver = boundary =>
+                    {
+                        if (boundary == "read_ledger." + sibling) GetOrAddSaveSyncFence(siblingJournals, applying);
+                    };
+                    var concurrent = ReadDictionaryList(SaveSyncStatusApi(null), "campaigns");
+                    add("status_ledger_fence_preserves_other_rows",
+                        concurrent.Any(row => ReadString(row, "backupId", "") == applying.Id && ReadString(row, "result", "") == "apply_in_progress")
+                        && concurrent.Any(row => ReadString(row, "backupId", "") == id && ReadString(row, "result", "") == "recovery_required"),
+                        "A fence acquired during a status ledger read reports its exact operation alongside other campaigns.");
+                }
+                finally { SaveSyncRecoveryObserver = null; ReleaseSaveSyncFence(siblingJournals, applying.Id); }
+                bool Denied(Action action)
+                {
+                    try { action(); return false; }
+                    catch (InvalidOperationException ex) when (ex.Message.Contains(id)) { return true; }
+                }
+                bool deletionsDenied = Denied(() => ReignPostgreSqlStorage.DropSnapshot(campaign, op.RecoverySnapshotId))
+                    && Denied(() => ReignPostgreSqlStorage.DropCampaign(campaign))
+                    && Denied(() => DeleteCampaignBackupData(TestDict("campaignId", campaign, "confirmation", campaign)))
+                    && Denied(() => DeleteCampaignOwnedDataCore(campaign, campaign, true, "recovery_test"));
+                ReleaseSaveSyncFence(journals, id);
+                string coldDeleteBlock = SaveSyncDeleteAllBlockReason();
+                add("recovery_fence_blocks_retirement_and_cold_delete_all", deletionsDenied && coldDeleteBlock.Contains(id)
+                    && DeleteAllPreDeleteBlockReason().Contains(id)
+                    && ReignPostgreSqlStorage.SnapshotExists(campaign, op.RecoverySnapshotId)
+                    && File.Exists(op.JournalPath) && Directory.Exists(op.DisplacedPath) && Directory.Exists(backup),
+                    "Snapshot drop, campaign deletion, retirement and cold Delete All preflight preserve every original.");
+                string metadataPath = Path.Combine(directory, "campaign.json");
+                byte[] metadataBytes = File.ReadAllBytes(metadataPath);
+                Dictionary<string, object> audit;
+                try
+                {
+                    File.WriteAllText(metadataPath, Json.Serialize(TestDict("campaignId", "unregistered_" + token)));
+                    audit = CampaignStorageAuditCore();
+                }
+                finally { File.WriteAllBytes(metadataPath, metadataBytes); }
+                add("fenced_storage_ineligible_for_orphan_cleanup",
+                    ReadDictionaryList(audit, "campaigns").Any(row => ReadString(row, "campaignId", "") == campaign
+                        && ReadString(row, "storageCategory", "") == "recovery_required" && !ReadBool(row, "eligibleForPermanentDeletion", true))
+                    && !ReadDictionaryList(audit, "orphanCampaignRoots").Any(row => ReadString(row, "path", "") == directory)
+                    && !ReadDictionaryList(audit, "orphanSaveSyncRoots").Any(row => ReadString(row, "path", "") == sync),
+                    "The storage audit protects operation-owned directories even with inconsistent metadata and a missing ledger.");
+
+                byte[] lastPhase = File.ReadAllBytes(op.JournalPath);
+                WriteRecoveryFile(op.JournalPath, Encoding.UTF8.GetBytes("{"));
+                ReleaseSaveSyncFence(journals, id);
+                string ledgerPath = Path.Combine(sync, "ledger.json");
+                CampaignFileService.WriteJsonObject(ledgerPath, TestDict("version", SaveSyncFormatVersion,
+                    "campaignId", campaign, "lastBackupId", id));
+                var degraded = ReadDictionaryList(SaveSyncStatusApi(null), "campaigns");
+                add("unreadable_status_journal_is_campaign_local",
+                    degraded.Any(row => ReadString(row, "campaignId", "") == sibling)
+                    && degraded.Any(row => ReadString(row, "backupId", "") == id
+                        && ReadString(row, "result", "") == "recovery_required"),
+                    "A journal damaged after startup reports recovery for its campaign while other Save Sync statuses remain readable.");
+                ReleaseSaveSyncFence(journals, id);
+                try
+                {
+                    SaveSyncRecoveryObserver = boundary =>
+                    {
+                        if (boundary == "status_journal") GetOrAddSaveSyncFence(journals, applying);
+                    };
+                    var status = SaveSyncStatusSummary(campaign);
+                    add("stale_status_preserves_newer_applying_fence", ReadString(status, "backupId", "") == applying.Id
+                        && ReadString(status, "result", "") == "apply_in_progress" && !status.ContainsKey("journalError")
+                        && FindSaveSyncFence(campaign) == applying,
+                        "Reading an older damaged receipt cannot replace an applying operation's fence.");
+                }
+                finally { SaveSyncRecoveryObserver = null; ReleaseSaveSyncFence(journals, applying.Id); }
+                File.Delete(ledgerPath);
+                ReleaseSaveSyncFence(journals, id);
+                bool unreadable = false;
+                try { CleanupSaveSyncRecovery(campaign); }
+                catch (System.Text.Json.JsonException) { unreadable = true; }
+                bool offlineUnreadable = false;
+                try { RequireOfflineSaveSyncCampaignAvailable(campaign, CampaignFileService.CampaignsRoot()); }
+                catch (InvalidDataException ex) when (ex.Message.Contains(op.JournalPath)) { offlineUnreadable = true; }
+                add("offline_maintenance_rejects_unreadable_journal", offlineUnreadable && File.ReadAllText(op.JournalPath) == "{",
+                    "Maintenance refuses the damaged journal and leaves its bytes intact.");
+                add("unreadable_journal_preserves_fence_and_originals", unreadable && FencedSaveSyncOperation(campaign) == id
+                    && Directory.Exists(op.DisplacedPath) && ReignPostgreSqlStorage.SnapshotExists(campaign, op.RecoverySnapshotId),
+                    "An unreadable operation journal blocks its campaign and all recovery cleanup.");
+                WriteRecoveryFile(op.JournalPath, lastPhase);
+
+                foreach (string failure in new[] { "rollback_copy", "rollback_move" })
+                {
+                    bool injected = false;
+                    SaveSyncRecoveryObserver = boundary =>
+                    {
+                        if (boundary == failure) { injected = true; throw new IOException("fixture file compensation"); }
+                    };
+                    try { RecoverSaveSyncOriginalFiles(op); }
+                    catch (IOException) when (injected) { }
+                    finally { SaveSyncRecoveryObserver = null; }
+                    add(failure + "_preserves_original_evidence", injected && !Directory.Exists(directory)
+                        && InventoryHash(SaveSyncTreeInventory(op.DisplacedPath)) == sourceHash
+                        && InventoryHash(SaveSyncTreeInventory(backup)) == sourceHash
+                        && ReignPostgreSqlStorage.SnapshotExists(campaign, op.RecoverySnapshotId),
+                        "A failed file compensation retains the displaced tree, independent bytes and SQL preimage.");
+                }
+                RecoverSaveSyncOriginalFiles(op);
+                add("rollback_file_copy_reconciles_inventory", InventoryHash(SaveSyncTreeInventory(directory)) == sourceHash,
+                    "Completing the isolated file leg reproduces the source inventory exactly.");
+            }
+            finally
+            {
+                SaveSyncRecoveryObserver = null;
+                ReleaseSaveSyncFence(journals, FencedSaveSyncOperation(campaign));
+                ReignPostgreSqlStorage.DropCampaign(campaign);
+                if (op != null) TryDeleteDirectory(op.WorkPath);
+                TryDeleteDirectory(directory);
+                TryDeleteDirectory(sync);
+                TryDeleteDirectory(journals);
+            }
+        }
+
+        private static void VerifyOfflineSaveSyncRecoveryFence(Action<string, bool, string> add, SaveSyncOperation op, string sibling)
+        {
+            string campaigns = CampaignFileService.CampaignsRoot();
+            string previousRoot = Program.CampaignsRootOverride.Value;
+            if (!ReignPostgreSqlStorage.Options.IsValidation || string.IsNullOrEmpty(previousRoot))
+                throw new InvalidOperationException("Offline maintenance fence checks require isolated campaign storage.");
+            string evidence = Directory.CreateDirectory(Path.Combine(Path.GetDirectoryName(campaigns), "maintenance-evidence")).FullName;
+            string manifest = Path.Combine(evidence, "request.json"), backup = Path.Combine(evidence, "backup-fixture");
+            string report = Path.Combine(evidence, "report.json");
+            File.WriteAllText(manifest, Json.Serialize(TestDict("schema", "reign-continuity-repair-v1",
+                "campaignId", op.CampaignId, "timelineId", "absent_" + op.OperationId)));
+            File.WriteAllText(backup, "synthetic maintenance backup hash input");
+            byte[] before = File.ReadAllBytes(op.JournalPath);
+            string expected = "Save Sync recovery_required for campaign " + op.CampaignId + ", operation " + op.OperationId + ".";
+            string previousMode = Environment.GetEnvironmentVariable("REIGN_CONTINUITY_MAINTENANCE");
+            bool cliBlocked = false, explicitRootBlocked = false;
+            try
+            {
+                Environment.SetEnvironmentVariable("REIGN_CONTINUITY_MAINTENANCE", "1");
+                try
+                {
+                    DialogueService.RunConversationContinuityRepairCli(new[] { "--apply", "--manifest", manifest, "--report", report,
+                        "--confirmed-manifest-sha256", FileSha256(manifest), "--backup", backup, "--backup-sha256", FileSha256(backup) });
+                }
+                catch (InvalidOperationException ex) when (ex.Message == expected) { cliBlocked = true; }
+                Program.CampaignsRootOverride.Value = Path.Combine(evidence, "campaigns");
+                try { RequireOfflineSaveSyncCampaignAvailable(op.CampaignId, campaigns); }
+                catch (InvalidOperationException ex) when (ex.Message == expected) { explicitRootBlocked = true; }
+                RequireOfflineSaveSyncCampaignAvailable(sibling, campaigns);
+            }
+            finally
+            {
+                Program.CampaignsRootOverride.Value = previousRoot;
+                Environment.SetEnvironmentVariable("REIGN_CONTINUITY_MAINTENANCE", previousMode);
+            }
+            add("cold_maintenance_apply_reads_exact_managed_journal", cliBlocked && explicitRootBlocked && !File.Exists(report)
+                && FencedSaveSyncOperation(op.CampaignId) == null && before.SequenceEqual(File.ReadAllBytes(op.JournalPath)),
+                "An offline apply with no cached fence reports the exact unresolved operation. A separate evidence root leaves sibling eligibility and journal bytes intact.");
+        }
+
+        private static void VerifyCaseDistinctSaveSyncFences(Action<string, bool, string> add, SaveSyncOperation op)
+        {
+            string sibling = op.CampaignId.ToUpperInvariant();
+            string journals = SaveSyncJournalDirectory(sibling);
+            string siblingId = Guid.NewGuid().ToString("N");
+            try
+            {
+                using var connection = ReignPostgreSqlStorage.OpenCampaignConnection(sibling);
+                var row = ReignDatabase.QuerySql(connection, "SELECT current_schema() AS schema_name;").Single();
+                string marker = Path.Combine(CampaignFileService.CampaignDirectory(sibling), "case-test.json");
+                CampaignFileService.WriteJsonObject(marker, TestDict("operation", siblingId));
+                var blockedMigration = CharactersService.MigrateCharacterProfilesToCurrentModels(new[] { "--campaign-id", op.CampaignId });
+                var healthyMigration = CharactersService.MigrateCharacterProfilesToCurrentModels(new[] { "--campaign-id", sibling });
+                string absentSpelling = char.ToUpperInvariant(op.CampaignId[0]) + op.CampaignId.Substring(1);
+                var absentMigration = CharactersService.MigrateCharacterProfilesToCurrentModels(new[] { "--campaign-id", absentSpelling });
+                add("profile_migration_selects_only_exact_unfenced_campaign",
+                    ReadString(blockedMigration, "result", "") == "recovery_required" && ReadString(blockedMigration, "backupId", "") == op.OperationId
+                    && ReadInt(healthyMigration, "campaignCount", -1) == 1 && ReadInt(absentMigration, "campaignCount", -1) == 0,
+                    "An explicitly targeted profile migration returns the exact recovery fence, visits a named healthy sibling, and ignores a missing spelling.");
+                add("relationship_queue_keeps_case_distinct_healthy_campaign",
+                    RelationshipsService.VerifyCaseDistinctSaveSyncScheduling(CampaignFileService.CampaignsRoot(), op.CampaignId, sibling),
+                    "Queueing the fenced campaign first keeps the healthy sibling eligible and preserves both worker generations.");
+                bool distinctActiveState;
+                lock (SaveSyncActiveStateLock)
+                    distinctActiveState = !ReferenceEquals(ReadSaveSyncActiveStateLocked(op.CampaignId), ReadSaveSyncActiveStateLocked(sibling));
+                GetOrAddSaveSyncFence(journals, new SaveSyncFence(siblingId, Applying: true));
+                var statuses = ReadDictionaryList(SaveSyncStatusApi(null), "campaigns");
+                add("case_distinct_campaigns_keep_separate_fences", ReadString(row, "schema_name", "") == ReignPostgreSqlStorage.CampaignSchemaName(sibling)
+                    && distinctActiveState && File.Exists(marker) && !File.Exists(Path.Combine(op.ActivePath, "case-test.json"))
+                    && statuses.Any(status => ReadString(status, "campaignId", "") == op.CampaignId && ReadString(status, "backupId", "") == op.OperationId)
+                    && statuses.Any(status => ReadString(status, "campaignId", "") == sibling && ReadString(status, "backupId", "") == siblingId),
+                    "A case-distinct sibling uses its own PostgreSQL schema and files. Both simultaneous fences retain their exact operation IDs in status.");
+            }
+            finally
+            {
+                ReleaseSaveSyncFence(journals, siblingId);
+                ReignPostgreSqlStorage.DropCampaign(sibling);
+                lock (SaveSyncActiveStateLock) SaveSyncActiveStates.Remove(sibling);
+                TryDeleteDirectory(SaveSyncCampaignRoot(sibling));
+            }
+        }
+
+        private static Dictionary<string, object> VerifyCaseDistinctSaveSyncRetirement(Action<string, bool, string> add, SaveSyncOperation op)
+        {
+            string campaign = op.CampaignId, sibling = campaign.ToUpperInvariant();
+            string siblingDirectory = StrictCampaignDirectory(sibling);
+            string marker = Path.Combine(siblingDirectory, "retirement-sibling.json");
+            string queuedSibling = sibling + "|" + op.OperationId.ToUpperInvariant();
+            string previousFailure = CampaignRetirementFailureInjectionForTests;
+            try
+            {
+                using (var connection = ReignPostgreSqlStorage.OpenCampaignConnection(sibling))
+                    CampaignFileService.WriteJsonObject(marker, TestDict("campaignId", ReignPostgreSqlStorage.CampaignIdForConnection(connection)));
+                SchedulePendingCampaignRetirement(sibling, "sibling", "Sibling fixture");
+                var unrelatedUnload = CampaignUnloadedApi(TestDict("campaignId", campaign));
+                SchedulePendingCampaignRetirement(campaign, op.SavePointId, "Target fixture");
+                add("case_distinct_pending_retirement_keeps_both_ids",
+                    ReadString(unrelatedUnload, "result", "") == "no_pending_retirement" && IsCampaignRetirementPending(campaign)
+                    && IsCampaignRetirementPending(sibling),
+                    "A sibling's pending retirement cannot authorize an unload. Both case-distinct requests retain their ownership.");
+
+                byte[] journal = File.ReadAllBytes(op.JournalPath);
+                lock (SaveSyncOptimizationQueued) SaveSyncOptimizationQueued.Add(queuedSibling);
+                CampaignRetirementFailureInjectionForTests = "after_database_drop";
+                var interrupted = DeleteCampaignOwnedDataCore(campaign, "Verified Retirement", true, "test_terminal");
+                CampaignRetirementFailureInjectionForTests = previousFailure;
+                var residuals = ReadStringList(interrupted, "residualCleanup");
+                bool staged = residuals.Select(root => Path.Combine(root, "save-sync-journals", op.OperationId + ".json"))
+                    .Any(path => File.Exists(path) && File.ReadAllBytes(path).SequenceEqual(journal));
+                CleanupCampaignRetirementStagingAtStartup();
+                var retry = DeleteCampaignOwnedDataCore(campaign, "Verified Retirement", true, "test_terminal_retry");
+                bool queued;
+                lock (SaveSyncOptimizationQueued) queued = SaveSyncOptimizationQueued.Contains(queuedSibling);
+                add("case_distinct_retirement_discards_only_committed_staging",
+                    ReadBool(interrupted, "campaignDeleted", false) && !ReadBool(interrupted, "cleanupComplete", true)
+                    && staged && residuals.All(root => !Directory.Exists(root)) && !Directory.Exists(op.ActivePath)
+                    && !File.Exists(op.JournalPath) && ReadString(retry, "result", "") == "already_deleted"
+                    && !IsCampaignRetirementPending(campaign) && IsCampaignRetirementPending(sibling) && queued
+                    && ReignPostgreSqlStorage.CampaignExists(sibling)
+                    && ReadString(CampaignFileService.ReadJsonObject(marker), "campaignId", "") == sibling,
+                    "After the target SQL drop, restart removes its staged terminal journal and files. The sibling keeps its data, pending retirement and queued work.");
+                return retry;
+            }
+            finally
+            {
+                CampaignRetirementFailureInjectionForTests = previousFailure;
+                lock (SaveSyncOptimizationQueued) SaveSyncOptimizationQueued.Remove(queuedSibling);
+                CancelPendingCampaignRetirement(sibling, "fixture_cleanup");
+                ReignPostgreSqlStorage.DropCampaign(sibling);
+                TryDeleteDirectory(siblingDirectory);
+                ClearSaveSyncCampaignRuntime(sibling);
+                TryDeleteDirectory(SaveSyncCampaignRoot(sibling));
+            }
+        }
+
+        private static void RunSaveSyncCommitJournalTest(Action<string, bool, string> add, string token)
+        {
+            string campaign = "sst_publish_" + token;
+            string active = StrictCampaignDirectory(campaign);
+            string journals = SaveSyncJournalDirectory(campaign);
+            string sync = SaveSyncCampaignRoot(campaign);
+            SaveSyncOperation op = null;
+            try
+            {
+                PrepareSaveSyncTestCampaign(campaign, "target");
+                var payload = SaveSyncTestPointPayload(campaign, "point_" + token, 1d, "Publication fixture " + token);
+                SaveSyncRegisterApi(payload);
+                AppendSaveSyncTestFutureState(campaign);
+                payload["loadSessionId"] = "session_" + token;
+                SaveSyncRecoveryObserver = boundary =>
+                {
+                    if (boundary is "journal.committed" or "audit.load.recovery_required")
+                        throw new IOException("fixture terminal publication failure");
+                };
+                var uncertain = SaveSyncLoadApi(payload, false);
+                SaveSyncRecoveryObserver = null;
+                string id = ReadString(uncertain, "backupId", "");
+                op = ReadSaveSyncOperation(campaign, Path.Combine(journals, id + ".json"));
+                var ledger = CampaignFileService.ReadJsonObject(Path.Combine(sync, "ledger.json"));
+                ReleaseSaveSyncFence(journals, id);
+                CleanupSaveSyncRecovery(campaign);
+                add("published_ledger_cannot_replay_indeterminate_commit",
+                    op.Outcome == "recovery_required" && ReadString(uncertain, "result", "") == op.Outcome
+                    && ReadString(ReadDictionary(ledger, "lastLoadReceipt"), "loadSessionId", "") == "session_" + token
+                    && ReadString(SaveSyncLoadApi(payload, false), "result", "") == op.Outcome
+                    && Directory.Exists(op.DisplacedPath) && ReignPostgreSqlStorage.SnapshotExists(campaign, op.RecoverySnapshotId),
+                    "The durable fence takes precedence over an already-published success receipt after a terminal journal failure.");
+            }
+            finally
+            {
+                SaveSyncRecoveryObserver = null;
+                ReleaseSaveSyncFence(journals, FencedSaveSyncOperation(campaign));
+                ReignPostgreSqlStorage.DropCampaign(campaign);
+                if (op != null) TryDeleteDirectory(op.WorkPath);
+                TryDeleteDirectory(active);
+                TryDeleteDirectory(sync);
+                TryDeleteDirectory(journals);
+            }
+        }
+
+#endif
         private static string SaveSyncActiveFingerprintForTests(string campaignId)
         {
             string campaignRoot = StrictCampaignDirectory(campaignId);
@@ -1399,4 +1941,52 @@ namespace ReignBetaServer
                 + ":" + SaveSyncManifestFingerprint(files);
         }
     }
+
+#if !REIGN_EXCLUDE_VERIFICATION
+    internal static partial class RelationshipsService
+    {
+        internal static bool VerifyCaseDistinctSaveSyncScheduling(string root, string fenced, string healthy)
+        {
+            // The real rescan can also visit other fixture directories. Restore the
+            // scheduler under its own lock before returning to the persistence suite.
+            lock (RelationshipReadyGate)
+            {
+                static Action Capture<T>(Dictionary<string, T> state)
+                {
+                    var entries = state.ToArray();
+                    return () =>
+                    {
+                        state.Clear();
+                        foreach (var entry in entries) state.Add(entry.Key, entry.Value);
+                    };
+                }
+                var restoreReady = Capture(RelationshipReadyCampaigns);
+                var restoreVersions = Capture(RelationshipReadyVersions);
+                var restoreGenerations = Capture(RelationshipCampaignGenerations);
+                var recovered = RelationshipRecoveredCampaigns.ToArray();
+                DateTime reconciled = RelationshipReadyReconciledUtc;
+                try
+                {
+                    RelationshipReadyReconciledUtc = DateTime.MinValue;
+                    ResetRelationshipCampaignScheduling(fenced);
+                    string generation = RelationshipCampaignGeneration(fenced);
+                    ResetRelationshipCampaignScheduling(healthy);
+                    var candidates = RelationshipCampaignCandidates(root);
+                    return candidates.Contains(Path.Combine(root, healthy), StringComparer.Ordinal)
+                        && !candidates.Contains(Path.Combine(root, fenced), StringComparer.Ordinal)
+                        && RelationshipCampaignGeneration(fenced) == generation && RelationshipCampaignGeneration(healthy) != generation;
+                }
+                finally
+                {
+                    restoreReady();
+                    restoreVersions();
+                    restoreGenerations();
+                    RelationshipRecoveredCampaigns.Clear();
+                    RelationshipRecoveredCampaigns.UnionWith(recovered);
+                    RelationshipReadyReconciledUtc = reconciled;
+                }
+            }
+        }
+    }
+#endif
 }

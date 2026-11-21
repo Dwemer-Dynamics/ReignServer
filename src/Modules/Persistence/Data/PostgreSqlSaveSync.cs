@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text.Json;
 using Npgsql;
 
 namespace ReignBetaServer
@@ -166,6 +168,7 @@ namespace ReignBetaServer
             }
             if (activeClean)
             {
+                result["outcome"] = "unchanged";
                 // Initialize only from this identity-verified native save. Every
                 // source is compared with its snapshot row; the no-op marker is
                 // not permission to include arbitrary current/foreign history.
@@ -211,163 +214,8 @@ namespace ReignBetaServer
                 return result;
             }
 
-            string operationId = DateTime.UtcNow.ToString(
-                "yyyyMMddHHmmss", CultureInfo.InvariantCulture)
-                + "_" + Guid.NewGuid().ToString("N").Substring(0, 8);
-            string recoveryPointId = "__recovery_" + operationId;
-            string campaignDir = StrictCampaignDirectory(campaignId);
-            string recoveryRoot = Path.Combine(
-                SaveSyncCampaignRoot(campaignId), "r", operationId);
-            string recoveryCampaign = Path.Combine(recoveryRoot, "campaign");
-            // The durable Save Sync root may live on a different volume from the
-            // installed server. Keep the immutable snapshot and recovery copy in
-            // that stable root, but stage the directory swap beside the active
-            // campaign so Directory.Move remains an atomic same-volume rename.
-            string campaignWorkRoot = SaveSyncCampaignWorkRoot(
-                campaignDir,
-                operationId,
-                Guid.NewGuid().ToString("N").Substring(0, 8));
-            string stagedCampaign = Path.Combine(campaignWorkRoot, "staged");
-            bool databaseRestored = false;
-            bool filesInstalled = false;
-            string phase = "prepare_recovery";
-            string displacedCampaign = Path.Combine(campaignWorkRoot, "active");
-            try
-            {
-                phase = "snapshot_active_database";
-                ReignPostgreSqlStorage.CloneCampaignToSnapshot(
-                    campaignId, recoveryPointId);
-                phase = "snapshot_active_campaign";
-                Directory.CreateDirectory(recoveryCampaign);
-                if (Directory.Exists(campaignDir))
-                    CopyDirectoryTree(
-                        campaignDir,
-                        recoveryCampaign,
-                        path => !IsLiveSqliteSidecar(path));
-
-                phase = "stage_target_campaign";
-                CopyDirectoryTree(
-                    Path.Combine(pointRoot, "campaign"),
-                    stagedCampaign,
-                    path => !IsLiveSqliteSidecar(path));
-                RequireSaveSyncCalendarDigest(calendarSha, SaveSyncCalendarDigest(ReadSaveSyncCalendar(stagedCampaign)));
-                int retainedAssets = MergeSaveSyncRetainedAssets(
-                    campaignDir, stagedCampaign);
-
-                SetSaveSyncSemanticBlocked(campaignId, true);
-                phase = "restore_target_database";
-                ReignPostgreSqlStorage.RestoreCampaignSnapshot(
-                    campaignId, postgresSnapshotPointId);
-                databaseRestored = true;
-                if (SaveSyncFailureInjectionForTests == "after_stage")
-                    throw new InvalidOperationException(
-                        "Injected Save Sync failure after PostgreSQL restore.");
-
-                phase = "move_active_campaign";
-                if (Directory.Exists(campaignDir))
-                    MoveDirectoryWithRetries(campaignDir, displacedCampaign);
-                phase = "install_target_campaign";
-                MoveDirectoryWithRetries(stagedCampaign, campaignDir);
-                filesInstalled = true;
-                if (SaveSyncFailureInjectionForTests == "after_install")
-                    throw new InvalidOperationException(
-                        "Injected Save Sync failure after installing campaign assets.");
-
-                ClearSaveSyncCaches(campaignId);
-                DialogueService.AdvanceMemoryRestoreGeneration(campaignId, point, "", loadSessionId);
-                MarkSaveSyncActiveStateClean(campaignId, point);
-                // Echoed only when the context is bound to this exact load; never fails the load.
-                string rollbackProofGeneration = DialogueService.TerminalReportLoadProofGeneration(campaignId, savePointId, loadSessionId);
-                if (rollbackProofGeneration.Length > 0) result["restoreGeneration"] = rollbackProofGeneration;
-                timer.Stop();
-                result["result"] = "rolled_back";
-                result["noOp"] = false;
-                result["wouldChange"] = true;
-                result["durationMs"] = timer.ElapsedMilliseconds;
-                result["backupCreated"] = true;
-                result["backupId"] = operationId;
-                result["backupPath"] = recoveryRoot;
-                result["retainedStaticAssetFiles"] = retainedAssets;
-                result["databaseRestored"] = true;
-                result["completedPhase"] = phase;
-                StoreSaveSyncLoadReceipt(
-                    ledger, savePointId, loadSessionId, result);
-                UpdateSaveSyncLastResult(
-                    ledger, point, result, operationId);
-                WriteSaveSyncLedger(campaignId, ledger);
-                AppendSaveSyncAudit(
-                    campaignId, "load.rolled_back", result);
-                TryDeleteDirectory(displacedCampaign);
-                ReignPostgreSqlStorage.DropSnapshot(
-                    campaignId, recoveryPointId);
-                SetSaveSyncSemanticBlocked(campaignId, false);
-                CleanupSaveSyncRecovery(campaignId);
-                return result;
-            }
-            catch (Exception ex)
-            {
-                try
-                {
-                    if (filesInstalled && Directory.Exists(campaignDir))
-                        TryDeleteDirectory(campaignDir);
-                    if (Directory.Exists(displacedCampaign))
-                        MoveDirectoryWithRetries(
-                            displacedCampaign, campaignDir);
-                    else if (!Directory.Exists(campaignDir)
-                        && Directory.Exists(recoveryCampaign))
-                        CopyDirectoryTree(
-                            recoveryCampaign,
-                            campaignDir,
-                            path => !IsLiveSqliteSidecar(path));
-                    if (databaseRestored)
-                        ReignPostgreSqlStorage.RestoreCampaignSnapshot(
-                            campaignId, recoveryPointId);
-                    ClearSaveSyncCaches(campaignId);
-                }
-                catch (Exception recoveryEx)
-                {
-                    throw new InvalidOperationException(
-                        "Save Sync failed and PostgreSQL recovery also failed. "
-                        + "Original error: " + ex
-                        + " Recovery error: " + recoveryEx,
-                        recoveryEx);
-                }
-                finally
-                {
-                    try
-                    {
-                        ReignPostgreSqlStorage.DropSnapshot(
-                            campaignId, recoveryPointId);
-                    }
-                    catch { }
-                    SetSaveSyncSemanticBlocked(campaignId, false);
-                }
-                timer.Stop();
-                Dictionary<string, object> failed =
-                    new Dictionary<string, object>
-                    {
-                        ["ok"] = false,
-                        ["result"] = "failed_recovered",
-                        ["campaignId"] = campaignId,
-                        ["savePointId"] = savePointId,
-                        ["backupCreated"] = Directory.Exists(recoveryRoot),
-                        ["backupId"] = operationId,
-                        ["backupPath"] = recoveryRoot,
-                        ["failedPhase"] = phase,
-                        ["error"] = ex.ToString(),
-                        ["durationMs"] = timer.ElapsedMilliseconds
-                    };
-                UpdateSaveSyncLastResult(
-                    ledger, point, failed, operationId);
-                try { WriteSaveSyncLedger(campaignId, ledger); } catch { }
-                AppendSaveSyncAudit(
-                    campaignId, "load.failed_recovered", failed);
-                return failed;
-            }
-            finally
-            {
-                TryDeleteDirectory(campaignWorkRoot);
-            }
+            return ApplyPostgreSqlSaveSync(campaignId, savePointId, loadSessionId, pointRoot,
+                postgresSnapshotPointId, calendarSha, manifest, ledger, point, result, timer);
         }
 
         private static Dictionary<string, object> TryReplaySaveSyncLoadReceipt(
@@ -397,6 +245,7 @@ namespace ReignBetaServer
             replay["idempotentReplay"] = true;
             replay["loadSessionId"] = loadSessionId;
             replay["replayDurationMs"] = timer.ElapsedMilliseconds;
+            AddSaveSyncOperationStatus(replay, ReadString(replay, "campaignId", ""), ReadString(replay, "backupId", ""));
             return replay;
         }
 
@@ -599,6 +448,50 @@ namespace ReignBetaServer
                     removed,
                     restored);
             }
+        }
+
+        private static string SaveSyncDatabaseHash(string schema)
+        {
+            // Physical relation sizes and statistics change across clones. Frame each
+            // table with its ordered column shape and a digest of its row multiset.
+            using var connection = ReignPostgreSqlStorage.OpenMetadataConnection();
+            using var transaction = connection.BeginTransaction(System.Data.IsolationLevel.RepeatableRead);
+            using (var exists = new NpgsqlCommand("SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname=@schema);",
+                connection, transaction))
+            {
+                exists.Parameters.AddWithValue("schema", schema);
+                if (!(bool)exists.ExecuteScalar()) throw new InvalidDataException("Save Sync SQL schema is missing.");
+            }
+            using var shape = new NpgsqlCommand(@"
+SELECT c.relname, COALESCE(json_agg(json_build_array(a.attname, format_type(a.atttypid, a.atttypmod))
+       ORDER BY a.attnum) FILTER (WHERE a.attnum IS NOT NULL), '[]')::text
+FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+LEFT JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped
+WHERE n.nspname=@schema AND c.relkind IN ('r','p')
+GROUP BY c.relname ORDER BY c.relname COLLATE ""C"";", connection, transaction);
+            shape.Parameters.AddWithValue("schema", schema);
+            var tables = new List<(string Name, string Columns)>();
+            using (var reader = shape.ExecuteReader())
+                while (reader.Read()) tables.Add((reader.GetString(0), reader.GetString(1)));
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            using var rows = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            foreach (var table in tables)
+            {
+                hash.AppendData(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new[] { table.Name, table.Columns })));
+                string qualified = QuotePostgreSqlIdentifier(schema) + "." + QuotePostgreSqlIdentifier(table.Name);
+                using var command = new NpgsqlCommand("SELECT sha256(convert_to(row_to_json(r)::text,'UTF8')) FROM "
+                    + qualified + " r ORDER BY 1;", connection, transaction) { CommandTimeout = 180 };
+                using var reader = command.ExecuteReader();
+                while (reader.Read()) rows.AppendData(reader.GetFieldValue<byte[]>(0));
+                hash.AppendData(rows.GetHashAndReset());
+            }
+            return Convert.ToHexString(hash.GetHashAndReset());
+        }
+
+        private static void VerifySaveSyncDatabase(string schema, string expected)
+        {
+            if (SaveSyncDatabaseHash(schema) != expected)
+                throw new InvalidDataException("Save Sync SQL state differs from the operation snapshot.");
         }
 
         private static HashSet<string> ReadPostgreSqlSchemaTables(

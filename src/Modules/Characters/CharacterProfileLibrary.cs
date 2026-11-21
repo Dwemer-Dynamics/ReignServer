@@ -93,14 +93,17 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> MigrateCharacterProfilesToCurrentModels(string[] args)
         {
             string requestedCampaign = ProfileArg(args, "--campaign-id", "");
+            try { PersistenceService.RequireSaveSyncCampaignAvailable(requestedCampaign); }
+            catch (PersistenceService.SaveSyncCampaignFencedException ex) { return ex.Status; }
             string campaignsRoot = CampaignFileService.CampaignsRoot();
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
             if (!Directory.Exists(campaignsRoot))
                 return new Dictionary<string, object>{{"ok",true},{"campaignCount",0},{"characterCount",0},{"migratedCount",0},{"skippedCount",0},{"failedCount",0},{"results",results}};
 
             IEnumerable<string> campaignDirectories = Directory.GetDirectories(campaignsRoot)
+                .Where(CampaignFileService.CanScanCampaignDirectory)
                 .Where(path => string.IsNullOrWhiteSpace(requestedCampaign)
-                    || Path.GetFileName(path).Equals(requestedCampaign, StringComparison.OrdinalIgnoreCase));
+                    || Path.GetFileName(path) == requestedCampaign);
             int campaignCount = 0, characterCount = 0, migratedCount = 0, skippedCount = 0, failedCount = 0;
             Dictionary<string,Dictionary<string,object>> library=LoadCharacterProfileLibrary();
             foreach (string campaignDirectory in campaignDirectories.OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
@@ -530,6 +533,11 @@ namespace ReignBetaServer
             }
         }
 
+        private static IEnumerable<string> CampaignEnrichmentFiles(string campaignsRoot) =>
+            Directory.EnumerateDirectories(campaignsRoot)
+                .Where(CampaignFileService.CanScanCampaignDirectory)
+                .SelectMany(directory => Directory.EnumerateFiles(directory, "enrichment.json", SearchOption.AllDirectories));
+
         private static void DeferLegacyBackgroundEnrichmentQueues()
         {
             string campaignsRoot = CampaignFileService.CampaignsRoot();
@@ -538,7 +546,7 @@ namespace ReignBetaServer
             int scanned = 0;
             int deferred = 0;
             Dictionary<string, int> previousStatuses = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (string path in Directory.GetFiles(campaignsRoot, "enrichment.json", SearchOption.AllDirectories))
+            foreach (string path in CampaignEnrichmentFiles(campaignsRoot))
             {
                 scanned++;
                 Dictionary<string, object> item = CampaignFileService.ReadJsonObject(path);
@@ -659,7 +667,7 @@ namespace ReignBetaServer
             string campaignsRoot = CampaignFileService.CampaignsRoot();
             if (Directory.Exists(campaignsRoot))
             {
-                foreach (string path in Directory.GetFiles(campaignsRoot, "enrichment.json", SearchOption.AllDirectories))
+                foreach (string path in CampaignEnrichmentFiles(campaignsRoot))
                 {
                     string status = ReadString(CampaignFileService.ReadJsonObject(path), "status", "missing");
                     statuses[status] = statuses.TryGetValue(status, out int count) ? count + 1 : 1;

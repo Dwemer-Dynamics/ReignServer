@@ -148,6 +148,11 @@ namespace ReignBetaServer
                 string backup = ArgValue(args, "--backup", "");
                 if (!File.Exists(backup) || !ContinuityFileHash(backup).Equals(ArgValue(args, "--backup-sha256", ""), StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException("A verified campaign backup is required before repair.");
+                // The offline wrapper directs incidental files to evidence. Read the stopped
+                // managed service's journals before opening its existing database.
+                string campaignsRoot = ReignPostgreSqlStorage.Options.IsValidation
+                    ? CampaignFileService.CampaignsRoot() : "/var/www/html/ReignServer/data/campaigns";
+                PersistenceService.RequireOfflineSaveSyncCampaignAvailable(campaign, campaignsRoot);
             }
             // Open an existing registered schema directly. Do not run server startup,
             // schema migration, background work, provider calls or campaign registration.

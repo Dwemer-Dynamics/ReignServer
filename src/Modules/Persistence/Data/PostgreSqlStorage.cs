@@ -10,6 +10,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using Npgsql;
 using Reign.Core.Contracts.Platform;
@@ -118,7 +119,7 @@ namespace ReignBetaServer
         private static readonly ConcurrentDictionary<string, byte>
             RegisteredCampaignSchemas =
                 new ConcurrentDictionary<string, byte>(
-                    StringComparer.OrdinalIgnoreCase);
+                    StringComparer.Ordinal);
         private static readonly ConditionalWeakTable<NpgsqlConnection, CampaignConnectionIdentity>
             CampaignConnectionIdentities =
                 new ConditionalWeakTable<NpgsqlConnection, CampaignConnectionIdentity>();
@@ -138,8 +139,9 @@ namespace ReignBetaServer
         public static NpgsqlConnection OpenCampaignConnection(string campaignId)
         {
             PersistenceService.ThrowIfCampaignRequestReplaced();
-            EnsureInfrastructure();
             string normalizedCampaignId = NormalizeCampaignId(campaignId);
+            PersistenceService.RequireSaveSyncCampaignAvailable(normalizedCampaignId);
+            EnsureInfrastructure();
             string schema = CampaignSchemaName(normalizedCampaignId);
             NpgsqlConnection connection = OpenDatabaseConnection();
             try
@@ -349,8 +351,9 @@ RETURNING (xmax = 0) AS inserted;", connection, transaction))
 
         public static void CloneCampaignToSnapshot(string campaignId, string savePointId)
         {
-            EnsureInfrastructure();
             string normalizedCampaignId = NormalizeCampaignId(campaignId);
+            PersistenceService.RequireSaveSyncCampaignAvailable(normalizedCampaignId);
+            EnsureInfrastructure();
             string sourceSchema = CampaignSchemaName(normalizedCampaignId);
             string snapshotSchema = SnapshotSchemaName(normalizedCampaignId, savePointId);
             for (int attempt = 0; ; attempt++)
@@ -431,9 +434,10 @@ SET schema_name=excluded.schema_name,
 
         public static void RestoreCampaignSnapshot(string campaignId, string savePointId)
         {
+            string normalizedCampaignId = NormalizeCampaignId(campaignId);
+            PersistenceService.RequireSaveSyncCampaignAvailable(normalizedCampaignId);
             PersistenceService.InvalidateWaitingCampaignRequests();
             EnsureInfrastructure();
-            string normalizedCampaignId = NormalizeCampaignId(campaignId);
             string campaignSchema = CampaignSchemaName(normalizedCampaignId);
             string snapshotSchema = SnapshotSchemaName(normalizedCampaignId, savePointId);
             using (NpgsqlConnection connection = OpenDatabaseConnection())
@@ -496,8 +500,9 @@ SELECT EXISTS(
 
         public static void DropSnapshot(string campaignId, string savePointId)
         {
-            EnsureInfrastructure();
             string normalizedCampaignId = NormalizeCampaignId(campaignId);
+            PersistenceService.RequireSaveSyncCampaignAvailable(normalizedCampaignId);
+            EnsureInfrastructure();
             string snapshotSchema = SnapshotSchemaName(
                 normalizedCampaignId, savePointId);
             using (NpgsqlConnection connection = OpenDatabaseConnection())
@@ -668,24 +673,95 @@ ORDER BY created_utc,save_point_id;", connection))
                     "PostgreSQL campaign export did not produce an archive.");
         }
 
+        internal static void VerifyCampaignArchive(string campaignId, string path,
+            IEnumerable<Dictionary<string, object>> snapshots)
+        {
+            var expected = new HashSet<string>(StringComparer.Ordinal) { CampaignSchemaName(campaignId) };
+            foreach (var snapshot in snapshots)
+            {
+                string savePointId = snapshot.TryGetValue("savePointId", out object value)
+                    ? Convert.ToString(value, CultureInfo.InvariantCulture) : null;
+                if (string.IsNullOrWhiteSpace(savePointId))
+                    throw new InvalidDataException("PostgreSQL archive snapshot inventory is missing a save point ID.");
+                expected.Add(SnapshotSchemaName(campaignId, savePointId));
+            }
+
+            bool nativeBin = !string.IsNullOrWhiteSpace(NativePostgreSqlBin());
+            string archive = PostgreSqlTools.ArchivePath(path, nativeBin);
+            string toc = RunPostgreSqlTool(new List<string> { "pg_restore", "--list", archive }, 600000);
+            var scopedList = new List<string> { "pg_restore", "--list" };
+            foreach (string schema in expected)
+            {
+                scopedList.Add("--schema");
+                scopedList.Add(schema);
+            }
+            scopedList.Add(archive);
+            VerifyCampaignArchiveInventory(toc, RunPostgreSqlTool(scopedList, 600000), expected);
+
+            // Reading the TOC alone does not read the compressed table data. Decode the
+            // entire custom archive to the PostgreSQL host's null device without applying SQL.
+            string sink = OperatingSystem.IsWindows() && nativeBin ? "NUL" : "/dev/null";
+            try { RunPostgreSqlTool(new List<string> { "pg_restore", "--file", sink, archive }, 600000); }
+            catch (InvalidOperationException ex)
+            {
+                throw new InvalidDataException("PostgreSQL could not read all campaign archive data. " + ex.Message, ex);
+            }
+        }
+
+        internal static void VerifyCampaignArchiveInventory(string toc, string scopedToc, HashSet<string> expected)
+        {
+            static IEnumerable<string> Entries(string listing) => listing.Split('\n')
+                .Select(row => row.TrimEnd('\r')).Where(row => !string.IsNullOrWhiteSpace(row) && !row.StartsWith(';'));
+
+            // pg_restore matches the actual namespace. The printed columns are unquoted,
+            // and type names such as TABLE DATA and SEQUENCE OWNED BY include spaces.
+            var scoped = Entries(scopedToc).ToHashSet(StringComparer.Ordinal);
+            var definitions = new HashSet<string>(StringComparer.Ordinal);
+            const string prefix = @"\A[0-9]+; [0-9]+ [0-9]+ ";
+            foreach (string row in Entries(toc))
+            {
+                if (Regex.IsMatch(row, prefix + "SCHEMA "))
+                {
+                    // Schema definitions have no namespace and never appear in the filtered list.
+                    // Require an unambiguous generated schema name and one owner field.
+                    Match definition = Regex.Match(row, prefix + @"SCHEMA - (\S+) \S+\z");
+                    if (!definition.Success || !expected.Contains(definition.Groups[1].Value) || !definitions.Add(definition.Groups[1].Value))
+                        throw new InvalidDataException("PostgreSQL archive has an unexpected or ambiguous schema definition.");
+                    continue;
+                }
+                // An annotation on the schema itself has no enclosing namespace. Its
+                // tag identifies the schema whose definition must also pass this inventory.
+                Match schemaAnnotation = Regex.Match(row, prefix + @"(?:COMMENT|ACL|SECURITY LABEL) - SCHEMA (\S+) \S+\z");
+                if (schemaAnnotation.Success && expected.Contains(schemaAnnotation.Groups[1].Value))
+                {
+                    scoped.Remove(row);
+                    continue;
+                }
+                // pg_restore selects these annotations by parent dependency. Check their
+                // displayed namespace as well before admitting them with that parent.
+                Match annotation = Regex.Match(row, prefix + @"(?:COMMENT|ACL|SECURITY LABEL) ([^ ]*)");
+                if (!scoped.Remove(row) || (annotation.Success && !expected.Contains(annotation.Groups[1].Value)))
+                    throw new InvalidDataException("PostgreSQL archive contains an entry outside the campaign and its snapshots.");
+            }
+            if (scoped.Count != 0 || !expected.SetEquals(definitions))
+                throw new InvalidDataException("PostgreSQL archive schema inventory does not match the campaign and its snapshots.");
+        }
+
         public static void ImportCampaignArchive(
             string campaignId,
             string archivePath,
             IEnumerable<Dictionary<string, object>> snapshots,
-            bool replace)
+            bool replace,
+            Action startingMutation = null)
         {
             EnsureInfrastructure();
             string normalizedCampaignId = NormalizeCampaignId(campaignId);
             string campaignSchema = CampaignSchemaName(normalizedCampaignId);
-            bool exists = ListCampaignMetadata().Any(row =>
-                string.Equals(
-                    Convert.ToString(
-                        row["campaignId"], CultureInfo.InvariantCulture),
-                    normalizedCampaignId,
-                    StringComparison.OrdinalIgnoreCase));
+            bool exists = CampaignExists(normalizedCampaignId);
             if (exists && !replace)
                 throw new InvalidOperationException(
                     "This campaign already exists in PostgreSQL.");
+            startingMutation?.Invoke();
             if (exists)
                 DropCampaign(normalizedCampaignId);
             ClaimInternalCampaignOwnership(normalizedCampaignId);
@@ -863,9 +939,10 @@ SELECT current_database(),current_user,
 
         public static void DropCampaign(string campaignId)
         {
+            string normalizedCampaignId = NormalizeCampaignId(campaignId);
+            PersistenceService.RequireSaveSyncCampaignAvailable(normalizedCampaignId);
             PersistenceService.InvalidateWaitingCampaignRequests();
             EnsureInfrastructure();
-            string normalizedCampaignId = NormalizeCampaignId(campaignId);
             RegisteredCampaignSchemas.TryRemove(normalizedCampaignId,
                 out byte ignoredRegistration);
             ReignDatabase.InvalidateCampaignSchemaCaches(normalizedCampaignId);

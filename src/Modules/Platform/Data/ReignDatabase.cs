@@ -411,6 +411,7 @@ WHERE table_schema=current_schema()
             ReignDbTransaction transaction = null)
         {
             PersistenceService.ThrowIfCampaignRequestReplaced();
+            PersistenceService.RequireSaveSyncConnectionAvailable(connection);
             bool serializePostgreSqlSchemaMutation =
                 ReignPostgreSqlDialect.IsPostgreSql(connection)
                 && IsPostgreSqlSchemaMutation(sql);
@@ -571,6 +572,7 @@ WHERE table_schema=current_schema()
             ReignDbTransaction transaction = null)
         {
             PersistenceService.ThrowIfCampaignRequestReplaced();
+            PersistenceService.RequireSaveSyncConnectionAvailable(connection);
             for (int attempt = 0; ; attempt++)
             {
                 try
