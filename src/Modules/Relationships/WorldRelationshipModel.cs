@@ -22,10 +22,8 @@ namespace ReignBetaServer
             private readonly string campaignId;
             private readonly string timelineId;
             private readonly RelationshipStandingContext previous;
-            private readonly Dictionary<string, Dictionary<string, object>> standing =
-                new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
-            private readonly Dictionary<string, Dictionary<string, object>> roster =
-                new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
+            private readonly Dictionary<string, Dictionary<string, object>> standing;
+            private readonly Dictionary<string, Dictionary<string, object>> roster;
             private readonly Dictionary<Dictionary<string, object>, List<Dictionary<string, object>>> sources =
                 new Dictionary<Dictionary<string, object>, List<Dictionary<string, object>>>();
             private HashSet<string> playerIds;
@@ -40,12 +38,15 @@ namespace ReignBetaServer
             public int PlayerReads;
 
             public RelationshipStandingContext(ReignDbConnection connection,
-                string campaignId, string timelineId, RelationshipFileSnapshot files = null)
+                string campaignId, string timelineId, RelationshipFileSnapshot files = null,
+                StringComparer idComparer = null)
             {
                 this.connection = connection;
                 this.campaignId = campaignId;
                 this.timelineId = timelineId;
                 this.files = files;
+                standing = new Dictionary<string, Dictionary<string, object>>(idComparer ?? StringComparer.OrdinalIgnoreCase);
+                roster = new Dictionary<string, Dictionary<string, object>>(standing.Comparer);
                 previous = CurrentRelationshipStandingContext;
                 CurrentRelationshipStandingContext = this;
             }
@@ -81,7 +82,7 @@ namespace ReignBetaServer
             public void Prefetch(IEnumerable<string> heroIds)
             {
                 List<string> ids = heroIds.Where(id => !string.IsNullOrWhiteSpace(id))
-                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    .Distinct(standing.Comparer).ToList();
                 if (ids.Count == 0) return;
                 PrefetchStanding(standingStale ? standing.Keys.Concat(ids) : ids);
                 PrefetchRoster(rosterStale ? roster.Keys.Concat(ids) : ids);
@@ -90,14 +91,14 @@ namespace ReignBetaServer
             private void PrefetchStanding(IEnumerable<string> heroIds)
             {
                 List<string> ids = heroIds.Where(id => !string.IsNullOrWhiteSpace(id))
-                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    .Distinct(standing.Comparer).ToList();
                 if (standingStale) standing.Clear();
                 foreach (string id in ids) standing[id] = null;
                 StandingReads++;
                 foreach (Dictionary<string, object> row in QueryRelationshipHeroRows(connection,
                     RelationshipsStore.SelectCharacterPublicStandingSql,
                     "subject_id", ids, new Dictionary<string, object>
-                    { ["campaign"] = campaignId, ["timeline"] = timelineId }))
+                    { ["campaign"] = campaignId, ["timeline"] = timelineId }, standing.Comparer))
                     standing[ReadString(row, "subject_id", "")] = row;
                 standingStale = false;
             }
@@ -105,13 +106,13 @@ namespace ReignBetaServer
             private void PrefetchRoster(IEnumerable<string> heroIds)
             {
                 List<string> ids = heroIds.Where(id => !string.IsNullOrWhiteSpace(id))
-                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    .Distinct(roster.Comparer).ToList();
                 if (rosterStale) roster.Clear();
                 foreach (string id in ids) roster[id] = null;
                 RosterReads++;
                 foreach (Dictionary<string, object> row in QueryRelationshipHeroRows(connection,
                     RelationshipsStore.SelectIdentityRosterSql,
-                    "hero_id", ids))
+                    "hero_id", ids, idComparer: roster.Comparer))
                     roster[ReadString(row, "hero_id", "")] = row;
                 rosterStale = false;
             }
@@ -244,10 +245,11 @@ namespace ReignBetaServer
 
         private static List<Dictionary<string, object>> QueryRelationshipHeroRows(
             ReignDbConnection connection, string query, string idColumn,
-            IEnumerable<string> heroIds, Dictionary<string, object> parameters = null)
+            IEnumerable<string> heroIds, Dictionary<string, object> parameters = null,
+            IEqualityComparer<string> idComparer = null)
         {
-            HashSet<string> ids = new HashSet<string>(heroIds
-                .Where(id => !string.IsNullOrWhiteSpace(id)), StringComparer.OrdinalIgnoreCase);
+            var ids = new HashSet<string>(heroIds.Where(id => !string.IsNullOrWhiteSpace(id)),
+                idComparer ?? StringComparer.OrdinalIgnoreCase);
             if (ids.Count == 0) return new List<Dictionary<string, object>>();
             if (!ReignPostgreSqlDialect.IsPostgreSql(connection))
                 return RelationshipsStore.QuerySql(connection, query, parameters)
@@ -406,6 +408,22 @@ namespace ReignBetaServer
             EnsureWorldRelationshipSchema(connection);
             string pairKey = AmbientPairKey(observerId, targetId);
             Dictionary<string, object> pair = RelationshipsStore.SelectRelationshipPairChemistry8(connection, new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
+            List<string> provenance = pair != null
+                ? RelationshipsStore.SelectRelationshipPairProvenance3(connection, new Dictionary<string, object>
+                {
+                    ["campaign"] = campaignId, ["timeline"] = timelineId,
+                    ["pair"] = pairKey
+                }).Select(row => ReadString(row, "source", ""))
+                  .Where(value => !string.IsNullOrWhiteSpace(value)).ToList()
+                : new List<string>();
+            return DescribeEffectiveAttitude(connection, campaignId, timelineId, observerId, targetId,
+                context, pairKey, pair, provenance);
+        }
+
+        private static Dictionary<string, object> DescribeEffectiveAttitude(
+            ReignDbConnection connection, string campaignId, string timelineId, string observerId, string targetId,
+            string context, string pairKey, Dictionary<string, object> pair, List<string> provenance)
+        {
             Dictionary<string, object> standing = ReadPublicStandingRow(connection,
                 campaignId, timelineId, targetId);
             bool hasPair = pair != null;
@@ -420,14 +438,6 @@ namespace ReignBetaServer
                 : new Dictionary<string, object> { ["value"] = 0 };
             int standingValue = ReadInt(standingResolution, "value", 0);
             int effective = hasPair ? Clamp(personal + standingValue, -100, 100) : 0;
-            List<string> provenance = hasPair
-                ? RelationshipsStore.SelectRelationshipPairProvenance3(connection, new Dictionary<string, object>
-                {
-                    ["campaign"] = campaignId, ["timeline"] = timelineId,
-                    ["pair"] = pairKey
-                }).Select(row => ReadString(row, "source", ""))
-                  .Where(value => !string.IsNullOrWhiteSpace(value)).ToList()
-                : new List<string>();
             return new Dictionary<string, object>
             {
                 ["observerId"] = observerId, ["targetId"] = targetId,
@@ -877,6 +887,8 @@ namespace ReignBetaServer
                 .Where(row => ReadPoliticalFlag(row, "is_clan_leader",
                         "isClanLeader")
                     || ReadPoliticalFlag(row, "is_ruler", "isRuler"))
+                .Where(row => !ReadPoliticalFlag(row, "is_player", "isPlayer")
+                    || ReadPoliticalFlag(row, "is_ruler", "isRuler"))
                 .ToList();
             Dictionary<string, List<Dictionary<string, object>>> desired =
                 new Dictionary<string, List<Dictionary<string, object>>>(
@@ -903,6 +915,7 @@ namespace ReignBetaServer
             }
             List<Dictionary<string, object>> rulers = leaders
                 .Where(row => ReadPoliticalFlag(row, "is_ruler", "isRuler"))
+                .Where(row => !ReadPoliticalFlag(row, "is_player", "isPlayer"))
                 .GroupBy(row => ReadFirstString(row, "hero_id",
                         "heroStringId", "heroId"),
                     StringComparer.OrdinalIgnoreCase)
@@ -1003,22 +1016,59 @@ namespace ReignBetaServer
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
             string timelineId = ReadString(payload, "timelineId", "main");
-            List<Dictionary<string, object>> requested = ReadDictionaryList(payload, "pairs");
+            var requested = new List<(string Observer, string Target, string Context, string Key)>();
+            payload.TryGetValue("pairs", out object raw);
+            // Retain the single-pair request shape accepted by earlier servers.
+            IEnumerable<object> items = raw switch
+            {
+                null => Enumerable.Empty<object>(),
+                Dictionary<string, object> single => new object[] { single },
+                System.Collections.IEnumerable list when !(raw is string) => list.Cast<object>(),
+                _ => null
+            };
+            if (items == null) return BatchError("pairs must contain relationship objects.");
+            foreach (var item in items)
+            {
+                if (requested.Count == 5000) return BatchError("At most 5000 directed pairs are allowed per batch.");
+                if (!(item is Dictionary<string, object> pair)) return BatchError("Invalid relationship pair.");
+                string observer = ReadFirstString(pair, "observerId", "subjectId", "actorHeroId");
+                string target = ReadFirstString(pair, "targetId", "targetHeroId");
+                if (string.IsNullOrWhiteSpace(observer) || string.IsNullOrWhiteSpace(target))
+                    return BatchError("Each pair requires observerId and targetId.");
+                requested.Add((observer, target, ReadString(pair, "context", "batch"), AmbientPairKey(observer, target)));
+            }
+
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureMbtiRelationshipSchema(connection);
-                return new Dictionary<string, object>
+                EnsureWorldRelationshipSchema(connection);
+                // Match the scalar SQL predicates, including exact spelling of public API inputs.
+                var keys = requested.Select(pair => pair.Key).Distinct(StringComparer.Ordinal).ToList();
+                var pairRows = RelationshipsStore.SelectEffectiveAttitudePairs(connection, new Dictionary<string, object>
                 {
-                    ["ok"] = true,
-                    ["campaignId"] = campaignId,
-                    ["timelineId"] = timelineId,
-                    ["attitudes"] = requested.Take(5000).Select(pair =>
-                        ResolveEffectiveAttitude(connection, campaignId, timelineId,
-                            ReadFirstString(pair, "observerId", "subjectId", "actorHeroId"),
-                            ReadFirstString(pair, "targetId", "targetHeroId"),
-                            ReadString(pair, "context", "batch"))).ToList()
-                };
+                    ["campaign"] = campaignId, ["timeline"] = timelineId, ["pairs"] = Json.Serialize(keys)
+                }).ToLookup(row => ReadString(row, "pair_key", ""), StringComparer.Ordinal);
+                using (var standing = new RelationshipStandingContext(connection, campaignId, timelineId, idComparer: StringComparer.Ordinal))
+                {
+                    standing.Prefetch(requested.Select(pair => pair.Observer).Concat(requested.Select(pair => pair.Target)));
+                    var attitudes = requested.Select(pair =>
+                    {
+                        var rows = pairRows[pair.Key];
+                        return DescribeEffectiveAttitude(connection, campaignId, timelineId, pair.Observer, pair.Target,
+                            pair.Context, pair.Key, rows.FirstOrDefault(), rows.Select(row => ReadString(row, "source", ""))
+                                .Where(source => !string.IsNullOrWhiteSpace(source)).ToList());
+                    }).ToList();
+                    return new Dictionary<string, object>
+                    {
+                        ["ok"] = true, ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["attitudes"] = attitudes
+                    };
+                }
             }
+
+            Dictionary<string, object> BatchError(string message) => new Dictionary<string, object>
+            {
+                ["ok"] = false, ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["error"] = message
+            };
         }
     }
 }
