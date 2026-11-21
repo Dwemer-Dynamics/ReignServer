@@ -1275,6 +1275,26 @@ namespace ReignBetaServer
                     && ReadInt(vacant, "registrationCount", -1) == 0 && !vacant.ContainsKey("point"),
                     "A case-insensitive foreign native slot remains occupied beyond the public summary cap, while an unrelated slot is vacant.");
 
+                var distinctOwner = Lookup(campaignId.ToUpperInvariant(), slot);
+                add("guarded_checkpoint_slot_recognizes_case_distinct_campaign",
+                    ReadBool(distinctOwner, "ok", false) && ReadBool(distinctOwner, "foreignRegistration", false)
+                    && ReadInt(distinctOwner, "registrationCount", -1) == 0 && !distinctOwner.ContainsKey("point"),
+                    "The case-distinct registration owner is foreign even though native slot names are case-insensitive.");
+
+                string journalRoot = SaveSyncJournalDirectory(campaignId);
+                string operation = Guid.NewGuid().ToString("N");
+                Dictionary<string, object> unresolved;
+                FenceSaveSyncRecovery(journalRoot, operation);
+                try { unresolved = Lookup(siblingId, slot); }
+                finally { ReleaseSaveSyncFence(journalRoot, operation); }
+                var restored = Lookup(siblingId, slot);
+                add("guarded_checkpoint_slot_requires_unfenced_occupancy",
+                    !ReadBool(unresolved, "ok", true)
+                    && ReadString(unresolved, "result", "") == "checkpoint_occupancy_unverified"
+                    && !unresolved.ContainsKey("foreignRegistration") && !unresolved.ContainsKey("backupId")
+                    && ReadBool(restored, "ok", false) && ReadBool(restored, "foreignRegistration", false),
+                    "A hidden foreign registration cannot prove vacancy, and settlement restores exact occupancy lookup.");
+
                 points.Add(new Dictionary<string, object>(archivedPoint) { ["savePointId"] = "duplicate_inventory" });
                 WriteSaveSyncLedger(campaignId, expanded);
                 var ambiguous = Lookup(campaignId, slot);
