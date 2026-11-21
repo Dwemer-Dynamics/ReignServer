@@ -166,7 +166,10 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> SpymasterSocialStatusApi(Dictionary<string, object> payload)
         {
-            return ReputationService.SocialCharacterStatusApi(payload ?? new Dictionary<string, object>());
+            payload = payload ?? new Dictionary<string, object>();
+            return ReadBool(payload, "readMitigationReceipt", false)
+                ? SpymasterMitigationReceiptApi(payload)
+                : ReputationService.SocialCharacterStatusApi(payload);
         }
 
         internal static Dictionary<string, object> SpymasterSocialApplyApi(Dictionary<string, object> payload)
@@ -176,8 +179,9 @@ namespace ReignBetaServer
             string timelineId = ReadString(payload, "timelineId", "main");
             Dictionary<string, object> mission = ReadDictionary(payload, "mission") ?? new Dictionary<string, object>();
             string type = ReadString(mission, "MissionType", ReadString(mission, "missionType", ""));
+            if (type.StartsWith("mitigate_", StringComparison.Ordinal))
+                return ApplySpymasterMitigation(payload, mission, type);
             string subjectId = ReadString(mission, "TargetStringId", ReadString(mission, "targetStringId", ""));
-            string itemId = ReadString(mission, "SocialItemId", ReadString(mission, "socialItemId", ""));
             string fabricated = ReadString(mission, "FabricatedText", ReadString(mission, "fabricatedText", ""));
             string missionId = ReadString(mission, "MissionId", ReadString(mission, "missionId", Guid.NewGuid().ToString("N")));
             double worldDay = ReadDouble(mission, "ResolvedDay", ReadDouble(mission, "resolvedDay", 0d));
@@ -185,27 +189,6 @@ namespace ReignBetaServer
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 ReputationService.EnsureSocialReputationSchema(connection);
-                double roll = RelationshipsService.StableUnit(string.Join("|", campaignId, timelineId, missionId, "social_apply"));
-                if (type.Contains("mitigate") && type.Contains("rumor"))
-                {
-                    string status = ReignSpymasterCore.SocialMitigationOutcome(type, roll);
-                    if (status == "disproven")
-                        SpymasterStore.UpdateRumorSubjectTags(connection, new Dictionary<string, object> { ["ts"] = ts, ["subject"] = subjectId, ["tag"] = itemId });
-                    else
-                        SpymasterStore.UpdateRumorSubjectTags2(connection, new Dictionary<string, object> { ["ts"] = ts, ["subject"] = subjectId, ["tag"] = itemId, ["factor"] = ReignSpymasterCore.SocialMitigationFactor });
-                    ReputationService.ReconcileSocialRelationshipsForSubjects(connection, campaignId, timelineId, new[] { subjectId }, worldDay);
-                    return new Dictionary<string, object> { ["ok"] = true, ["outcome"] = status, ["roll"] = roll };
-                }
-                if (type.Contains("mitigate") && type.Contains("reputation"))
-                {
-                    bool removed = ReignSpymasterCore.SocialMitigationOutcome(type, roll) == "removed";
-                    if (removed)
-                        SpymasterStore.UpdateCharacterReputations(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["subject"] = subjectId, ["tag"] = itemId, ["ts"] = ts });
-                    else
-                        SpymasterStore.UpdateCharacterReputations2(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["subject"] = subjectId, ["tag"] = itemId, ["factor"] = ReignSpymasterCore.SocialMitigationFactor, ["ts"] = ts });
-                    ReputationService.ReconcileSocialRelationshipsForSubjects(connection, campaignId, timelineId, new[] { subjectId }, worldDay);
-                    return new Dictionary<string, object> { ["ok"] = true, ["outcome"] = removed ? "removed" : "greatly_mitigated", ["roll"] = roll };
-                }
 
                 bool positive = type == "fabricate_positive";
                 bool severe = type == "fabricate_severe";

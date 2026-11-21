@@ -1,33 +1,32 @@
 # Conversation response recovery
 
-Updated 2026-10-19. `reign-conversation-response-recovery-v1` records recovery of
-provider output without granting nested private records the authority of dialogue.
+Ordinary individual and group/event dialogue use one authored response per
+generation attempt. Response recovery is deterministic.
 
 `TryParseJsonObject` parses one complete outer object, optionally in one JSON code
 fence. It rejects duplicate outer property names, multiple documents and malformed
 JSON. It never searches braces, quotes, private arrays or candidate scores for a
 replacement. Reasoning cleanup removes an actual leading provider think preamble
 and explicit private reasoning fields; literal tags inside authored JSON strings
-remain unchanged. Legacy `text` replies require positive conversation metadata.
+remain unchanged.
 
 Conversation-only prefix recovery is bounded to 1 MiB of characters, 64 JSON levels
 and 256 outer properties. Complete values are decoded through the production JSON
-serializer. Incomplete arrays contribute no entries. Diagnostics retain the original
-exact content hash, UTF-8 reply span in the sanitized assistant source (including
-leading whitespace/fences), the original pre-cleanup provider content hash when
-available, completed fields, unfinished field, original finish
-reason and effect completeness. Retained raw provider bytes continue to follow the
-existing opt-in private full-capture policy; recovery does not enable capture.
+serializer. An unambiguous truncated object with a complete outer `reply` can
+supply speech. Reign keeps only the complete reply from the provider output.
+An unreadable response fails the turn and the player can explicitly retry.
 
-A complete outer reply and complete effect fields may survive a missing final brace.
-A cutoff inside any outer value or property name, including unknown future fields,
-or before a required private drinking array, instead uses
-one ordinary full-context format regeneration before acceptance. This is not a drink
-judge or an inference of missing choices. The second response must be usable or the
-turn fails without publishing partial effects. Exact structured decision identity,
-normal semantic validation and atomic accepted-unit/replay guards still apply.
-Unknown metadata never authorizes native actions, drinks or consent. Ambiguous
-provider restarts are rejected rather than mistaken for nested or quoted answers.
+When Ollama Cloud is configured, eligible dialogue and event writers can also
+return one exactly delimited speech-only answer. Reign can publish that NPC line
+to the transcript while withholding gameplay effects from the line. Structured
+responses still go through separate action-authority, source and atomic
+acceptance/replay checks.
+
+The earlier `reign-conversation-response-recovery-v1` contract recorded exact
+content hashes, the UTF-8 reply span, completed and unfinished fields, the
+provider finish reason, and effect completeness. It also supported one format
+regeneration. That regeneration is outside ordinary single-pass delivery.
+Retained raw provider bytes still follow the opt-in private full-capture policy.
 
 Ordinary individual and group/event generation reserve at least 16,000 completion
 tokens, including any provider reasoning. Larger configured limits remain intact.

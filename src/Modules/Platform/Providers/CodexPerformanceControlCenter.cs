@@ -21,7 +21,7 @@ namespace ReignBetaServer
             <summary>Codex performance experiments</summary>
             <p class='hint'>These switches are optional, independent experiments. They apply only to Codex text requests and are shipped off until you enable them. An unsupported capability remains visible with its reported status.</p>
             <label><input id='codexStructuredOutputs' type='checkbox' data-codex-option='structuredOutputs'> Structured output schemas</label>
-            <p class='hint'>Request a typed response contract when the current Reign contract is supported; semantic validation and repair remain active.</p>
+            <p class='hint'>Request a typed response for supported Reign contracts. Ordinary dialogue uses one generation pass, with separate format, action, source, and acceptance checks.</p>
             <label><input id='codexCompactMetadata' type='checkbox' data-codex-option='compactMetadata'> Compact response metadata</label>
             <p class='hint'>Ask for concise metadata while preserving evidence identifiers, uncertainty, classifications, and durable writes.</p>
             <label><input id='codexStablePromptMapping' type='checkbox' data-codex-option='stablePromptMapping'> Stable prompt mapping</label>
