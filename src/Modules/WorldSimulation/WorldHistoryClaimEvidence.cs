@@ -27,6 +27,9 @@ namespace ReignBetaServer
             @"(?:\bor\s+so\s+|[,;:—–]\s*)(?!I\b|we\b)(?:he|she|they|you|(?-i:\p{Lu}[\p{L}'’-]+)"
             + @"|(?:the|my|our|your|his|her|their)\s+[\p{L}'’-]+)\s+(?:said|says?|claimed|claims?|wrote)\b|\baccording\s+to\b", ClaimOptions);
 
+        internal static bool StartsLinkedHistoryRetraction(string tail) => Regex.IsMatch(tail,
+            @"\A\s*[.!;]\s*(?:what I (?:just )?said is false|I know (?:this|that) (?:account|claim) is false|I admit (?:that )?I lied)(?=\s*(?:[.!;]|$))", ClaimOptions);
+
         internal static List<Match> HistoryQuotationAndNarration(string source) =>
             Regex.Matches(source, @"\*[^*]*(?:\*|\z)|[""“][^""”]*(?:[""”]|\z)|(?<![\p{L}\p{N}])['‘](?=\S).*?(?:['’](?![\p{L}\p{N}])|\z)",
                 RegexOptions.Singleline | RegexOptions.CultureInvariant).Cast<Match>().ToList();
@@ -63,8 +66,13 @@ namespace ReignBetaServer
                 if (Regex.IsMatch(quote, @"\b(?:in\s+(?:a|my|the)\s+dream|in\s+(?:a|the)\s+story|tomorrow|would\s+have)\b",
                     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)) continue;
                 // Do not swallow another clause, stage direction or attribution.
-                var boundary = Regex.Match(quote, @"\*|[""”]|;|,?\s+(?:and|but)\s+(?:I|he|she|we|they|you)\b", RegexOptions.IgnoreCase);
-                if (boundary.Success) quote = quote.Substring(0, boundary.Index).TrimEnd();
+                var boundary = Regex.Match(quote, @"\*|[""”]|(?<clause>;|,?\s+(?:and|but)\s+(?:I|he|she|we|they|you)\b)", ClaimOptions);
+                if (boundary.Success)
+                {
+                    string tail = quote.Substring(boundary.Index);
+                    if (boundary.Groups["clause"].Success && !SeparateHistoryProposition.IsMatch(tail) && !StartsLinkedHistoryRetraction(tail)) continue;
+                    quote = quote.Substring(0, boundary.Index).TrimEnd();
+                }
                 var route = ClassifyWorldHistoryClaim(quote);
                 string family = ReadString(route, "claimFamily", "generic_participation");
                 if (family == "generic_participation") continue;
@@ -80,13 +88,15 @@ namespace ReignBetaServer
 
         private const RegexOptions ClaimOptions = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
         private const string PlaceAndDay = @"(?:\s+at\s+(?<place>[\p{L}][\p{L}'’ -]*?))?(?:\s+on\s+day\s+(?<day>[0-9]{1,8}))?";
-        private static readonly Regex BattleClaim = new Regex(
-            @"\AI\s+(?<action>led|commanded|was\s+(?:present\s+)?at|won|lost)\s+a\s+battle" + PlaceAndDay + @"\z", ClaimOptions);
-        private static readonly Regex PrisonerClaim = new Regex(
-            @"\AI\s+(?:have\s+)?(?:rescued|freed)\s+(?:(?<bound>(?<minimum>at\s+least)|exactly)\s+)?"
+        private const string BattleProposition = @"\s+(?<action>led|commanded|was\s+(?:present\s+)?at|won|lost)\s+a\s+battle" + PlaceAndDay;
+        private const string PrisonerProposition = @"\s+(?:have\s+)?(?:rescued|freed)\s+(?:(?<bound>(?<minimum>at\s+least)|exactly)\s+)?"
             + @"(?<quantity>[0-9]{1,8}|one|two|three|four|five|six|seven|eight|nine|ten|a|several|multiple)\s+(?:prisoners?|captives?)"
             + @"(?:\s+(?:(?<battle>in\s+(?:one|a\s+single)\s+battle)|(?<career>(?:in|over)\s+my\s+(?:entire\s+)?career)|in\s+total))?"
-            + PlaceAndDay + @"\z", ClaimOptions);
+            + PlaceAndDay;
+        private static readonly Regex BattleClaim = new Regex(@"\AI" + BattleProposition + @"\z", ClaimOptions);
+        private static readonly Regex PrisonerClaim = new Regex(@"\AI" + PrisonerProposition + @"\z", ClaimOptions);
+        private static readonly Regex SeparateHistoryProposition = new Regex(@"\A(?:;\s*|,?\s+(?:and|but)\s+)(?:I|we|he|she|they|you)(?:"
+            + PrisonerProposition + "|" + BattleProposition + @")\z", ClaimOptions);
 
         private static bool MatchesClaimScope(Match claim, Dictionary<string, object> row)
         {

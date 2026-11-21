@@ -244,9 +244,7 @@ namespace ReignBetaServer
             if (spans.Count > 0)
             {
                 int end = ReadInt(spans[0], "start", 0) + ReadInt(spans[0], "length", 0);
-                if (spans.Count != 1 || !Regex.IsMatch(claim.Substring(end),
-                    @"\A\s*[.!;]\s*(?:what I (?:just )?said is false|I know (?:this|that) (?:account|claim) is false|I admit (?:that )?I lied)(?=\s*(?:[.!;]|$))",
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)) return null;
+                if (spans.Count != 1 || !WorldSimulationService.StartsLinkedHistoryRetraction(claim.Substring(end))) return null;
             }
             else if (WorldSimulationService.MentionsFirstPersonDeed(claim))
             {
@@ -321,16 +319,25 @@ namespace ReignBetaServer
             + @"(?:\s+about\s+(?:it|this|that|(?:the\s+)?(?:[\p{L}\d]+\s+)?(?:prisoners?|captives?)"
             + @"(?:\s+(?:he|she|they)\s+(?:rescued|freed|released))?))?\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
+        private const string HistoryProperName = @"(?-i:\p{Lu}[\p{L}'’-]*(?:\s+\p{Lu}[\p{L}'’-]*){0,3})";
+        private static readonly Regex AnnouncedPartyPosition = new Regex(@"\A" + HistoryProperName + @"\s+is\s+(?:inside|at|in)\s+" + HistoryProperName
+            + @"(?:\s+with\s+(?:exactly\s+)?(?:[0-9]{1,8}|(?:(?:" + DialogueNumericWords + @"|and)[ -]+){0,5}(?:" + DialogueNumericWords
+            + @"))\s+(?:troops|men|soldiers))?\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
         private static bool HasDirectSpokenAdmission(string spoken)
         {
             foreach (Match sentence in Regex.Matches(spoken, @"[^.!?\r\n]+[.!?]*"))
             {
                 if (sentence.Value.Contains('?') || WorldSimulationService.HasReportedHistoryTag(sentence.Value)) continue;
                 string words = sentence.Value.Trim().TrimEnd('.', '!').TrimEnd();
-                // The existing direct intent announcement introduces its separate claim with a colon.
+                // The direct intent announcement and the following position claim must each stand on their own.
                 int colon = words.IndexOf(':');
-                if (colon >= 0 && Regex.IsMatch(words.Substring(0, colon), @"\b(?:lie\s+to|deceive|mislead)\s+you\s*\z",
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)) words = words.Substring(0, colon).TrimEnd();
+                if (colon >= 0)
+                {
+                    if (!AnnouncedPartyPosition.IsMatch(words.Substring(colon + 1).Trim())) continue;
+                    words = words.Substring(0, colon).TrimEnd();
+                    if (!Regex.IsMatch(words, @"\b(?:lie\s+to|deceive|mislead)\s+you\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)) continue;
+                }
                 Match admission = StandaloneHistoryAdmission.Match(words);
                 if (admission.Success && ContainsExplicitDeceptionAdmission(ActionPipelineService.NormalizeLookup(admission.Groups["cue"].Value))) return true;
             }
@@ -967,6 +974,9 @@ namespace ReignBetaServer
             Check("relayed_admission_other_rescuer", "I heard him say I deliberately lied about the five prisoners she rescued.", 101, "lord_a", "", uncertain, unknown);
             Check("postfixed_admission_other_rescuer", "I deliberately lied about the five prisoners she rescued, or so he said.", 101, "lord_a", "", uncertain, unknown);
             Check("admission_by_another_speaker", "This is an admitted deception by her about the prisoners she rescued.", 101, "lord_a", "", uncertain, unknown);
+            Check("relayed_colon_announcement", "I am deliberately trying to deceive you: his words, not mine, about the five prisoners she rescued.", 101, "lord_a", "", uncertain, unknown);
+            Check("direct_colon_announcement", "I am deliberately trying to deceive you: Oros is inside Danustica with four hundred troops.", 101, "lord_a",
+                "contradicted", "detected_firsthand", "contradicted", expectedBasis: "firsthand");
             Check("direct_admission_other_rescuer", "I deliberately lied about the five prisoners she rescued.", 101, "lord_a",
                 "contradicted", "detected_firsthand", "contradicted", expectedBasis: "firsthand");
             Check("direct_admit_that_i_lied", "I admit that I lied about the prisoners she rescued.", 101, "lord_a",
@@ -975,6 +985,7 @@ namespace ReignBetaServer
                 "contradicted", "detected_firsthand", "contradicted", expectedBasis: "firsthand");
             Check("emphatic_question_career_cap", "I rescued exactly two prisoners in my entire career?!", 101, "lord_a", "", uncertain, unknown);
             Check("postfixed_reported_career_cap", "I rescued exactly two prisoners in my entire career; or so he said!", 101, "lord_a", "", uncertain, unknown);
+            Check("conjoined_reported_career_cap", "I rescued exactly two prisoners in my entire career, but he said that, not me!", 101, "lord_a", "", uncertain, unknown);
             Check("emphatic_statement_career_cap", "I rescued exactly two prisoners in my entire career!", 101, "lord_a",
                 "contradicted", "detected_firsthand", "contradicted", expectedBasis: "firsthand");
             Check("unrelated_admission", "I rescued five prisoners. I deliberately lied about the horses.", 101, "lord_a", partial, uncertain, unknown);
