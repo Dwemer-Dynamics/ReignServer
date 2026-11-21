@@ -34,7 +34,7 @@ namespace ReignBetaServer
             var nonAssertions = HistoryQuotationAndNarration(source);
             foreach (Match sentence in Regex.Matches(source, @"[^.!?\r\n]+(?:[.!?]+|$)"))
             {
-                if (sentence.Value.TrimEnd().EndsWith("?", StringComparison.Ordinal)) continue;
+                if (sentence.Value.Contains('?')) continue;
                 var assertion = ClaimantDeed.Match(sentence.Value);
                 if (!assertion.Success) continue;
                 int start = sentence.Index + assertion.Index;

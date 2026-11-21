@@ -263,7 +263,7 @@ namespace ReignBetaServer
                 return null;
             }
 
-            bool directAdmission = spans.Count == 1 || ContainsExplicitDeceptionAdmission(q)
+            bool directAdmission = spans.Count == 1 || HasDirectSpokenAdmission(spoken)
                 || Regex.IsMatch(spoken.Trim(), @"\Awhat I (?:just )?said is false[.!]?\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
             if (!directAdmission) return null;
 
@@ -311,6 +311,23 @@ namespace ReignBetaServer
                 ["durationMs"] = 0,
                 ["cached"] = false
             };
+        }
+
+        private static bool HasDirectSpokenAdmission(string spoken)
+        {
+            const RegexOptions options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
+            foreach (Match sentence in Regex.Matches(spoken, @"[^.!?;\r\n]+[.!?]*"))
+            {
+                if (sentence.Value.Contains('?')) continue;
+                string words = sentence.Value.Trim();
+                Match subject = Regex.Match(words, @"\A(?<speaker>I|we|this)\b(?:\s+admit\s+(?:that\s+)?\k<speaker>\b)?", options);
+                if (!subject.Success) continue;
+                // A later subject can introduce an admission attributed to somebody else's account.
+                Match nextSubject = Regex.Match(words.Substring(subject.Length), @"\b(?:I|we|this)\b", options);
+                if (nextSubject.Success) words = words.Substring(0, subject.Length + nextSubject.Index);
+                if (ContainsExplicitDeceptionAdmission(ActionPipelineService.NormalizeLookup(words))) return true;
+            }
+            return false;
         }
 
         private static Dictionary<string, object> VerifyNativeCurrentLocationClaim(
@@ -939,6 +956,15 @@ namespace ReignBetaServer
             Check("quoted_admission", "She said, “I rescued five prisoners. I deliberately lied.”", 101, "lord_a", "", uncertain, unknown);
             Check("reported_rescue_denied", "He said I rescued five prisoners. That account is false.", 101, "lord_a", "", uncertain, unknown);
             Check("reported_rescue_and_admission", "He said I rescued five prisoners and that I deliberately lied.", 101, "lord_a", "", uncertain, unknown);
+            Check("reported_admission_other_rescuer", "He said I deliberately lied about the five prisoners she rescued.", 101, "lord_a", "", uncertain, unknown);
+            Check("relayed_admission_other_rescuer", "I heard him say I deliberately lied about the five prisoners she rescued.", 101, "lord_a", "", uncertain, unknown);
+            Check("direct_admission_other_rescuer", "I deliberately lied about the five prisoners she rescued.", 101, "lord_a",
+                "contradicted", "detected_firsthand", "contradicted", expectedBasis: "firsthand");
+            Check("direct_admit_that_i_lied", "I admit that I lied about the prisoners she rescued.", 101, "lord_a",
+                "contradicted", "detected_firsthand", "contradicted", expectedBasis: "firsthand");
+            Check("emphatic_question_career_cap", "I rescued exactly two prisoners in my entire career?!", 101, "lord_a", "", uncertain, unknown);
+            Check("emphatic_statement_career_cap", "I rescued exactly two prisoners in my entire career!", 101, "lord_a",
+                "contradicted", "detected_firsthand", "contradicted", expectedBasis: "firsthand");
             Check("unrelated_admission", "I rescued five prisoners. I deliberately lied about the horses.", 101, "lord_a", partial, uncertain, unknown);
             Check("relative_clause_rescuer", "I killed the man who rescued my son.", 101, "lord_a", "insufficient_evidence", uncertain, unknown);
             Check("other_battle", "I led the battle at Different Field.", 101, "lord_a", partial, uncertain, unknown);
