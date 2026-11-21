@@ -226,6 +226,7 @@ namespace ReignBetaServer
         }
 
         private const long OrdinaryDeliveryWindowSeconds = 6 * 60 * 60;
+        private const string OrdinaryLegacyDispatchObservedField = "ordinaryLegacyDispatchObserved";
 
         internal static Dictionary<string, object> NextActions(Dictionary<string, object> payload, Dictionary<string, string> query)
         {
@@ -263,6 +264,7 @@ namespace ReignBetaServer
                         || status.Equals("proposed", StringComparison.OrdinalIgnoreCase);
                     bool ordinaryDispatchRecorded = !durable && (ReadLong(row, "deliveredTs", 0) > 0
                         || ReadLong(row, "deliveryUnconfirmedTs", 0) > 0
+                        || ReadBool(row, OrdinaryLegacyDispatchObservedField, false)
                         || status.Equals("delivered", StringComparison.OrdinalIgnoreCase));
                     long queuedTs = ReadLong(row, "ts", 0);
                     if (!durable && queuedTs > 0 && nowTs - queuedTs >= OrdinaryDeliveryWindowSeconds
@@ -465,6 +467,14 @@ namespace ReignBetaServer
                         if (ShouldAcceptActionStatusTransition(currentStatus, status)
                             || legacyRefusalCorrection)
                         {
+                            if (!DialogueService.DurableConversationAction(id)
+                                && currentStatus.Equals("delivered", StringComparison.OrdinalIgnoreCase)
+                                && ReadLong(row, "deliveredTs", 0) <= 0
+                                && ReadLong(row, "deliveryUnconfirmedTs", 0) <= 0)
+                            {
+                                // An older queue may record dispatch only in its mutable status.
+                                row[OrdinaryLegacyDispatchObservedField] = true;
+                            }
                             // Freeze explicit marriage evidence with first acceptance so a
                             // retry can finish its effects without reopening historical reports.
                             if (!IsTerminalActionReportStatus(currentStatus))

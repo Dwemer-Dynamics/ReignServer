@@ -3267,6 +3267,42 @@ namespace ReignBetaServer
                         && undatedDispatchTs > 0 && ReadLong(undatedRetained, "deliveredTs", 0) == undatedDispatchTs
                         && !undatedRetained.ContainsKey("ts") && !undatedRetained.ContainsKey("deliveryUnconfirmedTs"),
                         "A prior undated dispatch stays single-shot after a delayed queued report and does not consume the healthy sibling's slot.", null);
+
+                    const string statusOnlyId = "ordinary_legacy_status_only";
+                    const string statusOnlySiblingId = "ordinary_legacy_status_only_sibling";
+                    var statusOnly = Queued(statusOnlyId, now);
+                    statusOnly.Remove("ts");
+                    statusOnly["status"] = "delivered";
+                    ActionPipelineService.WriteActionQueueUnlocked(campaignId, new List<Dictionary<string, object>>
+                    {
+                        statusOnly, Queued(statusOnlySiblingId, now)
+                    });
+                    Dictionary<string, object> ReportLegacyStatus(string status) => ActionPipelineService.ReportAction(
+                        TestDict("campaignId", campaignId, "actionId", statusOnlyId, "status", status));
+                    var lateQueued = ReportLegacyStatus("queued");
+                    var statusOnlyPoll = ActionPipelineService.NextActions(poll, null);
+                    var retainedStatusOnly = ActionPipelineService.ReadActionQueueUnlocked(campaignId)
+                        .Single(row => ReadString(row, "id", "") == statusOnlyId);
+                    var lateEnqueued = ReportLegacyStatus("enqueued");
+                    var lateCompleted = ReportLegacyStatus("completed");
+                    var olderProposed = ReportLegacyStatus("proposed");
+                    var afterLegacyTerminal = ActionPipelineService.NextActions(poll, null);
+                    var settledStatusOnly = ActionPipelineService.ReadActionQueueUnlocked(campaignId)
+                        .Single(row => ReadString(row, "id", "") == statusOnlyId);
+                    add("ordinary_legacy_delivered_status_survives_late_reports",
+                        ReadString(lateQueued, "status", "") == "queued"
+                        && ReadString(ReadDictionaryList(statusOnlyPoll, "actions").SingleOrDefault(), "actionId", "") == statusOnlySiblingId
+                        && ReadString(retainedStatusOnly, "status", "") == "queued"
+                        && ReadBool(retainedStatusOnly, "ordinaryLegacyDispatchObserved", false)
+                        && !retainedStatusOnly.ContainsKey("ts") && !retainedStatusOnly.ContainsKey("deliveredTs")
+                        && !retainedStatusOnly.ContainsKey("deliveryUnconfirmedTs")
+                        && ReadString(lateEnqueued, "status", "") == "enqueued"
+                        && ReadString(lateCompleted, "status", "") == "completed"
+                        && ReadString(olderProposed, "status", "") == "completed"
+                        && ReadBool(olderProposed, "ignoredStatusRegression", false)
+                        && ReadBool(settledStatusOnly, "ordinaryLegacyDispatchObserved", false)
+                        && ReadInt(afterLegacyTerminal, "count", -1) == 0,
+                        "A delayed queued report preserves status-only legacy dispatch evidence without assigning a time, and a late native terminal report stays authoritative.", null);
                 }
                 Dictionary<string, object> governmentRefusalRecord =
                     new Dictionary<string, object>
