@@ -635,6 +635,7 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> queuedTestDirectiveActions = new List<Dictionary<string, object>>();
             List<string> dialogueActionErrors = new List<string>();
             List<Dictionary<string, object>> queuedDialogueActions = new List<Dictionary<string, object>>();
+            string queuedActionNotice = "";
             string actionShadowPreview = "";
             if (!delimitedSpeechOnly)
                 DialogueService.ApplyAgencyRelationshipAssessment(relationshipAssessments, payload, heroId, socialPlayerId);
@@ -679,8 +680,8 @@ namespace ReignBetaServer
                         reply = campaignCommandDraftReply;
                     if (queuedDialogueActions.Count > 0)
                     {
-                        string statusLine = ConversationResponseService.DialogueActionQueuedNoticePrefix + " " + string.Join(", ", queuedDialogueActions.Select(x => ReadString(x, "command", "")).Where(x => !string.IsNullOrWhiteSpace(x))) + ".]";
-                        reply = string.IsNullOrWhiteSpace(reply) || reply == "..." ? statusLine : reply + "\n\n" + statusLine;
+                        queuedActionNotice = ConversationResponseService.DialogueActionQueuedNoticePrefix + " " + string.Join(", ", queuedDialogueActions.Select(x => ReadString(x, "command", "")).Where(x => !string.IsNullOrWhiteSpace(x))) + ".]";
+                        reply = string.IsNullOrWhiteSpace(reply) || reply == "..." ? queuedActionNotice : reply + "\n\n" + queuedActionNotice;
                     }
                 }
             }
@@ -697,7 +698,7 @@ namespace ReignBetaServer
                 stateUpdates.Clear();
             }
             reply = WorldSimulationService.FinalizeDialogueActionOutcome(reply, payload, hero, queuedDialogueActions, dialogueActionErrors);
-            reply = DialogueService.RenderGroundedSceneHeading(payload, heroId, parsed, reply);
+            reply = DialogueService.RenderGroundedSceneHeading(payload, heroId, parsed, reply, out string displayPrefix);
             if (!DialogueService.FinalizeConversationGrounding(payload, heroId, parsed, ref reply))
             {
                 agencyVisibleFailure = true;
@@ -793,7 +794,7 @@ namespace ReignBetaServer
 
             Dictionary<string, object> dynamicCharacteristicsStore = CharactersService.StoreDynamicCharacteristicWrites(
                 campaignId, heroId, dynamicCharacteristicWrites, payload, conversationExchange,
-                decisionId, "dialogue", dialogueLocationId, ts, new[] { heroId, dialoguePlayerId });
+                decisionId, dialogueLocationId, reply, displayPrefix, queuedActionNotice);
 
             Dictionary<string, object> memoryLayerStore = ReadDictionary(ReadDictionary(conversationExchange, "acceptedUnit"), "memory");
             if (ActionPipelineService.ShouldPersistGovernmentCertificationConversationSideEffects(

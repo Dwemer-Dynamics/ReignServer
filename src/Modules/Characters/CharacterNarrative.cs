@@ -254,19 +254,30 @@ namespace ReignBetaServer
                 string basisFingerprint = ReadString(development, "baseItemFingerprint", "");
                 var baseItem = baseItems.FirstOrDefault(x => ReadString(x, "id", "") == ReadString(target, "id", ""));
                 if (basisFingerprint.Length > 0 && basisFingerprint != NarrativeItemFingerprint(baseItem)) continue;
+                if (IsReportedDynamicCharacteristic(row))
+                {
+                    if (ReadString(development, "sourceEvidenceVersion", "") != ReportedSpeechSchema) continue;
+                    string owner = ReadString(dynamic, "heroStringId", "");
+                    if (ReadString(row, "owner_id", "") != owner) continue;
+                    string speech = FormatReportedCharacteristicSpeech(ReadDictionary(development, "sourceEvidence"), owner);
+                    if (speech.Length > 0 && speech.Length <= 1600) target["reportedDevelopment"] = speech;
+                    continue;
+                }
                 target["description"] = ReadString(development, "description", ReadString(target, "description", ""));
                 target["personalMeaning"] = ReadString(development, "personalMeaning", ReadString(target, "personalMeaning", ""));
                 target["influence"] = ReadInt(development, "influence", ReadInt(target, "influence", 1));
                 target["developmentId"] = ReadString(row, "characteristic_id", "");
+                target["legacyDevelopmentInterpretation"] = true;
             }
             effective["items"] = items;
             effective["definingIds"] = SelectDefiningNarrativeIds(items, ReadString(effective, "seed", ""), ReadStringList(baseNarrative, "definingIds"));
             return effective;
         }
 
-        private static string FormatNarrativeInterest(Dictionary<string, object> item)
+        private static string FormatNarrativeInterest(Dictionary<string, object> item, bool includeReportedSpeech)
         {
             string category = ReadString(item, "category", "");
+            string speech = includeReportedSpeech ? ReadString(item, "reportedDevelopment", "") : "";
             return "- " + ReadString(item, "title", "") + " [PRIVATE reference " + ReadString(item, "id", "") + "; influence " + ReadInt(item, "influence", 1) + "/10]: " + ReadString(item, "description", "")
                 + " Personal meaning: " + ReadString(item, "personalMeaning", "") + " "
                 + NarrativeInfluenceDescription(category, ReadInt(item, "influence", 1))
@@ -274,7 +285,10 @@ namespace ReignBetaServer
                     ? " In safe voluntary time, show this strong interest through sustained attention, concrete curiosity and a wish to return to it; fit the expression to this person's voice. Actual obligations still bound that time." : "")
                 + (category == "hobby" && ReadInt(item, "influence", 1) == 10
                     ? " This consuming interest deserves substantial available leisure, not merely an occasional pleasant hour." : "")
-                + (ReadString(item, "visibility", "private") == "private" ? " PRIVATE: influence conduct without automatic disclosure." : " Personal information is not automatically known to other speakers.");
+                + (ReadString(item, "visibility", "private") == "private" ? " PRIVATE: influence conduct without automatic disclosure." : " Personal information is not automatically known to other speakers.")
+                + (ReadBool(item, "legacyDevelopmentInterpretation", false)
+                    ? " Legacy development interpretation; original wording and meaning unverified." : "")
+                + (speech.Length > 0 ? " PRIVATE development evidence. Preserve attribution and qualifications. " + speech : "");
         }
 
         private static string BuildDefiningInterestsPrompt(Dictionary<string, object> characteristics)
@@ -286,7 +300,8 @@ namespace ReignBetaServer
             return NarrativeRealismPolicy + "\nCURRENT PERSONAL IMPORTANCE: the supplied current influence governs present strength, including after development or an editor correction. Historical examples of occasional practice do not cap a now-strong interest. "
                 + "When responsibilities are finished and the subject is personally relevant, let strong interests noticeably shape voluntary attention, enthusiasm, plans and personal tradeoffs. Do not invent extra duties merely to suppress them. "
                 + "The three concerns below are the strongest distinct personal priorities; other concerns enter when relevant.\n"
-                + string.Join("\n", ids.Select(id => items.FirstOrDefault(x => ReadString(x, "id", "") == id)).Where(x => x != null).Select(FormatNarrativeInterest));
+                + string.Join("\n", ids.Select(id => items.FirstOrDefault(x => ReadString(x, "id", "") == id)).Where(x => x != null)
+                    .Select(item => FormatNarrativeInterest(item, ReadBool(characteristics, "reportedSpeechPromptScope", false))));
         }
 
         internal static string BuildRelevantInterestsPrompt(Dictionary<string, object> characteristics, string query)
@@ -318,7 +333,7 @@ namespace ReignBetaServer
                         : ReadString(x, "description", "").IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0 ? 1 : 0) })
                 .Where(x => x.Score > 0).OrderByDescending(x => x.Score).ThenByDescending(x => ReadInt(x.Item, "influence", 0)).Take(3).ToList();
             return relevant.Count == 0 ? "" : "Additional interests relevant to this question; their disclosure boundaries still apply.\n"
-                + string.Join("\n", relevant.Select(x => FormatNarrativeInterest(x.Item)));
+                + string.Join("\n", relevant.Select(x => FormatNarrativeInterest(x.Item, ReadBool(characteristics, "reportedSpeechPromptScope", false))));
         }
 
         private static Dictionary<string, object> NarrativePromptDiagnostics(Dictionary<string, object> characteristics)

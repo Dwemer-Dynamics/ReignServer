@@ -258,8 +258,13 @@ namespace ReignBetaServer
             });
         }
 
-        internal static string RenderGroundedSceneHeading(Dictionary<string, object> payload, string observer, Dictionary<string, object> parsed, string reply)
+        internal static string RenderGroundedSceneHeading(Dictionary<string, object> payload, string observer, Dictionary<string, object> parsed, string reply) =>
+            RenderGroundedSceneHeading(payload, observer, parsed, reply, out _);
+
+        internal static string RenderGroundedSceneHeading(Dictionary<string, object> payload, string observer, Dictionary<string, object> parsed,
+            string reply, out string displayPrefix)
         {
+            displayPrefix = "";
             if (ReadString(payload, "channel", "").Contains("correspond", StringComparison.OrdinalIgnoreCase)) return reply;
             string venue = ConversationLocationLabel(ResolvedNarrativeVenue(payload, observer, parsed, reply));
             if (venue.Length == 0 || string.IsNullOrWhiteSpace(reply) || IsTechnicalConversationNotice(reply)) return reply;
@@ -271,8 +276,9 @@ namespace ReignBetaServer
             string settlement = ReadFirstString(payload, "currentSettlementName", "settlementName");
             if (settlement.Length > 0 && !label.Contains(settlement, StringComparison.OrdinalIgnoreCase)) label = settlement + ", " + label;
             string header = (date.Length == 0 ? "" : date + " — ") + label;
-            if (reply.StartsWith(header + "\n\n", StringComparison.Ordinal)) return reply;
-            return header + "\n\n" + body;
+            displayPrefix = header + "\n\n";
+            if (reply.StartsWith(displayPrefix, StringComparison.Ordinal)) return reply;
+            return displayPrefix + body;
         }
 
         private static readonly string[] ConversationVenueKinds = { "stables?", "tavern", "tent", "bedchamber", "study", "library(?: room)?", "throne room", "courtyard", @"(?:(?:lord['’]s|great|feasting|main)\s+)?hall" };

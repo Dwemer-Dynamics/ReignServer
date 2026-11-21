@@ -377,38 +377,14 @@ ON CONFLICT(owner_id,normalized_key) DO NOTHING;", parameters, transaction);
             return ReignDatabase.QuerySql(connection, "SELECT DISTINCT hero_id FROM character_editor_revisions;", parameters, transaction);
         }
 
-        internal static List<Dictionary<string, object>> SelectDynamicCharacteristics4(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
-        {
-            return ReignDatabase.QuerySql(connection, "SELECT * FROM dynamic_characteristics WHERE owner_id=$owner AND normalized_key=$normalized LIMIT 1;", parameters, transaction);
-        }
-
-        internal static List<Dictionary<string, object>> SelectDynamicCharacteristics5(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
-        {
-            return ReignDatabase.QuerySql(connection, "SELECT characteristic_id,text FROM dynamic_characteristics WHERE owner_id=$owner AND status='active' AND category<>'narrative_development' ORDER BY last_ts DESC LIMIT 250;", parameters, transaction);
-        }
-
-        internal static List<Dictionary<string, object>> SelectDynamicCharacteristics6(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
-        {
-            return ReignDatabase.QuerySql(connection, @"SELECT characteristic_id,text FROM dynamic_characteristics
-WHERE owner_id=$owner AND topic_key=$topic AND status='active' AND normalized_key<>$normalized ORDER BY last_ts DESC LIMIT 1;", parameters, transaction);
-        }
-
-        internal static void UpsertDynamicCharacteristics2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static void InsertReportedDynamicCharacteristic(ReignDbConnection connection, Dictionary<string, object> parameters)
         {
             ReignDatabase.ExecuteSql(connection, @"INSERT INTO dynamic_characteristics(
 characteristic_id,owner_id,category,topic_key,text,normalized_key,status,confidence,importance,provenance,compatibility_status,rejection_reason,
 source_event_id,source_session_id,source_exchange_id,source_turn_ids_json,source_mode,location_id,world_day,known_by_json,first_ts,last_ts,repeat_count,payload_json)
-VALUES($id,$owner,$category,$topic,$text,$normalized,$status,$confidence,$importance,'npc_generated_personal_history',$compatibility,$rejection,
+VALUES($id,$owner,$category,$topic,$text,$id,$status,$confidence,$importance,$provenance,$compatibility,$rejection,
 $event,$session,$exchange,$turns,$mode,$location,$day,$known,$ts,$ts,1,$payload)
-ON CONFLICT(owner_id,normalized_key) DO UPDATE SET
-last_ts=$ts,
-repeat_count=dynamic_characteristics.repeat_count+1,
-known_by_json=$known,
-source_turn_ids_json=$turns,
-status=CASE WHEN dynamic_characteristics.status='active' THEN 'active' ELSE excluded.status END,
-compatibility_status=CASE WHEN dynamic_characteristics.status='active' THEN dynamic_characteristics.compatibility_status ELSE excluded.compatibility_status END,
-rejection_reason=CASE WHEN dynamic_characteristics.status='active' THEN dynamic_characteristics.rejection_reason ELSE excluded.rejection_reason END,
-payload_json=$payload;", parameters, transaction);
+ON CONFLICT(owner_id,normalized_key) DO NOTHING;", parameters);
         }
 
         internal static List<Dictionary<string, object>> SelectDynamicCharacteristics7(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)

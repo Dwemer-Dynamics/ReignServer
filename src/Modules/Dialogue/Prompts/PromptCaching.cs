@@ -405,6 +405,11 @@ namespace ReignBetaServer
             string precomputedMemoryPacket = null,
             string precomputedGroupConversationPrompt = null)
         {
+            characteristics = CharactersService.ScopeReportedCharacteristicSpeech(campaignId, characteristics, heroId,
+                ReadFirstString(turnPayload, "playerHeroStringId", "mainHeroStringId", "playerId"),
+                ReadDouble(turnPayload, "worldDay", -1), turnPayload,
+                ReadStringList(turnPayload, "participants"),
+                text => CharactersService.SanitizePromptForIdentity(text, playerText, canonicalPlayerName, identityView));
             state = WithoutRecallAbsenceState(state, campaignId, heroId, turnPayload);
             CharactersService.EnsureObserverParticipantIdentityViews(
                 campaignId, turnPayload, heroId);
@@ -632,6 +637,13 @@ namespace ReignBetaServer
             Dictionary<string, object> precomputedMotiveDecision = null,
             PublishedPartyReplayView publishedParty = null)
         {
+            bool privateInput = ReadBool(eventPayload, "privatePlayerInputForSpeaker", false);
+            var reportedSpeechParticipants = privateInput ? Enumerable.Empty<string>()
+                : ReadStringList(eventPayload, "participants").Concat(ReadStringList(eventPayload, "activeHeroIds"));
+            characteristics = CharactersService.ScopeReportedCharacteristicSpeech(campaignId, characteristics, heroId,
+                ReadFirstString(eventPayload, "playerHeroStringId", "mainHeroStringId", "playerId"),
+                ReadDouble(eventPayload, "worldDay", -1), eventPayload, reportedSpeechParticipants,
+                text => CharactersService.SanitizePromptForIdentity(text, playerText, canonicalPlayerName, identityView));
             state = WithoutRecallAbsenceState(state, campaignId, heroId, eventPayload);
             CharactersService.EnsureObserverParticipantIdentityViews(
                 campaignId, eventPayload, heroId);

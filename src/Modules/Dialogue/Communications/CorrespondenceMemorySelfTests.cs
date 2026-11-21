@@ -154,6 +154,16 @@ namespace ReignBetaServer
                 }
                 finally { ConversationReferenceValidationMode.Value = priorReferenceMode; }
 
+                const string savedSpeechTimeline = "restored_main", recoveredSpeechTimeline = "verified_a1_child";
+                const string reportedSpeech = "I did not collect painted lamps. If I had, I would have kept them in the attic.";
+                string proposedInterpretation = ReadString(profile, "name", "Author") + " collected painted lamps and kept them in the attic.";
+                var reportedFixture = CharactersService.StoreReportedSpeechFixture(campaign, profile, "attributed-speech", "party_chat", 18,
+                    reportedSpeech, reportedSpeech, TestDict("dynamicCharacteristicWrites", new[]
+                    {
+                        TestDict("text", proposedInterpretation, "category", "habit", "topicKey", "lantern_collecting",
+                            "sourceEvidence", TestDict("turnId", "current_npc", "speakerId", "npc", "quote", "I did not collect painted lamps."))
+                    }), timeline: savedSpeechTimeline);
+                Check("reported_characteristic_written_from_party_source", ReadInt(reportedFixture, "storedCount", 0) == 1, reportedFixture);
                 var point = TestDict("savePointId", "letter_before", "timelineId", "restored_main", "campaignTimeDays", 20d,
                     "worldHistorySequence", 8L, "worldHistoryHeadEventId", "history_head");
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "letter_before");
@@ -179,6 +189,53 @@ namespace ReignBetaServer
                     DialogueSelfTestStore.UpdateLetters3(connection, TestDict("id", letterId));
                     Check("changed_source_cannot_reuse_restored_membership", !Knows("npc", recovered));
                     DialogueSelfTestStore.UpdateLetters4(connection, TestDict("id", letterId, "body", body));
+
+                    // First qualify the exact turn in the saved timeline, then
+                    // carry its existing membership to the verified recovered branch.
+                    BindRecoveredMemorySources(connection, savedSpeechTimeline, recoveredSpeechTimeline, 8L, "history_head");
+                    var characteristic = ReadDictionaryList(reportedFixture, "stored").SingleOrDefault();
+                    string sourceId = TextListFromJson(ReadString(characteristic, "source_turn_ids_json", "[]")).SingleOrDefault() ?? "";
+                    var original = DialogueStore.SelectConversationTurns6(connection, TestDict("id", sourceId)).SingleOrDefault();
+                    var access = BuildKnowledgeAccessContext("npc", "main_hero", "", TestDict("timelineId", recoveredSpeechTimeline, "worldDay", 20d));
+                    Check("reported_characteristic_has_verified_restore_membership", original != null
+                        && PrecisionTurnVisible(original, "npc", access, connection));
+                }
+                var characteristicStack = PromptParityCharacteristics();
+                characteristicStack["dynamicCharacteristics"] = CampaignFileService.ReadJsonObject(
+                    CampaignFileService.CharacterFile(campaign, "npc", "dynamic_characteristics.json"));
+                const string recall = "Tell me about the painted lamps.";
+                foreach (string route in new[] { "in_person", "party_chat", "social_event", "correspondence" })
+                foreach (string scope in new[] { "original_audience", "unknown_peer", "new_witness", "new_active_speaker", "inactive_attendee", "before_source", "different_timeline", "restored_source", "before_sequence", "official_role" })
+                {
+                    string peer = scope == "unknown_peer" ? "stranger" : "main_hero";
+                    var payload = PromptParityPayload(route, false);
+                    payload["officialMemoryFirewall"] = scope == "official_role"; payload["mode"] = route;
+                    payload["timelineId"] = scope == "different_timeline" ? "other_branch"
+                        : scope == "restored_source" ? recoveredSpeechTimeline : savedSpeechTimeline;
+                    if (scope == "before_sequence") payload["memoryAsOfAcceptedSequence"] = 0L;
+                    payload["worldDay"] = scope == "before_source" ? 17d : 20d;
+                    payload["playerHeroStringId"] = peer;
+                    payload["participants"] = scope == "new_witness" ? new[] { "npc", peer, "uninvited" } : new[] { "npc", peer };
+                    if (scope == "new_active_speaker") payload["activeHeroIds"] = new[] { "npc", "uninvited" };
+                    if (scope == "inactive_attendee") payload["attendees"] = new[] { TestDict("heroStringId", "uninvited") };
+                    var motive = TestDict("sanitizedState", empty, "prompt", "", "relationshipNpcToTarget", empty, "relationshipNpcToSpouse", empty);
+                    PromptEnvelope envelope = route == "correspondence"
+                        ? BuildCorrespondencePromptEnvelope(campaign, "npc", "Author", peer, "Player", ReadDouble(payload, "worldDay", 0), recall,
+                            profile, characteristicStack, empty, "", payload)
+                        : route == "in_person"
+                            ? BuildDialoguePromptEnvelope(campaign, "npc", "Author", "Player", "Player", recall, "On the road.", profile,
+                                characteristicStack, empty, empty, empty, noLines, noLines, noLines, noLines, PromptParityIdentity(), payload, "", "")
+                            : BuildEventPromptEnvelope(campaign, "fixture_event", "npc", "Author", "Player", "Player", recall, "On the road.", payload,
+                                profile, characteristicStack, empty, empty, empty, noLines, noLines, noLines, noLines, PromptParityIdentity(), "", "", motive);
+                    string messages = string.Join("\n", envelope.Messages.Select(message => ReadString(message, "content", "")));
+                    bool expectSpeech = scope == "original_audience" || scope == "restored_source" || scope == "inactive_attendee"
+                        || (route == "correspondence" && scope == "new_witness")
+                        || ((route == "in_person" || route == "correspondence") && scope == "new_active_speaker");
+                    Check("reported_characteristic_final_prompt_" + route + "_" + scope,
+                        messages.Contains(reportedSpeech, StringComparison.Ordinal) == expectSpeech
+                        && !messages.Contains(proposedInterpretation, StringComparison.Ordinal)
+                        && (!expectSpeech || messages.Contains("Prior speech by", StringComparison.Ordinal)),
+                        TestDict("expectedSpeech", expectSpeech, "foundSpeech", messages.Contains(reportedSpeech, StringComparison.Ordinal)));
                 }
                 AdvanceMemoryRestoreGeneration(campaign);
                 using (var connection = ReignDatabase.OpenCampaignConnection(campaign))

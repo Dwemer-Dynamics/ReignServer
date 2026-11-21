@@ -505,7 +505,7 @@ namespace ReignBetaServer
             AppendPromptSection(builder, "RELEVANT DYNAMIC CHARACTERISTICS",
                 CharactersService.FormatDynamicCharacteristicsForPrompt(
                     ReadDictionary(characteristics, "dynamicCharacteristics") ?? new Dictionary<string, object>(),
-                    playerText ?? ""));
+                    playerText ?? "", ReadBool(characteristics, "reportedSpeechPromptScope", false)));
             AppendPromptSection(builder, "SECRET REBELLION PREPARATION DECISION",
                 BuildRebellionPreparationDecisionPrompt(profile, characteristics, playerText));
             return builder.ToString();
@@ -561,6 +561,8 @@ namespace ReignBetaServer
             if (CharactersService.UsesCommonerRolePrompt(profile)) rules.Add("WORLD TONE", PromptService.LoadPromptTemplate("world_tone.txt"));
             else rules.Omit("world_tone", "Correspondence uses its written-voice contract; the commoner world-tone supplement is not selected by the resident resolver.");
             var composition = new Dictionary<string, object>();
+            characteristics = CharactersService.ScopeReportedCharacteristicSpeech(campaignId, characteristics, senderId, recipientId ?? "",
+                worldDay, continuityContext, null, null);
             string character = BuildStableCharacterPrompt(senderId, senderName, profile, characteristics);
             var nativeFamily = new StringBuilder();
             DialogueService.AppendPromptLine(nativeFamily, "Native father", ReadString(profile, "fatherName", ""));
