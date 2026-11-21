@@ -865,13 +865,18 @@
               <option value='llm-log.jsonl'>llm-log.jsonl</option>
             </select>
           </label>
-          <label>Limit <input id='logLimit' type='number' min='1' max='5000' value='250'></label>
+          <label>Limit <input id='logLimit' type='number' min='1' max='500' value='250'></label>
+          <label>Search full redacted text <input id='logSearch' type='search' maxlength='200'></label>
+          <label>Event type <input id='logEventType' maxlength='160'></label>
+          <label>Severity <input id='logSeverity' maxlength='32'></label>
         </div>
         <div class='actions'>
-          <button onclick='loadLogs()'>Load Logs</button>
+          <button onclick='loadLogs()'>Load Latest</button>
+          <button id='olderLogs' onclick='loadLogs(true)' disabled>Older Matches</button>
           <button onclick='downloadLogs()'>Download Raw Log</button>
           <button class='danger' onclick='clearLogs()'>Clear Selected Log</button>
         </div>
+        <p id='logPageStatus' role='status'></p>
         <pre id='logOutput'>No logs loaded yet.</pre>
       </div>
     </section>
@@ -2957,16 +2962,51 @@
       try{const j=await (await fetch('/api/campaigns/delete-all',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmation})})).json();if(!j.ok)throw new Error(j.error||'Delete all failed.');status.className='editorStatus good';status.textContent=j.message;if(j.serverStopping)return;await loadCampaignManager();await loadCampaigns();}catch(e){status.className='editorStatus error';status.textContent=e.message;}
     }
 
-    async function loadLogs() {
-      const file = encodeURIComponent(document.getElementById('logFile').value);
-      const limit = encodeURIComponent(document.getElementById('logLimit').value || '250');
-      const campaign = encodeURIComponent(document.getElementById('logCampaignId')?.value || '');
-      const r = await fetch(`/api/logs?file=${file}&limit=${limit}&campaignId=${campaign}`);
-      const j = await r.json();
-      const output = document.getElementById('logOutput');
-      output.textContent = j.entries && j.entries.length
-        ? `Campaign: ${j.campaignId || 'global'}\n\n` + j.entries.map(x => JSON.stringify(x, null, 2)).join('\n\n')
-        : `No entries in ${j.file} for ${j.campaignId || 'global'}.`;
+    let logContinuation = null, logQueryKey = '', viewingOlderLogs = false, logLoadPending = false, logLoadVersion = 0;
+    function logQuery() {
+      return new URLSearchParams({
+        file: document.getElementById('logFile').value, limit: document.getElementById('logLimit').value || '250',
+        campaignId: document.getElementById('logCampaignId')?.value || '', search: document.getElementById('logSearch').value,
+        eventType: document.getElementById('logEventType').value, severity: document.getElementById('logSeverity').value
+      });
+    }
+    async function loadLogs(older = false, live = false) {
+      const query = logQuery(), key = query.toString();
+      if (live && (viewingOlderLogs || logLoadPending || (logQueryKey && key !== logQueryKey))) return;
+      const continuation = older && key === logQueryKey ? logContinuation : null;
+      const version = ++logLoadVersion, more = document.getElementById('olderLogs');
+      const status = document.getElementById('logPageStatus'), output = document.getElementById('logOutput');
+      if (continuation) {
+        query.set('cursor', continuation.cursor);
+        query.set('campaignId', continuation.campaignId);
+      }
+      logLoadPending = true;
+      more.disabled = true;
+      try {
+        const r = await fetch('/api/logs?' + query), j = await r.json();
+        if (version !== logLoadVersion || key !== logQuery().toString()) return;
+        if (!r.ok || !j.ok) throw new Error(j.error || 'Could not load logs.');
+        viewingOlderLogs = !!continuation;
+        logQueryKey = key;
+        logContinuation = j.hasMore && j.nextCursor ? { cursor: j.nextCursor, campaignId: j.campaignId || query.get('campaignId') } : null;
+        more.disabled = !logContinuation;
+        const notes = [];
+        if (j.elidedCount) notes.push(`Payload omitted for ${j.elidedCount} ${j.elidedCount === 1 ? 'entry' : 'entries'}.`);
+        if (j.responseLimitReached) notes.push('Response size limit reached.');
+        if (logContinuation) notes.push('Older matches are available.');
+        if (viewingOlderLogs) notes.push('Load Latest to resume live refresh.');
+        status.textContent = notes.join(' ');
+        output.textContent = j.entries && j.entries.length
+          ? `Campaign: ${j.campaignId || 'global'}\n\n` + j.entries.map(x => JSON.stringify(x, null, 2)).join('\n\n')
+          : `No matches in ${j.file} for ${j.campaignId || 'global'}.`;
+      } catch (error) {
+        if (version !== logLoadVersion || key !== logQuery().toString()) return;
+        logContinuation = null;
+        status.textContent = error.message;
+        output.textContent = '';
+      } finally {
+        if (version === logLoadVersion) logLoadPending = false;
+      }
     }
 
     function downloadLogs() {
@@ -4121,7 +4161,7 @@
       const live = document.getElementById('enableLiveLog');
       const logsOpen = document.getElementById('logs').classList.contains('active');
       const auditOpen = document.getElementById('audit').classList.contains('active');
-      if (live && live.checked && logsOpen) loadLogs();
+      if (live && live.checked && logsOpen) loadLogs(false, true);
       if (live && live.checked && auditOpen) loadAudit();
     }, 5000);
 

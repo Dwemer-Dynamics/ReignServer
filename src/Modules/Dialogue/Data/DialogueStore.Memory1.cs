@@ -604,9 +604,9 @@ VALUES($id,$lie,$campaign,$timeline,$believer,$claimant,$claim,$normalized,'acce
             ReignDatabase.ExecuteSql(connection, "UPDATE beliefs SET confidence=0,payload_json=$payload WHERE event_id=$lie;", parameters, transaction);
         }
 
-        internal static List<Dictionary<string, object>> SelectWorldHistoryClaimBeliefs2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static List<Dictionary<string, object>> SelectWorldHistoryClaimBeliefForLieCheck(ReignDbConnection connection, Dictionary<string, object> parameters, ReignDbTransaction transaction = null)
         {
-            return ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_claim_beliefs WHERE believer_id='observer_a' ORDER BY created_ts LIMIT 1;", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_claim_beliefs WHERE lie_check_id=$id;", parameters, transaction);
         }
 
         internal static List<Dictionary<string, object>> SelectConversationTurns58(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)

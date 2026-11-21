@@ -101,6 +101,9 @@ namespace ReignBetaServer
                     ["error"] = "Save Sync did not capture an inconsistent state because critical world-history events were still pending."
                 };
             string campaignDir = StrictCampaignDirectory(campaignId);
+            string calendarSha = ValidateSaveSyncCalendar(ReadSaveSyncCalendar(campaignDir), campaignId, payload);
+            string nativeCalendarSha = ReadString(payload, "calendarSha256", "");
+            if (nativeCalendarSha.Length != 0) RequireSaveSyncCalendarDigest(nativeCalendarSha, calendarSha);
             Directory.CreateDirectory(campaignDir);
             string campaignMetadataPath = Path.Combine(campaignDir, "campaign.json");
             if (!File.Exists(campaignMetadataPath))
@@ -126,6 +129,7 @@ namespace ReignBetaServer
                 if (!ReadString(existingManifest, "campaignId", "").Equals(campaignId, StringComparison.OrdinalIgnoreCase)
                     || !ReadString(existingManifest, "fingerprint", "").Equals(ReadString(existing, "snapshotFingerprint", ""), StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("Save Sync storage-key collision detected; no snapshot was changed.");
+                VerifySaveSyncCalendarCheckpoint(campaignId, pointRoot, existing, existingManifest, payload);
                 timer.Stop();
                 return new Dictionary<string, object>
                 {
@@ -136,10 +140,14 @@ namespace ReignBetaServer
             }
 
             Dictionary<string, object> point = NormalizeSaveSyncPoint(payload);
+            point["calendarSha256"] = calendarSha;
             Dictionary<string, object> cleanSharedPoint =
                 SaveSyncCleanActivePoint(campaignId, ledger);
             if (cleanSharedPoint != null)
             {
+                string sharedRoot = SaveSyncSnapshotRoot(campaignId, cleanSharedPoint);
+                var sharedManifest = CampaignFileService.ReadJsonObject(Path.Combine(sharedRoot, "manifest.json"));
+                RequireSaveSyncCalendarDigest(calendarSha, VerifySaveSyncCalendarCheckpoint(campaignId, sharedRoot, cleanSharedPoint, sharedManifest, payload));
                 point["postgresqlSnapshotPointId"] =
                     SaveSyncPostgreSqlSnapshotPointId(cleanSharedPoint);
                 point["snapshotStorageId"] = ReadString(cleanSharedPoint, "snapshotStorageId", "");
@@ -632,12 +640,15 @@ namespace ReignBetaServer
                 dbTimer.Stop();
                 string rawFingerprint = databaseStateToken + "_"
                     + Guid.NewGuid().ToString("N");
+                string calendarSha = ReadString(metadata, "calendarSha256", "");
+                RequireSaveSyncCalendarDigest(calendarSha, SaveSyncCalendarDigest(ReadSaveSyncCalendar(stagedCampaign)));
                 timer.Stop();
                 Dictionary<string, object> manifest = new Dictionary<string, object>
                 {
                     ["format"] = "bannerlord-reign-save-sync-snapshot",
                     ["version"] = SaveSyncFormatVersion,
                     ["snapshotState"] = "postgresql_ready",
+                    ["calendarSha256"] = calendarSha,
                     ["campaignId"] = campaignId,
                     ["savePointId"] = savePointId,
                     ["savePointKind"] = ReadString(metadata, "savePointKind", "native_save"),

@@ -451,6 +451,7 @@ namespace ReignBetaServer
                     && ReadString(rolledBack, "restoreGeneration", "").Length > 0,
                     "A verified no-op load binds its session without dirtying Save Sync state, and each verified load echoes the restore generation bound to it.");
                 add("cross_campaign_isolation", FileSha256(siblingFile) == siblingHash, "Save-point registration and backward/forward restores never write to a sibling campaign.");
+                VerifyCalendarCheckpointInstallation("ssc_" + token, add);
 
                 Directory.CreateDirectory(nativeSaveFixture);
                 string oldNativeSavePath = Path.Combine(
@@ -1163,7 +1164,13 @@ namespace ReignBetaServer
             AppendSaveSyncTestPath(campaignId, Path.Combine("diplomacy", "consequences.jsonl"), marker);
             AppendSaveSyncTestPath(campaignId, Path.Combine("negotiations", "events.jsonl"), marker);
             CampaignFileService.WriteJsonObject(Path.Combine(campaign, "actions", "action-queue.json"), new Dictionary<string, object> { ["marker"] = marker, ["items"] = new List<object> { marker + "_queued_action" } });
-            CampaignFileService.WriteJsonObject(Path.Combine(campaign, "world", "calendar.json"), new Dictionary<string, object> { ["marker"] = marker, ["nativeDayAnchor"] = marker == "old" ? 10d : 20d });
+            CampaignFileService.WriteJsonObject(Path.Combine(campaign, "world", "calendar.json"), new Dictionary<string, object>
+            {
+                ["marker"] = marker, ["Version"] = 1, ["CampaignId"] = campaignId,
+                ["NativeDayAnchor"] = marker == "old" ? 10d : 20d,
+                ["CalendarDayAnchor"] = marker == "old" ? 15d : 25d,
+                ["AgeAnchors"] = TestDict("hero_a", TestDict("Day", 10d, "Age", 17.5d))
+            });
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 RebellionService.EnsureRebellionSchema(connection);
