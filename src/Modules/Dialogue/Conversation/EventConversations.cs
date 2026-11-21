@@ -580,10 +580,11 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> queuedEventActions = approachOpening || agencyVisibleFailure || participation == "quiet"
                 ? new List<Dictionary<string, object>>()
                 : ActionPipelineService.QueueAcceptedDialogueActions(campaignId, payload, profile, playerText, reply, actionGate, suggestedActions, out eventActionErrors);
+            string queuedActionNotice = "";
             if (queuedEventActions.Count > 0)
             {
-                string statusLine = "[Bannerlord Reign event action queued: " + string.Join(", ", queuedEventActions.Select(x => ReadString(x, "command", "")).Where(x => !string.IsNullOrWhiteSpace(x))) + ".]";
-                reply = string.IsNullOrWhiteSpace(reply) || reply == "..." ? statusLine : reply + "\n\n" + statusLine;
+                queuedActionNotice = "[Bannerlord Reign event action queued: " + string.Join(", ", queuedEventActions.Select(x => ReadString(x, "command", "")).Where(x => !string.IsNullOrWhiteSpace(x))) + ".]";
+                reply = string.IsNullOrWhiteSpace(reply) || reply == "..." ? queuedActionNotice : reply + "\n\n" + queuedActionNotice;
             }
             if (WorldSimulationService.HasUnconfirmedMarriageClaim(reply, payload, profile))
             {
@@ -597,7 +598,7 @@ namespace ReignBetaServer
                 stateUpdates.Clear();
             }
             reply = WorldSimulationService.FinalizeDialogueActionOutcome(reply, payload, profile, queuedEventActions, eventActionErrors);
-            reply = DialogueService.RenderGroundedSceneHeading(payload, heroId, parsed, reply);
+            reply = DialogueService.RenderGroundedSceneHeading(payload, heroId, parsed, reply, out string displayPrefix);
             if (!DialogueService.FinalizeConversationGrounding(payload, heroId, parsed, ref reply))
             {
                 agencyVisibleFailure = true;
@@ -692,11 +693,6 @@ namespace ReignBetaServer
                 CampaignFileService.AppendJsonLineToPath(CampaignFileService.CharacterFile(campaignId, heroId, "memory", "memories.jsonl"), memoryWrite);
             }
 
-            List<string> dynamicCharacteristicAudience = partyChatTurn
-                ? privatePlayerInputForSpeaker ? new List<string> { heroId, socialPlayerId } : sharedParticipants
-                : privatePlayerInputForSpeaker ? new List<string> { heroId, socialPlayerId } : MergeStringLists(
-                    attendees.Select(CampaignFileService.CharacterIdFrom).Where(x => !string.IsNullOrWhiteSpace(x)),
-                    new[] { heroId, socialPlayerId });
             Dictionary<string, object> dynamicCharacteristicsStore = CharactersService.StoreDynamicCharacteristicWrites(
                 campaignId,
                 heroId,
@@ -704,10 +700,8 @@ namespace ReignBetaServer
                 payload,
                 conversationExchange,
                 decisionId,
-                partyChatTurn ? "party_chat" : ReadString(payload, "mode", "social_event"),
                 socialLocationId,
-                ts,
-                dynamicCharacteristicAudience);
+                reply, displayPrefix, queuedActionNotice);
 
             string partySessionId = ReadString(conversationExchange, "sessionId", "");
             Dictionary<string, object> memoryLayerStore = ReadDictionary(ReadDictionary(conversationExchange, "acceptedUnit"), "memory");
@@ -973,7 +967,7 @@ namespace ReignBetaServer
                 + (npcOpening
                     ? "\nCURRENT-BEAT PRIORITY: The player has entered but has not spoken. Initiate naturally; do not answer, acknowledge, quote, or infer a player message. Every prior labeled line belongs to that NPC, never to the player."
                     : "\nCURRENT-BEAT PRIORITY: Consider the latest player contribution and current scene before extending an earlier topic. If it asks you a question, answer naturally when warranted; an observable action may instead invite your initiative. Prior NPC lines are context to engage, not a replacement question. When the player asks for current or canonical facts, use only the selected live bundles; if a requested list or fact is absent, say it is unavailable instead of improvising local lore.")
-                + "\nRECALL GROUNDING: A plausible story is not evidence of an already established memory. Never claim a past event was previously discussed, externally verified, or part of supplied recall evidence unless it is present in the attributed transcript, selected memory/history evidence, or character foundation. The NPC may originate a new, low-impact autobiographical detail that is compatible with native facts and their traits; present it as a new disclosure and emit the required dynamicCharacteristicWrites entry so it becomes stable soft character canon. Never invent named relatives, major offices, ownership, wars, crimes, deaths, campaign outcomes, or facts about another person. Preserve evidence granularity and clearly label hypothetical examples as hypothetical."
+                + "\nRECALL GROUNDING: A plausible story is not evidence of an already established memory. Never claim a past event was previously discussed, externally verified, or part of supplied recall evidence unless it is present in the attributed transcript, selected memory/history evidence, or character foundation. The NPC may originate a new, low-impact autobiographical detail that is compatible with native facts and their traits; present it as a new disclosure and emit the required dynamicCharacteristicWrites entry with an exact source quote so the disclosure can be remembered as attributed speech. Never invent named relatives, major offices, ownership, wars, crimes, deaths, campaign outcomes, or facts about another person. Preserve evidence granularity and clearly label hypothetical examples as hypothetical."
                 + (ReadInt(payload, "partySpeakerIndex", 0) > 0
                     ? " Earlier response opportunities may have been quiet. Only actual attributed contributions establish prior speech. Engage a specific prior contribution when relevant and set reactionTargetHeroStringId to that NPC's supplied id; otherwise make your own warranted contribution or remain quiet."
                     : npcOpening

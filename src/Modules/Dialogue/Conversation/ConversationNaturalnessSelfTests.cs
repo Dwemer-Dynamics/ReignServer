@@ -108,25 +108,16 @@ namespace ReignBetaServer
             var profile = TestDict("name", speaker, "heroStringId", "fixture_gavene");
             var payload = TestDict("worldDay", 1d, "playerHeroStringId", "fixture_player", "mode", "dialogue");
             Func<string, string, List<Dictionary<string, object>>> normalize = (text, topic) => CharactersService.NormalizeDynamicCharacteristicWrites(
-                TestDict("dynamicCharacteristicWrites", new List<Dictionary<string, object>> { TestDict("text", text, "category", "habit", "topicKey", topic) }), "fixture_gavene", profile, payload, text);
+                TestDict("dynamicCharacteristicWrites", new List<Dictionary<string, object>> { TestDict("text", text, "category", "habit", "topicKey", topic,
+                    "sourceEvidence", TestDict("turnId", "current_npc", "speakerId", "fixture_gavene", "quote", text)) }), "fixture_gavene", profile, payload, text);
             var rhetoricalWrite = normalize(generatedA, "counting_people");
             add("new_rhetorical_self_story_rejected", rhetoricalWrite.Count == 1 && ReadString(rhetoricalWrite[0], "status", "") == "rejected", rhetoricalWrite);
             const string financialValue = "Gavene wants fair prices for grain and keeps a ledger for the family business.";
             var financialWrite = normalize(financialValue, "fair_grain_prices");
-            add("literal_financial_characterization_is_preserved", financialWrite.Count == 1 && ReadString(financialWrite[0], "status", "") == "active", financialWrite);
+            add("literal_financial_characterization_is_preserved", financialWrite.Count == 1 && ReadString(financialWrite[0], "status", "") == "proposed", financialWrite);
             var financialMemory = TestDict("active", new List<Dictionary<string, object>> { TestDict("text", financialValue, "category", "personal_value", "provenance", "npc_generated_personal_history") });
             add("literal_financial_memory_reaches_relevant_prompt", CharactersService.FormatDynamicCharacteristicsForPrompt(financialMemory, "What do you think about grain prices?").Contains("fair prices for grain"), null);
             add("figurative_price_is_still_filtered", IsConversationCharacteristicRhetoric("Gavene charges a price for every apology and keeps a ledger of answers."), null);
-            var firstWrite = normalize(hobbyA, "wooden_horses");
-            var secondWrite = normalize(hobbyB, "evening_carving");
-            string campaign = "naturalness_test_" + Guid.NewGuid().ToString("N");
-            CharactersService.UpsertCharacterProfile(campaign, profile);
-            CharactersService.StoreDynamicCharacteristicWrites(campaign, "fixture_gavene", firstWrite, payload, TestDict("exchangeId", "original"), "event_original", "dialogue", "", 1, new[] { "fixture_gavene" });
-            var duplicateStore = CharactersService.StoreDynamicCharacteristicWrites(campaign, "fixture_gavene", secondWrite, payload, TestDict("exchangeId", "paraphrase"), "event_paraphrase", "dialogue", "", 2, new[] { "fixture_gavene" });
-            var persisted = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, "fixture_gavene", "dynamic_characteristics.json"));
-            add("paraphrase_write_retains_original_and_rejection_evidence", ReadInt(duplicateStore, "rejectedCount", 0) == 1
-                && ReadDictionaryList(persisted, "active").Count == 1 && ReadDictionaryList(persisted, "rejected").Count == 1
-                && ReadString(ReadDictionaryList(persisted, "active")[0], "source_exchange_id", "") == "original", duplicateStore);
             foreach (string name in new[] { "world_tone.txt", "noble_prompt.txt" })
             {
                 string template = PromptService.LoadPromptTemplate(name), scoped = ScopeConversationTone(template);

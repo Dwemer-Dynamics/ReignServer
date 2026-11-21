@@ -11,8 +11,8 @@ namespace ReignBetaServer
             "Only when the NPC's visible reply actually expresses a lasting change, a dynamicCharacteristicWrites item may include " +
             "narrativeDevelopment:{itemId,influence,description,personalMeaning,supportingQuote,evidenceEventId}. " +
             "Use an existing private itemId supplied in the personal-interest context; never expose IDs or ratings in speech. " +
-            "Quote the NPC's exact lasting personal response, not the player's claim. evidenceEventId must name a supplied completed native historical event personally relevant to that concern, or be empty. " +
-            "The server independently requires a relevant major event plus lasting response, or matching evidence from three separate encounters spanning thirty campaign days. A proposal is not an accepted change.";
+            "Quote the NPC's complete spoken response as one direct statement of lasting personal change. evidenceEventId must name a supplied completed native event personally relevant to the concern, or be empty. " +
+            "The server requires a relevant major event plus a lasting response, or repeated exact evidence from three separate encounters spanning thirty campaign days. Keep the description, personal meaning and influence as proposals. Preserve exact prior speech and its qualifications.";
 
         private static bool NarrativeLastingQuote(string quote)
         {
@@ -20,15 +20,35 @@ namespace ReignBetaServer
                 && Regex.IsMatch(quote ?? "", @"\b(no longer|from now on|since then|over these|over the (weeks|months|years)|changed (me|my)|for the rest of|learned to|learnt to|have come to|has become|have stopped|never again|ever since|resolved to|means more to me|matters less to me|will always|have grown|have outgrown)\b", RegexOptions.IgnoreCase);
         }
 
+        private static bool HasDirectReportedNarrativeResponse(Dictionary<string, object> proof, string quote)
+        {
+            if (quote.Length < 20 || quote.Length > 600 || ReadString(proof, "schema", "") != ReportedSpeechSchema
+                || ReadString(proof, "quote", "") != quote || !ReadBool(proof, "quoteCoversAuthoredBody", false)) return false;
+
+            // Require a complete, direct statement for eligibility. A quoted, qualified,
+            // or multi-statement response can still be retained as attributed speech.
+            const string directChange =
+                @"^(?:(?:Since [\p{L}\p{N} ’'-]{1,160},|Over (?:these|the) [\p{L}\p{N} ’'-]{1,80},?)\s+)?I\s+" +
+                @"(?:have\s+(?:now\s+)?(?:(?:learned|learnt)\s+to|come\s+to|stopped|grown|outgrown)|(?:can\s+)?no\s+longer|resolved\s+to|will\s+always)\s+" +
+                @"[\p{L}\p{N} ’'-]+[.!]?$";
+            const string qualification =
+                @"\b(?:if|unless|would|could|might|maybe|perhaps|not|never|and|or|but|except|ago|until|without|according\s+to|per|puts?\s+it|used\s+to|pretend\w*|rehears\w*|" +
+                @"say|says|saying|said|tell|tells|telling|told|quot\w*|writ\w*|wrote|claim\w*|repeat\w*|recit\w*)\b" +
+                @"|\b\w+n['’]t\b|(?<![\p{L}\p{N}])['’]|['’](?![\p{L}\p{N}])";
+            const RegexOptions options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
+            return Regex.IsMatch(quote, directChange, options) && !Regex.IsMatch(quote, qualification, options);
+        }
+
         private static Dictionary<string, object> NormalizeNarrativeDevelopmentProposal(Dictionary<string, object> proposed, string visibleReply)
         {
             if (proposed == null || proposed.Count == 0) return null;
             var result = new Dictionary<string, object>();
-            foreach (string key in new[] { "itemId", "description", "personalMeaning", "supportingQuote", "evidenceEventId" })
+            foreach (string key in new[] { "itemId", "description", "personalMeaning", "evidenceEventId" })
                 result[key] = DialogueService.LimitText(ReadString(proposed, key, ""), key == "itemId" || key == "evidenceEventId" ? 160 : 600);
             result["influence"] = ReadInt(proposed, "influence", 0);
-            string quote = ReadString(result, "supportingQuote", "");
-            result["quoteValidated"] = quote.Length >= 20 && (visibleReply ?? "").IndexOf(quote, StringComparison.Ordinal) >= 0;
+            string quote = ReadString(proposed, "supportingQuote", "");
+            result["supportingQuote"] = quote;
+            result["quoteValidated"] = quote.Length >= 20 && quote.Length <= 600 && (visibleReply ?? "").IndexOf(quote, StringComparison.Ordinal) >= 0;
             return result;
         }
 
@@ -43,17 +63,22 @@ namespace ReignBetaServer
             int before = ReadInt(item, "influence", 0), after = ReadInt(proposal, "influence", 0);
             int direction = Math.Sign(after - before);
             result["direction"] = direction;
-            bool valid = item != null && before >= 1 && after >= 1 && after <= 10
+            bool reported = ReadString(proposal, "sourceEvidenceVersion", "") == ReportedSpeechSchema;
+            var proof = ReadDictionary(proposal, "sourceEvidence");
+            if (reported) result["interpretationStatus"] = "proposed";
+            string quote = ReadString(proposal, "supportingQuote", "");
+            bool valid = (reported ? HasDirectReportedNarrativeResponse(proof, quote) : NarrativeLastingQuote(quote))
+                && item != null && before >= 1 && after >= 1 && after <= 10
                 && !string.IsNullOrWhiteSpace(sessionId) && worldDay >= 0
                 && ReadBool(proposal, "quoteValidated", false) && ReadBool(proposal, "compatibilityValidated", false)
-                && NarrativeLastingQuote(ReadString(proposal, "supportingQuote", ""))
                 && ReadString(proposal, "description", "").Length >= 20 && ReadString(proposal, "personalMeaning", "").Length >= 20;
             if (!valid) { result["decision"] = "rejected"; result["reason"] = "missing_credible_lasting_personal_response"; return result; }
             var coherent = observations.Where(x => ReadString(x, "itemId", "") == ReadString(proposal, "itemId", "")
                     && ReadInt(x, "direction", 0) == direction && ReadBool(x, "quoteValidated", false)
                     && ReadBool(x, "compatibilityValidated", false)
-                    && HasDynamicTextEvidence(ReadString(proposal, "description", "") + " " + ReadString(proposal, "personalMeaning", ""),
-                        ReadString(x, "description", "") + " " + ReadString(x, "personalMeaning", ""))
+                    && (reported ? SameNarrativeObservation(proposal, x) : HasDynamicTextEvidence(
+                        ReadString(proposal, "description", "") + " " + ReadString(proposal, "personalMeaning", ""),
+                        ReadString(x, "description", "") + " " + ReadString(x, "personalMeaning", "")))
                     && ReadString(x, "decision", "") != "rejected" && ReadDouble(x, "worldDay", worldDay + 1) <= worldDay)
                 .Concat(new[] { result }).GroupBy(x => ReadString(x, "sessionId", ""))
                 .Where(x => x.Key.Length > 0).Select(x => x.OrderBy(i => ReadDouble(i, "worldDay", 0)).First()).ToList();
@@ -67,6 +92,20 @@ namespace ReignBetaServer
             return result;
         }
 
+        private static bool SameNarrativeObservation(Dictionary<string, object> proposal, Dictionary<string, object> prior)
+        {
+            var proof = ReadDictionary(proposal, "sourceEvidence");
+            var earlier = ReadDictionary(prior, "sourceEvidence");
+            return ReadString(prior, "sourceEvidenceVersion", "") == ReportedSpeechSchema
+                && ReadString(proof, "speakerId", "") == ReadString(earlier, "speakerId", "")
+                && ReadString(proof, "timelineId", "") == ReadString(earlier, "timelineId", "")
+                && ReadString(proof, "channel", "") == ReadString(earlier, "channel", "")
+                && ReadStringList(proof, "audienceIds").ToHashSet(StringComparer.Ordinal)
+                    .SetEquals(ReadStringList(earlier, "audienceIds"))
+                && ReadString(proof, "quote", "") == ReadString(earlier, "quote", "")
+                && ReadInt(proposal, "influence", 0) == ReadInt(prior, "influence", -1);
+        }
+
         private static Dictionary<string, object> StoreNarrativeDevelopment(ReignDbConnection connection,
             string campaignId, string heroId, Dictionary<string, object> proposal, string sessionId, string exchangeId,
             string sourceEventId, double worldDay, long ts)
@@ -75,7 +114,10 @@ namespace ReignBetaServer
                 return new Dictionary<string, object> { ["status"] = "rejected", ["reason"] = "missing_conversation_evidence_identity" };
             var basis = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "narrative.json"));
             var rows = CharactersStore.SelectDynamicCharacteristics2(connection, new Dictionary<string, object> { ["hero"] = heroId });
-            string id = "narrative_development_" + DialogueService.PromptHash(heroId + "|" + ReadString(proposal, "itemId", "") + "|" + exchangeId).Substring(0, 24);
+            bool reported = ReadString(proposal, "sourceEvidenceVersion", "") == ReportedSpeechSchema;
+            var proof = ReadDictionary(proposal, "sourceEvidence");
+            string id = reported ? ReportedSpeechRecordId(heroId, sourceEventId)
+                : "narrative_development_" + DialogueService.PromptHash(heroId + "|" + ReadString(proposal, "itemId", "") + "|" + exchangeId).Substring(0, 24);
             var replay = rows.FirstOrDefault(x => ReadString(x, "characteristic_id", "") == id);
             if (replay != null) return replay;
             var effective = ResolveEffectiveNarrative(new Dictionary<string, object> { ["narrative"] = basis,
@@ -98,18 +140,31 @@ namespace ReignBetaServer
                     ReadString(profile, "motherId", ""), ReadString(profile, "spouseId", "") }).Where(x => x.Length > 0).ToList();
                 major = NarrativeMajorEventRelevant(item, history, heroId, family, participants, ReadString(proposal, "supportingQuote", ""));
             }
-            var decision = EvaluateNarrativeDevelopment(item, proposal, sessionId, worldDay, observations, major);
+            string encounterId = reported ? ReadString(proof, "encounterId", "") : sessionId;
+            var decision = EvaluateNarrativeDevelopment(item, proposal, encounterId, worldDay, observations, major);
             decision["baseItemFingerprint"] = basisFingerprint;
             string state = ReadString(decision, "decision", "") == "accepted" ? "active" : "rejected";
             var payload = new Dictionary<string, object> { ["narrativeDevelopment"] = decision };
-            CharactersStore.InsertOrIgnoreDynamicCharacteristics(connection, new Dictionary<string, object> { ["id"] = id, ["hero"] = heroId,
-                ["topic"] = "narrative/" + ReadString(proposal, "itemId", ""), ["text"] = ReadString(proposal, "description", ""),
-                ["state"] = state, ["decision"] = ReadString(decision, "decision", ""), ["reason"] = ReadString(decision, "reason", ""),
-                ["event"] = sourceEventId, ["session"] = sessionId, ["exchange"] = exchangeId, ["day"] = worldDay, ["ts"] = ts,
-                ["payload"] = Json.Serialize(payload) });
+            string topic = "narrative/" + ReadString(proposal, "itemId", "");
+            if (reported)
+                CharactersStore.InsertReportedDynamicCharacteristic(connection, TestDict("id", id, "owner", heroId,
+                    "category", "narrative_development", "topic", topic, "text", ReadString(proof, "quote", ""), "status", state,
+                    "confidence", 1d, "importance", 1d, "provenance", ReportedSpeechProvenance,
+                    "compatibility", state == "active" ? "attributed_development_source" : ReadString(decision, "decision", ""),
+                    "rejection", ReadString(decision, "reason", ""), "event", sourceEventId, "session", sessionId, "exchange", exchangeId,
+                    "turns", Json.Serialize(new[] { ReadString(proof, "turnId", "") }), "mode", ReadString(proof, "channel", ""),
+                    "location", "", "day", worldDay, "known", Json.Serialize(ReadStringList(proof, "audienceIds")),
+                    "ts", ts, "payload", Json.Serialize(payload)));
+            else
+                CharactersStore.InsertOrIgnoreDynamicCharacteristics(connection, new Dictionary<string, object> { ["id"] = id, ["hero"] = heroId,
+                    ["topic"] = topic, ["text"] = ReadString(proposal, "description", ""),
+                    ["state"] = state, ["decision"] = ReadString(decision, "decision", ""), ["reason"] = ReadString(decision, "reason", ""),
+                    ["event"] = sourceEventId, ["session"] = sessionId, ["exchange"] = exchangeId, ["day"] = worldDay, ["ts"] = ts,
+                    ["payload"] = Json.Serialize(payload) });
             if (state == "active")
             {
-                CharactersStore.UpdateDynamicCharacteristics3(connection, new Dictionary<string, object> { ["hero"] = heroId, ["topic"] = "narrative/" + ReadString(proposal, "itemId", ""), ["id"] = id });
+                if (!reported)
+                    CharactersStore.UpdateDynamicCharacteristics3(connection, TestDict("hero", heroId, "topic", topic, "id", id));
                 DialogueService.InvalidatePromptRuntimeCache();
             }
             EnsureCharacterEditorSchema(connection);

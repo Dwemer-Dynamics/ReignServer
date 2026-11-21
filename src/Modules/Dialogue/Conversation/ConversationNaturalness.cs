@@ -215,7 +215,13 @@ namespace ReignBetaServer
             var selected = new List<Dictionary<string, object>>();
             foreach (var item in ranked)
             {
-                if (selected.Any(row => DynamicCharacteristicsEquivalent(ReadString(row, "text", ""), ReadString(item.row, "text", "")))) continue;
+                string text = ReadString(item.row, "text", "");
+                bool reported = CharactersService.IsReportedDynamicCharacteristic(item.row);
+                string sourceHash = reported ? CharactersService.CharacteristicSpeechSourceHash(item.row) : "";
+                if (selected.Any(row => reported
+                    ? sourceHash.Length > 0 && sourceHash == CharactersService.CharacteristicSpeechSourceHash(row)
+                    : !CharactersService.IsReportedDynamicCharacteristic(row)
+                        && DynamicCharacteristicsEquivalent(ReadString(row, "text", ""), text))) continue;
                 selected.Add(item.row);
                 if (selected.Count == 6) break;
             }
