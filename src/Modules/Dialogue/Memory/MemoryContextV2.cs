@@ -200,10 +200,21 @@ namespace ReignBetaServer
             });
 
         private static Dictionary<string, object> AcceptMemorySummaryCandidate(string candidate,
-            List<Dictionary<string, object>> rows, List<string> completeSource, List<string> topics)
+            List<Dictionary<string, object>> rows, List<string> completeSource, List<string> topics,
+            bool requireSuppliedSources = false)
         {
-            var distinctSources = (rows ?? new List<Dictionary<string, object>>())
-                .Select(r => ReadString(r, "summary", "").Trim()).Where(t => t.Length > 0).Distinct(StringComparer.Ordinal).ToList();
+            var sourceRows = rows ?? new List<Dictionary<string, object>>();
+            // Legacy replies may copy displayed rows. Once a prior summary has
+            // reopened an archive, only the actual supplied records can prove coverage.
+            bool usesSuppliedSources = requireSuppliedSources || sourceRows.Any(row => {
+                var payload = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
+                return IsCompactionArchiveMethod(ReadString(payload, "method", ""))
+                    && ReadStringList(payload, "originalSourceRecords").Count > 0;
+            });
+            IEnumerable<string> coverageSources = usesSuppliedSources ? completeSource
+                : sourceRows.Select(row => ReadString(row, "summary", ""));
+            var distinctSources = coverageSources.Select(text => (text ?? "").Trim())
+                .Where(text => text.Length > 0).Distinct(StringComparer.Ordinal).ToList();
             string remainder = (candidate ?? "").Trim();
             var uncovered = new List<string>();
             foreach (string source in distinctSources.OrderByDescending(s => s.Length))
@@ -361,7 +372,7 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> EvaluateMemoryCompactionResponse(Dictionary<string, object> provider,
             List<Dictionary<string, object>> rows, List<string> sources, List<string> topics, int maxChars, bool dialogueDerived,
-            Func<string, string> publicationText = null)
+            Func<string, string> publicationText = null, bool requireSuppliedSources = false)
         {
             var retained = ExtractiveMemoryFallback(sources, topics);
             string finish = ReadString(provider, "finishReason", "").ToLowerInvariant();
@@ -400,7 +411,7 @@ namespace ReignBetaServer
             string summary = ReadString(parsed, "summary", "");
             if (!string.IsNullOrWhiteSpace(summary) && summary.Trim().Length <= maxChars)
             {
-                var accepted = AcceptMemorySummaryCandidate(summary, rows, sources, topics);
+                var accepted = AcceptMemorySummaryCandidate(summary, rows, sources, topics, requireSuppliedSources);
                 if (ReadString(accepted, "compactionStatus", "") == "complete")
                 {
                     if (dialogueDerived) accepted["summary"] = DialogueService.EnsureConversationSummaryProvenance(ReadString(accepted, "summary", ""), maxChars);
@@ -508,12 +519,15 @@ namespace ReignBetaServer
             return result;
         }
 
+        private static bool IsCompactionArchiveMethod(string method, bool includeSelectionArchive = true) =>
+            method == "model_attributed_digest" || (includeSelectionArchive && method == "source_bound_selection");
+
         internal static IEnumerable<string> OriginalCompactionRecords(Dictionary<string, object> row,
             bool dialogueDerived, bool includeSelectionArchive = true)
         {
             var payload = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
             string method = ReadString(payload, "method", "");
-            if (method == "model_attributed_digest" || (includeSelectionArchive && method == "source_bound_selection"))
+            if (IsCompactionArchiveMethod(method, includeSelectionArchive))
             {
                 var originals = ReadStringList(payload, "originalSourceRecords");
                 if (originals.Count > 0) return originals;
@@ -527,6 +541,16 @@ namespace ReignBetaServer
                 return new[] { "[PRIOR SUMMARY RECORD - NOT AN ORIGINAL STATEMENT] " + value };
             return new[] { dialogueDerived && !native
                 ? "[DIALOGUE-DERIVED REPORTED SPEECH; NOT INDEPENDENT WORLD-FACT EVIDENCE] " + value : value };
+        }
+
+        private static IEnumerable<string> ProjectedCompactionRecords(Dictionary<string, object> row,
+            bool dialogueDerived, KnowledgeAccessContext knowledge, bool includeSelectionArchive = true)
+        {
+            foreach (string record in OriginalCompactionRecords(row, dialogueDerived, includeSelectionArchive))
+            {
+                if (UnknownIdentityMemoryEvidenceAllowed(row, knowledge, record))
+                    yield return SanitizeUnknownIdentityEvidenceText(record, knowledge);
+            }
         }
 
         private static int CompactConversationSummaryLimit(Dictionary<string, object> settings) =>

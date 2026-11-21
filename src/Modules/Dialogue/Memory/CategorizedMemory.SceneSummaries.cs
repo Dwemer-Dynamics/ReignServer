@@ -332,7 +332,6 @@ namespace ReignBetaServer
                 scenes = scenes
                     .Where(row => DialogueService.UnknownIdentityMemoryEvidenceAllowed(row, identityKnowledge,
                         ReadString(row, "summary", "")))
-                    .Select(row => DialogueService.SanitizeUnknownIdentityMemoryRow(row, identityKnowledge))
                     .ToList();
                 withheldScenes = before - scenes.Count;
             }
@@ -364,7 +363,8 @@ namespace ReignBetaServer
             Dictionary<string, object> compact = DialogueService.BuildMiddleTermSummary(arcSettings, npcId,
                 "arc:" + npcId + ":" + playerId + ":" + memoryLane, scenes, 60000,
                 "These records are chronological closed conversation scenes. A departure, silence, refusal, or closure in an older scene applies only to that scene. If a later scene exists, it proves the participants subsequently re-engaged; never preserve an older scene ending as current physical absence or permanent non-engagement.",
-                arcCorrelationId, campaignId: campaignId, publicationText: value => PublishArcText(value, out _));
+                arcCorrelationId, campaignId: campaignId, publicationText: value => PublishArcText(value, out _),
+                sourceKnowledge: identityKnowledge);
             string text = PublishArcText(ReadString(compact, "summary", ""), out bool continuityNormalized);
             if (string.IsNullOrWhiteSpace(text))
             {

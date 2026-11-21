@@ -1311,7 +1311,7 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> rows, int sourceCharacterLimit = 60000, string sourceInstructions = "",
             string correlationId = "", Func<Dictionary<string, object>, Dictionary<string, object>> responder = null,
             Action<IReadOnlyList<string>> captureSourceRecords = null, string campaignId = "",
-            Func<string, string> publicationText = null)
+            Func<string, string> publicationText = null, KnowledgeAccessContext sourceKnowledge = null)
         {
             if (responder != null && string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value))
                 throw new InvalidOperationException("Compaction response fixtures require isolated Verification Lab state.");
@@ -1324,12 +1324,10 @@ namespace ReignBetaServer
                 || (groupKey ?? "").StartsWith("scene:", StringComparison.OrdinalIgnoreCase);
             var orderedRows = rows.OrderBy(row => ReadLong(row, "ts", 0)).ToList();
             List<string> sourceText = orderedRows
-                .SelectMany(row => DialogueService.OriginalCompactionRecords(row, dialogueDerived))
+                .SelectMany(row => ProjectedCompactionRecords(row, dialogueDerived, sourceKnowledge))
                 .Where(value => !string.IsNullOrWhiteSpace(value))
                 .ToList();
             captureSourceRecords?.Invoke(sourceText.AsReadOnly());
-            sourceCharacterLimit = Math.Max(10000, Math.Min(120000, sourceCharacterLimit));
-            string joined = BuildBalancedSummarySource(sourceText, sourceCharacterLimit);
             List<string> topics = DialogueService.BuildMemorySummaryTopics(orderedRows, ReadInt(settings, "minimeMaxTopics", 5));
             var retained = DialogueService.ExtractiveMemoryFallback(sourceText, topics);
             if (!sourceText.Any()) return DialogueService.MemoryCompactionOutcome(retained, "no_original_source_records");
@@ -1343,21 +1341,14 @@ namespace ReignBetaServer
                 rows, sourceText, topics, maxChars, localSelection, publicationText);
             if (complete != null) return DialogueService.MemoryCompactionOutcome(complete, "complete_sources_fit_locally");
             if (!useLlm) return DialogueService.MemoryCompactionOutcome(retained, "generation_disabled");
-            // A stricter publication budget must not turn an existing local-only
-            // compaction into a new provider request.
-            if (ReadInt(localSelection, "selectedCharactersWithFraming", int.MaxValue) <= maxChars)
-                return DialogueService.MemoryCompactionOutcome(retained, "local_sources_exceed_serialized_budget");
-            if (joined != string.Join("\n---\n", sourceText))
-                return DialogueService.MemoryCompactionOutcome(retained, "source_input_exceeds_budget");
-            if (responder == null && !LlmProviderService.LlmProviderConfigured(settings))
-                return DialogueService.MemoryCompactionOutcome(retained, "provider_not_configured");
             if ((groupKey ?? "").StartsWith("arc:", StringComparison.OrdinalIgnoreCase))
             {
                 // Selection archives can expand beyond the budgets that a
                 // previously local rolling arc used. Use the old input size
                 // only to decide provider admission, never as source evidence.
                 var previousArcSources = orderedRows
-                    .SelectMany(row => OriginalCompactionRecords(row, dialogueDerived, includeSelectionArchive: false))
+                    .SelectMany(row => ProjectedCompactionRecords(row, dialogueDerived, sourceKnowledge,
+                        includeSelectionArchive: false))
                     .Where(value => !string.IsNullOrWhiteSpace(value)).ToList();
                 if (previousArcSources.Count is > 0 and <= 16
                     && MemorySummarySelectionText(previousArcSources,
@@ -1366,12 +1357,27 @@ namespace ReignBetaServer
                     var selected = PackMemorySummaryUnits(Enumerable.Range(1, sourceText.Count),
                         indices => MemorySummarySelectionText(sourceText, indices), maxChars, publicationText,
                         maximumUnits: 16);
-                    var local = selected.Count == 0 ? retained
-                        : CreateMemorySourceSelection(rows, sourceText, topics, selected,
-                            maxChars, publicationText);
+                    if (selected.Count == 0)
+                    {
+                        // Leave the previous arc and linked scene archives in
+                        // place when there is no bounded local text to publish.
+                        retained["summary"] = "";
+                        return MemoryCompactionOutcome(retained, "expanded_local_arc_has_no_fitting_records");
+                    }
+                    var local = CreateMemorySourceSelection(rows, sourceText, topics, selected,
+                        maxChars, publicationText);
                     return MemoryCompactionOutcome(local, "expanded_arc_sources_previously_fit_locally");
                 }
             }
+            // A stricter publication budget must not turn an existing local-only
+            // compaction into a new provider request.
+            if (ReadInt(localSelection, "selectedCharactersWithFraming", int.MaxValue) <= maxChars)
+                return DialogueService.MemoryCompactionOutcome(retained, "local_sources_exceed_serialized_budget");
+            sourceCharacterLimit = Math.Max(10000, Math.Min(120000, sourceCharacterLimit));
+            if (BuildBalancedSummarySource(sourceText, sourceCharacterLimit) != string.Join("\n---\n", sourceText))
+                return DialogueService.MemoryCompactionOutcome(retained, "source_input_exceeds_budget");
+            if (responder == null && !LlmProviderService.LlmProviderConfigured(settings))
+                return DialogueService.MemoryCompactionOutcome(retained, "provider_not_configured");
             {
                 var request = new Dictionary<string, object>
                 {
@@ -1394,7 +1400,7 @@ namespace ReignBetaServer
                         new Dictionary<string, object>
                         {
                             ["role"] = "user",
-                            ["content"] = "Compress these original records into a concise attributed recollection. Return {\"digest\":[{\"text\":\"Speaker A requested X; speaker B refused because Y.\",\"sourceIndices\":[1,2]}]}. Total text including citation labels must fit " + (maxChars - 200) + " characters; at most 24 entries. Cite existing one-based record numbers. Consider every record and the final answers. Preserve consequential names, who actually said or proposed what, promises, requests, standing preferences, conditions, scope, refusals, counteroffers, corrections, withdrawal and unresolved questions. Do not equate a quotation's reporter with its underlying actor/proposer or infer agreement from an offer. Keep uncertainty and contradictory accounts explicit. Omit repeated stage directions before consequential terms. This is model interpretation, not certified fact; the engine cannot prove semantic completeness. Originals remain available. If a responsible compact account cannot be made, return {\"digest\":[]}.\nGroup: " + groupKey
+                            ["content"] = "Compress these original records into a concise attributed recollection. Return {\"digest\":[{\"text\":\"Speaker A requested X; speaker B refused because Y.\",\"sourceIndices\":[1,2]}]}. Total text including citation labels must fit " + (maxChars - 200) + " characters; at most 24 entries. Cite existing one-based record numbers. Consider every record and the final answers. Preserve consequential names, who actually said or proposed what, promises, requests, standing preferences, conditions, scope, refusals, counteroffers, corrections, withdrawal and unresolved questions. Do not equate a quotation's reporter with its underlying actor/proposer or infer agreement from an offer. Keep uncertainty and contradictory accounts explicit. Omit repeated stage directions before consequential terms. This is model interpretation, not certified fact; the engine cannot prove semantic completeness. Originals remain available. If a responsible compact account cannot be made, return {\"digest\":[]}.\nGroup: " + SanitizeUnknownIdentityEvidenceText(groupKey, sourceKnowledge)
                                 + "\nRecord count: " + sourceText.Count.ToString(CultureInfo.InvariantCulture)
                                 + (string.IsNullOrWhiteSpace(sourceInstructions) ? "" : "\nSource rules: " + sourceInstructions.Trim())
                                 + "\nRecords (chronological):\n" + string.Join("\n---\n", sourceText.Select((text, index) =>
@@ -1405,7 +1411,7 @@ namespace ReignBetaServer
                 };
                 var llm = responder == null ? LlmProviderService.ChatWithLlm(request) : responder(request);
                 return DialogueService.EvaluateMemoryCompactionResponse(llm, rows, sourceText, topics, maxChars,
-                    dialogueDerived, publicationText);
+                    dialogueDerived, publicationText, requireSuppliedSources: sourceKnowledge?.PlayerIdentityUnknown == true);
             }
         }
 

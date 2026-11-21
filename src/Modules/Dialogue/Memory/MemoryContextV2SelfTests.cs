@@ -824,7 +824,7 @@ namespace ReignBetaServer
             var sourceExtract = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:fixture", rows, responder: Respond);
             Check("oversized_digest_can_fall_back_to_complete_source_records", ReadString(sourceExtract, "summary", "") == ReadString(accepted, "summary", "")
                 && Json.Serialize(ReadDictionary(ReadDictionary(sourceExtract, "compactionDiagnostic"), "packing")["omittedEntryIndices"]) == "[1]");
-            string omittedArcSource = new string('a', 4000);
+            string omittedArcSource = new string('a', 65000);
             var arcScenes = new List<Dictionary<string, object>>
             {
                 TestDict("summary_id", "scene_one", "ts", 1L, "summary", "Prior short selection.",
@@ -839,19 +839,76 @@ namespace ReignBetaServer
             var arc = DialogueService.BuildMiddleTermSummary(settings, "npc", arcScope, arcScenes,
                 responder: Respond, publicationText: Frame);
             string arcText = ReadString(arc, "summary", "");
-            Check("expanded_selection_archive_keeps_previously_local_arc_provider_free",
+            Check("archive_above_provider_input_limit_keeps_previously_local_arc_provider_free",
                 calls == beforeArc && ReadString(arc, "compactionStatus", "") == "partial"
                 && ReadString(ReadDictionary(arc, "compactionDiagnostic"), "reason", "") == "expanded_arc_sources_previously_fit_locally"
                 && arcText.Contains("An exact original record.") && !arcText.Contains("Prior short selection.")
                 && ReadStringList(arc, "originalSourceRecords").Contains(omittedArcSource)
                 && Json.Serialize(Frame(arcText)).Length <= 1800);
+            var oversizedArcScenes = Enumerable.Range(1, 4).Select(index =>
+                TestDict("summary_id", "scene_" + index, "ts", (long)index, "summary", "Prior short selection.",
+                    "payload_json", Json.Serialize(TestDict("method", "source_bound_selection",
+                        "originalSourceRecords", new[] { new string('a', 2000 + index) })))).ToList();
+            var noArc = DialogueService.BuildMiddleTermSummary(settings, "npc", arcScope, oversizedArcScenes,
+                responder: Respond, publicationText: Frame);
+            Check("previously_local_arc_without_fitting_records_preserves_archive_without_publication",
+                calls == beforeArc && ReadString(noArc, "summary", "") == ""
+                && ReadString(noArc, "compactionStatus", "") == "incomplete"
+                && ReadString(ReadDictionary(noArc, "compactionDiagnostic"), "reason", "") == "expanded_local_arc_has_no_fitting_records");
             arcScenes[0]["summary"] = new string('b', 4000);
+            arcScenes[0]["payload_json"] = Json.Serialize(TestDict("method", "source_bound_selection",
+                "originalSourceRecords", new[] { "An exact original record.", new string('a', 4000) }));
             response["content"] = "{\"sourceIndices\":[1]}";
             var providerArc = DialogueService.BuildMiddleTermSummary(settings, "npc", arcScope, arcScenes,
                 responder: Respond, publicationText: Frame);
             Check("arc_that_already_needed_provider_keeps_normal_dispatch",
                 calls == beforeArc + 1
                 && ReadBool(ReadDictionary(providerArc, "compactionDiagnostic"), "providerAttempted", false));
+            var legacySceneText = Enumerable.Range(1, 4)
+                .Select(index => "Displayed scene " + index + " " + new string((char)('a' + index), 400)).ToList();
+            var legacySceneRows = legacySceneText.Select((value, index) =>
+                TestDict("summary_id", "legacy_scene_" + index, "ts", (long)index, "summary", value)).ToList();
+            string missingLegacyOriginal = "Uncited original: " + new string('z', 4000);
+            legacySceneRows[0]["payload_json"] = Json.Serialize(TestDict("method", "source_bound_selection",
+                "originalSourceRecords", new[] { legacySceneText[0], missingLegacyOriginal }));
+            response["content"] = Json.Serialize(TestDict("summary", string.Join("\n---\n", legacySceneText)));
+            int beforeLegacyArc = calls;
+            var legacyArc = DialogueService.BuildMiddleTermSummary(settings, "npc", arcScope, legacySceneRows,
+                responder: Respond, publicationText: Frame);
+            Check("legacy_arc_reply_cannot_certify_display_rows_in_place_of_reopened_originals",
+                calls == beforeLegacyArc + 1
+                && ReadString(legacyArc, "compactionStatus", "") == "incomplete"
+                && !ReadBool(legacyArc, "candidateCoverageComplete", true)
+                && ReadString(ReadDictionary(legacyArc, "compactionDiagnostic"), "reason", "") == "unsupported_summary"
+                && ReadString(legacyArc, "summary", "").Contains(missingLegacyOriginal, StringComparison.Ordinal));
+
+            const string protectedName = "\u015Aeris";
+            const string protectedId = "fixture_private_hero";
+            const string privateStatus = "The stranger's wealth is the secret vault keyword.";
+            var unknownIdentity = BuildKnowledgeAccessContext("npc", protectedId, "",
+                TestDict("mainHeroStringId", protectedId, "mainHeroName", protectedName,
+                    "identityView", TestDict("knowsIdentity", false)));
+            string escapedArchive = Json.Serialize(TestDict("method", "source_bound_selection",
+                "originalSourceRecords", new[] { "A known public comment.", new string('p', 4000),
+                    protectedName + " is the hidden canonical name.", privateStatus }))
+                .Replace(protectedName, "\\u015Aeris", StringComparison.Ordinal);
+            arcScenes[0]["payload_json"] = escapedArchive;
+            arcScenes[0]["participants_json"] = Json.Serialize(new[] { "npc", protectedId });
+            response["content"] = "{\"sourceIndices\":[1]}";
+            int beforePrivateArc = calls;
+            var privateArc = DialogueService.BuildMiddleTermSummary(settings, "npc", "arc:npc:" + protectedId + ":fixture",
+                arcScenes, responder: Respond, publicationText: Frame, sourceKnowledge: unknownIdentity);
+            string projectedPrompt = string.Join("\n", ReadDictionaryList(request, "messages")
+                .Select(message => ReadString(message, "content", "")));
+            Check("unknown_identity_arc_filters_decoded_archive_and_group_before_dispatch",
+                calls == beforePrivateArc + 1 && unknownIdentity.PlayerIdentityUnknown
+                && escapedArchive.Contains("\\u015A", StringComparison.OrdinalIgnoreCase)
+                && projectedPrompt.Contains("A known public comment.", StringComparison.Ordinal)
+                && !projectedPrompt.Contains(protectedName, StringComparison.OrdinalIgnoreCase)
+                && !projectedPrompt.Contains(protectedId, StringComparison.OrdinalIgnoreCase)
+                && !projectedPrompt.Contains("secret vault keyword", StringComparison.Ordinal)
+                && !ReadStringList(privateArc, "originalSourceRecords").Contains(privateStatus)
+                && ReadString(arcScenes[0], "payload_json", "") == escapedArchive);
             int beforeDisabled = calls;
             var disabled = DialogueService.BuildMiddleTermSummary(TestDict("useMemoryLlmForConsolidation", false),
                 "npc", "conversation:fixture", rows, responder: Respond);
