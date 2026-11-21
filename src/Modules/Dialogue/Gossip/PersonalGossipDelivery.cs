@@ -384,19 +384,20 @@ namespace ReignBetaServer
             {
                 brief["receivedMessage"] = ReadString(data, "receivedBody", "");
                 brief["ownAccessibleMemory"] = ReadString(data, "recipientMemory", "");
-                brief["independentEvidence"] = ReadDictionaryList(data, "replyEvidence").Select(e => PersonalGossipReplyEvidenceBrief(data, e)).ToList();
+                brief["accessibleSourceTurns"] = ReadDictionaryList(data, "replyEvidence").Select(e => PersonalGossipReplyEvidenceBrief(data, e)).ToList();
                 brief["beliefConfidence"] = ReadInt(data, "credibility", 50);
                 instruction = "Reply briefly to the received NPC message in natural Bannerlord dialogue, 1-3 sentences, at most 100 words. "
-                    + "Use only your own accessible memory and the message. Answer a question if known; otherwise acknowledge, refuse or express uncertainty. "
-                    + "Hearsay is not proof. Never invent a romantic attachment or treat a report as your own experience. "
+                    + "Use only your own accessible memory and the message. Respond to the question if you can; otherwise acknowledge, refuse or express uncertainty. "
+                    + GossipSpeechEvidenceBoundary + " Attribute reports, preserve who did what, polarity, qualifications and uncertainty. Never invent a romantic attachment or present hearsay as your own experience. "
                     + "Return JSON {body, sourceQuote, privacy, existencePrivacy, confidenceOwnerIds:[], promisedSecrecy:false, ownCompromising:false, "
                     + "answerKind:'answered|refused|evaded|acknowledged', feeling:0, personalStake:25, beliefEvidence:[], gossipSignals:[]}. "
-                    + "Any factual answer must quote its exact supporting passage from ownAccessibleMemory in sourceQuote. With no supporting fact, use an acknowledgement/refusal and an empty quote. "
+                    + "Use answered for your attempt to address the question. Copy an exact passage from one accessibleSourceTurns text as sourceQuote, and use it only if it addresses the actual question and supports what you say. The quotation and label do not establish truth or complete coverage. With no relevant support, acknowledge or refuse with an empty quote. "
                     + "privacy and existencePrivacy are public, personal, intimate, or secret; never classify a confidence as public merely because you know it. "
-                    + "Feeling and personalStake use only 0,25,50,75,100. Supply reactionEvidenceQuote copied from your received message or independentEvidence for feeling, "
-                    + "and concernEvidenceQuote from independentEvidence for a personal stake above ordinary news (25). Never invent attachments. "
-                    + "beliefEvidence entries are {kind:'inconsistent|exposed_liar|corroborated|disproved|confirmed',sourceQuote,sourceRootId}; "
-                    + "quote exact independentEvidence entries and copy their sourceRootId; never use the received report itself. Conclusive disproof requires personal knowledge; corroboration/confirmation requires independent evidence. "
+                    + "Feeling and personalStake use only 0,25,50,75,100. Supply reactionEvidenceQuote copied from your received message or accessibleSourceTurns for feeling, "
+                    + "and concernEvidenceQuote from accessibleSourceTurns for a personal stake above ordinary news (25). Never invent attachments. "
+                    + "beliefEvidence entries are your assessments {kind:'inconsistent|exposed_liar|corroborated|disproved|confirmed',sourceQuote,sourceRootId,sourceId}. "
+                    + "Copy all source fields from one accessible turn. Use confirmed or disproved only for your own prior words about the same claim. "
+                    + "A repeated report, even in another conversation, is still hearsay and is not independent support. Leave beliefEvidence empty when unsure. "
                     + PersonalGossipSignalContract;
             }
             var request = GossipFields("campaignId", campaign, "heroStringId", speaker, "requestType", "personal_gossip", "maxTokens", 1800,
@@ -452,14 +453,22 @@ namespace ReignBetaServer
                     && GossipBodyAllowed(body, source, severity)
                     && (ReadInt(data, "hop", 1) == 1 || ReadString(result, "account", "secondhand") != "firsthand");
             }
-            string memory = ReadString(data, "recipientMemory", ""), kind = ReadString(result, "answerKind", "acknowledged");
-            if (kind == "answered" && !GossipQuoteSupported(quote, memory)) return false;
-            if (quote.Length > 0 && !GossipQuoteSupported(quote, memory)) return false;
+            string kind = PersonalGossipReplyKind(result);
+            var confidenceEvidence = ReadDictionaryList(data, "replyEvidence")
+                .Where(e => GossipQuoteSupported(quote, ReadString(e, "text", ""))).ToList();
+            // Quote membership permits attribution and privacy evaluation. It cannot
+            // establish relevance to the question or verify what the response claims.
+            if ((kind == "answered" || quote.Length > 0) && confidenceEvidence.Count == 0) return false;
+            result["answerKind"] = kind;
             if (quote.Length == 0)
             {
-                result["body"] = kind == "refused" ? "I would rather keep that to myself."
-                    : kind == "evaded" ? "Let us leave that there." : "I will think about what you said.";
-                result["answerKind"] = kind == "refused" || kind == "evaded" ? kind : "acknowledged";
+                result["body"] = kind switch
+                {
+                    "refused" => "I would rather keep that to myself.",
+                    "evaded" => "Let us leave that there.",
+                    _ when ReadString(data, "claimKind", "") == "question" => "I cannot say for certain.",
+                    _ => "I will think about what you said."
+                };
                 return true;
             }
             if (!GossipBodyAllowed(body, quote + "\n" + ReadString(data, "receivedBody", ""), "none")) return false;
@@ -469,8 +478,6 @@ namespace ReignBetaServer
             var people = ReadDictionaryList(GossipSnapshot(c, ReadString(data, "timelineId", "main")), "people");
             double affinity = GossipAffinity(c, GossipHeroId(self), GossipHeroId(recipient), self, recipient);
             string confidencePlayer = ReadString(data, "playerId", "");
-            var confidenceEvidence = ReadDictionaryList(data, "replyEvidence")
-                .Where(e => GossipQuoteSupported(quote, ReadString(e, "text", ""))).ToList();
             var confidenceMentions = confidenceEvidence.SelectMany(e => GossipMentionedIds(quote,
                 people.FirstOrDefault(p => GossipSameId(GossipHeroId(p), ReadString(e, "speakerId", ""))), self, people));
             var confidenceMetadata = new Dictionary<string, object>(result) { ["evidenceQuote"] = quote };
@@ -603,12 +610,26 @@ namespace ReignBetaServer
             var visible = GossipFields("channel", "npc_gossip", "messageId", ReadString(row, "message_id", ""),
                 "speakerId", speaker, "speakerName", name, "recipientId", ReadString(row, "recipient_id", ""),
                 "body", ReadString(data, "body", ""), "claimKind", kind, "credibility", authored || kind == "question" || kind == "impression" ? (object)null : credibility,
+                "evidenceVersion", GossipReceiptEvidenceVersion, "sourceBasis", "attributed_npc_speech", "factVerification", "unavailable",
                 "authored", authored, "local", ReadBool(data, "local", false), "acquiredDay", day,
                 "worldDay", day, "timelineId", ReadString(row, "timeline_id", "main"),
                 "uncertain", ReadBool(data, "uncertain", false),
                 "subjectReference", visibleReference, "subjectIsOwnEncounter", ownEncounter,
                 "questionOpen", kind == "question", "feeling", 0, "personalStake", 25,
                 "raiseRoll", GossipDecisionRoll(data, ReadString(row, "root_id", "") + "|" + owner, "raise"));
+            // A reply inherits the question's neutral compatibility value. No
+            // listener belief was calculated for that reply.
+            if (visible["credibility"] != null && ReadString(data, "claimKind", "") != "question")
+                visible["beliefBasis"] = "listener_policy_estimate";
+            if (kind == "reply")
+            {
+                // The author's existing receipt records what they prepared.
+                // Only the recipient's receipt establishes acquisition.
+                var response = PersonalGossipResponseEvidence(authored ? "prepared" : "delivered",
+                    PersonalGossipReplyKind(ReadDictionary(data, "reaction")));
+                response["inReplyTo"] = ReadString(data, "receivedMessageId", "");
+                visible["response"] = response;
+            }
             if (authored && ReadString(data, "distortion", "none") != "none") visible["authorKnowsDistortion"] = true;
             DialogueStore.InsertOrIgnorePersonalGossipHistory(c, GossipFields("id", id, "message", ReadString(row, "message_id", ""), "root", ReadString(row, "root_id", ""),
                     "timeline", ReadString(row, "timeline_id", "main"), "owner", owner, "peer", peer, "day", day, "json", Json.Serialize(visible)));
@@ -618,10 +639,53 @@ namespace ReignBetaServer
                     "ts", ts, "day", day, "participants", Json.Serialize(new[] { owner }), "json", Json.Serialize(visible)));
             if (DialogueStore.SelectConversationTurns8(c, GossipFields("id", id)).Count == 0)
                 InsertConversationTurn(c, id, session, id, 0, id, "npc", speaker, name,
-                    "[NPC gossip; " + (authored ? "you said" : "you heard") + "; " + kind + ", not verified world history"
+                    "[NPC gossip; " + (authored ? "you said" : "you heard") + "; " + kind
+                        + (kind == "reply" ? "; " + (authored ? "response prepared" : "response delivered") : "")
+                        + "; attributed speech, factual claims unverified"
                         + (authored && ReadString(data, "distortion", "none") != "none" ? "; you deliberately distorted this claim" : "")
                         + "] " + ReadString(data, "body", ""),
                     "npc_gossip", day, ts, "", new List<string> { owner }, visible);
+        }
+
+        private static string PersonalGossipReplyKind(Dictionary<string, object> result)
+        {
+            string kind = ReadString(result, "answerKind", "");
+            return kind is "answered" or "refused" or "evaded" ? kind : "acknowledged";
+        }
+
+        private static Dictionary<string, object> PersonalGossipResponseEvidence(string stage, string kind) =>
+            GossipFields("evidenceVersion", GossipReceiptEvidenceVersion, "stage", stage,
+                "kind", kind == "answered" ? "answer_attempt" : kind, "coverage", "unverified");
+
+        private static List<Dictionary<string, object>> BindPersonalGossipBeliefEvidence(Dictionary<string, object> replyData,
+            Dictionary<string, object> original, Dictionary<string, object> result)
+        {
+            var sources = ReadDictionaryList(replyData, "replyEvidence");
+            string originalRoot = "conversation:" + ReadString(original, "sessionId", "");
+            string owner = ReadString(replyData, "speakerId", "");
+            var seen = new HashSet<(string Kind, string SourceId, string Quote)>();
+            var bound = new List<Dictionary<string, object>>();
+            foreach (var assessment in ReadDictionaryList(result, "beliefEvidence"))
+            {
+                string kind = ReadString(assessment, "kind", ""), quote = ReadString(assessment, "sourceQuote", "").Trim();
+                string root = ReadString(assessment, "sourceRootId", ""), requestedId = ReadString(assessment, "sourceId", "");
+                if (root.Length == 0 || kind is not ("inconsistent" or "exposed_liar" or "corroborated" or "disproved" or "confirmed")) continue;
+                if (kind == "corroborated" && (root == originalRoot
+                    || GossipQuoteSupported(quote, ReadString(replyData, "receivedBody", ""))
+                    || GossipQuoteSupported(quote, ReadString(original, "sourceQuote", "")))) continue;
+
+                var matches = sources.Where(s => ReadString(s, "sourceRootId", "") == root
+                    && (requestedId.Length == 0 || ReadString(s, "sourceId", "") == requestedId)
+                    && GossipQuoteSupported(quote, ReadString(s, "text", ""))).Take(2).ToList();
+                if (matches.Count != 1) continue;
+                string sourceId = ReadString(matches[0], "sourceId", ""), speakerId = ReadString(matches[0], "speakerId", "");
+                if (sourceId.Length == 0 || speakerId.Length == 0
+                    || (kind == "disproved" || kind == "confirmed") && !GossipSameId(speakerId, owner)
+                    || !seen.Add((kind, sourceId, quote))) continue;
+                bound.Add(GossipFields("kind", kind, "sourceId", sourceId, "sourceRootId", root,
+                    "speakerId", speakerId, "sourceQuote", quote));
+            }
+            return bound;
         }
 
         private static void UpdatePersonalGossipReaction(ReignDbConnection c, string campaign, Dictionary<string, object> replyData,
@@ -631,33 +695,43 @@ namespace ReignBetaServer
             var receipt = DialogueStore.SelectPersonalGossipHistory2(c, GossipFields("id", original, "owner", owner)).FirstOrDefault();
             if (receipt == null) return;
             var visible = GossipJson(receipt);
-            var evidence = ReadDictionaryList(replyData, "replyEvidence");
-            var originalMessage = DialogueStore.SelectPersonalGossipMessages8(c, GossipFields("id", original)).FirstOrDefault();
-            var originalData = GossipJson(originalMessage);
-            var acceptedEvidence = ReadDictionaryList(result, "beliefEvidence").Where(e => evidence.Any(s =>
-                ReadString(e, "sourceRootId", "") == ReadString(s, "sourceRootId", "")
-                && GossipQuoteSupported(ReadString(e, "sourceQuote", ""), ReadString(s, "text", ""))
-                && (ReadString(e, "kind", "") != "corroborated" || ReadString(s, "sourceRootId", "") != "conversation:" + ReadString(originalData, "sessionId", ""))
-                && (ReadString(e, "kind", "") != "disproved" && ReadString(e, "kind", "") != "confirmed"
-                    || GossipSameId(ReadString(s, "speakerId", ""), owner)))).ToList();
-            string conclusive = acceptedEvidence.Any(e => ReadString(e, "kind", "") == "disproved") ? "disproved"
-                : acceptedEvidence.Any(e => ReadString(e, "kind", "") == "confirmed") ? "confirmed" : "";
-            bool Has(string kind) => acceptedEvidence.Any(e => ReadString(e, "kind", "") == kind);
-            if (ReadString(originalData, "claimKind", "") == "assertion")
-                visible["credibility"] = GossipCredibility(GossipAffinity(c, owner, ReadString(replyData, "recipientId", ""),
-                    ReadDictionary(replyData, "speaker"), ReadDictionary(replyData, "recipient")), GossipTrait(ReadDictionary(replyData, "traits"), "socialTrust"),
-                    ReadString(originalData, "account", "firsthand"), Math.Max(0, ReadInt(originalData, "hop", 1) - 1), Has("corroborated"), Has("exposed_liar"), Has("inconsistent"), conclusive);
+            var originalRow = DialogueStore.SelectPersonalGossipMessages8(c, GossipFields("id", original)).FirstOrDefault();
+            var source = GossipJson(originalRow);
+            if (originalRow != null)
+            {
+                var assessment = BindPersonalGossipBeliefEvidence(replyData, source, result);
+                // Keep the model's labels and exact bindings in the private job.
+                // Searchable receipts omit the root, private quote, and lie flag.
+                replyData["beliefAssessment"] = GossipFields("evidenceVersion", GossipReceiptEvidenceVersion,
+                    "basis", "model_assessment", "factVerification", "unavailable", "evidence", assessment);
+                if (ReadString(source, "claimKind", "") == "assertion"
+                    && ReadString(visible, "evidenceVersion", "") == GossipReceiptEvidenceVersion)
+                {
+                    bool Has(string kind) => assessment.Any(e => ReadString(e, "kind", "") == kind);
+                    bool corroborated = Has("corroborated"), exposedLiar = Has("exposed_liar"), inconsistent = Has("inconsistent");
+                    visible["credibility"] = GossipCredibility(GossipAffinity(c, owner, ReadString(replyData, "recipientId", ""),
+                        ReadDictionary(replyData, "speaker"), ReadDictionary(replyData, "recipient")), GossipTrait(ReadDictionary(replyData, "traits"), "socialTrust"),
+                        ReadString(source, "account", "firsthand"), Math.Max(0, ReadInt(source, "hop", 1) - 1),
+                        corroborated, exposedLiar, inconsistent);
+                    visible["beliefBasis"] = corroborated || exposedLiar || inconsistent
+                        ? "listener_model_assessment" : "listener_policy_estimate";
+                }
+            }
             visible["feeling"] = GossipQuoteSupported(ReadString(result, "reactionEvidenceQuote", ""),
                 ReadString(replyData, "receivedBody", "") + "\n" + ReadString(replyData, "recipientMemory", "")) ? GossipFeeling(result, "feeling") : 0;
             visible["personalStake"] = GossipQuoteSupported(ReadString(result, "concernEvidenceQuote", ""), ReadString(replyData, "recipientMemory", ""))
                 ? GossipFeeling(result, "personalStake") : 25;
-            if (ReadString(result, "answerKind", "") == "answered") visible["questionOpen"] = false;
+            if (ReadString(visible, "claimKind", "") == "question")
+            {
+                string responseKind = PersonalGossipReplyKind(result);
+                visible["response"] = PersonalGossipResponseEvidence("prepared", responseKind);
+                // Retain the listener's agenda lifecycle. Their response attempt
+                // is already authored here, regardless of later return delivery.
+                if (responseKind == "answered") visible["questionOpen"] = false;
+            }
             DialogueStore.UpdatePersonalGossipHistory(c, GossipFields("id", ReadString(receipt, "receipt_id", ""), "json", Json.Serialize(visible)));
             // Received stories get one onward opportunity, with the holder's own feelings and traits.
-            if (ReadInt(replyData, "hop", 1) >= ReadInt(ReadDictionary(replyData, "policy"), "maximumOutwardHops", 2)) return;
-            var originalRow = DialogueStore.SelectPersonalGossipMessages8(c, GossipFields("id", original)).FirstOrDefault();
-            if (originalRow == null) return;
-            var source = GossipJson(originalRow);
+            if (originalRow == null || ReadInt(replyData, "hop", 1) >= ReadInt(ReadDictionary(replyData, "policy"), "maximumOutwardHops", 2)) return;
             var signal = ReadDictionaryList(result, "gossipSignals").FirstOrDefault(s => ReadDouble(s, "confidence", 0) >= .8
                 && GossipQuoteSupported(ReadString(s, "evidenceQuote", ""), ReadString(source, "body", "") + "\n" + ReadString(result, "body", "")));
             if (signal == null) return;

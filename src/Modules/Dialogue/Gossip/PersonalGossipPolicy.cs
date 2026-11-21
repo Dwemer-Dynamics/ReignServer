@@ -9,6 +9,8 @@ namespace ReignBetaServer
     internal static partial class DialogueService
     {
         private const string PersonalGossipVersion = "personal-gossip-v1";
+        private const string GossipReceiptEvidenceVersion = "gossip-receipt-evidence-v1";
+        private const string GossipSpeechEvidenceBoundary = "A source quotation records who said those words. Its claims may be firsthand accounts, hearsay, speculation or deliberate distortion. Establishing a world fact would require a separate native check.";
         private static Dictionary<string, object> GossipFields(params object[] fields)
         {
             var result = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
@@ -95,10 +97,8 @@ namespace ReignBetaServer
             : (roll <= 20 ? "loaded_exaggeration" : roll <= 65 ? "false_escalation" : "invented_detail");
 
         private static int GossipCredibility(double affinity, double socialTrust, string account, int retellings,
-            bool corroborated, bool exposedLiar, bool inconsistent, string conclusive = "")
+            bool corroborated, bool exposedLiar, bool inconsistent)
         {
-            if (conclusive == "disproved") return 0;
-            if (conclusive == "confirmed") return 100;
             int bonus = account == "firsthand" ? 10 : account == "speculation" ? -15 : 0;
             return (int)Math.Round(DialogueService.ClampDouble(40 + .25 * affinity + .20 * (socialTrust - 50) + bonus
                 - 10 * retellings + (corroborated ? 15 : 0) - (exposedLiar ? 25 : 0) - (inconsistent ? 20 : 0), 5, 95), MidpointRounding.AwayFromZero);

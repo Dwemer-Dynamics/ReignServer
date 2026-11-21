@@ -104,7 +104,7 @@ with the exact words of this reply. Do not mark something raised merely because 
                     if (history.Count > 0)
                     {
                         text.AppendLine("RECENT NPC EXCHANGES — current dialogue day " + day.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture) + ":");
-                        text.AppendLine("You heard/said these words at their recorded acquisition time. Reports remain attributed claims, not witnessed events, consent, intimacy or promises. Never claim the player told you this.");
+                        text.AppendLine("Keep these words attributed to the named NPC. The record establishes the exchange; witnessing, consent, intimacy and promises need their own evidence. Belief scores describe listener confidence. Replies may be partial, mistaken or uncertain. Never claim the player told you this.");
                         text.AppendLine("The acquisition time dates YOUR exchange with the named NPC, not the underlying encounter they described. Do not move that exchange to a date from an older player conversation or public visit. Do not invent its place, purchases, or other business: shared settlement/party presence establishes contact, not an unrecorded scene. If no time for the underlying encounter was communicated, its time is unknown.");
                         text.AppendLine("The record is the complete evidence for that NPC exchange. Do not add unrecorded remarks, repetitions, actions, reactions, or quantities when recalling it. You may offer your interpretation as an interpretation, but do not turn plausible conversational color into an observed event.");
                         text.AppendLine("Known contact identity hints come from current native profile facts. Use those pronouns instead of guessing from a name or copying an earlier mistaken recollection; when none are supplied, use the person's name. This is identity context, not a newly discovered event.");
@@ -123,10 +123,7 @@ with the exact words of this reply. Do not mark something raised merely because 
                                 + "; " + GossipAcquisitionAge(ReadDouble(row, "acquired_day", day), day)
                                 + "] " + (ReadBool(data, "authored", false) ? "You said to " + ReadString(row, "peer_id", "") : GossipKnownIdentityHint(campaign,
                                     ReadString(data, "speakerId", ""), ReadString(data, "speakerName", "Someone"), nativeIdentities) + " told you")
-                                + ": " + body + " (" + ReadString(data, "claimKind", "assertion")
-                                + (ReadBool(data, "authored", false) ? "; your outgoing account, not proof of the listener's belief.)"
-                                    : ReadString(data, "claimKind", "") == "question" || ReadString(data, "claimKind", "") == "impression" ? "; no factual belief score.)"
-                                    : "; belief " + ReadInt(data, "credibility", 50) + "/100.)");
+                                + ": " + body + " (" + ReadString(data, "claimKind", "assertion") + GossipReceiptEvidenceWording(data) + ")";
                             if (used + line.Length > 6000) break; // Whole records, never clipped claims/corrections.
                             text.AppendLine(line); used += line.Length; sourceIds.Add(id);
                             if (!associated) text.AppendLine("The communicated description does not identify your current interlocutor. Do not associate this report with them or reveal an uncommunicated name. Ask who was meant if clarification is needed.");
@@ -179,6 +176,29 @@ with the exact words of this reply. Do not mark something raised merely because 
                 OperationsService.LogOperational("gossip.prompt_failed", GossipFields("campaignId", campaign, "error", DialogueService.LimitText(ex.Message, 500)));
                 return "";
             }
+        }
+
+        private static string GossipReceiptEvidenceWording(Dictionary<string, object> receipt)
+        {
+            string kind = ReadString(receipt, "claimKind", "assertion");
+            bool legacy = ReadString(receipt, "evidenceVersion", "") != GossipReceiptEvidenceVersion;
+            var response = ReadDictionary(receipt, "response");
+            string stage = ReadString(response, "evidenceVersion", "") == GossipReceiptEvidenceVersion
+                ? ReadString(response, "stage", "") : "";
+            string wording = stage switch
+            {
+                "delivered" => "; response delivered, coverage and claims unverified",
+                "prepared" => "; response prepared, coverage and claims unverified",
+                _ => kind == "reply" ? "; attributed response, coverage and claims unverified" : ""
+            };
+            string beliefBasis = ReadString(receipt, "beliefBasis", "");
+            if (!ReadBool(receipt, "authored", false) && kind is not ("question" or "impression") && (legacy || beliefBasis.Length > 0))
+            {
+                string belief = legacy ? "legacy listener belief"
+                    : beliefBasis == "listener_model_assessment" ? "model-assessed listener belief" : "listener belief";
+                wording += "; " + belief + " " + ReadInt(receipt, "credibility", 50) + "/100";
+            }
+            return wording + (legacy ? "; legacy evidence, claims unverified" : "; attributed NPC speech");
         }
 
         private static string GossipAcquisitionAge(double acquiredDay, double currentDay)
