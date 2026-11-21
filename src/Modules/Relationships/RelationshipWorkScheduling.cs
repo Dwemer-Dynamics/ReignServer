@@ -119,12 +119,12 @@ namespace ReignBetaServer
 
         private static readonly object RelationshipReadyGate = new object();
         private static readonly Dictionary<string, int> RelationshipReadyCampaigns =
-            new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            new Dictionary<string, int>(StringComparer.Ordinal);
         private static readonly Dictionary<string, long> RelationshipReadyVersions =
-            new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            new Dictionary<string, long>(StringComparer.Ordinal);
         private static DateTime RelationshipReadyReconciledUtc;
-        private static readonly HashSet<string> RelationshipRecoveredCampaigns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        private static readonly Dictionary<string, string> RelationshipCampaignGenerations = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<string> RelationshipRecoveredCampaigns = new HashSet<string>(StringComparer.Ordinal);
+        private static readonly Dictionary<string, string> RelationshipCampaignGenerations = new Dictionary<string, string>(StringComparer.Ordinal);
 
         internal static string RelationshipCampaignGeneration(string campaignId)
         {
@@ -189,7 +189,7 @@ namespace ReignBetaServer
                 // notifications and Save Sync replacements without persisting a second queue.
                 if ((DateTime.UtcNow - RelationshipReadyReconciledUtc).TotalSeconds >= 30)
                 {
-                    foreach (string directory in Directory.GetDirectories(root))
+                    foreach (string directory in Directory.GetDirectories(root).Where(CampaignFileService.CanScanCampaignDirectory))
                     {
                         string campaign = Path.GetFileName(directory);
                         RelationshipReadyCampaigns[campaign] = Math.Max(1,
@@ -198,7 +198,8 @@ namespace ReignBetaServer
                     RelationshipReadyReconciledUtc = DateTime.UtcNow;
                 }
                 return RelationshipReadyCampaigns.Where(x => x.Value > 0)
-                    .Select(x => Path.Combine(root, x.Key)).Where(Directory.Exists).ToArray();
+                    .Select(x => Path.Combine(root, x.Key)).Where(Directory.Exists)
+                    .Where(CampaignFileService.CanScanCampaignDirectory).ToArray();
             }
         }
 

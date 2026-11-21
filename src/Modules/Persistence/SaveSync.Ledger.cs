@@ -88,6 +88,10 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> ReadSaveSyncLedger(string campaignId)
         {
+#if !REIGN_EXCLUDE_VERIFICATION
+            SaveSyncRecoveryObserver?.Invoke("read_ledger." + campaignId);
+#endif
+            RequireSaveSyncCampaignAvailable(campaignId);
             lock (SaveSyncLedgerLock)
             {
                 Dictionary<string, object> ledger = CampaignFileService.ReadJsonObject(Path.Combine(SaveSyncCampaignRoot(campaignId), "ledger.json"));
@@ -105,6 +109,7 @@ namespace ReignBetaServer
 
         internal static void WriteSaveSyncLedger(string campaignId, Dictionary<string, object> ledger)
         {
+            RequireSaveSyncCampaignAvailable(campaignId);
             lock (SaveSyncLedgerLock)
             {
                 string root = SaveSyncCampaignRoot(campaignId);
@@ -453,6 +458,7 @@ namespace ReignBetaServer
         {
             try
             {
+                SaveSyncRecoveryBoundary("audit." + eventType);
                 string path = Path.Combine(SaveSyncCampaignRoot(campaignId), "audit.jsonl");
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
                 Dictionary<string, object> row = new Dictionary<string, object>
@@ -469,28 +475,6 @@ namespace ReignBetaServer
                 OperationsService.LogOperational("save_sync." + eventType, row);
             }
             catch { }
-        }
-
-        private static void CleanupSaveSyncRecovery(string campaignId)
-        {
-            string root = Path.Combine(SaveSyncCampaignRoot(campaignId), "r");
-            if (!Directory.Exists(root)) return;
-            foreach (DirectoryInfo directory in new DirectoryInfo(root).GetDirectories().OrderByDescending(x => x.CreationTimeUtc).Skip(SaveSyncRecoveryRetention))
-                TryDeleteDirectory(directory.FullName);
-        }
-
-        internal static void CleanupAllSaveSyncRecoveryAtStartup()
-        {
-            string root = SaveSyncRoot();
-            if (!Directory.Exists(root)) return;
-            foreach (string campaignRoot in Directory.GetDirectories(root))
-            {
-                string ledgerPath = Path.Combine(campaignRoot, "ledger.json");
-                if (!File.Exists(ledgerPath)) continue;
-                string campaignId = ReadString(CampaignFileService.ReadJsonObject(ledgerPath), "campaignId", "");
-                if (string.IsNullOrWhiteSpace(campaignId)) continue;
-                try { CleanupSaveSyncRecovery(campaignId); } catch { }
-            }
         }
 
         private static string SaveSyncActiveStatePath(string campaignId)
@@ -711,6 +695,7 @@ namespace ReignBetaServer
         internal static string StrictCampaignDirectory(string campaignId)
         {
             ValidateSaveSyncId(campaignId, "campaignId");
+            RequireSaveSyncCampaignAvailable(campaignId);
             string root = Path.GetFullPath(CampaignFileService.CampaignsRoot());
             string path = Path.GetFullPath(Path.Combine(root, campaignId));
             string prefix = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;

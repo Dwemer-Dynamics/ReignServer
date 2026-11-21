@@ -53,15 +53,14 @@ namespace ReignBetaServer
             string savePointId,
             string nativeSaveName)
         {
-            ValidateSaveSyncId(campaignId, "campaignId");
+            RequireSaveSyncJournalCampaign(campaignId);
             lock (CampaignRetirementLedgerLock)
             {
                 Dictionary<string, object> ledger = ReadCampaignRetirementLedger();
                 List<Dictionary<string, object>> pending =
                     ReadDictionaryList(ledger, "pending");
                 Dictionary<string, object> entry = pending.FirstOrDefault(row =>
-                    ReadString(row, "campaignId", "").Equals(
-                        campaignId, StringComparison.OrdinalIgnoreCase));
+                    ReadString(row, "campaignId", "") == campaignId);
                 if (entry == null)
                 {
                     entry = new Dictionary<string, object>();
@@ -92,8 +91,7 @@ namespace ReignBetaServer
                 List<Dictionary<string, object>> pending =
                     ReadDictionaryList(ledger, "pending");
                 int removed = pending.RemoveAll(row =>
-                    ReadString(row, "campaignId", "").Equals(
-                        campaignId, StringComparison.OrdinalIgnoreCase));
+                    ReadString(row, "campaignId", "") == campaignId);
                 if (removed == 0) return false;
                 ledger["pending"] = pending;
                 WriteCampaignRetirementLedger(ledger);
@@ -109,8 +107,7 @@ namespace ReignBetaServer
         private static bool IsCampaignRetirementPending(string campaignId)
         {
             return ReadDictionaryList(ReadCampaignRetirementLedger(), "pending")
-                .Any(row => ReadString(row, "campaignId", "").Equals(
-                    campaignId ?? "", StringComparison.OrdinalIgnoreCase));
+                .Any(row => ReadString(row, "campaignId", "") == campaignId);
         }
 
         internal static Dictionary<string, object> CampaignUnloadedApi(
@@ -446,10 +443,8 @@ namespace ReignBetaServer
                             transaction, "campaignId", "");
                         if (string.IsNullOrWhiteSpace(campaignId))
                             campaignId = CampaignIdFromRetirementStagingName(child);
-                        ValidateSaveSyncId(campaignId, "campaignId");
-                        bool databaseExists = ReignPostgreSqlStorage.ListCampaignMetadata().Any(row =>
-                            ReadString(row, "campaignId", "").Equals(
-                                campaignId, StringComparison.OrdinalIgnoreCase));
+                        RequireSaveSyncJournalCampaign(campaignId);
+                        bool databaseExists = ReignPostgreSqlStorage.CampaignExists(campaignId);
                         if (databaseExists)
                         {
                             RestoreRetirementTransactionRoot(child, campaignId);
@@ -491,7 +486,7 @@ namespace ReignBetaServer
             HashSet<string> allowedEntries = new HashSet<string>(
                 StringComparer.OrdinalIgnoreCase)
             {
-                "campaign", "save-sync", "portrait-cache", "transaction.json"
+                "campaign", "save-sync", "save-sync-journals", "portrait-cache", "transaction.json"
             };
             if (Directory.GetFileSystemEntries(path).Any(entry =>
                 !allowedEntries.Contains(Path.GetFileName(entry))))
@@ -511,6 +506,8 @@ namespace ReignBetaServer
                     StrictCampaignDirectory(campaignId),
                 [Path.Combine(stagingRoot, "save-sync")] =
                     SaveSyncCampaignRoot(campaignId),
+                [Path.Combine(stagingRoot, "save-sync-journals")] =
+                    SaveSyncJournalDirectory(campaignId),
                 [Path.Combine(stagingRoot, "portrait-cache")] =
                     CampaignPortraitCacheDirectory(campaignId)
             };
@@ -529,6 +526,11 @@ namespace ReignBetaServer
                     StringComparison.OrdinalIgnoreCase))
                     ValidateCampaignOwnedDirectory(candidate.Value,
                         SaveSyncRoot(), false);
+                else if (candidate.Key.EndsWith("save-sync-journals", StringComparison.OrdinalIgnoreCase))
+                {
+                    RequirePhysicalSaveSyncPath(CampaignFileService.CampaignsRoot(), candidate.Value);
+                    Directory.CreateDirectory(SaveSyncJournalDirectory(""));
+                }
                 else
                     ValidateCampaignOwnedDirectory(candidate.Value,
                         CampaignFileService.CampaignsRoot(), false);
