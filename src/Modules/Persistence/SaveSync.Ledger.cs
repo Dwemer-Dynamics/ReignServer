@@ -153,6 +153,35 @@ namespace ReignBetaServer
             return ReadDictionaryList(ledger, "points").FirstOrDefault(x => ReadString(x, "savePointId", "").Equals(savePointId, StringComparison.OrdinalIgnoreCase));
         }
 
+        // The caller first verifies that the active restore context names this save.
+        // Read the exact selected queue file, including raw load-ready snapshots.
+        internal static Dictionary<string, object> ReadSaveSyncActionQueueRow(string campaignId, string savePointId, string actionId)
+        {
+            var point = SaveSyncPoint(ReadSaveSyncLedger(campaignId), savePointId);
+            if (point == null) return null;
+            SaveSyncStorageGate.EnterReadLock();
+            try
+            {
+                string root = SaveSyncSnapshotRoot(campaignId, point);
+                var manifest = CampaignFileService.ReadJsonObject(Path.Combine(root, "manifest.json"));
+                if (ReadString(manifest, "format", "") != "bannerlord-reign-save-sync-snapshot"
+                    || ReadString(manifest, "campaignId", "") != campaignId) return null;
+                const string relative = "actions/action-queue.json";
+                string queuePath = Path.Combine(root, "campaign", "actions", "action-queue.json");
+                if (!File.Exists(queuePath)) return null;
+                var inventory = ReadDictionaryList(manifest, "files").FirstOrDefault(file => ReadString(file, "path", "") == relative);
+                if (inventory == null ? !ReadBool(manifest, "integrityDeferred", false)
+                    : ReadLong(inventory, "bytes", -1) != new FileInfo(queuePath).Length
+                        || !string.Equals(ReadString(inventory, "sha256", ""), FileSha256(queuePath), StringComparison.OrdinalIgnoreCase))
+                    return null;
+                var rows = CampaignFileService.ReadJsonArray(queuePath)
+                    .OfType<Dictionary<string, object>>()
+                    .Where(row => ReadString(row, "id", "") == actionId).Take(2).ToList();
+                return rows.Count == 1 ? rows[0] : null;
+            }
+            finally { SaveSyncStorageGate.ExitReadLock(); }
+        }
+
         private static void UpsertSaveSyncPoint(Dictionary<string, object> ledger, Dictionary<string, object> point)
         {
             List<Dictionary<string, object>> points = ReadDictionaryList(ledger, "points");
@@ -567,7 +596,9 @@ namespace ReignBetaServer
         {
             if (SaveSyncActiveStates.TryGetValue(campaignId, out SaveSyncActiveState cached))
                 return cached;
-            Dictionary<string, object> json = CampaignFileService.ReadJsonObject(SaveSyncActiveStatePath(campaignId));
+            // This sidecar is atomically replaced under SaveSyncActiveStateLock.
+            // Taking FileLock here would invert queue writers' FileLock → dirty-state order.
+            Dictionary<string, object> json = CampaignFileService.ReadAtomicallyReplacedJsonObject(SaveSyncActiveStatePath(campaignId));
             SaveSyncActiveState loaded = new SaveSyncActiveState
             {
                 SavePointId = ReadString(json, "savePointId", ""),

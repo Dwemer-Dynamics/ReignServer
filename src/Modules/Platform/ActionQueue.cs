@@ -347,7 +347,8 @@ namespace ReignBetaServer
             };
         }
 
-        internal static Dictionary<string, object> ReportAction(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> ReportAction(Dictionary<string, object> payload,
+            Action beforeMarriageAdmissionCommit = null, Action beforeMarriageEffectCommit = null)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -360,12 +361,13 @@ namespace ReignBetaServer
             {
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "serverActionId/actionId is required." };
             }
-            if (reportedStatus == "completed" && RelationshipsService.ReportsNativeDiplomaticMarriageSettlement(payload))
-            {
-                using var connection = ReignDatabase.OpenCampaignConnection(campaignId);
-                if (!RelationshipsService.CurrentDiplomaticMarriageScope(connection, payload))
-                    return TestDict("ok", false, "error", "The diplomatic marriage report belongs to a different campaign load or timeline.");
-            }
+            bool nativeMarriage = reportedStatus == "completed" && RelationshipsService.ReportsNativeDiplomaticMarriageSettlement(payload);
+            bool scopedMarriage = nativeMarriage || (reportedStatus == "completed" && RelationshipsService.ReportsLegacyDiplomaticMarriage(payload));
+            using var timelineScope = scopedMarriage ? WorldSimulationService.EnterWorldHistoryTimelineScope(campaignId) : null;
+            var marriageScope = scopedMarriage
+                ? RelationshipsService.CaptureDiplomaticMarriageReportScope(campaignId, id, payload, nativeMarriage) : null;
+            if (nativeMarriage && marriageScope == null)
+                return TestDict("ok", false, "error", "The diplomatic marriage report belongs to a different campaign load or timeline.");
 
             bool found = false;
             bool ignoredStatusRegression = false;
@@ -374,7 +376,7 @@ namespace ReignBetaServer
             bool protocolOwned = false;
             string authoritativeStatus = status;
             Dictionary<string, object> admittedDiplomaticMarriage = null;
-            bool firstCompletion = false;
+            bool admittedFirstMarriage = false;
             lock (Program.FileLock)
             {
                 List<Dictionary<string, object>> queue = ReadActionQueueUnlocked(campaignId);
@@ -413,13 +415,16 @@ namespace ReignBetaServer
                         if (ShouldAcceptActionStatusTransition(currentStatus, status)
                             || legacyRefusalCorrection)
                         {
-                            // Freeze native marriage evidence with first acceptance so a
+                            // Freeze explicit marriage evidence with first acceptance so a
                             // retry can finish its effects without reopening historical reports.
                             if (!IsTerminalActionReportStatus(currentStatus))
                             {
-                                firstCompletion = status == "completed";
-                                var completion = RelationshipsService.NativeDiplomaticMarriageCompletion(id, status, matchedRecord, payload);
-                                if (completion != null) row[DiplomaticMarriageCompletionField] = completion;
+                                var completion = RelationshipsService.DiplomaticMarriageCompletion(id, status, matchedRecord, payload, marriageScope);
+                                if (completion != null)
+                                {
+                                    row[DiplomaticMarriageCompletionField] = completion;
+                                    admittedFirstMarriage = true;
+                                }
                             }
                             row["status"] = status;
                             row["reportTs"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -444,6 +449,7 @@ namespace ReignBetaServer
 
                 if (!protocolOwned)
                 {
+                    if (admittedFirstMarriage) beforeMarriageAdmissionCommit?.Invoke();
                     WriteActionQueueUnlocked(campaignId, queue);
                     CampaignFileService.AppendJsonLineToPath(CampaignFileService.CampaignFile(campaignId, "actions", "actions.jsonl"), new Dictionary<string, object>
                     {
@@ -455,6 +461,7 @@ namespace ReignBetaServer
                     });
                 }
             }
+            timelineScope?.Dispose();
 
             correlationId = FirstNonEmpty(correlationId, ReadFirstString(ReadDictionary(payload, "result"), "correlationId"));
             OperationsService.LogOperational("action.report", new Dictionary<string, object> { ["campaignId"] = campaignId, ["correlationId"] = correlationId, ["id"] = id, ["status"] = status, ["reportedStatus"] = reportedStatus, ["found"] = found, ["protocolOwned"] = protocolOwned });
@@ -508,9 +515,7 @@ namespace ReignBetaServer
             }
             if (found) DialogueService.RecordSharedActionReceipt(campaignId, payload, matchedRecord, authoritativeStatus);
             if (admittedDiplomaticMarriage != null)
-                CompletePendingDiplomaticMarriage(campaignId, id, matchedRecord, admittedDiplomaticMarriage);
-            else if (firstCompletion && found)
-                RelationshipsService.FinalizeDiplomaticMarriageEffects(campaignId, id, authoritativeStatus, matchedRecord, payload);
+                CompletePendingDiplomaticMarriage(campaignId, id, matchedRecord, admittedDiplomaticMarriage, beforeMarriageEffectCommit);
             Dictionary<string, object> memoryStore = DialogueService.StoreActionResultMemory(payload, "actions_report");
             List<Dictionary<string, object>> nativeRelationChanges = RelationshipsService.EvaluateCompletedActionRelationships(payload);
             DiplomacyService.UpdateDiplomaticEventForAction(campaignId, id, status, payload);
@@ -576,10 +581,9 @@ namespace ReignBetaServer
         }
 
         private static void CompletePendingDiplomaticMarriage(string campaignId, string id,
-            Dictionary<string, object> record, Dictionary<string, object> admission)
+            Dictionary<string, object> record, Dictionary<string, object> admission, Action beforeEffectCommit = null)
         {
-            bool applied = RelationshipsService.FinalizeDiplomaticMarriageEffects(campaignId, id,
-                "completed", record, report: null, admittedCompletion: admission);
+            bool applied = RelationshipsService.FinalizeDiplomaticMarriageEffects(campaignId, id, record, admission, beforeEffectCommit);
             lock (Program.FileLock)
             {
                 List<Dictionary<string, object>> queue = ReadActionQueueUnlocked(campaignId);

@@ -413,26 +413,24 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> ReadJsonObject(string path)
         {
             lock (Program.FileLock)
+                return ReadAtomicallyReplacedJsonObject(path);
+        }
+
+        // For callers that own a narrower lock and know the writer replaces the
+        // whole file. Do not use this for files that can be written in place.
+        internal static Dictionary<string, object> ReadAtomicallyReplacedJsonObject(string path)
+        {
+            try
             {
-                try
-                {
-                    if (!File.Exists(path))
-                    {
-                        return new Dictionary<string, object>();
-                    }
-
-                    string text = File.ReadAllText(path, Encoding.UTF8);
-                    if (string.IsNullOrWhiteSpace(text))
-                    {
-                        return new Dictionary<string, object>();
-                    }
-
-                    return Json.Deserialize<Dictionary<string, object>>(text) ?? new Dictionary<string, object>();
-                }
-                catch
-                {
+                if (!File.Exists(path))
                     return new Dictionary<string, object>();
-                }
+                string text = File.ReadAllText(path, Encoding.UTF8);
+                return string.IsNullOrWhiteSpace(text) ? new Dictionary<string, object>()
+                    : Json.Deserialize<Dictionary<string, object>>(text) ?? new Dictionary<string, object>();
+            }
+            catch
+            {
+                return new Dictionary<string, object>();
             }
         }
 
