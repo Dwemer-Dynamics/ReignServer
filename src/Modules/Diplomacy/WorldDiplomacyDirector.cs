@@ -250,10 +250,10 @@ namespace ReignBetaServer
                 WorldSimulationService.RecordWorldTestDiplomacyEvaluation(campaignId, timelineId, day,
                     "model_failure", initiativeAttempts.Count, true, true,
                     new Dictionary<string, object> { ["intent"] = mode });
-                return DirectorError(ReadString(decision, "error", "The diplomacy model did not return a usable decision."));
+                return DirectorModelFailure(decision, "The diplomacy model did not return a usable decision.", debugInitiativeTest);
             }
 
-            Dictionary<string, object> parsed = ReadDictionary(decision, "decision") ?? new Dictionary<string, object>();
+            Dictionary<string, object> parsed = ReadDictionary(decision, "decision");
             UpdateDirectorAgenda(rulerState, parsed, worldDay);
             string decisionKind = ReadString(parsed, "decision", "none").Trim().ToLowerInvariant();
             if (decisionKind == "none")
@@ -409,10 +409,10 @@ namespace ReignBetaServer
                     campaignId, payload, ruler, target, candidate, mode, false);
                 if (!ReadBool(response, "ok", false))
                 {
-                    return DirectorError(ReadString(response, "error", "The responding diplomacy model failed."));
+                    return DirectorModelFailure(response, "The responding diplomacy model failed.", debugInitiativeTest);
                 }
 
-                Dictionary<string, object> answer = ReadDictionary(response, "response") ?? new Dictionary<string, object>();
+                Dictionary<string, object> answer = ReadDictionary(response, "response");
                 string answerKind = ReadString(answer, "response", "refuse").Trim().ToLowerInvariant();
                 targetReason = RequirePublicReason(answer, ReadString(target, "leaderName", "The responding ruler") + " declined without offering a public explanation.");
                 if (answerKind != "counter")
@@ -447,13 +447,12 @@ namespace ReignBetaServer
                                 ruler, finalCandidate, mode, true);
                         if (!ReadBool(finalResponse, "ok", false))
                         {
-                            return DirectorError(ReadString(finalResponse,
-                                "error", "The initiating ruler could not answer the counteroffer."));
+                            return DirectorModelFailure(finalResponse,
+                                "The initiating ruler could not answer the counteroffer.", debugInitiativeTest);
                         }
 
                         Dictionary<string, object> finalAnswer =
-                            ReadDictionary(finalResponse, "response")
-                                ?? new Dictionary<string, object>();
+                            ReadDictionary(finalResponse, "response");
                         string reportedFinalAnswerKind = ReadString(finalAnswer,
                             "response", "refuse").Trim().ToLowerInvariant();
                         accepted = ResolveAllianceAcceptance(campaignId,
@@ -1086,17 +1085,7 @@ namespace ReignBetaServer
 
             llm = ConversationResponseService.RetryMalformedStructuredResponse(llm, llmRequest, campaignId,
                 OperationsService.EnsureCorrelationId(llmRequest), "diplomacy_decision", rulerHeroId, "");
-            Dictionary<string, object> parsed = TryParseJsonObject(ReadString(llm, "content", ""));
-            if (parsed == null)
-            {
-                OperationsService.WriteAudit(campaignId, OperationsService.EnsureCorrelationId(llmRequest), "server", "diplomacy",
-                    "diplomacy.format_fallback", rulerHeroId, "", "", "completed", 0,
-                    "Malformed ruler decision was converted to a safe no-initiative evaluation.",
-                    new Dictionary<string, object> { ["fallback"] = "none" });
-            }
-            return parsed == null
-                ? MalformedDiplomacyDecisionFallback()
-                : new Dictionary<string, object> { ["ok"] = true, ["decision"] = parsed };
+            return FinishDiplomacyModelOutput(llm, llmRequest, campaignId, rulerHeroId, "decision");
         }
 
         internal static Dictionary<string, object> AskRulerToRespond(
@@ -1117,11 +1106,13 @@ namespace ReignBetaServer
             Dictionary<string, object> responderProfile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, responderHeroId, "profile.json"));
             string responderMbti = RelationshipsService.BuildCharacterMbtiPromptBlock(campaignId, responderHeroId, responderProfile,
                 CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, responderHeroId, "traits.json")));
-            List<string> counterCommands = DirectorIntentCommands.TryGetValue(mode,
-                    out HashSet<string> legalCommands)
-                ? legalCommands.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-                    .ToList()
-                : new List<string>();
+            bool courtReferral = !finalCounterDecision && ReadBool(world, "courtReferral", false)
+                && ReadString(world, "source", "") == "resident_ambassador_referral";
+            List<string> counterCommands = courtReferral
+                ? new List<string> { ReadString(candidate, "command", "") }
+                : DirectorIntentCommands.TryGetValue(mode, out HashSet<string> legalCommands)
+                    ? legalCommands.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList()
+                    : new List<string>();
             string prompt = role
                 + " Personality and strategic reality must govern the answer. Return JSON only. Never invent IDs or assets.\n\nRESPONDER:\n" + DirectorRulerPromptJson(responder)
                 + "\n\nRESPONDER MBTI:\n" + responderMbti
@@ -1141,7 +1132,9 @@ namespace ReignBetaServer
                     ReadString(proposer, "kingdomId", ""), mode))
                 + (finalCounterDecision ? "" : "\n\nA counteroffer is a complete executable replacement, never a patch. Its command must be one of: "
                     + Json.Serialize(counterCommands)
-                    + ". Include only the replacement command's own targetSettlementId and terms; omit assets, payments, treaties, and prisoners that are not part of the replacement.")
+                    + (courtReferral
+                        ? ". Keep the referred command, already named captive, and settlement target. Give the complete exact revised terms, including all unchanged material terms. For a Court settlement carried as a promise, keep the original promise text, visibility, and duration if you repeat them."
+                        : ". Include only the replacement command's own targetSettlementId and terms; omit assets, payments, treaties, and prisoners that are not part of the replacement."))
                 + "\n\nReturn {\"response\":\"accept|refuse" + (finalCounterDecision ? "" : "|counter")
                 + "\",\"command\":\"" + (finalCounterDecision
                     ? "empty"
@@ -1166,56 +1159,64 @@ namespace ReignBetaServer
 
             llm = ConversationResponseService.RetryMalformedStructuredResponse(llm, llmRequest, campaignId,
                 OperationsService.EnsureCorrelationId(llmRequest), "diplomacy_response", responderHeroId, "");
-            Dictionary<string, object> parsed = TryParseJsonObject(ReadString(llm, "content", ""));
-            if (parsed == null)
-            {
-                OperationsService.WriteAudit(campaignId, OperationsService.EnsureCorrelationId(llmRequest), "server", "diplomacy",
-                    "diplomacy.format_fallback", responderHeroId, "", "", "completed", 0,
-                    "Malformed ruler response was converted to a safe refusal.",
-                    new Dictionary<string, object> { ["fallback"] = "refuse" });
-            }
-            return parsed == null
-                ? MalformedDiplomacyResponseFallback()
-                : new Dictionary<string, object> { ["ok"] = true, ["response"] = parsed };
+            return FinishDiplomacyModelOutput(llm, llmRequest, campaignId, responderHeroId, "response", finalCounterDecision);
         }
 
-        private static Dictionary<string, object> MalformedDiplomacyDecisionFallback()
+        private static Dictionary<string, object> FinishDiplomacyModelOutput(
+            Dictionary<string, object> llm, Dictionary<string, object> request,
+            string campaignId, string rulerHeroId, string field, bool finalCounterDecision = false)
         {
+            Dictionary<string, object> result = ParseDiplomacyModelOutput(llm, field, finalCounterDecision);
+            if (ReadBool(result, "formatFallback", false))
+            {
+                OperationsService.WriteAudit(campaignId, OperationsService.EnsureCorrelationId(request), "server", "diplomacy",
+                    "diplomacy.format_fallback", rulerHeroId, "", "", "failed", 0,
+                    ReadString(result, "error", ""), new Dictionary<string, object>
+                    {
+                        ["stage"] = finalCounterDecision ? "counteroffer_response" : field,
+                        ["providerErrorCode"] = ReadString(llm, "errorCode", "")
+                    });
+            }
+            return result;
+        }
+
+        private static Dictionary<string, object> ParseDiplomacyModelOutput(
+            Dictionary<string, object> llm, string field, bool finalCounterDecision = false)
+        {
+            Dictionary<string, object> parsed = ReadBool(llm, "ok", false)
+                ? TryParseJsonObject(ReadString(llm, "content", "")) : null;
+            string choice = ReadString(parsed, field, "").Trim().ToLowerInvariant();
+            bool usable = field == "decision"
+                ? choice == "none" || choice == "unilateral" || choice == "proposal"
+                : choice == "accept" || choice == "refuse" || (!finalCounterDecision && choice == "counter");
+            if (usable)
+            {
+                parsed[field] = choice;
+                return new Dictionary<string, object> { ["ok"] = true, [field] = parsed };
+            }
+
             return new Dictionary<string, object>
             {
-                ["ok"] = true,
+                ["ok"] = false,
                 ["formatFallback"] = true,
-                ["decision"] = new Dictionary<string, object>
-                {
-                    ["decision"] = "none",
-                    ["command"] = "",
-                    ["targetKingdomId"] = "",
-                    ["targetSettlementId"] = "",
-                    ["terms"] = new Dictionary<string, object>(),
-                    ["publicReason"] = "No diplomatic initiative was issued.",
-                    ["decisionFactors"] = new ArrayList { "system: malformed structured response fallback" },
-                    ["confidence"] = 0d,
-                    ["agenda"] = new Dictionary<string, object>()
-                }
+                ["error"] = "The diplomacy model did not return a usable ruler " + field + "."
             };
         }
 
-        private static Dictionary<string, object> MalformedDiplomacyResponseFallback()
+        private static Dictionary<string, object> DirectorModelFailure(
+            Dictionary<string, object> model, string defaultError, bool debugInitiativeTest)
         {
+            string error = ReadString(model, "error", defaultError);
+            if (!ReadBool(model, "formatFallback", false)) return DirectorError(error);
+
+            // The evaluation completed without a ruler choice. Keep its normal schedule;
+            // the client's paused/failed path would immediately schedule more model calls.
             return new Dictionary<string, object>
             {
-                ["ok"] = true,
+                ["ok"] = !debugInitiativeTest,
+                ["status"] = "model_output_unusable",
                 ["formatFallback"] = true,
-                ["response"] = new Dictionary<string, object>
-                {
-                    ["response"] = "refuse",
-                    ["baseWillingness"] = 0d,
-                    ["acceptReason"] = "The terms would have been acceptable.",
-                    ["refuseReason"] = "No agreement was reached.",
-                    ["publicReason"] = "No agreement was reached.",
-                    ["terms"] = new Dictionary<string, object>(),
-                    ["decisionFactors"] = new ArrayList { "system: malformed structured response fallback" }
-                }
+                ["error"] = error
             };
         }
     }

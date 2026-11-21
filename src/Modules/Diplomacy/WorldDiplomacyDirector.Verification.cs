@@ -74,16 +74,7 @@ namespace ReignBetaServer
                     && ReadString(validationRejection, "failureClass", "") == "validation_failed"
                     && !ReadBool(validationRejection, "retryable", true),
                 "world-data validation failures are recorded without masquerading as an AI-service outage");
-            Dictionary<string, object> malformedDecisionFallback = MalformedDiplomacyDecisionFallback();
-            Dictionary<string, object> malformedResponseFallback = MalformedDiplomacyResponseFallback();
-            add("malformed_decision_becomes_safe_no_action",
-                ReadBool(malformedDecisionFallback, "ok", false)
-                    && ReadString(ReadDictionary(malformedDecisionFallback, "decision"), "decision", "") == "none",
-                "an unrepaired malformed decision records a safe no-initiative evaluation instead of pausing diplomacy");
-            add("malformed_response_becomes_safe_refusal",
-                ReadBool(malformedResponseFallback, "ok", false)
-                    && ReadString(ReadDictionary(malformedResponseFallback, "response"), "response", "") == "refuse",
-                "an unrepaired malformed proposal response becomes a safe refusal instead of pausing diplomacy");
+            AddDiplomacyModelOutputSelfTests(add);
             Dictionary<string, object> dualOutcomeReasons = new Dictionary<string, object>
             {
                 ["publicReason"] = "I accept these terms.",
@@ -690,6 +681,76 @@ namespace ReignBetaServer
             tests.AddRange(RunClanAccordServerSelfTests());
             bool passedAll = tests.All(x => ReadBool(x, "passed", false));
             return new Dictionary<string, object> { ["passed"] = passedAll, ["count"] = tests.Count, ["tests"] = tests };
+        }
+
+        private static void AddDiplomacyModelOutputSelfTests(Action<string, bool, string> add)
+        {
+            Dictionary<string, object> Output(string content, bool ok = true) =>
+                new Dictionary<string, object> { ["ok"] = ok, ["content"] = content };
+
+            foreach (var (stage, field, finalCounterDecision) in new[]
+            {
+                ("initiative", "decision", false),
+                ("proposal", "response", false),
+                ("counteroffer", "response", true)
+            })
+            {
+                foreach (var (kind, content) in new[]
+                {
+                    ("malformed", "{\"" + field + "\":"),
+                    ("null", "null"),
+                    ("missing_choice", "{}"),
+                    ("null_choice", "{\"" + field + "\":null}")
+                })
+                {
+                    Dictionary<string, object> result = ParseDiplomacyModelOutput(Output(content), field, finalCounterDecision);
+                    Dictionary<string, object> evaluation = DirectorModelFailure(result, "", false);
+                    add(stage + "_" + kind + "_has_no_ruler_choice",
+                        !ReadBool(result, "ok", true) && !result.ContainsKey(field)
+                            && ReadBool(evaluation, "ok", false)
+                            && ReadString(evaluation, "status", "") == "model_output_unusable"
+                            && !evaluation.ContainsKey("actionId") && !evaluation.ContainsKey("eventId"),
+                        "Unusable output cannot enter the political outcome path or trigger the client outage retry.");
+                }
+            }
+
+            Dictionary<string, object> noAction = ParseDiplomacyModelOutput(Output("{\"decision\":\"none\"}"), "decision");
+            add("initiative_explicit_no_action_remains_a_choice",
+                ReadBool(noAction, "ok", false) && ReadString(ReadDictionary(noAction, "decision"), "decision", "") == "none",
+                "A usable, explicit no-action decision can still consume an opportunity.");
+
+            Dictionary<string, object> secondCounter = ParseDiplomacyModelOutput(Output("{\"response\":\"counter\"}"), "response", true);
+            Dictionary<string, object> firstCounter = ParseDiplomacyModelOutput(Output("{\"response\":\"counter\"}"), "response");
+            add("negotiation_allows_only_one_counteroffer",
+                ReadBool(firstCounter, "ok", false) && !ReadBool(secondCounter, "ok", true)
+                    && !secondCounter.ContainsKey("response"),
+                "The final reply requires an explicit acceptance or refusal and cannot extend the negotiation.");
+
+            Dictionary<string, object> exhausted = ParseDiplomacyModelOutput(Output("{\"response\":\"refuse\"}", false), "response");
+            add("failed_recovery_cannot_supply_a_ruler_choice",
+                !ReadBool(exhausted, "ok", true) && !exhausted.ContainsKey("response")
+                    && !ReadBool(DirectorModelFailure(exhausted, "", true), "ok", true),
+                "Content retained by a failed recovery is ignored and the debug initiative reports the technical error.");
+
+            Dictionary<string, object> proposer = TestDirectorKingdom("proposer", false);
+            Dictionary<string, object> responder = TestDirectorKingdom("responder", false);
+            Dictionary<string, object> candidate = new Dictionary<string, object> { ["command"] = "make_peace" };
+            foreach (bool counter in new[] { false, true })
+            {
+                foreach (var (choice, willingness, expected) in new[] { ("refuse", 0, false), ("accept", 100, true) })
+                {
+                    string content = "{\"response\":\"" + choice + "\",\"baseWillingness\":"
+                        + willingness.ToString(CultureInfo.InvariantCulture) + "}";
+                    Dictionary<string, object> output = ParseDiplomacyModelOutput(Output(content), "response", counter);
+                    Dictionary<string, object> answer = ReadDictionary(output, "response");
+                    string stage = counter ? "counteroffer" : "proposal";
+                    bool canResolve = ReadBool(output, "ok", false) && ReadString(answer, "response", "") == choice;
+                    bool accepted = canResolve && ResolveAllianceAcceptance("diplomacy_contract", 70d,
+                        new Dictionary<string, object>(), proposer, responder, candidate, answer, counter, out _);
+                    add(stage + "_explicit_" + choice + "_retains_willingness_roll", canResolve && accepted == expected,
+                        "Usable responses still yield the authoritative willingness outcome.");
+                }
+            }
         }
 #endif
 
