@@ -84,12 +84,16 @@ namespace ReignBetaServer
             }
             return rows;
         }
+        internal static bool IsDiagnosticLegacyResponse(Dictionary<string, object> row)
+        {
+            string phase = ReadString(row, "phase", "");
+            return phase.EndsWith(".response") && !phase.StartsWith("llm.")
+                && !string.IsNullOrWhiteSpace(ReadString(ReadDictionary(row, "data"), "reply", ""));
+        }
+
         private static List<Dictionary<string, object>> DiagnosticLegacyIndex(string campaign)
         {
-            return DiagnosticLegacyRows(campaign).Where(row => {
-                string phase = ReadString(row, "phase", "");
-                return phase.EndsWith(".response") && !phase.StartsWith("llm.") && !string.IsNullOrWhiteSpace(ReadString(ReadDictionary(row, "data"), "reply", ""));
-            }).Select(row => {
+            return DiagnosticLegacyRows(campaign).Where(IsDiagnosticLegacyResponse).Select(row => {
                 var data = ReadDictionary(row, "data");
                 var player = ReadDictionary(data, "playerLine");
                 var npc = ReadDictionary(data, "npcLine");
@@ -184,9 +188,11 @@ namespace ReignBetaServer
             if (trace.StartsWith("legacy-", StringComparison.Ordinal))
             {
                 var detail = ConversationDiagnosticsTraceApi(query);
+                if (!ReadBool(detail, "ok", false)) return detail;
                 if (!ReadDictionaryList(detail, "steps").Any(x => ReadString(x, "stepId", "") == id)) throw new ArgumentException("The payload does not belong to this response.");
                 var row = DiagnosticLegacyRows(DiagnosticQuery(query, "campaignId")).FirstOrDefault(x => ReadString(x, "auditId", "") == id);
-                text = Json.Serialize(ReadDictionary(row, "data"));
+                if (row == null) return new() { ["ok"] = false, ["error"] = "Historical evidence is no longer retained." };
+                text = Json.Serialize(OperationsService.RedactSensitive(ReadDictionary(row, "data")));
                 meta = new Dictionary<string, object> { ["complete"] = false, ["sanitizedLegacy"] = true, ["characters"] = text.Length };
             }
             else

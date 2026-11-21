@@ -17,8 +17,16 @@ namespace ReignBetaServer
         private const long SupportTotalLimit = 64L * 1024 * 1024;
         private const int SupportFileCountLimit = 200;
         private static readonly Regex SupportSecretField = new Regex(
-            "(?i)(\\\"?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|client[_-]?secret|qdrant[_-]?api[_-]?key)\\\"?\\s*[:=]\\s*\\\"?)[^\\\",\\s}]+",
-            RegexOptions.Compiled);
+            """
+            (?<label> \b (?: [a-z0-9_-]*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|client[_-]?secret|password)
+                          | authorization | token | secret ) ["']? \s* [:=] \s* )
+            (?:(?:Bearer|Basic)\s+)?
+            """,
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.IgnorePatternWhitespace | RegexOptions.NonBacktracking);
+        // A semicolon inside a bare value is private unless it starts the next named assignment.
+        private static readonly Regex SupportBareValueBoundary = new(
+            """[\s,}"]|;["']?[\w.-]+["']?\s*[:=]|[:=]["']""",
+            RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
         private static readonly Regex SupportBearer = new Regex(
             "(?i)\\bBearer\\s+[A-Za-z0-9._~+/-]{8,}", RegexOptions.Compiled);
         private static readonly Regex SupportKnownKey = new Regex(
@@ -26,10 +34,48 @@ namespace ReignBetaServer
         private static readonly Regex SupportUrlCredential = new Regex(
             "(?i)(https?://)[^/@\\s:]+:[^/@\\s]+@", RegexOptions.Compiled);
 
+        private static int AfterSupportQuotedValue(string text, int start)
+        {
+            char quote = text[start];
+            for (int i = start + 1; i < text.Length; i++)
+            {
+                if (text[i] == quote) return i + 1;
+                if (text[i] == '\\' && i + 1 < text.Length) i++;
+            }
+            return text.Length;
+        }
+
         internal static string RedactSupportText(string value)
         {
             string text = value ?? string.Empty;
-            text = SupportSecretField.Replace(text, "$1[REDACTED]");
+            var field = SupportSecretField.Match(text);
+            if (field.Success)
+            {
+                var masked = new StringBuilder(text.Length);
+                int copied = 0;
+                while (field.Success)
+                {
+                    var label = field.Groups["label"];
+                    masked.Append(text, copied, label.Index + label.Length - copied);
+                    int start = field.Index + field.Length;
+                    if (start < text.Length && text[start] is '"' or '\'')
+                    {
+                        masked.Append(text[start]).Append("[REDACTED]").Append(text[start]);
+                        copied = AfterSupportQuotedValue(text, start);
+                    }
+                    else
+                    {
+                        var boundary = SupportBareValueBoundary.Match(text, start);
+                        // A quoted assignment embedded in a bare credential is part of that private value.
+                        while (boundary.Success && text[boundary.Index] is ':' or '=')
+                            boundary = SupportBareValueBoundary.Match(text, AfterSupportQuotedValue(text, boundary.Index + 1));
+                        copied = boundary.Success ? boundary.Index : text.Length;
+                        masked.Append("[REDACTED]");
+                    }
+                    field = SupportSecretField.Match(text, copied);
+                }
+                text = masked.Append(text, copied, text.Length - copied).ToString();
+            }
             text = SupportBearer.Replace(text, "Bearer [REDACTED]");
             text = SupportKnownKey.Replace(text, "[REDACTED_KEY]");
             return SupportUrlCredential.Replace(text, "$1[REDACTED]@");
