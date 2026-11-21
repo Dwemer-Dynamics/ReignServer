@@ -29,9 +29,19 @@ namespace ReignBetaServer
                 List<Dictionary<string, object>> matchingPoints = points
                     .Where(point => MatchesCheckpointSlot(point, slot)).ToList();
                 bool foreignRegistration = SaveSyncCampaignIds()
-                    .Where(id => !id.Equals(campaignId, StringComparison.OrdinalIgnoreCase))
+                    .Where(id => id != campaignId)
                     .Any(id => ReadDictionaryList(ReadSaveSyncLedger(id), "points")
                         .Any(point => MatchesCheckpointSlot(point, slot)));
+
+                // Native slots are shared across campaigns. A skipped ledger
+                // can hide a registration even when no native file is present.
+                if (!foreignRegistration && FencedSaveSyncCampaignIds().Count != 0)
+                    return new Dictionary<string, object>
+                    {
+                        ["ok"] = false, ["result"] = "checkpoint_occupancy_unverified",
+                        ["campaignId"] = campaignId, ["checkpointSlot"] = slot,
+                        ["error"] = "Save Sync recovery prevents verifying this shared native checkpoint slot."
+                    };
 
                 var result = new Dictionary<string, object>
                 {

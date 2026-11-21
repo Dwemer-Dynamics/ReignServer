@@ -38,6 +38,12 @@ namespace ReignBetaServer
             {
                 string campaignId =
                     ReadString(databaseCampaign, "campaignId", "");
+                string blocked = FencedSaveSyncOperation(campaignId);
+                if (blocked != null)
+                {
+                    campaigns.Add(SaveSyncFencedResult(campaignId, blocked));
+                    continue;
+                }
                 string directory = CampaignFileService.CampaignDirectory(campaignId);
                 if (!Directory.Exists(directory)) continue;
                 DirectoryInfo directoryInfo = new DirectoryInfo(directory);
@@ -74,17 +80,20 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> databaseCampaigns =
                 ReignPostgreSqlStorage.ListCampaigns();
             HashSet<string> databaseIds = new HashSet<string>(
-                StringComparer.OrdinalIgnoreCase);
+                StringComparer.Ordinal);
             int ignoredDatabaseRecords = 0;
             Dictionary<string, Dictionary<string, object>> pending =
                 ReadDictionaryList(ReadCampaignRetirementLedger(), "pending")
                     .Where(row => !string.IsNullOrWhiteSpace(ReadString(row, "campaignId", "")))
-                    .GroupBy(row => ReadString(row, "campaignId", ""), StringComparer.OrdinalIgnoreCase)
-                    .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
+                    .GroupBy(row => ReadString(row, "campaignId", ""), StringComparer.Ordinal)
+                    .ToDictionary(group => group.Key, group => group.Last(), StringComparer.Ordinal);
             List<Dictionary<string, object>> campaigns = new List<Dictionary<string, object>>();
+            List<string> fenced = FencedSaveSyncCampaignIds();
+            databaseIds.UnionWith(fenced);
             foreach (Dictionary<string, object> databaseCampaign in databaseCampaigns)
             {
                 string campaignId = ReadString(databaseCampaign, "campaignId", "");
+                if (FencedSaveSyncOperation(campaignId) != null) continue;
                 if (!TryResolveAuditableCampaignDirectory(
                     campaignId, out string directory))
                 {
@@ -106,13 +115,19 @@ namespace ReignBetaServer
 
             Dictionary<string, object> nativeSaveInventory =
                 ApplyNativeSaveInventory(campaigns, pending);
+            campaigns.AddRange(fenced.Select(id => SaveSyncFencedResult(id, FencedSaveSyncOperation(id))));
 
             List<Dictionary<string, object>> orphanPortraitRoots =
                 EnumerateOrphanPortraitRoots(databaseIds);
             List<Dictionary<string, object>> orphanCampaignRoots =
                 EnumerateOrphanCampaignRoots(databaseIds);
+            // The active directory stays owned by the journal even if a partially
+            // restored metadata file identifies another campaign.
+            orphanCampaignRoots.RemoveAll(row => FencedSaveSyncOperation(ReadString(row, "name", "")) != null);
             List<Dictionary<string, object>> orphanSaveSyncRoots =
                 EnumerateOrphanSaveSyncRoots(databaseIds);
+            var protectedRoots = fenced.Select(SaveSyncCampaignRoot).ToHashSet(StringComparer.Ordinal);
+            orphanSaveSyncRoots.RemoveAll(row => protectedRoots.Contains(ReadString(row, "path", "")));
             string portraitCacheRoot = CampaignPortraitCacheRoot();
             string installedPortraitCacheRoot = CharactersService.CharacterEditorPortraitCacheRoot();
             string installedSharedRoot = string.IsNullOrWhiteSpace(installedPortraitCacheRoot)

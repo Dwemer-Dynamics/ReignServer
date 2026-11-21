@@ -118,7 +118,7 @@ namespace ReignBetaServer
         private static readonly ConcurrentDictionary<string, byte>
             RegisteredCampaignSchemas =
                 new ConcurrentDictionary<string, byte>(
-                    StringComparer.OrdinalIgnoreCase);
+                    StringComparer.Ordinal);
         private static readonly ConditionalWeakTable<NpgsqlConnection, CampaignConnectionIdentity>
             CampaignConnectionIdentities =
                 new ConditionalWeakTable<NpgsqlConnection, CampaignConnectionIdentity>();
@@ -138,8 +138,9 @@ namespace ReignBetaServer
         public static NpgsqlConnection OpenCampaignConnection(string campaignId)
         {
             PersistenceService.ThrowIfCampaignRequestReplaced();
-            EnsureInfrastructure();
             string normalizedCampaignId = NormalizeCampaignId(campaignId);
+            PersistenceService.RequireSaveSyncCampaignAvailable(normalizedCampaignId);
+            EnsureInfrastructure();
             string schema = CampaignSchemaName(normalizedCampaignId);
             NpgsqlConnection connection = OpenDatabaseConnection();
             try
@@ -349,8 +350,9 @@ RETURNING (xmax = 0) AS inserted;", connection, transaction))
 
         public static void CloneCampaignToSnapshot(string campaignId, string savePointId)
         {
-            EnsureInfrastructure();
             string normalizedCampaignId = NormalizeCampaignId(campaignId);
+            PersistenceService.RequireSaveSyncCampaignAvailable(normalizedCampaignId);
+            EnsureInfrastructure();
             string sourceSchema = CampaignSchemaName(normalizedCampaignId);
             string snapshotSchema = SnapshotSchemaName(normalizedCampaignId, savePointId);
             for (int attempt = 0; ; attempt++)
@@ -431,9 +433,10 @@ SET schema_name=excluded.schema_name,
 
         public static void RestoreCampaignSnapshot(string campaignId, string savePointId)
         {
+            string normalizedCampaignId = NormalizeCampaignId(campaignId);
+            PersistenceService.RequireSaveSyncCampaignAvailable(normalizedCampaignId);
             PersistenceService.InvalidateWaitingCampaignRequests();
             EnsureInfrastructure();
-            string normalizedCampaignId = NormalizeCampaignId(campaignId);
             string campaignSchema = CampaignSchemaName(normalizedCampaignId);
             string snapshotSchema = SnapshotSchemaName(normalizedCampaignId, savePointId);
             using (NpgsqlConnection connection = OpenDatabaseConnection())
@@ -496,8 +499,9 @@ SELECT EXISTS(
 
         public static void DropSnapshot(string campaignId, string savePointId)
         {
-            EnsureInfrastructure();
             string normalizedCampaignId = NormalizeCampaignId(campaignId);
+            PersistenceService.RequireSaveSyncCampaignAvailable(normalizedCampaignId);
+            EnsureInfrastructure();
             string snapshotSchema = SnapshotSchemaName(
                 normalizedCampaignId, savePointId);
             using (NpgsqlConnection connection = OpenDatabaseConnection())
@@ -863,9 +867,10 @@ SELECT current_database(),current_user,
 
         public static void DropCampaign(string campaignId)
         {
+            string normalizedCampaignId = NormalizeCampaignId(campaignId);
+            PersistenceService.RequireSaveSyncCampaignAvailable(normalizedCampaignId);
             PersistenceService.InvalidateWaitingCampaignRequests();
             EnsureInfrastructure();
-            string normalizedCampaignId = NormalizeCampaignId(campaignId);
             RegisteredCampaignSchemas.TryRemove(normalizedCampaignId,
                 out byte ignoredRegistration);
             ReignDatabase.InvalidateCampaignSchemaCaches(normalizedCampaignId);

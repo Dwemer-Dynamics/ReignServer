@@ -26,11 +26,9 @@ namespace ReignBetaServer
             new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion);
         private static readonly SemaphoreSlim SaveSyncOptimizationSemaphore = new SemaphoreSlim(1, 1);
         private static readonly HashSet<string> SaveSyncOptimizationQueued =
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        private static readonly HashSet<string> SaveSyncSemanticBlockedCampaigns =
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            new HashSet<string>(StringComparer.Ordinal);
         private static readonly Dictionary<string, SaveSyncActiveState> SaveSyncActiveStates =
-            new Dictionary<string, SaveSyncActiveState>(StringComparer.OrdinalIgnoreCase);
+            new Dictionary<string, SaveSyncActiveState>(StringComparer.Ordinal);
         private static string SaveSyncFailureInjectionForTests = "";
         private static bool? SaveSyncEnabledOverrideForTests;
         private static bool SaveSyncSkipSemanticForTests;
@@ -348,9 +346,19 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> SaveSyncLoadApi(Dictionary<string, object> payload, bool forcePreview)
         {
             payload = payload ?? new Dictionary<string, object>();
-            if (!IsSaveSyncEnabled()) return SaveSyncDisabledResult(payload);
+            string campaignId = ReadString(payload, "campaignId", "");
+            if (!IsSaveSyncEnabled())
+            {
+                string blocked = FencedSaveSyncOperation(campaignId);
+                return blocked == null ? SaveSyncDisabledResult(payload) : SaveSyncFencedResult(campaignId, blocked);
+            }
             Program.CampaignDataGate.EnterWriteLock();
-            try { return SaveSyncLoadCore(payload, forcePreview || ReadBool(payload, "dryRun", false)); }
+            try
+            {
+                string blocked = FencedSaveSyncOperation(campaignId);
+                if (blocked != null) return SaveSyncFencedResult(campaignId, blocked);
+                return SaveSyncLoadCore(payload, forcePreview || ReadBool(payload, "dryRun", false));
+            }
             finally { Program.CampaignDataGate.ExitWriteLock(); }
         }
 
@@ -372,7 +380,11 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> SaveSyncStatusSummary(string campaignId)
         {
-            Dictionary<string, object> ledger = ReadSaveSyncLedger(campaignId);
+            var blocked = FindSaveSyncFence(campaignId);
+            if (blocked != null) return SaveSyncFencedResult(campaignId, blocked.Id, blocked.Applying);
+            Dictionary<string, object> ledger;
+            try { ledger = ReadSaveSyncLedger(campaignId); }
+            catch (SaveSyncCampaignFencedException ex) { return ex.Status; }
             List<Dictionary<string, object>> allPoints = ReadDictionaryList(ledger, "points");
             List<Dictionary<string, object>> availablePoints = allPoints
                 .Where(point => SaveSyncPointSnapshotAvailable(campaignId, point))
@@ -388,6 +400,17 @@ namespace ReignBetaServer
             bool lastRegisteredPointAvailable = availablePoints.Any(point =>
                 ReadString(point, "savePointId", "").Equals(
                     lastRegisteredPointId, StringComparison.OrdinalIgnoreCase));
+            var lastResult = ReadDictionary(ledger, "lastSyncResult") ?? new Dictionary<string, object>();
+            string lastOperation = ReadString(ledger, "lastBackupId", "");
+            try { AddSaveSyncOperationStatus(lastResult, campaignId, lastOperation); }
+            catch (Exception ex)
+            {
+                // A stale status read must never replace a newer operation's applying fence.
+                var fence = GetOrAddSaveSyncFence(SaveSyncJournalDirectory(campaignId), new SaveSyncFence(lastOperation));
+                var failure = SaveSyncFencedResult(campaignId, fence.Id, fence.Applying);
+                if (fence.Id == lastOperation && !fence.Applying) failure["journalError"] = ex.Message;
+                return failure;
+            }
             return new Dictionary<string, object>
             {
                 ["enabled"] = IsSaveSyncEnabled(), ["campaignId"] = campaignId,
@@ -403,7 +426,7 @@ namespace ReignBetaServer
                 ["lastRegisteredPointId"] = lastRegisteredPointId,
                 ["lastRegisteredPointAvailable"] = lastRegisteredPointAvailable,
                 ["lastLoadedSavePoint"] = PublicLoadedSaveSyncPoint(campaignId, ledger, allPoints),
-                ["lastSyncResult"] = ReadDictionary(ledger, "lastSyncResult") ?? new Dictionary<string, object>(),
+                ["lastSyncResult"] = lastResult,
                 ["lastBackupId"] = ReadString(ledger, "lastBackupId", ""),
                 ["pendingFinalSaveDeletion"] = IsCampaignRetirementPending(campaignId),
                 ["updatedUtc"] = ReadString(ledger, "updatedUtc", "")
@@ -566,7 +589,7 @@ namespace ReignBetaServer
 
         private static List<Dictionary<string, object>> SaveSyncCampaignStatuses()
         {
-            return SaveSyncCampaignIds()
+            return SaveSyncCampaignIds().Concat(FencedSaveSyncCampaignIds()).Distinct(StringComparer.Ordinal)
                 .Select(id => SaveSyncStatusSummary(id)).ToList();
         }
 
@@ -576,8 +599,8 @@ namespace ReignBetaServer
             if (!Directory.Exists(root)) return new List<string>();
             return Directory.GetDirectories(root).Where(path => File.Exists(Path.Combine(path, "ledger.json")))
                 .Select(path => ReadString(CampaignFileService.ReadJsonObject(Path.Combine(path, "ledger.json")), "campaignId", ""))
-                .Where(id => CampaignFileService.HasLocalCampaignMetadata(id))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(id => FencedSaveSyncOperation(id) == null && CampaignFileService.HasLocalCampaignMetadata(id))
+                .Distinct(StringComparer.Ordinal)
                 .ToList();
         }
 
@@ -585,13 +608,11 @@ namespace ReignBetaServer
         {
             lock (SaveSyncActiveStateLock)
                 SaveSyncActiveStates.Remove(campaignId ?? "");
-            lock (SaveSyncSemanticBlockedCampaigns)
-                SaveSyncSemanticBlockedCampaigns.Remove(campaignId ?? "");
             lock (SaveSyncOptimizationQueued)
             {
                 string prefix = (campaignId ?? "") + "|";
                 SaveSyncOptimizationQueued.RemoveWhere(key =>
-                    key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+                    key.StartsWith(prefix, StringComparison.Ordinal));
             }
         }
 
@@ -702,7 +723,7 @@ namespace ReignBetaServer
         private static void QueueSaveSyncOptimization(string campaignId, string savePointId)
         {
             if (SaveSyncDisableBackgroundOptimizationForTests || Program.ShutdownRequested) return;
-            string key = campaignId + "|" + savePointId;
+            string key = campaignId + "|" + savePointId?.ToUpperInvariant();
             lock (SaveSyncOptimizationQueued)
             {
                 if (!SaveSyncOptimizationQueued.Add(key)) return;
@@ -1095,19 +1116,9 @@ namespace ReignBetaServer
             return BuildSaveSyncSemanticReconciliationPlan(current, target);
         }
 
-        private static void SetSaveSyncSemanticBlocked(string campaignId, bool blocked)
-        {
-            lock (SaveSyncSemanticBlockedCampaigns)
-            {
-                if (blocked) SaveSyncSemanticBlockedCampaigns.Add(campaignId);
-                else SaveSyncSemanticBlockedCampaigns.Remove(campaignId);
-            }
-        }
-
         internal static bool IsSaveSyncSemanticBlocked(string campaignId)
         {
-            lock (SaveSyncSemanticBlockedCampaigns)
-                return SaveSyncSemanticBlockedCampaigns.Contains(campaignId ?? "");
+            return FencedSaveSyncOperation(campaignId) != null;
         }
 
         internal static DialogueService.SaveSyncSemanticReconciliationPlan BuildSaveSyncSemanticReconciliationPlan(
