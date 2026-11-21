@@ -165,7 +165,7 @@ WHERE pair_key='race_pair_a|race_pair_b';", parameters, transaction);
 hero_id,canonical_name,clan_id,kingdom_id,is_lord,is_ruler,
 family_ids_json,updated_ts,is_alive,is_adult,is_player,is_clan_leader)
 VALUES
-('political_ruler','Ruler','clan_r','kingdom_test',1,1,'[]',1,1,1,0,1),
+('political_ruler','Ruler','clan_r','kingdom_test',1,1,'[]',1,1,1,1,1),
 ('political_leader_a','Leader A','clan_a','kingdom_test',1,0,'[]',1,1,1,0,1),
 ('political_leader_b','Leader B','clan_b','kingdom_test',1,0,'[]',1,1,1,0,1);", parameters, transaction);
         }
@@ -283,7 +283,7 @@ AND active=1 AND required=1;", parameters, transaction);
         {
             return ReignDatabase.QuerySql(connection, @"
 SELECT * FROM identity_roster
-WHERE is_alive=1 AND is_adult=1 AND is_player=0
+WHERE is_alive=1 AND is_adult=1 AND (is_player=0 OR is_ruler=1)
 AND (is_clan_leader=1 OR is_ruler=1) AND hero_id<>'';", parameters, transaction);
         }
 
@@ -455,7 +455,7 @@ ELSE relationship_native_targets.revision+1 END,updated_ts=$ts;", parameters, tr
         {
             return ReignDatabase.QuerySql(connection, @"
 SELECT * FROM identity_roster
-WHERE is_alive=1 AND is_adult=1 AND is_player=0
+WHERE is_alive=1 AND is_adult=1 AND (is_player=0 OR is_ruler=1)
 AND (is_clan_leader=1 OR is_ruler=1)
 AND hero_id<>'';", parameters, transaction);
         }
@@ -493,6 +493,21 @@ VALUES($pair,$a,$b,$typeA,$typeB,$baseAB,$baseBA,$chanceAB,$chanceBA,
 0,0,'neutral','neutral',$day,$day,$shard,-1,0,$version,$ts)
 ON CONFLICT(pair_key) DO NOTHING
 RETURNING pair_key;", parameters, transaction);
+        }
+
+        internal static List<Dictionary<string, object>> SelectEffectiveAttitudePairs(
+            ReignDbConnection connection, Dictionary<string, object> parameters)
+        {
+            string keys = ReignPostgreSqlDialect.IsPostgreSql(connection)
+                ? "SELECT jsonb_array_elements_text(CAST($pairs AS jsonb))"
+                : "SELECT value FROM json_each($pairs)";
+            return ReignDatabase.QuerySql(connection, @"
+SELECT c.pair_key,c.hero_a_id,c.affinity_a_to_b,c.affinity_b_to_a,p.source
+FROM relationship_pair_chemistry c
+LEFT JOIN relationship_pair_provenance p ON p.pair_key=c.pair_key
+    AND p.campaign_id=$campaign AND p.timeline_id=$timeline AND p.active=1
+WHERE c.pair_key IN (" + keys + @")
+ORDER BY c.pair_key,p.source;", parameters);
         }
 
         internal const string SelectCharacterPublicStandingSql = "SELECT subject_id,standing_value,sources_json,revision,last_changed_day,updated_ts,calculation_status,last_error FROM character_public_standing WHERE campaign_id=$campaign AND timeline_id=$timeline";

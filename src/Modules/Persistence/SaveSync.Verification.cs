@@ -256,6 +256,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> oldStoredPoint = SaveSyncPoint(ReadSaveSyncLedger(campaignId), oldPoint);
                 string oldStoredRoot = SaveSyncSnapshotRoot(campaignId, oldStoredPoint);
                 add("register_old_save_point", ReadBool(oldRegistered, "ok", false) && Directory.Exists(Path.Combine(oldStoredRoot, "campaign")), "Old native save point receives an immutable complete snapshot.");
+                VerifySaveSyncCheckpointSlot(campaignId, siblingId, oldStoredPoint, add);
                 add("snapshot_excludes_rebuildable_portrait_roster",
                     !File.Exists(Path.Combine(oldStoredRoot, "campaign", "portrait_roster.json")),
                     "Save Sync excludes the rebuildable portrait roster from every native-save snapshot.");
@@ -451,6 +452,7 @@ namespace ReignBetaServer
                     && ReadString(rolledBack, "restoreGeneration", "").Length > 0,
                     "A verified no-op load binds its session without dirtying Save Sync state, and each verified load echoes the restore generation bound to it.");
                 add("cross_campaign_isolation", FileSha256(siblingFile) == siblingHash, "Save-point registration and backward/forward restores never write to a sibling campaign.");
+                VerifyCalendarCheckpointInstallation("ssc_" + token, add);
 
                 Directory.CreateDirectory(nativeSaveFixture);
                 string oldNativeSavePath = Path.Combine(
@@ -1133,6 +1135,71 @@ namespace ReignBetaServer
             MarkCampaignSaveSyncLifecycle(campaignId, "registered", true);
         }
 
+        private static void VerifySaveSyncCheckpointSlot(string campaignId, string siblingId,
+            Dictionary<string, object> oldStoredPoint, Action<string, bool, string> add)
+        {
+            const string slot = "ReignTest_Inventory_Current";
+            Dictionary<string, object> original = ReadSaveSyncLedger(campaignId);
+            var archivedPoint = new Dictionary<string, object>(oldStoredPoint)
+            {
+                ["nativeSaveName"] = " reigntest_inventory_current.SAV ",
+                ["capturedUtc"] = "2025-01-01T00:00:00Z",
+                ["status"] = "ready",
+                ["saveFinalizedUtc"] = "2025-01-01T00:00:01Z"
+            };
+            var points = Enumerable.Range(0, 50).Select(index => new Dictionary<string, object>
+            {
+                ["savePointId"] = "inventory_" + index.ToString(CultureInfo.InvariantCulture),
+                ["nativeSaveName"] = "Inventory " + index.ToString(CultureInfo.InvariantCulture),
+                ["capturedUtc"] = "2026-01-01T00:00:00Z",
+                ["snapshotFingerprint"] = "unavailable-inventory-generation"
+            }).ToList();
+            points.Add(archivedPoint);
+
+            Dictionary<string, object> Lookup(string id, string name) =>
+                SaveSyncStatusRequestApi(new Dictionary<string, string>
+                {
+                    ["campaignId"] = id, ["checkpointSlot"] = name
+                });
+
+            try
+            {
+                var expanded = new Dictionary<string, object>(original) { ["points"] = points };
+                WriteSaveSyncLedger(campaignId, expanded);
+                var summary = SaveSyncStatusRequestApi(new Dictionary<string, string> { ["campaignId"] = campaignId });
+                var projected = ReadDictionaryList(ReadDictionary(summary, "saveSync"), "points");
+                var owned = Lookup(campaignId, slot);
+                var ownedPoint = ReadDictionary(owned, "point");
+                add("guarded_checkpoint_slot_reads_beyond_status_cap",
+                    projected.Count == 50 && !projected.Any(point => MatchesCheckpointSlot(point, slot))
+                    && ReadInt(owned, "registrationCount", -1) == 1
+                    && ReadInt(owned, "registrationUniqueStateCount", -1) == 2
+                    && ReadInt(ReadDictionary(summary, "saveSync"), "uniqueStateCount", -1) == 1
+                    && !ReadBool(owned, "foreignRegistration", true) && ownedPoint != null
+                    && ReadString(ownedPoint, "savePointId", "") == ReadString(oldStoredPoint, "savePointId", "")
+                    && ReadString(ownedPoint, "status", "") == "ready"
+                    && ReadBool(ownedPoint, "snapshotAvailable", false),
+                    "An exact lookup returns the finalized checkpoint beyond the status cap and counts unavailable generations still charged at registration.");
+
+                var foreign = Lookup(siblingId, slot);
+                var vacant = Lookup(siblingId, "ReignTest_Vacant_Current");
+                add("guarded_checkpoint_slot_distinguishes_hidden_foreign_and_vacant",
+                    ReadBool(foreign, "foreignRegistration", false)
+                    && ReadInt(foreign, "registrationCount", -1) == 0 && !foreign.ContainsKey("point")
+                    && !ReadBool(vacant, "foreignRegistration", true)
+                    && ReadInt(vacant, "registrationCount", -1) == 0 && !vacant.ContainsKey("point"),
+                    "A case-insensitive foreign native slot remains occupied beyond the public summary cap, while an unrelated slot is vacant.");
+
+                points.Add(new Dictionary<string, object>(archivedPoint) { ["savePointId"] = "duplicate_inventory" });
+                WriteSaveSyncLedger(campaignId, expanded);
+                var ambiguous = Lookup(campaignId, slot);
+                add("guarded_checkpoint_slot_exposes_duplicate_occupancy",
+                    ReadInt(ambiguous, "registrationCount", -1) == 2 && !ambiguous.ContainsKey("point"),
+                    "An ambiguous slot exposes its occupancy count and cannot stand in for one exact owned point.");
+            }
+            finally { WriteSaveSyncLedger(campaignId, original); }
+        }
+
         private static void PrepareSaveSyncTestCampaign(string campaignId, string marker)
         {
             string campaign = StrictCampaignDirectory(campaignId);
@@ -1163,7 +1230,13 @@ namespace ReignBetaServer
             AppendSaveSyncTestPath(campaignId, Path.Combine("diplomacy", "consequences.jsonl"), marker);
             AppendSaveSyncTestPath(campaignId, Path.Combine("negotiations", "events.jsonl"), marker);
             CampaignFileService.WriteJsonObject(Path.Combine(campaign, "actions", "action-queue.json"), new Dictionary<string, object> { ["marker"] = marker, ["items"] = new List<object> { marker + "_queued_action" } });
-            CampaignFileService.WriteJsonObject(Path.Combine(campaign, "world", "calendar.json"), new Dictionary<string, object> { ["marker"] = marker, ["nativeDayAnchor"] = marker == "old" ? 10d : 20d });
+            CampaignFileService.WriteJsonObject(Path.Combine(campaign, "world", "calendar.json"), new Dictionary<string, object>
+            {
+                ["marker"] = marker, ["Version"] = 1, ["CampaignId"] = campaignId,
+                ["NativeDayAnchor"] = marker == "old" ? 10d : 20d,
+                ["CalendarDayAnchor"] = marker == "old" ? 15d : 25d,
+                ["AgeAnchors"] = TestDict("hero_a", TestDict("Day", 10d, "Age", 17.5d))
+            });
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 RebellionService.EnsureRebellionSchema(connection);

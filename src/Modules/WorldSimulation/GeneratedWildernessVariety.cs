@@ -91,8 +91,8 @@ namespace ReignBetaServer
                 ["name"] = DialogueService.LimitText(ReadString(participant, "name", ""), 120),
                 ["role"] = DialogueService.LimitText(ReadString(participant, "generatedRole", "party_member"), 80),
                 ["culture"] = DialogueService.LimitText(ReadFirstString(participant, "cultureName", "culture"), 120),
-                ["personality"] = DialogueService.LimitText(ReadString(traits, "basePersonalitySummary", ""), 700),
-                ["background"] = DialogueService.LimitText(FirstNonEmpty(ReadString(background, "summary", ""), ReadString(stack, "nativeBiography", "")), 900),
+                ["background"] = DialogueService.LimitText(FirstNonEmpty(CharactersService.ReadPublicEncyclopediaText(background),
+                    ReadString(participant, "nativeEncyclopediaText", ""), ReadString(stack, "nativeBiography", "")), 900),
                 ["scope"] = "Selected character facts for a new opening, not a transcript or a complete biography. Missing facts are unknown."
             };
             // Missing native identity is unknown, never the false/male default.
@@ -103,14 +103,10 @@ namespace ReignBetaServer
                 brief["pronouns"] = female ? "she/her" : "he/him";
             }
             else brief["pronouns"] = "they/them (gender unknown)";
-            // Whole bounded structural projections, never a serialized full stack.
-            // Dynamic characteristics, constructed copies, archives and repeated
-            // narrative projections previously made three people exceed 312k chars.
-            foreach (string section in new[] { "motivations", "voice", "pressure" })
-            {
-                int budget = section == "voice" ? 400 : section == "pressure" ? 600 : 800;
-                brief[section] = ProjectWildernessFacts(ReadDictionary(stack, section), ref budget, 0);
-            }
+            // The opening writer also produces public hooks and clues. Give it
+            // a speech style without private motives, pressure or personal tells.
+            var voice = ReadDictionary(stack, "voice");
+            brief["speechStyle"] = DialogueService.LimitText(ReadString(voice, "speechStyle", ""), 400);
             int traitBudget = 1200;
             var scores = ReadDictionary(traits, "traitPercentages");
             if (scores == null || scores.Count == 0) scores = ReadDictionary(stack, "nativeTraits");

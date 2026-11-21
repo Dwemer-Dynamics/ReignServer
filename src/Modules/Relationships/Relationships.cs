@@ -616,29 +616,70 @@ namespace ReignBetaServer
             }
         }
 
-        internal static List<Dictionary<string, object>> EvaluateCompletedActionRelationships(Dictionary<string, object> payload)
+        internal static List<Dictionary<string, object>> EvaluateCompletedActionRelationships(
+            Dictionary<string, object> payload, out string scopeError)
         {
+            scopeError = "";
             List<Dictionary<string, object>> changes = new List<Dictionary<string, object>>();
-            List<Dictionary<string, object>> directions = CompletedActionRelationshipDirections(payload);
+            bool scoped = payload.Keys.Any(key => key.Equals("timelineId", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("sharedActivityGeneration", StringComparison.OrdinalIgnoreCase));
+            string timelineId = scoped
+                ? (payload.TryGetValue("timelineId", out object rawTimeline) ? rawTimeline as string : null)
+                : "main";
+            List<Dictionary<string, object>> directions = CompletedActionRelationshipDirections(payload, timelineId);
             if (directions.Count == 0) return changes;
-            List<int> nativeDeltas = new List<int>();
-            foreach (Dictionary<string, object> direction in directions)
+
+            string campaignId = ReadString(directions[0], "campaignId", "default");
+            lock (CampaignRelationshipWriteLock(campaignId))
             {
-                Dictionary<string, object> evaluation = RelationshipEvaluateApi(direction);
-                int delta = ReadInt(evaluation, "nativeRelationDelta", 0);
-                if (delta != 0 && !ReadBool(evaluation, "idempotent", false)) nativeDeltas.Add(delta);
+                // The action-report route's campaign read lease excludes restores. World history
+                // can switch its active timeline independently, so both directions use the
+                // timeline verified at admission and the day captured in the report.
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+                    scopeError = CompletedActionRelationshipScopeError(connection, payload, timelineId, scoped);
+                if (scopeError.Length > 0) return changes;
+
+                List<int> nativeDeltas = new List<int>();
+                foreach (Dictionary<string, object> direction in directions)
+                {
+                    Dictionary<string, object> evaluation = RelationshipEvaluateApiLocked(direction);
+                    int delta = ReadInt(evaluation, "nativeRelationDelta", 0);
+                    if (delta != 0 && !ReadBool(evaluation, "idempotent", false)) nativeDeltas.Add(delta);
+                }
+                int sharedDelta = CompletedActionSharedDelta(nativeDeltas);
+                if (sharedDelta != 0)
+                {
+                    changes.Add(new Dictionary<string, object> { ["subjectId"] = ReadString(directions[0], "subjectId", ""), ["targetId"] = ReadString(directions[0], "targetId", ""), ["delta"] = sharedDelta, ["eventId"] = "action_relationship_" + ReadString(directions[0], "actionId", "") });
+                }
+                return changes;
             }
-            int sharedDelta = CompletedActionSharedDelta(nativeDeltas);
-            if (sharedDelta != 0)
-            {
-                changes.Add(new Dictionary<string, object> { ["subjectId"] = ReadString(directions[0], "subjectId", ""), ["targetId"] = ReadString(directions[0], "targetId", ""), ["delta"] = sharedDelta, ["eventId"] = "action_relationship_" + ReadString(directions[0], "actionId", "") });
-            }
-            return changes;
+        }
+
+        private static string CompletedActionRelationshipScopeError(ReignDbConnection connection,
+            Dictionary<string, object> payload, string timelineId, bool scoped)
+        {
+            string activeTimeline = WorldSimulationService.TableExists(connection, "world_history_timelines")
+                ? ReadString(WorldSimulationStore.SelectWorldHistoryTimelines2(connection).FirstOrDefault(), "timeline_id", "") : "";
+            if (!scoped)
+                return activeTimeline.Length == 0 || activeTimeline == "main" ? "" : "timeline_required_on_fork";
+
+            if (!payload.TryGetValue("campaignId", out object rawCampaign) || rawCampaign is not string campaignId
+                || string.IsNullOrWhiteSpace(campaignId)) return "campaign_required";
+            if (string.IsNullOrWhiteSpace(timelineId)) return "timeline_required";
+            if (timelineId != activeTimeline) return "timeline_not_active";
+            if (!payload.TryGetValue("sharedActivityGeneration", out object rawGeneration) || rawGeneration is not string generation
+                || string.IsNullOrWhiteSpace(generation)) return "restore_generation_required";
+            string currentGeneration = WorldSimulationService.TableExists(connection, "memory_precision_state")
+                ? ReadString(DialogueStore.SelectMemoryPrecisionState2(connection).FirstOrDefault(), "restore_generation", "") : "";
+            if (generation != currentGeneration) return "restore_generation_mismatch";
+
+            double worldDay = ReadDouble(payload, "worldDay", double.NaN);
+            return double.IsFinite(worldDay) && worldDay > 0d ? "" : "world_day_required";
         }
 
         // Actor-toward-target first, then the reverse. Empty when the report has no
-        // relationship effect. A null timeline keeps the legacy "main" default.
-        internal static List<Dictionary<string, object>> CompletedActionRelationshipDirections(Dictionary<string, object> payload, string timelineId = null)
+        // relationship effect. Each report path supplies its own timeline.
+        internal static List<Dictionary<string, object>> CompletedActionRelationshipDirections(Dictionary<string, object> payload, string timelineId)
         {
             List<Dictionary<string, object>> directions = new List<Dictionary<string, object>>();
             if (DialogueService.IsPracticeDuelActionReport(payload)) return directions;
@@ -678,10 +719,10 @@ namespace ReignBetaServer
                     ["nativeRelation"] = ReadInt(pair.Item3, "relationToPlayer", 0),
                     ["summary"] = summary,
                     ["worldDay"] = ReadDouble(payload, "worldDay", 0d),
+                    ["timelineId"] = timelineId,
                     ["source"] = "completed_game_action",
                     ["actionId"] = actionId
                 };
-                if (timelineId != null) direction["timelineId"] = timelineId;
                 directions.Add(direction);
             }
             return directions;

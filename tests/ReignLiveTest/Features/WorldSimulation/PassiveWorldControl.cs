@@ -136,13 +136,22 @@ namespace ReignLiveTest
             string campaignId,
             string timelineId)
         {
+            var ownership = CheckpointArgument(args, "--checkpoint-ownership");
+            var source = CheckpointArgument(args, "--campaign-test-source") ?? ownership;
+            bool initialBaseline = Has(args, "--initial-baseline");
+            if (initialBaseline && (ownership == null
+                || !String(ownership, "baselineSaveName").Equals(String(ownership, "sourceSaveName"),
+                    StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException("The baseline-only drain exception requires a matching checkpoint intent.");
+            var fields = new Dictionary<string, object>
+            {
+                ["timeMode"] = "stop",
+                ["settlementWait"] = false,
+                ["autoAcknowledgeDiplomacyAnnouncements"] = true
+            };
+            if (source != null) fields["campaignTestSource"] = source;
             Dictionary<string, object> stopped = RunPassiveWorldStep(runtime, campaignId,
-                "world_time_control", new Dictionary<string, object>
-                {
-                    ["timeMode"] = "stop",
-                    ["settlementWait"] = false,
-                    ["autoAcknowledgeDiplomacyAnnouncements"] = true
-                }, 120);
+                "world_time_control", fields, 120);
             if (!IsOk(stopped)) return stopped;
             Dictionary<string, object> latestRuntime = Runtime(
                 new[] { "status", "--campaign", campaignId });
@@ -153,7 +162,7 @@ namespace ReignLiveTest
             Dictionary<string, object> drained = WaitForPassiveWorldCatchUp(
                 campaignId, timelineId, targetDay,
                 Math.Max(60, IntValue(args, "--catch-up-timeout", 900)),
-                Has(args, "--initial-baseline"));
+                initialBaseline);
             return new Dictionary<string, object>
             {
                 ["ok"] = IsOk(drained),
@@ -171,21 +180,24 @@ namespace ReignLiveTest
             string campaignId,
             string timelineId)
         {
+            var ownership = CheckpointArgument(args, "--checkpoint-ownership");
             string saveName = Value(args, "--save", "").Trim();
             if (string.IsNullOrWhiteSpace(saveName))
                 throw new InvalidOperationException("world-test checkpoint requires --save <name>.");
             Dictionary<string, object> drained = DrainPassiveWorld(
                 args, runtime, campaignId, timelineId);
-            if (!IsOk(drained)) return drained;
+            if (!IsOk(drained)) return ReportCheckpointNotSubmitted(drained, ownership);
             var saveHold = CheckpointPeriodicPollHold(campaignId, 60);
-            if (!IsOk(saveHold)) return saveHold;
+            if (!IsOk(saveHold)) return ReportCheckpointNotSubmitted(saveHold, ownership);
             Dictionary<string, object> saved = SaveGame(new[]
             {
                 "game-save", "--campaign", campaignId,
                 "--save", saveName,
                 "--wait", Math.Max(180, IntValue(args, "--save-timeout", 420))
                     .ToString(CultureInfo.InvariantCulture)
-            });
+            }, ownership);
+            if (NativeCheckpointNotSubmitted(saved, ownership))
+                return ReportCheckpointNotSubmitted(saved, ownership);
             Dictionary<string, object> finalRuntime =
                 WaitForPassiveWorldPostSaveRuntime(campaignId, saveName);
             bool postSaveRuntimeQuiesced =
@@ -214,13 +226,15 @@ namespace ReignLiveTest
             if (string.IsNullOrWhiteSpace(saveName) || string.IsNullOrWhiteSpace(prefix))
                 throw new InvalidOperationException(
                     "world-test delete-checkpoint requires --save <name> and --prefix <run-prefix>.");
-            return RunPassiveWorldStep(runtime, campaignId, "world_delete_checkpoint",
-                new Dictionary<string, object>
-                {
-                    ["saveName"] = saveName,
-                    ["expectedPrefix"] = prefix,
-                    ["confirmation"] = "delete Reign campaign-test checkpoint"
-                }, 120);
+            var fields = new Dictionary<string, object>
+            {
+                ["saveName"] = saveName,
+                ["expectedPrefix"] = prefix,
+                ["confirmation"] = "delete Reign campaign-test checkpoint"
+            };
+            var ownership = CheckpointArgument(args, "--checkpoint-ownership");
+            if (ownership != null) fields["checkpointOwnership"] = ownership;
+            return RunPassiveWorldStep(runtime, campaignId, "world_delete_checkpoint", fields, 120);
         }
 
         private static Dictionary<string, object> PassiveWorldStatus(
@@ -267,22 +281,25 @@ namespace ReignLiveTest
             int timeoutSeconds = Math.Max(120,
                 Math.Min(21600, IntValue(args, "--timeout", 7200)));
 
+            var ownership = CheckpointArgument(args, "--checkpoint-ownership");
+            var source = CheckpointArgument(args, "--campaign-test-source");
+            var fields = new Dictionary<string, object>
+            {
+                ["targetWorldDay"] = targetDay,
+                ["timeoutSeconds"] = timeoutSeconds
+            };
+            if (source != null) fields["campaignTestSource"] = source;
             Dictionary<string, object> run = RunPassiveWorldStep(
                 runtime,
                 campaignId,
                 "world_advance",
-                new Dictionary<string, object>
-                {
-                    ["targetWorldDay"] = targetDay,
-                    ["timeoutSeconds"] = timeoutSeconds
-                },
-                timeoutSeconds + 60);
-            if (!IsOk(run)) return run;
+                fields, timeoutSeconds + 60);
+            if (!IsOk(run)) return ReportCheckpointNotSubmitted(run, ownership);
 
             Dictionary<string, object> caughtUp = WaitForPassiveWorldCatchUp(
                 campaignId, timelineId, targetDay,
                 Math.Max(60, IntValue(args, "--catch-up-timeout", 900)));
-            if (!IsOk(caughtUp)) return caughtUp;
+            if (!IsOk(caughtUp)) return ReportCheckpointNotSubmitted(caughtUp, ownership);
 
             Dictionary<string, object> save = new Dictionary<string, object>
             {
@@ -296,14 +313,16 @@ namespace ReignLiveTest
                     "Reign_World_Day_" + Math.Floor(targetDay + 0.000001d)
                         .ToString("0", CultureInfo.InvariantCulture));
                 var saveHold = CheckpointPeriodicPollHold(campaignId, 60);
-                if (!IsOk(saveHold)) return saveHold;
+                if (!IsOk(saveHold)) return ReportCheckpointNotSubmitted(saveHold, ownership);
                 save = SaveGame(new[]
                 {
                     "game-save", "--campaign", campaignId,
                     "--save", saveName,
                     "--wait", Math.Max(180, IntValue(args, "--save-timeout", 420))
                         .ToString(CultureInfo.InvariantCulture)
-                });
+                }, ownership);
+                if (NativeCheckpointNotSubmitted(save, ownership))
+                    return ReportCheckpointNotSubmitted(save, ownership);
                 if (!IsOk(save)) return save;
             }
 
@@ -328,6 +347,29 @@ namespace ReignLiveTest
                 ["report"] = CompactPassiveWorldStatus(
                     finalRuntime, campaignId, timelineId)
             };
+        }
+
+        private static Dictionary<string, object> CheckpointArgument(string[] args, string flag)
+        {
+            if (!Has(args, flag)) return null;
+            return Json.Deserialize<Dictionary<string, object>>(Value(args, flag, ""))
+                ?? throw new InvalidOperationException("Campaign-test checkpoint evidence must be an object.");
+        }
+
+        private static Dictionary<string, object> ReportCheckpointNotSubmitted(
+            Dictionary<string, object> result, Dictionary<string, object> ownership)
+        {
+            if (ownership != null) result["checkpointNotSubmitted"] = String(ownership, "id");
+            return result;
+        }
+
+        private static bool NativeCheckpointNotSubmitted(
+            Dictionary<string, object> result, Dictionary<string, object> ownership)
+        {
+            if (ownership == null || IsOk(result)) return false;
+            var native = LastCompletedCommandResult(result);
+            return native.TryGetValue("nativeSaveQueued", out object queued) && queued is bool value && !value
+                && String(native, "checkpointNotSubmitted") == String(ownership, "id");
         }
 
         private static Dictionary<string, object> RunPassiveWorldStep(
@@ -774,6 +816,7 @@ namespace ReignLiveTest
                 ["error"] = FirstNonEmpty(String(result, "error"), String(value, "error")),
                 ["nativeSave"] = ReadObject(result, "nativeSave"),
                 ["saveFinalization"] = ReadObject(result, "saveFinalization"),
+                ["checkpointOwnership"] = ReadObject(result, "checkpointOwnership"),
                 ["runtime"] = CompactPassiveWorldRuntime(finalRuntime)
             };
         }

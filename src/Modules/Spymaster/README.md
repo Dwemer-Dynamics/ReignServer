@@ -24,6 +24,10 @@ All `POST`, each wrapped in Court's `CapitalCourtApi`: `/court/spymaster/memory`
 
 `EnsureSpymasterSchema`: `spymaster_mission_memory`, `foreign_agent_assignments`.
 
+Social mitigation stores `spymaster_mitigation_receipts` in the campaign database. The mission ID binds the campaign, timeline, subject, selected tag, and resolved mission terms. A rumor selection represents the tag shown in the selector. At first resolution the operation freezes all active, unexpired occurrences of that tag on the mission's timeline whose world day is at or before the resolution day. Registered timelines must be active for a first apply. The paired client also supplies its restore generation for first admission. The receipt records the matched and changed rows. The mutation, Public Standing recompute, relationship invalidation and receipt share a PostgreSQL transaction.
+
+The same mission and terms return the original result from `/court/spymaster/social/apply`. Different terms for the same campaign mission ID return a conflict. Sending `readMitigationReceipt: true` with the mission to `/court/spymaster/social/status` looks up the original receipt without applying mitigation or running social lifecycle maintenance. The lookup uses the existing capital court session gate. The client uses it after a lost reply and for interrupted or uncertain missions on later campaign ticks. A missing receipt leaves the social outcome unknown.
+
 ## Self-tests
 
 `SpymasterService.RunSpymasterSystemSelfTests`, VerificationLab suite `spymaster`. Test file compiled into the server:

@@ -548,7 +548,7 @@ namespace ReignBetaServer
                 "caseId", "memory_precision_archive_" + id, "passed", pass, "summary", id, "data", evidence));
             string campaign = "memory_archive_test_" + Guid.NewGuid().ToString("N");
             string original = "ORIGINAL_BEGIN " + new string('x', 6200) + char.ConvertFromUtf32(0x1F33F) + " ORIGINAL_END";
-            const string lastSource = "The final source says that the proposed visit has not happened. FINAL_ARCHIVE_SOURCE";
+            const string lastSource = "Correction: the proposed visit has not happened. We can visit tomorrow only after the caravan arrives. FINAL_ARCHIVE_SOURCE";
             string historical = original + " Lucon departed and declared his withdrawal permanent. He did not re-engage on the same terms.";
             string archive = NormalizeHistoricalRoleplayContinuityText(historical, 1800, true, HistoricalTextPurpose.StoredArchive);
             Check("historical_archive_preserves_whole_quoted_source_and_idempotent_scope", archive.Contains(historical, StringComparison.Ordinal)
@@ -562,7 +562,7 @@ namespace ReignBetaServer
             Check("legacy_scope_framing_is_retained_without_rewriting", NormalizeHistoricalRoleplayContinuityText(
                 legacyFramedArchive, 1800, false, HistoricalTextPurpose.StoredArchive) == legacyFramedArchive);
             var response = TestDict("ok", true, "finishReason", "stop", "content", "{\"sourceIndices\":[1,2]}");
-            var rejected = EvaluateMemoryCompactionResponse(response, new(), new() { new string('a', 1100), new string('b', 1100) }, new(), 1800, true);
+            var rejected = EvaluateMemoryCompactionResponse(response, new(), new() { new string('a', 1800), new string('b', 1800) }, new(), 1800, true);
             var selection = ReadDictionary(ReadDictionary(rejected, "compactionDiagnostic"), "selectionValidation");
             Check("oversized_valid_selection_reports_exact_budget_failure", ReadString(selection, "reason", "") == "selection_exceeds_character_budget"
                 && ReadInt(selection, "selectedCount", 0) == 2 && ReadInt(selection, "selectedCharactersWithFraming", 0) > 1800
@@ -600,6 +600,48 @@ namespace ReignBetaServer
                 string view = CompactRecentSummaryView(stored, metadata, new[] { "FINAL_ARCHIVE_SOURCE" }, 1800, out _);
                 Check("bounded_view_selects_complete_sources_without_clipping_archive", view.Length <= 1800
                     && view.Contains(lastSource, StringComparison.Ordinal) && !view.Contains("ORIGINAL_BEGIN", StringComparison.Ordinal));
+
+                var candidate = TestDict("digest", new[] {
+                    TestDict("text", "The player spoke about the proposed visit.", "sourceIndices", new[] { 1 }),
+                    TestDict("text", new string('x', 500), "sourceIndices", new[] { 2 }) });
+                var partial = CreateConversationSceneSummary(campaign, session, turns, 4L,
+                    TestDict("useMemoryLlmForConsolidation", true, "enableSemanticMemory", false, "memoryConsolidationMaxSummaryChars", 500),
+                    responder: _ => TestDict("ok", true, "content", Json.Serialize(candidate)));
+                string summaryId = ReadString(partial, "summaryId", "");
+                var partialRow = DialogueSelfTestStore.SelectSummaries4(c, TestDict("id", summaryId)).Single();
+                var payload = TryParseJsonObject(ReadString(partialRow, "payload_json", "{}"));
+                var packing = ReadDictionary(ReadDictionary(payload, "compactionDiagnostic"), "packing");
+                string packedText = ReadString(partialRow, "summary", "");
+                Check("partial_scene_persists_measured_text_and_complete_originals",
+                    ReadString(payload, "compactionStatus", "") == "partial" && ReadString(payload, "interpretationStatus", "") == "unverified"
+                    && Json.Serialize(packedText).Length == ReadInt(packing, "serializedCharacters", 0)
+                    && Json.Serialize(packedText).Length <= 500 && !packedText.Contains("FINAL_ARCHIVE_SOURCE")
+                    && OriginalCompactionRecords(partialRow, true).SequenceEqual(sources)
+                    && ReadString(DialogueSelfTestStore.SelectConversationTurns59(c).Single(), "text", "") == original,
+                    packing);
+                var recallPlan = PlanMemoryQuery("archive_npc", "archive_player", "When can we visit after the caravan arrives?", context);
+                var knowledge = new KnowledgeAccessContext { NpcId = "archive_npc", TimelineId = "archive_branch", WorldDay = 1d };
+                var recalled = ExpandPrecisionSource(c, "summaries", partialRow, recallPlan, knowledge, 99);
+                Check("linked_recall_recovers_omitted_correction_and_final_answer", recalled
+                    .SelectMany(e => e.SourceTurns)
+                    .Any(t => ReadString(t, "id", "") == "archive_last" && ReadString(t, "text", "").Contains(lastSource, StringComparison.Ordinal)));
+
+                long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                string job = EnqueueMemoryJob(c, campaign, "scene_summary", "archive_npc", "scene:archive_session", "archive_session");
+                ClaimMemoryJob(c, job, "archive_worker", now);
+                CompleteMemoryCompactionJob(c, job, "archive_worker", 1, "scene_summary", partial);
+                var background = MemoryBackgroundStatusApi(new Dictionary<string, string> { ["campaignId"] = campaign });
+                var jobRow = ReadDictionaryList(background, "jobs").SingleOrDefault(j => ReadString(j, "job_id", "") == job);
+                var jobResult = TryParseJsonObject(ReadString(jobRow, "result_json", "{}"));
+                Check("partial_job_terminal_and_distinct_from_completed",
+                    ReadInt(background, "partial", 0) == 1 && ReadInt(background, "completed", -1) == 0
+                    && ReadString(jobRow, "status", "") == "partial" && ReadInt(jobRow, "attempt_count", 0) == 1
+                    && !ReadBool(jobResult, "retryable", true)
+                    && ReadString(ReadDictionary(jobResult, "compactionDiagnostic"), "reason", "") == "attributed_digest_partial"
+                    && ClaimMemoryJob(c, job, "retry_worker", now + 5000) == null);
+                Check("consolidation_propagates_partial_and_prioritizes_incomplete",
+                    ConsolidatedMemoryCompactionStatus(new() { partial }) == "partial"
+                    && ConsolidatedMemoryCompactionStatus(new() { partial, result }) == "incomplete");
             }
             catch (Exception ex) { Check("suite_exception", false, ex.ToString()); }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
@@ -712,9 +754,14 @@ namespace ReignBetaServer
             }
             response = TestDict("ok", true, "finishReason", "stop", "content", "{\"sourceIndices\":[1,3]}");
             var accepted = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:compaction_fixture", rows, responder: Respond);
-            Check("valid_partial_selection_preserves_answer_and_qualification", ReadString(accepted, "compactionStatus", "") == "complete"
+            Check("valid_partial_selection_preserves_answer_and_qualification", ReadString(accepted, "compactionStatus", "") == "partial"
                 && !ReadBool(accepted, "coverageComplete", true) && ReadString(accepted, "summary", "").Contains("may arrive tomorrow; no payment has happened.")
                 && ReadString(accepted, "summary", "").Contains("NPC asked") && ReadString(accepted, "summary", "").Length <= 1800);
+            response["content"] = "{\"sourceIndices\":[3,2,1]}";
+            var packedSelection = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:compaction_fixture", rows, responder: Respond);
+            Check("validated_source_selection_packs_complete_records", ReadString(packedSelection, "summary", "") == ReadString(accepted, "summary", "")
+                && Json.Serialize(ReadDictionary(ReadDictionary(packedSelection, "compactionDiagnostic"), "packing")["omittedSourceIndices"]) == "[2]"
+                && ReadStringList(packedSelection, "originalSourceRecords").Count == 3);
             response = TestDict("ok", false, "error", "HTTP status 401 invalid API key");
             var unauthorized = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:compaction_fixture", rows, responder: Respond);
             Check("provider_configuration_failure_is_not_blindly_retried", !ReadBool(unauthorized, "retryable", true)
@@ -735,11 +782,161 @@ namespace ReignBetaServer
             var wrongReference = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:fixture", rows, responder: Respond);
             Check("digest_bad_reference_retains_originals", ReadString(wrongReference, "compactionStatus", "") == "incomplete"
                 && ReadString(ReadDictionary(wrongReference, "compactionDiagnostic"), "reason", "") == "digest_invalid_source_reference");
+            string unicode = string.Concat(Enumerable.Repeat(char.ConvertFromUtf32(0x1F33F), 140));
+            var entries = new[] {
+                TestDict("text", "NPC asked whether the caravan arrived.", "sourceIndices", new[] { 1 }),
+                TestDict("text", unicode, "sourceIndices", new[] { 2, 3 }),
+                TestDict("text", "Player said: \"tomorrow\" is possible.", "sourceIndices", new[] { 3 }) };
+            response["content"] = Json.Serialize(TestDict("digest", entries));
+            string Frame(string text) => "Published scene framing: " + text;
+            var packed = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:fixture", rows, responder: Respond, publicationText: Frame);
+            var packing = ReadDictionary(ReadDictionary(packed, "compactionDiagnostic"), "packing");
+            string packedText = ReadString(packed, "summary", "");
+            var repeated = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:fixture", rows, responder: Respond, publicationText: Frame);
+            Check("serialized_unicode_framing_packs_deterministically", packedText.Contains("[records 1] NPC asked")
+                && packedText.Contains("[records 3] Player said: \"tomorrow\" is possible.") && !packedText.Contains(unicode)
+                && packedText == ReadString(repeated, "summary", "")
+                && Json.Serialize(packing) == Json.Serialize(ReadDictionary(ReadDictionary(repeated, "compactionDiagnostic"), "packing"))
+                && Json.Serialize(packing["selectedSourceIndices"]) == "[1,3]" && Json.Serialize(packing["omittedSourceIndices"]) == "[2]"
+                && Json.Serialize(packing["omittedEntryIndices"]) == "[2]" && ReadInt(packing, "publishedEntryCount", 0) == 2
+                && ReadInt(packing, "serializedCharacters", 0) == Json.Serialize(Frame(packedText)).Length
+                && Json.Serialize(Frame(packedText)).Length <= 1800 && ReadString(packed, "interpretationStatus", "") == "unverified");
+            // Framing alone can push otherwise admissible text over the exact boundary.
+            var onlyFirst = TestDict("digest", new[] { entries[0] });
+            int boundary = Json.Serialize(Frame(packedText.Split('\n')[0] + "\n[records 1] NPC asked whether the caravan arrived.")).Length;
+            var exact = AcceptAttributedMemoryDigest(onlyFirst, rows, new() { new string('a', 3000) }, new(), boundary, out _, Frame);
+            var overByOne = AcceptAttributedMemoryDigest(onlyFirst, rows, new() { new string('a', 3000) }, new(), boundary - 1, out _, Frame);
+            Check("final_framed_json_exact_boundary", exact != null && overByOne == null);
+
+            response["content"] = Json.Serialize(TestDict("digest", new[] { entries[0],
+                TestDict("text", new string('z', 4000), "sourceIndices", new[] { 2, 2 }), entries[2] }));
+            var malformedOversized = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:fixture", rows, responder: Respond);
+            Check("malformed_would_be_omission_rejects_entire_candidate", ReadString(malformedOversized, "summary", "") == retained
+                && ReadString(ReadDictionary(malformedOversized, "compactionDiagnostic"), "reason", "") == "digest_invalid_source_reference");
+            response["content"] = "{\"digest\":[{\"text\":\"Short valid entry\",\"sourceIndices\":[1]},"
+                + "{\"text\":\"" + new string('z', 4000) + "\",\"sourceIndices\":[0],\"sourceIndices\":[2]}]}";
+            var duplicateMember = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:fixture", rows, responder: Respond);
+            Check("raw_duplicate_digest_member_rejects_entire_candidate",
+                ReadString(duplicateMember, "summary", "") == retained
+                && ReadString(duplicateMember, "compactionStatus", "") == "incomplete"
+                && ReadString(ReadDictionary(duplicateMember, "compactionDiagnostic"), "reason", "") == "duplicate_digest_member");
+            response["content"] = Json.Serialize(TestDict("digest", new[] { TestDict("text", new string('z', 4000), "sourceIndices", new[] { 2 }) }));
+            var sourceExtract = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:fixture", rows, responder: Respond);
+            Check("oversized_digest_can_fall_back_to_complete_source_records", ReadString(sourceExtract, "summary", "") == ReadString(accepted, "summary", "")
+                && Json.Serialize(ReadDictionary(ReadDictionary(sourceExtract, "compactionDiagnostic"), "packing")["omittedEntryIndices"]) == "[1]");
+            string omittedArcSource = new string('a', 65000);
+            var arcScenes = new List<Dictionary<string, object>>
+            {
+                TestDict("summary_id", "scene_one", "ts", 1L, "summary", "Prior short selection.",
+                    "payload_json", Json.Serialize(TestDict("method", "source_bound_selection",
+                        "originalSourceRecords", new[] { "An exact original record.", omittedArcSource }))),
+                TestDict("summary_id", "scene_two", "ts", 2L, "summary", "Second record."),
+                TestDict("summary_id", "scene_three", "ts", 3L, "summary", "Third record."),
+                TestDict("summary_id", "scene_four", "ts", 4L, "summary", "Fourth record.")
+            };
+            int beforeArc = calls;
+            string arcScope = "arc:npc:player:fixture";
+            var arc = DialogueService.BuildMiddleTermSummary(settings, "npc", arcScope, arcScenes,
+                responder: Respond, publicationText: Frame);
+            string arcText = ReadString(arc, "summary", "");
+            Check("archive_above_provider_input_limit_keeps_previously_local_arc_provider_free",
+                calls == beforeArc && ReadString(arc, "compactionStatus", "") == "partial"
+                && ReadString(ReadDictionary(arc, "compactionDiagnostic"), "reason", "") == "expanded_arc_sources_previously_fit_locally"
+                && arcText.Contains("An exact original record.") && !arcText.Contains("Prior short selection.")
+                && ReadStringList(arc, "originalSourceRecords").Contains(omittedArcSource)
+                && Json.Serialize(Frame(arcText)).Length <= 1800);
+            var disabledArcSettings = new Dictionary<string, object>(settings) { ["useMemoryLlmForConsolidation"] = false };
+            var disabledLocalArc = DialogueService.BuildMiddleTermSummary(disabledArcSettings, "npc", arcScope, arcScenes,
+                responder: Respond, publicationText: Frame);
+            Check("disabled_generation_preserves_bounded_local_arc",
+                calls == beforeArc && ReadString(disabledLocalArc, "summary", "") == arcText
+                && ReadString(disabledLocalArc, "compactionStatus", "") == "partial");
+            var oversizedArcScenes = Enumerable.Range(1, 4).Select(index =>
+                TestDict("summary_id", "scene_" + index, "ts", (long)index, "summary", "Prior short selection.",
+                    "payload_json", Json.Serialize(TestDict("method", "source_bound_selection",
+                        "originalSourceRecords", new[] { new string('a', 2000 + index) })))).ToList();
+            var noArc = DialogueService.BuildMiddleTermSummary(settings, "npc", arcScope, oversizedArcScenes,
+                responder: Respond, publicationText: Frame);
+            Check("previously_local_arc_without_fitting_records_preserves_archive_without_publication",
+                calls == beforeArc && ReadString(noArc, "summary", "") == ""
+                && ReadString(noArc, "compactionStatus", "") == "incomplete"
+                && ReadString(ReadDictionary(noArc, "compactionDiagnostic"), "reason", "") == "expanded_local_arc_has_no_fitting_records");
+            var disabledNoArc = DialogueService.BuildMiddleTermSummary(disabledArcSettings, "npc", arcScope, oversizedArcScenes,
+                responder: Respond, publicationText: Frame);
+            Check("disabled_generation_leaves_arc_when_no_complete_record_fits",
+                calls == beforeArc && ReadString(disabledNoArc, "summary", "") == ""
+                && ReadString(disabledNoArc, "compactionStatus", "") == "incomplete");
+            arcScenes[0]["summary"] = new string('b', 4000);
+            arcScenes[0]["payload_json"] = Json.Serialize(TestDict("method", "source_bound_selection",
+                "originalSourceRecords", new[] { "An exact original record.", new string('a', 4000) }));
+            response["content"] = "{\"sourceIndices\":[1]}";
+            var providerArc = DialogueService.BuildMiddleTermSummary(settings, "npc", arcScope, arcScenes,
+                responder: Respond, publicationText: Frame);
+            Check("arc_that_already_needed_provider_keeps_normal_dispatch",
+                calls == beforeArc + 1
+                && ReadBool(ReadDictionary(providerArc, "compactionDiagnostic"), "providerAttempted", false));
+            var legacySceneText = Enumerable.Range(1, 4)
+                .Select(index => "Displayed scene " + index + " " + new string((char)('a' + index), 400)).ToList();
+            var legacySceneRows = legacySceneText.Select((value, index) =>
+                TestDict("summary_id", "legacy_scene_" + index, "ts", (long)index, "summary", value)).ToList();
+            string missingLegacyOriginal = "Uncited original: " + new string('z', 4000);
+            legacySceneRows[0]["payload_json"] = Json.Serialize(TestDict("method", "source_bound_selection",
+                "originalSourceRecords", new[] { legacySceneText[0], missingLegacyOriginal }));
+            response["content"] = Json.Serialize(TestDict("summary", string.Join("\n---\n", legacySceneText)));
+            int beforeLegacyArc = calls;
+            var legacyArc = DialogueService.BuildMiddleTermSummary(settings, "npc", arcScope, legacySceneRows,
+                responder: Respond, publicationText: Frame);
+            Check("legacy_arc_reply_cannot_certify_display_rows_in_place_of_reopened_originals",
+                calls == beforeLegacyArc + 1
+                && ReadString(legacyArc, "compactionStatus", "") == "incomplete"
+                && !ReadBool(legacyArc, "candidateCoverageComplete", true)
+                && ReadString(ReadDictionary(legacyArc, "compactionDiagnostic"), "reason", "") == "unsupported_summary"
+                && ReadString(legacyArc, "summary", "").Contains(missingLegacyOriginal, StringComparison.Ordinal));
+
+            const string protectedName = "\u015Aeris";
+            const string protectedId = "fixture_private_hero";
+            const string privateStatus = "The stranger's wealth is the secret vault keyword.";
+            var unknownIdentity = BuildKnowledgeAccessContext("npc", protectedId, "",
+                TestDict("mainHeroStringId", protectedId, "mainHeroName", protectedName,
+                    "identityView", TestDict("knowsIdentity", false)));
+            string escapedArchive = Json.Serialize(TestDict("method", "source_bound_selection",
+                "originalSourceRecords", new[] { "A known public comment.", new string('p', 4000),
+                    protectedName + " is the hidden canonical name.", privateStatus }))
+                .Replace(protectedName, "\\u015Aeris", StringComparison.Ordinal);
+            arcScenes[0]["payload_json"] = escapedArchive;
+            arcScenes[0]["participants_json"] = Json.Serialize(new[] { "npc", protectedId });
+            response["content"] = "{\"sourceIndices\":[1]}";
+            int beforePrivateArc = calls;
+            var privateArc = DialogueService.BuildMiddleTermSummary(settings, "npc", "arc:npc:" + protectedId + ":fixture",
+                arcScenes, responder: Respond, publicationText: Frame, sourceKnowledge: unknownIdentity);
+            string projectedPrompt = string.Join("\n", ReadDictionaryList(request, "messages")
+                .Select(message => ReadString(message, "content", "")));
+            Check("unknown_identity_arc_filters_decoded_archive_and_group_before_dispatch",
+                calls == beforePrivateArc + 1 && unknownIdentity.PlayerIdentityUnknown
+                && escapedArchive.Contains("\\u015A", StringComparison.OrdinalIgnoreCase)
+                && projectedPrompt.Contains("A known public comment.", StringComparison.Ordinal)
+                && !projectedPrompt.Contains(protectedName, StringComparison.OrdinalIgnoreCase)
+                && !projectedPrompt.Contains(protectedId, StringComparison.OrdinalIgnoreCase)
+                && !projectedPrompt.Contains("secret vault keyword", StringComparison.Ordinal)
+                && !ReadStringList(privateArc, "originalSourceRecords").Contains(privateStatus)
+                && ReadString(arcScenes[0], "payload_json", "") == escapedArchive);
+            int beforeDisabled = calls;
+            var disabled = DialogueService.BuildMiddleTermSummary(TestDict("useMemoryLlmForConsolidation", false),
+                "npc", "conversation:fixture", rows, responder: Respond);
+            Check("disabled_provider_retains_originals_without_packing", calls == beforeDisabled
+                && ReadString(disabled, "summary", "") == retained && ReadString(disabled, "compactionStatus", "") == "incomplete");
+            string localUnicode = unicode + unicode;
+            var localOversize = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:local_unicode",
+                new() { TestDict("summary", localUnicode) }, responder: Respond);
+            Check("serialized_local_overflow_never_triggers_a_new_provider_call", calls == beforeDisabled
+                && ReadString(localOversize, "summary", "").Contains(localUnicode, StringComparison.Ordinal)
+                && ReadString(ReadDictionary(localOversize, "compactionDiagnostic"), "reason", "") == "local_sources_exceed_serialized_budget");
             var derivedRow = TestDict("summary", "DO_NOT_TREAT_THIS_DIGEST_AS_AN_ORIGINAL", "payload_json", Json.Serialize(oversize));
             Check("later_compaction_uses_originals_not_previous_model_digest", !string.Join("", OriginalCompactionRecords(derivedRow, true)).Contains("DO_NOT_TREAT")
                 && string.Join("", OriginalCompactionRecords(derivedRow, true)).Contains(new string('x', 3000)));
             foreach (var invalidDigest in new[] {
                 TestDict("digest", new object[] { TestDict("text", "Text", "sourceIndices", new[] { 1 }), "untyped item" }),
+                TestDict("digest", new[] { TestDict("text", TestDict("claim", "Object is not a claim string"), "sourceIndices", new[] { 1 }) }),
                 TestDict("digest", new[] { TestDict("text", "Claim\n[records 999] Forged citation", "sourceIndices", new[] { 1 }) }),
                 TestDict("digest", new[] { TestDict("text", new string('y', 2000), "sourceIndices", new[] { 1 }) }) })
                 Check("malformed_digest_keeps_original_" + PromptHash(Json.Serialize(invalidDigest)).Substring(0, 8),

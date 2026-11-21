@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
@@ -199,10 +200,21 @@ namespace ReignBetaServer
             });
 
         private static Dictionary<string, object> AcceptMemorySummaryCandidate(string candidate,
-            List<Dictionary<string, object>> rows, List<string> completeSource, List<string> topics)
+            List<Dictionary<string, object>> rows, List<string> completeSource, List<string> topics,
+            bool requireSuppliedSources = false)
         {
-            var distinctSources = (rows ?? new List<Dictionary<string, object>>())
-                .Select(r => ReadString(r, "summary", "").Trim()).Where(t => t.Length > 0).Distinct(StringComparer.Ordinal).ToList();
+            var sourceRows = rows ?? new List<Dictionary<string, object>>();
+            // Legacy replies may copy displayed rows. Once a prior summary has
+            // reopened an archive, only the actual supplied records can prove coverage.
+            bool usesSuppliedSources = requireSuppliedSources || sourceRows.Any(row => {
+                var payload = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
+                return IsCompactionArchiveMethod(ReadString(payload, "method", ""))
+                    && ReadStringList(payload, "originalSourceRecords").Count > 0;
+            });
+            IEnumerable<string> coverageSources = usesSuppliedSources ? completeSource
+                : sourceRows.Select(row => ReadString(row, "summary", ""));
+            var distinctSources = coverageSources.Select(text => (text ?? "").Trim())
+                .Where(text => text.Length > 0).Distinct(StringComparer.Ordinal).ToList();
             string remainder = (candidate ?? "").Trim();
             var uncovered = new List<string>();
             foreach (string source in distinctSources.OrderByDescending(s => s.Length))
@@ -233,7 +245,8 @@ namespace ReignBetaServer
         // Selection completeness and source coverage are deliberately separate.
         internal static Dictionary<string, object> AcceptMemorySummarySelection(Dictionary<string, object> candidate,
             List<Dictionary<string, object>> rows, List<string> sources, List<string> topics, int maxChars,
-            Dictionary<string, object> selectionDiagnostic = null)
+            Dictionary<string, object> selectionDiagnostic = null, Func<string, string> publicationText = null,
+            bool allowPartialPacking = false)
         {
             Dictionary<string, object> Reject(string reason)
             {
@@ -256,7 +269,6 @@ namespace ReignBetaServer
             }
             if (selected.Count == 0) return Reject("empty_selection");
             var indices = selected.OrderBy(i => i).ToList();
-            bool complete = indices.Count == sources.Count;
             string text = MemorySummarySelectionText(sources, indices);
             if (selectionDiagnostic != null)
             {
@@ -265,13 +277,34 @@ namespace ReignBetaServer
                 selectionDiagnostic["selectedCharactersWithFraming"] = text.Length;
                 selectionDiagnostic["selectedCount"] = indices.Count;
             }
-            if (text.Length > maxChars) return Reject("selection_exceeds_character_budget");
-            return TestDict("summary", text, "tags", topics, "confidence", 1d,
+            if (!MemorySummaryFits(text, maxChars, publicationText))
+            {
+                if (!allowPartialPacking) return Reject("selection_exceeds_character_budget");
+                indices = PackMemorySummaryUnits(indices, units => MemorySummarySelectionText(sources, units),
+                    maxChars, publicationText);
+                if (indices.Count == 0) return Reject("selection_exceeds_character_budget");
+            }
+            return CreateMemorySourceSelection(rows, sources, topics, indices, maxChars, publicationText);
+        }
+
+        private static Dictionary<string, object> CreateMemorySourceSelection(List<Dictionary<string, object>> rows,
+            List<string> sources, List<string> topics, List<int> indices, int maxChars, Func<string, string> publicationText)
+        {
+            string text = MemorySummarySelectionText(sources, indices);
+            bool complete = indices.Count == sources.Count;
+            var result = TestDict("summary", text, "tags", topics, "confidence", 1d,
                 "method", "source_bound_selection", "coverageComplete", complete,
                 "sourceCoverage", complete ? "all_records" : "selected_records",
                 "selectedSourceIndices", indices, "sourceItemCount", sources.Count,
-                "compactionStatus", "complete", "retryable", false,
+                "compactionStatus", complete ? "complete" : "partial", "retryable", false,
                 "sourceHash", MemorySourceHash(rows), "processingVersion", MemoryPrecisionVersion);
+            if (!complete)
+            {
+                result["originalSourceRecords"] = sources.ToArray();
+                result["originalsRetained"] = true;
+                result["packing"] = MemoryPackingReceipt(sources.Count, indices, text, maxChars, publicationText);
+            }
+            return result;
         }
 
         private static string MemorySummarySelectionText(List<string> sources, List<int> indices)
@@ -280,6 +313,43 @@ namespace ReignBetaServer
                 ? "Original source records (reported speech remains attributed):\n"
                 : "Selected original source records; partial coverage. Other answers, conditions and corrections may remain in the linked history; absence here is not evidence they never occurred.\n";
             return prefix + string.Join("\n---\n", indices.Select(i => sources[i - 1]));
+        }
+
+        private static bool MemorySummaryFits(string text, int maxChars, Func<string, string> publicationText,
+            int exclusiveRenderedLimit = int.MaxValue)
+        {
+            string published = publicationText == null ? text : publicationText(text);
+            return published.Length <= maxChars && published.Length < exclusiveRenderedLimit && !string.IsNullOrWhiteSpace(published)
+                && Json.Serialize(published).Length <= maxChars;
+        }
+
+        // Validate every unit before packing. Skipping one oversized unit leaves
+        // room for later entries without changing their order or cutting text.
+        private static List<int> PackMemorySummaryUnits(IEnumerable<int> candidates, Func<List<int>, string> render,
+            int maxChars, Func<string, string> publicationText, int exclusiveRenderedLimit = int.MaxValue,
+            int maximumUnits = int.MaxValue)
+        {
+            var packed = new List<int>();
+            foreach (int index in candidates)
+            {
+                packed.Add(index);
+                if (!MemorySummaryFits(render(packed), maxChars, publicationText, exclusiveRenderedLimit))
+                    packed.RemoveAt(packed.Count - 1);
+                else if (packed.Count == maximumUnits)
+                    break;
+            }
+            return packed;
+        }
+
+        private static Dictionary<string, object> MemoryPackingReceipt(int sourceCount, IEnumerable<int> selected,
+            string text, int maxChars, Func<string, string> publicationText)
+        {
+            var indices = selected.Distinct().OrderBy(index => index).ToArray();
+            string published = publicationText == null ? text : publicationText(text);
+            return TestDict("selectedSourceIndices", indices,
+                "omittedSourceIndices", Enumerable.Range(1, sourceCount).Except(indices).ToArray(),
+                "sourceItemCount", sourceCount, "originalsRetained", true, "renderedCharacters", published.Length,
+                "serializedCharacters", Json.Serialize(published).Length, "maximumCharacters", maxChars);
         }
 
         internal static Dictionary<string, object> MemoryCompactionOutcome(Dictionary<string, object> result,
@@ -295,11 +365,14 @@ namespace ReignBetaServer
                 "responseCacheHit", ReadBool(ReadDictionary(provider, "cache"), "idempotencyCacheHit", false),
                 "outputTokens", usage == null ? null : (object)ReadInt(usage, "completion_tokens", ReadInt(usage, "output_tokens", 0)),
                 "reasoningTokens", outputDetails == null ? null : (object)ReadInt(outputDetails, "reasoning_tokens", 0));
+            if (result.Remove("packing", out object packing))
+                ReadDictionary(result, "compactionDiagnostic")["packing"] = packing;
             return result;
         }
 
         internal static Dictionary<string, object> EvaluateMemoryCompactionResponse(Dictionary<string, object> provider,
-            List<Dictionary<string, object>> rows, List<string> sources, List<string> topics, int maxChars, bool dialogueDerived)
+            List<Dictionary<string, object>> rows, List<string> sources, List<string> topics, int maxChars, bool dialogueDerived,
+            Func<string, string> publicationText = null, bool requireSuppliedSources = false)
         {
             var retained = ExtractiveMemoryFallback(sources, topics);
             string finish = ReadString(provider, "finishReason", "").ToLowerInvariant();
@@ -312,16 +385,22 @@ namespace ReignBetaServer
                 bool transient = LlmProviderService.IsTransientLlmFailure(ReadString(provider, "error", ""));
                 return MemoryCompactionOutcome(retained, transient ? "provider_transient_failure" : "provider_failure", provider, transient);
             }
-            var parsed = TryParseJsonObject(ReadString(provider, "content", ""));
+            string responseText = ReadString(provider, "content", "");
+            var parsed = TryParseJsonObject(responseText);
             if (parsed == null) return MemoryCompactionOutcome(retained, "malformed_response", provider);
             if (parsed.ContainsKey("digest"))
             {
-                var digest = AcceptAttributedMemoryDigest(parsed, rows, sources, topics, maxChars, out string rejection);
-                return MemoryCompactionOutcome(digest ?? retained, digest == null ? rejection : "attributed_digest_accepted", provider);
+                if (MemoryDigestHasDuplicateMembers(responseText))
+                    return MemoryCompactionOutcome(retained, "duplicate_digest_member", provider);
+                var digest = AcceptAttributedMemoryDigest(parsed, rows, sources, topics, maxChars, out string reason,
+                    publicationText);
+                return MemoryCompactionOutcome(digest ?? retained, reason, provider);
             }
             var selectionDiagnostic = new Dictionary<string, object>();
-            var selected = AcceptMemorySummarySelection(parsed, rows, sources, topics, maxChars, selectionDiagnostic);
-            if (selected != null) return MemoryCompactionOutcome(selected, "source_selection_accepted", provider);
+            var selected = AcceptMemorySummarySelection(parsed, rows, sources, topics, maxChars, selectionDiagnostic,
+                publicationText, allowPartialPacking: true);
+            if (selected != null) return MemoryCompactionOutcome(selected,
+                ReadBool(selected, "coverageComplete", false) ? "source_selection_accepted" : "source_selection_partial", provider);
             if (parsed.TryGetValue("sourceIndices", out var raw))
             {
                 bool empty = raw is not string && raw is System.Collections.IEnumerable list && !list.Cast<object>().Any();
@@ -332,11 +411,11 @@ namespace ReignBetaServer
             string summary = ReadString(parsed, "summary", "");
             if (!string.IsNullOrWhiteSpace(summary) && summary.Trim().Length <= maxChars)
             {
-                var accepted = AcceptMemorySummaryCandidate(summary, rows, sources, topics);
+                var accepted = AcceptMemorySummaryCandidate(summary, rows, sources, topics, requireSuppliedSources);
                 if (ReadString(accepted, "compactionStatus", "") == "complete")
                 {
                     if (dialogueDerived) accepted["summary"] = DialogueService.EnsureConversationSummaryProvenance(ReadString(accepted, "summary", ""), maxChars);
-                    if (ReadString(accepted, "summary", "").Length > maxChars)
+                    if (!MemorySummaryFits(ReadString(accepted, "summary", ""), maxChars, publicationText))
                         return MemoryCompactionOutcome(retained, "summary_exceeds_budget", provider);
                     return MemoryCompactionOutcome(accepted, "source_extract_accepted", provider);
                 }
@@ -347,57 +426,113 @@ namespace ReignBetaServer
             return MemoryCompactionOutcome(retained, "missing_source_selection", provider);
         }
 
-        private static Dictionary<string, object> AcceptAttributedMemoryDigest(Dictionary<string, object> candidate,
-            List<Dictionary<string, object>> rows, List<string> sources, List<string> topics, int maxChars, out string rejection)
+        private static bool MemoryDigestHasDuplicateMembers(string responseText)
         {
-            rejection = "invalid_digest_shape";
+            // Read the already-parsed envelope as raw JSON so repeated entry
+            // fields cannot be overwritten before the digest is checked.
+            using var document = JsonDocument.Parse(UnwrapJsonResponse(responseText));
+            var digest = document.RootElement.GetProperty("digest");
+            if (digest.ValueKind != JsonValueKind.Array) return false;
+            foreach (var entry in digest.EnumerateArray())
+            {
+                if (entry.ValueKind != JsonValueKind.Object) continue;
+                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (entry.EnumerateObject().Any(property => !names.Add(property.Name))) return true;
+            }
+            return false;
+        }
+
+        private static Dictionary<string, object> AcceptAttributedMemoryDigest(Dictionary<string, object> candidate,
+            List<Dictionary<string, object>> rows, List<string> sources, List<string> topics, int maxChars, out string reason,
+            Func<string, string> publicationText = null)
+        {
+            reason = "invalid_digest_shape";
             var entries = ReadDictionaryList(candidate, "digest");
             if (entries.Count == 0 || entries.Count > 24 || !candidate.TryGetValue("digest", out var rawEntries)
                 || rawEntries is string || rawEntries is not System.Collections.IEnumerable entryValues
                 || entryValues.Cast<object>().Count() != entries.Count) return null;
             const string header = "MODEL-INTERPRETED DIGEST — not independently verified or lossless. Original dated statements control authorship, terms and corrections; absence here proves nothing.\n";
-            var text = new StringBuilder(header);
-            var cited = new HashSet<int>();
+            var validated = new List<(string Line, List<int> References)>();
             foreach (var entry in entries)
             {
-                string claim = Regex.Replace(ReadString(entry, "text", ""), @"[\p{Cc}\p{Zl}\p{Zp}]+", " ").Trim();
+                if (!entry.TryGetValue("text", out var rawClaim) || rawClaim is not string claimText) return null;
+                string claim = Regex.Replace(claimText, @"[\p{Cc}\p{Zl}\p{Zp}]+", " ").Trim();
                 if (Regex.IsMatch(claim, @"\[\s*records\b", RegexOptions.IgnoreCase))
-                { rejection = "digest_embedded_source_label"; return null; }
+                { reason = "digest_embedded_source_label"; return null; }
                 if (claim.Length == 0 || !entry.TryGetValue("sourceIndices", out var raw)
                     || raw is string || raw is not System.Collections.IEnumerable indices) return null;
                 var refs = new List<int>();
                 foreach (object value in indices)
                 {
-                    if (!int.TryParse(Convert.ToString(value, CultureInfo.InvariantCulture), out int index)
+                    if (!int.TryParse(Convert.ToString(value, CultureInfo.InvariantCulture), NumberStyles.None,
+                            CultureInfo.InvariantCulture, out int index)
                         || index < 1 || index > sources.Count || refs.Contains(index))
-                    { rejection = "digest_invalid_source_reference"; return null; }
-                    refs.Add(index); cited.Add(index);
+                    { reason = "digest_invalid_source_reference"; return null; }
+                    refs.Add(index);
                 }
-                if (refs.Count == 0) { rejection = "digest_missing_source_reference"; return null; }
+                if (refs.Count == 0) { reason = "digest_missing_source_reference"; return null; }
                 // This checks source membership only. It cannot establish that the
                 // prose is entailed, that all conditions survived, or who agreed.
-                text.Append("[records ").Append(string.Join(",", refs)).Append("] ").AppendLine(claim);
+                validated.Add(("[records " + string.Join(",", refs) + "] " + claim, refs));
             }
-            if (text.Length > maxChars) { rejection = "digest_exceeds_character_budget"; return null; }
-            if (text.Length >= string.Join("\n---\n", sources).Length)
-            { rejection = "digest_does_not_compress"; return null; }
-            rejection = "";
-            return TestDict("summary", text.ToString().TrimEnd(), "tags", topics, "confidence", 0.5d,
-                "method", "model_attributed_digest", "interpretationStatus", "unverified", "coverageComplete", false,
-                "sourceCoverage", "semantic_digest_not_lossless", "selectedSourceIndices", cited.OrderBy(i => i).ToArray(),
-                "sourceItemCount", sources.Count, "originalSourceRecords", sources.ToArray(), "originalsRetained", true,
-                "compactionStatus", "complete", "retryable", false, "sourceHash", MemorySourceHash(rows),
-                "processingVersion", "attributed-digest-v1", "claimEntailmentVerified", false);
+            int archiveCharacters = string.Join("\n---\n", sources).Length;
+            var candidateIndices = Enumerable.Range(1, validated.Count).ToList();
+            string Render(List<int> units) => header + string.Join("\n", units.Select(index => validated[index - 1].Line));
+            string candidateText = Render(candidateIndices);
+            var packed = candidateIndices;
+            if (!MemorySummaryFits(candidateText, maxChars, publicationText))
+                packed = PackMemorySummaryUnits(candidateIndices, Render, maxChars, publicationText, archiveCharacters);
+            else if (!MemorySummaryFits(candidateText, maxChars, publicationText, archiveCharacters))
+            { reason = "digest_does_not_compress"; return null; }
+
+            Dictionary<string, object> result;
+            Dictionary<string, object> receipt;
+            if (packed.Count == 0)
+            {
+                reason = "digest_exceeds_character_budget";
+                var records = PackMemorySummaryUnits(Enumerable.Range(1, sources.Count),
+                    units => MemorySummarySelectionText(sources, units), maxChars, publicationText);
+                if (records.Count == 0) return null;
+                result = CreateMemorySourceSelection(rows, sources, topics, records, maxChars, publicationText);
+                receipt = MemoryPackingReceipt(sources.Count, records, ReadString(result, "summary", ""), maxChars, publicationText);
+                reason = "digest_budget_source_extract";
+            }
+            else
+            {
+                string text = Render(packed);
+                var cited = packed.SelectMany(index => validated[index - 1].References)
+                    .Distinct().OrderBy(index => index).ToArray();
+                bool partial = packed.Count < validated.Count || cited.Length < sources.Count;
+                reason = partial ? "attributed_digest_partial" : "attributed_digest_accepted";
+                result = TestDict("summary", text, "tags", topics, "confidence", 0.5d,
+                    "method", "model_attributed_digest", "interpretationStatus", "unverified", "coverageComplete", false,
+                    "sourceCoverage", "semantic_digest_not_lossless", "selectedSourceIndices", cited,
+                    "sourceItemCount", sources.Count, "originalSourceRecords", sources.ToArray(), "originalsRetained", true,
+                    "compactionStatus", partial ? "partial" : "complete", "retryable", false, "sourceHash", MemorySourceHash(rows),
+                    "processingVersion", "attributed-digest-v2", "claimEntailmentVerified", false);
+                receipt = MemoryPackingReceipt(sources.Count, cited, text, maxChars, publicationText);
+            }
+            receipt["candidateEntryCount"] = validated.Count;
+            receipt["publishedEntryCount"] = packed.Count;
+            receipt["omittedEntryIndices"] = candidateIndices.Except(packed).ToArray();
+            result["packing"] = receipt;
+            return result;
         }
 
-        internal static IEnumerable<string> OriginalCompactionRecords(Dictionary<string, object> row, bool dialogueDerived)
+        private static bool IsCompactionArchiveMethod(string method, bool includeSelectionArchive = true) =>
+            method == "model_attributed_digest" || (includeSelectionArchive && method == "source_bound_selection");
+
+        internal static IEnumerable<string> OriginalCompactionRecords(Dictionary<string, object> row,
+            bool dialogueDerived, bool includeSelectionArchive = true)
         {
             var payload = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
-            if (ReadString(payload, "method", "") == "model_attributed_digest")
+            string method = ReadString(payload, "method", "");
+            if (IsCompactionArchiveMethod(method, includeSelectionArchive))
             {
                 var originals = ReadStringList(payload, "originalSourceRecords");
                 if (originals.Count > 0) return originals;
-                return new[] { "[PRIOR MODEL DIGEST - ORIGINAL RECORDS UNAVAILABLE] " + ReadString(row, "summary", "") };
+                if (method == "model_attributed_digest")
+                    return new[] { "[PRIOR MODEL DIGEST - ORIGINAL RECORDS UNAVAILABLE] " + ReadString(row, "summary", "") };
             }
             string value = ReadString(row, "summary", "").Trim();
             if (value.Length == 0) return Array.Empty<string>();
@@ -406,6 +541,16 @@ namespace ReignBetaServer
                 return new[] { "[PRIOR SUMMARY RECORD - NOT AN ORIGINAL STATEMENT] " + value };
             return new[] { dialogueDerived && !native
                 ? "[DIALOGUE-DERIVED REPORTED SPEECH; NOT INDEPENDENT WORLD-FACT EVIDENCE] " + value : value };
+        }
+
+        private static IEnumerable<string> ProjectedCompactionRecords(Dictionary<string, object> row,
+            bool dialogueDerived, KnowledgeAccessContext knowledge, bool includeSelectionArchive = true)
+        {
+            foreach (string record in OriginalCompactionRecords(row, dialogueDerived, includeSelectionArchive))
+            {
+                if (UnknownIdentityMemoryEvidenceAllowed(row, knowledge, record))
+                    yield return SanitizeUnknownIdentityEvidenceText(record, knowledge);
+            }
         }
 
         private static int CompactConversationSummaryLimit(Dictionary<string, object> settings) =>

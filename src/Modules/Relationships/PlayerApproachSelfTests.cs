@@ -300,13 +300,37 @@ namespace ReignBetaServer
                     Check("native_observation_immutable", !ReadBool(PlayerApproachDecisionApi(acknowledgment), "ok", true), "A retained native observation cannot be replaced by different before/after values.");
                     var cadenceInput = TestDict("campaignId", campaign, "timelineId", "cadence_test", "playerId", "player", "worldDay", 1d,
                         "kind", "shared", "candidates", new[] { TestDict("heroId", "observer", "alive", true, "adult", true, "free", true, "coPresent", true, "known", true) });
+                    var witnessedAttention = Unit("npc", "witnessed_before_contact", 0);
+                    witnessedAttention.Payload["timelineId"] = "cadence_test";
+                    RecordAcceptedPlayerAttention(c, witnessedAttention, Sources("npc", "witnessed_before_contact_source"));
+                    var noContact = PlayerApproachEvaluateApi(cadenceInput);
+                    Check("shared_approach_requires_direct_contact", ReadBool(noContact, "ok", false)
+                        && ReadDictionaryList(noContact, "checks").Count == 0 && ReadDictionaryList(noContact, "requests").Count == 0
+                        && ApproachState(c, "cadence_test", "cadence:player:observer").Count == 0,
+                        "A native-known observer who witnessed the player's attention still has no jealousy cadence, roll or invitation without prior contact.");
+
+                    const string preContactRequest = "old_request_without_contact";
+                    PutApproachState(c, "cadence_test", "request:" + preContactRequest,
+                        TestDict("requestId", preContactRequest, "playerId", "player", "kind", "shared", "status", "pending",
+                            "heroes", new[] { TestDict("heroId", "observer", "lastContact", TestDict(), "penalty", 8) }));
+                    var preContactDecline = CloneDictionary(decline);
+                    preContactDecline["timelineId"] = "cadence_test";
+                    preContactDecline["requestId"] = preContactRequest;
+                    var cancelledPreContactRequest = ReadDictionary(PlayerApproachDecisionApi(preContactDecline), "request");
+                    Check("legacy_unmet_jealousy_invitation_cancels", ReadString(cancelledPreContactRequest, "status", "") == "cancelled"
+                        && ReadDictionaryList(cancelledPreContactRequest, "receipts").Count == 0,
+                        "Refusing a queued legacy invitation without contact cancels it without a relationship penalty.");
+
+                    var firstConversation = Unit("observer", "cadence_first_contact", 0);
+                    firstConversation.Payload["timelineId"] = "cadence_test";
+                    RecordAcceptedPlayerAttention(c, firstConversation, Sources("observer", "cadence_contact_source"));
                     PlayerApproachEvaluateApi(cadenceInput); PlayerApproachEvaluateApi(cadenceInput);
                     int sameDayCount = ReadInt(ApproachState(c, "cadence_test", "cadence:player:observer"), "sharedDays", 0);
                     cadenceInput["worldDay"] = 8d; PlayerApproachEvaluateApi(cadenceInput);
                     Check("shared_days_pause_and_resume", sameDayCount == 1 && ReadInt(ApproachState(c, "cadence_test", "cadence:player:observer"), "sharedDays", 0) == 2,
                         "Multiple hourly evaluations count one shared day; six absent days add no cadence credit on return.");
                     var stale = TestDict("requestId", "stale", "playerId", "player", "kind", "shared", "status", "pending",
-                        "heroes", new[] { TestDict("heroId", "observer", "lastContact", TestDict(), "penalty", 8) });
+                        "heroes", new[] { TestDict("heroId", "observer", "lastContact", TestDict("exchange", "older_contact"), "penalty", 8) });
                     PutApproachState(c, "attention_test", "request:stale", stale);
                     var staleDecision = CloneDictionary(decline); staleDecision["requestId"] = "stale";
                     Check("contact_resolves_queued_neglect", ReadString(ReadDictionary(PlayerApproachDecisionApi(staleDecision), "request"), "status", "") == "cancelled",
