@@ -1322,15 +1322,15 @@ namespace ReignBetaServer
             int maxChars = Math.Max(500, Math.Min(5000, ReadInt(settings, "memoryConsolidationMaxSummaryChars", 1800)));
             bool dialogueDerived = (groupKey ?? "").StartsWith("conversation:", StringComparison.OrdinalIgnoreCase)
                 || (groupKey ?? "").StartsWith("scene:", StringComparison.OrdinalIgnoreCase);
-            List<string> sourceText = rows
-                .OrderBy(row => ReadLong(row, "ts", 0))
+            var orderedRows = rows.OrderBy(row => ReadLong(row, "ts", 0)).ToList();
+            List<string> sourceText = orderedRows
                 .SelectMany(row => DialogueService.OriginalCompactionRecords(row, dialogueDerived))
                 .Where(value => !string.IsNullOrWhiteSpace(value))
                 .ToList();
             captureSourceRecords?.Invoke(sourceText.AsReadOnly());
             sourceCharacterLimit = Math.Max(10000, Math.Min(120000, sourceCharacterLimit));
             string joined = BuildBalancedSummarySource(sourceText, sourceCharacterLimit);
-            List<string> topics = DialogueService.BuildMemorySummaryTopics(rows.OrderBy(row => ReadLong(row, "ts", 0)), ReadInt(settings, "minimeMaxTopics", 5));
+            List<string> topics = DialogueService.BuildMemorySummaryTopics(orderedRows, ReadInt(settings, "minimeMaxTopics", 5));
             var retained = DialogueService.ExtractiveMemoryFallback(sourceText, topics);
             if (!sourceText.Any()) return DialogueService.MemoryCompactionOutcome(retained, "no_original_source_records");
             if (rows.Any(row => {
@@ -1351,6 +1351,27 @@ namespace ReignBetaServer
                 return DialogueService.MemoryCompactionOutcome(retained, "source_input_exceeds_budget");
             if (responder == null && !LlmProviderService.LlmProviderConfigured(settings))
                 return DialogueService.MemoryCompactionOutcome(retained, "provider_not_configured");
+            if ((groupKey ?? "").StartsWith("arc:", StringComparison.OrdinalIgnoreCase))
+            {
+                // Selection archives can expand beyond the budgets that a
+                // previously local rolling arc used. Use the old input size
+                // only to decide provider admission, never as source evidence.
+                var previousArcSources = orderedRows
+                    .SelectMany(row => OriginalCompactionRecords(row, dialogueDerived, includeSelectionArchive: false))
+                    .Where(value => !string.IsNullOrWhiteSpace(value)).ToList();
+                if (previousArcSources.Count is > 0 and <= 16
+                    && MemorySummarySelectionText(previousArcSources,
+                        Enumerable.Range(1, previousArcSources.Count).ToList()).Length <= maxChars)
+                {
+                    var selected = PackMemorySummaryUnits(Enumerable.Range(1, sourceText.Count),
+                        indices => MemorySummarySelectionText(sourceText, indices), maxChars, publicationText,
+                        maximumUnits: 16);
+                    var local = selected.Count == 0 ? retained
+                        : CreateMemorySourceSelection(rows, sourceText, topics, selected,
+                            maxChars, publicationText);
+                    return MemoryCompactionOutcome(local, "expanded_arc_sources_previously_fit_locally");
+                }
+            }
             {
                 var request = new Dictionary<string, object>
                 {

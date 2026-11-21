@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
@@ -314,7 +315,8 @@ namespace ReignBetaServer
         // Validate every unit before packing. Skipping one oversized unit leaves
         // room for later entries without changing their order or cutting text.
         private static List<int> PackMemorySummaryUnits(IEnumerable<int> candidates, Func<List<int>, string> render,
-            int maxChars, Func<string, string> publicationText, int exclusiveRenderedLimit = int.MaxValue)
+            int maxChars, Func<string, string> publicationText, int exclusiveRenderedLimit = int.MaxValue,
+            int maximumUnits = int.MaxValue)
         {
             var packed = new List<int>();
             foreach (int index in candidates)
@@ -322,6 +324,8 @@ namespace ReignBetaServer
                 packed.Add(index);
                 if (!MemorySummaryFits(render(packed), maxChars, publicationText, exclusiveRenderedLimit))
                     packed.RemoveAt(packed.Count - 1);
+                else if (packed.Count == maximumUnits)
+                    break;
             }
             return packed;
         }
@@ -370,10 +374,13 @@ namespace ReignBetaServer
                 bool transient = LlmProviderService.IsTransientLlmFailure(ReadString(provider, "error", ""));
                 return MemoryCompactionOutcome(retained, transient ? "provider_transient_failure" : "provider_failure", provider, transient);
             }
-            var parsed = TryParseJsonObject(ReadString(provider, "content", ""));
+            string responseText = ReadString(provider, "content", "");
+            var parsed = TryParseJsonObject(responseText);
             if (parsed == null) return MemoryCompactionOutcome(retained, "malformed_response", provider);
             if (parsed.ContainsKey("digest"))
             {
+                if (MemoryDigestHasDuplicateMembers(responseText))
+                    return MemoryCompactionOutcome(retained, "duplicate_digest_member", provider);
                 var digest = AcceptAttributedMemoryDigest(parsed, rows, sources, topics, maxChars, out string reason,
                     publicationText);
                 return MemoryCompactionOutcome(digest ?? retained, reason, provider);
@@ -406,6 +413,22 @@ namespace ReignBetaServer
             // Repeating the same selector request cannot establish source support.
             // Transport failures alone use the existing bounded background backoff.
             return MemoryCompactionOutcome(retained, "missing_source_selection", provider);
+        }
+
+        private static bool MemoryDigestHasDuplicateMembers(string responseText)
+        {
+            // Read the already-parsed envelope as raw JSON so repeated entry
+            // fields cannot be overwritten before the digest is checked.
+            using var document = JsonDocument.Parse(UnwrapJsonResponse(responseText));
+            var digest = document.RootElement.GetProperty("digest");
+            if (digest.ValueKind != JsonValueKind.Array) return false;
+            foreach (var entry in digest.EnumerateArray())
+            {
+                if (entry.ValueKind != JsonValueKind.Object) continue;
+                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (entry.EnumerateObject().Any(property => !names.Add(property.Name))) return true;
+            }
+            return false;
         }
 
         private static Dictionary<string, object> AcceptAttributedMemoryDigest(Dictionary<string, object> candidate,
@@ -485,11 +508,12 @@ namespace ReignBetaServer
             return result;
         }
 
-        internal static IEnumerable<string> OriginalCompactionRecords(Dictionary<string, object> row, bool dialogueDerived)
+        internal static IEnumerable<string> OriginalCompactionRecords(Dictionary<string, object> row,
+            bool dialogueDerived, bool includeSelectionArchive = true)
         {
             var payload = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
             string method = ReadString(payload, "method", "");
-            if (method == "model_attributed_digest" || method == "source_bound_selection")
+            if (method == "model_attributed_digest" || (includeSelectionArchive && method == "source_bound_selection"))
             {
                 var originals = ReadStringList(payload, "originalSourceRecords");
                 if (originals.Count > 0) return originals;

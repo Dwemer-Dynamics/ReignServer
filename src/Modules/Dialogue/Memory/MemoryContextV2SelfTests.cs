@@ -813,10 +813,45 @@ namespace ReignBetaServer
             var malformedOversized = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:fixture", rows, responder: Respond);
             Check("malformed_would_be_omission_rejects_entire_candidate", ReadString(malformedOversized, "summary", "") == retained
                 && ReadString(ReadDictionary(malformedOversized, "compactionDiagnostic"), "reason", "") == "digest_invalid_source_reference");
+            response["content"] = "{\"digest\":[{\"text\":\"Short valid entry\",\"sourceIndices\":[1]},"
+                + "{\"text\":\"" + new string('z', 4000) + "\",\"sourceIndices\":[0],\"sourceIndices\":[2]}]}";
+            var duplicateMember = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:fixture", rows, responder: Respond);
+            Check("raw_duplicate_digest_member_rejects_entire_candidate",
+                ReadString(duplicateMember, "summary", "") == retained
+                && ReadString(duplicateMember, "compactionStatus", "") == "incomplete"
+                && ReadString(ReadDictionary(duplicateMember, "compactionDiagnostic"), "reason", "") == "duplicate_digest_member");
             response["content"] = Json.Serialize(TestDict("digest", new[] { TestDict("text", new string('z', 4000), "sourceIndices", new[] { 2 }) }));
             var sourceExtract = DialogueService.BuildMiddleTermSummary(settings, "npc", "conversation:fixture", rows, responder: Respond);
             Check("oversized_digest_can_fall_back_to_complete_source_records", ReadString(sourceExtract, "summary", "") == ReadString(accepted, "summary", "")
                 && Json.Serialize(ReadDictionary(ReadDictionary(sourceExtract, "compactionDiagnostic"), "packing")["omittedEntryIndices"]) == "[1]");
+            string omittedArcSource = new string('a', 4000);
+            var arcScenes = new List<Dictionary<string, object>>
+            {
+                TestDict("summary_id", "scene_one", "ts", 1L, "summary", "Prior short selection.",
+                    "payload_json", Json.Serialize(TestDict("method", "source_bound_selection",
+                        "originalSourceRecords", new[] { "An exact original record.", omittedArcSource }))),
+                TestDict("summary_id", "scene_two", "ts", 2L, "summary", "Second record."),
+                TestDict("summary_id", "scene_three", "ts", 3L, "summary", "Third record."),
+                TestDict("summary_id", "scene_four", "ts", 4L, "summary", "Fourth record.")
+            };
+            int beforeArc = calls;
+            string arcScope = "arc:npc:player:fixture";
+            var arc = DialogueService.BuildMiddleTermSummary(settings, "npc", arcScope, arcScenes,
+                responder: Respond, publicationText: Frame);
+            string arcText = ReadString(arc, "summary", "");
+            Check("expanded_selection_archive_keeps_previously_local_arc_provider_free",
+                calls == beforeArc && ReadString(arc, "compactionStatus", "") == "partial"
+                && ReadString(ReadDictionary(arc, "compactionDiagnostic"), "reason", "") == "expanded_arc_sources_previously_fit_locally"
+                && arcText.Contains("An exact original record.") && !arcText.Contains("Prior short selection.")
+                && ReadStringList(arc, "originalSourceRecords").Contains(omittedArcSource)
+                && Json.Serialize(Frame(arcText)).Length <= 1800);
+            arcScenes[0]["summary"] = new string('b', 4000);
+            response["content"] = "{\"sourceIndices\":[1]}";
+            var providerArc = DialogueService.BuildMiddleTermSummary(settings, "npc", arcScope, arcScenes,
+                responder: Respond, publicationText: Frame);
+            Check("arc_that_already_needed_provider_keeps_normal_dispatch",
+                calls == beforeArc + 1
+                && ReadBool(ReadDictionary(providerArc, "compactionDiagnostic"), "providerAttempted", false));
             int beforeDisabled = calls;
             var disabled = DialogueService.BuildMiddleTermSummary(TestDict("useMemoryLlmForConsolidation", false),
                 "npc", "conversation:fixture", rows, responder: Respond);
