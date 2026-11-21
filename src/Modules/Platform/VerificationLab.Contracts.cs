@@ -30,9 +30,12 @@ namespace ReignBetaServer
                 string inlineCredential = "fixture-" + "header-value";
                 const string bareAssignment = "password=O'fixture-suffix;fixture-tail";
                 const string adjacentAssignments = """password=fixture-first;clientSecret="fixture-second value";mode=fixture-public""";
+                const string nestedAssignment = "password=fixturePassword=fixture-opaque;mode=fixture-public";
+                const string nestedQuoted = """password=fixturePrefix/field="fixture-quoted private";mode=fixture-public""";
                 var data = TestDict("apiKey", credential, "reply", "A retained fixture reply.", "messages", privateText,
                     "header", "Authorization: Bearer " + inlineCredential, "line", "token='fixture labeled value'", "bare", bareAssignment,
-                    "adjacent", adjacentAssignments, "memoryReferences", TestDict("quote", "hidden-reference-only"));
+                    "adjacent", adjacentAssignments, "nested", nestedAssignment, "nestedQuoted", nestedQuoted,
+                    "memoryReferences", TestDict("quote", "hidden-reference-only"));
                 var huge = TestDict("phase", "fixture.response", "severity", "warning", "campaignId", campaign,
                     "correlationId", "fixture-correlation", "auditId", id, "data", data);
                 data["messages"] = privateText + new string('p', 612101 - Json.Serialize(huge).Length);
@@ -58,12 +61,14 @@ namespace ReignBetaServer
                     && !Json.Serialize(first).Contains("prompt-only") && !Json.Serialize(first).Contains(credential),
                     TestDict("storedCharacters", largeLine.Length, "entryBytes", WireBytes(entry), "bodyBytes", WireBytes(first)));
                 Check("redacted_search", new[] { credential, inlineCredential, "fixture labeled value", "fixture-suffix", "fixture-tail",
-                    "fixture-first", "fixture-second", "hidden-reference-only" }.All(term => {
+                    "fixture-first", "fixture-second", "fixturePassword", "fixture-opaque", "fixturePrefix", "fixture-quoted", "hidden-reference-only" }.All(term => {
                     var result = OperationsService.ReadLogApi(new(query) { ["search"] = term });
                     return ReadInt(result, "returnedCount", -1) == 0 && !Json.Serialize(result).Contains(term);
                 })
                     && OperationsService.RedactSupportText(bareAssignment) == "password=[REDACTED]"
                     && OperationsService.RedactSupportText(adjacentAssignments) == """password=[REDACTED];clientSecret="[REDACTED]";mode=fixture-public"""
+                    && OperationsService.RedactSupportText(nestedAssignment) == "password=[REDACTED];mode=fixture-public"
+                    && OperationsService.RedactSupportText(nestedQuoted) == "password=[REDACTED];mode=fixture-public"
                     && ReadInt(OperationsService.ReadLogApi(new(query) { ["search"] = "fixture-public" }), "returnedCount", -1) == 1
                     && ReadInt(OperationsService.ReadLogApi(new(query) { ["severity"] = "error" }), "returnedCount", -1) == 0
                     && ReadInt(OperationsService.ReadLogApi(new(query) { ["eventType"] = "absent" }), "returnedCount", -1) == 0

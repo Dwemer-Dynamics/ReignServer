@@ -18,15 +18,14 @@ namespace ReignBetaServer
         private const int SupportFileCountLimit = 200;
         private static readonly Regex SupportSecretField = new Regex(
             """
-            \b (?: [a-z0-9_-]*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|client[_-]?secret|password)
-                 | authorization | token | secret ) ["']? \s* [:=] \s*
-            (?<value> "(?:\\[\s\S]|[^"\\])*(?:"|(?:\\)?\z) | '(?:\\[\s\S]|[^'\\])*(?:'|(?:\\)?\z)
-                    | (?:(?:Bearer|Basic)\s+)? (?<bare>[^\s,}"]) )
+            (?<label> \b (?: [a-z0-9_-]*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|client[_-]?secret|password)
+                          | authorization | token | secret ) ["']? \s* [:=] \s* )
+            (?:(?:Bearer|Basic)\s+)?
             """,
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.IgnorePatternWhitespace | RegexOptions.NonBacktracking);
         // A semicolon inside a bare value is private unless it starts the next named assignment.
-        private static readonly Regex SupportBareValueDelimiter = new(
-            """[\s,}"]|;["']?[\w.-]+["']?\s*[:=]""",
+        private static readonly Regex SupportBareValueBoundary = new(
+            """[\s,}"]|;["']?[\w.-]+["']?\s*[:=]|[:=]["']""",
             RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
         private static readonly Regex SupportBearer = new Regex(
             "(?i)\\bBearer\\s+[A-Za-z0-9._~+/-]{8,}", RegexOptions.Compiled);
@@ -34,6 +33,17 @@ namespace ReignBetaServer
             "\\b(?:sk-[A-Za-z0-9_-]{12,}|AIza[A-Za-z0-9_-]{20,})\\b", RegexOptions.Compiled);
         private static readonly Regex SupportUrlCredential = new Regex(
             "(?i)(https?://)[^/@\\s:]+:[^/@\\s]+@", RegexOptions.Compiled);
+
+        private static int AfterSupportQuotedValue(string text, int start)
+        {
+            char quote = text[start];
+            for (int i = start + 1; i < text.Length; i++)
+            {
+                if (text[i] == quote) return i + 1;
+                if (text[i] == '\\' && i + 1 < text.Length) i++;
+            }
+            return text.Length;
+        }
 
         internal static string RedactSupportText(string value)
         {
@@ -45,25 +55,24 @@ namespace ReignBetaServer
                 int copied = 0;
                 while (field.Success)
                 {
-                    var valueGroup = field.Groups["value"];
-                    masked.Append(text, copied, valueGroup.Index - copied);
-                    var bare = field.Groups["bare"];
-                    if (bare.Success)
+                    var label = field.Groups["label"];
+                    masked.Append(text, copied, label.Index + label.Length - copied);
+                    int start = field.Index + field.Length;
+                    if (start < text.Length && text[start] is '"' or '\'')
                     {
-                        var delimiter = SupportBareValueDelimiter.Match(text, bare.Index);
-                        copied = delimiter.Success ? delimiter.Index : text.Length;
-                        // A missing value can put another sensitive assignment immediately after the label.
-                        field = SupportSecretField.Match(text, bare.Index);
-                        if (field.Success) copied = Math.Min(copied, field.Index);
-                        masked.Append("[REDACTED]");
+                        masked.Append(text[start]).Append("[REDACTED]").Append(text[start]);
+                        copied = AfterSupportQuotedValue(text, start);
                     }
                     else
                     {
-                        char quote = valueGroup.ValueSpan[0];
-                        masked.Append(quote).Append("[REDACTED]").Append(quote);
-                        copied = field.Index + field.Length;
-                        field = SupportSecretField.Match(text, copied);
+                        var boundary = SupportBareValueBoundary.Match(text, start);
+                        // A quoted assignment embedded in a bare credential is part of that private value.
+                        while (boundary.Success && text[boundary.Index] is ':' or '=')
+                            boundary = SupportBareValueBoundary.Match(text, AfterSupportQuotedValue(text, boundary.Index + 1));
+                        copied = boundary.Success ? boundary.Index : text.Length;
+                        masked.Append("[REDACTED]");
                     }
+                    field = SupportSecretField.Match(text, copied);
                 }
                 text = masked.Append(text, copied, text.Length - copied).ToString();
             }
