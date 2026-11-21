@@ -18,11 +18,16 @@ namespace ReignBetaServer
         private const int SupportFileCountLimit = 200;
         private static readonly Regex SupportSecretField = new Regex(
             """
-            (?<label> \b (?: [a-z0-9_-]*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|client[_-]?secret|password)
-                          | authorization | token | secret ) ["']? \s* [:=] \s* )
-            (?<value> "(?:\\.|[^"\\])*(?:"|$) | '(?:\\.|[^'\\])*(?:'|$) | (?:(?:Bearer|Basic)\s+)?[^\s,}"]+ )
+            \b (?: [a-z0-9_-]*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|client[_-]?secret|password)
+                 | authorization | token | secret ) ["']? \s* [:=] \s*
+            (?<value> "(?:\\[\s\S]|[^"\\])*(?:"|(?:\\)?\z) | '(?:\\[\s\S]|[^'\\])*(?:'|(?:\\)?\z)
+                    | (?:(?:Bearer|Basic)\s+)? (?<bare>[^\s,}"]) )
             """,
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.IgnorePatternWhitespace | RegexOptions.NonBacktracking);
+        // A semicolon inside a bare value is private unless it starts the next named assignment.
+        private static readonly Regex SupportBareValueDelimiter = new(
+            """[\s,}"]|;["']?[\w.-]+["']?\s*[:=]""",
+            RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
         private static readonly Regex SupportBearer = new Regex(
             "(?i)\\bBearer\\s+[A-Za-z0-9._~+/-]{8,}", RegexOptions.Compiled);
         private static readonly Regex SupportKnownKey = new Regex(
@@ -33,12 +38,35 @@ namespace ReignBetaServer
         internal static string RedactSupportText(string value)
         {
             string text = value ?? string.Empty;
-            text = SupportSecretField.Replace(text, match =>
+            var field = SupportSecretField.Match(text);
+            if (field.Success)
             {
-                char first = match.Groups["value"].ValueSpan[0];
-                string mask = first == '"' ? "\"[REDACTED]\"" : first == '\'' ? "'[REDACTED]'" : "[REDACTED]";
-                return match.Groups["label"].Value + mask;
-            });
+                var masked = new StringBuilder(text.Length);
+                int copied = 0;
+                while (field.Success)
+                {
+                    var valueGroup = field.Groups["value"];
+                    masked.Append(text, copied, valueGroup.Index - copied);
+                    var bare = field.Groups["bare"];
+                    if (bare.Success)
+                    {
+                        var delimiter = SupportBareValueDelimiter.Match(text, bare.Index);
+                        copied = delimiter.Success ? delimiter.Index : text.Length;
+                        // A missing value can put another sensitive assignment immediately after the label.
+                        field = SupportSecretField.Match(text, bare.Index);
+                        if (field.Success) copied = Math.Min(copied, field.Index);
+                        masked.Append("[REDACTED]");
+                    }
+                    else
+                    {
+                        char quote = valueGroup.ValueSpan[0];
+                        masked.Append(quote).Append("[REDACTED]").Append(quote);
+                        copied = field.Index + field.Length;
+                        field = SupportSecretField.Match(text, copied);
+                    }
+                }
+                text = masked.Append(text, copied, text.Length - copied).ToString();
+            }
             text = SupportBearer.Replace(text, "Bearer [REDACTED]");
             text = SupportKnownKey.Replace(text, "[REDACTED_KEY]");
             return SupportUrlCredential.Replace(text, "$1[REDACTED]@");
