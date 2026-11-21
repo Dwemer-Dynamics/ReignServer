@@ -737,6 +737,17 @@ namespace ReignBetaServer
                     TestDict(), TestDict("reason", "The referred sovereign no longer matches the current ruler."));
 
             Dictionary<string, object> response = DiplomacyService.AskRulerToRespond(campaignId, evaluationPayload, proposer, responder, candidate, "relations", false);
+            if (ReadBool(response, "formatFallback", false))
+            {
+                // The daily tick would resubmit a pending referral. Preserve the terms
+                // and record a technical failure separately from a sovereign's answer.
+                return UpdateAmbassadorReferralState(campaignId, referralId, "model_output_unusable", "format_failure", worldDay,
+                    new Dictionary<string, object>(), new Dictionary<string, object>
+                    {
+                        ["technicalFailure"] = true,
+                        ["reason"] = ReadString(response, "error", "The sovereign's response was unavailable.")
+                    });
+            }
             Dictionary<string, object> answer = ReadDictionary(response, "response") ?? new Dictionary<string, object>();
             string answerKind = ReadString(answer, "response", "").Trim().ToLowerInvariant();
             if (!ReadBool(response, "ok", false) || !new[] { "accept", "refuse", "counter" }.Contains(answerKind))
