@@ -199,6 +199,10 @@ namespace ReignBetaServer
                 heroId = CampaignFileService.CharacterIdFrom(speaker);
             }
 
+            // These are outputs of the authoritative audience projection, never request overrides.
+            payload.Remove("publicPlayerText");
+            payload.Remove("privatePlayerInputForSpeaker");
+            payload.Remove("privateAudienceHeroStringId");
             DialogueService.ApplyPlayerInputAudienceToPayload(payload, heroId);
 
             string playerText = ReadFirstString(payload, "playerText", "text", "message");
@@ -646,7 +650,8 @@ namespace ReignBetaServer
                 PublishScene = !agencyVisibleFailure && participation != "quiet",
                 PublishIntroductions = !agencyVisibleFailure && participation != "quiet",
                 SceneMode = ReadString(payload, "mode", "social_event"),
-                GroupConversation = partyChatTurn, PrivateWhisper = privatePlayerInputForSpeaker };
+                GroupConversation = partyChatTurn, PrivateWhisper = privatePlayerInputForSpeaker,
+                CollectGroupHistoryObservation = !approachOpening && !recallOnlyTurn };
             Dictionary<string, object> conversationExchange = DialogueService.PublishAcceptedConversationUnit(acceptedUnit,
                 accept => partyChatTurn
                     ? DialogueService.StorePartyConversationExchange(campaignId, payload, heroId, socialPlayerId, playerName, heroName,

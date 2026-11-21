@@ -20,7 +20,7 @@ namespace ReignBetaServer
             internal string Campaign, Hero, Player, Location, EventId, EventType, PlayerText, Reply, Generation;
             internal long Timestamp;
             internal bool CommitEffects = true, RetrievalEligible = true, GroupConversation, PrivateWhisper;
-            internal bool DelimitedSpeechOnly;
+            internal bool DelimitedSpeechOnly, CollectGroupHistoryObservation;
             internal bool PublishScene, PublishSocial, PublishIntroductions;
             // Only ordinary individual /dialogue/respond sets this, from an exact client opt-in.
             internal bool ViewInsertionRequested;
@@ -178,6 +178,19 @@ namespace ReignBetaServer
                         && !unit.PrivateWhisper && unit.EventType == "dialogue_turn"
                         ? IndividualViewInsertionDescriptor(unit, session, generation, sourceRows) : null;
                     if (viewInsertion != null) receipt["viewInsertion"] = viewInsertion;
+                    if (unit.CollectGroupHistoryObservation)
+                    {
+                        var publicPlayer = sourceRows.FirstOrDefault(row => ReadString(row, "role", "") == "player");
+                        var privatePlayer = ReadStringList(privateExchange, "turnIds")
+                            .SelectMany(id => DialogueStore.SelectConversationTurns6(connection, TestDict("id", id)))
+                            .FirstOrDefault(row => ReadString(row, "role", "") == "player");
+                        if (publicPlayer != null || privatePlayer != null)
+                            receipt["groupHistoryObservation"] = TestDict("timelineId", ContinuityTimeline(unit.Payload),
+                                "mode", unit.EventType == "party_chat_turn" ? "party_chat" : "social_event",
+                                "publicTurn", GroupHistorySource(publicPlayer), "privateTurn", GroupHistorySource(privatePlayer),
+                                "claimantSkills", GroupHistorySkills(ReadDictionary(ReadDictionary(unit.Payload, "groupHistoryContext"), "claimantSkills")),
+                                "listeners", GroupHistoryListenerContexts(unit, publicPlayer, privatePlayer));
+                    }
                     DialogueStore.InsertConversationAcceptedUnits(connection, TestDict("unit", unit.EventId, "hash", hash,
                         "generation", generation, "receipt", Json.Serialize(receipt), "ts", unit.Timestamp));
                     SaveConversationInputAcceptance(connection, unit, source, receipt);

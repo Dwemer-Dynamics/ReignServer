@@ -22,9 +22,133 @@ namespace ReignBetaServer
             DialogueStore.UpsertSchemaMeta6(connection);
         }
 
+        private const string GroupHistoryListenerSuffix = "_player_to_listener";
+
+        private static Dictionary<string, object> GroupHistorySource(Dictionary<string, object> row) =>
+            row == null ? null : TestDict("turnId", ReadString(row, "turn_id", ""),
+                "sessionId", ReadString(row, "session_id", ""), "speakerId", ReadString(row, "speaker_id", ""),
+                "worldDay", ReadDouble(row, "world_day", 0d),
+                "textHash", ConversationExactTextHash(ReadString(row, "text", "")),
+                "audienceHash", ConversationExactTextHash(ReadString(row, "participants_json", "")));
+
+        private static Dictionary<string, object> GroupHistorySkills(Dictionary<string, object> skills) =>
+            TryReadLieSkill(skills, "roguery", out double roguery) && TryReadLieSkill(skills, "charm", out double charm)
+            && double.IsFinite(roguery) && double.IsFinite(charm)
+                ? TestDict("roguery", roguery, "charm", charm) : null;
+
+        private static Dictionary<string, object> GroupHistoryListenerContexts(AcceptedConversationUnit unit,
+            Dictionary<string, object> publicTurn, Dictionary<string, object> privateTurn)
+        {
+            var audience = new[] { publicTurn, privateTurn }.SelectMany(row =>
+                TextListFromJson(ReadString(row, "participants_json", "[]"))).ToHashSet(StringComparer.Ordinal);
+            var contexts = new Dictionary<string, object>(StringComparer.Ordinal);
+            var profiles = ReadDictionaryList(ReadDictionary(unit.Payload, "groupHistoryContext"), "listeners");
+            if (profiles.Count == 0) profiles = ReadDictionaryList(unit.Payload, "attendees");
+            foreach (var profile in profiles)
+            {
+                string id = CampaignFileService.CharacterIdFrom(profile);
+                if (id.Length == 0 || id == unit.Player || !audience.Contains(id)) continue;
+                var risk = ReadDictionary(profile, "sceneRisk");
+                contexts.TryAdd(id, TestDict("kingdomId", ReadString(profile, "kingdomId", ""),
+                    "skills", GroupHistorySkills(ReadDictionary(profile, "skills")),
+                    "sceneRisk", TestDict("targetIsPrisoner", ReadBool(risk, "targetIsPrisoner", ReadBool(profile, "isPrisoner", false)),
+                        "powerDisadvantage", ClampDouble(ReadDouble(risk, "powerDisadvantage", 1d), 0d, 2d))));
+            }
+            return contexts;
+        }
+
+        private static bool CanObserveGroupHistorySource(Dictionary<string, object> row, Dictionary<string, object> source,
+            string claimant, string target, string timeline, bool privateTurn) =>
+            row != null && source != null && claimant != target
+            && ReadString(row, "role", "") == "player" && ReadString(row, "status", "") == "active"
+            && ReadString(row, "speaker_id", "") == claimant
+            && ReadString(row, "turn_id", "") == ReadString(source, "turnId", "")
+            && ReadString(row, "session_id", "") == ReadString(source, "sessionId", "")
+            && claimant == ReadString(source, "speakerId", "")
+            && ReadDouble(row, "world_day", 0d) == ReadDouble(source, "worldDay", -1d)
+            && (privateTurn ? ReadString(row, "channel", "") == "private_whisper"
+                : ReadString(row, "channel", "") is "party_chat" or "social_event" or "wilderness_event")
+            && ContinuityTimeline(TryParseJsonObject(ReadString(row, "payload_json", "{}"))) == timeline
+            && ConversationExactTextHash(ReadString(row, "text", "")) == ReadString(source, "textHash", "")
+            && ConversationExactTextHash(ReadString(row, "participants_json", "")) == ReadString(source, "audienceHash", "")
+            && TextListFromJson(ReadString(row, "participants_json", "[]")).Contains(target, StringComparer.Ordinal);
+
+        private static Dictionary<string, object> GroupHistoryNotObserved() =>
+            TestDict("ok", true, "recorded", false, "outcome", "not_adjudicable", "reason", "accepted_group_source_required");
+
+        private static Dictionary<string, object> ObserveAcceptedGroupHistoryClaim(Dictionary<string, object> payload, string mode)
+        {
+            string unitId = ReadString(payload, "acceptedUnitId", "");
+            string campaign = ReadString(payload, "campaignId", "");
+            string timeline = ReadString(payload, "timelineId", "");
+            string claimant = ReadString(payload, "claimantId", "");
+            string target = ReadString(payload, "targetId", "");
+            if (new[] { unitId, campaign, timeline, claimant, target }.Any(string.IsNullOrWhiteSpace)
+                || !ReignPostgreSqlStorage.CampaignExists(campaign))
+                return GroupHistoryNotObserved();
+            using var timelineScope = WorldSimulationService.EnterWorldHistoryTimelineScope(campaign);
+            lock (RelationshipsService.CampaignRelationshipWriteLock(campaign))
+            {
+                using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                if (!(new[] { "conversation_accepted_units", "conversation_turns", "memory_precision_state" })
+                    .All(table => WorldSimulationService.TableExists(connection, table)))
+                    return GroupHistoryNotObserved();
+                var unit = DialogueStore.SelectConversationAcceptedUnits2(connection, TestDict("unit", unitId)).SingleOrDefault();
+                if (unit == null || ReadString(unit, "restore_generation", "")
+                    != ReadString(DialogueStore.SelectMemoryPrecisionState(connection).SingleOrDefault(), "restore_generation", "missing"))
+                    return GroupHistoryNotObserved();
+                var receipt = TryParseJsonObject(ReadString(unit, "receipt_json", "{}"));
+                var observation = ReadDictionary(receipt, "groupHistoryObservation");
+                string activeTimeline = WorldSimulationService.TableExists(connection, "world_history_timelines")
+                    ? WorldSimulationService.ActiveWorldHistoryTimeline(connection) : "main";
+                if (activeTimeline != timeline || ReadString(observation, "timelineId", "") != timeline
+                    || ReadString(observation, "mode", "") + GroupHistoryListenerSuffix != mode)
+                    return GroupHistoryNotObserved();
+                foreach (string kind in new[] { "privateTurn", "publicTurn" })
+                {
+                    var source = ReadDictionary(observation, kind);
+                    string turnId = ReadString(source, "turnId", "");
+                    if (string.IsNullOrWhiteSpace(turnId) || !ReadStringList(receipt, "sourceIds").Contains(turnId, StringComparer.Ordinal))
+                        continue;
+                    var row = DialogueStore.SelectConversationTurns6(connection, TestDict("id", turnId)).SingleOrDefault();
+                    if (!CanObserveGroupHistorySource(row, source, claimant, target, timeline, kind == "privateTurn"))
+                        continue;
+                    string claim = ReadString(row, "text", "");
+                    if (string.IsNullOrWhiteSpace(claim))
+                        return GroupHistoryNotObserved();
+                    // Evaluate the saved spoken projection with its original sentence
+                    // boundaries. A later request cannot supply live scene evidence.
+                    var context = ReadDictionary(ReadDictionary(observation, "listeners"), target);
+                    return EvaluateWorldHistoryLieCheck(TestDict("campaignId", campaign, "timelineId", timeline,
+                        "claimantId", claimant, "targetId", target, "claim", claim,
+                        "worldDay", ReadDouble(row, "world_day", 0d), "targetKingdomId", ReadString(context, "kingdomId", ""),
+                        "claimantSkills", ReadDictionary(observation, "claimantSkills"), "targetSkills", ReadDictionary(context, "skills"),
+                        "sceneRisk", ReadDictionary(context, "sceneRisk") ?? TestDict("powerDisadvantage", 1d)));
+                }
+            }
+            return GroupHistoryNotObserved();
+        }
+
         internal static Dictionary<string, object> WorldHistoryLieCheckApi(Dictionary<string, object> payload)
         {
-            payload = payload ?? new Dictionary<string, object>();
+            payload ??= new Dictionary<string, object>();
+            string mode = ReadString(payload, "mode", "").Trim().ToLowerInvariant();
+            if (mode.EndsWith(GroupHistoryListenerSuffix, StringComparison.Ordinal))
+                return ObserveAcceptedGroupHistoryClaim(payload, mode);
+            if (mode is "party_chat" or "social_event" or "castle_chat" or "wilderness_event" or "family_chambers")
+            {
+                // Older clients can still look up history. Group assertions need an
+                // accepted source; the pre-reply text has no audience proof.
+                string text = ReadFirstString(payload, "claim", "claimText", "playerText", "text", "message");
+                if (!ReadBool(payload, "lookupOnly", false)
+                    && (WorldSimulationService.ExtractAssertedWorldHistorySpans(text).Count != 0 || !IsWorldHistoryLookupRequest(text)))
+                    return GroupHistoryNotObserved();
+            }
+            return EvaluateWorldHistoryLieCheck(payload);
+        }
+
+        private static Dictionary<string, object> EvaluateWorldHistoryLieCheck(Dictionary<string, object> payload)
+        {
             string campaignId = ReadString(payload, "campaignId", "default");
             string claimantId = ReadFirstString(payload, "claimantId", "playerId", "mainHeroStringId");
             string targetId = ReadFirstString(payload, "targetId", "speakerId", "npcId", "heroStringId");
@@ -737,6 +861,113 @@ namespace ReignBetaServer
             return ReadDouble(row, key, 0d);
         }
 
+        private static void CheckAcceptedGroupHistoricalObservation(string campaign, string timeline, Action<string, bool, string> add)
+        {
+            const string speaker = "d29_primary", listener = "d29_listener", mode = "party_chat";
+            const string publicClaim = "I was at a battle at Test Field.";
+            const string privateClaim = "I led the battle at Test Field.";
+            const string turn = "d29_group_beat";
+            string generation;
+            using (var setup = ReignDatabase.OpenCampaignConnection(campaign))
+                generation = ReadString(ReadMemoryPrecisionState(setup), "restore_generation", "");
+
+            Dictionary<string, object> Publish(string eventId, string original, double day = 102d)
+            {
+                var skills = TestDict("roguery", 100d, "charm", 100d);
+                var request = TestDict("campaignId", campaign, "timelineId", timeline, "mode", mode,
+                    "conversationSessionId", "d29_group", "sceneTurnId", eventId, "worldDay", day,
+                    "playerText", original, "playerHeroStringId", "main_hero",
+                    "groupHistoryContext", TestDict("claimantSkills", skills, "listeners", new[] {
+                        TestDict("heroStringId", listener, "kingdomId", "kingdom_a", "skills", skills,
+                            "sceneRisk", TestDict("powerDisadvantage", 2d))
+                    }),
+                    "participants", new[] { speaker, listener, "main_hero" }, "activeHeroIds", new[] { speaker, listener },
+                    "attendees", new List<Dictionary<string, object>> {
+                        TestDict("heroStringId", speaker, "name", "Ada"),
+                        TestDict("heroStringId", listener, "name", "Bert")
+                    });
+                ApplyPlayerInputAudienceToPayload(request, speaker, allowInterpretation: false);
+                string addressed = ReadString(request, "playerText", "");
+                string published = ReadString(request, "publicPlayerText", addressed);
+                var unit = new AcceptedConversationUnit
+                {
+                    Campaign = campaign, Payload = request, EventId = eventId, EventType = "party_chat_turn",
+                    Hero = speaker, Player = "main_hero", HeroName = "Ada", PlayerName = "Player", Location = "town",
+                    PlayerText = addressed, Reply = "", Timestamp = 1L, Generation = generation,
+                    GroupConversation = true, PrivateWhisper = ReadBool(request, "privatePlayerInputForSpeaker", false),
+                    CollectGroupHistoryObservation = true, CommitEffects = false, Parsed = TestDict("participation", "quiet")
+                };
+                return PublishAcceptedConversationUnit(unit, accept => StorePartyConversationExchange(campaign, request,
+                    speaker, "main_hero", "Player", "Ada", published, "", eventId, 1L, accept));
+            }
+
+            var exchange = Publish(turn, publicClaim + " *I speak quietly only for Ada.* " + privateClaim);
+            var receipt = ReadDictionary(exchange, "acceptedUnit");
+            var observation = ReadDictionary(receipt, "groupHistoryObservation");
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+            {
+                string Text(string kind)
+                {
+                    string id = ReadString(ReadDictionary(observation, kind), "turnId", "");
+                    return ReadString(DialogueStore.SelectConversationTurns6(connection, TestDict("id", id)).SingleOrDefault(), "text", "");
+                }
+                string publicText = Text("publicTurn");
+                add("group_quiet_address_projection", publicText.Contains(publicClaim, StringComparison.Ordinal)
+                    && !publicText.Contains(privateClaim, StringComparison.Ordinal)
+                    && Text("privateTurn").Contains(privateClaim, StringComparison.Ordinal),
+                    "The accepted public source excludes the quiet address, and the saved whisper contains it.");
+                DialogueStore.InsertConversationAcceptedUnits(connection, TestDict("unit", turn + "_stale", "hash", turn,
+                    "generation", "d29_old_generation", "receipt", Json.Serialize(receipt), "ts", 1L));
+            }
+            var laterNativeContext = TestDict("sameCurrentSettlement", true,
+                "claimantCurrentSettlementId", "other_town", "claimantCurrentSettlementName", "Other Town",
+                "targetCurrentSettlementId", "other_town");
+            Dictionary<string, object> Check(string target, string acceptedId, string requestedTimeline, string route) =>
+                WorldHistoryLieCheckApi(TestDict("campaignId", campaign, "timelineId", requestedTimeline ?? timeline, "worldDay", 700d,
+                    "claimantId", "main_hero", "targetId", target, "acceptedUnitId", acceptedId,
+                    "targetKingdomId", "kingdom_b", "mode", route, "claim", privateClaim, "nativeContext", laterNativeContext,
+                    "targetSkills", TestDict("roguery", 200d, "charm", 200d), "sceneRisk", TestDict("powerDisadvantage", 0d)));
+            string Observe(string target, string acceptedId, string requestedTimeline = null, string route = mode)
+            {
+                var result = Check(target, acceptedId, requestedTimeline, route);
+                string id = ReadString(result, "lieCheckId", "");
+                if (id.Length == 0) return ReadString(result, "reason", "");
+                using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                return ReadString(DialogueStore.SelectWorldHistoryLieChecks2(connection, TestDict("id", id)).Single(), "raw_claim", "");
+            }
+            const string denied = "accepted_group_source_required";
+            add("group_historical_listener_uses_accepted_public_words", ReadBool(exchange, "ok", false)
+                && Observe(listener, turn, route: mode + GroupHistoryListenerSuffix).TrimEnd('.') == publicClaim.TrimEnd('.'),
+                "An accepted listener's verdict uses saved public words and ignores the caller's private claim text.");
+            add("group_historical_listener_private_source", Observe(speaker, turn, route: mode + GroupHistoryListenerSuffix) == "multiple_claims_require_separate_evidence",
+                "Only the directly addressed speaker reaches the private source, and its mixed claims are not adjudicated as one.");
+            add("group_historical_listener_unknown_target", Observe("d29_absent", turn, route: mode + GroupHistoryListenerSuffix) == denied,
+                "An unlisted hero cannot adjudicate either accepted source.");
+            add("group_historical_listener_requires_current_scope",
+                Observe(listener, turn + "_stale", route: mode + GroupHistoryListenerSuffix) == denied
+                && Observe(listener, turn, timeline + "_different", mode + GroupHistoryListenerSuffix) == denied
+                && Observe(listener, "", route: mode + GroupHistoryListenerSuffix) == denied
+                && Observe(listener, turn) == denied, "Old generations, wrong timelines and unbound legacy group calls create no listener episode.");
+            var reported = Publish(turn + "_reported", "She said *I pause* I led a battle at Test Field.");
+            add("group_reported_speech_preserves_clause", ReadBool(reported, "ok", false)
+                && Observe(listener, turn + "_reported", route: mode + GroupHistoryListenerSuffix) == "no_asserted_claimant_deed",
+                "An inline aside does not convert a report of someone else's deed into the player's assertion.");
+            const string locationDenial = "I am not in Other Town.";
+            var moved = Publish(turn + "_moved", locationDenial);
+            bool nativeWouldAdjudicate = VerifyNativeCurrentLocationClaim(
+                TestDict("campaignId", campaign, "timelineId", timeline, "nativeContext", laterNativeContext),
+                locationDenial, "main_hero", listener) != null;
+            add("group_observation_ignores_later_location", ReadBool(moved, "ok", false) && nativeWouldAdjudicate
+                && Observe(listener, turn + "_moved", route: mode + GroupHistoryListenerSuffix) == "no_asserted_claimant_deed",
+                "A location captured after acceptance cannot adjudicate an earlier statement.");
+            var news = Publish(turn + "_news", "I rescued exactly two prisoners in my entire career.", 104d);
+            var newsResult = Check(listener, turn + "_news", timeline, mode + GroupHistoryListenerSuffix);
+            add("group_observation_respects_accepted_realm_and_skills", ReadBool(news, "ok", false)
+                && ReadString(newsResult, "knowledgeBasis", "") == "secondhand"
+                && ReadDouble(newsResult, "successChance", -1d) == 50d,
+                "The saved listener realm and equal skills govern the known contradiction, even after a differently scoped request.");
+        }
+
         internal static List<Dictionary<string, object>> RunLieDetectionAssertions(string campaignId, string timelineId)
         {
             List<Dictionary<string, object>> assertions = new List<Dictionary<string, object>>();
@@ -752,6 +983,8 @@ namespace ReignBetaServer
             add("hundred_point_advantage", Math.Abs(HistoricalLieSuccessChance(200d, 100d) - 70d) < 0.001d, "A 100-point advantage produces 70%.");
             add("upper_cap", Math.Abs(HistoricalLieSuccessChance(1000d, 0d) - 80d) < 0.001d, "Success is capped at 80%.");
             add("lower_cap", Math.Abs(HistoricalLieSuccessChance(0d, 1000d) - 10d) < 0.001d, "Success has a 10% floor.");
+
+            CheckAcceptedGroupHistoricalObservation(campaignId, timelineId, add);
 
             foreach (string ordinary in new[] { "I smiled and nodded.", "I settled the matter.", "I led a toast to our friendship.",
                 "If I led the battle, I would be proud.", "I will command the army tomorrow.", "She said, \"I led the battle at Test Field.\"",
