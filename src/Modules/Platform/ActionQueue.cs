@@ -21,6 +21,9 @@ namespace ReignBetaServer
 {
     internal static partial class ActionPipelineService
     {
+        private const string DiplomaticMarriageCompletionField = "diplomaticMarriageCompletion";
+        private static readonly ConcurrentDictionary<string, byte> DiplomaticMarriageRecoveryWorkers = new(StringComparer.Ordinal);
+
         internal static Dictionary<string, object> ProposeAction(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -200,11 +203,15 @@ namespace ReignBetaServer
                 }
                 DialogueService.SaveDurableConversationAction(campaignId, row);
                 List<Dictionary<string, object>> queue = ReadActionQueueUnlocked(campaignId);
+                var pendingMarriage = queue.FirstOrDefault(existing => ReadString(existing, "id", "") == id
+                    && PendingDiplomaticMarriage(existing) != null);
+                if (pendingMarriage != null) return pendingMarriage;
                 queue.RemoveAll(x => ReadString(x, "id", "") == id);
                 queue.Add(row);
                 if (queue.Count > 500)
                 {
-                    queue = queue.Skip(queue.Count - 500).ToList();
+                    queue = queue.Where((existing, index) => index >= queue.Count - 500
+                        || PendingDiplomaticMarriage(existing) != null).ToList();
                 }
 
                 WriteActionQueueUnlocked(campaignId, queue);
@@ -225,6 +232,7 @@ namespace ReignBetaServer
             string campaignId = query.TryGetValue("campaignId", out string campaignQuery) ? campaignQuery : ReadString(payload, "campaignId", "default");
             int limit = query.TryGetValue("limit", out string limitText) && int.TryParse(limitText, out int parsedLimit) ? parsedLimit : ReadInt(payload, "limit", 10);
             limit = Math.Max(1, Math.Min(50, limit));
+            bool recoverDiplomaticMarriages;
             List<Dictionary<string, object>> selected = new List<Dictionary<string, object>>();
             long nowTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             const long deliveryMaxAgeSeconds = 6 * 60 * 60;
@@ -234,6 +242,7 @@ namespace ReignBetaServer
             lock (Program.FileLock)
             {
                 List<Dictionary<string, object>> queue = ReadActionQueueUnlocked(campaignId);
+                recoverDiplomaticMarriages = queue.Any(row => DiplomaticMarriageRecoveryDue(row, nowTs));
                 // Read at most once per poll, and only when a durable row needs it.
                 string deliveryGeneration = null;
                 Func<string> generation = () => deliveryGeneration ?? (deliveryGeneration = DialogueService.ActionDeliveryGeneration(campaignId));
@@ -328,6 +337,7 @@ namespace ReignBetaServer
                     ["row"] = row
                 });
             }
+            if (recoverDiplomaticMarriages) ScheduleDiplomaticMarriageRecovery(campaignId);
             return new Dictionary<string, object>
             {
                 ["ok"] = true,
@@ -338,6 +348,12 @@ namespace ReignBetaServer
         }
 
         internal static Dictionary<string, object> ReportAction(Dictionary<string, object> payload)
+        {
+            return ReportAction(payload, null, null);
+        }
+
+        internal static Dictionary<string, object> ReportAction(Dictionary<string, object> payload,
+            Action beforeMarriageAdmissionCommit, Action beforeMarriageEffectCommit)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -350,6 +366,13 @@ namespace ReignBetaServer
             {
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "serverActionId/actionId is required." };
             }
+            bool nativeMarriage = reportedStatus == "completed" && RelationshipsService.ReportsNativeDiplomaticMarriageSettlement(payload);
+            bool scopedMarriage = nativeMarriage || (reportedStatus == "completed" && RelationshipsService.ReportsLegacyDiplomaticMarriage(payload));
+            using var timelineScope = scopedMarriage ? WorldSimulationService.EnterWorldHistoryTimelineScope(campaignId) : null;
+            var marriageScope = scopedMarriage
+                ? RelationshipsService.CaptureDiplomaticMarriageReportScope(campaignId, id, payload, nativeMarriage) : null;
+            if (nativeMarriage && marriageScope == null)
+                return TestDict("ok", false, "error", "The diplomatic marriage report belongs to a different campaign load or timeline.");
 
             bool found = false;
             bool ignoredStatusRegression = false;
@@ -357,6 +380,8 @@ namespace ReignBetaServer
             // report returns that canonical status and writes no evidence, audit or projection.
             bool protocolOwned = false;
             string authoritativeStatus = status;
+            Dictionary<string, object> admittedDiplomaticMarriage = null;
+            bool admittedFirstMarriage = false;
             lock (Program.FileLock)
             {
                 List<Dictionary<string, object>> queue = ReadActionQueueUnlocked(campaignId);
@@ -395,6 +420,17 @@ namespace ReignBetaServer
                         if (ShouldAcceptActionStatusTransition(currentStatus, status)
                             || legacyRefusalCorrection)
                         {
+                            // Freeze explicit marriage evidence with first acceptance so a
+                            // retry can finish its effects without reopening historical reports.
+                            if (!IsTerminalActionReportStatus(currentStatus))
+                            {
+                                var completion = RelationshipsService.DiplomaticMarriageCompletion(id, status, matchedRecord, payload, marriageScope);
+                                if (completion != null)
+                                {
+                                    row[DiplomaticMarriageCompletionField] = completion;
+                                    admittedFirstMarriage = true;
+                                }
+                            }
                             row["status"] = status;
                             row["reportTs"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                             row["report"] = payload;
@@ -411,12 +447,14 @@ namespace ReignBetaServer
                             protocolOwned = true;
                             authoritativeStatus = status = ReadString(row, "status", "");
                         }
+                        else admittedDiplomaticMarriage = PendingDiplomaticMarriage(row);
                         break;
                     }
                 }
 
                 if (!protocolOwned)
                 {
+                    if (admittedFirstMarriage) beforeMarriageAdmissionCommit?.Invoke();
                     WriteActionQueueUnlocked(campaignId, queue);
                     CampaignFileService.AppendJsonLineToPath(CampaignFileService.CampaignFile(campaignId, "actions", "actions.jsonl"), new Dictionary<string, object>
                     {
@@ -428,6 +466,7 @@ namespace ReignBetaServer
                     });
                 }
             }
+            timelineScope?.Dispose();
 
             correlationId = FirstNonEmpty(correlationId, ReadFirstString(ReadDictionary(payload, "result"), "correlationId"));
             OperationsService.LogOperational("action.report", new Dictionary<string, object> { ["campaignId"] = campaignId, ["correlationId"] = correlationId, ["id"] = id, ["status"] = status, ["reportedStatus"] = reportedStatus, ["found"] = found, ["protocolOwned"] = protocolOwned });
@@ -480,7 +519,8 @@ namespace ReignBetaServer
                 };
             }
             if (found) DialogueService.RecordSharedActionReceipt(campaignId, payload, matchedRecord, authoritativeStatus);
-            if(found)RelationshipsService.FinalizeDiplomaticMarriageEffects(campaignId,id,authoritativeStatus,matchedRecord,payload);
+            if (admittedDiplomaticMarriage != null)
+                CompletePendingDiplomaticMarriage(campaignId, id, matchedRecord, admittedDiplomaticMarriage, beforeMarriageEffectCommit);
             Dictionary<string, object> memoryStore = DialogueService.StoreActionResultMemory(payload, "actions_report");
             List<Dictionary<string, object>> nativeRelationChanges = RelationshipsService.EvaluateCompletedActionRelationships(payload, out string relationshipScopeError);
             if (relationshipScopeError.Length > 0)
@@ -499,6 +539,75 @@ namespace ReignBetaServer
             var response = new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaignId, ["correlationId"] = correlationId, ["id"] = id, ["status"] = status, ["reportedStatus"] = reportedStatus, ["found"] = found, ["memoryStore"] = memoryStore, ["nativeRelationChanges"] = nativeRelationChanges };
             if (relationshipScopeError.Length > 0) response["relationshipScopeError"] = relationshipScopeError;
             return response;
+        }
+
+        private static Dictionary<string, object> PendingDiplomaticMarriage(Dictionary<string, object> row)
+        {
+            var completion = ReadDictionary(row, DiplomaticMarriageCompletionField);
+            return ReadString(row, "status", "") == "completed" && completion != null
+                && ReadString(completion, "outcome", "").Length == 0 ? completion : null;
+        }
+
+        private static bool DiplomaticMarriageRecoveryDue(Dictionary<string, object> row, long now)
+        {
+            var pending = PendingDiplomaticMarriage(row);
+            return pending != null && ReadLong(pending, "retryAfterUtc", 0) <= now;
+        }
+
+        private static void ScheduleDiplomaticMarriageRecovery(string campaignId)
+        {
+            if (!DiplomaticMarriageRecoveryWorkers.TryAdd(campaignId, 0)) return;
+            _ = Task.Run(() =>
+            {
+                Program.CampaignDataGate.EnterReadLock();
+                try
+                {
+                    List<Dictionary<string, object>> pending;
+                    long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                    lock (Program.FileLock)
+                        pending = ReadActionQueueUnlocked(campaignId)
+                            .Where(row => DiplomaticMarriageRecoveryDue(row, now)).Take(4).ToList();
+                    foreach (var row in pending)
+                    {
+                        try
+                        {
+                            CompletePendingDiplomaticMarriage(campaignId, ReadString(row, "id", ""),
+                                ReadDictionary(row, "record"), PendingDiplomaticMarriage(row));
+                        }
+                        catch (Exception error)
+                        {
+                            Console.Error.WriteLine("Reign diplomatic marriage recovery: " + error.GetType().Name);
+                        }
+                    }
+                }
+                catch (Exception error)
+                {
+                    Console.Error.WriteLine("Reign diplomatic marriage recovery read: " + error.GetType().Name);
+                }
+                finally
+                {
+                    Program.CampaignDataGate.ExitReadLock();
+                    DiplomaticMarriageRecoveryWorkers.TryRemove(campaignId, out _);
+                }
+            });
+        }
+
+        private static void CompletePendingDiplomaticMarriage(string campaignId, string id,
+            Dictionary<string, object> record, Dictionary<string, object> admission, Action beforeEffectCommit = null)
+        {
+            bool applied = RelationshipsService.FinalizeDiplomaticMarriageEffects(campaignId, id, record, admission, beforeEffectCommit);
+            lock (Program.FileLock)
+            {
+                List<Dictionary<string, object>> queue = ReadActionQueueUnlocked(campaignId);
+                var row = queue.FirstOrDefault(existing => ReadString(existing, "id", "") == id);
+                var pending = PendingDiplomaticMarriage(row);
+                if (pending == null || Json.Serialize(pending) != Json.Serialize(admission)) return;
+                if (applied) pending["outcome"] = "applied";
+                // A concurrent timeline switch or missing snapshot lineage does not invalidate
+                // first admission. Preserve it and let later polls recheck without blocking siblings.
+                else pending["retryAfterUtc"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 30;
+                WriteActionQueueUnlocked(campaignId, queue);
+            }
         }
 
         internal static string NormalizeActionReportStatus(
@@ -782,8 +891,7 @@ namespace ReignBetaServer
         internal static void WriteActionQueueUnlocked(string campaignId, List<Dictionary<string, object>> queue)
         {
             string path = CampaignFileService.CampaignFile(campaignId, "actions", "action-queue.json");
-            Directory.CreateDirectory(Path.GetDirectoryName(path));
-            File.WriteAllText(path, Json.Serialize(queue ?? new List<Dictionary<string, object>>()), Encoding.UTF8);
+            CampaignFileService.WriteJsonObject(path, queue ?? new List<Dictionary<string, object>>());
         }
 
         internal static string ModelForRequest(Dictionary<string, object> settings, string requestType)

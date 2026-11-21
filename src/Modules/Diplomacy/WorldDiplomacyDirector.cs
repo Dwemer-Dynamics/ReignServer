@@ -490,6 +490,8 @@ namespace ReignBetaServer
                 }
 
                 normalized["source"] = "world_diplomacy_director";
+                if (ReadDictionary(ReadDictionary(finalCandidate, "terms"), "marriageTerms") != null)
+                    normalized[RelationshipsService.DiplomaticMarriageOriginTimelineField] = timelineId;
                 normalized["reason"] = ReadString(finalCandidate, "publicReason", "A ruler-driven diplomatic decision.");
                 normalized["requiresAcceptance"] = false;
                 normalized["serverActionId"] = ReadString(normalized, "actionId", Guid.NewGuid().ToString("N"));

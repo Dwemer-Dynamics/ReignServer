@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Reign.Core.Contracts.Actions;
 using Reign.Relationships;
 
 namespace ReignBetaServer
@@ -162,23 +164,173 @@ namespace ReignBetaServer
             }
         }
 
-        internal static void FinalizeDiplomaticMarriageEffects(string campaign,string id,string status,Dictionary<string,object> record,Dictionary<string,object> report)
+        private static Dictionary<string, object> CompletedDiplomaticMarriageTerms(string status, Dictionary<string, object> record)
         {
-            if(status!="completed"||ReadString(record,"source","")!="world_diplomacy_director")return;
-            var terms=ReadDictionary(record,"terms")??TryParseJsonObject(ReadString(record,"termsJson","{}"));
-            var quote=ReadDictionary(terms,"marriageTerms");if(ReadInt(quote,"policyVersion",0)!=ArrangedMarriagePolicy.Version)return;
-            var result=ReadDictionary(report,"result")??new Dictionary<string,object>();
-            var effects=ReadDictionaryList(result,"effects");if(effects.Count==0)effects=ReadDictionaryList(result,"Effects");
-            if(!effects.Any(x=>ReadString(x,"type","")=="marriage_completed"))return;
-            // Match the director/worker order: campaign ownership, then DB work.
+            if (status != "completed" || ReadString(record, "source", "") != "world_diplomacy_director") return null;
+            var terms = ReadDictionary(record, "terms") ?? TryParseJsonObject(ReadString(record, "termsJson", "{}"));
+            return ReadInt(ReadDictionary(terms, "marriageTerms"), "policyVersion", 0) == ArrangedMarriagePolicy.Version
+                ? terms : null;
+        }
+
+        internal static bool ReportsNativeDiplomaticMarriageSettlement(Dictionary<string, object> report)
+            => ReadString(report, "source", "") == "world_diplomacy_director"
+                && ReadDictionaryList(ReadDictionary(report, "result"), "effects").Any(effect =>
+                    ReadString(effect, "effectType", "") == "diplomatic_marriage_settled");
+
+        private static bool CurrentDiplomaticMarriageScope(ReignDbConnection connection, Dictionary<string, object> evidence)
+            => ReadString(evidence, "sharedActivityGeneration", "").Length > 0
+                && DialogueService.SharedActivityGenerationMatches(connection, evidence)
+                && WorldSimulationService.TableExists(connection, "world_history_timelines")
+                && WorldSimulationService.ActiveWorldHistoryTimeline(connection) == ReadString(evidence, "timelineId", "");
+
+        internal const string DiplomaticMarriageOriginTimelineField = "diplomaticMarriageOriginTimelineId";
+
+        internal static bool ReportsLegacyDiplomaticMarriage(Dictionary<string, object> report)
+        {
+            var result = ReadDictionary(report, "result");
+            var effects = ReadDictionaryList(result, "effects");
+            if (effects.Count == 0) effects = ReadDictionaryList(result, "Effects");
+            return effects.Any(effect => ReadString(effect, "type", "") == "marriage_completed");
+        }
+
+        internal sealed record DiplomaticMarriageReportScope(string Timeline, string Generation, HashSet<string> AncestorTimelines,
+            Dictionary<string, object> SavedRow);
+
+        // Called while holding timeline ownership but before the action queue's FileLock.
+        internal static DiplomaticMarriageReportScope CaptureDiplomaticMarriageReportScope(string campaign, string id,
+            Dictionary<string, object> report, bool native)
+        {
+            using var c = ReignDatabase.OpenCampaignConnection(campaign);
+            if (native && !CurrentDiplomaticMarriageScope(c, report)) return null;
+            if (!native && !WorldSimulationService.TableExists(c, "world_history_timelines"))
+                WorldSimulationService.EnsureWorldHistorySchema(c);
+            string timeline = WorldSimulationService.ActiveWorldHistoryTimeline(c);
+            string generation = ReadString(DialogueService.ReadMemoryPrecisionState(c), "restore_generation", "");
+            string reportedTimeline = ReadString(report, "timelineId", "");
+            string reportedGeneration = ReadString(report, "sharedActivityGeneration", "");
+            if (generation.Length == 0 || (reportedTimeline.Length != 0 && timeline != reportedTimeline)
+                || (reportedGeneration.Length != 0 && generation != reportedGeneration)) return null;
+
+            var active = WorldSimulationStore.SelectWorldHistoryTimelines(c, TestDict("id", timeline)).FirstOrDefault();
+            string parent = ReadString(active, "parent_timeline_id", "");
+            var context = parent.Length == 0 ? null : VerifiedDiplomaticMarriageRestoreContext(c, timeline);
+            string head = ReadString(context, "head_event_id", "");
+            var saved = context != null && head == ReadString(active, "fork_event_id", "")
+                ? PersistenceService.ReadSaveSyncActionQueueRow(campaign, ReadString(context, "save_point_id", ""), parent,
+                    ReadLong(context, "head_sequence", 0), head, id)
+                : null;
+            HashSet<string> ancestors = null;
+            if (saved != null)
+            {
+                ancestors = new HashSet<string>(StringComparer.Ordinal);
+                while (parent.Length > 0)
+                {
+                    if (parent == timeline || ancestors.Contains(parent))
+                    {
+                        ancestors.Clear();
+                        break;
+                    }
+                    var ancestor = WorldSimulationStore.SelectWorldHistoryTimelines(c, TestDict("id", parent)).FirstOrDefault();
+                    if (ancestor == null) break;
+                    ancestors.Add(parent);
+                    parent = ReadString(ancestor, "parent_timeline_id", "");
+                }
+            }
+            return new DiplomaticMarriageReportScope(timeline, generation, ancestors, saved);
+        }
+
+        private static Dictionary<string, object> VerifiedDiplomaticMarriageRestoreContext(ReignDbConnection c, string timeline)
+        {
+            if (!WorldSimulationService.TableExists(c, "memory_restored_source_context")) return null;
+            var context = DialogueService.RestoredMemorySourceContext(c, timeline);
+            string session = ReadString(context, "load_session_id", "");
+            return TerminalActionReportProtocol.IsTrustedIdentifier(session)
+                && !session.StartsWith(TerminalActionReportProtocol.ImportedLoadSession, StringComparison.Ordinal)
+                && TerminalActionReportProtocol.IsTrustedIdentifier(ReadString(context, "save_point_id", ""))
+                && ReadString(context, "source_generation", "").Length > 0 ? context : null;
+        }
+
+        private static bool RestoredDiplomaticMarriageScope(ReignDbConnection c, Dictionary<string, object> admission)
+        {
+            // Only a server-admitted row from the current restored queue can use snapshot provenance.
+            string timeline = ReadString(admission, "timelineId", ""), source = ReadString(admission, "sharedActivityGeneration", "");
+            if (timeline.Length == 0 || source.Length == 0 || !WorldSimulationService.TableExists(c, "world_history_timelines")
+                || WorldSimulationService.ActiveWorldHistoryTimeline(c) != timeline)
+                return false;
+            var context = VerifiedDiplomaticMarriageRestoreContext(c, timeline);
+            return ReadString(context, "source_generation", "") == source
+                && ReadDouble(admission, "worldDay", 0d) <= ReadDouble(context, "world_day", 0d);
+        }
+
+        internal static Dictionary<string, object> DiplomaticMarriageCompletion(string actionId, string status,
+            Dictionary<string, object> record, Dictionary<string, object> report, DiplomaticMarriageReportScope scope)
+        {
+            var terms = CompletedDiplomaticMarriageTerms(status, record);
+            if (terms == null || scope == null) return null;
+            bool native = ReportsNativeDiplomaticMarriageSettlement(report);
+            if (native ? !VerifiedNativeDiplomaticMarriage(actionId, terms, report) : !ReportsLegacyDiplomaticMarriage(report))
+                return null;
+
+            string origin = ReadFirstString(record, DiplomaticMarriageOriginTimelineField, "timelineId");
+            // Older unscoped rows can keep the explicit legacy effect on their
+            // first completion. An ordinary modern completion without an origin
+            // cannot establish new settlement authority.
+            if (origin.Length == 0 && native) return null;
+            if (origin.Length > 0 && origin != scope.Timeline
+                && (scope.SavedRow == null || scope.AncestorTimelines?.Contains(origin) != true
+                    || ActionPipelineService.IsTerminalActionReportStatus(ReadString(scope.SavedRow, "status", ""))
+                    || Json.Serialize(ReadDictionary(scope.SavedRow, "record")) != Json.Serialize(record))) return null;
+            return TestDict("timelineId", scope.Timeline, "sharedActivityGeneration", scope.Generation,
+                "worldDay", ReadDouble(report, "worldDay", 0d));
+        }
+
+        private static bool VerifiedNativeDiplomaticMarriage(string actionId, Dictionary<string, object> terms,
+            Dictionary<string, object> report)
+        {
+            var result = ReadDictionary(report, "result");
+            if (!ReadBool(result, "success", false) || !ReadBool(result, "completed", false)) return false;
+
+            string first = ReadFirstString(terms, "marriageHero1StringId", "groomHeroStringId");
+            string second = ReadFirstString(terms, "marriageHero2StringId", "brideHeroStringId", "spouseHeroStringId");
+            if (first.Length == 0 || second.Length == 0 || first == second) return false;
+
+            var spouses = ReadDictionaryList(result, "changedEntities")
+                .Where(change => ReadString(change, "entityType", "") == "hero" && ReadString(change, "changeType", "") == "spouse_changed")
+                .Select(change => ReadString(change, "id", "")).ToHashSet(StringComparer.Ordinal);
+            var effects = ReadDictionaryList(result, "effects");
+            if (!spouses.SetEquals(new[] { first, second }) || !effects.Any(effect =>
+                ReadString(effect, "effectType", "") == "marriage_completed" && ReadString(effect, "entityType", "") == "hero"
+                && spouses.Contains(ReadString(effect, "id", "")))) return false;
+
+            int fee = ReadInt(ReadDictionary(terms, "marriageTerms"), "fee", -1);
+            string quotedFee = fee.ToString(CultureInfo.InvariantCulture);
+            return fee >= 0 && effects.Any(effect => ReadString(effect, "effectType", "") == "diplomatic_marriage_settled"
+                && ReadString(effect, "entityType", "") == "action" && ReadString(effect, "id", "") == actionId
+                && effect.TryGetValue("detail", out object value) && value is string paidFee && paidFee == quotedFee);
+        }
+
+        internal static bool FinalizeDiplomaticMarriageEffects(string campaign, string id,
+            Dictionary<string, object> record, Dictionary<string, object> admittedCompletion, Action beforeCommit = null)
+        {
+            var terms = CompletedDiplomaticMarriageTerms("completed", record);
+            if (terms == null || admittedCompletion == null) return false;
+            var quote = ReadDictionary(terms, "marriageTerms");
+            // Both activation routes share this fence through the affinity commit.
+            using var timelineScope = WorldSimulationService.EnterWorldHistoryTimelineScope(campaign);
             using var ownership = PersistenceService.EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaign));
-            using var c=ReignDatabase.OpenCampaignConnection(campaign);EnsureRelationshipDirectorSchema(c);
-            string timeline=ReadString(record,"timelineId",WorldSimulationService.ActiveWorldHistoryTimeline(c));
-            double day=ReadDouble(report,"worldDay",0);
-            using var tx=c.BeginTransaction();
-            ApplyMarriageLeaderEffect(c,campaign,timeline,"diplomatic_"+id,ReadString(quote,"leaderAId",""),ReadString(quote,"leaderBId",""),20,day);
-            ApplyMarriageLeaderEffect(c,campaign,timeline,"diplomatic_"+id,ReadString(quote,"leaderBId",""),ReadString(quote,"leaderAId",""),20,day);
+            using var c = ReignDatabase.OpenCampaignConnection(campaign);
+            EnsureRelationshipDirectorSchema(c);
+            string timeline = ReadString(admittedCompletion, "timelineId", "");
+            double day = ReadDouble(admittedCompletion, "worldDay", 0d);
+            string leaderA = ReadString(quote, "leaderAId", ""), leaderB = ReadString(quote, "leaderBId", "");
+            using var tx = c.BeginTransaction();
+            if (!CurrentDiplomaticMarriageScope(c, admittedCompletion)
+                && !RestoredDiplomaticMarriageScope(c, admittedCompletion)) return false;
+            ApplyMarriageLeaderEffect(c, campaign, timeline, "diplomatic_" + id, leaderA, leaderB, 20, day);
+            ApplyMarriageLeaderEffect(c, campaign, timeline, "diplomatic_" + id, leaderB, leaderA, 20, day);
+            beforeCommit?.Invoke();
             tx.Commit();
+            return true;
         }
 
         private static List<Dictionary<string,object>> RunArrangedMarriageSelfTests()
@@ -412,11 +564,17 @@ namespace ReignBetaServer
                 Check("paid_native_receipt_and_leaders_replay",ReadBool(completion,"ok",false)&&ReadBool(completionReplay,"idempotent",false)
                     &&RelationshipsStore.SelectArrangedMarriageEffects5(c).Count==2);
                 var diplomaticTerms=TestDict("marriageTerms",paidQuote);
+                var diplomaticScope = WorldSimulationService.WorldHistoryOpenTimelineApi(
+                    TestDict("campaignId", campaign, "timelineId", "diplomatic_fixture"));
                 Check("diplomatic_wait_does_not_hold_database_locks",
                     MarriageWorkWaitLeavesDatabaseAvailable(campaign,
-                        () => FinalizeDiplomaticMarriageEffects(campaign,"lock_fixture","completed",
+                        () => FinalizeDiplomaticMarriageEffects(campaign,"lock_fixture",
                             TestDict("source","world_diplomacy_director","terms",diplomaticTerms,"timelineId","diplomatic_fixture"),
-                            TestDict("worldDay",21d,"result",TestDict("effects",new[]{TestDict("type","marriage_completed")})))));
+                            TestDict("worldDay",21d,"timelineId","diplomatic_fixture",
+                                "sharedActivityGeneration",ReadString(diplomaticScope,"sharedActivityGeneration","")))));
+                RunNativeDiplomaticMarriageReportSelfTests(c, campaign, paidQuote, Check);
+                Check("divorce_waits_for_timeline_before_relationship_ownership", DivorceWaitsForTimelineBeforeRelationshipOwnership(c, campaign));
+                Check("cold_save_sync_state_read_does_not_wait_for_file_lock", ColdSaveSyncStateReadAvoidsFileLock(campaign));
                 // An older snapshot must be inspected as it is, with no stale
                 // process readiness surviving its restored table shape.
                 RelationshipsSchema.AlterRelationshipNativeTargets(c);
@@ -435,8 +593,329 @@ namespace ReignBetaServer
 
             }
             catch(Exception ex){results.Add(TestDict("caseId","arranged_suite_exception","passed",false,"summary",DialogueService.LimitText(ex.ToString(),2000)));}
-            finally {ReignPostgreSqlStorage.DropCampaign(campaign);}
+            finally
+            {
+                ReignPostgreSqlStorage.DropCampaign(campaign);
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaign));
+            }
             return results;
+        }
+
+        private static void RunNativeDiplomaticMarriageReportSelfTests(ReignDbConnection connection, string campaign,
+            Dictionary<string, object> quote, Action<string, bool> check)
+        {
+            const string first = "paid_son", second = "paid_daughter";
+            var scope = WorldSimulationService.WorldHistoryOpenTimelineApi(TestDict("campaignId", campaign, "timelineId", "diplomatic_fixture"));
+            string timeline = ReadString(scope, "timelineId", "");
+            string generation = ReadString(scope, "sharedActivityGeneration", "");
+            string leaderA = ReadString(quote, "leaderAId", ""), leaderB = ReadString(quote, "leaderBId", "");
+            var record = TestDict("source", "world_diplomacy_director", "type", "DiplomacyPackage",
+                DiplomaticMarriageOriginTimelineField, timeline,
+                "termsJson", Json.Serialize(TestDict("marriageTerms", quote, "marriageHero1StringId", first, "marriageHero2StringId", second)));
+            Dictionary<string, object> Row(string id, string status) => TestDict("id", id, "status", status, "record", record);
+            int fee = ReadInt(quote, "fee", -1);
+            Dictionary<string, object> NativeReport(string id, string spouse, int? paidFee)
+            {
+                var effects = new List<Dictionary<string, object>>
+                    { TestDict("effectType", "marriage_completed", "entityType", "hero", "id", spouse) };
+                if (paidFee.HasValue)
+                    effects.Add(TestDict("effectType", "diplomatic_marriage_settled", "entityType", "action", "id", id,
+                        "detail", paidFee.Value.ToString(CultureInfo.InvariantCulture)));
+                return TestDict("campaignId", campaign, "actionId", id, "status", "completed", "type", "DiplomacyPackage",
+                    "source", "world_diplomacy_director",
+                    "message", "Wedding concluded.", "actorHeroStringId", "report_actor", "targetHeroStringId", "report_target",
+                    "worldDay", 22d, "timelineId", timeline, "sharedActivityGeneration", generation,
+                    "result", TestDict("success", true, "completed", true, "effects", effects,
+                        "changedEntities", new[] { TestDict("entityType", "hero", "changeType", "spouse_changed", "id", first),
+                            TestDict("entityType", "hero", "changeType", "spouse_changed", "id", spouse) }));
+            }
+            Dictionary<string, object> Pair(string a, string b)
+                => RelationshipsStore.SelectRelationshipPairChemistry5(connection, TestDict("p", AmbientPairKey(a, b))).FirstOrDefault();
+            var before = Pair(leaderA, leaderB);
+            string spousesBefore = Json.Serialize(Pair(first, second));
+            var completed = Row("native_marriage_completed", "queued");
+            var currentReport = NativeReport("native_marriage_completed", second, fee);
+            currentReport["message"] = "Verified agreement: Marriage completed: Paid Son married Paid Daughter.";
+            const string pendingId = "native_marriage_pending_effect";
+            const string unprovenId = "native_marriage_pending_older_source";
+            var pendingEffect = Row(pendingId, "completed");
+            var reportScope = new DiplomaticMarriageReportScope(timeline, generation, null, null);
+            pendingEffect["diplomaticMarriageCompletion"] =
+                DiplomaticMarriageCompletion(pendingId, "completed", record, NativeReport(pendingId, second, fee), reportScope);
+            var unproven = Row(unprovenId, "completed");
+            var unprovenAdmission = DiplomaticMarriageCompletion(unprovenId, "completed", record, NativeReport(unprovenId, second, fee), reportScope);
+            unprovenAdmission["sharedActivityGeneration"] = "unproven_older_source";
+            unproven["diplomaticMarriageCompletion"] = unprovenAdmission;
+            var unstamped = new Dictionary<string, object>(record);
+            unstamped.Remove(DiplomaticMarriageOriginTimelineField);
+            const string legacyId = "legacy_marriage_interrupted";
+            const string legacyLeaderA = "legacy_marriage_leader_a", legacyLeaderB = "legacy_marriage_leader_b";
+            var legacyQuote = new Dictionary<string, object>(quote) { ["leaderAId"] = legacyLeaderA, ["leaderBId"] = legacyLeaderB };
+            var legacyRow = Row(legacyId, "queued");
+            legacyRow["record"] = new Dictionary<string, object>(unstamped)
+            {
+                ["termsJson"] = Json.Serialize(TestDict("marriageTerms", legacyQuote, "marriageHero1StringId", first, "marriageHero2StringId", second))
+            };
+            var unstampedNative = Row("native_marriage_unstamped", "queued");
+            unstampedNative["record"] = unstamped;
+            ActionPipelineService.WriteActionQueueUnlocked(campaign, new List<Dictionary<string, object>> {
+                completed, Row("native_marriage_historical", "completed"), Row("native_marriage_wrong_couple", "queued"),
+                Row("native_marriage_unsettled", "queued"), Row("native_marriage_wrong_fee", "queued"),
+                Row("native_marriage_malformed_fee", "queued"),
+                Row("native_marriage_stale_timeline", "queued"), pendingEffect, unproven, legacyRow, unstampedNative
+            });
+
+            ActionPipelineService.ReportAction(NativeReport("native_marriage_historical", second, fee));
+            var historicalLegacy = NativeReport("native_marriage_historical", second, null);
+            ReadDictionaryList(ReadDictionary(historicalLegacy, "result"), "effects")[0]["type"] = "marriage_completed";
+            ActionPipelineService.ReportAction(historicalLegacy);
+            ActionPipelineService.ReportAction(NativeReport("native_marriage_unstamped", second, fee));
+            check("diplomatic_historical_completion_has_no_effect",
+                Json.Serialize(Pair(leaderA, leaderB)) == Json.Serialize(before));
+            ActionPipelineService.ReportAction(NativeReport("native_marriage_wrong_couple", "other_spouse", fee));
+            // A later same-status report cannot replace evidence on an already completed row.
+            ActionPipelineService.ReportAction(NativeReport("native_marriage_wrong_couple", second, fee));
+            ActionPipelineService.ReportAction(NativeReport("native_marriage_unsettled", second, null));
+            ActionPipelineService.ReportAction(NativeReport("native_marriage_wrong_fee", second, fee + 1));
+            var malformedFee = NativeReport("native_marriage_malformed_fee", second, fee);
+            var payment = ReadDictionaryList(ReadDictionary(malformedFee, "result"), "effects")[1];
+            payment["detail"] = "unverified " + ReadString(payment, "detail", "");
+            ActionPipelineService.ReportAction(malformedFee);
+            var staleGeneration = NativeReport("native_marriage_completed", second, fee);
+            staleGeneration["sharedActivityGeneration"] = "prior_restore_generation";
+            var rejectedGeneration = ActionPipelineService.ReportAction(staleGeneration);
+            var staleTimeline = NativeReport("native_marriage_stale_timeline", second, fee);
+            staleTimeline["timelineId"] = "prior_world_timeline";
+            var rejectedTimeline = ActionPipelineService.ReportAction(staleTimeline);
+            check("diplomatic_wrong_couple_and_unverified_settlement_have_no_effect",
+                Json.Serialize(Pair(leaderA, leaderB)) == Json.Serialize(before));
+            check("diplomatic_stale_report_cannot_retire_a_queued_marriage",
+                !ReadBool(rejectedGeneration, "ok", true) && !ReadBool(rejectedTimeline, "ok", true)
+                && ActionPipelineService.ReadActionQueueUnlocked(campaign)
+                    .Where(row => ReadString(row, "id", "") is "native_marriage_completed" or "native_marriage_stale_timeline")
+                    .All(row => ReadString(row, "status", "") == "queued"));
+
+            ActionPipelineService.ReportAction(currentReport);
+            var after = Pair(leaderA, leaderB);
+            var reportedActors = Pair("report_actor", "report_target");
+            int deltaAB = ReadInt(after, "affinity_a_to_b", 0) - ReadInt(before, "affinity_a_to_b", 0);
+            int deltaBA = ReadInt(after, "affinity_b_to_a", 0) - ReadInt(before, "affinity_b_to_a", 0);
+            ActionPipelineService.ReportAction(currentReport);
+            check("diplomatic_native_completion_applies_once_to_quoted_leaders",
+                deltaAB == 20 && deltaBA == 20 && Json.Serialize(Pair(leaderA, leaderB)) == Json.Serialize(after)
+                && Json.Serialize(Pair(first, second)) == spousesBefore);
+            check("diplomatic_typed_receipt_is_separate_from_legacy_report_prose",
+                ReadInt(reportedActors, "affinity_a_to_b", 0) == 2 && ReadInt(reportedActors, "affinity_b_to_a", 0) == 2
+                && Json.Serialize(Pair("report_actor", "report_target")) == Json.Serialize(reportedActors));
+
+            var legacy = NativeReport(legacyId, second, null);
+            legacy.Remove("timelineId");
+            legacy.Remove("sharedActivityGeneration");
+            ReadDictionaryList(ReadDictionary(legacy, "result"), "effects")[0]["type"] = "marriage_completed";
+            bool interruptedLegacy = false;
+            try
+            {
+                ActionPipelineService.ReportAction(legacy, beforeMarriageAdmissionCommit: null,
+                    beforeMarriageEffectCommit: () => throw new IOException("legacy affinity interrupted"));
+            }
+            catch (IOException error) when (error.Message == "legacy affinity interrupted") { interruptedLegacy = true; }
+            var interruptedRow = ActionPipelineService.ReadActionQueueUnlocked(campaign).Single(row => ReadString(row, "id", "") == legacyId);
+            bool legacyRolledBack = Pair(legacyLeaderA, legacyLeaderB) == null;
+            var legacyRetry = NativeReport(legacyId, "ignored_replay_spouse", null);
+            legacyRetry["worldDay"] = 99d;
+            ActionPipelineService.ReportAction(legacyRetry);
+            var afterLegacy = Pair(legacyLeaderA, legacyLeaderB);
+            ActionPipelineService.ReportAction(legacy);
+            check("diplomatic_first_legacy_evidence_recovers_after_rollback",
+                interruptedLegacy && legacyRolledBack && ReadString(interruptedRow, "status", "") == "completed"
+                && ReadDouble(ReadDictionary(interruptedRow, "diplomaticMarriageCompletion"), "worldDay", -1d) == 22d
+                && ReadInt(afterLegacy, "affinity_a_to_b", 0) == 20 && ReadInt(afterLegacy, "affinity_b_to_a", 0) == 20
+                && Json.Serialize(Pair(legacyLeaderA, legacyLeaderB)) == Json.Serialize(afterLegacy));
+
+            // Simulate the ordinary queue cap after an interruption before projection.
+            lock (Program.FileLock)
+            {
+                var queue = ActionPipelineService.ReadActionQueueUnlocked(campaign);
+                queue.AddRange(Enumerable.Range(0, 500).Select(i => Row("unrelated_terminal_" + i, "completed")));
+                ActionPipelineService.WriteActionQueueUnlocked(campaign, queue);
+            }
+            ActionPipelineService.QueueAction(campaign, TestDict("serverActionId", "unrelated_new_action"));
+            // Reproduce the server-owned provenance of a snapshot that contained the queued admission.
+            string restoredGeneration = Guid.NewGuid().ToString("N");
+            DialogueStore.UpdateMemoryPrecisionState2(connection, TestDict("generation", restoredGeneration,
+                "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+            DialogueStore.UpsertMemoryRestoredSourceContext(connection, TestDict("generation", restoredGeneration,
+                "timeline", timeline, "point", "diplomatic_fixture_save", "day", 25d, "sequence", 0L,
+                "head", "", "source", generation, "session", "diplomatic_fixture_load"));
+            var offered = ActionPipelineService.NextActions(TestDict("campaignId", campaign), null);
+            Dictionary<string, object> ReadSavedAdmission(string id)
+            {
+                lock (Program.FileLock)
+                {
+                    var saved = ActionPipelineService.ReadActionQueueUnlocked(campaign)
+                        .SingleOrDefault(row => ReadString(row, "id", "") == id);
+                    return ReadDictionary(saved, "diplomaticMarriageCompletion");
+                }
+            }
+            bool recoveredViaPoll = SpinWait.SpinUntil(() => ReadString(ReadSavedAdmission(pendingId), "outcome", "") == "applied"
+                && ReadLong(ReadSavedAdmission(unprovenId), "retryAfterUtc", 0) > 0, TimeSpan.FromSeconds(10));
+            var recovered = Pair(leaderA, leaderB);
+            var retry = NativeReport(pendingId, "other_spouse", null);
+            retry["timelineId"] = "different_retry_timeline";
+            retry["worldDay"] = 99d;
+            ActionPipelineService.ReportAction(retry);
+            var savedAdmission = ReadSavedAdmission(pendingId);
+            check("diplomatic_unproven_snapshot_lineage_remains_pending",
+                ReadString(ReadSavedAdmission(unprovenId), "outcome", "") == ""
+                && ReadLong(ReadSavedAdmission(unprovenId), "retryAfterUtc", 0) > 0);
+            check("diplomatic_completion_recovers_from_persisted_admission",
+                recoveredViaPoll && ReadDictionaryList(offered, "actions").Count == 1
+                && ReadInt(recovered, "affinity_a_to_b", 0) - ReadInt(after, "affinity_a_to_b", 0) == 20
+                && ReadInt(recovered, "affinity_b_to_a", 0) - ReadInt(after, "affinity_b_to_a", 0) == 20
+                && ReadString(savedAdmission, "timelineId", "") == timeline && ReadDouble(savedAdmission, "worldDay", 0d) == 22d
+                && ReadString(savedAdmission, "sharedActivityGeneration", "") == generation
+                && Json.Serialize(Pair(leaderA, leaderB)) == Json.Serialize(recovered));
+
+            foreach (bool ingest in new[] { false, true })
+            {
+                string activation = ingest ? "ingest" : "open";
+                string id = "timeline_admission_" + activation;
+                var scopeReport = NativeReport(id, second, fee);
+                scopeReport["sharedActivityGeneration"] = restoredGeneration;
+                WorldSimulationService.WorldHistoryOpenTimelineApi(TestDict("campaignId", campaign, "timelineId", timeline));
+                ActionPipelineService.WriteActionQueueUnlocked(campaign, new List<Dictionary<string, object>> { Row(id, "queued") });
+                check("diplomatic_" + activation + "_waits_for_admission_commit",
+                    MarriageTimelineActivationWaits(campaign, id + "_other", ingest, beforeCommit =>
+                        ActionPipelineService.ReportAction(scopeReport, beforeMarriageAdmissionCommit: beforeCommit, beforeMarriageEffectCommit: null))
+                    && ReadString(ReadSavedAdmission(id), "timelineId", "") == timeline);
+
+                WorldSimulationService.WorldHistoryOpenTimelineApi(TestDict("campaignId", campaign, "timelineId", timeline));
+                var directAdmission = TestDict("timelineId", timeline, "sharedActivityGeneration", restoredGeneration, "worldDay", 22d);
+                check("diplomatic_" + activation + "_waits_for_affinity_commit",
+                    MarriageTimelineActivationWaits(campaign, id + "_effect_other", ingest, beforeCommit =>
+                        FinalizeDiplomaticMarriageEffects(campaign, id + "_effect", record, directAdmission, beforeCommit)));
+            }
+
+            // Exercise the real timeline fork and exact selected queue file lookup.
+            const string inheritedId = "native_marriage_inherited";
+            var points = new List<Dictionary<string, object>>();
+            Dictionary<string, object> ForkFromQueuedSnapshot(string sourceTimeline, string pointId, string head, long sequence)
+            {
+                var point = TestDict("savePointId", pointId, "timelineId", sourceTimeline,
+                    "worldHistorySequence", sequence, "worldHistoryHeadEventId", head);
+                points.Add(point);
+                string snapshot = PersistenceService.SaveSyncSnapshotRoot(campaign, point);
+                PersistenceService.WriteSaveSyncLedger(campaign, TestDict("campaignId", campaign, "points", points));
+                CampaignFileService.WriteJsonObject(Path.Combine(snapshot, "manifest.json"),
+                    TestDict("format", "bannerlord-reign-save-sync-snapshot", "campaignId", campaign, "integrityDeferred", true));
+                CampaignFileService.WriteJsonObject(Path.Combine(snapshot, "campaign", "actions", "action-queue.json"),
+                    new[] { Row(inheritedId, "queued") });
+                WorldSimulationStore.UpdateWorldHistoryTimelines2(connection,
+                    TestDict("sequence", sequence + 1, "event", "c4_later_" + pointId, "now", DateTime.UtcNow.ToString("o"), "timeline", sourceTimeline));
+                DialogueStore.UpsertMemoryRestoredSourceContext(connection, TestDict("generation", restoredGeneration,
+                    "timeline", sourceTimeline, "point", pointId, "day", 25d, "sequence", sequence,
+                    "head", head, "source", generation, "session", "c4_load_" + pointId));
+                return WorldSimulationService.WorldHistoryOpenTimelineApi(TestDict("campaignId", campaign, "timelineId", sourceTimeline,
+                    "savedSequence", sequence, "savedHeadEventId", head, "currentWorldDay", 25d));
+            }
+            try
+            {
+                var child = ForkFromQueuedSnapshot(timeline, "c4_origin_snapshot", "c4_fork_head", 2L);
+                var inherited = NativeReport(inheritedId, second, fee);
+                inherited["timelineId"] = ReadString(child, "timelineId", "");
+                inherited["sharedActivityGeneration"] = restoredGeneration;
+                using var childOwnership = WorldSimulationService.EnterWorldHistoryTimelineScope(campaign);
+                var proved = CaptureDiplomaticMarriageReportScope(campaign, inheritedId, inherited, native: true);
+                var unrelated = new Dictionary<string, object>(record) { [DiplomaticMarriageOriginTimelineField] = "sibling" };
+                var unrelatedRow = Row(inheritedId, "queued");
+                unrelatedRow["record"] = unrelated;
+                var changed = new Dictionary<string, object>(record) { ["reason"] = "another proposal" };
+                check("diplomatic_fork_needs_exact_saved_origin_action",
+                    ReadBool(child, "branched", false)
+                    && DiplomaticMarriageCompletion(inheritedId, "completed", record, inherited, proved) != null
+                    && DiplomaticMarriageCompletion(inheritedId, "completed", record, inherited, proved with { SavedRow = null }) == null
+                    && DiplomaticMarriageCompletion(inheritedId, "completed", unrelated, inherited, proved with { SavedRow = unrelatedRow }) == null
+                    && DiplomaticMarriageCompletion(inheritedId, "completed", changed, inherited, proved) == null);
+                var grandchild = ForkFromQueuedSnapshot(ReadString(child, "timelineId", ""), "c4_child_snapshot", "c4_child_head", 4L);
+                inherited["timelineId"] = ReadString(grandchild, "timelineId", "");
+                var continued = CaptureDiplomaticMarriageReportScope(campaign, inheritedId, inherited, native: true);
+                check("diplomatic_verified_grandchild_preserves_queued_origin",
+                    ReadBool(grandchild, "branched", false)
+                    && DiplomaticMarriageCompletion(inheritedId, "completed", record, inherited, continued) != null
+                    && DiplomaticMarriageCompletion(inheritedId, "completed", unrelated, inherited, continued) == null);
+            }
+            finally { PersistenceService.TryDeleteDirectory(PersistenceService.SaveSyncCampaignRoot(campaign)); }
+        }
+
+        private static bool DivorceWaitsForTimelineBeforeRelationshipOwnership(ReignDbConnection connection, string campaign)
+        {
+            const string timeline = "c4_divorce_fixture";
+            const string actor = "c4_divorce_actor", target = "c4_divorce_target";
+            ReputationService.EnsureSocialReputationSchema(connection);
+            string id = QueueDirectorAction(connection, "divorce", 30d, actor, target,
+                TestDict("source", "mbti_relationship_lifecycle", "timelineId", timeline));
+            var report = TestDict("campaignId", campaign, "directorActionId", id, "status", "completed", "timelineId", timeline);
+            using var waiting = new ManualResetEventSlim();
+            Task<Dictionary<string, object>> worker;
+            bool relationshipAvailable = false;
+            using (WorldSimulationService.EnterWorldHistoryTimelineScope(campaign))
+            {
+                worker = Task.Factory.StartNew(() =>
+                {
+                    PersistenceService.CampaignWorkLockWaitObserverForTests = _ => waiting.Set();
+                    try { return RelationshipDirectorReportActionApi(report); }
+                    finally { PersistenceService.CampaignWorkLockWaitObserverForTests = null; }
+                }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+                var relationshipLock = CampaignRelationshipWriteLock(campaign);
+                if (waiting.Wait(TimeSpan.FromSeconds(5)) && Monitor.TryEnter(relationshipLock))
+                {
+                    Monitor.Exit(relationshipLock);
+                    relationshipAvailable = true;
+                }
+            }
+            if (!worker.Wait(TimeSpan.FromSeconds(20))) return false;
+            return relationshipAvailable && ReadBool(worker.Result, "ok", false)
+                && ReadBool(RelationshipDirectorReportActionApi(report), "idempotent", false)
+                && WorldSimulationStore.SelectWorldHistoryEvents4(connection, TestDict("id", "divorce_" + id, "timeline", timeline)).Count == 1;
+        }
+
+        private static bool MarriageTimelineActivationWaits(string campaign, string nextTimeline, bool ingest, Action<Action> complete)
+        {
+            using var waiting = new ManualResetEventSlim();
+            Task worker = null;
+            bool blocked = false;
+            complete(() =>
+            {
+                worker = Task.Factory.StartNew(() =>
+                {
+                    PersistenceService.CampaignWorkLockWaitObserverForTests = _ => waiting.Set();
+                    try
+                    {
+                        var request = TestDict("campaignId", campaign, "timelineId", nextTimeline);
+                        if (ingest) WorldSimulationService.WorldHistoryIngestBatchApi(request);
+                        else WorldSimulationService.WorldHistoryOpenTimelineApi(request);
+                    }
+                    finally { PersistenceService.CampaignWorkLockWaitObserverForTests = null; }
+                }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+                blocked = waiting.Wait(TimeSpan.FromSeconds(5)) && !worker.IsCompleted;
+            });
+            if (worker == null || !worker.Wait(TimeSpan.FromSeconds(20))) return false;
+            using var c = ReignDatabase.OpenCampaignConnection(campaign);
+            return blocked && WorldSimulationService.ActiveWorldHistoryTimeline(c) == nextTimeline;
+        }
+
+        private static bool ColdSaveSyncStateReadAvoidsFileLock(string campaign)
+        {
+            string coldCampaign = campaign + "_cold_state";
+            Task dirty;
+            bool completedUnderFileLock;
+            lock (Program.FileLock)
+            {
+                dirty = Task.Factory.StartNew(() => PersistenceService.MarkSaveSyncActiveStateDirty(coldCampaign),
+                    CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+                completedUnderFileLock = dirty.Wait(TimeSpan.FromSeconds(3));
+            }
+            return dirty.Wait(TimeSpan.FromSeconds(15)) && completedUnderFileLock;
         }
 
         private static bool RelationshipReadinessLeavesWritersUnblocked(string campaign,

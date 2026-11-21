@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -14,6 +15,15 @@ namespace ReignBetaServer
     {
         private const int PostgreSqlWorldHistorySchemaRevision = 4;
         internal static readonly object WorldHistoryCacheLock = new object();
+        private static readonly ConcurrentDictionary<string, object> WorldHistoryTimelineLocks = new(StringComparer.Ordinal);
+
+        // Acquire before relationship ownership, database transactions or FileLock.
+        // Save Sync takes the campaign data write gate outside these scopes.
+        internal static PersistenceService.CampaignWorkLock EnterWorldHistoryTimelineScope(string campaignId)
+        {
+            string key = string.IsNullOrWhiteSpace(campaignId) ? "default" : campaignId.Trim();
+            return PersistenceService.EnterCampaignWorkLock(WorldHistoryTimelineLocks.GetOrAdd(key, _ => new object()));
+        }
         internal static readonly Dictionary<string, Dictionary<string, object>> WorldHistoryClaimCache =
             new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
 
@@ -188,6 +198,7 @@ namespace ReignBetaServer
                 .DefaultIfEmpty(0d).Max();
             bool hasSpouseLetter = events.Any(item => RelationshipsService.IsSpouseLetterPayload(ReadDictionary(item, "payload")
                 ?? TryParseJsonObject(ReadString(item,"payload_json","{}"))));
+            using var timelineScope = EnterWorldHistoryTimelineScope(campaignId);
             // Spouse-letter projections enter the relationship monitor. Reserve
             // it before the ingest transaction takes any table/advisory locks.
             using var relationshipOwnership = hasSpouseLetter
@@ -303,6 +314,9 @@ namespace ReignBetaServer
                     }
                     transaction.Commit();
                 }
+                // The resolved active timeline is now durable. Keep the existing
+                // relationship scope for the rest of the spouse-letter path.
+                timelineScope.Dispose();
 
                 // A direct dynamic reputation is an immediate authoritative
                 // consequence (for example, a ruler's public judgment), not a
@@ -406,6 +420,7 @@ namespace ReignBetaServer
             bool branched = false;
             bool historyMissing = false;
             Dictionary<string, object> result;
+            using (EnterWorldHistoryTimelineScope(campaignId))
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureWorldHistorySchema(connection);
@@ -423,13 +438,17 @@ namespace ReignBetaServer
                     branched = true;
                 }
                 string now = DateTime.UtcNow.ToString("o");
-                WorldSimulationStore.UpsertWorldHistoryTimelines2(connection, new Dictionary<string, object>
+                using (var transaction = connection.BeginTransaction())
                 {
-                    ["id"] = timelineId, ["campaign"] = campaignId, ["parent"] = branched ? requested : ReadString(existing, "parent_timeline_id", ""),
-                    ["fork"] = savedHead, ["complete"] = completeFrom, ["sequence"] = branched ? savedSequence : Math.Max(savedSequence, serverHead),
-                    ["head"] = savedHead, ["now"] = now
-                });
-                WorldSimulationStore.UpdateWorldHistoryTimelines3(connection, new Dictionary<string, object> { ["id"] = timelineId, ["campaign"] = campaignId });
+                    WorldSimulationStore.UpsertWorldHistoryTimelines2(connection, new Dictionary<string, object>
+                    {
+                        ["id"] = timelineId, ["campaign"] = campaignId, ["parent"] = branched ? requested : ReadString(existing, "parent_timeline_id", ""),
+                        ["fork"] = savedHead, ["complete"] = completeFrom, ["sequence"] = branched ? savedSequence : Math.Max(savedSequence, serverHead),
+                        ["head"] = savedHead, ["now"] = now
+                    });
+                    WorldSimulationStore.UpdateWorldHistoryTimelines3(connection, new Dictionary<string, object> { ["id"] = timelineId, ["campaign"] = campaignId });
+                    transaction.Commit();
+                }
                 if (historyMissing || branched)
                 {
                     DialogueService.BindRecoveredLetterSources(connection, requested, timelineId, savedSequence, savedHead);
