@@ -165,7 +165,7 @@ namespace ReignBetaServer
                 ["origin"] = "An upbringing in an ordinary household within the native culture.",
                 ["upbringing"] = "Small responsibilities offered practice in patience and careful observation.",
                 ["reputation"] = "Known privately for taking time to consider an answer before speaking.",
-                ["privateBackstory"] = "Remembers unfinished childhood work and the satisfaction of returning to it." };
+                ["privateBackstory"] = "Remembers mending a basket in silence with Orla Fen, an old neighbor, and finishing it years later." };
             var fixtureVoice = new Dictionary<string, object> { ["nativeVoice"] = "reflective",
                 ["speechStyle"] = "Asks a concrete question before offering a carefully considered answer.",
                 ["socialMask"] = "Keeps attention on the business at hand while concealing uncertainty.",
@@ -189,6 +189,11 @@ namespace ReignBetaServer
                 && !items.Any(x => requestText.Contains(ReadString(x, "id", ""))) && ReadInt(firstRequest, "maxTokens", 0) == 50000
                 && !firstRequest.ContainsKey("minTokens") && !firstRequest.ContainsKey("min_tokens"),
                 "The 50,000-token ceiling permits one complete compact response without a minimum token target; local IDs, identity, ratings and trio remain authoritative.");
+            check("authoring_public_private_boundary", requestText.Contains("publicSummary and reputation use native-supported facts and observable details")
+                && requestText.Contains("ordinary fictional acquaintances")
+                && ReadString(ReadDictionary(written, "life"), "privateBackstory", "").Contains("Orla Fen")
+                && ReadString(ReadDictionary(written, "life"), "upbringing", "") == ReadString(fixtureLife, "upbringing", ""),
+                "Authoring keeps an ordinary named acquaintance and anonymous formative detail, without treating them as native records or public material.");
             var transportBody = LlmProviderService.BuildChatRequestBody(SettingsService.DefaultSettings(), firstRequest,
                 ReadDictionaryList(firstRequest, "messages"), "deepseek/deepseek-v4.1-flash");
             check("construction_transport_budget", ReadInt(transportBody, "max_tokens", 0) == 50000
