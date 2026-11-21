@@ -30,7 +30,9 @@ namespace ReignBetaServer
         internal static string CampaignDirectory(string campaignId)
         {
             PersistenceService.ThrowIfCampaignRequestReplaced();
-            return Path.Combine(CampaignsRoot(), SafePathSegment(campaignId, "default"));
+            string segment = SafePathSegment(campaignId, "default");
+            PersistenceService.RequireSaveSyncCampaignAvailable(segment);
+            return Path.Combine(CampaignsRoot(), segment);
         }
 
         internal static string CampaignsRoot()
@@ -96,13 +98,16 @@ namespace ReignBetaServer
                         .Select(registered => ReadString(
                             registered, "campaignId", ""))
                         .Where(IsInternalCampaignId)
+                        .Where(id => !PersistenceService.IsSaveSyncSemanticBlocked(id))
                         .ToList());
             if (Directory.Exists(root))
             {
                 foreach (DirectoryInfo directory
                     in new DirectoryInfo(root).GetDirectories())
                 {
-                    if (!IsInternalCampaignId(directory.Name)) continue;
+                    if (directory.Name.Equals(".save-sync-work", StringComparison.OrdinalIgnoreCase)
+                        || PersistenceService.IsSaveSyncSemanticBlocked(directory.Name)
+                        || !IsInternalCampaignId(directory.Name)) continue;
                     if (liveOwned.Contains(directory.Name)) continue;
                     try { directory.Delete(true); } catch { }
                 }
@@ -121,11 +126,20 @@ namespace ReignBetaServer
             return !IsInternalCampaignId(ReadString(metadata, "campaignId", directory.Name));
         }
 
+        internal static bool CanScanCampaignDirectory(string directory)
+        {
+            string id = Path.GetFileName(directory);
+            return !id.Equals(".save-sync-work", StringComparison.OrdinalIgnoreCase)
+                && !PersistenceService.IsSaveSyncSemanticBlocked(id);
+        }
+
         internal static bool HasLocalCampaignMetadata(string campaignId)
         {
             if (string.IsNullOrWhiteSpace(campaignId)
-                || IsInternalCampaignId(campaignId)) return false;
-            string directoryPath = CampaignDirectory(campaignId);
+                || IsInternalCampaignId(campaignId) || PersistenceService.IsSaveSyncSemanticBlocked(campaignId)) return false;
+            string directoryPath;
+            try { directoryPath = CampaignDirectory(campaignId); }
+            catch (PersistenceService.SaveSyncCampaignFencedException) { return false; }
             return Directory.Exists(directoryPath)
                 && File.Exists(Path.Combine(directoryPath, "campaign.json"))
                 && IsRealCampaignDirectory(new DirectoryInfo(directoryPath));
@@ -464,6 +478,7 @@ namespace ReignBetaServer
             PersistenceService.ThrowIfCampaignRequestReplaced();
             lock (Program.FileLock)
             {
+                PersistenceService.RequireSaveSyncPathAvailable(path);
                 string directory = Path.GetDirectoryName(path);
                 string serialized = Json.Serialize(value);
                 for (int attempt = 0; ; attempt++)
@@ -521,6 +536,7 @@ namespace ReignBetaServer
             PersistenceService.ThrowIfCampaignRequestReplaced();
             lock (Program.FileLock)
             {
+                PersistenceService.RequireSaveSyncPathAvailable(path);
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
                 if (!File.Exists(path))
                 {
@@ -534,6 +550,7 @@ namespace ReignBetaServer
             PersistenceService.ThrowIfCampaignRequestReplaced();
             lock (Program.FileLock)
             {
+                PersistenceService.RequireSaveSyncPathAvailable(path);
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
                 if (!File.Exists(path))
                 {
@@ -547,6 +564,7 @@ namespace ReignBetaServer
             PersistenceService.ThrowIfCampaignRequestReplaced();
             lock (Program.FileLock)
             {
+                PersistenceService.RequireSaveSyncPathAvailable(path);
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
                 File.AppendAllText(path, Json.Serialize(row ?? new Dictionary<string, object>()) + Environment.NewLine, Encoding.UTF8);
             }
@@ -572,6 +590,7 @@ namespace ReignBetaServer
             long maximumBytes,
             long retainedBytes)
         {
+            PersistenceService.RequireSaveSyncPathAvailable(path);
             Directory.CreateDirectory(Path.GetDirectoryName(path));
             CompactTextLogTail(path, maximumBytes, retainedBytes);
             File.AppendAllText(path, Json.Serialize(row ?? new Dictionary<string, object>()) + Environment.NewLine, Encoding.UTF8);

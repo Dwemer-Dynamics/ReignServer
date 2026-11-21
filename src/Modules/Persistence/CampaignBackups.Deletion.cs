@@ -26,13 +26,10 @@ namespace ReignBetaServer
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "");
-            ValidateSaveSyncId(campaignId, "campaignId");
+            RequireSaveSyncJournalCampaign(campaignId);
             string confirmation = ReadString(payload, "confirmation", "");
             string campaignDir = CampaignFileService.CampaignDirectory(campaignId);
-            bool databaseExists =
-                ReignPostgreSqlStorage.ListCampaignMetadata().Any(row =>
-                    ReadString(row, "campaignId", "")
-                        .Equals(campaignId, StringComparison.OrdinalIgnoreCase));
+            bool databaseExists = ReignPostgreSqlStorage.CampaignExists(campaignId);
             if (string.IsNullOrWhiteSpace(campaignId) || !databaseExists)
                 return new Dictionary<string, object>
                 {
@@ -53,7 +50,7 @@ namespace ReignBetaServer
             bool allowBannerlordRunning,
             string reason)
         {
-            ValidateSaveSyncId(campaignId, "campaignId");
+            RequireSaveSyncJournalCampaign(campaignId);
             if (campaignId.Equals("_shared", StringComparison.OrdinalIgnoreCase))
                 return new Dictionary<string, object>
                 {
@@ -85,13 +82,21 @@ namespace ReignBetaServer
                 ValidateCampaignOwnedDirectory(portraitDir, portraitRoot, true);
                 ValidateCampaignOwnedDirectory(saveSyncDir, saveSyncRoot, false);
 
-                bool databaseExists = ReignPostgreSqlStorage.ListCampaignMetadata().Any(row =>
-                    ReadString(row, "campaignId", "").Equals(
-                        campaignId, StringComparison.OrdinalIgnoreCase));
+                bool databaseExists = ReignPostgreSqlStorage.CampaignExists(campaignId);
                 bool campaignExists = Directory.Exists(campaignDir);
                 bool portraitExists = Directory.Exists(portraitDir);
                 bool saveSyncExists = Directory.Exists(saveSyncDir);
-                if (!databaseExists && !campaignExists && !portraitExists && !saveSyncExists)
+                string journalDir;
+                try { journalDir = PrepareSaveSyncJournalsForCampaignRemoval(campaignId); }
+                catch (Exception ex)
+                {
+                    string operation = FencedSaveSyncOperation(campaignId);
+                    if (operation != null) return SaveSyncFencedResult(campaignId, operation);
+                    return TestDict("ok", false, "result", "delete_deferred", "campaignId", campaignId,
+                        "campaignDeleted", false, "cleanupComplete", false, "error", ex.Message);
+                }
+                bool journalsExist = journalDir != null;
+                if (!databaseExists && !campaignExists && !portraitExists && !saveSyncExists && !journalsExist)
                 {
                     CancelPendingCampaignRetirement(campaignId, "already_deleted");
                     return new Dictionary<string, object>
@@ -109,6 +114,7 @@ namespace ReignBetaServer
                 counts["campaignFiles"] = CampaignDeletionCount(campaignDir);
                 counts["portraitCache"] = CampaignDeletionCount(portraitDir);
                 counts["saveSync"] = CampaignDeletionCount(saveSyncDir);
+                if (journalsExist) counts["saveSyncJournals"] = CampaignDeletionCount(journalDir);
                 Dictionary<string, object> databaseCounts =
                     ReadDictionary(counts, "postgresql") ?? new Dictionary<string, object>();
                 databaseCounts["schemas"] = databaseExists ? 1 : 0;
@@ -128,10 +134,12 @@ namespace ReignBetaServer
                     portraitParent, ".reign-campaign-retirement-staging", operationId);
                 string movedCampaign = Path.Combine(dataStageRoot, "campaign");
                 string movedSaveSync = Path.Combine(dataStageRoot, "save-sync");
+                string movedJournals = Path.Combine(dataStageRoot, "save-sync-journals");
                 string movedPortrait = Path.Combine(portraitStageRoot, "portrait-cache");
                 bool movedCampaignReady = false;
                 bool movedPortraitReady = false;
                 bool movedSaveSyncReady = false;
+                bool movedJournalsReady = false;
                 bool databaseDropped = false;
                 try
                 {
@@ -160,6 +168,12 @@ namespace ReignBetaServer
                         MoveDirectoryWithRetries(saveSyncDir, movedSaveSync);
                         VerifyStagedCampaignDirectory(saveSyncDir, movedSaveSync);
                         movedSaveSyncReady = true;
+                    }
+                    if (journalsExist)
+                    {
+                        MoveDirectoryWithRetries(journalDir, movedJournals);
+                        movedJournalsReady = true;
+                        VerifyStagedCampaignDirectory(journalDir, movedJournals);
                     }
                     if (portraitExists)
                     {
@@ -195,10 +209,9 @@ namespace ReignBetaServer
                     }
                     bool rootsGone = !Directory.Exists(campaignDir)
                         && !Directory.Exists(saveSyncDir)
+                        && !Directory.Exists(journalDir)
                         && !Directory.Exists(portraitDir);
-                    bool databaseGone = !ReignPostgreSqlStorage.ListCampaignMetadata().Any(row =>
-                        ReadString(row, "campaignId", "").Equals(
-                            campaignId, StringComparison.OrdinalIgnoreCase));
+                    bool databaseGone = !ReignPostgreSqlStorage.CampaignExists(campaignId);
                     bool campaignDeleted = rootsGone && databaseGone;
                     Dictionary<string, object> result = new Dictionary<string, object>
                     {
@@ -231,6 +244,8 @@ namespace ReignBetaServer
                             movedCampaign, campaignDir, movedCampaignReady, rollbackErrors);
                         RestoreStagedCampaignDirectory(
                             movedSaveSync, saveSyncDir, movedSaveSyncReady, rollbackErrors);
+                        RestoreStagedCampaignDirectory(
+                            movedJournals, journalDir, movedJournalsReady, rollbackErrors);
                         RestoreStagedCampaignDirectory(
                             movedPortrait, portraitDir, movedPortraitReady, rollbackErrors);
                     }
@@ -283,7 +298,8 @@ namespace ReignBetaServer
             if (!ReadString(payload, "confirmation", "").Equals("delete", StringComparison.Ordinal))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Type delete exactly to confirm permanent removal of every Reign campaign." };
 
-            string running = CampaignMutationBlockReason();
+            string running = SaveSyncDeleteAllBlockReason();
+            if (string.IsNullOrEmpty(running)) running = CampaignMutationBlockReason();
             if (!string.IsNullOrWhiteSpace(running)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = running };
 #if !REIGN_EXCLUDE_VERIFICATION
             if (VerificationService.VerificationTask != null && !VerificationService.VerificationTask.IsCompleted)
@@ -357,6 +373,8 @@ namespace ReignBetaServer
         // Re-evaluated after quiescence, before any delete phase. Local teardown rechecks Bannerlord itself.
         internal static string DeleteAllPreDeleteBlockReason()
         {
+            string recovery = SaveSyncDeleteAllBlockReason();
+            if (!string.IsNullOrEmpty(recovery)) return recovery;
             string running = CampaignMutationBlockReason();
             if (!string.IsNullOrWhiteSpace(running)) return running;
 #if !REIGN_EXCLUDE_VERIFICATION
@@ -482,6 +500,9 @@ namespace ReignBetaServer
             };
             try
             {
+                // The deferred CLI may run in a fresh process before normal startup.
+                string recovery = SaveSyncDeleteAllBlockReason();
+                if (!string.IsNullOrEmpty(recovery)) throw new InvalidOperationException(recovery);
                 string running = CampaignMutationBlockReason();
                 if (!string.IsNullOrWhiteSpace(running)) throw new InvalidOperationException(running);
                 ReignPostgreSqlStorage.ClearAllPools();
