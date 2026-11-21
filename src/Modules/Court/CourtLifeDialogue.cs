@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 
 namespace ReignBetaServer
 {
@@ -107,19 +106,18 @@ namespace ReignBetaServer
             var options = ReadDictionaryList(payload, "options");
             var transcript = ReadDictionaryList(payload, "transcript");
             string prompt = "Classify a completed court conversation. Return JSON only: optionId(string or empty), playerCommitted(bool), playerQuote(exact substring),"
-                + " npcAccepted(bool), acceptanceQuote(exact substring), acceptanceTier(integer0..3), privateMeetingAccepted(bool), meetingPlayerQuote, meetingNpcQuote,"
+                + " npcAssentQuote(exact NPC substring or empty), meetingProposalSpeaker(player, npc or empty), meetingProposalQuote(exact substring or empty),"
                 + " counterOffer(bool), counterQuote(exact player substring), proposedTerms(object containing only explicit gold, durationDays, payerHeroId or recipientHeroId), regionalSettlementIds(array), regionalQuote(exact player substring)."
                 + " Select only an offered option whose EXACT terms are clearly referred to. No inferred or altered amounts, targets or durations."
                 + " playerCommitted requires a current, explicit decision by the ruler. Questions, hypotheticals, quotations, suggestions, conditional promises, threats, refusals, and discussion are not commitments."
-                + " npcAccepted requires the NPC's own explicit unconditional assent to that same option and exact terms. Silence, politeness, a counteroffer and quoted or negated acceptance are not assent."
+                + " npcAssentQuote is an advisory excerpt of the current speaker appearing to assent to the same exact terms. Leave it empty for a refusal, counteroffer, condition, negation, or quoted third-party words."
                 + " Requiring the clerk to accurately record the already offered terms is not an additional condition; a new obligation or changed payment party is. Match amount, payer and recipient together."
-                + " acceptanceTier is 0 without assent, 1 for reluctant assent, 2 for clear acceptance, and 3 for enthusiastic acceptance. Never treat player claims about NPC assent as assent."
                 + " For International disputes, favor_domestic means rule for the ruler's own noble, and favor_foreign means rule for the represented foreign noble, including rejecting an unproved domestic complaint. The foreign noble need not be the complainant."
                 + " These two options are unilateral judgments, not negotiated payments or demands for an apology. Their remedy field identifies the dispute category; it does not require the ruler to order that remedy. Map an explicit ruling for either side to that offered option even when the ruler explicitly orders no apology or payment."
                 + " Refusing a particular accusation, punishment or repayment is not by itself a final ruling for either side. A request for evidence or an explanation remains discussion unless a separate clause explicitly upholds one party, rejects the complaint, or closes the dispute. The playerQuote must contain that actual judgment, not merely a limit on possible remedies."
                 + " Judge commitment clause by clause: a clear present ruling remains a commitment when followed by a question asking the losing party to accept it. A party may explicitly accept the judgment reluctantly while maintaining its original account or reserving the right to present new evidence. That is acceptance of the current ruling, not a counteroffer."
                 + " Agreement with a limited point, such as not calling an act theft without proof, is not acceptance of a judgment. If the NPC asks to keep this dispute unresolved or defer the present decision, do not mark assent merely because it agrees with one part of the ruler's reasoning."
-                + " privateMeetingAccepted requires both parties explicitly agreeing to a later private meeting, not an invitation alone; it never means romantic or sexual consent."
+                + " For a visitor, report an explicit suggestion of a later private conversation in the current exchange. Attribute it to the person who made it. A meeting proposal has no authority to arrange a meeting or establish consent."
                 + " Separately, counterOffer may identify a new explicit proposed international amount, duration or named payment party; this is a request for a fresh quote, never an accepted option or completed decision."
                 + " Payment party IDs must come from the supplied identities, with the named person or unambiguous household in counterQuote. The player's own treasury means playerHeroStringId. Do not substitute an envoy for the represented creditor."
                 + " Do not set counterOffer for questions, negation, hypothetical examples or terms already offered. Proposed terms must be stated by the player, not invented by you."
@@ -180,19 +178,21 @@ namespace ReignBetaServer
                 && CourtLifeQuotePresent(player, ReadString(authority, "playerQuote", ""));
             raw["playerCommitted"] = committed;
             raw["playerQuote"] = committed ? ReadString(authority, "playerQuote", "") : "";
-            if (!committed) raw["npcAccepted"] = false;
         }
 
         private static Dictionary<string, object> NormalizeCourtLifeInterpretation(Dictionary<string, object> payload, Dictionary<string, object> raw)
         {
             string id = ReadString(raw, "optionId", ""), player = ReadString(payload, "playerText", ""), reply = ReadString(payload, "visibleReply", "");
             var option = ReadDictionaryList(payload, "options").FirstOrDefault(x => ReadString(x, "optionId", "") == id);
-            bool accepted = option != null && ReadBool(raw, "npcAccepted", false) && CourtLifeQuotePresent(reply, ReadString(raw, "acceptanceQuote", ""));
+            string assentQuote = ReadString(raw, "npcAssentQuote", "");
+            string speakerHeroId = ReadString(payload, "speakerHeroId", "");
+            bool apparentAssent = option != null && id.Length > 0 && speakerHeroId.Length > 0
+                && CourtLifeQuotePresent(reply, assentQuote);
             bool committed = option != null && ReadBool(raw, "playerCommitted", false) && CourtLifeQuotePresent(player, ReadString(raw, "playerQuote", ""));
             var referralOption = ReadDictionaryList(payload, "options").FirstOrDefault(x =>
                 ReadString(x, "optionId", "") == ReadString(raw, "referralOptionId", "")
                 && new[] { "accept", "compensate", "compromise" }.Contains(ReadString(x, "optionId", "")));
-            if (id == "refer" && (referralOption == null || !committed)) { committed = false; accepted = false; }
+            if (id == "refer" && (referralOption == null || !committed)) { committed = false; apparentAssent = false; }
             var proposed = new Dictionary<string, object>();
             if (ReadString(payload, "source", "") == "International" && ReadBool(raw, "counterOffer", false)
                 && CourtLifeQuotePresent(player, ReadString(raw, "counterQuote", "")))
@@ -212,7 +212,7 @@ namespace ReignBetaServer
                     }
                 }
                 if (invalidParty) proposed.Clear();
-                accepted = false; committed = false;
+                apparentAssent = false; committed = false;
             }
             var destinations = new List<string>();
             if (ReadString(payload, "source", "") == "Patronage" && CourtLifeQuotePresent(player, ReadString(raw, "regionalQuote", "")))
@@ -222,21 +222,27 @@ namespace ReignBetaServer
                     ReadString(x, "settlementId", "") == destinationId && CourtLifeQuotePresent(player, ReadString(x, "name", "")))).ToList();
                 if (destinations.Count != 3) destinations.Clear();
             }
+            string meetingSpeaker = ReadString(raw, "meetingProposalSpeaker", "");
+            string meetingQuote = ReadString(raw, "meetingProposalQuote", "");
+            bool meetingProposed = ReadString(payload, "source", "") == "Visitor"
+                && (meetingSpeaker == "player" && CourtLifeQuotePresent(player, meetingQuote)
+                    || meetingSpeaker == "npc" && CourtLifeQuotePresent(reply, meetingQuote));
             return new Dictionary<string, object> {
                 ["schema"] = "reign-court-life-decision-v1", ["matterId"] = ReadString(payload, "matterId", ""),
                 ["optionId"] = option == null ? "" : id, ["playerCommitted"] = committed,
                 ["playerQuote"] = committed ? ReadString(raw, "playerQuote", "") : "",
                 ["referralOptionId"] = id == "refer" && committed ? ReadString(referralOption, "optionId", "") : "",
                 ["referralTerms"] = id == "refer" && committed ? ReadDictionary(referralOption, "terms") ?? new Dictionary<string, object>() : new Dictionary<string, object>(),
-                ["npcAccepted"] = accepted, ["acceptanceTier"] = accepted ? Math.Max(1, Math.Min(3, ReadInt(raw, "acceptanceTier", 1))) : 0,
-                ["agreeingHeroId"] = accepted ? ReadString(payload, "speakerHeroId", "") : "",
-                ["acceptanceQuote"] = accepted ? ReadString(raw, "acceptanceQuote", "") : "",
-                ["acceptedTerms"] = accepted ? ReadDictionary(option, "terms") ?? new Dictionary<string, object>() : new Dictionary<string, object>(),
-                ["privateMeetingAccepted"] = ReadBool(raw, "privateMeetingAccepted", false)
-                    && CourtLifeQuotePresent(player, ReadString(raw, "meetingPlayerQuote", ""))
-                    && CourtLifeQuotePresent(reply, ReadString(raw, "meetingNpcQuote", "")),
-                ["meetingWords"] = ReadString(raw, "meetingPlayerQuote", "") + " / " + ReadString(raw, "meetingNpcQuote", "")
-                ,["proposedTerms"] = proposed, ["regionalSettlementIds"] = destinations
+                // Interpretation receives speech and a caller-supplied option snapshot. It has
+                // no authored Court decision, even if an excerpt matches the visible reply.
+                ["npcAccepted"] = false, ["acceptanceTier"] = 0, ["agreeingHeroId"] = "",
+                ["acceptanceQuote"] = "", ["acceptedTerms"] = new Dictionary<string, object>(),
+                ["npcAssentProposal"] = apparentAssent ? TestDict("speakerHeroId", speakerHeroId,
+                    "quote", assentQuote.Trim(), "terms", ReadDictionary(option, "terms") ?? new Dictionary<string, object>()) : null,
+                ["privateMeetingAccepted"] = false, ["meetingWords"] = "",
+                ["privateMeetingProposal"] = meetingProposed
+                    ? TestDict("speaker", meetingSpeaker, "quote", meetingQuote.Trim()) : null,
+                ["proposedTerms"] = proposed, ["regionalSettlementIds"] = destinations
             };
         }
         private static bool CourtLifeQuotePresent(string text, string quote) => !string.IsNullOrWhiteSpace(quote)
@@ -256,6 +262,11 @@ namespace ReignBetaServer
             });
         }
 
+        private static bool IsUnsignedCourtLifeDecision(Dictionary<string, object> decision)
+            => !ReadBool(decision, "npcAccepted", true) && ReadInt(decision, "acceptanceTier", -1) == 0
+                && ReadString(decision, "agreeingHeroId", "missing") == ""
+                && ReadDictionary(decision, "acceptedTerms")?.Count == 0;
+
         private static void AppendCourtLifeInterpretationTests(List<Dictionary<string, object>> results)
         {
             AppendCourtLifeSceneTests(results);
@@ -264,7 +275,7 @@ namespace ReignBetaServer
                 ["playerText"] = "I will pay the stated five hundred.", ["visibleReply"] = "I accept those exact terms.",
                 ["options"] = new List<object> { option } };
             var raw = new Dictionary<string, object> { ["optionId"] = "pay", ["playerCommitted"] = true, ["playerQuote"] = "I will pay",
-                ["npcAccepted"] = true, ["acceptanceQuote"] = "I accept those exact terms", ["acceptanceTier"] = 99 };
+                ["npcAccepted"] = true, ["npcAssentQuote"] = "I accept those exact terms", ["acceptanceTier"] = 99 };
             Action<string, bool> add = (id, passed) => results.Add(new Dictionary<string, object> {
                 ["ok"] = true, ["passed"] = passed, ["suite"] = "court_life_interpretation", ["caseId"] = id, ["name"] = id, ["durationMs"] = 0 });
             Func<Dictionary<string, object>> judgment = () => new Dictionary<string, object> {
@@ -275,7 +286,7 @@ namespace ReignBetaServer
             var checkedJudgment = judgment();
             ApplyCourtLifeJudgmentAuthority(checkedJudgment, authority, ruling);
             add("independent_current_judgment_preserves_authority", ReadBool(checkedJudgment, "playerCommitted", false)
-                && ReadBool(checkedJudgment, "npcAccepted", false));
+                && ReadString(checkedJudgment, "playerQuote", "") == "I reject the complaint.");
             foreach (string invalid in new[] { "missing", "discussion", "different_option", "invented_quote" })
             {
                 var invalidAuthority = new Dictionary<string, object>(authority);
@@ -284,8 +295,7 @@ namespace ReignBetaServer
                 if (invalid == "invented_quote") invalidAuthority["playerQuote"] = "I uphold the foreign noble.";
                 checkedJudgment = judgment();
                 ApplyCourtLifeJudgmentAuthority(checkedJudgment, invalid == "missing" ? null : invalidAuthority, ruling);
-                add("npc_assent_cannot_supply_" + invalid + "_authority", !ReadBool(checkedJudgment, "playerCommitted", true)
-                    && !ReadBool(checkedJudgment, "npcAccepted", true));
+                add("npc_assent_cannot_supply_" + invalid + "_authority", !ReadBool(checkedJudgment, "playerCommitted", true));
             }
             var referralPayload = new Dictionary<string, object> { ["source"] = "International",
                 ["playerText"] = "Send the offered 250 gold settlement for his answer.", ["visibleReply"] = "I accept that referral.",
@@ -300,20 +310,59 @@ namespace ReignBetaServer
             add("referral_preserves_explicit_offered_terms", ReadBool(referralDecision, "playerCommitted", false)
                 && ReadInt(ReadDictionary(referralDecision, "referralTerms"), "gold", 0) == 250);
             referralRaw["referralOptionId"] = "invented";
-            add("referral_rejects_unknown_terms", !ReadBool(NormalizeCourtLifeInterpretation(referralPayload, referralRaw), "npcAccepted", true));
-            var accepted = NormalizeCourtLifeInterpretation(payload, raw);
-            add("exact_option_preserves_terms_and_speaker", ReadBool(accepted, "npcAccepted", false)
-                && ReadString(accepted, "agreeingHeroId", "") == "actual_envoy"
-                && ReadInt(ReadDictionary(accepted, "acceptedTerms"), "gold", 0) == 500 && ReadInt(accepted, "acceptanceTier", 0) == 3);
+            add("referral_rejects_unknown_terms", !ReadBool(NormalizeCourtLifeInterpretation(referralPayload, referralRaw), "playerCommitted", true));
+            var classified = NormalizeCourtLifeInterpretation(payload, raw);
+            var assent = ReadDictionary(classified, "npcAssentProposal");
+            add("exact_option_preserves_attributed_proposal_and_player_choice", IsUnsignedCourtLifeDecision(classified)
+                && ReadBool(classified, "playerCommitted", false)
+                && ReadString(assent, "speakerHeroId", "") == "actual_envoy"
+                && ReadString(assent, "quote", "") == "I accept those exact terms"
+                && ReadInt(ReadDictionary(assent, "terms"), "gold", 0) == 500);
+
+            foreach (var example in new[] {
+                (id: "negation", reply: "I do not accept those exact terms.", quote: "accept those exact terms"),
+                (id: "unrelated_yes_substring", reply: "We visited yesterday.", quote: "yes"),
+                (id: "quoted_third_party", reply: "He said, 'I accept those exact terms.' I offer no assent.", quote: "I accept those exact terms"),
+                (id: "different_terms", reply: "I accept 250 gold, with payment from the foreign crown.", quote: "I accept"),
+                (id: "refusal", reply: "No. I refuse the offer.", quote: "I refuse"),
+                (id: "exact_words_without_authored_decision", reply: "I accept those exact terms.", quote: "I accept those exact terms")
+            })
+            {
+                var spoken = new Dictionary<string, object>(payload) { ["visibleReply"] = example.reply };
+                var guessed = new Dictionary<string, object>(raw) { ["npcAssentQuote"] = example.quote };
+                var first = NormalizeCourtLifeInterpretation(spoken, guessed);
+                var repeat = NormalizeCourtLifeInterpretation(spoken, guessed);
+                add(example.id + "_stays_unsigned_on_replay", IsUnsignedCourtLifeDecision(first)
+                    && Json.Serialize(first) == Json.Serialize(repeat));
+            }
+
             raw["optionId"] = "invented_castle_transfer";
             var unknown = NormalizeCourtLifeInterpretation(payload, raw);
-            add("invented_action_rejected", !ReadBool(unknown, "npcAccepted", true) && !ReadBool(unknown, "playerCommitted", true));
-            raw["optionId"] = "pay"; raw["acceptanceQuote"] = "Words the NPC never said";
-            add("fabricated_acceptance_quote_rejected", !ReadBool(NormalizeCourtLifeInterpretation(payload, raw), "npcAccepted", true));
+            add("missing_option_rejects_selection_and_assent", IsUnsignedCourtLifeDecision(unknown)
+                && !ReadBool(unknown, "playerCommitted", true) && unknown["npcAssentProposal"] == null);
+            raw["optionId"] = "pay"; raw["npcAssentQuote"] = "Words the NPC never said";
+            add("fabricated_acceptance_quote_rejected", NormalizeCourtLifeInterpretation(payload, raw)["npcAssentProposal"] == null);
             raw["playerQuote"] = "Spend all my money";
             add("fabricated_player_authority_rejected", !ReadBool(NormalizeCourtLifeInterpretation(payload, raw), "playerCommitted", true));
-            raw["privateMeetingAccepted"] = true; raw["meetingPlayerQuote"] = "I will pay"; raw["meetingNpcQuote"] = "Meet me alone";
-            add("meeting_needs_both_actual_quotes", !ReadBool(NormalizeCourtLifeInterpretation(payload, raw), "privateMeetingAccepted", true));
+
+            var visitor = TestDict("source", "Visitor", "playerText", "Could we talk in private tomorrow?",
+                "visibleReply", "Yes, tomorrow.");
+            var invitation = TestDict("privateMeetingAccepted", true, "meetingProposalSpeaker", "player",
+                "meetingProposalQuote", "Could we talk in private tomorrow?");
+            classified = NormalizeCourtLifeInterpretation(visitor, invitation);
+            add("meeting_with_apparent_assent_is_only_an_attributed_proposal",
+                !ReadBool(classified, "privateMeetingAccepted", true)
+                && ReadString(ReadDictionary(classified, "privateMeetingProposal"), "speaker", "") == "player"
+                && ReadString(ReadDictionary(classified, "privateMeetingProposal"), "quote", "") == "Could we talk in private tomorrow?");
+            visitor["visibleReply"] = "I would prefer to keep our conversation here.";
+            add("declined_invitation_remains_a_player_proposal", !ReadBool(NormalizeCourtLifeInterpretation(visitor, invitation), "privateMeetingAccepted", true)
+                && NormalizeCourtLifeInterpretation(visitor, invitation)["privateMeetingProposal"] != null);
+            invitation["meetingProposalSpeaker"] = "npc";
+            add("meeting_proposal_quote_must_be_in_attributed_speech",
+                NormalizeCourtLifeInterpretation(visitor, invitation)["privateMeetingProposal"] == null);
+            visitor["visibleReply"] = "Could we talk in private tomorrow?";
+            add("visitor_can_make_a_proposal", ReadString(ReadDictionary(NormalizeCourtLifeInterpretation(visitor, invitation),
+                "privateMeetingProposal"), "speaker", "") == "npc");
             var paymentTerms = new Dictionary<string, object> { ["gold"] = 250, ["payerHeroId"] = "player", ["recipientHeroId"] = "foreign_lord" };
             option["terms"] = paymentTerms;
             payload["source"] = "International"; payload["playerHeroStringId"] = "player";
@@ -324,7 +373,7 @@ namespace ReignBetaServer
                 new Dictionary<string, object> { ["heroId"] = "foreign_lord", ["name"] = "Lethes", ["householdName"] = "Foreign House" } };
             raw["counterOffer"] = true; raw["counterQuote"] = payload["playerText"];
             raw["proposedTerms"] = new Dictionary<string, object> { ["gold"] = 250, ["payerHeroId"] = "player", ["recipientHeroId"] = "domestic_lord" };
-            raw["npcAccepted"] = true; raw["acceptanceQuote"] = "I accept those exact terms";
+            raw["npcAccepted"] = true; raw["npcAssentQuote"] = "I accept those exact terms";
             var counter = NormalizeCourtLifeInterpretation(payload, raw);
             add("named_payment_counter_requires_fresh_assent", !ReadBool(counter, "npcAccepted", true)
                 && !ReadBool(counter, "playerCommitted", true)
@@ -335,9 +384,16 @@ namespace ReignBetaServer
             raw["proposedTerms"] = new Dictionary<string, object> { ["recipientHeroId"] = "invented" };
             add("unknown_payment_recipient_rejected", !ReadDictionary(NormalizeCourtLifeInterpretation(payload, raw), "proposedTerms").ContainsKey("recipientHeroId"));
             raw["counterOffer"] = false;
-            var exactPayment = ReadDictionary(NormalizeCourtLifeInterpretation(payload, raw), "acceptedTerms");
-            add("payment_acceptance_retains_both_identities", ReadString(exactPayment, "payerHeroId", "") == "player"
+            classified = NormalizeCourtLifeInterpretation(payload, raw);
+            var exactPayment = ReadDictionary(ReadDictionary(classified, "npcAssentProposal"), "terms");
+            add("payment_proposal_retains_both_offered_identities", IsUnsignedCourtLifeDecision(classified)
+                && ReadString(exactPayment, "payerHeroId", "") == "player"
                 && ReadString(exactPayment, "recipientHeroId", "") == "foreign_lord");
+            option["terms"] = TestDict("gold", 275, "payerHeroId", "player", "recipientHeroId", "foreign_lord");
+            raw["acceptedTerms"] = paymentTerms;
+            classified = NormalizeCourtLifeInterpretation(payload, raw);
+            add("stale_terms_cannot_supply_exact_authority", IsUnsignedCourtLifeDecision(classified)
+                && ReadInt(ReadDictionary(ReadDictionary(classified, "npcAssentProposal"), "terms"), "gold", 0) == 275);
             add("payment_direction_and_authority", Reign.Core.Contracts.Court.ReignInternationalDocketRules.PaymentPartiesAllowed("player", "domestic_lord", "player", "king", "domestic_lord", "foreign_lord", false, false)
                 && Reign.Core.Contracts.Court.ReignInternationalDocketRules.PaymentPartiesAllowed("king", "player", "player", "king", "domestic_lord", "foreign_lord", true, false)
                 && !Reign.Core.Contracts.Court.ReignInternationalDocketRules.PaymentPartiesAllowed("foreign_lord", "domestic_lord", "player", "king", "domestic_lord", "foreign_lord", false, false)

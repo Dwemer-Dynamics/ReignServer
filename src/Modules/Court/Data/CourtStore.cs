@@ -745,6 +745,27 @@ JOIN ambassador_referrals r ON l.referral_id=r.referral_id AND l.campaign_id=r.c
 WHERE l.campaign_id=$campaign AND l.timeline_id=$timeline ORDER BY r.due_day,r.referral_id;", parameters, transaction);
         }
 
+        internal static List<Dictionary<string, object>> SelectUnavailableInternationalCourtReferrals(
+            ReignDbConnection connection, Dictionary<string, object> parameters)
+        {
+            return ReignDatabase.QuerySql(connection, @"SELECT r.* FROM ambassador_referrals r
+WHERE r.campaign_id=$campaign AND r.timeline_id=$timeline AND r.posting_id=$posting AND r.action_id=$action
+AND r.status='model_output_unusable' AND r.outcome='format_failure'
+AND EXISTS (SELECT 1 FROM international_court_referrals l
+    WHERE l.campaign_id=r.campaign_id AND l.timeline_id=r.timeline_id AND l.referral_id=r.referral_id)
+ORDER BY r.created_ts,r.referral_id;", parameters);
+        }
+
+        internal static void MarkPendingInternationalCourtReferralUnavailable(
+            ReignDbConnection connection, Dictionary<string, object> parameters)
+        {
+            ReignDatabase.ExecuteSql(connection, @"UPDATE ambassador_referrals
+SET status='model_output_unusable', outcome='format_failure', resolved_day=$day,
+counter_terms_json='{}', authoritative_receipt_json=$receipt, revision=revision+1, updated_ts=$ts
+WHERE campaign_id=$campaign AND timeline_id=$timeline AND referral_id=$id
+AND status='pending' AND revision=$revision;", parameters);
+        }
+
         internal static List<Dictionary<string, object>> SelectInternationalCourtReferrals2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             return ReignDatabase.QuerySql(connection, @"SELECT matter_id FROM international_court_referrals

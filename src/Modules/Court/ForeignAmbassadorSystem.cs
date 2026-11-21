@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using Reign.Core.Contracts.Court;
 
 namespace ReignBetaServer
 {
@@ -723,17 +724,61 @@ namespace ReignBetaServer
                 posting = CourtStore.SelectForeignAmbassadorPostings9(connection, new Dictionary<string, object>{{"posting",postingId}}).FirstOrDefault();
             }
             if (posting == null) return UpdateAmbassadorReferralState(campaignId, referralId, "cancelled", "posting_ended", worldDay, new Dictionary<string, object>(), new Dictionary<string, object>());
+            bool courtReferral = IsInternationalCourtReferral(campaignId, timelineId, referralId);
+            evaluationPayload["courtReferral"] = courtReferral;
+            if (courtReferral)
+            {
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+                {
+                    Dictionary<string, object> unavailable = FindUnavailableInternationalCourtReferral(
+                        connection, campaignId, timelineId, postingId, ReadString(referral, "action_id", ""), candidate);
+                    if (unavailable != null)
+                    {
+                        if (ReadString(unavailable, "referral_id", "") == referralId)
+                            return UnavailableInternationalCourtReferralResult(unavailable);
+                        var scope = TestDict("id", referralId, "campaign", campaignId, "timeline", timelineId);
+                        var update = new Dictionary<string, object>(scope)
+                        {
+                            ["day"] = worldDay, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                            ["revision"] = ReadLong(referral, "revision", 0),
+                            ["receipt"] = ReadString(unavailable, "authoritative_receipt_json", "{}")
+                        };
+                        CourtStore.MarkPendingInternationalCourtReferralUnavailable(connection, update);
+                        Dictionary<string, object> current = CourtStore.SelectAmbassadorReferrals3(connection, scope).FirstOrDefault();
+                        string status = ReadString(current, "status", "pending");
+                        return status == "model_output_unusable" && ReadString(current, "outcome", "") == "format_failure"
+                            ? UnavailableInternationalCourtReferralResult(current)
+                            : TestDict("referralId", referralId, "status", status);
+                    }
+                }
+            }
             Dictionary<string, object> proposer = DiplomacyService.FindDirectorKingdom(evaluationPayload, ReadString(posting, "host_kingdom_id", ""));
             Dictionary<string, object> responder = DiplomacyService.FindDirectorKingdom(evaluationPayload, ReadString(posting, "origin_kingdom_id", ""));
             if (proposer == null || responder == null)
                 return new Dictionary<string, object>{{"referralId",referralId},{"status","pending"},{"reason","Current diplomacy snapshot does not contain both kingdoms."}};
+            string responderHeroId = ReadString(responder, "leaderHeroId", "");
+            string frozenRulerId = ReadString(candidate, "courtRulerId", "");
+            if (courtReferral && (responderHeroId.Length == 0 || (frozenRulerId.Length > 0 && responderHeroId != frozenRulerId)))
+                return UpdateAmbassadorReferralState(campaignId, referralId, "cancelled", "ruler_changed", worldDay,
+                    TestDict(), TestDict("reason", "The referred sovereign no longer matches the current ruler."));
 
             Dictionary<string, object> response = DiplomacyService.AskRulerToRespond(campaignId, evaluationPayload, proposer, responder, candidate, "relations", false);
+            if (ReadBool(response, "formatFallback", false))
+            {
+                // The daily tick would resubmit a pending referral. Preserve the terms
+                // and record a technical failure separately from a sovereign's answer.
+                return UpdateAmbassadorReferralState(campaignId, referralId, "model_output_unusable", "format_failure", worldDay,
+                    new Dictionary<string, object>(), new Dictionary<string, object>
+                    {
+                        ["technicalFailure"] = true,
+                        ["reason"] = ReadString(response, "error", "The sovereign's response was unavailable.")
+                    });
+            }
             Dictionary<string, object> answer = ReadDictionary(response, "response") ?? new Dictionary<string, object>();
             string answerKind = ReadString(answer, "response", "").Trim().ToLowerInvariant();
             if (!ReadBool(response, "ok", false) || !new[] { "accept", "refuse", "counter" }.Contains(answerKind))
             {
-                if (IsInternationalCourtReferral(campaignId, timelineId, referralId))
+                if (courtReferral)
                     return new Dictionary<string, object> { ["referralId"] = referralId, ["status"] = "pending",
                         ["technicalFailure"] = true, ["reason"] = "The sovereign's response was unavailable; the exact referral remains pending for retry." };
                 int fallback = StableAmbassadorInt(referralId + "|ruler_referral", 100);
@@ -742,12 +787,17 @@ namespace ReignBetaServer
             if (answerKind == "counter")
             {
                 Dictionary<string, object> counter = DiplomacyService.ApplyCounteroffer(candidate, answer);
+                if (courtReferral && ReadString(counter, "command", "") != ReadString(candidate, "command", ""))
+                    return UpdateAmbassadorReferralState(campaignId, referralId, "cancelled", "counter_command_changed", worldDay,
+                        TestDict(), TestDict("reason", "A Court counter must keep the referred command."));
                 string counterHash = CourtHash(CourtCanonicalJson(counter));
-                return UpdateAmbassadorReferralState(campaignId, referralId, "countered", "counter", worldDay, counter,
-                    new Dictionary<string, object>{{"counterTermsHash",counterHash},{"requiresPlayerAcceptance",true}});
+                var counterReceipt = TestDict("counterTermsHash", counterHash, "requiresPlayerAcceptance", true);
+                if (courtReferral) counterReceipt["responderHeroId"] = responderHeroId;
+                return UpdateAmbassadorReferralState(campaignId, referralId, "countered", "counter", worldDay, counter, counterReceipt);
             }
             if (answerKind == "refuse")
-                return UpdateAmbassadorReferralState(campaignId, referralId, "refused", "refuse", worldDay, new Dictionary<string, object>(), new Dictionary<string, object>());
+                return UpdateAmbassadorReferralState(campaignId, referralId, "refused", "refuse", worldDay, TestDict(),
+                    courtReferral ? TestDict("responderHeroId", responderHeroId) : TestDict());
 
             Dictionary<string, object> normalizationPayload = DiplomacyService.BuildDirectorNormalizationPayload(evaluationPayload, responder);
             Dictionary<string, object> normalized = ActionPipelineService.NormalizeActionCommand(candidate, campaignId, out List<string> errors, normalizationPayload,
@@ -755,10 +805,9 @@ namespace ReignBetaServer
             if (normalized == null || errors.Count > 0)
                 return UpdateAmbassadorReferralState(campaignId, referralId, "refused", "validation_failed", worldDay, new Dictionary<string, object>(),
                     new Dictionary<string, object>{{"errors",errors}});
-            if (IsInternationalCourtReferral(campaignId, timelineId, referralId))
+            if (courtReferral)
                 return UpdateAmbassadorReferralState(campaignId, referralId, "accepted_awaiting_court", "accept", worldDay,
-                    new Dictionary<string, object>(), new Dictionary<string, object>
-                    { ["state"] = "awaiting_player_review", ["normalizedAction"] = normalized });
+                    TestDict(), TestDict("state", "awaiting_player_review", "normalizedAction", normalized, "responderHeroId", responderHeroId));
             normalized["source"] = "resident_ambassador_referral";
             normalized["ambassadorReferralId"] = referralId;
             normalized["requiresAcceptance"] = false;
@@ -901,6 +950,66 @@ namespace ReignBetaServer
             add("ambassador_referral_exact_terms",ReadString(referral,"termsHash","")==exactHash && ReadDouble(referral,"dueDay",0d)>=15d && ReadDouble(referral,"dueDay",0d)<=17d,
                 "Unauthorized concrete terms are hash-bound and deterministically due in one to three days.",referral);
 
+            var home = TestDict("kingdomId", "player_kingdom", "name", "Home", "leaderHeroId", "player", "leaderName", "Ruler");
+            var foreign = TestDict("kingdomId", "foreign_test", "name", "Foreign Test", "leaderHeroId", "foreign_ruler", "leaderName", "Foreign Ruler");
+            var world = TestDict("campaignId", campaignId, "kingdoms", new ArrayList { home, foreign },
+                "settlements", new ArrayList { TestDict("settlementId", "town_test", "name", "Court Town", "kingdomId", "player_kingdom") },
+                "clans", new ArrayList { TestDict("clanId", "court_test_clan", "name", "Court Clan", "kingdomId", "player_kingdom") },
+                "prisoners", new ArrayList { TestDict("heroId", "captured_noble", "name", "Captured Noble", "kingdomId", "foreign_test") });
+            foreach (string command in new[] { "sign_trade_agreement", "record_promise" })
+            {
+                bool tradeCounter = command == "sign_trade_agreement";
+                var material = tradeCounter ? TestDict("durationDays", 90)
+                    : TestDict("captiveId", "captured_noble", "ransom", true, "gold", 525,
+                        "payerHeroId", "foreign_ruler", "recipientHeroId", "player");
+                var originalTerms = new Dictionary<string, object>(material);
+                originalTerms[tradeCounter ? "durationDays" : "gold"] = tradeCounter ? 120 : 500;
+                var original = TestDict("command", command, "actorKingdomStringId", "player_kingdom",
+                    "targetKingdomStringId", "foreign_test", "terms", originalTerms);
+                if (tradeCounter)
+                {
+                    original["actorHeroStringId"] = "player";
+                    original["targetHeroStringId"] = "foreign_ruler";
+                }
+                else
+                {
+                    originalTerms["promise"] = "Accept the exact terms of the proposed court settlement.";
+                    originalTerms["isPublic"] = true;
+                    originalTerms["durationDays"] = 120;
+                }
+                var answer = TestDict("command", command, "terms", material);
+                var counter = DiplomacyService.ApplyCounteroffer(original, answer);
+                var normalized = ActionPipelineService.NormalizeActionCommand(counter, campaignId, out List<string> issues,
+                    DiplomacyService.BuildDirectorNormalizationPayload(world, foreign), "The sovereign proposed exact revised terms.");
+                var terms = ParseAmbassadorJsonObject(ReadString(normalized, "termsJson", "{}"));
+                if (ReadString(terms, "targetSettlementStringId", "") == "") terms.Remove("targetSettlementStringId");
+                var aliases = new Dictionary<string, string>(StringComparer.Ordinal);
+                if (tradeCounter)
+                {
+                    aliases["fromHeroStringId"] = Json.Serialize("player");
+                    aliases["targetHeroStringId"] = Json.Serialize("foreign_ruler");
+                    aliases["toHeroStringId"] = Json.Serialize("foreign_ruler");
+                }
+                else
+                {
+                    originalTerms.Remove("promise");
+                    originalTerms.Remove("isPublic");
+                    originalTerms.Remove("durationDays");
+                }
+                var authored = material.ToDictionary(p => p.Key, p => CourtCanonicalJson(p.Value), StringComparer.Ordinal);
+                var resolved = terms.ToDictionary(p => p.Key, p => CourtCanonicalJson(p.Value), StringComparer.Ordinal);
+                bool valid = issues.Count == 0 && aliases.All(p => resolved.TryGetValue(p.Key, out string alias) && alias == p.Value)
+                    && ReignInternationalDocketRules.MatchesSovereignReplyAction(command, ReadString(counter, "command", ""),
+                        ReadString(normalized, "command", ""), ReadString(normalized, "type", ""))
+                    && ReignInternationalDocketRules.MatchesCourtNormalizedTerms(authored, resolved, aliases)
+                    && (tradeCounter ? ReignInternationalDocketRules.BindsCourtTradeDuration(authored)
+                        : ReignInternationalDocketRules.BindsCourtSettlementTerms(
+                            originalTerms.ToDictionary(p => p.Key, p => CourtCanonicalJson(p.Value), StringComparer.Ordinal), authored));
+                add("court_referral_normalizes_exact_" + command + "_counter", valid,
+                    "Same-command Court counter terms survive production normalization with only bound resolver aliases.",
+                    TestDict("errors", issues, "authored", material, "resolved", terms));
+            }
+
             bool pressureValues = AmbassadorPressureDelta("strongly conciliatory")==-6 && AmbassadorPressureDelta("conciliatory")==-3
                 && AmbassadorPressureDelta("neutral")==0 && AmbassadorPressureDelta("hostile")==3 && AmbassadorPressureDelta("strongly hostile")==6;
             add("ambassador_pressure_discrete_values",pressureValues,"Official-scene tone maps only to -6, -3, 0, +3, or +6 with positive values hostile.",new Dictionary<string,object>());
@@ -916,9 +1025,14 @@ namespace ReignBetaServer
             add("ambassador_non_overridable_role_contract",roleContract,
                 "The dedicated role prompt mandates total relay, exact authority, receipt gating, and the private Keep firewall.",new Dictionary<string,object>{{"promptHash",CourtHash(rolePrompt)}});
 
+            Dictionary<string, object> resident = ForeignAmbassadorLocationApi(TestDict("campaignId", campaignId, "timelineId", timelineId,
+                "commandId", "amb_arrive_replay_test", "postingId", postingId, "status", "resident",
+                "expectedRevision", ReadLong(established, "revision", 0), "worldDay", 17d));
+            AppendInternationalCourtReferralReplaySelfTests(add, campaignId, timelineId, postingId);
+
             Dictionary<string, object> ended = ForeignAmbassadorEndApi(new Dictionary<string,object>
             {
-                {"campaignId",campaignId},{"timelineId",timelineId},{"commandId","amb_war_recall"},{"expectedRevision",ReadLong(established,"revision",0)},
+                {"campaignId",campaignId},{"timelineId",timelineId},{"commandId","amb_war_recall"},{"expectedRevision",ReadLong(resident,"revision",0)},
                 {"postingId",postingId},{"reason","war_declared"},{"worldDay",14.5d}
             });
             string referralStatus;
@@ -928,6 +1042,78 @@ namespace ReignBetaServer
             }
             add("ambassador_war_recall_cancels_referrals",ReadBool(ended,"ok",false) && referralStatus=="cancelled_war",
                 "War termination ends the posting and immediately cancels its pending ruler referrals.",new Dictionary<string,object>{{"ended",ended},{"referralStatus",referralStatus}});
+        }
+
+        private static void AppendInternationalCourtReferralReplaySelfTests(Action<string, bool, string, object> add,
+            string campaignId, string timelineId, string postingId)
+        {
+            Dictionary<string, object> Refer(string matterId, string optionId, string note, int days)
+                => InternationalCourtReferralApi(TestDict("campaignId", campaignId, "timelineId", timelineId,
+                    "worldDay", 17d, "matterId", matterId, "postingId", postingId, "playerKingdomStringId", "player_kingdom",
+                    "candidate", TestDict("command", "sign_trade_agreement", "actorKingdomId", "player_kingdom",
+                        "targetKingdomId", "foreign_test", "courtRulerId", "foreign_ruler", "courtMatterId", matterId,
+                        "courtOptionId", optionId, "publicReason", note, "terms", TestDict("durationDays", days),
+                        "source", "world_diplomacy_director", "correlationId", "director-" + matterId,
+                        "reason", note, "confidence", note.Length / 100d, "decisionFactors", new[] { note },
+                        "intentFamily", optionId, "initiativeDiagnostics", TestDict("roll", note.Length),
+                        "relationshipOpportunityId", matterId, "actorEffectiveAttitude", note.Length)));
+
+            Dictionary<string, object> original = Refer("original_trade_matter", "accept", "Original offer.", 30);
+            Dictionary<string, object> queued = Refer("already_queued_trade_matter", "accept", "Original offer.", 30);
+            Dictionary<string, object> concurrent = Refer("simultaneously_resolving_trade_matter", "accept", "Original offer.", 30);
+            string originalId = ReadString(original, "referralId", "");
+            string queuedId = ReadString(queued, "referralId", "");
+            string concurrentId = ReadString(concurrent, "referralId", "");
+            UpdateAmbassadorReferralState(campaignId, originalId, "model_output_unusable", "format_failure", 19d,
+                TestDict(), TestDict("technicalFailure", true, "reason", "Invalid output fixture."));
+
+            Dictionary<string, object> replay = Refer("regenerated_trade_matter", "revised_option", "Offer restated.", 30);
+            Dictionary<string, object> revised = Refer("regenerated_trade_matter", "revised_option", "Offer restated.", 31);
+            string revisedId = ReadString(revised, "referralId", "");
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+            {
+                var pending = CourtStore.SelectAmbassadorReferrals(connection, TestDict("campaign", campaignId, "timeline", timelineId, "day", 20d));
+                var links = CourtStore.SelectInternationalCourtReferrals(connection, TestDict("campaign", campaignId, "timeline", timelineId));
+                bool retainedBinding = links.Any(row => ReadString(row, "referral_id", "") == originalId
+                    && ReadString(row, "matter_id", "") == "original_trade_matter")
+                    && !links.Any(row => ReadString(row, "referral_id", "") == originalId
+                        && ReadString(row, "matter_id", "") != "original_trade_matter");
+                add("court_referral_format_failure_reuses_exact_material_across_matters",
+                    originalId.Length > 0 && retainedBinding && ReadBool(replay, "ok", false)
+                    && ReadString(replay, "referralId", "") == originalId
+                    && ReadString(replay, "termsHash", "") == ReadString(original, "termsHash", "")
+                    && ReadString(replay, "status", "") == "model_output_unusable"
+                    && ReadString(replay, "outcome", "") == "format_failure" && ReadBool(replay, "technicalFailure", false)
+                    && !pending.Any(row => ReadString(row, "referral_id", "") == originalId),
+                    "Regenerated Court and director context returns the original terminal receipt and preserves its matter link.", replay);
+                add("court_referral_material_revision_can_enter_pending_queue",
+                    revisedId.Length > 0 && revisedId != originalId && revisedId != queuedId
+                    && pending.Any(row => ReadString(row, "referral_id", "") == revisedId),
+                    "Changed executable terms remain eligible for ordinary referral.", revised);
+
+                Dictionary<string, object> queuedRow = pending.FirstOrDefault(row => ReadString(row, "referral_id", "") == queuedId);
+                // No world snapshot is supplied. If terminal suppression regresses,
+                // this stays pending before it could reach a provider.
+                Dictionary<string, object> resolved = queuedRow == null ? TestDict()
+                    : ResolveAmbassadorReferral(campaignId, timelineId, TestDict(), queuedRow, 20d);
+                Dictionary<string, object> persisted = CourtStore.SelectAmbassadorReferrals3(connection,
+                    TestDict("id", queuedId, "campaign", campaignId, "timeline", timelineId)).FirstOrDefault();
+                add("court_referral_pending_duplicate_uses_terminal_format_failure",
+                    queuedId.Length > 0 && queuedId != originalId
+                    && ReadString(resolved, "status", "") == "model_output_unusable"
+                    && ReadString(persisted, "status", "") == "model_output_unusable"
+                    && ReadString(persisted, "outcome", "") == "format_failure",
+                    "An already-pending duplicate terminates before a model call when the same terms failed.", resolved);
+                Dictionary<string, object> stale = pending.FirstOrDefault(row => ReadString(row, "referral_id", "") == concurrentId);
+                UpdateAmbassadorReferralState(campaignId, concurrentId, "accepted_awaiting_court", "accept", 20d,
+                    TestDict(), TestDict("responderHeroId", "foreign_ruler"));
+                Dictionary<string, object> current = stale == null ? TestDict()
+                    : ResolveAmbassadorReferral(campaignId, timelineId, TestDict(), stale, 20d);
+                add("court_referral_format_failure_cannot_replace_a_concurrent_typed_reply",
+                    concurrentId.Length > 0 && concurrentId != originalId && concurrentId != queuedId
+                    && ReadString(current, "status", "") == "accepted_awaiting_court",
+                    "A stale batch cannot overwrite a completed sovereign decision with a technical result.", current);
+            }
         }
 
         private static Dictionary<string, object> ReadForeignAmbassadorPosting(ReignDbConnection connection, CourtApiContext ctx, string postingId)
