@@ -512,6 +512,7 @@ namespace ReignBetaServer
         internal static bool IsReportedDynamicCharacteristic(Dictionary<string, object> row) =>
             ReadString(row, "provenance", "") == ReportedSpeechProvenance;
 
+#if !REIGN_EXCLUDE_VERIFICATION
         internal static List<Dictionary<string, object>> RunDynamicCharacteristicsSelfTests()
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
@@ -789,5 +790,6 @@ namespace ReignBetaServer
             return StoreDynamicCharacteristicWrites(campaign, hero, writes, payload, exchange, eventId, "",
                 finalReply, displayPrefix, queuedActionNotice);
         }
+#endif
     }
 }
