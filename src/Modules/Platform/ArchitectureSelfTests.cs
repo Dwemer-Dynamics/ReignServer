@@ -1882,14 +1882,19 @@ namespace ReignBetaServer
                     liveTestControllerPath);
                 string serverClientPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignServerClient.cs");
                 string serverClientText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
-                string compactServerClientText = string.Concat(serverClientText.Where(c => !char.IsWhiteSpace(c)));
+                string httpTransportPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignHttpTransport.cs");
+                string httpTransportText = VerificationSourceLocator.SourceDeclaresType(serverClientText, "ReignHttpTransport")
+                    ? VerificationSourceLocator.ReadClientTypeSourceText(qualificationClientRoot, "ReignHttpTransport")
+                    : string.Empty;
+                string compactHttpTransportText = string.Concat(httpTransportText.Where(c => !char.IsWhiteSpace(c)));
                 add("live_test_control_plane_bypasses_shared_endpoint_breaker",
-                    compactServerClientText.Contains("boolliveTestRoute=route.StartsWith(\"/tests/live/\"", StringComparison.Ordinal)
-                    && compactServerClientText.Contains("if(!liveTestRoute&&!ReignServerEndpoint.TryBeginRequest(outstringunavailable,outprobeClaim))", StringComparison.Ordinal)
-                    && compactServerClientText.Contains("HttpClientrouteClient=liveTestRoute?LiveTestClient:", StringComparison.Ordinal)
-                    && compactServerClientText.Contains("if(!liveTestRoute)ReignServerEndpoint.ReportTransportFailure(probeClaim);", StringComparison.Ordinal),
-                    "Loopback heartbeat, polling, acknowledgement, and lifecycle routes use their short-timeout client without inheriting unrelated passive-system endpoint backoff.",
-                    serverClientPath);
+                    compactHttpTransportText.Contains("boolliveTestRoute=route.StartsWith(\"/tests/live/\"", StringComparison.Ordinal)
+                    && compactHttpTransportText.Contains("if(!liveTestRoute&&!ReignServerEndpoint.TryBeginRequest(outstringunavailable,outprobeClaim))", StringComparison.Ordinal)
+                    && compactHttpTransportText.Contains("HttpClientrouteClient=requestClient??(liveTestRoute?LiveTestClient:", StringComparison.Ordinal)
+                    && compactHttpTransportText.Contains("LiveTestClient=CreateLocalServerHttpClient(4,5);", StringComparison.Ordinal)
+                    && compactHttpTransportText.Contains("if(!liveTestRoute)ReignServerEndpoint.ReportTransportFailure(probeClaim);", StringComparison.Ordinal),
+                    "Loopback heartbeat, polling, acknowledgement, and lifecycle routes use their short-timeout client by default and bypass unrelated passive-system endpoint backoff.",
+                    httpTransportPath);
                 string liveTestClientPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignLiveTestClient.cs");
                 string liveTestClientText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
                 string liveTestClientTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(qualificationClientRoot, "ReignServerClient");
