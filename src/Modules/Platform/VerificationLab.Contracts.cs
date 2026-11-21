@@ -13,6 +13,40 @@ using System.Xml;
 
 namespace ReignBetaServer
 {
+    internal static partial class ConversationResponseService
+    {
+        internal static bool VerifyRetainedLogPayload(string root, string logPath, Dictionary<string, string> query)
+        {
+            string previousRoot = DiagnosticRootOverride.Value, previousError = DiagnosticLastError;
+            DiagnosticRootOverride.Value = Path.Combine(root, "captures");
+            try
+            {
+                DiagnosticWriteJson(Path.Combine(DiagnosticRoot, "capture.json"), TestDict("enabled", true));
+                var trace = new ConversationDiagnosticTrace(query["campaignId"], "fixture-correlation", "fixture", "", TestDict());
+                try
+                {
+                    const string retained = "Retained fixture evidence.";
+                    string payloadId = trace.Payload(retained, Guid.NewGuid().ToString("N"));
+                    var logged = TestDict("eventType", "fixture", "data", TestDict("traceId", trace.Id,
+                        "payloadId", payloadId, "text", "omitted fixture text", "level", "warn"));
+                    File.WriteAllLines(logPath, new[] { Json.Serialize(logged),
+                        Json.Serialize(TestDict("eventType", "http.request", "data", TestDict("status", 503))) });
+                    var warning = OperationsService.ReadLogApi(new(query) { ["severity"] = "warning", ["search"] = "payloadId" });
+                    var link = ReadDictionary(ReadDictionaryList(warning, "entries").Single(), "relatedEvidence");
+                    var target = new Dictionary<string, string> { ["traceId"] = ReadString(link, "traceId", ""),
+                        ["payloadId"] = ReadString(link, "payloadId", "") };
+                    var page = ConversationDiagnosticsPayloadApi(target);
+                    return ReadString(link, "route", "") == "/api/diagnostics/conversations/payload"
+                        && target["traceId"] == trace.Id && target["payloadId"] == payloadId && ReadBool(page, "ok", false)
+                        && ReadString(page, "content", "") == retained
+                        && ReadInt(OperationsService.ReadLogApi(new(query) { ["severity"] = "error" }), "returnedCount", -1) == 1;
+                }
+                finally { trace.Finish("completed"); }
+            }
+            finally { DiagnosticRootOverride.Value = previousRoot; DiagnosticLastError = previousError; }
+        }
+    }
+
     internal static partial class VerificationService
     {
         private static void RunLogPageContractChecks(List<Dictionary<string, object>> checks)
@@ -92,6 +126,19 @@ namespace ReignBetaServer
                 File.WriteAllLines(path, File.ReadAllLines(path).Skip(1).ToArray());
                 Check("trimmed_cursor", !ReadBool(OperationsService.ReadLogApi(query), "ok", true));
 
+                var rich = new Dictionary<string, object>();
+                foreach (string key in new[] { "ts", "timestamp", "eventType", "phase", "requestType", "type", "kind", "severity",
+                    "level", "status", "method", "path", "source", "mode", "model", "provider", "id", "eventId", "actionId", "heroId" })
+                    rich[key] = new string('雪', 160);
+                var packed = new Dictionary<string, object>(rich) { ["data"] = rich };
+                File.WriteAllText(path, Json.Serialize(packed));
+                var minimalPage = OperationsService.ReadLogApi(new() { ["file"] = file, ["campaignId"] = campaign });
+                var minimal = ReadDictionaryList(minimalPage, "entries").Single();
+                Check("minimal_elision", WireBytes(packed) > 16384 && WireBytes(minimal) <= 16384 && WireBytes(minimalPage) <= 262144
+                    && ReadBool(minimal, "elided", false) && ReadString(minimal, "unabridgedRow", "") == "unavailable_from_this_response"
+                    && !minimal.ContainsKey("data") && !minimal.ContainsKey("relatedEvidence"),
+                    TestDict("sourceBytes", WireBytes(packed), "entryBytes", WireBytes(minimal), "bodyBytes", WireBytes(minimalPage)));
+
                 // Fill the page with individually small, public rows, including JSON-escaped characters.
                 var sample = TestDict("eventType", "fixture", "status", "info", "model", new string('+', 145),
                     "heroId", new string('h', 150), "eventId", new string('e', 150), "source", new string('s', 150));
@@ -159,16 +206,7 @@ namespace ReignBetaServer
                 Check("expired_attempt", !ReadBool(DialogueService.ReadPromptEvidenceApi(pinned), "ok", true)
                     && !ReadDictionaryList(OperationsService.ReadLogApi(query), "entries").Single().ContainsKey("relatedEvidence"));
 
-                string traceId = Guid.NewGuid().ToString("N"), payloadId = Guid.NewGuid().ToString("N");
-                var traced = TestDict("eventType", "fixture", "data", TestDict("traceId", traceId,
-                    "payloadId", payloadId, "text", "omitted fixture text", "level", "warn"));
-                File.WriteAllLines(path, new[] { Json.Serialize(traced),
-                    Json.Serialize(TestDict("eventType", "http.request", "data", TestDict("status", 503))) });
-                var warning = OperationsService.ReadLogApi(new(query) { ["severity"] = "warning", ["search"] = "payloadId" });
-                var diagnostic = ReadDictionary(ReadDictionaryList(warning, "entries").Single(), "relatedEvidence");
-                Check("pinned_payload", ReadString(diagnostic, "route", "") == "/api/diagnostics/conversations/payload"
-                    && ReadString(diagnostic, "traceId", "") == traceId && ReadString(diagnostic, "payloadId", "") == payloadId
-                    && ReadInt(OperationsService.ReadLogApi(new(query) { ["severity"] = "error" }), "returnedCount", -1) == 1);
+                Check("pinned_payload", ConversationResponseService.VerifyRetainedLogPayload(root, path, query));
 
                 File.WriteAllLines(path, new[] {
                     Json.Serialize(TestDict("eventType", "diagnostics.test_llm", "data", TestDict("ok", false))),

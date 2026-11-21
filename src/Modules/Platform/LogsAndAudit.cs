@@ -206,8 +206,11 @@ namespace ReignBetaServer
             if (evidence != null) entry["relatedEvidence"] = evidence;
             // Even many individually valid fields can exceed the row ceiling when JSON-escaped.
             if (Encoding.UTF8.GetByteCount(Json.Serialize(entry)) > LogEntryBytes)
-                return new() { ["elided"] = true, ["elisionReason"] = "row_limit", ["redactedRowBytes"] = redactedBytes,
-                    ["unabridgedRow"] = "unavailable_from_this_response", ["relatedEvidence"] = evidence };
+            {
+                entry = new() { ["elided"] = true, ["elisionReason"] = "row_limit", ["redactedRowBytes"] = redactedBytes,
+                    ["unabridgedRow"] = "unavailable_from_this_response" };
+                if (evidence != null) entry["relatedEvidence"] = evidence;
+            }
             return entry;
         }
 
