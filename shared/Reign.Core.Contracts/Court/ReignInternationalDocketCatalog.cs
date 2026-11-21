@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 
 namespace Reign.Core.Contracts.Court
@@ -68,6 +69,31 @@ namespace Reign.Core.Contracts.Court
                     return ReignInternationalReplyDisposition.Unavailable;
             }
         }
+
+        public static bool MatchesSovereignReplyAction(string? frozenCommand, string? typedCommand,
+            string? normalizedCommand, string? normalizedType)
+        {
+            if (string.IsNullOrWhiteSpace(frozenCommand) || typedCommand != frozenCommand
+                || normalizedCommand != frozenCommand || string.IsNullOrWhiteSpace(normalizedType))
+                return false;
+            return frozenCommand switch
+            {
+                "sign_trade_agreement" => normalizedType == "DiplomacySignTradeAgreement",
+                "record_promise" => normalizedType == "DiplomacyRecordPromise",
+                _ => true
+            };
+        }
+
+        public static bool BindsCourtTradeDuration(IReadOnlyDictionary<string, string> terms)
+            => terms.Count == 1 && terms.TryGetValue("durationDays", out var duration)
+                && int.TryParse(duration, NumberStyles.None, CultureInfo.InvariantCulture, out int days)
+                && days >= 1 && days <= 365;
+
+        public static bool BindsCourtSettlementTerms(IReadOnlyDictionary<string, string> original,
+            IReadOnlyDictionary<string, string> proposed)
+            => original.Count > 0 && original.Count == proposed.Count
+                && original.All(p => proposed.TryGetValue(p.Key, out var value)
+                    && (value == p.Value || p.Key == "gold" || p.Key == "payerHeroId" || p.Key == "recipientHeroId"));
 
         public static int NpcPressureDelta(ReignNobleMatterSeverity severity, bool favorsPlayer, bool hostile)
             => favorsPlayer || !hostile ? -PressureMagnitude(severity) : PressureMagnitude(severity);
