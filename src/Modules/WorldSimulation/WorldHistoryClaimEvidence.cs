@@ -23,6 +23,10 @@ namespace ReignBetaServer
 
         internal static bool MentionsFirstPersonDeed(string text) => ClaimantDeed.IsMatch(text);
 
+        internal static bool HasReportedHistoryTag(string text) => Regex.IsMatch(text,
+            @"(?:\bor\s+so\s+|[,;:—–]\s*)(?!I\b|we\b)(?:he|she|they|you|(?-i:\p{Lu}[\p{L}'’-]+)"
+            + @"|(?:the|my|our|your|his|her|their)\s+[\p{L}'’-]+)\s+(?:said|says?|claimed|claims?|wrote)\b|\baccording\s+to\b", ClaimOptions);
+
         internal static List<Match> HistoryQuotationAndNarration(string source) =>
             Regex.Matches(source, @"\*[^*]*(?:\*|\z)|[""“][^""”]*(?:[""”]|\z)|(?<![\p{L}\p{N}])['‘](?=\S).*?(?:['’](?![\p{L}\p{N}])|\z)",
                 RegexOptions.Singleline | RegexOptions.CultureInvariant).Cast<Match>().ToList();
@@ -39,6 +43,8 @@ namespace ReignBetaServer
                 if (!assertion.Success) continue;
                 int start = sentence.Index + assertion.Index;
                 if (nonAssertions.Any(n => start >= n.Index && start < n.Index + n.Length)) continue;
+                // A trailing attribution belongs to the original sentence, even after a semicolon.
+                if (HasReportedHistoryTag(sentence.Value.Substring(assertion.Index))) continue;
                 int clauseStart = sentence.Index;
                 foreach (Match aside in nonAssertions.Where(n => n.Value[0] == '*' && n.Index + n.Length > sentence.Index && n.Index + n.Length <= start))
                 {

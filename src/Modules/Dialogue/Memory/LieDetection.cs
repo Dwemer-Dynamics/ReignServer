@@ -313,19 +313,26 @@ namespace ReignBetaServer
             };
         }
 
+        private static readonly Regex StandaloneHistoryAdmission = new Regex(
+            @"\A(?<cue>(?<speaker>I|we)\s+(?:admit\s+(?:that\s+)?\k<speaker>\s+)?"
+            + @"(?:(?:am|are|was|were)\s+)?(?:(?:openly|deliberately|knowingly|intentionally)\s+)?"
+            + @"(?:(?:trying|attempting|intending|intended|meant)\s+to\s+)?(?:lie|lied|lying|deceive|deceived|deceiving|mislead|misled|misleading)"
+            + @"(?:\s+(?:to\s+)?(?:you|him|her|them|everyone|the\s+(?:court|king|queen|lord|lady)))?)"
+            + @"(?:\s+about\s+(?:it|this|that|(?:the\s+)?(?:[\p{L}\d]+\s+)?(?:prisoners?|captives?)"
+            + @"(?:\s+(?:he|she|they)\s+(?:rescued|freed|released))?))?\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
         private static bool HasDirectSpokenAdmission(string spoken)
         {
-            const RegexOptions options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
-            foreach (Match sentence in Regex.Matches(spoken, @"[^.!?;\r\n]+[.!?]*"))
+            foreach (Match sentence in Regex.Matches(spoken, @"[^.!?\r\n]+[.!?]*"))
             {
-                if (sentence.Value.Contains('?')) continue;
-                string words = sentence.Value.Trim();
-                Match subject = Regex.Match(words, @"\A(?<speaker>I|we|this)\b(?:\s+admit\s+(?:that\s+)?\k<speaker>\b)?", options);
-                if (!subject.Success) continue;
-                // A later subject can introduce an admission attributed to somebody else's account.
-                Match nextSubject = Regex.Match(words.Substring(subject.Length), @"\b(?:I|we|this)\b", options);
-                if (nextSubject.Success) words = words.Substring(0, subject.Length + nextSubject.Index);
-                if (ContainsExplicitDeceptionAdmission(ActionPipelineService.NormalizeLookup(words))) return true;
+                if (sentence.Value.Contains('?') || WorldSimulationService.HasReportedHistoryTag(sentence.Value)) continue;
+                string words = sentence.Value.Trim().TrimEnd('.', '!').TrimEnd();
+                // The existing direct intent announcement introduces its separate claim with a colon.
+                int colon = words.IndexOf(':');
+                if (colon >= 0 && Regex.IsMatch(words.Substring(0, colon), @"\b(?:lie\s+to|deceive|mislead)\s+you\s*\z",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)) words = words.Substring(0, colon).TrimEnd();
+                Match admission = StandaloneHistoryAdmission.Match(words);
+                if (admission.Success && ContainsExplicitDeceptionAdmission(ActionPipelineService.NormalizeLookup(admission.Groups["cue"].Value))) return true;
             }
             return false;
         }
@@ -958,11 +965,16 @@ namespace ReignBetaServer
             Check("reported_rescue_and_admission", "He said I rescued five prisoners and that I deliberately lied.", 101, "lord_a", "", uncertain, unknown);
             Check("reported_admission_other_rescuer", "He said I deliberately lied about the five prisoners she rescued.", 101, "lord_a", "", uncertain, unknown);
             Check("relayed_admission_other_rescuer", "I heard him say I deliberately lied about the five prisoners she rescued.", 101, "lord_a", "", uncertain, unknown);
+            Check("postfixed_admission_other_rescuer", "I deliberately lied about the five prisoners she rescued, or so he said.", 101, "lord_a", "", uncertain, unknown);
+            Check("admission_by_another_speaker", "This is an admitted deception by her about the prisoners she rescued.", 101, "lord_a", "", uncertain, unknown);
             Check("direct_admission_other_rescuer", "I deliberately lied about the five prisoners she rescued.", 101, "lord_a",
                 "contradicted", "detected_firsthand", "contradicted", expectedBasis: "firsthand");
             Check("direct_admit_that_i_lied", "I admit that I lied about the prisoners she rescued.", 101, "lord_a",
                 "contradicted", "detected_firsthand", "contradicted", expectedBasis: "firsthand");
+            Check("direct_retraction_after_semicolon", "I rescued five prisoners; what I just said is false.", 101, "lord_a",
+                "contradicted", "detected_firsthand", "contradicted", expectedBasis: "firsthand");
             Check("emphatic_question_career_cap", "I rescued exactly two prisoners in my entire career?!", 101, "lord_a", "", uncertain, unknown);
+            Check("postfixed_reported_career_cap", "I rescued exactly two prisoners in my entire career; or so he said!", 101, "lord_a", "", uncertain, unknown);
             Check("emphatic_statement_career_cap", "I rescued exactly two prisoners in my entire career!", 101, "lord_a",
                 "contradicted", "detected_firsthand", "contradicted", expectedBasis: "firsthand");
             Check("unrelated_admission", "I rescued five prisoners. I deliberately lied about the horses.", 101, "lord_a", partial, uncertain, unknown);
