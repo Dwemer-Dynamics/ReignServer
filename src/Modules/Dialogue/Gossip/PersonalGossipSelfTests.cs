@@ -256,9 +256,10 @@ namespace ReignBetaServer
                     >= GossipDistortionChance(GossipTestTraits("honesty", i + 1), 75)), null);
             check("credibility_and_retelling_examples", GossipCredibility(60, 60, "firsthand", 0, false, false, false) == 67
                 && GossipRetellChance(62, 67) == 19 && GossipRaiseChance(70, 75, 33, 75) == 68, null);
-            check("recipient_proof_and_speculation", GossipCredibility(80, 80, "firsthand", 0, false, false, false, "disproved") == 0
-                && GossipCredibility(-80, 20, "secondhand", 1, false, false, false, "confirmed") == 100
+            check("recipient_bounded_belief_and_speculation", GossipCredibility(80, 80, "firsthand", 0, false, false, false) == 76
+                && GossipCredibility(-80, 20, "secondhand", 1, false, false, false) == 5
                 && GossipCredibility(0, 50, "speculation", 0, false, false, false) == 25, null);
+            RunPersonalGossipEvidenceTests(check);
             check("strong_feelings_gate", !GossipEmotionEligible(0, excitable) && !GossipEmotionEligible(25, ordinary) && GossipEmotionEligible(25, excitable), null);
             check("rounding_and_roll_endpoints", GossipPercent(.5) == 1 && GossipPercent(-1) == 0 && GossipPercent(120, 85) == 85
                 && Enumerable.Range(0, 500).All(i => GossipRoll("endpoint" + i, "share") is >= 1 and <= 100), null);
@@ -286,6 +287,61 @@ namespace ReignBetaServer
             try { RunPublicWitnessGossipSelfTests(check); RunPersonalGossipPersistenceTests(check, spiteful); }
             catch (Exception ex) { check("persistence_fixture", false, ex.ToString()); }
             return results;
+        }
+
+        private static void RunPersonalGossipEvidenceTests(Action<string, bool, object> check)
+        {
+            const string report = "Traveler and Daria sealed the bargain yesterday.";
+            const string ownRoot = "conversation:earlier_exchange";
+            Dictionary<string, object> Source(string id, string root, string speaker, string words) =>
+                GossipFields("sourceId", id, "sourceRootId", root, "speakerId", speaker, "text", words);
+            Dictionary<string, object> Assessment(string kind, string root, string id, string quote) =>
+                GossipFields("kind", kind, "sourceRootId", root, "sourceId", id, "sourceQuote", quote, "nativeVerified", true);
+
+            var source = GossipFields("sessionId", "root_exchange", "sourceQuote", report, "claimKind", "assertion");
+            var inputs = new[] {
+                (Case: "wrong_actor", Quote: "Cassius and Daria sealed the bargain yesterday.", Kind: "confirmed"),
+                (Case: "wrong_relation", Quote: "Traveler and Daria discussed the bargain yesterday.", Kind: "confirmed"),
+                (Case: "wrong_polarity", Quote: "Traveler and Daria did not seal the bargain.", Kind: "confirmed"),
+                (Case: "reported_other", Quote: "I only heard from Cassius that Traveler and Daria sealed the bargain.", Kind: "confirmed"),
+                (Case: "native_status_mismatch", Quote: "The captive was freed yesterday.", Kind: "disproved")
+            };
+            var replyData = GossipFields("speakerId", "holder", "receivedBody", report, "replyEvidence",
+                inputs.Select(i => Source(i.Case, ownRoot, "holder", i.Quote)).Concat(new[] {
+                    Source("echo", "conversation:echo", "interlocutor", report),
+                    Source("original_root", "conversation:root_exchange", "interlocutor", "Someone else reported a new bargain."),
+                    Source("wrong_author", "conversation:other", "interlocutor", "Traveler was nowhere near the town."),
+                    Source("other_account", "conversation:other", "interlocutor", "I saw Traveler and Daria sign the agreement.")
+                }).ToList());
+            foreach (var input in inputs)
+            {
+                var result = GossipFields("beliefEvidence", new[] { Assessment(input.Kind, ownRoot, input.Case, input.Quote) });
+                var bound = BindPersonalGossipBeliefEvidence(replyData, source, result);
+                check("receipt_preserves_model_opinion_" + input.Case, bound.Count == 1
+                    && ReadString(bound[0], "kind", "") == input.Kind
+                    && ReadString(bound[0], "sourceQuote", "") == input.Quote
+                    && ReadString(bound[0], "sourceRootId", "") == ownRoot && ReadString(bound[0], "speakerId", "") == "holder"
+                    && ReadString(bound[0], "sourceId", "") == input.Case && !bound[0].ContainsKey("nativeVerified"), bound);
+            }
+            var rejected = GossipFields("beliefEvidence", new[] {
+                Assessment("corroborated", "conversation:echo", "echo", report),
+                Assessment("corroborated", "conversation:root_exchange", "original_root", "Someone else reported a new bargain."),
+                Assessment("confirmed", "conversation:other", "wrong_author", "Traveler was nowhere near the town."),
+                Assessment("disproved", ownRoot, "forged_id", inputs[0].Quote)
+            });
+            check("receipt_rejects_echo_original_root_wrong_speaker_and_forged_id",
+                BindPersonalGossipBeliefEvidence(replyData, source, rejected).Count == 0, null);
+
+            var corroboration = GossipFields("beliefEvidence", new[] { Assessment("corroborated", "conversation:other",
+                "other_account", "I saw Traveler and Daria sign the agreement.") });
+            check("corroboration_remains_a_bounded_belief_input", BindPersonalGossipBeliefEvidence(replyData, source, corroboration).Count == 1
+                && GossipCredibility(80, 80, "firsthand", 0, true, false, false) == 91, null);
+
+            var legacy = GossipFields("claimKind", "assertion", "credibility", 100);
+            string wording = GossipReceiptEvidenceWording(legacy);
+            check("receipt_legacy_absolute_value_remains_historical", ReadInt(legacy, "credibility", 0) == 100
+                && !legacy.ContainsKey("evidenceVersion") && wording.Contains("legacy listener belief 100/100")
+                && wording.Contains("claims unverified"), wording);
         }
 
         private static void RunPersonalGossipCompositionReviewTests(Action<string, bool, object> check)
@@ -430,6 +486,16 @@ namespace ReignBetaServer
                     "createdDay", day, "worldDay", day, "category", "conversation", "signal", signal, "speaker", source, "policy", policy,
                     "mentionedIds", named ? new[] { "target" } : Array.Empty<string>(), "sourceText", text, "sourceQuote", text,
                     "sourceTurnIds", ReadStringList(exchange, "turnIds"), "sourceExchangeId", ReadString(exchange, "exchangeId", ""), "rootId", id, "hop", 1, "holders", new[] { "source" });
+            }
+            void StoreReplySource(ReignDbConnection connection, string session, double day, string question, string replyText)
+            {
+                long time = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                DialogueStore.InsertOrIgnoreConversationSessions7(connection, GossipFields("id", session, "campaign", campaign,
+                    "npc", "target", "player", "player", "ts", time, "day", day,
+                    "participants", Json.Serialize(new[] { "target", "player" }), "payload", "{}"));
+                StoreConversationExchange(campaign, GossipFields("campaignId", campaign, "conversationSessionId", session,
+                    "timelineId", "main", "worldDay", day, "channel", "correspondence"), "target", "player", "Traveler", "Target",
+                    question, replyText, session + "_exchange", time);
             }
             Dictionary<string, object> ReviewedFixture(Dictionary<string, object> data, Dictionary<string, object> draft) =>
                 ReviewPersonalGossipComposition(data, draft, _ => GossipFields("ok", true, "content", Json.Serialize(GossipFields(
@@ -757,13 +823,52 @@ namespace ReignBetaServer
                 PersonalGossipTickApi(presence(32.99));
                 using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                     check("remote_not_early", DialogueSelfTestStore.SelectPersonalGossipHistory9(c, GossipFields("root", remoteId)).Count == 0, null);
-                PersonalGossipTickApi(presence(33));
-                ComposeAndCapture(Compose);
+                const string unrelatedQuote = "The west mill sold me two sacks of barley.";
                 using (var c = ReignDatabase.OpenCampaignConnection(campaign))
-                    check("remote_answer_waits_for_return", DialogueSelfTestStore.SelectPersonalGossipHistory10(c, GossipFields("id", remoteId + "_out_reply")).Count == 0, null);
+                    StoreReplySource(c, "remote_reply_memory", 32d, "Where did you get the grain?", unrelatedQuote);
+                PersonalGossipTickApi(presence(33));
+                string remoteReplyId = remoteId + "_out_reply", replyInstruction = "";
+                int replyCalls = 0;
+                ComposeAndCapture((data, reply) => ReadString(data, "messageId", "") != remoteReplyId ? Compose(data, reply)
+                    : ComposePersonalGossip(data, true, request =>
+                    {
+                        replyCalls++;
+                        replyInstruction = ReadString(ReadDictionaryList(request, "messages").First(), "content", "");
+                        return GossipFields("ok", true, "content", Json.Serialize(GossipFields(
+                            "body", unrelatedQuote, "sourceQuote", unrelatedQuote, "privacy", "public", "answerKind", "answered",
+                            "factVerification", "verified")));
+                    }));
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
+                {
+                    check("remote_answer_waits_for_return", DialogueSelfTestStore.SelectPersonalGossipHistory10(c, GossipFields("id", remoteReplyId)).Count == 0, null);
+                    var holder = GossipJson(DialogueSelfTestStore.SelectPersonalGossipHistory11(c, GossipFields("id", remoteId + "_out")).Single());
+                    var prepared = GossipJson(DialogueSelfTestStore.SelectPersonalGossipHistory11(c, GossipFields("id", remoteReplyId)).Single());
+                    check("unrelated_quote_prepares_response_without_verifying_answer", replyCalls == 1
+                        && replyInstruction.Contains("exact passage from one accessibleSourceTurns text")
+                        && replyInstruction.Contains("do not establish truth or complete coverage")
+                        && ReadString(prepared, "body", "") == unrelatedQuote
+                        && ReadString(ReadDictionary(prepared, "response"), "stage", "") == "prepared"
+                        && ReadString(ReadDictionary(holder, "response"), "kind", "") == "answer_attempt"
+                        && ReadString(ReadDictionary(holder, "response"), "coverage", "") == "unverified"
+                        && !ReadBool(holder, "questionOpen", true), holder);
+                }
+                PersonalGossipTickApi(presence(36));
                 PersonalGossipTickApi(presence(36));
                 using (var c = ReignDatabase.OpenCampaignConnection(campaign))
-                    check("remote_reply_arrives_once", DialogueSelfTestStore.SelectPersonalGossipHistory10(c, GossipFields("id", remoteId + "_out_reply")).Count == 1, null);
+                {
+                    var deliveredRows = DialogueSelfTestStore.SelectPersonalGossipHistory10(c, GossipFields("id", remoteReplyId));
+                    check("remote_reply_arrives_once", deliveredRows.Count == 1, null);
+                    var delivered = GossipJson(deliveredRows.Single());
+                    var turn = DialogueStore.SelectConversationTurns7(c, GossipFields("id", ReadString(deliveredRows[0], "receipt_id", ""))).Single();
+                    string prompt = BuildPersonalGossipPrompt(campaign, "source", presence(36), new List<string>());
+                    check("delivered_reply_and_both_memories_keep_unverified_attribution",
+                        ReadString(delivered, "sourceBasis", "") == "attributed_npc_speech"
+                        && ReadString(delivered, "factVerification", "") == "unavailable"
+                        && ReadString(ReadDictionary(delivered, "response"), "stage", "") == "delivered"
+                        && ReadString(ReadDictionary(delivered, "response"), "inReplyTo", "") == remoteId + "_out"
+                        && ReadString(turn, "text", "").Contains("response delivered; attributed speech, factual claims unverified")
+                        && prompt.Contains(unrelatedQuote + " (reply; response delivered, coverage and claims unverified"), delivered);
+                }
 
                 CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "source", "traits.json"), spiteful);
                 source["settlementId"] = "town_a"; target["settlementId"] = "town_a";
@@ -1100,6 +1205,11 @@ namespace ReignBetaServer
                     var inventedReply = GossipFields("body", "Yes, I spent the night with Traveler.", "sourceQuote", "", "answerKind", "acknowledged");
                     check("unsupported_reply_cannot_invent_answer", ValidatePersonalGossipComposition(c, GossipFields(), inventedReply, true)
                         && ReadString(inventedReply, "body", "") == "I will think about what you said.", null);
+                    var uncertain = GossipFields("body", "I am unsure what happened.", "sourceQuote", "", "answerKind", "acknowledged");
+                    check("unsupported_question_response_expresses_uncertainty", ValidatePersonalGossipComposition(c,
+                        GossipFields("claimKind", "question"), uncertain, true)
+                        && ReadString(uncertain, "body", "") == "I cannot say for certain."
+                        && ReadString(uncertain, "answerKind", "") == "acknowledged", uncertain);
                 }
                 CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "source", "traits.json"), excitable);
                 string retryId = GossipTestSeed("retry_", id => GossipRoll(id, "share") <= 85);
@@ -1139,9 +1249,13 @@ namespace ReignBetaServer
                 CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "target", "traits.json"), excitable);
                 string retellId = GossipTestSeed("retell_", id => GossipRoll(id, "share") <= 85
                     && GossipRoll(id + "_via_" + PromptHash("target").Substring(0, 12).ToLowerInvariant(), "share") <= 25);
+                const string retellSource = "I heard that Source is a woman.";
+                double originalAffinity;
                 using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     GossipTestPair(c, "target", "third", 60, 30);
+                    originalAffinity = GossipAffinity(c, "target", "source", target, source);
+                    StoreReplySource(c, "retell_reply_memory", 79d, "What did you hear about Source?", retellSource);
                     GossipAcceptPresence(c, presence(80));
                     var topic = NewTopic(c, retellId, 80, false);
                     ReadDictionary(topic, "signal")["question"] = false;
@@ -1151,8 +1265,14 @@ namespace ReignBetaServer
                 {
                     if (!reply) return PersonalGossipFramedSource(data) ?? GossipFields("body", (ReadInt(data, "hop", 1) > 1 ? "Source said: " : "") + ReadString(data, "sourceQuote", ""), "sourceQuote", ReadString(data, "sourceQuote", ""),
                         "distortionSeverity", "none", "account", ReadInt(data, "hop", 1) > 1 ? "secondhand" : "firsthand");
-                    return GossipFields("body", "That is interesting news.", "sourceQuote", "", "answerKind", "acknowledged", "gossipSignals", new[] {
-                        GossipFields("confidence", 1d, "evidenceQuote", ReadString(data, "receivedBody", ""), "excitement", 100, "privacy", "public", "existencePrivacy", "public") });
+                    return GossipFields("body", "That is interesting news.", "sourceQuote", "", "answerKind", "acknowledged",
+                        "beliefEvidence", new[] {
+                            GossipFields("kind", "confirmed", "sourceQuote", retellSource,
+                                "sourceRootId", "conversation:retell_reply_memory", "sourceId", "retell_reply_memory_exchange_npc")
+                        }, "gossipSignals", new[] {
+                            GossipFields("confidence", 1d, "evidenceQuote", ReadString(data, "receivedBody", ""),
+                                "excitement", 100, "privacy", "public", "existencePrivacy", "public")
+                        });
                 }
                 ComposeAndCapture(ComposeRetell);
                 PersonalGossipTickApi(presence(80.05));
@@ -1164,6 +1284,34 @@ namespace ReignBetaServer
                     var outward = DialogueSelfTestStore.SelectPersonalGossipMessages13(c, GossipFields("root", retellId));
                     check("one_onward_hop_and_no_loop", outward.Count == 2 && outward.Any(r => ReadString(r, "recipient_id", "") == "third" && ReadInt(r, "hop", 0) == 2)
                         && outward.All(r => ReadString(r, "recipient_id", "") != "source"), outward.Select(r => ReadString(r, "recipient_id", "")).ToList());
+                    var originalJob = GossipJson(DialogueStore.SelectPersonalGossipMessages8(c, GossipFields("id", retellId + "_out")).Single());
+                    var replyJob = GossipJson(DialogueStore.SelectPersonalGossipMessages8(c, GossipFields("id", retellId + "_out_reply")).Single());
+                    var originalRow = DialogueStore.SelectPersonalGossipHistory2(c, GossipFields("id", retellId + "_out", "owner", "target")).Single();
+                    var originalReceipt = GossipJson(originalRow);
+                    var assessment = ReadDictionary(replyJob, "beliefAssessment");
+                    var binding = ReadDictionaryList(assessment, "evidence").Single();
+                    var sourceProfile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, "source", "profile.json"));
+                    string retellPrompt = BuildPersonalGossipPrompt(campaign, "target", presence(80.10), new List<string>());
+                    check("mismatched_hearsay_is_model_opinion_with_bounded_retell_belief", ReadBool(sourceProfile, "isFemale", true) == false
+                        && ReadString(assessment, "factVerification", "") == "unavailable"
+                        && ReadString(binding, "kind", "") == "confirmed" && ReadString(binding, "speakerId", "") == "target"
+                        && ReadString(binding, "sourceQuote", "") == retellSource
+                        && ReadString(originalReceipt, "beliefBasis", "") == "listener_model_assessment"
+                        && ReadInt(originalReceipt, "credibility", -1) == ReadInt(originalJob, "credibility", -2)
+                        && ReadInt(originalReceipt, "credibility", -1) is >= 5 and <= 95
+                        && retellPrompt.Contains("model-assessed listener belief") && !retellPrompt.Contains(retellSource)
+                        && GossipAffinity(c, "target", "source", target, source) == originalAffinity, originalReceipt);
+                    originalReceipt.Remove("evidenceVersion");
+                    originalReceipt.Remove("beliefBasis");
+                    originalReceipt["credibility"] = 100;
+                    DialogueStore.UpdatePersonalGossipHistory(c, GossipFields("id", ReadString(originalRow, "receipt_id", ""),
+                        "json", Json.Serialize(originalReceipt)));
+                    var legacyReply = GossipFields("receivedMessageId", retellId + "_out", "speakerId", "target", "hop", 2);
+                    UpdatePersonalGossipReaction(c, campaign, legacyReply, GossipFields(), 80.10);
+                    var legacyReceipt = GossipJson(DialogueStore.SelectPersonalGossipHistory2(c, GossipFields("id", retellId + "_out", "owner", "target")).Single());
+                    check("inflight_reaction_preserves_legacy_receipt_credibility", ReadInt(legacyReceipt, "credibility", -1) == 100
+                        && !legacyReceipt.ContainsKey("evidenceVersion") && GossipReceiptEvidenceWording(legacyReceipt).Contains("legacy listener belief 100/100")
+                        && GossipAffinity(c, "target", "source", target, source) == originalAffinity, legacyReceipt);
                     var pastLimit = NewTopic(c, "past_hop_limit", 80, true); pastLimit["hop"] = 3;
                     EvaluatePersonalGossip(c, campaign, pastLimit, people);
                     var expired = NewTopic(c, "expired_root", 80, true); expired["rootCreatedDay"] = 60;
