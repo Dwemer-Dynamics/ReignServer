@@ -725,6 +725,14 @@ ORDER BY created_utc,save_point_id;", connection))
                         throw new InvalidDataException("PostgreSQL archive has an unexpected or ambiguous schema definition.");
                     continue;
                 }
+                // An annotation on the schema itself has no enclosing namespace. Its
+                // tag identifies the schema whose definition must also pass this inventory.
+                Match schemaAnnotation = Regex.Match(row, prefix + @"(?:COMMENT|ACL|SECURITY LABEL) - SCHEMA (\S+) \S+\z");
+                if (schemaAnnotation.Success && expected.Contains(schemaAnnotation.Groups[1].Value))
+                {
+                    scoped.Remove(row);
+                    continue;
+                }
                 // pg_restore selects these annotations by parent dependency. Check their
                 // displayed namespace as well before admitting them with that parent.
                 Match annotation = Regex.Match(row, prefix + @"(?:COMMENT|ACL|SECURITY LABEL) ([^ ]*)");
@@ -745,12 +753,7 @@ ORDER BY created_utc,save_point_id;", connection))
             EnsureInfrastructure();
             string normalizedCampaignId = NormalizeCampaignId(campaignId);
             string campaignSchema = CampaignSchemaName(normalizedCampaignId);
-            bool exists = ListCampaignMetadata().Any(row =>
-                string.Equals(
-                    Convert.ToString(
-                        row["campaignId"], CultureInfo.InvariantCulture),
-                    normalizedCampaignId,
-                    StringComparison.OrdinalIgnoreCase));
+            bool exists = CampaignExists(normalizedCampaignId);
             if (exists && !replace)
                 throw new InvalidOperationException(
                     "This campaign already exists in PostgreSQL.");

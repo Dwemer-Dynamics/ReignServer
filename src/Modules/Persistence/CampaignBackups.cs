@@ -865,41 +865,32 @@ namespace ReignBetaServer
                 string destinationCampaign = StrictCampaignDirectory(campaignId);
                 string destinationPortraits = CampaignPortraitCacheDirectory(campaignId);
                 string destinationSaveSync = SaveSyncCampaignRoot(campaignId);
-                var originalMetadata =
-                    ReignPostgreSqlStorage.ListCampaignMetadata().FirstOrDefault(row =>
-                        ReadString(row, "campaignId", "")
-                            .Equals(
-                                campaignId,
-                                StringComparison.OrdinalIgnoreCase));
+                var originalMetadata = ReignPostgreSqlStorage.ListCampaignMetadata().FirstOrDefault(row =>
+                    string.Equals(ReadString(row, "campaignId", ""), campaignId, StringComparison.Ordinal));
                 bool databaseExists = originalMetadata != null;
                 if (databaseExists && !replace)
                     return new Dictionary<string, object> { ["ok"] = false, ["conflict"] = true, ["campaignId"] = campaignId, ["error"] = "This campaign already exists. Enable Replace existing campaign to restore over it." };
 
                 List<string> nativeSaveSources = Directory.Exists(
                         sourceNativeSaves)
-                    ? Directory.GetFiles(sourceNativeSaves, "*",
-                        SearchOption.TopDirectoryOnly)
-                        .Select(path =>
-                        {
-                            ValidateNativeSaveFileName(
-                                Path.GetFileName(path));
-                            return path;
-                        }).ToList()
+                    ? Directory.GetFiles(sourceNativeSaves, "*", SearchOption.TopDirectoryOnly).ToList()
                     : new List<string>();
                 string nativeSaveRoot = CampaignNativeSaveRoot();
-                List<string> nativeSaveConflicts = nativeSaveSources
-                    .Where(source =>
+                var nativeSaveConflicts = new List<string>();
+                bool occupiedNativeSlot = false;
+                foreach (string source in nativeSaveSources)
+                {
+                    string name = ValidateNativeSaveFileName(Path.GetFileName(source));
+                    string destination = Path.Combine(nativeSaveRoot, name);
+                    if (Directory.Exists(destination))
                     {
-                        string destination = Path.Combine(nativeSaveRoot,
-                            Path.GetFileName(source));
-                        return File.Exists(destination)
-                            && !FileSha256(destination).Equals(
-                                FileSha256(source),
-                                StringComparison.OrdinalIgnoreCase);
-                    })
-                    .Select(Path.GetFileName).ToList();
-                if (nativeSaveConflicts.Count > 0
-                    && !replaceNativeSaves)
+                        occupiedNativeSlot = true;
+                        nativeSaveConflicts.Add(name);
+                    }
+                    else if (File.Exists(destination) && FileSha256(destination) != FileSha256(source) && !replaceNativeSaves)
+                        nativeSaveConflicts.Add(name);
+                }
+                if (nativeSaveConflicts.Count > 0)
                     return new Dictionary<string, object>
                     {
                         ["ok"] = false,
@@ -907,7 +898,9 @@ namespace ReignBetaServer
                         ["nativeSaveConflict"] = true,
                         ["campaignId"] = campaignId,
                         ["nativeSaveConflicts"] = nativeSaveConflicts,
-                        ["error"] = "Native Bannerlord save files with the same names already exist. Enable Replace native saves to import this diagnostic bundle without silently overwriting them."
+                        ["error"] = occupiedNativeSlot
+                            ? "A directory occupies a requested native Bannerlord save path."
+                            : "Native Bannerlord save files with the same names already exist. Enable Replace native saves to import this diagnostic bundle without silently overwriting them."
                     };
 
                 var directories = new[]
@@ -1093,14 +1086,10 @@ namespace ReignBetaServer
                 if (originalHash != null)
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(backup));
-                    string partial = backup + ".partial";
-                    File.Copy(Destination, partial, false);
-                    if (FileSha256(partial) != originalHash)
-                        throw new IOException("Original native save changed during backup: " + Destination);
-                    File.Move(partial, backup);
+                    CopyVerified(Destination, backup, originalHash, false);
                 }
                 installation = ImportRename.Attempted;
-                CopyVerified(source, incomingHash, originalHash != null);
+                CopyVerified(source, Destination, incomingHash, originalHash != null);
                 installation = ImportRename.Completed;
                 if (FileSha256(Destination) != incomingHash)
                     throw new InvalidDataException("Imported native save verification failed: " + Destination);
@@ -1121,7 +1110,7 @@ namespace ReignBetaServer
                 if (present && FileSha256(Destination) != incomingHash)
                     throw new IOException("Native save changed since installation. Recovery copy retained.");
                 if (originalHash != null)
-                    CopyVerified(backup, originalHash, present);
+                    CopyVerified(backup, Destination, originalHash, present);
                 else if (present)
                     File.Delete(Destination);
                 installation = ImportRename.Untouched;
@@ -1133,15 +1122,15 @@ namespace ReignBetaServer
                 ["incomingSha256"] = incomingHash, ["installation"] = installation.ToString()
             };
 
-            private void CopyVerified(string source, string hash, bool overwrite)
+            private static void CopyVerified(string source, string destination, string hash, bool overwrite)
             {
-                string temporary = Path.Combine(Path.GetDirectoryName(Destination), ".ri-" + Guid.NewGuid().ToString("N") + ".tmp");
+                string temporary = Path.Combine(Path.GetDirectoryName(destination), ".ri-" + Guid.NewGuid().ToString("N") + ".tmp");
                 try
                 {
                     File.Copy(source, temporary, false);
                     if (FileSha256(temporary) != hash)
                         throw new InvalidDataException("Native save copy failed hash verification: " + source);
-                    File.Move(temporary, Destination, overwrite);
+                    File.Move(temporary, destination, overwrite);
                 }
                 finally { TryDeleteFile(temporary); }
             }

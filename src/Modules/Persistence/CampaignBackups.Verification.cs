@@ -252,16 +252,19 @@ namespace ReignBetaServer
                 try { ReignPostgreSqlStorage.VerifyCampaignArchiveInventory(complete, scoped, expected); return true; }
                 catch (InvalidDataException) { return false; }
             }
-            add("import_scoped_archive_inventory", Accepted(definitions + objects, objects),
-                "The inventory admits multiword entries selected by PostgreSQL for both the campaign and its snapshot.");
+            string schemaMetadata = $"8; 0 0 SECURITY LABEL - SCHEMA {campaign} owner\n9; 0 0 ACL - SCHEMA {snapshot} owner\n";
+            add("import_scoped_archive_inventory", Accepted(definitions + schemaMetadata + objects, objects),
+                "The inventory admits multiword entries and annotations on the expected campaign and snapshot schemas.");
             string other = "5; 0 13 TABLE DATA separate_fixture sample owner\n";
             add("import_foreign_archive_entry", !Accepted(definitions + objects + other, objects),
                 "A table-data entry outside the selected namespaces invalidates an otherwise complete inventory.");
             string unscoped = "6; 0 0 COMMENT - fixture owner\n";
             string emptyScope = "6; 0 0 COMMENT  fixture owner\n";
+            string foreignComment = "6; 0 0 COMMENT - SCHEMA separate_fixture owner\n";
             add("import_unscoped_archive_annotation", !Accepted(definitions + objects + unscoped, objects + unscoped)
-                && !Accepted(definitions + objects + emptyScope, objects + emptyScope),
-                "An annotation selected by a parent still needs an owned namespace of its own.");
+                && !Accepted(definitions + objects + emptyScope, objects + emptyScope)
+                && !Accepted(definitions + objects + foreignComment, objects),
+                "An annotation must name an owned schema or be selected in an owned namespace.");
             add("import_duplicate_archive_definition", !Accepted(definitions + objects + $"7; 2615 14 SCHEMA - {campaign} owner\n", objects),
                 "A repeated namespace definition invalidates the inventory.");
         }
@@ -274,6 +277,15 @@ namespace ReignBetaServer
             Directory.CreateDirectory(campaign);
             File.Copy(Path.Combine(StrictCampaignDirectory(campaignId), "campaign.json"), Path.Combine(campaign, "campaign.json"));
             File.WriteAllText(Path.Combine(campaign, "v2.txt"), "version two");
+            object ExecuteFixtureSql(string sql)
+            {
+                using var connection = ReignPostgreSqlStorage.OpenCampaignConnection(campaignId);
+                using var command = connection.CreateCommand();
+                command.CommandText = sql;
+                return command.ExecuteScalar();
+            }
+            string schemaComment = "COMMENT ON SCHEMA " + ReignPostgreSqlStorage.CampaignSchemaName(campaignId) + " IS ";
+            ExecuteFixtureSql(schemaComment + "'version two fixture'");
             ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaignId, point);
             ReignPostgreSqlStorage.ExportCampaignArchive(campaignId, Path.Combine(root, "postgresql.dump"));
             // Version 2 permits an archive without the version 3 native-save inventory.
@@ -288,11 +300,52 @@ namespace ReignBetaServer
             ZipFile.CreateFromDirectory(root, upload);
             string nativeHash = FileSha256(nativeSave);
             ReignPostgreSqlStorage.DropSnapshot(campaignId, point);
+            ExecuteFixtureSql(schemaComment + "NULL");
             var imported = ImportCampaignBackup(upload, new Dictionary<string, string> { ["replace"] = "true" });
             add("import_version_two_snapshot", ReadBool(imported, "ok", false) && ReadInt(imported, "nativeSavesRestored", -1) == 0
                 && ReignPostgreSqlStorage.SnapshotExists(campaignId, point) && FileSha256(nativeSave) == nativeHash
                 && File.ReadAllText(Path.Combine(StrictCampaignDirectory(campaignId), "v2.txt")) == "version two",
                 "A version 2 archive restores its campaign files and PostgreSQL snapshot while preserving the existing native save.");
+            add("import_version_two_schema_comment", ReadBool(imported, "ok", false)
+                && Equals(ExecuteFixtureSql("SELECT obj_description(oid, 'pg_namespace') FROM pg_namespace WHERE nspname=current_schema()"), "version two fixture"),
+                "A comment exported on the owned campaign schema is restored after being cleared from the disposable database.");
+            VerifyCaseDistinctBackupImport(campaignId, root, Path.Combine(fixture, "case-distinct.reignbackup"), add);
+        }
+
+        private static void VerifyCaseDistinctBackupImport(string campaignId, string v2Root, string upload, Action<string, bool, string> add)
+        {
+            string sibling = campaignId.ToUpperInvariant();
+            var query = new Dictionary<string, string> { ["replace"] = "true" };
+            ReignPostgreSqlStorage.DropCampaign(campaignId);
+            try
+            {
+                using var connection = ReignPostgreSqlStorage.OpenCampaignConnection(sibling);
+                using var command = connection.CreateCommand();
+                command.CommandText = @"CREATE TABLE import_case_sibling AS SELECT oid AS original_oid
+FROM pg_namespace WHERE nspname=current_schema();
+UPDATE reign_meta.campaign_registry SET updated_utc=now()+interval '1 day' WHERE campaign_id=@sibling;";
+                command.Parameters.AddWithValue("sibling", sibling);
+                command.ExecuteNonQuery();
+                // Only the sibling is registered on the first import. Both rows exist on replacement.
+                ZipFile.CreateFromDirectory(v2Root, upload);
+                var created = ImportCampaignBackup(upload, query);
+                bool siblingListedFirst = ReignPostgreSqlStorage.ListCampaignMetadata()
+                    .Select(row => ReadString(row, "campaignId", "")).Where(id => id == sibling || id == campaignId)
+                    .SequenceEqual(new[] { sibling, campaignId });
+                string marker = Path.Combine(StrictCampaignDirectory(campaignId), "v2.txt");
+                File.WriteAllText(marker, "before replacement");
+                ZipFile.CreateFromDirectory(v2Root, upload);
+                var imported = ImportCampaignBackup(upload, query);
+                command.CommandText = @"SELECT EXISTS(SELECT 1 FROM import_case_sibling s
+JOIN pg_namespace n ON n.oid=s.original_oid
+JOIN reign_meta.campaign_registry r ON r.schema_name=n.nspname
+WHERE r.campaign_id=@sibling AND n.nspname=current_schema());";
+                bool siblingPreserved = Convert.ToBoolean(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+                add("import_case_distinct_campaign", ReadBool(created, "ok", false) && siblingListedFirst && ReadBool(imported, "ok", false)
+                    && File.ReadAllText(marker) == "version two" && siblingPreserved,
+                    "A missing campaign can be imported and then replaced while its newer case-distinct sibling keeps its original schema OID and marker.");
+            }
+            finally { ReignPostgreSqlStorage.DropCampaign(sibling); }
         }
 
         private static void VerifyBackupNativeStaging(string fixture, Action<string, bool, string> add)
@@ -313,6 +366,22 @@ namespace ReignBetaServer
             add("import_native_staging_hash_mismatch", rejected && FileSha256(target) == priorHash && FileSha256(original) == priorHash
                 && !Directory.EnumerateFiles(root, ".ri-*.tmp").Any(),
                 "A short staged copy fails hash verification before replacement and leaves the verified original intact.");
+
+            string slot = new string('s', 251) + ".sav";
+            string uploads = Directory.CreateDirectory(Path.Combine(root, "upload")).FullName;
+            string saves = Directory.CreateDirectory(Path.Combine(root, "saves")).FullName;
+            string recovery = Path.Combine(root, "recovery");
+            string incoming = Path.Combine(uploads, slot), destination = Path.Combine(saves, slot);
+            File.WriteAllText(incoming, "replacement save");
+            File.WriteAllText(destination, "existing long save");
+            string originalHash = FileSha256(destination);
+            var rollback = new List<ImportNativeSave>();
+            var result = InstallImportedNativeSaves(new List<string> { incoming }, saves, true, recovery, rollback);
+            bool installed = ReadString(result.Single(), "result", "") == "replaced" && FileSha256(destination) == FileSha256(incoming);
+            rollback.Single().Restore();
+            add("import_long_native_save_replacement", installed && FileSha256(destination) == originalHash
+                && FileSha256(Path.Combine(recovery, slot)) == originalHash,
+                "A 255-byte native save name can be backed up, replaced and restored at its original name.");
         }
 
         private static void VerifyBackupDirectoryRenames(string fixture, Action<string, bool, string> add)
@@ -392,11 +461,12 @@ namespace ReignBetaServer
                 command.CommandText = "CREATE TABLE import_original_marker AS SELECT 1 AS value";
                 command.ExecuteNonQuery();
             }
-            Dictionary<string, object> Import(Action<string, string> step)
+            Dictionary<string, object> Import(Action<string, string> step, bool replaceNative = true)
             {
                 string upload = Path.Combine(fixture, Guid.NewGuid().ToString("N") + ".reignbackup");
                 File.Copy(archive, upload);
-                return ImportCampaignBackup(upload, new Dictionary<string, string> { ["replace"] = "true", ["replaceNativeSaves"] = "true" }, step);
+                return ImportCampaignBackup(upload, new Dictionary<string, string>
+                    { ["replace"] = "true", ["replaceNativeSaves"] = replaceNative ? "true" : "false" }, step);
             }
             void CheckEarlyFailure(string id, string phase, string target = null)
             {
@@ -412,6 +482,41 @@ namespace ReignBetaServer
             }
             CheckEarlyFailure("import_list_snapshots_failure", "list_snapshots");
             CheckEarlyFailure("import_partial_export_failure", "export_recovery");
+            string savedNative = Path.Combine(fixture, "prior-native.sav");
+            string occupant = Path.Combine(nativeSave, "occupant.txt");
+            File.Move(nativeSave, savedNative);
+            Directory.CreateDirectory(nativeSave);
+            File.WriteAllText(occupant, "preserve");
+            try
+            {
+                bool started = false;
+                var withoutReplace = Import((_, _) => started = true, false);
+                var withReplace = Import((_, _) => started = true);
+                // Imported slot names are trimmed. The preflight and the eventual installation must target the same path.
+                string paddedRoot = Path.Combine(fixture, "padded-slot");
+                ExtractCampaignBackupSecurely(archive, paddedRoot);
+                string nativeRoot = Path.Combine(paddedRoot, "native_saves"), name = Path.GetFileName(nativeSave);
+                File.Move(Path.Combine(nativeRoot, name), Path.Combine(nativeRoot, " " + name));
+                string manifestPath = Path.Combine(paddedRoot, "manifest.json");
+                var manifest = CampaignFileService.ReadJsonObject(manifestPath);
+                File.Delete(manifestPath);
+                manifest["files"] = BackupFileManifest(paddedRoot);
+                CampaignFileService.WriteJsonObject(manifestPath, manifest);
+                string paddedUpload = Path.Combine(fixture, "padded.reignbackup");
+                ZipFile.CreateFromDirectory(paddedRoot, paddedUpload);
+                var padded = ImportCampaignBackup(paddedUpload,
+                    new Dictionary<string, string> { ["replace"] = "true", ["replaceNativeSaves"] = "true" }, (_, _) => started = true);
+                add("import_native_directory_conflict", !started && new[] { withoutReplace, withReplace, padded }.All(result =>
+                        !ReadBool(result, "ok", true) && ReadBool(result, "nativeSaveConflict", false) && !ReadBool(result, "recoveryRequired", false))
+                    && File.ReadAllText(occupant) == "preserve" && OriginalDirectories() && DatabaseOid() == originalOid,
+                    "An occupied native slot refuses either replacement policy and a padded archive name before directory or PostgreSQL mutation.");
+            }
+            finally
+            {
+                File.Delete(occupant);
+                Directory.Delete(nativeSave);
+                File.Move(savedNative, nativeSave);
+            }
             using (var connection = ReignPostgreSqlStorage.OpenCampaignConnection(campaignId))
             using (var command = connection.CreateCommand())
             {
