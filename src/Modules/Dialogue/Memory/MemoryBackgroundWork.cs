@@ -156,11 +156,14 @@ namespace ReignBetaServer
         private static void CompleteMemoryCompactionJob(ReignDbConnection connection, string id, string token,
             int attempt, string type, Dictionary<string, object> result)
         {
-            bool incomplete = ReadString(result, "compactionStatus", "") == "incomplete";
+            string compactionStatus = ReadString(result, "compactionStatus", "");
+            bool incomplete = compactionStatus == "incomplete";
             if (incomplete && !ReadBool(result, "retryable", true))
                 FinishMemoryJob(connection, id, token, "incomplete", result);
             else if (incomplete)
                 RetryMemoryJob(connection, id, token, attempt, "Compaction incomplete; original sources retained.", result);
+            else if (compactionStatus == "partial")
+                FinishMemoryJob(connection, id, token, "partial", result);
             else FinishMemoryJob(connection, id, token,
                 ReadString(result, "reason", "") == "empty_session"
                     || (type == "memory_consolidation" && ReadInt(result, "summaryCount", 0) == 0) ? "no_op" : "completed", result);
@@ -235,7 +238,7 @@ namespace ReignBetaServer
                     ["heartbeatSeconds"] = 30, ["reconciliationSeconds"] = 60,
                     ["effectiveMemoryMode"] = ResolveMemoryMode(SettingsService.LoadSettings()),
                     ["referenceGraphMode"] = ConversationReferenceMode() };
-                foreach (string status in new[] { "pending", "running", "failed", "incomplete", "completed", "no_op" })
+                foreach (string status in new[] { "pending", "running", "failed", "incomplete", "partial", "completed", "no_op" })
                     result[status] = ReadInt(counts.FirstOrDefault(r => ReadString(r, "status", "") == status), "count", 0);
                 result["attentionRequired"] = ReadInt(result, "failed", 0) + ReadInt(result, "incomplete", 0);
                 result["incompleteDiagnostics"] = MemoryIncompleteDiagnostics(jobs, ReadInt(result, "incomplete", 0));
