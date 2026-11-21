@@ -36,6 +36,7 @@ namespace ReignBetaServer
             public Action<string> NotStarted;
             public TaskCompletionSource<bool> Completion;
             public DateTime EnqueuedUtc;
+            public DateTime StartedUtc;
         }
 
         /// <summary>
@@ -156,9 +157,16 @@ namespace ReignBetaServer
             {
                 lock (gate)
                 {
+                    DateTime now = DateTime.UtcNow;
+                    DateTime oldest = now;
+                    foreach (Queue<PriorityWorkItem> queue in queues)
+                        if (queue.TryPeek(out PriorityWorkItem first) && first.EnqueuedUtc < oldest)
+                            oldest = first.EnqueuedUtc;
                     return new Dictionary<string, object>
                     {
                         ["running"] = worker != null && worker.IsAlive, ["active"] = active?.Name ?? "",
+                        ["activeDurationMs"] = active == null ? (long?)null : Math.Max(0, (long)(now - active.StartedUtc).TotalMilliseconds),
+                        ["oldestQueuedAgeMs"] = queued == 0 ? (long?)null : (long)(now - oldest).TotalMilliseconds,
                         ["interactiveQueued"] = queues[0].Count, ["normalQueued"] = queues[1].Count,
                         ["maintenanceQueued"] = queues[2].Count, ["queued"] = queued,
                         ["interactiveLimit"] = limits[0], ["normalLimit"] = limits[1], ["maintenanceLimit"] = limits[2],
@@ -272,6 +280,7 @@ namespace ReignBetaServer
                                 if (level > 0 && QuietPeriodPending(level)) { waitMs = QuietPollMs; break; }
                                 item = queues[level].Dequeue();
                                 queued--;
+                                item.StartedUtc = DateTime.UtcNow;
                                 active = item;
                                 break;
                             }
