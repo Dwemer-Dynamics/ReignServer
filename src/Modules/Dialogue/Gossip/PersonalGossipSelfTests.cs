@@ -853,12 +853,13 @@ namespace ReignBetaServer
                         && !ReadBool(holder, "questionOpen", true), holder);
                 }
                 PersonalGossipTickApi(presence(36));
-                PersonalGossipTickApi(presence(36));
+                PersonalGossipTickApi(presence(36)); // Replayed delivery must not duplicate or upgrade the author's receipt.
                 using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     var deliveredRows = DialogueSelfTestStore.SelectPersonalGossipHistory10(c, GossipFields("id", remoteReplyId));
                     check("remote_reply_arrives_once", deliveredRows.Count == 1, null);
                     var delivered = GossipJson(deliveredRows.Single());
+                    var authored = GossipJson(DialogueSelfTestStore.SelectPersonalGossipHistory11(c, GossipFields("id", remoteReplyId)).Single());
                     var turn = DialogueStore.SelectConversationTurns7(c, GossipFields("id", ReadString(deliveredRows[0], "receipt_id", ""))).Single();
                     string prompt = BuildPersonalGossipPrompt(campaign, "source", presence(36), new List<string>());
                     check("delivered_reply_and_both_memories_keep_unverified_attribution",
@@ -866,6 +867,9 @@ namespace ReignBetaServer
                         && ReadString(delivered, "factVerification", "") == "unavailable"
                         && ReadString(ReadDictionary(delivered, "response"), "stage", "") == "delivered"
                         && ReadString(ReadDictionary(delivered, "response"), "inReplyTo", "") == remoteId + "_out"
+                        && ReadString(ReadDictionary(authored, "response"), "stage", "") == "prepared"
+                        && ReadInt(delivered, "credibility", -1) == 50 && !delivered.ContainsKey("beliefBasis")
+                        && !GossipReceiptEvidenceWording(delivered).Contains("listener belief")
                         && ReadString(turn, "text", "").Contains("response delivered; attributed speech, factual claims unverified")
                         && prompt.Contains(unrelatedQuote + " (reply; response delivered, coverage and claims unverified"), delivered);
                 }
@@ -1205,6 +1209,10 @@ namespace ReignBetaServer
                     var inventedReply = GossipFields("body", "Yes, I spent the night with Traveler.", "sourceQuote", "", "answerKind", "acknowledged");
                     check("unsupported_reply_cannot_invent_answer", ValidatePersonalGossipComposition(c, GossipFields(), inventedReply, true)
                         && ReadString(inventedReply, "body", "") == "I will think about what you said.", null);
+                    var unsupportedAnswer = GossipFields("body", "I know how that happened.",
+                        "sourceQuote", "What did you see there?", "answerKind", "answered");
+                    check("incoming_question_cannot_supply_its_own_answer_quote", !ValidatePersonalGossipComposition(c,
+                        GossipFields("claimKind", "question", "receivedBody", "What did you see there?"), unsupportedAnswer, true), null);
                     var uncertain = GossipFields("body", "I am unsure what happened.", "sourceQuote", "", "answerKind", "acknowledged");
                     check("unsupported_question_response_expresses_uncertainty", ValidatePersonalGossipComposition(c,
                         GossipFields("claimKind", "question"), uncertain, true)
@@ -1296,11 +1304,27 @@ namespace ReignBetaServer
                         && ReadString(assessment, "factVerification", "") == "unavailable"
                         && ReadString(binding, "kind", "") == "confirmed" && ReadString(binding, "speakerId", "") == "target"
                         && ReadString(binding, "sourceQuote", "") == retellSource
-                        && ReadString(originalReceipt, "beliefBasis", "") == "listener_model_assessment"
+                        && ReadString(originalReceipt, "beliefBasis", "") == "listener_policy_estimate"
                         && ReadInt(originalReceipt, "credibility", -1) == ReadInt(originalJob, "credibility", -2)
                         && ReadInt(originalReceipt, "credibility", -1) is >= 5 and <= 95
-                        && retellPrompt.Contains("model-assessed listener belief") && !retellPrompt.Contains(retellSource)
-                        && GossipAffinity(c, "target", "source", target, source) == originalAffinity, originalReceipt);
+                        && retellPrompt.Contains("listener belief") && !retellPrompt.Contains("model-assessed listener belief")
+                        && !retellPrompt.Contains(retellSource) && GossipAffinity(c, "target", "source", target, source) == originalAffinity, originalReceipt);
+                    var modelInput = GossipFields("receivedMessageId", retellId + "_out", "speakerId", "target", "recipientId", "source",
+                        "speaker", target, "recipient", source, "traits", excitable, "hop", 2, "replyEvidence", new[] {
+                            GossipFields("sourceRootId", "conversation:retell_reply_memory", "sourceId", "retell_reply_memory_exchange_npc",
+                                "speakerId", "target", "text", retellSource)
+                        });
+                    var scoredAssessment = GossipFields("beliefEvidence", new[] {
+                        GossipFields("kind", "inconsistent", "sourceRootId", "conversation:retell_reply_memory",
+                            "sourceId", "retell_reply_memory_exchange_npc", "sourceQuote", retellSource)
+                    });
+                    UpdatePersonalGossipReaction(c, campaign, modelInput, scoredAssessment, 80.10);
+                    var scored = GossipJson(DialogueStore.SelectPersonalGossipHistory2(c, GossipFields("id", retellId + "_out", "owner", "target")).Single());
+                    int expected = GossipCredibility(originalAffinity, GossipTrait(excitable, "socialTrust"),
+                        ReadString(originalJob, "account", "firsthand"), 0, false, false, true);
+                    check("applying_model_belief_input_matches_the_prompt_basis", ReadInt(scored, "credibility", -1) == expected
+                        && GossipReceiptEvidenceWording(scored).Contains("model-assessed listener belief"), scored);
+
                     originalReceipt.Remove("evidenceVersion");
                     originalReceipt.Remove("beliefBasis");
                     originalReceipt["credibility"] = 100;

@@ -617,9 +617,14 @@ namespace ReignBetaServer
                 "subjectReference", visibleReference, "subjectIsOwnEncounter", ownEncounter,
                 "questionOpen", kind == "question", "feeling", 0, "personalStake", 25,
                 "raiseRoll", GossipDecisionRoll(data, ReadString(row, "root_id", "") + "|" + owner, "raise"));
-            if (visible["credibility"] != null) visible["beliefBasis"] = "listener_policy_estimate";
+            // A reply inherits the question's neutral compatibility value. No
+            // listener belief was calculated for that reply.
+            if (visible["credibility"] != null && ReadString(data, "claimKind", "") != "question")
+                visible["beliefBasis"] = "listener_policy_estimate";
             if (kind == "reply")
             {
+                // The author's existing receipt records what they prepared.
+                // Only the recipient's receipt establishes acquisition.
                 var response = PersonalGossipResponseEvidence(authored ? "prepared" : "delivered",
                     PersonalGossipReplyKind(ReadDictionary(data, "reaction")));
                 response["inReplyTo"] = ReadString(data, "receivedMessageId", "");
@@ -691,28 +696,32 @@ namespace ReignBetaServer
             if (receipt == null) return;
             var visible = GossipJson(receipt);
             var originalRow = DialogueStore.SelectPersonalGossipMessages8(c, GossipFields("id", original)).FirstOrDefault();
-            if (originalRow == null) return;
             var source = GossipJson(originalRow);
-            var assessment = BindPersonalGossipBeliefEvidence(replyData, source, result);
-            // Keep the model's labels and their exact bindings in the private job
-            // payload. Searchable receipts expose no root, private quote, or lie flag.
-            replyData["beliefAssessment"] = GossipFields("evidenceVersion", GossipReceiptEvidenceVersion,
-                "basis", "model_assessment", "factVerification", "unavailable", "evidence", assessment);
-            if (ReadString(source, "claimKind", "") == "assertion"
-                && ReadString(visible, "evidenceVersion", "") == GossipReceiptEvidenceVersion)
+            if (originalRow != null)
             {
-                bool Has(string kind) => assessment.Any(e => ReadString(e, "kind", "") == kind);
-                visible["credibility"] = GossipCredibility(GossipAffinity(c, owner, ReadString(replyData, "recipientId", ""),
-                    ReadDictionary(replyData, "speaker"), ReadDictionary(replyData, "recipient")), GossipTrait(ReadDictionary(replyData, "traits"), "socialTrust"),
-                    ReadString(source, "account", "firsthand"), Math.Max(0, ReadInt(source, "hop", 1) - 1),
-                    Has("corroborated"), Has("exposed_liar"), Has("inconsistent"));
-                if (assessment.Count > 0) visible["beliefBasis"] = "listener_model_assessment";
+                var assessment = BindPersonalGossipBeliefEvidence(replyData, source, result);
+                // Keep the model's labels and exact bindings in the private job.
+                // Searchable receipts omit the root, private quote, and lie flag.
+                replyData["beliefAssessment"] = GossipFields("evidenceVersion", GossipReceiptEvidenceVersion,
+                    "basis", "model_assessment", "factVerification", "unavailable", "evidence", assessment);
+                if (ReadString(source, "claimKind", "") == "assertion"
+                    && ReadString(visible, "evidenceVersion", "") == GossipReceiptEvidenceVersion)
+                {
+                    bool Has(string kind) => assessment.Any(e => ReadString(e, "kind", "") == kind);
+                    bool corroborated = Has("corroborated"), exposedLiar = Has("exposed_liar"), inconsistent = Has("inconsistent");
+                    visible["credibility"] = GossipCredibility(GossipAffinity(c, owner, ReadString(replyData, "recipientId", ""),
+                        ReadDictionary(replyData, "speaker"), ReadDictionary(replyData, "recipient")), GossipTrait(ReadDictionary(replyData, "traits"), "socialTrust"),
+                        ReadString(source, "account", "firsthand"), Math.Max(0, ReadInt(source, "hop", 1) - 1),
+                        corroborated, exposedLiar, inconsistent);
+                    visible["beliefBasis"] = corroborated || exposedLiar || inconsistent
+                        ? "listener_model_assessment" : "listener_policy_estimate";
+                }
             }
             visible["feeling"] = GossipQuoteSupported(ReadString(result, "reactionEvidenceQuote", ""),
                 ReadString(replyData, "receivedBody", "") + "\n" + ReadString(replyData, "recipientMemory", "")) ? GossipFeeling(result, "feeling") : 0;
             visible["personalStake"] = GossipQuoteSupported(ReadString(result, "concernEvidenceQuote", ""), ReadString(replyData, "recipientMemory", ""))
                 ? GossipFeeling(result, "personalStake") : 25;
-            if (ReadString(source, "claimKind", "") == "question")
+            if (ReadString(visible, "claimKind", "") == "question")
             {
                 string responseKind = PersonalGossipReplyKind(result);
                 visible["response"] = PersonalGossipResponseEvidence("prepared", responseKind);
@@ -722,7 +731,7 @@ namespace ReignBetaServer
             }
             DialogueStore.UpdatePersonalGossipHistory(c, GossipFields("id", ReadString(receipt, "receipt_id", ""), "json", Json.Serialize(visible)));
             // Received stories get one onward opportunity, with the holder's own feelings and traits.
-            if (ReadInt(replyData, "hop", 1) >= ReadInt(ReadDictionary(replyData, "policy"), "maximumOutwardHops", 2)) return;
+            if (originalRow == null || ReadInt(replyData, "hop", 1) >= ReadInt(ReadDictionary(replyData, "policy"), "maximumOutwardHops", 2)) return;
             var signal = ReadDictionaryList(result, "gossipSignals").FirstOrDefault(s => ReadDouble(s, "confidence", 0) >= .8
                 && GossipQuoteSupported(ReadString(s, "evidenceQuote", ""), ReadString(source, "body", "") + "\n" + ReadString(result, "body", "")));
             if (signal == null) return;

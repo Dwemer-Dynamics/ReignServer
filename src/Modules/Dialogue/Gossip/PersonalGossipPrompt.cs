@@ -191,10 +191,11 @@ with the exact words of this reply. Do not mark something raised merely because 
                 "prepared" => "; response prepared, coverage and claims unverified",
                 _ => kind == "reply" ? "; attributed response, coverage and claims unverified" : ""
             };
-            if (!ReadBool(receipt, "authored", false) && kind is not ("question" or "impression"))
+            string beliefBasis = ReadString(receipt, "beliefBasis", "");
+            if (!ReadBool(receipt, "authored", false) && kind is not ("question" or "impression") && (legacy || beliefBasis.Length > 0))
             {
                 string belief = legacy ? "legacy listener belief"
-                    : ReadString(receipt, "beliefBasis", "") == "listener_model_assessment" ? "model-assessed listener belief" : "listener belief";
+                    : beliefBasis == "listener_model_assessment" ? "model-assessed listener belief" : "listener belief";
                 wording += "; " + belief + " " + ReadInt(receipt, "credibility", 50) + "/100";
             }
             return wording + (legacy ? "; legacy evidence, claims unverified" : "; attributed NPC speech");
