@@ -84,6 +84,12 @@ namespace Reign.Core.Contracts.Court
             };
         }
 
+        public static bool MatchesCourtNormalizedTerms(IReadOnlyDictionary<string, string> authored,
+            IReadOnlyDictionary<string, string> normalized, IReadOnlyDictionary<string, string> resolverAliases)
+            => authored.All(p => normalized.TryGetValue(p.Key, out var value) && value == p.Value)
+                && normalized.All(p => authored.ContainsKey(p.Key)
+                    || (resolverAliases.TryGetValue(p.Key, out var alias) && alias == p.Value));
+
         public static bool BindsCourtTradeDuration(IReadOnlyDictionary<string, string> terms)
             => terms.Count == 1 && terms.TryGetValue("durationDays", out var duration)
                 && int.TryParse(duration, NumberStyles.None, CultureInfo.InvariantCulture, out int days)

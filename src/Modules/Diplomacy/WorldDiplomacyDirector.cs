@@ -1115,11 +1115,13 @@ namespace ReignBetaServer
             Dictionary<string, object> responderProfile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, responderHeroId, "profile.json"));
             string responderMbti = RelationshipsService.BuildCharacterMbtiPromptBlock(campaignId, responderHeroId, responderProfile,
                 CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, responderHeroId, "traits.json")));
-            List<string> counterCommands = DirectorIntentCommands.TryGetValue(mode,
-                    out HashSet<string> legalCommands)
-                ? legalCommands.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-                    .ToList()
-                : new List<string>();
+            bool courtReferral = !finalCounterDecision && ReadBool(world, "courtReferral", false)
+                && ReadString(world, "source", "") == "resident_ambassador_referral";
+            List<string> counterCommands = courtReferral
+                ? new List<string> { ReadString(candidate, "command", "") }
+                : DirectorIntentCommands.TryGetValue(mode, out HashSet<string> legalCommands)
+                    ? legalCommands.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList()
+                    : new List<string>();
             string prompt = role
                 + " Personality and strategic reality must govern the answer. Return JSON only. Never invent IDs or assets.\n\nRESPONDER:\n" + DirectorRulerPromptJson(responder)
                 + "\n\nRESPONDER MBTI:\n" + responderMbti
@@ -1139,7 +1141,9 @@ namespace ReignBetaServer
                     ReadString(proposer, "kingdomId", ""), mode))
                 + (finalCounterDecision ? "" : "\n\nA counteroffer is a complete executable replacement, never a patch. Its command must be one of: "
                     + Json.Serialize(counterCommands)
-                    + ". Include only the replacement command's own targetSettlementId and terms; omit assets, payments, treaties, and prisoners that are not part of the replacement.")
+                    + (courtReferral
+                        ? ". Keep the referred command, already named captive, and settlement target. Give the complete exact revised terms, including all unchanged material terms. For a Court settlement carried as a promise, keep the original promise text, visibility, and duration if you repeat them."
+                        : ". Include only the replacement command's own targetSettlementId and terms; omit assets, payments, treaties, and prisoners that are not part of the replacement."))
                 + "\n\nReturn {\"response\":\"accept|refuse" + (finalCounterDecision ? "" : "|counter")
                 + "\",\"command\":\"" + (finalCounterDecision
                     ? "empty"
