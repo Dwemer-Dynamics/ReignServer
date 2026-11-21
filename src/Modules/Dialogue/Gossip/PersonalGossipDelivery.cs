@@ -9,21 +9,6 @@ namespace ReignBetaServer
 {
     internal static partial class DialogueService
     {
-        private static void SchedulePersonalGossip(string campaign)
-        {
-            if (campaign.StartsWith("__gossip_test_", StringComparison.Ordinal) || !string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)
-                || Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") == "1" || !PersonalGossipWorkers.TryAdd(campaign, 0)) return;
-            // The marker is released exactly once: by the callback's finally after it runs, or by
-            // the scheduler's not-started release on busy/stopping rejection or pre-start
-            // cancellation. Pending rows, leases and generation fences are untouched; the next
-            // existing scheduling trigger re-admits the campaign.
-            OperationsService.TryEnqueuePriorityBackgroundWork("personal_gossip." + campaign, "normal", () =>
-            {
-                try { RunPersonalGossipWork(campaign, ComposePersonalGossip); }
-                finally { PersonalGossipWorkers.TryRemove(campaign, out _); }
-            }, reason => PersonalGossipWorkers.TryRemove(campaign, out _), out _);
-        }
-
         private static bool GossipSourcesActive(ReignDbConnection c, Dictionary<string, object> data)
         {
             if (ReadInt(data, "hop", 1) > 1 || ReadBool(data, "reply", false))
@@ -42,115 +27,124 @@ namespace ReignBetaServer
             return ReadString(data, "type", "") == "impression" || GossipQuoteSupported(ReadString(data, "sourceQuote", ""), text.ToString());
         }
 
-        private static void RunPersonalGossipWork(string campaign, Func<Dictionary<string, object>, bool, Dictionary<string, object>> compose)
+        private static Dictionary<string, object> SelectDuePersonalGossip(ReignDbConnection c, string generation, long now)
+            => DialogueStore.SelectPersonalGossipMessages4(c, GossipFields("now", now,
+                "timeline", WorldSimulationService.ActiveWorldHistoryTimeline(c), "generation", generation + ":%")).FirstOrDefault();
+
+        private static (string Outcome, bool MoreDue) FinishPersonalGossipTurn(ReignDbConnection c, string generation, string outcome)
+            => (outcome, SelectDuePersonalGossip(c, generation, DateTimeOffset.UtcNow.ToUnixTimeSeconds()) != null);
+
+        private static (string Outcome, bool MoreDue) ProcessPersonalGossipTurn(string campaign,
+            Func<Dictionary<string, object>, bool, Dictionary<string, object>> compose)
         {
+            if (!ReadBool(PersonalGossipSettings(), "enabled", true)) return ("disabled", false);
             // Provider waits hold no campaign/database lock. Both restore generations and the
             // persisted lease must still match before accepting a result into the loaded save.
-            for (int item = 0; item < 8 && ReadBool(PersonalGossipSettings(), "enabled", true); item++)
+            Dictionary<string, object> row, data;
+            string token, generation;
+            long processGeneration = Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration);
+            Program.CampaignDataGate.EnterReadLock();
+            try
             {
-                Dictionary<string, object> row = null, data = null;
-                string token = Guid.NewGuid().ToString("N"), generation = "";
-                long processGeneration = Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration);
-                Program.CampaignDataGate.EnterReadLock();
-                try
+                using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
-                    using (var c = ReignDatabase.OpenCampaignConnection(campaign))
+                    EnsurePersonalGossipSchema(c);
+                    EnsureMemoryPrecisionSchema(c);
+                    generation = ReadString(ReadMemoryPrecisionState(c), "restore_generation", "");
+                    token = generation + ":" + Guid.NewGuid().ToString("N");
+                    long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                    row = SelectDuePersonalGossip(c, generation, now);
+                    if (row == null) return ("idle", false);
+                    data = GossipJson(row);
+                    if (!GossipSourcesActive(c, data))
                     {
-                        EnsurePersonalGossipSchema(c);
-                        EnsureMemoryPrecisionSchema(c);
-                        generation = ReadString(ReadMemoryPrecisionState(c), "restore_generation", "");
-                        token = generation + ":" + token;
-                        long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                        row = DialogueStore.SelectPersonalGossipMessages4(c, GossipFields("now", now, "timeline", WorldSimulationService.ActiveWorldHistoryTimeline(c), "generation", generation + ":%")).FirstOrDefault();
-                        if (row == null) return;
-                        data = GossipJson(row);
-                        if (!GossipSourcesActive(c, data))
-                        {
-                            DialogueStore.UpdatePersonalGossipMessages(c, GossipFields("id", ReadString(row, "message_id", "")));
-                            continue;
-                        }
-                        if (ReadInt(row, "is_reply", 0) != 0)
-                        {
-                            var currentPresence = GossipSnapshot(c, ReadString(row, "timeline_id", "main"));
-                            var replyingPerson = ReadDictionaryList(currentPresence, "people")
-                                .FirstOrDefault(p => GossipSameId(GossipHeroId(p), ReadString(row, "speaker_id", "")));
-                            if (replyingPerson == null && !ReadBool(currentPresence, "rosterComplete", false)) return;
-                            if (!GossipCommunicationAvailable(replyingPerson))
-                            {
-                                CancelUnavailablePersonalGossip(c, row, data, "reply_speaker_unavailable", replyingPerson,
-                                    ReadDouble(GossipClock(c, ReadString(row, "timeline_id", "main")), "world_day", 0));
-                                continue;
-                            }
-                        }
-                        data["operatorAttempt"] = ReadInt(row, "attempts", 0) + 1;
-                        data["campaignId"] = campaign;
-                        data["messageId"] = ReadString(row, "message_id", "");
-                        data["currentDay"] = ReadDouble(GossipClock(c, ReadString(row, "timeline_id", "main")), "world_day", ReadDouble(row, "created_day", 0));
-                        if (ReadInt(row, "is_reply", 0) == 0 && ReadInt(data, "hop", 1) == 1)
-                        {
-                            string sourceQuote = ReadString(data, "sourceQuote", "");
-                            var sourceTurns = ReadStringList(data, "sourceTurnIds").Take(2)
-                                .SelectMany(id => DialogueStore.SelectConversationTurns37(c, GossipFields("id", id)))
-                                .ToList();
-                            BindPersonalGossipEncounterTurns(data, sourceTurns);
-                            var quoteSources = ReadString(data, "sourceOrigin", "") == "public_witness"
-                                ? ReadDictionaryList(data, "publicWitnessSources") : sourceTurns;
-                            var quotedSpeakers = quoteSources.Where(turn => GossipQuoteSupported(sourceQuote, ReadString(turn, "text", "")))
-                                .Select(turn => ReadString(turn, "speaker_id", "")).Distinct().ToList();
-                            data["sourceQuoteSpeakerId"] = quotedSpeakers.Count == 1 ? quotedSpeakers[0] : "";
-                        }
-                        if (ReadInt(row, "is_reply", 0) != 0) PreparePersonalGossipReply(c, campaign, row, data);
-                        DialogueStore.UpdatePersonalGossipMessages2(c, GossipFields("id", ReadString(row, "message_id", ""), "token", token, "until", now + 600));
+                        DialogueStore.UpdatePersonalGossipMessages(c, GossipFields("id", ReadString(row, "message_id", "")));
+                        return FinishPersonalGossipTurn(c, generation, "cancelled_source");
                     }
-                }
-                finally { Program.CampaignDataGate.ExitReadLock(); }
-                if (row == null || data == null) continue;
-                Dictionary<string, object> result;
-                try
-                {
-                    result = compose(data, ReadInt(row, "is_reply", 0) != 0);
-                    // Fixed post-result latency tests the causal clock boundary without
-                    // provider timing, injected prose, or an arbitrary operator sleep.
-                    int delaySeconds = PersonalGossipCompositionDelaySeconds(data);
-                    if (delaySeconds > 0) Thread.Sleep(delaySeconds * 1000);
-                }
-                catch (Exception ex) { result = GossipFields("error", DialogueService.LimitText(ex.Message, 500)); }
-                Program.CampaignDataGate.EnterReadLock();
-                try
-                {
-                    using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
-                    using (var c = ReignDatabase.OpenCampaignConnection(campaign))
+                    if (ReadInt(row, "is_reply", 0) != 0)
                     {
-                        EnsurePersonalGossipSchema(c);
-                        EnsureMemoryPrecisionSchema(c);
-                        if (processGeneration != Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration)
-                            || generation != ReadString(ReadMemoryPrecisionState(c), "restore_generation", "")) continue;
-                        var current = DialogueStore.SelectPersonalGossipMessages5(c, GossipFields("id", ReadString(row, "message_id", ""), "token", token)).FirstOrDefault();
-                        if (current == null || ReadString(current, "status", "") != "generating") continue;
-                        bool isReply = ReadInt(current, "is_reply", 0) != 0;
-                        bool accepted = GossipSourcesActive(c, data) && ValidatePersonalGossipComposition(c, data, result, isReply);
-                        if (!accepted)
+                        var currentPresence = GossipSnapshot(c, ReadString(row, "timeline_id", "main"));
+                        var replyingPerson = ReadDictionaryList(currentPresence, "people")
+                            .FirstOrDefault(p => GossipSameId(GossipHeroId(p), ReadString(row, "speaker_id", "")));
+                        if (replyingPerson == null && !ReadBool(currentPresence, "rosterComplete", false)) return ("deferred_roster", false);
+                        if (!GossipCommunicationAvailable(replyingPerson))
                         {
-                            data["lastFailure"] = ReadString(result, "error", "Composition failed source, privacy, length, or distortion validation.");
-                            DialogueStore.UpdatePersonalGossipMessages3(c, GossipFields("id", ReadString(current, "message_id", ""), "status", ReadInt(current, "attempts", 0) >= 3 ? "generation_failed" : "pending", "json", Json.Serialize(data)));
-                            continue;
+                            CancelUnavailablePersonalGossip(c, row, data, "reply_speaker_unavailable", replyingPerson,
+                                ReadDouble(GossipClock(c, ReadString(row, "timeline_id", "main")), "world_day", 0));
+                            return FinishPersonalGossipTurn(c, generation, "cancelled_unavailable");
                         }
-                        data["body"] = ReadString(result, "body", "").Trim();
-                        data["account"] = ReadString(result, "account", ReadInt(data, "hop", 1) > 1 ? "secondhand" : "firsthand");
-                        if (result.TryGetValue(GossipCompositionApprovalKey, out object approvalValue)
-                            && approvalValue is GossipCompositionApproval approval)
-                            data["compositionReview"] = approval.Evidence;
-                        result.Remove(GossipCompositionApprovalKey);
-                        data["reaction"] = result;
-                        // A provider result cannot date itself using the clock captured before
-                        // its request. Native must first observe this nonce, then capture time.
-                        data["readyNonce"] = Guid.NewGuid().ToString("N");
-                        DialogueStore.UpdatePersonalGossipMessages4(c, GossipFields("id", ReadString(current, "message_id", ""), "json", Json.Serialize(data)));
                     }
+                    data["operatorAttempt"] = ReadInt(row, "attempts", 0) + 1;
+                    data["campaignId"] = campaign;
+                    data["messageId"] = ReadString(row, "message_id", "");
+                    data["currentDay"] = ReadDouble(GossipClock(c, ReadString(row, "timeline_id", "main")), "world_day", ReadDouble(row, "created_day", 0));
+                    if (ReadInt(row, "is_reply", 0) == 0 && ReadInt(data, "hop", 1) == 1)
+                    {
+                        string sourceQuote = ReadString(data, "sourceQuote", "");
+                        var sourceTurns = ReadStringList(data, "sourceTurnIds").Take(2)
+                            .SelectMany(id => DialogueStore.SelectConversationTurns37(c, GossipFields("id", id)))
+                            .ToList();
+                        BindPersonalGossipEncounterTurns(data, sourceTurns);
+                        var quoteSources = ReadString(data, "sourceOrigin", "") == "public_witness"
+                            ? ReadDictionaryList(data, "publicWitnessSources") : sourceTurns;
+                        var quotedSpeakers = quoteSources.Where(turn => GossipQuoteSupported(sourceQuote, ReadString(turn, "text", "")))
+                            .Select(turn => ReadString(turn, "speaker_id", "")).Distinct().ToList();
+                        data["sourceQuoteSpeakerId"] = quotedSpeakers.Count == 1 ? quotedSpeakers[0] : "";
+                    }
+                    if (ReadInt(row, "is_reply", 0) != 0) PreparePersonalGossipReply(c, campaign, row, data);
+                    DialogueStore.UpdatePersonalGossipMessages2(c, GossipFields("id", ReadString(row, "message_id", ""), "token", token, "until", now + 600));
                 }
-                finally { Program.CampaignDataGate.ExitReadLock(); }
             }
+            finally { Program.CampaignDataGate.ExitReadLock(); }
+            Dictionary<string, object> result;
+            try
+            {
+                result = compose(data, ReadInt(row, "is_reply", 0) != 0);
+                // Fixed post-result latency tests the causal clock boundary without
+                // provider timing, injected prose, or an arbitrary operator sleep.
+                int delaySeconds = PersonalGossipCompositionDelaySeconds(data);
+                if (delaySeconds > 0) Thread.Sleep(delaySeconds * 1000);
+            }
+            catch (Exception ex) { result = GossipFields("error", DialogueService.LimitText(ex.Message, 500)); }
+            Program.CampaignDataGate.EnterReadLock();
+            try
+            {
+                using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
+                {
+                    EnsurePersonalGossipSchema(c);
+                    EnsureMemoryPrecisionSchema(c);
+                    string activeGeneration = ReadString(ReadMemoryPrecisionState(c), "restore_generation", "");
+                    if (processGeneration != Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration)
+                        || generation != activeGeneration)
+                        return FinishPersonalGossipTurn(c, activeGeneration, "stale_generation");
+                    var current = DialogueStore.SelectPersonalGossipMessages5(c, GossipFields("id", ReadString(row, "message_id", ""), "token", token)).FirstOrDefault();
+                    if (current == null || ReadString(current, "status", "") != "generating") return ("stale_lease", false);
+                    bool isReply = ReadInt(current, "is_reply", 0) != 0;
+                    bool accepted = GossipSourcesActive(c, data) && ValidatePersonalGossipComposition(c, data, result, isReply);
+                    if (!accepted)
+                    {
+                        data["lastFailure"] = ReadString(result, "error", "Composition failed source, privacy, length, or distortion validation.");
+                        bool exhausted = ReadInt(current, "attempts", 0) >= 3;
+                        DialogueStore.UpdatePersonalGossipMessages3(c, GossipFields("id", ReadString(current, "message_id", ""), "status", exhausted ? "generation_failed" : "pending", "json", Json.Serialize(data)));
+                        return FinishPersonalGossipTurn(c, generation, exhausted ? "generation_failed" : "retry_pending");
+                    }
+                    data["body"] = ReadString(result, "body", "").Trim();
+                    data["account"] = ReadString(result, "account", ReadInt(data, "hop", 1) > 1 ? "secondhand" : "firsthand");
+                    if (result.TryGetValue(GossipCompositionApprovalKey, out object approvalValue)
+                        && approvalValue is GossipCompositionApproval approval)
+                        data["compositionReview"] = approval.Evidence;
+                    result.Remove(GossipCompositionApprovalKey);
+                    data["reaction"] = result;
+                    // A provider result cannot date itself using the clock captured before
+                    // its request. Native must first observe this nonce, then capture time.
+                    data["readyNonce"] = Guid.NewGuid().ToString("N");
+                    DialogueStore.UpdatePersonalGossipMessages4(c, GossipFields("id", ReadString(current, "message_id", ""), "json", Json.Serialize(data)));
+                    return FinishPersonalGossipTurn(c, generation, "awaiting_native_clock");
+                }
+            }
+            finally { Program.CampaignDataGate.ExitReadLock(); }
         }
 
         private static int PersonalGossipCompositionDelaySeconds(Dictionary<string, object> data)

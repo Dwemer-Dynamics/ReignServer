@@ -12,7 +12,6 @@ namespace ReignBetaServer
     internal static partial class DialogueService
     {
         private static readonly ConcurrentDictionary<string, object> PersonalGossipLocks = new(StringComparer.OrdinalIgnoreCase);
-        private static readonly ConcurrentDictionary<string, byte> PersonalGossipWorkers = new(StringComparer.OrdinalIgnoreCase);
         private static readonly string PersonalGossipClockBoot = Guid.NewGuid().ToString("N");
         private static object GossipGate(string campaign) => PersonalGossipLocks.GetOrAdd(campaign, _ => new object());
 

@@ -284,6 +284,7 @@ namespace ReignBetaServer
             check("public_source_does_not_gain_an_automatic_confidence_owner", GossipResolveConfidenceOwners(publicSource,
                 "confidant_id", "current_heir_id", Array.Empty<string>(), entrustedPlan).Count == 0, null);
             RunPersonalGossipCompositionReviewTests(check);
+            RunPersonalGossipSchedulingTests(check);
             try { RunPublicWitnessGossipSelfTests(check); RunPersonalGossipPersistenceTests(check, spiteful); }
             catch (Exception ex) { check("persistence_fixture", false, ex.ToString()); }
             return results;
