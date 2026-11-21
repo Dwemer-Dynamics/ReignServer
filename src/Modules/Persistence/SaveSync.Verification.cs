@@ -256,6 +256,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> oldStoredPoint = SaveSyncPoint(ReadSaveSyncLedger(campaignId), oldPoint);
                 string oldStoredRoot = SaveSyncSnapshotRoot(campaignId, oldStoredPoint);
                 add("register_old_save_point", ReadBool(oldRegistered, "ok", false) && Directory.Exists(Path.Combine(oldStoredRoot, "campaign")), "Old native save point receives an immutable complete snapshot.");
+                VerifySaveSyncCheckpointSlot(campaignId, siblingId, oldStoredPoint, add);
                 add("snapshot_excludes_rebuildable_portrait_roster",
                     !File.Exists(Path.Combine(oldStoredRoot, "campaign", "portrait_roster.json")),
                     "Save Sync excludes the rebuildable portrait roster from every native-save snapshot.");
@@ -1131,6 +1132,69 @@ namespace ReignBetaServer
             ledger["updatedUtc"] = DateTime.UtcNow.ToString("o");
             WriteSaveSyncLedger(campaignId, ledger);
             MarkCampaignSaveSyncLifecycle(campaignId, "registered", true);
+        }
+
+        private static void VerifySaveSyncCheckpointSlot(string campaignId, string siblingId,
+            Dictionary<string, object> oldStoredPoint, Action<string, bool, string> add)
+        {
+            const string slot = "ReignTest_Inventory_Current";
+            Dictionary<string, object> original = ReadSaveSyncLedger(campaignId);
+            var archivedPoint = new Dictionary<string, object>(oldStoredPoint)
+            {
+                ["nativeSaveName"] = " reigntest_inventory_current.SAV ",
+                ["capturedUtc"] = "2025-01-01T00:00:00Z",
+                ["status"] = "ready",
+                ["saveFinalizedUtc"] = "2025-01-01T00:00:01Z"
+            };
+            var points = Enumerable.Range(0, 50).Select(index => new Dictionary<string, object>
+            {
+                ["savePointId"] = "inventory_" + index.ToString(CultureInfo.InvariantCulture),
+                ["nativeSaveName"] = "Inventory " + index.ToString(CultureInfo.InvariantCulture),
+                ["capturedUtc"] = "2026-01-01T00:00:00Z"
+            }).ToList();
+            points.Add(archivedPoint);
+
+            Dictionary<string, object> Lookup(string id, string name) =>
+                SaveSyncStatusRequestApi(new Dictionary<string, string>
+                {
+                    ["campaignId"] = id, ["checkpointSlot"] = name
+                });
+
+            try
+            {
+                var expanded = new Dictionary<string, object>(original) { ["points"] = points };
+                WriteSaveSyncLedger(campaignId, expanded);
+                var summary = SaveSyncStatusRequestApi(new Dictionary<string, string> { ["campaignId"] = campaignId });
+                var projected = ReadDictionaryList(ReadDictionary(summary, "saveSync"), "points");
+                var owned = Lookup(campaignId, slot);
+                var ownedPoint = ReadDictionary(owned, "point");
+                add("guarded_checkpoint_slot_reads_beyond_status_cap",
+                    projected.Count == 50 && !projected.Any(point => MatchesCheckpointSlot(point, slot))
+                    && ReadInt(owned, "registrationCount", -1) == 1
+                    && ReadInt(owned, "uniqueStateCount", -1) == 1
+                    && !ReadBool(owned, "foreignRegistration", true) && ownedPoint != null
+                    && ReadString(ownedPoint, "savePointId", "") == ReadString(oldStoredPoint, "savePointId", "")
+                    && ReadString(ownedPoint, "status", "") == "ready"
+                    && ReadBool(ownedPoint, "snapshotAvailable", false),
+                    "An exact lookup returns the available finalized checkpoint even when the ordinary status summary omits it.");
+
+                var foreign = Lookup(siblingId, slot);
+                var vacant = Lookup(siblingId, "ReignTest_Vacant_Current");
+                add("guarded_checkpoint_slot_distinguishes_hidden_foreign_and_vacant",
+                    ReadBool(foreign, "foreignRegistration", false)
+                    && ReadInt(foreign, "registrationCount", -1) == 0 && !foreign.ContainsKey("point")
+                    && !ReadBool(vacant, "foreignRegistration", true)
+                    && ReadInt(vacant, "registrationCount", -1) == 0 && !vacant.ContainsKey("point"),
+                    "A case-insensitive foreign native slot remains occupied beyond the public summary cap, while an unrelated slot is vacant.");
+
+                points.Add(new Dictionary<string, object>(archivedPoint) { ["savePointId"] = "duplicate_inventory" });
+                WriteSaveSyncLedger(campaignId, expanded);
+                var ambiguous = Lookup(campaignId, slot);
+                add("guarded_checkpoint_slot_exposes_duplicate_occupancy",
+                    ReadInt(ambiguous, "registrationCount", -1) == 2 && !ambiguous.ContainsKey("point"),
+                    "An ambiguous slot exposes its occupancy count and cannot stand in for one exact owned point.");
+            }
+            finally { WriteSaveSyncLedger(campaignId, original); }
         }
 
         private static void PrepareSaveSyncTestCampaign(string campaignId, string marker)
