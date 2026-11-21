@@ -155,10 +155,13 @@ namespace ReignBetaServer
 
         // The caller first verifies that the active restore context names this save.
         // Read the exact selected queue file, including raw load-ready snapshots.
-        internal static Dictionary<string, object> ReadSaveSyncActionQueueRow(string campaignId, string savePointId, string actionId)
+        internal static Dictionary<string, object> ReadSaveSyncActionQueueRow(string campaignId, string savePointId,
+            string sourceTimeline, long sourceSequence, string sourceHead, string actionId)
         {
             var point = SaveSyncPoint(ReadSaveSyncLedger(campaignId), savePointId);
-            if (point == null) return null;
+            if (point == null || ReadString(point, "timelineId", "") != sourceTimeline
+                || ReadLong(point, "worldHistorySequence", 0) != sourceSequence
+                || ReadString(point, "worldHistoryHeadEventId", "") != sourceHead) return null;
             SaveSyncStorageGate.EnterReadLock();
             try
             {

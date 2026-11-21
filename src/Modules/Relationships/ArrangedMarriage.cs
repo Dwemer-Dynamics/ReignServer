@@ -193,7 +193,7 @@ namespace ReignBetaServer
             return effects.Any(effect => ReadString(effect, "type", "") == "marriage_completed");
         }
 
-        internal sealed record DiplomaticMarriageReportScope(string Timeline, string Generation, string ParentTimeline,
+        internal sealed record DiplomaticMarriageReportScope(string Timeline, string Generation, HashSet<string> AncestorTimelines,
             Dictionary<string, object> SavedRow);
 
         // Called while holding timeline ownership but before the action queue's FileLock.
@@ -214,10 +214,29 @@ namespace ReignBetaServer
             var active = WorldSimulationStore.SelectWorldHistoryTimelines(c, TestDict("id", timeline)).FirstOrDefault();
             string parent = ReadString(active, "parent_timeline_id", "");
             var context = parent.Length == 0 ? null : VerifiedDiplomaticMarriageRestoreContext(c, timeline);
-            var saved = context != null && ReadString(context, "head_event_id", "") == ReadString(active, "fork_event_id", "")
-                ? PersistenceService.ReadSaveSyncActionQueueRow(campaign, ReadString(context, "save_point_id", ""), id)
+            string head = ReadString(context, "head_event_id", "");
+            var saved = context != null && head == ReadString(active, "fork_event_id", "")
+                ? PersistenceService.ReadSaveSyncActionQueueRow(campaign, ReadString(context, "save_point_id", ""), parent,
+                    ReadLong(context, "head_sequence", 0), head, id)
                 : null;
-            return new DiplomaticMarriageReportScope(timeline, generation, parent, saved);
+            HashSet<string> ancestors = null;
+            if (saved != null)
+            {
+                ancestors = new HashSet<string>(StringComparer.Ordinal);
+                while (parent.Length > 0)
+                {
+                    if (parent == timeline || ancestors.Contains(parent))
+                    {
+                        ancestors.Clear();
+                        break;
+                    }
+                    var ancestor = WorldSimulationStore.SelectWorldHistoryTimelines(c, TestDict("id", parent)).FirstOrDefault();
+                    if (ancestor == null) break;
+                    ancestors.Add(parent);
+                    parent = ReadString(ancestor, "parent_timeline_id", "");
+                }
+            }
+            return new DiplomaticMarriageReportScope(timeline, generation, ancestors, saved);
         }
 
         private static Dictionary<string, object> VerifiedDiplomaticMarriageRestoreContext(ReignDbConnection c, string timeline)
@@ -258,7 +277,7 @@ namespace ReignBetaServer
             // cannot establish new settlement authority.
             if (origin.Length == 0 && native) return null;
             if (origin.Length > 0 && origin != scope.Timeline
-                && (origin != scope.ParentTimeline || scope.SavedRow == null
+                && (scope.SavedRow == null || scope.AncestorTimelines?.Contains(origin) != true
                     || ActionPipelineService.IsTerminalActionReportStatus(ReadString(scope.SavedRow, "status", ""))
                     || Json.Serialize(ReadDictionary(scope.SavedRow, "record")) != Json.Serialize(record))) return null;
             return TestDict("timelineId", scope.Timeline, "sharedActivityGeneration", scope.Generation,
@@ -554,6 +573,7 @@ namespace ReignBetaServer
                             TestDict("worldDay",21d,"timelineId","diplomatic_fixture",
                                 "sharedActivityGeneration",ReadString(diplomaticScope,"sharedActivityGeneration","")))));
                 RunNativeDiplomaticMarriageReportSelfTests(c, campaign, paidQuote, Check);
+                Check("divorce_waits_for_timeline_before_relationship_ownership", DivorceWaitsForTimelineBeforeRelationshipOwnership(c, campaign));
                 Check("cold_save_sync_state_read_does_not_wait_for_file_lock", ColdSaveSyncStateReadAvoidsFileLock(campaign));
                 // An older snapshot must be inspected as it is, with no stale
                 // process readiness surviving its restored table shape.
@@ -619,7 +639,7 @@ namespace ReignBetaServer
             const string pendingId = "native_marriage_pending_effect";
             const string unprovenId = "native_marriage_pending_older_source";
             var pendingEffect = Row(pendingId, "completed");
-            var reportScope = new DiplomaticMarriageReportScope(timeline, generation, "", null);
+            var reportScope = new DiplomaticMarriageReportScope(timeline, generation, null, null);
             pendingEffect["diplomaticMarriageCompletion"] =
                 DiplomaticMarriageCompletion(pendingId, "completed", record, NativeReport(pendingId, second, fee), reportScope);
             var unproven = Row(unprovenId, "completed");
@@ -778,38 +798,85 @@ namespace ReignBetaServer
 
             // Exercise the real timeline fork and exact selected queue file lookup.
             const string inheritedId = "native_marriage_inherited";
-            const string pointId = "c4_origin_snapshot";
-            var point = TestDict("savePointId", pointId, "timelineId", timeline);
-            string snapshot = PersistenceService.SaveSyncSnapshotRoot(campaign, point);
-            try
+            var points = new List<Dictionary<string, object>>();
+            Dictionary<string, object> ForkFromQueuedSnapshot(string sourceTimeline, string pointId, string head, long sequence)
             {
-                PersistenceService.WriteSaveSyncLedger(campaign, TestDict("campaignId", campaign, "points", new[] { point }));
+                var point = TestDict("savePointId", pointId, "timelineId", sourceTimeline,
+                    "worldHistorySequence", sequence, "worldHistoryHeadEventId", head);
+                points.Add(point);
+                string snapshot = PersistenceService.SaveSyncSnapshotRoot(campaign, point);
+                PersistenceService.WriteSaveSyncLedger(campaign, TestDict("campaignId", campaign, "points", points));
                 CampaignFileService.WriteJsonObject(Path.Combine(snapshot, "manifest.json"),
                     TestDict("format", "bannerlord-reign-save-sync-snapshot", "campaignId", campaign, "integrityDeferred", true));
                 CampaignFileService.WriteJsonObject(Path.Combine(snapshot, "campaign", "actions", "action-queue.json"),
                     new[] { Row(inheritedId, "queued") });
                 WorldSimulationStore.UpdateWorldHistoryTimelines2(connection,
-                    TestDict("sequence", 3L, "event", "c4_later", "now", DateTime.UtcNow.ToString("o"), "timeline", timeline));
+                    TestDict("sequence", sequence + 1, "event", "c4_later_" + pointId, "now", DateTime.UtcNow.ToString("o"), "timeline", sourceTimeline));
                 DialogueStore.UpsertMemoryRestoredSourceContext(connection, TestDict("generation", restoredGeneration,
-                    "timeline", timeline, "point", pointId, "day", 25d, "sequence", 2L,
-                    "head", "c4_fork_head", "source", generation, "session", "c4_snapshot_load"));
-                var child = WorldSimulationService.WorldHistoryOpenTimelineApi(TestDict("campaignId", campaign, "timelineId", timeline,
-                    "savedSequence", 2L, "savedHeadEventId", "c4_fork_head", "currentWorldDay", 25d));
+                    "timeline", sourceTimeline, "point", pointId, "day", 25d, "sequence", sequence,
+                    "head", head, "source", generation, "session", "c4_load_" + pointId));
+                return WorldSimulationService.WorldHistoryOpenTimelineApi(TestDict("campaignId", campaign, "timelineId", sourceTimeline,
+                    "savedSequence", sequence, "savedHeadEventId", head, "currentWorldDay", 25d));
+            }
+            try
+            {
+                var child = ForkFromQueuedSnapshot(timeline, "c4_origin_snapshot", "c4_fork_head", 2L);
                 var inherited = NativeReport(inheritedId, second, fee);
                 inherited["timelineId"] = ReadString(child, "timelineId", "");
                 inherited["sharedActivityGeneration"] = restoredGeneration;
                 using var childOwnership = WorldSimulationService.EnterWorldHistoryTimelineScope(campaign);
                 var proved = CaptureDiplomaticMarriageReportScope(campaign, inheritedId, inherited, native: true);
                 var unrelated = new Dictionary<string, object>(record) { [DiplomaticMarriageOriginTimelineField] = "sibling" };
-                var changed = new Dictionary<string, object>(record) { ["termsJson"] = "{}" };
+                var unrelatedRow = Row(inheritedId, "queued");
+                unrelatedRow["record"] = unrelated;
+                var changed = new Dictionary<string, object>(record) { ["reason"] = "another proposal" };
                 check("diplomatic_fork_needs_exact_saved_origin_action",
                     ReadBool(child, "branched", false)
                     && DiplomaticMarriageCompletion(inheritedId, "completed", record, inherited, proved) != null
                     && DiplomaticMarriageCompletion(inheritedId, "completed", record, inherited, proved with { SavedRow = null }) == null
-                    && DiplomaticMarriageCompletion(inheritedId, "completed", unrelated, inherited, proved) == null
+                    && DiplomaticMarriageCompletion(inheritedId, "completed", unrelated, inherited, proved with { SavedRow = unrelatedRow }) == null
                     && DiplomaticMarriageCompletion(inheritedId, "completed", changed, inherited, proved) == null);
+                var grandchild = ForkFromQueuedSnapshot(ReadString(child, "timelineId", ""), "c4_child_snapshot", "c4_child_head", 4L);
+                inherited["timelineId"] = ReadString(grandchild, "timelineId", "");
+                var continued = CaptureDiplomaticMarriageReportScope(campaign, inheritedId, inherited, native: true);
+                check("diplomatic_verified_grandchild_preserves_queued_origin",
+                    ReadBool(grandchild, "branched", false)
+                    && DiplomaticMarriageCompletion(inheritedId, "completed", record, inherited, continued) != null
+                    && DiplomaticMarriageCompletion(inheritedId, "completed", unrelated, inherited, continued) == null);
             }
             finally { PersistenceService.TryDeleteDirectory(PersistenceService.SaveSyncCampaignRoot(campaign)); }
+        }
+
+        private static bool DivorceWaitsForTimelineBeforeRelationshipOwnership(ReignDbConnection connection, string campaign)
+        {
+            const string timeline = "c4_divorce_fixture";
+            const string actor = "c4_divorce_actor", target = "c4_divorce_target";
+            ReputationService.EnsureSocialReputationSchema(connection);
+            string id = QueueDirectorAction(connection, "divorce", 30d, actor, target,
+                TestDict("source", "mbti_relationship_lifecycle", "timelineId", timeline));
+            var report = TestDict("campaignId", campaign, "directorActionId", id, "status", "completed", "timelineId", timeline);
+            using var waiting = new ManualResetEventSlim();
+            Task<Dictionary<string, object>> worker;
+            bool relationshipAvailable = false;
+            using (WorldSimulationService.EnterWorldHistoryTimelineScope(campaign))
+            {
+                worker = Task.Factory.StartNew(() =>
+                {
+                    PersistenceService.CampaignWorkLockWaitObserverForTests = _ => waiting.Set();
+                    try { return RelationshipDirectorReportActionApi(report); }
+                    finally { PersistenceService.CampaignWorkLockWaitObserverForTests = null; }
+                }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+                var relationshipLock = CampaignRelationshipWriteLock(campaign);
+                if (waiting.Wait(TimeSpan.FromSeconds(5)) && Monitor.TryEnter(relationshipLock))
+                {
+                    Monitor.Exit(relationshipLock);
+                    relationshipAvailable = true;
+                }
+            }
+            if (!worker.Wait(TimeSpan.FromSeconds(20))) return false;
+            return relationshipAvailable && ReadBool(worker.Result, "ok", false)
+                && ReadBool(RelationshipDirectorReportActionApi(report), "idempotent", false)
+                && WorldSimulationStore.SelectWorldHistoryEvents4(connection, TestDict("id", "divorce_" + id, "timeline", timeline)).Count == 1;
         }
 
         private static bool MarriageTimelineActivationWaits(string campaign, string nextTimeline, bool ingest, Action<Action> complete)

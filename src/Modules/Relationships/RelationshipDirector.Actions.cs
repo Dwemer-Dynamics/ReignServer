@@ -408,8 +408,12 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> RelationshipDirectorReportActionApi(Dictionary<string, object> payload)
         {
             string campaignId=ReadString(payload,"campaignId","default"),id=ReadFirstString(payload,"directorActionId","director_action_id"),status=ReadString(payload,"status","completed");
+            bool nativeTarget = IsRelationshipNativeTargetId(id);
+            // A completed divorce can ingest world history under relationship ownership.
+            using var timelineScope = status == "completed" && !nativeTarget
+                ? WorldSimulationService.EnterWorldHistoryTimelineScope(campaignId) : null;
             using var ownership = PersistenceService.EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaignId));
-            if (IsRelationshipNativeTargetId(id))
+            if (nativeTarget)
             {
                 using (ReignDbConnection targetConnection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
