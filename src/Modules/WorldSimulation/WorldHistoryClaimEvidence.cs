@@ -27,9 +27,6 @@ namespace ReignBetaServer
             @"(?:\bor\s+so\s+|[,;:—–]\s*)(?!I\b|we\b)(?:he|she|they|you|(?-i:\p{Lu}[\p{L}'’-]+)"
             + @"|(?:the|my|our|your|his|her|their)\s+[\p{L}'’-]+)\s+(?:said|says?|claimed|claims?|wrote)\b|\baccording\s+to\b", ClaimOptions);
 
-        internal static bool StartsLinkedHistoryRetraction(string tail) => Regex.IsMatch(tail,
-            @"\A\s*[.!;]\s*(?:what I (?:just )?said is false|I know (?:this|that) (?:account|claim) is false|I admit (?:that )?I lied)(?=\s*(?:[.!;]|$))", ClaimOptions);
-
         internal static List<Match> HistoryQuotationAndNarration(string source) =>
             Regex.Matches(source, @"\*[^*]*(?:\*|\z)|[""“][^""”]*(?:[""”]|\z)|(?<![\p{L}\p{N}])['‘](?=\S).*?(?:['’](?![\p{L}\p{N}])|\z)",
                 RegexOptions.Singleline | RegexOptions.CultureInvariant).Cast<Match>().ToList();
@@ -70,7 +67,7 @@ namespace ReignBetaServer
                 if (boundary.Success)
                 {
                     string tail = quote.Substring(boundary.Index);
-                    if (boundary.Groups["clause"].Success && !SeparateHistoryProposition.IsMatch(tail) && !StartsLinkedHistoryRetraction(tail)) continue;
+                    if (boundary.Groups["clause"].Success && !SeparateHistoryProposition.IsMatch(tail) && !DialogueService.IsCompleteHistoryRetraction(tail)) continue;
                     quote = quote.Substring(0, boundary.Index).TrimEnd();
                 }
                 var route = ClassifyWorldHistoryClaim(quote);

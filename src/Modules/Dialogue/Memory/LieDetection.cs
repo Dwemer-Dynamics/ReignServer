@@ -244,7 +244,7 @@ namespace ReignBetaServer
             if (spans.Count > 0)
             {
                 int end = ReadInt(spans[0], "start", 0) + ReadInt(spans[0], "length", 0);
-                if (spans.Count != 1 || !WorldSimulationService.StartsLinkedHistoryRetraction(claim.Substring(end))) return null;
+                if (spans.Count != 1 || !IsCompleteHistoryRetraction(claim.Substring(end))) return null;
             }
             else if (WorldSimulationService.MentionsFirstPersonDeed(claim))
             {
@@ -317,31 +317,38 @@ namespace ReignBetaServer
             + @"(?:(?:trying|attempting|intending|intended|meant)\s+to\s+)?(?:lie|lied|lying|deceive|deceived|deceiving|mislead|misled|misleading)"
             + @"(?:\s+(?:to\s+)?(?:you|him|her|them|everyone|the\s+(?:court|king|queen|lord|lady)))?)"
             + @"(?:\s+about\s+(?:it|this|that|(?:the\s+)?(?:[\p{L}\d]+\s+)?(?:prisoners?|captives?)"
-            + @"(?:\s+(?:he|she|they)\s+(?:rescued|freed|released))?))?\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            + @"(?:\s+(?:he|she|they)\s+(?:rescued|freed|released))?)|\s+to\s+test\s+whether\s+you\s+(?:accept|believe)\s+(?:it|me|us))?\z",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         private const string HistoryProperName = @"(?-i:\p{Lu}[\p{L}'’-]*(?:\s+\p{Lu}[\p{L}'’-]*){0,3})";
         private static readonly Regex AnnouncedPartyPosition = new Regex(@"\A" + HistoryProperName + @"\s+is\s+(?:inside|at|in)\s+" + HistoryProperName
             + @"(?:\s+with\s+(?:exactly\s+)?(?:[0-9]{1,8}|(?:(?:" + DialogueNumericWords + @"|and)[ -]+){0,5}(?:" + DialogueNumericWords
             + @"))\s+(?:troops|men|soldiers))?\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
+        internal static bool IsCompleteHistoryRetraction(string tail)
+        {
+            Match retraction = Regex.Match(tail,
+                @"\A\s*[.!;]+\s*(?:what I (?:just )?said is false|I know (?:this|that) (?:account|claim) is false|I admit (?:that )?I lied)"
+                + @"\s*(?<punctuation>[.!?;]*)(?<rest>[\s\S]*)\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            if (!retraction.Success || retraction.Groups["punctuation"].Value.Contains('?')) return false;
+            string rest = retraction.Groups["rest"].Value.Trim();
+            return rest.Length == 0 || retraction.Groups["punctuation"].Length > 0 && HasDirectSpokenAdmission(rest);
+        }
+
         private static bool HasDirectSpokenAdmission(string spoken)
         {
-            foreach (Match sentence in Regex.Matches(spoken, @"[^.!?\r\n]+[.!?]*"))
+            if (spoken.Contains('?') || WorldSimulationService.HasReportedHistoryTag(spoken)) return false;
+            string words = spoken.Trim().TrimEnd('.', '!').TrimEnd();
+            // The direct intent announcement and the following position claim must each stand on their own.
+            int colon = words.IndexOf(':');
+            if (colon >= 0)
             {
-                if (sentence.Value.Contains('?') || WorldSimulationService.HasReportedHistoryTag(sentence.Value)) continue;
-                string words = sentence.Value.Trim().TrimEnd('.', '!').TrimEnd();
-                // The direct intent announcement and the following position claim must each stand on their own.
-                int colon = words.IndexOf(':');
-                if (colon >= 0)
-                {
-                    if (!AnnouncedPartyPosition.IsMatch(words.Substring(colon + 1).Trim())) continue;
-                    words = words.Substring(0, colon).TrimEnd();
-                    if (!Regex.IsMatch(words, @"\b(?:lie\s+to|deceive|mislead)\s+you\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)) continue;
-                }
-                Match admission = StandaloneHistoryAdmission.Match(words);
-                if (admission.Success && ContainsExplicitDeceptionAdmission(ActionPipelineService.NormalizeLookup(admission.Groups["cue"].Value))) return true;
+                if (!AnnouncedPartyPosition.IsMatch(words.Substring(colon + 1).Trim())) return false;
+                words = words.Substring(0, colon).TrimEnd();
+                if (!Regex.IsMatch(words, @"\b(?:lie\s+to|deceive|mislead)\s+you\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)) return false;
             }
-            return false;
+            Match admission = StandaloneHistoryAdmission.Match(words);
+            return admission.Success && ContainsExplicitDeceptionAdmission(ActionPipelineService.NormalizeLookup(admission.Groups["cue"].Value));
         }
 
         private static Dictionary<string, object> VerifyNativeCurrentLocationClaim(
@@ -983,6 +990,10 @@ namespace ReignBetaServer
                 "contradicted", "detected_firsthand", "contradicted", expectedBasis: "firsthand");
             Check("direct_retraction_after_semicolon", "I rescued five prisoners; what I just said is false.", 101, "lord_a",
                 "contradicted", "detected_firsthand", "contradicted", expectedBasis: "firsthand");
+            Check("questioned_retraction_bang_first", "I rescued five prisoners. What I just said is false!?", 101, "lord_a", partial, uncertain, unknown);
+            Check("questioned_retraction_question_first", "I rescued five prisoners. What I just said is false?!", 101, "lord_a", partial, uncertain, unknown);
+            Check("reported_retraction_tail", "I rescued five prisoners; what I just said is false; but he said that, not me!", 101, "lord_a", "", uncertain, unknown);
+            Check("disowned_admission_sentence", "I deliberately lied about the prisoners she rescued. Those were his words, not mine.", 101, "lord_a", "", uncertain, unknown);
             Check("emphatic_question_career_cap", "I rescued exactly two prisoners in my entire career?!", 101, "lord_a", "", uncertain, unknown);
             Check("postfixed_reported_career_cap", "I rescued exactly two prisoners in my entire career; or so he said!", 101, "lord_a", "", uncertain, unknown);
             Check("conjoined_reported_career_cap", "I rescued exactly two prisoners in my entire career, but he said that, not me!", 101, "lord_a", "", uncertain, unknown);
