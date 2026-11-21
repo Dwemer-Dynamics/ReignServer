@@ -845,6 +845,12 @@ namespace ReignBetaServer
                 && arcText.Contains("An exact original record.") && !arcText.Contains("Prior short selection.")
                 && ReadStringList(arc, "originalSourceRecords").Contains(omittedArcSource)
                 && Json.Serialize(Frame(arcText)).Length <= 1800);
+            var disabledArcSettings = new Dictionary<string, object>(settings) { ["useMemoryLlmForConsolidation"] = false };
+            var disabledLocalArc = DialogueService.BuildMiddleTermSummary(disabledArcSettings, "npc", arcScope, arcScenes,
+                responder: Respond, publicationText: Frame);
+            Check("disabled_generation_preserves_bounded_local_arc",
+                calls == beforeArc && ReadString(disabledLocalArc, "summary", "") == arcText
+                && ReadString(disabledLocalArc, "compactionStatus", "") == "partial");
             var oversizedArcScenes = Enumerable.Range(1, 4).Select(index =>
                 TestDict("summary_id", "scene_" + index, "ts", (long)index, "summary", "Prior short selection.",
                     "payload_json", Json.Serialize(TestDict("method", "source_bound_selection",
@@ -855,6 +861,11 @@ namespace ReignBetaServer
                 calls == beforeArc && ReadString(noArc, "summary", "") == ""
                 && ReadString(noArc, "compactionStatus", "") == "incomplete"
                 && ReadString(ReadDictionary(noArc, "compactionDiagnostic"), "reason", "") == "expanded_local_arc_has_no_fitting_records");
+            var disabledNoArc = DialogueService.BuildMiddleTermSummary(disabledArcSettings, "npc", arcScope, oversizedArcScenes,
+                responder: Respond, publicationText: Frame);
+            Check("disabled_generation_leaves_arc_when_no_complete_record_fits",
+                calls == beforeArc && ReadString(disabledNoArc, "summary", "") == ""
+                && ReadString(disabledNoArc, "compactionStatus", "") == "incomplete");
             arcScenes[0]["summary"] = new string('b', 4000);
             arcScenes[0]["payload_json"] = Json.Serialize(TestDict("method", "source_bound_selection",
                 "originalSourceRecords", new[] { "An exact original record.", new string('a', 4000) }));

@@ -1340,7 +1340,6 @@ namespace ReignBetaServer
             var complete = DialogueService.AcceptMemorySummarySelection(TestDict("sourceIndices", Enumerable.Range(1, sourceText.Count).ToArray()),
                 rows, sourceText, topics, maxChars, localSelection, publicationText);
             if (complete != null) return DialogueService.MemoryCompactionOutcome(complete, "complete_sources_fit_locally");
-            if (!useLlm) return DialogueService.MemoryCompactionOutcome(retained, "generation_disabled");
             if ((groupKey ?? "").StartsWith("arc:", StringComparison.OrdinalIgnoreCase))
             {
                 // Selection archives can expand beyond the budgets that a
@@ -1369,6 +1368,7 @@ namespace ReignBetaServer
                     return MemoryCompactionOutcome(local, "expanded_arc_sources_previously_fit_locally");
                 }
             }
+            if (!useLlm) return DialogueService.MemoryCompactionOutcome(retained, "generation_disabled");
             // A stricter publication budget must not turn an existing local-only
             // compaction into a new provider request.
             if (ReadInt(localSelection, "selectedCharactersWithFraming", int.MaxValue) <= maxChars)
