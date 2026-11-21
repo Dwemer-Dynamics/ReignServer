@@ -3303,6 +3303,49 @@ namespace ReignBetaServer
                         && ReadBool(settledStatusOnly, "ordinaryLegacyDispatchObserved", false)
                         && ReadInt(afterLegacyTerminal, "count", -1) == 0,
                         "A delayed queued report preserves status-only legacy dispatch evidence without assigning a time, and a late native terminal report stays authoritative.", null);
+
+                    const string aliasSiblingId = "ordinary_alias_healthy_sibling";
+                    const string wrongActionAliasId = "ordinary_wrong_action_alias";
+                    const string wrongServerAliasId = "ordinary_wrong_server_alias";
+                    const string aliaslessNestedId = "ordinary_aliasless_nested";
+                    const string aliaslessFlatId = "ordinary_aliasless_flat";
+                    var wrongActionAlias = Queued(wrongActionAliasId, now - 5);
+                    ReadDictionary(wrongActionAlias, "record")["actionId"] = aliasSiblingId;
+                    var wrongServerAlias = Queued(wrongServerAliasId, now - 4);
+                    ReadDictionary(wrongServerAlias, "record")["serverActionId"] = aliasSiblingId;
+                    var nonStringId = Queued("placeholder", now - 3);
+                    nonStringId["id"] = 42;
+                    ReadDictionary(nonStringId, "record").Remove("actionId");
+                    var aliasSibling = Queued(aliasSiblingId, now - 2);
+                    ReadDictionary(aliasSibling, "record")["serverActionId"] = aliasSiblingId;
+                    var aliaslessNested = Queued(aliaslessNestedId, now - 1);
+                    ReadDictionary(aliaslessNested, "record").Remove("actionId");
+                    var aliaslessFlat = Queued(aliaslessFlatId, now);
+                    aliaslessFlat.Remove("record");
+                    aliaslessFlat["command"] = "sign_trade_agreement";
+                    ActionPipelineService.WriteActionQueueUnlocked(campaignId, new List<Dictionary<string, object>>
+                    {
+                        wrongActionAlias, wrongServerAlias, nonStringId, aliasSibling, aliaslessNested, aliaslessFlat
+                    });
+                    var firstAliasPoll = ReadDictionaryList(ActionPipelineService.NextActions(poll, null), "actions").SingleOrDefault();
+                    var nestedFallback = ReadDictionaryList(ActionPipelineService.NextActions(poll, null), "actions").SingleOrDefault();
+                    var flatFallback = ReadDictionaryList(ActionPipelineService.NextActions(poll, null), "actions").SingleOrDefault();
+                    var aliasQueue = ActionPipelineService.ReadActionQueueUnlocked(campaignId);
+                    var rejectedAliases = aliasQueue.Where(row => new[] { wrongActionAliasId, wrongServerAliasId, "42" }
+                        .Contains(ReadString(row, "id", ""))).ToList();
+                    add("ordinary_poll_rejects_conflicting_identities_before_dispatch",
+                        ReadString(firstAliasPoll, "actionId", "") == aliasSiblingId
+                        && ReadString(firstAliasPoll, "serverActionId", "") == aliasSiblingId
+                        && ReadString(nestedFallback, "serverActionId", "") == aliaslessNestedId
+                        && ReadString(flatFallback, "serverActionId", "") == aliaslessFlatId
+                        && ReadString(flatFallback, "command", "") == "sign_trade_agreement"
+                        && !ReadDictionary(aliasQueue.Single(row => ReadString(row, "id", "") == aliaslessNestedId), "record")
+                            .ContainsKey("serverActionId")
+                        && !aliasQueue.Single(row => ReadString(row, "id", "") == aliaslessFlatId).ContainsKey("serverActionId")
+                        && rejectedAliases.Count == 3
+                        && rejectedAliases.All(row => ReadString(row, "status", "") == "queued" && !row.ContainsKey("deliveredTs"))
+                        && ReadInt(ActionPipelineService.NextActions(poll, null), "count", -1) == 0,
+                        "Invalid identities stay undispatched without using a poll slot; valid legacy envelopes receive the exact stored ID in their response only.", null);
                 }
                 Dictionary<string, object> governmentRefusalRecord =
                     new Dictionary<string, object>

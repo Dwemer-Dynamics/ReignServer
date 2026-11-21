@@ -241,6 +241,7 @@ namespace ReignBetaServer
 
             List<Dictionary<string, object>> enteredBackoff = new List<Dictionary<string, object>>();
             List<Dictionary<string, object>> unconfirmedDeliveries = new List<Dictionary<string, object>>();
+            int invalidOrdinaryIdentities = 0;
 
             lock (Program.FileLock)
             {
@@ -303,6 +304,12 @@ namespace ReignBetaServer
                         continue;
                     }
 
+                    if (!durable && !HasOrdinaryActionPollIdentity(row, id))
+                    {
+                        invalidOrdinaryIdentities++;
+                        continue;
+                    }
+
                     // A redelivery never regresses a later reported status (for example executing);
                     // the rejected regression used to discard deliveredTs and redeliver every poll.
                     if (!durable || ShouldAcceptActionStatusTransition(status, "delivered"))
@@ -361,7 +368,12 @@ namespace ReignBetaServer
             }
 
             List<object> records = selected.Select(ActionPollRecord).ToList();
-            OperationsService.LogOperational("action.next", new Dictionary<string, object> { ["campaignId"] = campaignId, ["count"] = records.Count });
+            OperationsService.LogOperational("action.next", new Dictionary<string, object>
+            {
+                ["campaignId"] = campaignId,
+                ["count"] = records.Count,
+                ["invalidOrdinaryIdentities"] = invalidOrdinaryIdentities
+            });
             foreach (Dictionary<string, object> row in selected)
             {
                 Dictionary<string, object> record = ReadDictionary(row, "record") ?? row;
@@ -378,6 +390,25 @@ namespace ReignBetaServer
                 ["count"] = records.Count,
                 ["actions"] = records
             };
+        }
+
+        private static bool HasOrdinaryActionPollIdentity(Dictionary<string, object> row, string rowId)
+        {
+            // Reports resolve the persisted outer ID. A legacy projection may omit
+            // its aliases, but neither alias may redirect execution to another row.
+            object value = row.TryGetValue("record", out object nested) ? nested : row;
+            return row.TryGetValue("id", out object persistedId) && persistedId is string
+                && !string.IsNullOrWhiteSpace(rowId) && !rowId.Any(char.IsControl)
+                && value is Dictionary<string, object> record
+                && OrdinaryActionPollAliasMatches(record, "actionId", rowId)
+                && OrdinaryActionPollAliasMatches(record, "serverActionId", rowId);
+        }
+
+        private static bool OrdinaryActionPollAliasMatches(Dictionary<string, object> record, string name, string rowId)
+        {
+            return !record.TryGetValue(name, out object alias) || alias == null
+                || (alias is string value && (string.IsNullOrWhiteSpace(value)
+                    || value.Equals(rowId, StringComparison.Ordinal)));
         }
 
         private static object ActionPollRecord(Dictionary<string, object> row)
