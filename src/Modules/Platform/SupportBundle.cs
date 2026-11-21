@@ -17,8 +17,12 @@ namespace ReignBetaServer
         private const long SupportTotalLimit = 64L * 1024 * 1024;
         private const int SupportFileCountLimit = 200;
         private static readonly Regex SupportSecretField = new Regex(
-            "(?i)(\\\"?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|client[_-]?secret|qdrant[_-]?api[_-]?key)\\\"?\\s*[:=]\\s*\\\"?)[^\\\",\\s}]+",
-            RegexOptions.Compiled);
+            """
+            (?<label> \b (?: [a-z0-9_-]*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|client[_-]?secret|password)
+                          | authorization | token | secret ) ["']? \s* [:=] \s* )
+            (?<value> "(?:\\.|[^"\\])*(?:"|$) | '(?:\\.|[^'\\])*(?:'|$) | (?:(?:Bearer|Basic)\s+)?[^\s,;}"']+ )
+            """,
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.IgnorePatternWhitespace | RegexOptions.NonBacktracking);
         private static readonly Regex SupportBearer = new Regex(
             "(?i)\\bBearer\\s+[A-Za-z0-9._~+/-]{8,}", RegexOptions.Compiled);
         private static readonly Regex SupportKnownKey = new Regex(
@@ -29,7 +33,12 @@ namespace ReignBetaServer
         internal static string RedactSupportText(string value)
         {
             string text = value ?? string.Empty;
-            text = SupportSecretField.Replace(text, "$1[REDACTED]");
+            text = SupportSecretField.Replace(text, match =>
+            {
+                char first = match.Groups["value"].ValueSpan[0];
+                string mask = first == '"' ? "\"[REDACTED]\"" : first == '\'' ? "'[REDACTED]'" : "[REDACTED]";
+                return match.Groups["label"].Value + mask;
+            });
             text = SupportBearer.Replace(text, "Bearer [REDACTED]");
             text = SupportKnownKey.Replace(text, "[REDACTED_KEY]");
             return SupportUrlCredential.Replace(text, "$1[REDACTED]@");

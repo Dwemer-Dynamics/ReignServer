@@ -21,49 +21,207 @@ namespace ReignBetaServer
 {
     internal static partial class OperationsService
     {
+        private const int LogEntryBytes = 16 * 1024;
+        private const int LogPageBytes = 256 * 1024;
+        private const int LogCursorLength = 10 + 1 + 64; // Int32 row index, dot, SHA-256.
+        private static readonly byte[] LogCursorKey = RandomNumberGenerator.GetBytes(32);
+        private static readonly HashSet<string> LogMetadataKeys = new(StringComparer.Ordinal)
+        {
+            "ts", "timestamp", "eventType", "phase", "requestType", "type", "kind", "severity", "level",
+            "status", "ok", "method", "path", "source", "mode", "model", "provider", "exceptionType",
+            "id", "campaignId", "correlationId", "auditId", "eventId", "actionId", "serverActionId", "heroId", "traceId",
+            "payloadId", "evidenceId", "promptEvidenceId", "durationMs", "requestChars", "responseChars"
+        };
+
         internal static Dictionary<string, object> ReadLogApi(Dictionary<string, string> query)
         {
-            string file = query.TryGetValue("file", out string requestedFile) ? requestedFile : "server-log.jsonl";
-            string campaignId = query.TryGetValue("campaignId", out string requestedCampaignId) ? requestedCampaignId : "";
-            int limit = query.TryGetValue("limit", out string limitText) && int.TryParse(limitText, out int parsedLimit) ? parsedLimit : 250;
-            limit = Math.Max(1, Math.Min(500, limit));
-            string search = query.TryGetValue("search", out string requestedSearch)
-                ? (requestedSearch ?? string.Empty).Trim()
-                : string.Empty;
-            if (search.Length > 200) search = search.Substring(0, 200);
-
+            query ??= new();
+            string Parameter(string name) => query.GetValueOrDefault(name) ?? "";
+            string file = Parameter("file"), campaignId = Parameter("campaignId");
+            if (campaignId.Length > 160) return LogQueryError("Campaign ID exceeds 160 characters.");
+            campaignId = CampaignFileService.ResolveLogCampaignId(campaignId);
             string path = ResolveLogFile(file, campaignId);
-            List<Dictionary<string, object>> candidates = Program.ReadJsonLinesFromPath(path)
-                .Reverse<Dictionary<string, object>>()
-                .Select(RedactSensitive)
-                .Where(row => string.IsNullOrWhiteSpace(search)
-                    || Json.Serialize(row).IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0)
-                .Take(limit)
-                .ToList();
-            const int maxResponseCharacters = 256 * 1024;
-            int responseCharacters = 0;
-            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
-            foreach (Dictionary<string, object> row in candidates)
+            int limit = query.TryGetValue("limit", out string limitText) && int.TryParse(limitText, out int parsedLimit) ? parsedLimit : 250;
+            limit = Math.Clamp(limit, 1, 500);
+            string search = Parameter("search").Trim();
+            if (search.Length > 200) search = search.Substring(0, 200);
+            bool searchNeedsEscaping = Json.Serialize(search).Length > search.Length + 2;
+            string eventType = Parameter("eventType").Trim();
+            string severity = Parameter("severity").Trim();
+            string cursor = Parameter("cursor");
+            if (eventType.Length > 160 || severity.Length > 32 || cursor.Length > LogCursorLength)
+                return LogQueryError("Invalid log filter or continuation.");
+
+            var source = Program.ReadJsonLinesFromPath(path); // A single ordered snapshot under FileLock.
+            int index = source.Count - 1;
+            if (cursor.Length > 0)
             {
-                int rowCharacters = Json.Serialize(row).Length;
-                if (rows.Count > 0 && responseCharacters + rowCharacters > maxResponseCharacters) break;
-                rows.Add(row);
-                responseCharacters += rowCharacters;
+                int dot = cursor.IndexOf('.');
+                if (dot <= 0 || dot != cursor.Length - 65
+                    || !int.TryParse(cursor.AsSpan(0, dot), NumberStyles.None, CultureInfo.InvariantCulture, out index)
+                    || index >= source.Count)
+                    return LogQueryError("Log continuation is invalid or expired. Reload the first page.");
             }
 
-            return new Dictionary<string, object>
+            // Reserve the largest possible serialized envelope, including a continuation and counters.
+            // Only entries and the commas between them consume the remaining UTF-8 body budget.
+            var entries = new List<Dictionary<string, object>>();
+            var response = new Dictionary<string, object>
             {
-                ["ok"] = true,
-                ["file"] = Path.GetFileName(path),
-                ["campaignId"] = CampaignFileService.ResolveLogCampaignId(campaignId),
-                ["path"] = path,
-                ["search"] = search,
-                ["requestedLimit"] = limit,
-                ["returnedCount"] = rows.Count,
-                ["responseCharacters"] = responseCharacters,
-                ["truncated"] = rows.Count < candidates.Count,
-                ["entries"] = rows
+                ["ok"] = true, ["file"] = Path.GetFileName(path), ["campaignId"] = campaignId, ["path"] = path,
+                ["searchApplied"] = search.Length > 0, ["requestedLimit"] = limit,
+                ["maxEntryBytes"] = LogEntryBytes, ["maxResponseBytes"] = LogPageBytes,
+                ["returnedCount"] = limit, ["elidedCount"] = limit, ["responseCharacters"] = LogPageBytes,
+                ["truncated"] = false, ["responseLimitReached"] = false, ["hasMore"] = false,
+                ["nextCursor"] = new string('0', LogCursorLength), ["entries"] = entries
             };
+            int remaining = LogPageBytes - Encoding.UTF8.GetByteCount(Json.Serialize(response));
+            if (remaining < LogEntryBytes) return LogQueryError("Log metadata exceeds the response budget.");
+            string scope = Json.Serialize(new[] { path, search, eventType, severity });
+            string CursorFor(int position, string json)
+            {
+                string ordinal = position.ToString(CultureInfo.InvariantCulture);
+                byte[] anchor = Encoding.UTF8.GetBytes(scope + "\n" + ordinal + "\n" + json);
+                return ordinal + "." + Convert.ToHexString(HMACSHA256.HashData(LogCursorKey, anchor));
+            }
+            int characters = 0, elided = 0;
+            string nextCursor = null;
+            for (; index >= 0; index--)
+            {
+                var row = (Dictionary<string, object>)DialogueService.WithoutConversationReferenceMetadata(RedactSensitive(source[index]));
+                string json = Json.Serialize(row);
+                if (cursor.Length > 0)
+                {
+                    if (cursor != CursorFor(index, json)) return LogQueryError("Log continuation is invalid or expired. Reload the first page.");
+                    cursor = "";
+                }
+                var data = ReadDictionary(row, "data");
+                string rowEvent = ReadFirstString(row, "eventType", "phase", "requestType", "type", "kind");
+                if (eventType.Length > 0 && !eventType.Equals(rowEvent, StringComparison.OrdinalIgnoreCase)) continue;
+                if (severity.Length > 0 && !severity.Equals(LogSeverity(row, data, rowEvent), StringComparison.OrdinalIgnoreCase)) continue;
+                if (search.Length > 0 && !json.Contains(search, StringComparison.OrdinalIgnoreCase)
+                    && !(searchNeedsEscaping && LogTextMatches(row, search))) continue;
+                if (entries.Count == limit) { nextCursor = CursorFor(index, json); break; }
+
+                var entry = ProjectLogEntry(row, data, Path.GetFileName(path), campaignId, Encoding.UTF8.GetByteCount(json));
+                string entryJson = Json.Serialize(entry);
+                int cost = Encoding.UTF8.GetByteCount(entryJson) + (entries.Count == 0 ? 0 : 1);
+                if (cost > remaining)
+                {
+                    nextCursor = CursorFor(index, json);
+                    response["responseLimitReached"] = response["truncated"] = true;
+                    break;
+                }
+                entries.Add(entry);
+                remaining -= cost;
+                characters += entryJson.Length;
+                if (entry.ContainsKey("elided")) elided++;
+            }
+            response["nextCursor"] = nextCursor;
+            response["hasMore"] = nextCursor != null;
+            response["returnedCount"] = entries.Count;
+            response["elidedCount"] = elided;
+            response["responseCharacters"] = characters;
+            return response;
+        }
+
+        private static Dictionary<string, object> LogQueryError(string error) => new() { ["ok"] = false, ["error"] = error };
+
+        private static bool LogTextMatches(object value, string search) => value switch
+        {
+            string text => text.Contains(search, StringComparison.OrdinalIgnoreCase),
+            Dictionary<string, object> fields => fields.Any(pair => pair.Key.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || LogTextMatches(pair.Value, search)),
+            IEnumerable<object> items => items.Any(item => LogTextMatches(item, search)),
+            _ => false
+        };
+
+        private static string LogSeverity(Dictionary<string, object> row, Dictionary<string, object> data, string eventType)
+        {
+            string level = FirstNonEmpty(ReadFirstString(row, "severity", "level"), ReadFirstString(data, "severity", "level"));
+            if (level.Length > 0) return level.Equals("warn", StringComparison.OrdinalIgnoreCase) ? "warning" : level;
+            string status = ReadString(row, "status", "").ToLowerInvariant();
+            if (status is "warn" or "warning" || eventType.EndsWith("_warning", StringComparison.OrdinalIgnoreCase)
+                || eventType.EndsWith(".warning", StringComparison.OrdinalIgnoreCase)) return "warning";
+            if (status is "failed" or "error" || eventType.EndsWith(".error", StringComparison.OrdinalIgnoreCase)
+                || eventType.EndsWith("_failed", StringComparison.OrdinalIgnoreCase)
+                || eventType.EndsWith(".failed", StringComparison.OrdinalIgnoreCase)) return "error";
+            if (row.TryGetValue("ok", out var ok) && ok is bool success) return success ? "info" : "error";
+            int code = ReadInt(data, "status", 0);
+            if (eventType == "http.request" && code >= 100)
+                return code >= 500 ? "error" : code >= 400 ? "warning" : "info";
+            return status.Length == 0 ? "unclassified" : status;
+        }
+
+        // Logs contain arbitrary campaign text, provider messages and returned reasoning, even in tiny rows.
+        // Keep diagnostic fields in their original places. A raw text prefix can contain the entire private message.
+        private static Dictionary<string, object> LogMetadata(Dictionary<string, object> source)
+        {
+            var result = new Dictionary<string, object>();
+            foreach (var pair in source)
+            {
+                if (!LogMetadataKeys.Contains(pair.Key)) continue;
+                if (pair.Value is string value)
+                {
+                    if (value.Length > 160 || !value.EnumerateRunes().All(c => Rune.IsLetterOrDigit(c) || c.IsAscii && "._:/+-".Contains((char)c.Value))) continue;
+                }
+                else if (pair.Value is not (null or bool or int or long or decimal or double)) continue;
+                result[pair.Key] = pair.Value;
+            }
+            return result;
+        }
+
+        private static Dictionary<string, object> ProjectLogEntry(Dictionary<string, object> row, Dictionary<string, object> data,
+            string file, string campaignId, int redactedBytes)
+        {
+            var entry = LogMetadata(row);
+            bool omittedData = false;
+            if (data != null)
+            {
+                var fields = LogMetadata(data);
+                entry["data"] = fields;
+                omittedData = fields.Count != data.Count;
+            }
+            if (redactedBytes <= LogEntryBytes && entry.Count == row.Count && !omittedData) return entry;
+            entry["elided"] = true;
+            entry["elisionReason"] = redactedBytes > LogEntryBytes ? "row_limit" : "payload_omitted";
+            entry["redactedRowBytes"] = redactedBytes;
+            entry["unabridgedRow"] = "unavailable_from_this_response";
+            var evidence = LogEvidenceReference(row, data) ?? (data == null ? null : LogEvidenceReference(data, row));
+            if (evidence == null && file == "audit.jsonl" && ConversationResponseService.IsDiagnosticLegacyResponse(row)
+                && IsLogEvidenceId(ReadString(row, "auditId", "")))
+            {
+                string id = ReadString(row, "auditId", "");
+                evidence = new() { ["route"] = "/api/diagnostics/conversations/payload", ["campaignId"] = campaignId,
+                    ["traceId"] = "legacy-" + id, ["payloadId"] = id };
+            }
+            if (evidence != null) entry["relatedEvidence"] = evidence;
+            // Even many individually valid fields can exceed the row ceiling when JSON-escaped.
+            if (Encoding.UTF8.GetByteCount(Json.Serialize(entry)) > LogEntryBytes)
+                return new() { ["elided"] = true, ["elisionReason"] = "row_limit", ["redactedRowBytes"] = redactedBytes,
+                    ["unabridgedRow"] = "unavailable_from_this_response", ["relatedEvidence"] = evidence };
+            return entry;
+        }
+
+        private static bool IsLogEvidenceId(string value) => value.Length == 32
+            && value.All(c => char.IsAsciiDigit(c) || c is >= 'a' and <= 'f');
+
+        private static Dictionary<string, object> LogEvidenceReference(Dictionary<string, object> row, Dictionary<string, object> context)
+        {
+            var ids = LogMetadata(row);
+            string trace = ReadString(ids, "traceId", ""), payload = ReadString(ids, "payloadId", "");
+            if (IsLogEvidenceId(trace) && IsLogEvidenceId(payload))
+                return new() { ["route"] = "/api/diagnostics/conversations/payload", ["traceId"] = trace, ["payloadId"] = payload };
+
+            string prompt = ReadString(ids, "promptEvidenceId", "");
+            if (ReadString(row, "schema", "") == "reign-prompt-evidence-v1") prompt = ReadString(ids, "evidenceId", "");
+            if (!IsLogEvidenceId(prompt)) return null;
+            var contextIds = context == null ? null : LogMetadata(context);
+            string ScopeId(string key) => ReadString(row.ContainsKey(key) ? ids : contextIds, key, "");
+            string campaign = ScopeId("campaignId"), correlation = ScopeId("correlationId");
+            return campaign.Length > 0 && correlation.Length > 0
+                ? new() { ["route"] = "/audit/prompt", ["campaignId"] = campaign, ["correlationId"] = correlation, ["evidenceId"] = prompt }
+                : null;
         }
 
         internal static Dictionary<string, object> ListCampaigns()
@@ -512,8 +670,8 @@ namespace ReignBetaServer
         private static bool IsSensitiveDiagnosticKey(string name)
         {
             string normalized = (name ?? "").Replace("_", "").Replace("-", "");
-            return new[] { "authorization", "secret", "token" }.Contains(normalized, StringComparer.OrdinalIgnoreCase)
-                || new[] { "apiKey", "accessToken", "refreshToken", "clientSecret", "password" }
+            return new[] { "authorization", "bearer", "secret", "token" }.Contains(normalized, StringComparer.OrdinalIgnoreCase)
+                || new[] { "apiKey", "accessToken", "refreshToken", "authToken", "clientSecret", "password" }
                     .Any(suffix => normalized.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
         }
 

@@ -71,6 +71,41 @@ try {
   assert.equal(await page.locator('.page.active').getAttribute('id'), 'general');
   assert.equal(await page.evaluate(() => typeof runDirectorSample), 'undefined');
   assert.equal(html.includes('/relationships/simulation/'), false);
+  const logRequests = [];
+  await page.route('**/api/logs?*', async route => {
+    assert.equal(route.request().method(), 'GET');
+    const query = Object.fromEntries(new URL(route.request().url()).searchParams);
+    logRequests.push(query);
+    const older = !!query.cursor;
+    await route.fulfill({ json: { ok: true, file: query.file, returnedCount: 1, elidedCount: older ? 0 : 1,
+      hasMore: !older, nextCursor: older ? null : 'fixture-next', responseLimitReached: !older,
+      entries: older ? [{ eventType: 'older-row' }] : [{ eventType: 'first-row', elided: true, unabridgedRow: 'unavailable_from_this_response' }] } });
+  });
+  await page.evaluate(() => selectControlCenterTab('logs'));
+  await page.locator('#logOutput').filter({ hasText: 'first-row' }).waitFor();
+  const initialLogCount = logRequests.length;
+  await page.locator('#logSearch').fill('body & 雪');
+  await page.locator('#logEventType').fill('fixture');
+  await page.locator('#logSeverity').fill('warning');
+  await page.evaluate(() => loadLogs(false, true));
+  assert.equal(logRequests.length, initialLogCount, 'A live refresh must not submit edited filters');
+  await page.getByRole('button', { name: 'Load Latest' }).click();
+  await page.waitForFunction(() => !logLoadPending);
+  assert.match(await page.locator('#logPageStatus').innerText(), /Payload omitted.*size limit.*Older matches/);
+  await page.locator('#olderLogs').click();
+  await page.locator('#logOutput').filter({ hasText: 'older-row' }).waitFor();
+  assert.deepEqual(logRequests.at(-1), { ...logRequests.at(-2), cursor: 'fixture-next' });
+  assert.equal(logRequests.at(-1).search, 'body & 雪');
+  assert.equal(logRequests.at(-1).eventType, 'fixture');
+  assert.equal(logRequests.at(-1).severity, 'warning');
+  assert.equal(await page.locator('#olderLogs').isDisabled(), true);
+  const count = logRequests.length;
+  await page.evaluate(() => loadLogs(false, true));
+  assert.equal(logRequests.length, count, 'Live refresh must leave an older page readable');
+  await page.getByRole('button', { name: 'Load Latest' }).click();
+  await page.locator('#logOutput').filter({ hasText: 'first-row' }).waitFor();
+  assert.equal(logRequests.at(-1).cursor, undefined);
+  await page.locator('#mainNavigation [data-tab="general"]').click();
   await page.evaluate(names => {
     window.navigationLoads = [];
     for (const name of names) {
@@ -194,7 +229,7 @@ try {
   assert.deepEqual(errors, []);
   const report = { schema: 'reign-control-center-navigation-ui-v1', ok: true, isolated: true, sourceHash,
     source: path.resolve(fixtureDirectory), results, styleResults, palette, errors, interceptedRequests: requests,
-    rememberedPage: true, keyboardAccess: true, unsavedDraftsPreserved: true, retiredClientRemoved: true,
+    rememberedPage: true, keyboardAccess: true, unsavedDraftsPreserved: true, retiredClientRemoved: true, logPaging: true,
     coverage: 'Navigation/loader dispatch and rendered empty-state matrix. Providers, campaigns and backend tool execution are outside this fixture.',
     fidelityScope: 'All Control Center CSS uses frozen palette tokens, with computed-style audits, populated renderer fixtures and control-state checks; existing logo/portrait bytes, native shells and Bannerlord adapters are unchanged.' };
   await fs.writeFile(path.join(outputDirectory, 'ui-report.json'), JSON.stringify(report, null, 2));

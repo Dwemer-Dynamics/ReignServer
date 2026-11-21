@@ -15,12 +15,170 @@ namespace ReignBetaServer
 {
     internal static partial class VerificationService
     {
+        private static void RunLogPageContractChecks(List<Dictionary<string, object>> checks)
+        {
+            const string campaign = "log-page-fixture", file = "audit.jsonl";
+            string root = Path.Combine(VerificationDir, "log-query", Guid.NewGuid().ToString("N"));
+            string previous = Program.CampaignsRootOverride.Value;
+            Program.CampaignsRootOverride.Value = root;
+            try
+            {
+                string path = CampaignFileService.CampaignFile(campaign, "audit", file);
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                string id = Guid.NewGuid().ToString("N"), credential = "fixture-" + "credential-value";
+                string privateText = "prompt-only\nÉlan雪🦊";
+                string inlineCredential = "fixture-" + "header-value";
+                var data = TestDict("apiKey", credential, "reply", "A retained fixture reply.", "messages", privateText,
+                    "header", "Authorization: Bearer " + inlineCredential, "line", "token='fixture labeled value'",
+                    "memoryReferences", TestDict("quote", "hidden-reference-only"));
+                var huge = TestDict("phase", "fixture.response", "severity", "warning", "campaignId", campaign,
+                    "correlationId", "fixture-correlation", "auditId", id, "data", data);
+                data["messages"] = privateText + new string('p', 612101 - Json.Serialize(huge).Length);
+                string largeLine = Json.Serialize(huge);
+                var old = TestDict("phase", "fixture.response", "severity", "warning", "actionId", "older",
+                    "data", TestDict("messages", privateText));
+                File.WriteAllLines(path, new[] { Json.Serialize(old), Json.Serialize(TestDict("type", "other")), largeLine });
+                string original = File.ReadAllText(path);
+                var query = new Dictionary<string, string> { ["file"] = file, ["campaignId"] = campaign, ["limit"] = "1",
+                    ["search"] = privateText.ToLowerInvariant(), ["eventType"] = "FIXTURE.RESPONSE", ["severity"] = "WARNING" };
+                var first = OperationsService.ReadLogApi(query);
+                var entry = ReadDictionaryList(first, "entries").Single();
+                var reference = ReadDictionary(entry, "relatedEvidence");
+                void Check(string name, bool passed, Dictionary<string, object> measures = null) => AddVerificationCheck(checks,
+                    "contracts.log_page_" + name, "contracts", passed, "Operational log " + name.Replace('_', ' '), measures);
+                int WireBytes(object page) => Encoding.UTF8.GetByteCount(Json.Serialize(
+                    DialogueService.ConversationReferenceTransportPayload(page, "GET", "/api/logs")));
+                Check("first_row", largeLine.Length == 612101 && ReadBool(entry, "elided", false)
+                    && ReadString(entry, "elisionReason", "") == "row_limit" && WireBytes(entry) <= 16384
+                    && WireBytes(first) <= 262144 && ReadInt(first, "elidedCount", 0) == 1
+                    && ReadInt(first, "responseCharacters", -1) == Json.Serialize(entry).Length
+                    && ReadBool(first, "hasMore", false) && !ReadBool(first, "responseLimitReached", true) && !ReadBool(first, "truncated", true)
+                    && !Json.Serialize(first).Contains("prompt-only") && !Json.Serialize(first).Contains(credential),
+                    TestDict("storedCharacters", largeLine.Length, "entryBytes", WireBytes(entry), "bodyBytes", WireBytes(first)));
+                Check("redacted_search", new[] { credential, inlineCredential, "fixture labeled value", "hidden-reference-only" }.All(term => {
+                    var result = OperationsService.ReadLogApi(new(query) { ["search"] = term });
+                    return ReadInt(result, "returnedCount", -1) == 0 && !Json.Serialize(result).Contains(term);
+                })
+                    && ReadInt(OperationsService.ReadLogApi(new(query) { ["severity"] = "error" }), "returnedCount", -1) == 0
+                    && ReadInt(OperationsService.ReadLogApi(new(query) { ["eventType"] = "absent" }), "returnedCount", -1) == 0
+                    && File.ReadAllText(path) == original);
+                var evidenceQuery = new Dictionary<string, string> { ["campaignId"] = campaign,
+                    ["traceId"] = ReadString(reference, "traceId", ""), ["payloadId"] = ReadString(reference, "payloadId", ""), ["length"] = "1000" };
+                var payload = ConversationResponseService.ConversationDiagnosticsPayloadApi(evidenceQuery);
+                Check("pinned_evidence", ReadString(reference, "route", "") == "/api/diagnostics/conversations/payload"
+                    && evidenceQuery["traceId"] == "legacy-" + id && evidenceQuery["payloadId"] == id
+                    && ReadBool(payload, "ok", false) && ReadString(payload, "content", "").Contains("***")
+                    && !ReadString(payload, "content", "").Contains(credential));
+
+                File.AppendAllText(path, Json.Serialize(old) + "\n"); // Appending a new match must not shift the cursor.
+                query["cursor"] = ReadString(first, "nextCursor", "");
+                var second = OperationsService.ReadLogApi(query);
+                var older = ReadDictionaryList(second, "entries").Single();
+                Check("continuation", ReadString(older, "actionId", "") == "older" && !ReadBool(second, "hasMore", true)
+                    && !older.ContainsKey("relatedEvidence") && ReadString(older, "unabridgedRow", "") == "unavailable_from_this_response"
+                    && !Json.Serialize(older).Contains("prompt-only")
+                    && !ReadBool(OperationsService.ReadLogApi(new(query) { ["search"] = "changed query" }), "ok", true));
+                File.WriteAllLines(path, File.ReadAllLines(path).Skip(1).ToArray());
+                Check("trimmed_cursor", !ReadBool(OperationsService.ReadLogApi(query), "ok", true));
+
+                // Fill the page with individually small, public rows, including JSON-escaped characters.
+                var sample = TestDict("eventType", "fixture", "status", "info", "model", new string('+', 145),
+                    "heroId", new string('h', 150), "eventId", new string('e', 150), "source", new string('s', 150));
+                File.WriteAllLines(path, Enumerable.Range(0, 500).Select(n => {
+                    sample["durationMs"] = n;
+                    return Json.Serialize(sample);
+                }));
+                Check("expired", !ReadBool(OperationsService.ReadLogApi(query), "ok", true)
+                    && !ReadBool(ConversationResponseService.ConversationDiagnosticsPayloadApi(evidenceQuery), "ok", true));
+                query = new() { ["file"] = file, ["campaignId"] = campaign, ["limit"] = "500" };
+                var seen = new List<int>();
+                bool bounded = true, firstHitCeiling = false;
+                int maxBody = 0, pages = 0;
+                for (int pageNumber = 0; pageNumber < 500; pageNumber++)
+                {
+                    var page = OperationsService.ReadLogApi(query);
+                    var rows = ReadDictionaryList(page, "entries");
+                    maxBody = Math.Max(maxBody, WireBytes(page));
+                    pages++;
+                    if (seen.Count == 0) firstHitCeiling = ReadBool(page, "responseLimitReached", false);
+                    bounded &= WireBytes(page) <= 262144 && rows.All(x => WireBytes(x) <= 16384)
+                        && ReadInt(page, "returnedCount", -1) == rows.Count && ReadInt(page, "elidedCount", -1) == 0
+                        && ReadBool(page, "truncated", true) == ReadBool(page, "responseLimitReached", false)
+                        && ReadBool(page, "hasMore", false) == !string.IsNullOrEmpty(ReadString(page, "nextCursor", ""));
+                    seen.AddRange(rows.Select(x => ReadInt(x, "durationMs", -1)));
+                    query["cursor"] = ReadString(page, "nextCursor", "");
+                    if (query["cursor"].Length == 0 || rows.Count == 0 || seen.Count >= 500) break;
+                }
+                Check("wire_budget_and_order", bounded && firstHitCeiling && query["cursor"].Length == 0
+                    && seen.SequenceEqual(Enumerable.Range(0, 500).Reverse()), TestDict("pages", pages, "rows", seen.Count, "maxBodyBytes", maxBody));
+
+                File.WriteAllLines(path, Enumerable.Range(0, 501).Select(n => Json.Serialize(TestDict("durationMs", n))));
+                query["limit"] = "5000";
+                var countPage = OperationsService.ReadLogApi(query);
+                var countRows = ReadDictionaryList(countPage, "entries");
+                var tailPage = OperationsService.ReadLogApi(new(query) { ["cursor"] = ReadString(countPage, "nextCursor", "") });
+                var tailRows = ReadDictionaryList(tailPage, "entries");
+                Check("row_count_limit", ReadInt(countPage, "requestedLimit", -1) == 500 && ReadInt(countPage, "returnedCount", -1) == 500
+                    && countRows.Select(row => ReadInt(row, "durationMs", -1)).SequenceEqual(Enumerable.Range(1, 500).Reverse())
+                    && WireBytes(countPage) <= 262144 && ReadBool(countPage, "hasMore", false)
+                    && !ReadBool(countPage, "truncated", true) && !ReadBool(countPage, "responseLimitReached", true)
+                    && tailRows.Count == 1 && ReadInt(tailRows[0], "durationMs", -1) == 0 && !ReadBool(tailPage, "hasMore", true),
+                    TestDict("requested", 5000, "returned", countRows.Count, "olderMatches", tailRows.Count));
+
+                string promptId = Guid.NewGuid().ToString("N");
+                var prompt = TestDict("evidenceId", promptId, "correlationId", "shared", "campaignId", campaign,
+                    "complete", true, "messages", new[] { TestDict("content", "first fixture attempt") });
+                string ledger = CampaignFileService.CampaignFile(campaign, "audit", "prompt-evidence.jsonl");
+                string attempt = Json.Serialize(prompt);
+                prompt["evidenceId"] = Guid.NewGuid().ToString("N");
+                prompt["messages"] = new[] { TestDict("content", "newer fixture attempt") };
+                File.WriteAllLines(ledger, new[] { attempt, Json.Serialize(prompt) });
+                var linked = TestDict("data", TestDict("campaignId", campaign), "correlationId", "shared", "promptEvidenceId", promptId,
+                    "request", TestDict("messages", "private prompt body"));
+                File.WriteAllText(path, Json.Serialize(linked));
+                query.Remove("cursor");
+                var link = ReadDictionary(ReadDictionaryList(OperationsService.ReadLogApi(query), "entries").Single(), "relatedEvidence");
+                var pinned = new Dictionary<string, string> { ["campaignId"] = ReadString(link, "campaignId", ""),
+                    ["correlationId"] = ReadString(link, "correlationId", ""), ["evidenceId"] = ReadString(link, "evidenceId", "") };
+                Check("pinned_attempt", ReadString(link, "route", "") == "/audit/prompt" && pinned["evidenceId"] == promptId
+                    && ReadString(DialogueService.ReadPromptEvidenceApi(pinned), "content", "") == "first fixture attempt");
+                File.WriteAllText(ledger, Json.Serialize(prompt));
+                linked.Remove("promptEvidenceId");
+                File.WriteAllText(path, Json.Serialize(linked));
+                Check("expired_attempt", !ReadBool(DialogueService.ReadPromptEvidenceApi(pinned), "ok", true)
+                    && !ReadDictionaryList(OperationsService.ReadLogApi(query), "entries").Single().ContainsKey("relatedEvidence"));
+
+                string traceId = Guid.NewGuid().ToString("N"), payloadId = Guid.NewGuid().ToString("N");
+                var traced = TestDict("eventType", "fixture", "data", TestDict("traceId", traceId,
+                    "payloadId", payloadId, "text", "omitted fixture text", "level", "warn"));
+                File.WriteAllLines(path, new[] { Json.Serialize(traced),
+                    Json.Serialize(TestDict("eventType", "http.request", "data", TestDict("status", 503))) });
+                var warning = OperationsService.ReadLogApi(new(query) { ["severity"] = "warning", ["search"] = "payloadId" });
+                var diagnostic = ReadDictionary(ReadDictionaryList(warning, "entries").Single(), "relatedEvidence");
+                Check("pinned_payload", ReadString(diagnostic, "route", "") == "/api/diagnostics/conversations/payload"
+                    && ReadString(diagnostic, "traceId", "") == traceId && ReadString(diagnostic, "payloadId", "") == payloadId
+                    && ReadInt(OperationsService.ReadLogApi(new(query) { ["severity"] = "error" }), "returnedCount", -1) == 1);
+
+                string preview = Path.Combine(VerificationDir, "log-query-ui", "control-center.html");
+                Directory.CreateDirectory(Path.GetDirectoryName(preview));
+                File.WriteAllText(preview, Program.ControlCenterHtml());
+            }
+            finally
+            {
+                Program.CampaignsRootOverride.Value = previous;
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+        }
+
         private static void RunBuildAndContractChecks(
             List<Dictionary<string, object>> checks,
             bool includeExpensiveSubsystems)
         {
             if (Program.HasArg(Environment.GetCommandLineArgs(), "--run-verification") && Program.ActiveServerPort <= 0)
+            {
+                RunLogPageContractChecks(checks);
                 AddSubsystemListSummary(checks, "contracts.campaign_provider_wait", "save_load", PersistenceService.RunCampaignProviderWaitSelfTests(), caseResultLimit:64);
+            }
             AddSubsystemListSummary(checks, "contracts.wanderer_population", "characters", CharactersService.RunWandererPopulationTests());
             AddSubsystemListSummary(checks, "contracts.encountered_residents", "characters", CharactersService.RunEncounteredResidentTests());
             AddSubsystemListSummary(checks, "contracts.tavern_house", "characters", CharactersService.RunTavernHouseContractTests());
