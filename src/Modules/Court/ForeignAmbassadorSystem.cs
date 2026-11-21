@@ -915,7 +915,10 @@ namespace ReignBetaServer
 
             var home = TestDict("kingdomId", "player_kingdom", "name", "Home", "leaderHeroId", "player", "leaderName", "Ruler");
             var foreign = TestDict("kingdomId", "foreign_test", "name", "Foreign Test", "leaderHeroId", "foreign_ruler", "leaderName", "Foreign Ruler");
-            var world = TestDict("campaignId", campaignId, "kingdoms", new ArrayList { home, foreign });
+            var world = TestDict("campaignId", campaignId, "kingdoms", new ArrayList { home, foreign },
+                "settlements", new ArrayList { TestDict("settlementId", "town_test", "name", "Court Town", "kingdomId", "player_kingdom") },
+                "clans", new ArrayList { TestDict("clanId", "court_test_clan", "name", "Court Clan", "kingdomId", "player_kingdom") },
+                "prisoners", new ArrayList { TestDict("heroId", "captured_noble", "name", "Captured Noble", "kingdomId", "foreign_test") });
             foreach (string command in new[] { "sign_trade_agreement", "record_promise" })
             {
                 bool tradeCounter = command == "sign_trade_agreement";
