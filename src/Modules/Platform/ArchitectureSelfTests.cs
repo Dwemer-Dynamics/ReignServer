@@ -1882,14 +1882,19 @@ namespace ReignBetaServer
                     liveTestControllerPath);
                 string serverClientPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignServerClient.cs");
                 string serverClientText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
-                string compactServerClientText = string.Concat(serverClientText.Where(c => !char.IsWhiteSpace(c)));
+                string httpTransportPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignHttpTransport.cs");
+                string httpTransportText = VerificationSourceLocator.SourceDeclaresType(serverClientText, "ReignHttpTransport")
+                    ? VerificationSourceLocator.ReadClientTypeSourceText(qualificationClientRoot, "ReignHttpTransport")
+                    : string.Empty;
+                string compactHttpTransportText = string.Concat(httpTransportText.Where(c => !char.IsWhiteSpace(c)));
                 add("live_test_control_plane_bypasses_shared_endpoint_breaker",
-                    compactServerClientText.Contains("boolliveTestRoute=route.StartsWith(\"/tests/live/\"", StringComparison.Ordinal)
-                    && compactServerClientText.Contains("if(!liveTestRoute&&!ReignServerEndpoint.TryBeginRequest(outstringunavailable,outprobeClaim))", StringComparison.Ordinal)
-                    && compactServerClientText.Contains("HttpClientrouteClient=liveTestRoute?LiveTestClient:", StringComparison.Ordinal)
-                    && compactServerClientText.Contains("if(!liveTestRoute)ReignServerEndpoint.ReportTransportFailure(probeClaim);", StringComparison.Ordinal),
-                    "Loopback heartbeat, polling, acknowledgement, and lifecycle routes use their short-timeout client without inheriting unrelated passive-system endpoint backoff.",
-                    serverClientPath);
+                    compactHttpTransportText.Contains("boolliveTestRoute=route.StartsWith(\"/tests/live/\"", StringComparison.Ordinal)
+                    && compactHttpTransportText.Contains("if(!liveTestRoute&&!ReignServerEndpoint.TryBeginRequest(outstringunavailable,outprobeClaim))", StringComparison.Ordinal)
+                    && compactHttpTransportText.Contains("HttpClientrouteClient=requestClient??(liveTestRoute?LiveTestClient:", StringComparison.Ordinal)
+                    && compactHttpTransportText.Contains("LiveTestClient=CreateLocalServerHttpClient(4,5);", StringComparison.Ordinal)
+                    && compactHttpTransportText.Contains("if(!liveTestRoute)ReignServerEndpoint.ReportTransportFailure(probeClaim);", StringComparison.Ordinal),
+                    "Loopback heartbeat, polling, acknowledgement, and lifecycle routes use their short-timeout client by default and bypass unrelated passive-system endpoint backoff.",
+                    httpTransportPath);
                 string liveTestClientPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignLiveTestClient.cs");
                 string liveTestClientText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
                 string liveTestClientTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(qualificationClientRoot, "ReignServerClient");
@@ -3157,6 +3162,191 @@ namespace ReignBetaServer
                         ["completedThenEnqueuedAccepted"] = ActionPipelineService.ShouldAcceptActionStatusTransition("completed", "enqueued"),
                         ["failedThenExecutingAccepted"] = ActionPipelineService.ShouldAcceptActionStatusTransition("failed", "executing")
                     });
+                {
+                    const string lost = "ordinary_lost_poll";
+                    const string sibling = "ordinary_healthy_sibling";
+                    const string undelivered = "ordinary_undelivered_expiry";
+                    long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                    long expired = now - 6 * 60 * 60 - 1;
+                    Dictionary<string, object> Queued(string id, long ts) => TestDict(
+                        "id", id, "campaignId", campaignId, "status", "queued", "ts", ts,
+                        "record", TestDict("actionId", id, "command", "sign_trade_agreement"));
+                    var legacy = Queued(lost, now);
+                    ReadDictionary(legacy, "record").Remove("actionId");
+                    ActionPipelineService.WriteActionQueueUnlocked(campaignId,
+                        new List<Dictionary<string, object>> { legacy });
+                    var poll = TestDict("campaignId", campaignId, "limit", 1);
+                    var first = ActionPipelineService.NextActions(poll, null);
+                    // Treat the first response as lost. Inspect its identity only in the
+                    // fixture, without sending any native acknowledgement or effect report.
+                    var second = ActionPipelineService.NextActions(poll, null);
+                    var dispatched = ActionPipelineService.ReadActionQueueUnlocked(campaignId).Single();
+                    add("ordinary_lost_poll_keeps_one_unacknowledged_identity",
+                        ReadString(ReadDictionaryList(first, "actions").Single(), "serverActionId", "") == lost
+                        && ReadInt(second, "count", -1) == 0
+                        && ReadString(dispatched, "status", "") == "delivered"
+                        && ReadLong(dispatched, "deliveredTs", 0) > 0
+                        && !ReadDictionary(dispatched, "record").ContainsKey("serverActionId")
+                        && !dispatched.ContainsKey("report"),
+                        "Discarding a prepared response leaves one retained dispatch attempt without enqueue or effect evidence.", null);
+
+                    ActionPipelineService.ReportAction(TestDict("campaignId", campaignId, "actionId", lost, "status", "queued"));
+                    var repeatedFresh = ActionPipelineService.NextActions(poll, null);
+                    dispatched = ActionPipelineService.ReadActionQueueUnlocked(campaignId).Single();
+                    add("ordinary_dispatch_marker_blocks_same_rank_report_reoffer",
+                        ReadString(dispatched, "status", "") == "queued"
+                        && ReadLong(dispatched, "deliveredTs", 0) > 0
+                        && ReadInt(repeatedFresh, "count", -1) == 0,
+                        "A same-rank legacy report can change the result status but cannot reopen a recorded one-shot dispatch.", null);
+
+                    dispatched["ts"] = expired;
+                    ActionPipelineService.WriteActionQueueUnlocked(campaignId,
+                        new List<Dictionary<string, object>> { Queued(sibling, now), dispatched, Queued(undelivered, expired) });
+                    var afterWindow = ActionPipelineService.NextActions(poll, null);
+                    var afterPoll = ActionPipelineService.ReadActionQueueUnlocked(campaignId);
+                    var unconfirmed = afterPoll.Single(row => ReadString(row, "id", "") == lost);
+                    var expiredRow = afterPoll.Single(row => ReadString(row, "id", "") == undelivered);
+                    var repeated = ActionPipelineService.NextActions(poll, null);
+                    var stillUnconfirmed = ActionPipelineService.ReadActionQueueUnlocked(campaignId)
+                        .Single(row => ReadString(row, "id", "") == lost);
+                    add("ordinary_delivery_window_preserves_healthy_siblings_and_evidence",
+                        ReadString(ReadDictionaryList(afterWindow, "actions").Single(), "actionId", "") == sibling
+                        && ReadString(expiredRow, "status", "") == "expired"
+                        && ReadLong(unconfirmed, "deliveryUnconfirmedTs", 0) > 0
+                        && ReadLong(stillUnconfirmed, "deliveryUnconfirmedTs", 0) == ReadLong(unconfirmed, "deliveryUnconfirmedTs", 0)
+                        && ReadInt(repeated, "count", -1) == 0,
+                        "A new poll expires untouched work and can serve newer work while retaining an attempted identity for reconciliation.", null);
+
+                    ActionPipelineService.ReportAction(TestDict("campaignId", campaignId, "actionId", lost, "status", "enqueued"));
+                    var enqueued = ActionPipelineService.ReadActionQueueUnlocked(campaignId)
+                        .Single(row => ReadString(row, "id", "") == lost);
+                    ActionPipelineService.ReportAction(TestDict("campaignId", campaignId, "actionId", lost, "status", "completed"));
+                    var delayed = ActionPipelineService.ReportAction(TestDict("campaignId", campaignId, "actionId", lost, "status", "enqueued"));
+                    add("ordinary_dispatch_expiry_does_not_preempt_late_action_reports",
+                        ReadString(enqueued, "status", "") == "enqueued"
+                        && !ActionPipelineService.IsTerminalActionReportStatus(ReadString(enqueued, "status", ""))
+                        && ReadString(delayed, "status", "") == "completed"
+                        && ReadBool(delayed, "ignoredStatusRegression", false),
+                        "Enqueue and terminal reports remain distinct after an unconfirmed dispatch.", null);
+
+                    const string undatedId = "ordinary_undated_legacy";
+                    const string oldCorrelationId = "legacy-1700000000000-undated";
+                    var undated = Queued(undatedId, now);
+                    undated.Remove("ts");
+                    undated["correlationId"] = oldCorrelationId;
+                    ReadDictionary(undated, "record")["correlationId"] = oldCorrelationId;
+                    ActionPipelineService.WriteActionQueueUnlocked(campaignId,
+                        new List<Dictionary<string, object>> { undated });
+                    var undatedPoll = ActionPipelineService.NextActions(poll, null);
+                    var undatedDispatched = ActionPipelineService.ReadActionQueueUnlocked(campaignId)
+                        .Single(row => ReadString(row, "id", "") == undatedId);
+                    long undatedDispatchTs = ReadLong(undatedDispatched, "deliveredTs", 0);
+                    var undatedPayload = ReadDictionaryList(undatedPoll, "actions").SingleOrDefault();
+                    add("ordinary_undated_legacy_row_remains_eligible",
+                        ReadString(undatedPayload, "actionId", "") == undatedId
+                        && ReadString(undatedPayload, "correlationId", "") == oldCorrelationId
+                        && ReadString(undatedDispatched, "status", "") == "delivered"
+                        && undatedDispatchTs > 0
+                        && !undatedDispatched.ContainsKey("ts") && !undatedDispatched.ContainsKey("expiredTs")
+                        && !undatedDispatched.ContainsKey("report"),
+                        "An undated legacy action remains eligible without inferring a queue age from its correlation ID.", null);
+
+                    ActionPipelineService.ReportAction(TestDict("campaignId", campaignId, "actionId", undatedId, "status", "queued"));
+                    var undatedQueue = ActionPipelineService.ReadActionQueueUnlocked(campaignId);
+                    const string datedSiblingId = "ordinary_undated_healthy_sibling";
+                    undatedQueue.Add(Queued(datedSiblingId, now));
+                    ActionPipelineService.WriteActionQueueUnlocked(campaignId, undatedQueue);
+                    var afterUndatedDispatch = ActionPipelineService.NextActions(poll, null);
+                    var undatedRetained = ActionPipelineService.ReadActionQueueUnlocked(campaignId)
+                        .Single(row => ReadString(row, "id", "") == undatedId);
+                    var remainingPoll = ActionPipelineService.NextActions(poll, null);
+                    add("ordinary_undated_dispatch_stays_outside_redelivery",
+                        ReadString(ReadDictionaryList(afterUndatedDispatch, "actions").SingleOrDefault(), "actionId", "") == datedSiblingId
+                        && ReadInt(remainingPoll, "count", -1) == 0
+                        && ReadString(undatedRetained, "status", "") == "queued"
+                        && undatedDispatchTs > 0 && ReadLong(undatedRetained, "deliveredTs", 0) == undatedDispatchTs
+                        && !undatedRetained.ContainsKey("ts") && !undatedRetained.ContainsKey("deliveryUnconfirmedTs"),
+                        "A prior undated dispatch stays single-shot after a delayed queued report and does not consume the healthy sibling's slot.", null);
+
+                    const string statusOnlyId = "ordinary_legacy_status_only";
+                    const string statusOnlySiblingId = "ordinary_legacy_status_only_sibling";
+                    var statusOnly = Queued(statusOnlyId, now);
+                    statusOnly.Remove("ts");
+                    statusOnly["status"] = "delivered";
+                    ActionPipelineService.WriteActionQueueUnlocked(campaignId, new List<Dictionary<string, object>>
+                    {
+                        statusOnly, Queued(statusOnlySiblingId, now)
+                    });
+                    Dictionary<string, object> ReportLegacyStatus(string status) => ActionPipelineService.ReportAction(
+                        TestDict("campaignId", campaignId, "actionId", statusOnlyId, "status", status));
+                    var lateQueued = ReportLegacyStatus("queued");
+                    var statusOnlyPoll = ActionPipelineService.NextActions(poll, null);
+                    var retainedStatusOnly = ActionPipelineService.ReadActionQueueUnlocked(campaignId)
+                        .Single(row => ReadString(row, "id", "") == statusOnlyId);
+                    var lateEnqueued = ReportLegacyStatus("enqueued");
+                    var lateCompleted = ReportLegacyStatus("completed");
+                    var olderProposed = ReportLegacyStatus("proposed");
+                    var afterLegacyTerminal = ActionPipelineService.NextActions(poll, null);
+                    var settledStatusOnly = ActionPipelineService.ReadActionQueueUnlocked(campaignId)
+                        .Single(row => ReadString(row, "id", "") == statusOnlyId);
+                    add("ordinary_legacy_delivered_status_survives_late_reports",
+                        ReadString(lateQueued, "status", "") == "queued"
+                        && ReadString(ReadDictionaryList(statusOnlyPoll, "actions").SingleOrDefault(), "actionId", "") == statusOnlySiblingId
+                        && ReadString(retainedStatusOnly, "status", "") == "queued"
+                        && ReadBool(retainedStatusOnly, "ordinaryLegacyDispatchObserved", false)
+                        && !retainedStatusOnly.ContainsKey("ts") && !retainedStatusOnly.ContainsKey("deliveredTs")
+                        && !retainedStatusOnly.ContainsKey("deliveryUnconfirmedTs")
+                        && ReadString(lateEnqueued, "status", "") == "enqueued"
+                        && ReadString(lateCompleted, "status", "") == "completed"
+                        && ReadString(olderProposed, "status", "") == "completed"
+                        && ReadBool(olderProposed, "ignoredStatusRegression", false)
+                        && ReadBool(settledStatusOnly, "ordinaryLegacyDispatchObserved", false)
+                        && ReadInt(afterLegacyTerminal, "count", -1) == 0,
+                        "A delayed queued report preserves status-only legacy dispatch evidence without assigning a time, and a late native terminal report stays authoritative.", null);
+
+                    const string aliasSiblingId = "ordinary_alias_healthy_sibling";
+                    const string wrongActionAliasId = "ordinary_wrong_action_alias";
+                    const string wrongServerAliasId = "ordinary_wrong_server_alias";
+                    const string aliaslessNestedId = "ordinary_aliasless_nested";
+                    const string aliaslessFlatId = "ordinary_aliasless_flat";
+                    var wrongActionAlias = Queued(wrongActionAliasId, now - 5);
+                    ReadDictionary(wrongActionAlias, "record")["actionId"] = aliasSiblingId;
+                    var wrongServerAlias = Queued(wrongServerAliasId, now - 4);
+                    ReadDictionary(wrongServerAlias, "record")["serverActionId"] = aliasSiblingId;
+                    var nonStringId = Queued("placeholder", now - 3);
+                    nonStringId["id"] = 42;
+                    ReadDictionary(nonStringId, "record").Remove("actionId");
+                    var aliasSibling = Queued(aliasSiblingId, now - 2);
+                    ReadDictionary(aliasSibling, "record")["serverActionId"] = aliasSiblingId;
+                    var aliaslessNested = Queued(aliaslessNestedId, now - 1);
+                    ReadDictionary(aliaslessNested, "record").Remove("actionId");
+                    var aliaslessFlat = Queued(aliaslessFlatId, now);
+                    aliaslessFlat.Remove("record");
+                    aliaslessFlat["command"] = "sign_trade_agreement";
+                    ActionPipelineService.WriteActionQueueUnlocked(campaignId, new List<Dictionary<string, object>>
+                    {
+                        wrongActionAlias, wrongServerAlias, nonStringId, aliasSibling, aliaslessNested, aliaslessFlat
+                    });
+                    var firstAliasPoll = ReadDictionaryList(ActionPipelineService.NextActions(poll, null), "actions").SingleOrDefault();
+                    var nestedFallback = ReadDictionaryList(ActionPipelineService.NextActions(poll, null), "actions").SingleOrDefault();
+                    var flatFallback = ReadDictionaryList(ActionPipelineService.NextActions(poll, null), "actions").SingleOrDefault();
+                    var aliasQueue = ActionPipelineService.ReadActionQueueUnlocked(campaignId);
+                    var rejectedAliases = aliasQueue.Where(row => new[] { wrongActionAliasId, wrongServerAliasId, "42" }
+                        .Contains(ReadString(row, "id", ""))).ToList();
+                    add("ordinary_poll_rejects_conflicting_identities_before_dispatch",
+                        ReadString(firstAliasPoll, "actionId", "") == aliasSiblingId
+                        && ReadString(firstAliasPoll, "serverActionId", "") == aliasSiblingId
+                        && ReadString(nestedFallback, "serverActionId", "") == aliaslessNestedId
+                        && ReadString(flatFallback, "serverActionId", "") == aliaslessFlatId
+                        && ReadString(flatFallback, "command", "") == "sign_trade_agreement"
+                        && !ReadDictionary(aliasQueue.Single(row => ReadString(row, "id", "") == aliaslessNestedId), "record")
+                            .ContainsKey("serverActionId")
+                        && !aliasQueue.Single(row => ReadString(row, "id", "") == aliaslessFlatId).ContainsKey("serverActionId")
+                        && rejectedAliases.Count == 3
+                        && rejectedAliases.All(row => ReadString(row, "status", "") == "queued" && !row.ContainsKey("deliveredTs"))
+                        && ReadInt(ActionPipelineService.NextActions(poll, null), "count", -1) == 0,
+                        "Invalid identities stay undispatched without using a poll slot; valid legacy envelopes receive the exact stored ID in their response only.", null);
+                }
                 Dictionary<string, object> governmentRefusalRecord =
                     new Dictionary<string, object>
                     {

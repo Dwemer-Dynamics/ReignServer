@@ -670,23 +670,29 @@ namespace ReignBetaServer
                 && CharactersService.ReplyLikelyIntroducesDynamicCharacteristic(
                     "I cannot stand courtiers who talk around a thing instead of through it."),
                 "Qualification permits direct, metalinguistic, and counterfactual refusals while still detecting an unstored explicit stable preference or aversion.");
+            const string keepsakeSpeaker = "lord_6_12";
+            const string keepsakeQuote = "I keep a river stone";
             List<Dictionary<string, object>> inferredKeepsake = CharactersService.NormalizeDynamicCharacteristicWrites(
-                new Dictionary<string, object>(), "lord_6_12",
+                new Dictionary<string, object>(), keepsakeSpeaker,
                 new Dictionary<string, object> { ["name"] = "Abagai" },
                 new Dictionary<string, object>(),
-                "I keep a river stone. Smooth, grey, fits in the palm. I picked it up from a council tent when I was seventeen and have carried it since.");
+                keepsakeQuote + ". Smooth, grey, fits in the palm. I picked it up from a council tent when I was seventeen and have carried it since.");
             List<Dictionary<string, object>> quotedPlayerKeepsake = CharactersService.NormalizeDynamicCharacteristicWrites(
-                new Dictionary<string, object>(), "lord_6_12",
+                new Dictionary<string, object>(), keepsakeSpeaker,
                 new Dictionary<string, object> { ["name"] = "Abagai" },
                 new Dictionary<string, object>(),
                 "You told me, \"I keep a blue glass token beneath a cedar box.\" I will remember what you said.");
+            var keepsakeCitation = ReadDictionary(inferredKeepsake.FirstOrDefault(), "proposedCitation");
             add("dynamic_characteristic_keepsake_fallback",
                 inferredKeepsake.Count == 1
                 && ReadString(inferredKeepsake[0], "text", "").Contains("river stone", StringComparison.OrdinalIgnoreCase)
                 && ReadString(inferredKeepsake[0], "category", "") == "personal_history"
-                && ReadString(inferredKeepsake[0], "status", "") == "active"
+                && ReadString(inferredKeepsake[0], "status", "") == "proposed"
+                && ReadString(keepsakeCitation, "turnId", "") == "current_npc"
+                && ReadString(keepsakeCitation, "speakerId", "") == keepsakeSpeaker
+                && ReadString(keepsakeCitation, "quote", "") == keepsakeQuote
                 && quotedPlayerKeepsake.Count == 0,
-                "An explicit NPC-owned keepsake receives a minimal grounded companion write, while a quoted player-owned keepsake is not misattributed."
+                "Keepsake normalization proposes a characteristic with exact NPC speech evidence and excludes quoted player-owned keepsakes."
                 + " inferred=" + Json.Serialize(inferredKeepsake) + " quoted=" + Json.Serialize(quotedPlayerKeepsake));
             add("dynamic_characteristic_recall_accepts_grounded_paraphrase",
                 CharactersService.HasDynamicTextEvidence(
