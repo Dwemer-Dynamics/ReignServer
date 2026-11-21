@@ -36,7 +36,7 @@ namespace ReignBetaServer
             routes.Post("/save-sync/campaign-unloaded", request => PersistenceService.CampaignUnloadedApi(request.JsonBody));
             routes.Post("/save-sync/load", request => PersistenceService.SaveSyncLoadApi(request.JsonBody, false));
             routes.Post("/api/save-sync/preview", request => PersistenceService.SaveSyncLoadApi(request.JsonBody, true));
-            routes.Get("/api/save-sync/status", request => PersistenceService.SaveSyncStatusApi(request.Query));
+            routes.Get("/api/save-sync/status", request => PersistenceService.SaveSyncStatusRequestApi(request.Query));
         }
     }
 }

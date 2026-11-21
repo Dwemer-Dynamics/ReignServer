@@ -7,6 +7,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
@@ -247,6 +248,20 @@ namespace ReignLiveTest
                         Value(args, "--save", ""),
                         ReadNestedString(saved, "commands", "result", "saveName"),
                         ReadLastSaveName());
+                    RequireOwnedLoadBytes(args, saveName);
+                    var source = CheckpointArgument(args, "--campaign-test-source");
+                    if (source != null)
+                    {
+                        var runtime = Runtime(args);
+                        var native = ReadObject(runtime, "runtime");
+                        if (!ReadBoolean(runtime, "gameOnline")
+                            || String(native, "campaignId") != String(source, "campaignId")
+                            || RuntimeInstance(runtime) != String(source, "gameInstanceId")
+                            || !String(native, "activeSaveName").Equals(String(source, "sourceSaveName"),
+                                StringComparison.OrdinalIgnoreCase)
+                            || String(ReadObject(native, "saveSync"), "timelineId") != String(source, "timelineId"))
+                            throw new InvalidOperationException("The loaded campaign-test checkpoint changed before restart.");
+                    }
                     Dictionary<string, object> stopped = StopGame(args);
                     if (!IsOk(stopped)
                         && (String(stopped, "status").Equals(
@@ -287,7 +302,8 @@ namespace ReignLiveTest
             };
         }
 
-        private static Dictionary<string, object> SaveGame(string[] args)
+        private static Dictionary<string, object> SaveGame(string[] args,
+            Dictionary<string, object> ownership = null)
         {
             Dictionary<string, object> runtime = Runtime(args);
             string campaignId = ResolveCampaign(args, runtime);
@@ -300,6 +316,14 @@ namespace ReignLiveTest
                 runtime = QualificationRuntimeWithHeartbeatGrace(campaignId);
             }
             string saveName = Value(args, "--save", NextRotatingSaveName());
+            var step = new Dictionary<string, object>
+            {
+                ["schemaVersion"] = 2,
+                ["operation"] = "save_checkpoint",
+                ["saveName"] = saveName,
+                ["timeoutSeconds"] = Math.Max(60, IntValue(args, "--wait", 180))
+            };
+            if (ownership != null) step["checkpointOwnership"] = ownership;
             Dictionary<string, object> start = Post("/tests/live/run/start", new Dictionary<string, object>
             {
                 ["schemaVersion"] = 2,
@@ -310,16 +334,7 @@ namespace ReignLiveTest
                 ["effects"] = "guarded",
                 ["label"] = "Lifecycle save " + saveName,
                 ["autoCompleteWhenIdle"] = true,
-                ["steps"] = new object[]
-                {
-                    new Dictionary<string, object>
-                    {
-                        ["schemaVersion"] = 2,
-                        ["operation"] = "save_checkpoint",
-                        ["saveName"] = saveName,
-                        ["timeoutSeconds"] = Math.Max(60, IntValue(args, "--wait", 180))
-                    }
-                }
+                ["steps"] = new object[] { step }
             });
             if (!IsOk(start)) return start;
             Dictionary<string, object> completed = WaitForRun(
@@ -484,6 +499,7 @@ namespace ReignLiveTest
                 UseShellExecute = true,
                 WindowStyle = ProcessWindowStyle.Normal
             };
+            RequireOwnedLoadBytes(args, saveName);
             using (Process launched = Process.Start(start)) { }
             int requestedWaitSeconds = Math.Max(60, IntValue(args, "--wait", 240));
             // A large campaign can finish the native load before Save Sync has copied,
@@ -538,6 +554,26 @@ namespace ReignLiveTest
                 ["processIds"] = GameProcessIds(),
                 ["error"] = "BLSE started, but no loaded, Save-Sync-aligned campaign heartbeat became ready before the bounded load and restoration timeout."
             };
+        }
+
+        private static void RequireOwnedLoadBytes(string[] args, string saveName)
+        {
+            if (!Has(args, "--owned-save-sha256")) return;
+            string expected = Value(args, "--owned-save-sha256", "");
+            if (string.IsNullOrWhiteSpace(saveName) || saveName.Length > 64
+                || !saveName.StartsWith("ReignTest_", StringComparison.OrdinalIgnoreCase)
+                || saveName.Any(ch => !char.IsLetterOrDigit(ch) && ch != '_'))
+                throw new InvalidOperationException("The campaign-test reload target is outside the owned namespace.");
+            string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                "Mount and Blade II Bannerlord", "Game Saves", saveName + ".sav");
+            using (var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (var sha = SHA256.Create())
+            {
+                if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0
+                    || !string.Equals(BitConverter.ToString(sha.ComputeHash(input)).Replace("-", ""), expected,
+                        StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("The campaign-test reload target differs from the checkpoint receipt.");
+            }
         }
 
         private static Dictionary<string, object> StartGameMainMenu(string[] args)
@@ -1514,6 +1550,7 @@ namespace ReignLiveTest
             Console.WriteLine("Social: ReignLiveTest.exe social-balance plan|prepare|status|record|export [options]");
             Console.WriteLine("        prepare requires --campaign --timeline --save-prefix Reign_SocialBalance_* --main-hero");
             Console.WriteLine("World:  ReignLiveTest.exe world-test status|snapshot|stop|drain|advance|checkpoint|delete-checkpoint [--days N|--target-day D] [--save name] [--prefix run-prefix] [--no-save] [--observe-government-news (advance requires --no-save; manually acknowledge bulletin)] [--initial-baseline] [--timeout seconds] [--catch-up-timeout seconds] [--save-timeout seconds]");
+            Console.WriteLine("Use guarded MCP campaign-test tools for ReignTest_ checkpoint writes, reloads and cleanup.");
             Console.WriteLine("        --initial-baseline is reserved for the guarded campaign-test arm path; it accepts only an absent pre-existing daily rollup after exact native baseline observation and confirmation. All live queues and failure counters still must be clean.");
             Console.WriteLine("        drain, advance, and checkpoint emit bounded receipts; use their reportPath references for full live-test evidence.");
             Console.WriteLine("Party agency: ReignLiveTest.exe party-agency --profile contracts|status|preflight [--campaign id] [--no-wait]");
