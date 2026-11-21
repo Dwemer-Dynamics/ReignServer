@@ -273,7 +273,7 @@ namespace ReignBetaServer
                 };
             }
             Dictionary<string, object> background = DeepCloneProfileDictionary(ReadDictionary(shipped, "background"));
-            CharactersService.EnsureEncyclopediaText(background, runtimeProfile, traits);
+            CharactersService.EnsureEncyclopediaText(background, runtimeProfile);
             Dictionary<string, object> voice = DeepCloneProfileDictionary(ReadDictionary(shipped, "voice"));
             Dictionary<string, object> motivations = DeepCloneProfileDictionary(ReadDictionary(shipped, "motivations"));
             Dictionary<string, object> template = DeepCloneProfileDictionary(ReadDictionary(shipped, "template"));
@@ -634,7 +634,7 @@ namespace ReignBetaServer
                 ["clan"] = ReadFirstString(runtimeProfile, "clanName", "clan"),
                 ["kingdom"] = ReadFirstString(runtimeProfile, "kingdomName", "kingdom"),
                 ["nativeTraits"] = DeepCloneProfileDictionary(ReadDictionary(runtimeProfile, "traits")),
-                ["nativeBiography"] = ReadFirstString(runtimeProfile, "biography", "nativeBiography", "description")
+                ["nativeBiography"] = ReadFirstString(runtimeProfile, "nativeEncyclopediaText", "biography", "nativeBiography", "description")
             };
         }
 

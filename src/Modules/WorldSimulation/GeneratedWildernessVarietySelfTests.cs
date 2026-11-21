@@ -71,7 +71,7 @@ namespace ReignBetaServer
                 var empty = new Dictionary<string, object>();
                 var female = new Dictionary<string, object> { ["name"] = "Mira", ["occupation"] = "Lord", ["isFemale"] = true };
                 string foundation = DialogueService.BuildStableCharacterPrompt("female", "Mira", female, empty);
-                Require(foundation.Contains("female; she/her") && foundation.Contains("earlier event descriptions and transcript wording never override native identity"), "Saved scene wording or a Lord title can override native female identity.");
+                Require(foundation.Contains("female; she/her") && foundation.Contains("Authored background and past dialogue cannot change native facts"), "Saved scene wording or a Lord title can override native female identity.");
                 female["isFemale"] = false;
                 Require(DialogueService.BuildStableCharacterPrompt("male", "Mira", female, empty).Contains("male; he/him"), "Known male foundation lost native pronouns.");
                 foreach (object unknown in new object[] { null, "invalid" })
@@ -116,17 +116,37 @@ namespace ReignBetaServer
                     ["constructed"] = new Dictionary<string, object> { ["duplicatedProfile"] = large },
                     ["dynamicCharacteristics"] = new Dictionary<string, object> { ["history"] = large },
                     ["narrative"] = new Dictionary<string, object> { ["fullNarrative"] = large },
-                    ["traits"] = new Dictionary<string, object> { ["basePersonalitySummary"] = "Curious, frank and playful." },
-                    ["background"] = new Dictionary<string, object> { ["summary"] = "A Khuzait noble from Akkalat." }
+                    ["traits"] = TestDict("basePersonalitySummary", "The secret attachment behind the yellow basket.",
+                        "traitPercentages", TestDict("curiosity", 87)),
+                    ["background"] = TestDict("encyclopediaText", "A Khuzait noble from Akkalat.", "summary", "Only Orla Fen knows the story of the blue basket."),
+                    ["hiddenHistory"] = TestDict("privateBackstory", "The unspoken history of the green basket."),
+                    ["motivations"] = TestDict("version", 5, "fears", new[] { "The quiet terror of the silver basket." }),
+                    ["pressure"] = TestDict("privatePressure", "The secret pressure of the orange basket."),
+                    ["voice"] = TestDict("speechStyle", "Conversational and brisk.", "tells", "The private tell of the red basket.")
                 };
                 string before = Json.Serialize(stack);
                 int loads = 0;
                 string prompt = DialogueService.BuildGeneratedWildernessPrompt("isolated_wilderness_fixture", new Dictionary<string, object>(), participants,
                     WildernessDirections[0], (id, person) => { loads++; return stack; });
                 Require(loads == 3 && prompt.Length < 15000, "Three 330k-character stacks exceeded the opening budget.");
-                Require(prompt.Contains("Curious, frank and playful.") && prompt.Contains("Akkalat"), "Compact context discarded relevant character grounding.");
+                Require(prompt.Contains("curiosity") && prompt.Contains("Akkalat"), "Compact context discarded relevant character grounding.");
+                Require(prompt.Contains("Conversational and brisk.") && !prompt.Contains("blue basket") && !prompt.Contains("green basket")
+                    && !prompt.Contains("silver basket") && !prompt.Contains("orange basket") && !prompt.Contains("red basket") && !prompt.Contains("yellow basket"),
+                    "The opening writer should receive speech style and public grounding while excluding hidden personal context.");
                 Require(!prompt.Contains(large.Substring(0, 3000)) && !prompt.Contains("duplicatedProfile"), "A full profile copy escaped projection.");
                 Require(Json.Serialize(stack) == before, "Projection mutated the stored profile fixture.");
+            });
+            Check("opening_biography_falls_back_only_to_native", () =>
+            {
+                var stack = TestDict("background", TestDict("summary", "A private life account."), "nativeBiography", "An established native biography.");
+                Require(ReadString(WildernessCharacterBrief(stack, participants[0]), "background", "") == "An established native biography.",
+                    "The opening brief should use an available native biography when the public field is absent.");
+                stack.Remove("nativeBiography");
+                var current = new Dictionary<string, object>(participants[0]) { ["nativeEncyclopediaText"] = "The current native biography." };
+                Require(ReadString(WildernessCharacterBrief(stack, current), "background", "") == "The current native biography.",
+                    "A profile-only character can still use the current native biography from the participant snapshot.");
+                Require(ReadString(WildernessCharacterBrief(stack, participants[0]), "background", "") == "",
+                    "A private-capable summary alone should produce no public biography in the opening brief.");
             });
             Check("unicode_escaping_and_history_are_bounded", () =>
             {
