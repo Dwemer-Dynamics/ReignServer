@@ -950,6 +950,38 @@ namespace ReignBetaServer
                             .FirstOrDefault(), "count", 0) == 2,
                         "Re-entering schema initialization after repair does not mutate or duplicate the migration result.");
 
+                    const string historicalMarriage = "repair_completed_before_later_observation";
+                    const string historicalActor = "repair_historical_actor";
+                    const string historicalTarget = "repair_historical_target";
+                    string historicalEvent = "marriage_" + historicalMarriage;
+                    DialogueService.StoreWorldMemoryEvent(TestDict(
+                        "campaignId", campaignId, "eventId", historicalEvent, "eventType", "world_event",
+                        "worldDay", 5.25d, "summary", "The two historical figures married.",
+                        "participants", new[] { historicalActor, historicalTarget }, "visibility", "public",
+                        "importance", 0.9d), "relationship_lifecycle_marriage");
+                    RelationshipsStore.UpsertRelationshipObservedHeroes(connection, TestDict(
+                        "hero", historicalActor, "day", 40d, "ts", 5L, "hash", "historical_actor_observation",
+                        "profile", Json.Serialize(TestDict("heroStringId", historicalActor,
+                            "isFemale", false, "isAlive", true, "spouseId", ""))));
+                    RelationshipsStore.UpsertRelationshipObservedHeroes(connection, TestDict(
+                        "hero", historicalTarget, "day", 40d, "ts", 5L, "hash", "historical_target_observation",
+                        "profile", Json.Serialize(TestDict("heroStringId", historicalTarget,
+                            "isFemale", true, "isAlive", true, "spouseId", "historical_later_spouse"))));
+                    RelationshipsStore.InsertRelationshipDirectorActions2(connection, TestDict(
+                        "id", historicalMarriage, "type", "marriage", "day", 5d, "actor", historicalActor,
+                        "target", historicalTarget, "ts", 1L, "payload", Json.Serialize(TestDict(
+                            "source", "mbti_relationship_lifecycle", "route", "mutual_affinity",
+                            "pairKey", AmbientPairKey(historicalActor, historicalTarget), "timelineId", "main"))));
+                    RelationshipsStore.UpdateRelationshipDirectorActions7(connection, TestDict(
+                        "id", historicalMarriage, "status", "completed", "ts", 2L, "result",
+                        Json.Serialize(TestDict("status", "completed", "worldDay", 5.25d))));
+                    RepairUnconfirmedOrganicMarriageHistory(connection);
+                    add("marriage_history_survives_later_nonreciprocal_observation",
+                        ReadString(RelationshipsStore.SelectRelationshipDirectorActions5(connection,
+                            TestDict("id", historicalMarriage)).SingleOrDefault(), "status", "") == "completed"
+                        && RelationshipsStore.SelectEvents3(connection, TestDict("id", historicalEvent)).Count == 1,
+                        "A later change in spouse observations does not invalidate a completed historical marriage or delete its event.");
+
                     HashSet<string> schemaTables = new HashSet<string>(RelationshipsStore.SelectSqliteMaster8(connection)
                         .Select(item => ReadString(item, "name", "")), StringComparer.OrdinalIgnoreCase);
                     string[] retiredTables =

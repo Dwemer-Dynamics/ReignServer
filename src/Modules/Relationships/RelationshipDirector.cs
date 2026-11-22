@@ -160,36 +160,13 @@ namespace ReignBetaServer
                 bool sameSex = ReadBool(actorProfile, "isFemale", false)
                     == ReadBool(targetProfile, "isFemale", false);
                 bool duplicateReports = group.Count() > 1;
-                bool bothAlive = ReadBool(actorProfile, "isAlive", false)
-                    && ReadBool(targetProfile, "isAlive", false);
-                bool bothUnmarried = string.IsNullOrWhiteSpace(
-                        ReadString(actorProfile, "spouseId", ""))
-                    && string.IsNullOrWhiteSpace(
-                        ReadString(targetProfile, "spouseId", ""));
-                double latestReportedDay = group.Max(row =>
-                {
-                    Dictionary<string, object> result = TryParseJsonObject(
-                        ReadString(row, "result_json", "{}"))
-                        ?? new Dictionary<string, object>();
-                    return ReadDouble(result, "worldDay",
-                        ReadDouble(row, "world_day", 0d));
-                });
-                double observedThrough = Math.Min(
-                    ReadDouble(actorObservation, "last_observed_day", -1d),
-                    ReadDouble(targetObservation, "last_observed_day", -1d));
-                bool laterNonreciprocalObservation = bothAlive
-                    && observedThrough >= Math.Floor(latestReportedDay) + 1d;
-                if (!sameSex && !duplicateReports
-                    && !laterNonreciprocalObservation)
+                // Current spouse observations cannot disprove a completed historical marriage.
+                if (!sameSex && !duplicateReports)
                     continue;
 
                 string reason = sameSex
                     ? "Native marriage model does not support this same-sex couple."
-                    : duplicateReports
-                        ? "Repeated completed reports lacked reciprocal native spouse state."
-                        : bothUnmarried
-                            ? "A later native observation confirmed that the marriage did not take effect."
-                            : "A later native observation confirmed that the marriage was not reciprocal.";
+                    : "Repeated completed reports lacked reciprocal native spouse state.";
                 blockedPairs[group.Key] = reason;
                 invalidActions.AddRange(group);
             }
