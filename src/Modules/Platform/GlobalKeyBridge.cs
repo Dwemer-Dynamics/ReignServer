@@ -273,12 +273,23 @@ namespace ReignBetaServer
         private static extern int NativeLstat(string path, byte[] buffer);
 
         // Linux x86_64 glibc struct stat: st_mode at 24, st_uid at 28. Other platforms report nothing (fail closed).
-        private static bool LinuxLstat(string path, out uint mode, out uint uid)
+        private static bool LinuxLstat(string path, out uint mode, out uint uid) =>
+            LinuxLstat(path, out mode, out uid, out _, out _);
+
+        private static bool LinuxLstat(string path, out uint mode, out uint uid, out ulong links, out int error)
         {
             mode = uid = 0;
+            links = 0;
+            error = 0;
             if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.X64) return false;
             var buffer = new byte[256];
-            if (NativeLstat(path, buffer) != 0) return false;
+            if (NativeLstat(path, buffer) != 0)
+            {
+                error = Marshal.GetLastPInvokeError();
+                return false;
+            }
+
+            links = BitConverter.ToUInt64(buffer, 16);
             mode = BitConverter.ToUInt32(buffer, 24);
             uid = BitConverter.ToUInt32(buffer, 28);
             return true;
