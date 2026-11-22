@@ -564,9 +564,66 @@ namespace ReignBetaServer
             {
                 PersistenceService.RequireSaveSyncPathAvailable(path);
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
-                File.AppendAllText(path, Json.Serialize(row ?? new Dictionary<string, object>()) + Environment.NewLine, Encoding.UTF8);
+                string line = Json.Serialize(row ?? new Dictionary<string, object>()) + Environment.NewLine;
+                if (IsDialogueHistoryPath(path)) AppendDialogueHistoryLineLocked(path, line, durable: false);
+                else File.AppendAllText(path, line, Encoding.UTF8);
             }
             PersistenceService.MarkSaveSyncActiveStateDirtyForPath(path);
+        }
+
+        internal static bool IsDialogueHistoryPath(string path) =>
+            string.Equals(Path.GetFileName(path), "dialogue.jsonl", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(Path.GetFileName(Path.GetDirectoryName(path)), "history", StringComparison.OrdinalIgnoreCase);
+
+        internal static Dictionary<string, object> ParseDialogueHistoryLine(string line)
+        {
+            try { return Json.Deserialize<Dictionary<string, object>>(line); }
+            catch (System.Text.Json.JsonException) { return null; }
+        }
+
+        internal static void AppendDurableJsonLineIfAbsent(string path, Dictionary<string, object> row,
+            Func<Dictionary<string, object>, bool> existingMatch)
+        {
+            PersistenceService.ThrowIfCampaignRequestReplaced();
+            lock (Program.FileLock)
+            {
+                PersistenceService.RequireSaveSyncPathAvailable(path);
+                bool alreadyWritten = File.Exists(path) && File.ReadLines(path, Encoding.UTF8)
+                    .Select(ParseDialogueHistoryLine)
+                    .Any(line => line != null && existingMatch(line));
+                if (alreadyWritten)
+                {
+                    // The previous writer may have stopped before flushing
+                    // the bytes, even though this process can already read them.
+                    using var stream = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.Read);
+                    stream.Flush(flushToDisk: true);
+                }
+                else
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(path));
+                    AppendDialogueHistoryLineLocked(path, Json.Serialize(row) + Environment.NewLine, durable: true);
+                }
+            }
+            // A retry may find a line written just before the previous process
+            // stopped. Complete dirty-state bookkeeping even on that path.
+            PersistenceService.MarkSaveSyncActiveStateDirtyForPath(path);
+        }
+
+        private static void AppendDialogueHistoryLineLocked(string path, string line, bool durable)
+        {
+            using var stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+            if (stream.Length == 0)
+                stream.Write(Encoding.UTF8.GetPreamble());
+            else
+            {
+                stream.Seek(-1, SeekOrigin.End);
+                // Keep an interrupted older line byte-for-byte, but do not join
+                // it to the next valid entry. History readers skip invalid rows.
+                if (stream.ReadByte() != '\n')
+                    stream.Write(Encoding.UTF8.GetBytes(Environment.NewLine));
+            }
+            stream.Write(Encoding.UTF8.GetBytes(line));
+            if (durable) stream.Flush(flushToDisk: true);
         }
 
         internal static void AppendBoundedJsonLineToPath(
