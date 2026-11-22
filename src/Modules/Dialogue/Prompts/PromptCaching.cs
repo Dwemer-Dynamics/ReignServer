@@ -190,8 +190,9 @@ namespace ReignBetaServer
             const int finalRequestReserve = 2048;
             int inputAllowance = ReadInt(capacity, "inputAllowance", ConversationUnverifiedInputLimit);
             int target = Math.Min(targetOverride > 0 ? targetOverride : 32000 * 3, inputAllowance * 3);
+            string liveTemplate = PromptService.LoadPromptTemplate(templateName);
             Func<string> assemble = () => AssembleConversationLiveTurn(templateName, values,
-                conversationScenePrompt, roleAttribution, relationship);
+                conversationScenePrompt, roleAttribution, relationship, liveTemplate);
             Func<string, int> total = live => (globalPrefix ?? "").Length + (characterPrefix ?? "").Length + live.Length;
             Func<string, int> serializedEstimate = live => EstimateContinuityTokens(Json.Serialize(new[] {
                 TestDict("role", "system", "content", globalPrefix ?? ""),
@@ -246,24 +247,57 @@ namespace ReignBetaServer
             var optionalRecords = OrderPromptEvidenceRecords(contextRecords.Select(r => (Record: r, Section: "selectedContextAndMemory"))
                 .Concat(transcriptRecords.Select(r => (Record: r, Section: "canonicalTranscript"))))
                 .Where(item => !item.Record.Required).Reverse().ToList();
-            foreach (var item in optionalRecords)
+            if (finalEstimate > messageAllowance && optionalRecords.Count > 0)
             {
-                if (finalEstimate <= messageAllowance) break;
-                (item.Section == "canonicalTranscript" ? transcriptRecords : contextRecords).Remove(item.Record);
-                foreach (var decision in actions.OfType<Dictionary<string, object>>().Where(d =>
-                    ReadString(d, "section", "") == item.Section && ReadString(d, "sourceId", "") == item.Record.SourceId))
+                var dropOrder = optionalRecords.Select((item, index) => (item.Record, Index: index))
+                    .ToDictionary(item => item.Record, item => item.Index);
+                var orderedContext = contextRecords.OrderBy(record => record.Order).ToArray();
+                var orderedTranscript = transcriptRecords.OrderBy(record => record.Order).ToArray();
+                int lastProbe = 0;
+                void Probe(int count)
                 {
+                    bool Keep(ContinuityPromptRecord record) => !dropOrder.TryGetValue(record, out int index) || index >= count;
+                    context = string.Join("\n\n", orderedContext.Where(Keep).Select(record => record.Text));
+                    transcript = string.Join("\n\n", orderedTranscript.Where(Keep).Select(record => record.Text));
+                    values["contextPullText"] = context;
+                    values[transcriptValueKey] = transcript;
+                    liveTurn = assemble();
+                    finalEstimate = serializedEstimate(liveTurn);
+                    lastProbe = count;
+                }
+
+                // With a fixed template, removing whole records cannot increase the
+                // escaped message size. Find the same first fitting removal count.
+                int lower = 0;
+                int upper = 1;
+                Probe(upper);
+                while (finalEstimate > messageAllowance && upper < optionalRecords.Count)
+                {
+                    lower = upper;
+                    upper += Math.Min(upper, optionalRecords.Count - upper);
+                    Probe(upper);
+                }
+                if (finalEstimate <= messageAllowance)
+                {
+                    while (upper - lower > 1)
+                    {
+                        int middle = lower + (upper - lower) / 2;
+                        Probe(middle);
+                        if (finalEstimate <= messageAllowance) upper = middle;
+                        else lower = middle;
+                    }
+                }
+                if (lastProbe != upper) Probe(upper);
+
+                var dropped = optionalRecords.Take(upper).Select(item => (item.Section, item.Record.SourceId)).ToHashSet();
+                foreach (var decision in actions.OfType<Dictionary<string, object>>())
+                {
+                    if (!dropped.Contains((ReadString(decision, "section", ""), ReadString(decision, "sourceId", "")))) continue;
                     decision["retained"] = false;
                     decision["reason"] = "optional_whole_record_exceeds_serialized_token_allowance";
                 }
-                context = string.Join("\n\n", contextRecords.OrderBy(r => r.Order).Select(r => r.Text));
-                transcript = string.Join("\n\n", transcriptRecords.OrderBy(r => r.Order).Select(r => r.Text));
-                values["contextPullText"] = context;
-                values[transcriptValueKey] = transcript;
-                liveTurn = assemble();
-                finalEstimate = serializedEstimate(liveTurn);
             }
-            var structure = CreateConversationTemplateSlots(PromptService.LoadPromptTemplate(templateName), transcriptValueKey);
+            var structure = CreateConversationTemplateSlots(liveTemplate, transcriptValueKey);
             structure.MarkedLiveTurn = AssembleConversationLiveTurn(templateName, values,
                 conversationScenePrompt, roleAttribution, relationship, structure.Template);
             if (NormalizePromptSegment(structure.WithoutMarkers(structure.MarkedLiveTurn)) != NormalizePromptSegment(liveTurn))

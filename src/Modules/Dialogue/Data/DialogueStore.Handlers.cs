@@ -133,6 +133,23 @@ WHERE owner_id=$owner_id AND status='active'
 ORDER BY ts DESC LIMIT 400;", parameters, transaction);
         }
 
+        internal static List<Dictionary<string, object>> SelectMemoryConsolidationPage(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
+        {
+            return ReignDatabase.QuerySql(connection, @"SELECT memory_id,ts,source,tags_json,participants_json,location_id,payload_json
+FROM memories WHERE owner_id=$owner_id AND status='active'
+AND (NOT $has_cursor OR ts < $ts OR (ts = $ts AND memory_id COLLATE ""C"" > $id))
+ORDER BY ts DESC,memory_id COLLATE ""C"" LIMIT $limit;", parameters, transaction);
+        }
+
+        internal static List<Dictionary<string, object>> SelectMemoryConsolidationRows(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
+        {
+            return ReignDatabase.QuerySql(connection, @"SELECT * FROM memories
+WHERE owner_id=$owner_id AND status='active'
+AND memory_id IN (SELECT jsonb_array_elements_text(CAST($ids AS jsonb)));", parameters, transaction);
+        }
+
         internal static void UpsertSummaries3(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             ReignDatabase.ExecuteSql(connection, @"INSERT INTO summaries(

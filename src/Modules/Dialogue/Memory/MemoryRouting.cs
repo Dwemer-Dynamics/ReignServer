@@ -484,7 +484,10 @@ namespace ReignBetaServer
         }
 
         internal static string RenderExactHistoryTurn(Dictionary<string, object> turn,
-            DialogueService.KnowledgeAccessContext knowledge)
+            DialogueService.KnowledgeAccessContext knowledge) => RenderExactHistoryTurn(turn, knowledge, npcSpeechOnly: false);
+
+        private static string RenderExactHistoryTurn(Dictionary<string, object> turn,
+            DialogueService.KnowledgeAccessContext knowledge, bool npcSpeechOnly)
         {
             turn = turn ?? new Dictionary<string, object>();
             string role = NormalizeMemoryCategory(ReadString(turn, "role", ""));
@@ -498,7 +501,18 @@ namespace ReignBetaServer
             // projection. A second verb heuristic can erase a valid clause that
             // starts mid-sentence. Retrieval's source/audience gates still apply.
             bool interpretedPlayer = HasValidatedPlayerSourceProjection(turn);
-            if (knowledge != null && !interpretedPlayer && published == null)
+            if (npcSpeechOnly && role == "npc")
+            {
+                // The replay above verifies only original rows. Bound the resulting
+                // body here before any reader-facing formatting or source evidence.
+                var projection = ProjectConversationNarration(body, ReadString(turn, "speaker_id", ""), knowledge?.NpcId ?? "");
+                var spoken = ReadDictionaryList(projection, "spans")
+                    .Where(span => ReadString(span, "kind", "") == "spoken_statement")
+                    .Select(span => ReadString(span, "text", "").Trim()).Where(text => text.Length > 0);
+                body = string.Join("\n", spoken);
+                if (body.Length == 0) return "";
+            }
+            else if (knowledge != null && !interpretedPlayer && published == null)
             {
                 if (role.Equals("player", StringComparison.OrdinalIgnoreCase)
                     && ReadString(turn, "speaker_id", "") != knowledge.NpcId)

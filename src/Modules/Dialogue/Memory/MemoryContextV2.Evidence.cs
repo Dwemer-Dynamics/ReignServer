@@ -551,9 +551,26 @@ namespace ReignBetaServer
             Dictionary<string, object> row, MemoryQueryPlan plan, DialogueService.KnowledgeAccessContext knowledge, double score)
         {
             string key = table == "summaries" ? "summary_id" : table == "memories" ? "memory_id" : table == "beliefs" ? "belief_id" : "comprehension_id";
+            var result = new List<MemoryEvidence>();
+            if (table == "summaries" && RequiresSharedSceneSourceProjection(row, knowledge.NpcId))
+            {
+                var scene = ProjectSharedSceneSummary(connection, row, knowledge);
+                if (scene != null)
+                {
+                    // Relevance scores do not identify the bounded source view.
+                    scene.Remove("precisionRank");
+                    scene.Remove("vectorSemanticScore");
+                    var evidence = EvidenceFromRow(scene, key, "Source-bound shared scene excerpt:\n" + ReadString(scene, "summary", ""),
+                        "shared_scene_excerpt", plan.Observer, false, score);
+                    // The excerpt grants neither full-turn credit nor a generic session expansion.
+                    evidence.Session = "";
+                    result.Add(evidence);
+                }
+                return result;
+            }
+
             var originals = ReadConversationDerivativeOriginals(connection, table, row);
             var sources = originals.Where(t => PrecisionTurnVisible(t, plan.Observer, knowledge, connection)).ToList();
-            var result = new List<MemoryEvidence>();
             bool subjective = table == "beliefs" || table == "comprehension";
             if (subjective && originals.Count == sources.Count)
                 result.Add(EvidenceFromRow(row, key, "Private " + table + " of " + plan.Observer + ": " + ReadFirstString(row, "claim", "text"),

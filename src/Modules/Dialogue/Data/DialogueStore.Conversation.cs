@@ -423,6 +423,15 @@ WHERE input_id=$id AND restore_generation=$generation;", parameters, transaction
             return ReignDatabase.QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$event AND status='active' ORDER BY accepted_sequence;", parameters, transaction);
         }
 
+        internal static List<Dictionary<string, object>> SelectSharedSceneSummaryTurns(ReignDbConnection connection,
+            bool byTurnId, Dictionary<string, object> parameters)
+        {
+            string key = byTurnId ? "turn_id" : "event_id";
+            return ReignDatabase.QuerySql(connection, @"SELECT * FROM conversation_turns
+WHERE session_id=$session AND status='active' AND " + key + @" IN (SELECT jsonb_array_elements_text($ids::jsonb))
+ORDER BY accepted_sequence DESC,turn_order DESC,ts DESC,turn_id DESC LIMIT $limit;", parameters);
+        }
+
         internal static List<Dictionary<string, object>> SelectConversationTurns26(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             return ReignDatabase.QuerySql(connection, @"SELECT t.*,s.npc_id,s.player_id,s.payload_json AS session_payload

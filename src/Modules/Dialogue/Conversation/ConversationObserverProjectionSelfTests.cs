@@ -177,6 +177,89 @@ namespace ReignBetaServer
                     Check("read_projection_does_not_rewrite_history", ReadString(DialogueSelfTestStore.SelectMemories5(connection).Single(), "summary", "").Contains(secret));
                     var missing = new Dictionary<string, object>(legacy) { ["event_id"] = "missing_original" };
                     Check("unverifiable_private_derivative_withheld", ProjectRetrievedConversationMemories(connection, new List<Dictionary<string, object>> { missing }, bystander).Count == 0);
+                    const string unsupported = "Arin regretted sheltering Orel.";
+                    var shared = TestDict("summary_id", "d2_legacy_scene", "summary_type", "scene", "owner_id", "npc_a",
+                        "scope", "scene:observer_scene", "summary", unsupported, "source_events_json", Json.Serialize(new[] { "observer_event" }));
+                    var bounded = ProjectRetrievedConversationMemories(connection, new() { shared }, bystander).SingleOrDefault();
+                    string boundedText = ReadString(bounded, "summary", "");
+                    Check("shared_scene_legacy_summary_uses_eligible_canonical_speech", boundedText.Contains("It survived the journey.")
+                        && boundedText.Contains("[source=observer_source role=npc]") && !boundedText.Contains(unsupported)
+                        && !boundedText.Contains(secret) && !boundedText.Contains("turns the stem")
+                        && ReadString(shared, "summary", "") == unsupported);
+                    var replayReader = DialogueService.BuildKnowledgeAccessContext("npc_b", "player", "town", payload);
+                    replayReader.PlayerIdentityUnknown = false;
+                    var replaySource = new PublishedPartyReplayRow("observer_source", ReadString(original, "exchange_id", ""),
+                        "npc_a", ReadString(original, "speaker_name", ""), "npc", ConversationTurnTextForRecall(original),
+                        ReadLong(original, "accepted_sequence", 0), ReadDouble(original, "world_day", 0d));
+                    var replayView = new PublishedPartyReplayView(campaign, replayReader.NpcId, replayReader.PlayerId,
+                        replayReader.TimelineId, "observer_scene", "D2 generated replay", replayReader.AsOfAcceptedSequence,
+                        replayReader.WorldDay, participants.ToArray(), new() { replaySource }, new[] { "observer_source" }, "test", "test");
+                    replayView.BindRead(campaign, replayReader, "D2 generated replay");
+                    var replayBounded = ProjectRetrievedConversationMemories(connection, new() { shared }, replayReader).SingleOrDefault();
+                    bool mutatedSourceRefused = false;
+                    try
+                    {
+                        var tampered = new Dictionary<string, object>(original) { ["text"] = "It survived the journey." };
+                        RenderExactHistoryTurn(tampered, replayReader, npcSpeechOnly: true);
+                    }
+                    catch (InvalidOperationException ex) when (ex.Message.Contains("isolated DB identity", StringComparison.Ordinal))
+                    { mutatedSourceRefused = true; }
+                    string replayText = ReadString(replayBounded, "summary", "");
+                    Check("shared_scene_replay_verifies_original_before_bounding_spoken_view",
+                        mutatedSourceRefused && RenderExactHistoryTurn(original, replayReader).Contains(secret)
+                        && replayText.Contains("It survived the journey.") && !replayText.Contains(secret)
+                        && !replayText.Contains("turns the stem") && ReadString(original, "text", "") == reply);
+                    var projectedPayload = TryParseJsonObject(ReadString(bounded, "payload_json", "{}"));
+                    var projectedPins = ReadDictionaryList(projectedPayload, "sourceReferences");
+                    var lateEvidence = EvidenceFromRow(bounded, "summary_id", boundedText, "recent_summary", "npc_b", true, 118);
+                    var missingPins = CloneDictionary(bounded);
+                    projectedPayload.Remove("sourceReferences");
+                    missingPins["payload_json"] = Json.Serialize(projectedPayload);
+                    Check("shared_scene_late_summary_hash_commits_bounded_pins_without_full_turn_credit",
+                        projectedPins.Count == 1 && ReadString(projectedPins[0], "sourceId", "") == "observer_source"
+                        && ReadString(projectedPins[0], "sourceHash", "") == MemorySourceHash(new[] { original })
+                        && ReadString(projectedPins[0], "viewHash", "") == PromptHash(boundedText)
+                        && DialogueService.TextListFromJson(ReadString(bounded, "source_events_json", "[]")).SequenceEqual(new[] { "observer_event" })
+                        && lateEvidence.SourceTurns.Count == 0
+                        && lateEvidence.SourceHash != EvidenceFromRow(missingPins, "summary_id", boundedText, "recent_summary", "npc_b", true, 118).SourceHash);
+                    Check("shared_scene_lexical_shortcut_never_publishes_unbound_paraphrase",
+                        ProjectRetrievedConversationMemories(connection, new() { new Dictionary<string, object>(shared)
+                            { ["source_events_json"] = Json.Serialize(new[] { "missing_event" }) } }, bystander).Count == 0);
+                    var stagedScene = PrepareStagedSceneMemory(TestDict("npc_id", "npc_a"), new() { original }, "main");
+                    var exactReference = ReadDictionaryList(stagedScene, "sourceReferences").Single();
+                    var modern = new Dictionary<string, object>(shared) { ["payload_json"] = Json.Serialize(TestDict(
+                        "sessionId", "observer_scene", "sourceReferences", new[] { exactReference },
+                        "originalSourceRecords", new[] { unsupported })) };
+                    var exactSummary = ProjectRetrievedConversationMemories(connection, new() { modern }, bystander).SingleOrDefault();
+                    Check("shared_scene_modern_proof_rebinds_exact_original_and_omits_derivative_payload",
+                        ReadString(exactSummary, "summary", "").Contains("It survived the journey.")
+                        && !ReadString(exactSummary, "payload_json", "").Contains(unsupported));
+                    exactReference["sourceHash"] = "old_source_text";
+                    modern["payload_json"] = Json.Serialize(TestDict("sessionId", "observer_scene", "sourceReferences", new[] { exactReference }));
+                    Check("shared_scene_stale_modern_receipt_has_no_legacy_downgrade",
+                        ProjectRetrievedConversationMemories(connection, new() { modern }, bystander).Count == 0);
+                    var elsewhere = new Dictionary<string, object>(shared) { ["scope"] = "scene:different_session" };
+                    var outsider = DialogueService.BuildKnowledgeAccessContext("npc_outside", "player", "town", payload);
+                    Check("shared_scene_rebind_still_checks_session_asof_and_audience",
+                        ProjectRetrievedConversationMemories(connection, new() { elsewhere }, bystander).Count == 0
+                        && ProjectRetrievedConversationMemories(connection, new() { shared }, earlier).Count == 0
+                        && ProjectRetrievedConversationMemories(connection, new() { shared }, outsider).Count == 0);
+                    var nativeSummary = TestDict("summary_id", "d2_native", "summary_type", "world_event", "scope", "public_calendar",
+                        "visibility", "public", "summary", "Town bell sounded at dawn.");
+                    Check("shared_scene_leaves_own_summary_and_native_public_evidence",
+                        ReferenceEquals(ProjectRetrievedConversationMemories(connection, new() { shared }, owner).SingleOrDefault(), shared)
+                        && ReferenceEquals(ProjectRetrievedConversationMemories(connection, new() { nativeSummary }, bystander).SingleOrDefault(), nativeSummary));
+                    const string playerStory = "*I pass the blue spindle across the table.* This is yours.";
+                    InsertConversationTurn(connection, "d2_player_source", "observer_scene", "d2_player_event", 2, "d2_player_exchange",
+                        "player", "player", "Player", playerStory, "party_chat", 10d, 20L, "town", participants, payload);
+                    var playerSummary = new Dictionary<string, object>(shared)
+                    { ["source_events_json"] = Json.Serialize(new[] { "d2_player_event" }) };
+                    Check("shared_scene_preserves_explicit_eligible_player_story",
+                        ReadString(ProjectRetrievedConversationMemories(connection, new() { playerSummary }, bystander).SingleOrDefault(),
+                            "summary", "").Contains(playerStory));
+
+                    VerifyRankedSharedSceneProjection(connection, campaign, payload, bystander, original, Check);
+
                     var link = TestDict("relatedTurnId", "observer_source", "relationKind", "correction", "relatedQuote", secret);
                     Check("private_narration_cannot_ground_other_observer_link", ConversationContinuityLinkError(connection, link, "npc_b", "main", 10d) == "related_source_outside_observer_scope");
                 }
@@ -226,6 +309,72 @@ namespace ReignBetaServer
             catch (Exception ex) { Check("suite_exception", false, DialogueService.LimitText(ex.ToString(), 2200)); }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             return results;
+        }
+
+        private static void VerifyRankedSharedSceneProjection(ReignDbConnection connection, string campaign,
+            Dictionary<string, object> context, DialogueService.KnowledgeAccessContext reader,
+            Dictionary<string, object> original, Action<string, bool, object> check)
+        {
+            const string query = "dahlia", legacyId = "d2_rank_event_only", missingId = "d2_rank_missing",
+                staleId = "d2_rank_stale", ownedId = "d2_rank_owned";
+            const string legacySentinel = "unboundparaphrase", missingSentinel = "missingprose",
+                staleSentinel = "stalebindingprose", ownedSentinel = "authoredrecollection";
+            void Seed(string id, string owner, string eventId, string marker, Dictionary<string, object> binding)
+            {
+                string stored = query + " " + marker;
+                var known = new[] { owner, reader.NpcId };
+                DialogueStore.UpsertSummaries(connection, TestDict("id", id, "scope", "scene:observer_scene", "owner", owner,
+                    "summary", stored, "events", Json.Serialize(new[] { eventId }), "start", 20L, "end", 20L, "count", 1,
+                    "location", "town", "participants", Json.Serialize(known), "known", Json.Serialize(known),
+                    "tags", "[]", "updated", 21L, "importance", 0.5d, "confidence", 0.8d, "status", "active",
+                    "source", "conversation_scene", "embedding", "not_indexed", "lane", "interpersonal_history",
+                    "payload", Json.Serialize(binding)));
+                DialogueService.InsertSummaryFts(connection, id, stored, new List<string>(), known.ToList());
+            }
+
+            Seed(legacyId, "npc_a", "observer_event", legacySentinel, TestDict("timelineId", "main"));
+            Seed(missingId, "npc_a", "d2_absent_event", missingSentinel, TestDict("timelineId", "main"));
+            var reference = ReadDictionaryList(PrepareStagedSceneMemory(TestDict("npc_id", "npc_a"), new() { original }, "main"),
+                "sourceReferences").Single();
+            reference["sourceHash"] = "stale_original";
+            Seed(staleId, "npc_a", "observer_event", staleSentinel,
+                TestDict("timelineId", "main", "sessionId", "observer_scene", "sourceReferences", new[] { reference }));
+            LinkMemorySource(connection, "summary", staleId, "turn", ReadString(original, "turn_id", ""), 0);
+            Seed(ownedId, reader.NpcId, "d2_owner_unbound_event", ownedSentinel, TestDict("timelineId", "main"));
+
+            var plan = PlanMemoryQuery(reader.NpcId, reader.PlayerId, query, context);
+            var lexical = SearchSummaryFts(connection, plan.Terms, 24, reader);
+            var eligible = QueryKnownRows(connection, "summaries", reader, "status='active'", 16);
+            var legacyRow = eligible.Single(row => ReadString(row, "summary_id", "") == legacyId);
+            var staleRow = eligible.Single(row => ReadString(row, "summary_id", "") == staleId);
+            check("ranked_shared_scene_fixtures_enter_fts_and_have_actual_stale_link",
+                new[] { legacyId, missingId, staleId, ownedId }.All(id => lexical.Contains(id))
+                && ReadConversationDerivativeOriginals(connection, "summaries", staleRow).Any(turn =>
+                    ReadString(turn, "turn_id", "") == ReadString(original, "turn_id", "")), lexical);
+
+            var settings = TestDict("enableSemanticMemory", false, "memorySelectionMode", "off", "enableMinime", false,
+                "memoryPrecisionOrdinaryTokens", 8000);
+            var packet = BuildPrecisionMemoryPacket(campaign, reader.NpcId, reader.PlayerId, "town", query, context, settings, shadow: false);
+            var audit = ReadDictionary(packet, "precisionEvidence");
+            var records = ReadDictionaryList(audit, "records");
+            string prompt = ReadString(packet, "memoryPacket", "");
+            var ranked = records.SingleOrDefault(record => ReadString(record, "kind", "") == "shared_scene_excerpt"
+                && ReadString(record, "sourceId", "") == legacyId);
+            var expected = ProjectSharedSceneSummary(connection, legacyRow, reader);
+            check("ranked_shared_scene_legacy_events_reconstruct_without_full_turn_credit",
+                ranked != null && ReadString(audit, "mode", "") == "precision"
+                && ReadString(ranked, "rendered", "").Contains("It survived the journey.")
+                && !ReadString(ranked, "rendered", "").Contains("turns the stem")
+                && ReadString(ranked, "sourceHash", "") == MemorySourceHash(new[] { expected })
+                && ReadDictionaryList(ranked, "sourceTurns").Count == 0 && !prompt.Contains(legacySentinel), ranked);
+            check("ranked_shared_scene_missing_original_never_falls_back_to_paraphrase",
+                records.All(record => ReadString(record, "sourceId", "") != missingId) && !prompt.Contains(missingSentinel), null);
+            check("ranked_shared_scene_stale_modern_pin_rejects_durable_link_fallback",
+                records.All(record => ReadString(record, "sourceId", "") != staleId) && !prompt.Contains(staleSentinel), null);
+            check("ranked_shared_scene_keeps_reader_owned_legacy_recollection",
+                records.Any(record => ReadString(record, "sourceId", "") == ownedId
+                    && ReadString(record, "kind", "") == "unverified"
+                    && ReadString(record, "rendered", "").Contains(ownedSentinel)), null);
         }
     }
 }
