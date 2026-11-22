@@ -1039,7 +1039,8 @@ namespace ReignBetaServer
             return ClampDouble(value, 0d, 1d);
         }
 
-        internal static string BuildMemoryGroupKey(Dictionary<string, object> payload, string npcId, string playerId, string locationId, string prefix, long ts)
+        internal static string BuildMemoryGroupKey(Dictionary<string, object> payload, string npcId, string playerId,
+            string locationId, string prefix, long ts, Dictionary<string, object> settings = null)
         {
             payload = payload ?? new Dictionary<string, object>();
             string existing = ReadFirstString(payload, "memoryGroupKey", "memory_group_key");
@@ -1054,7 +1055,7 @@ namespace ReignBetaServer
                 return FirstNonEmpty(prefix, "memory") + ":" + explicitId.Trim();
             }
 
-            Dictionary<string, object> settings = SettingsService.LoadSettings();
+            settings ??= SettingsService.LoadSettings();
             int windowMinutes = Math.Max(5, Math.Min(240, ReadInt(settings, "memoryConsolidationWindowMinutes", 30)));
             long bucket = Math.Max(0, ts) / (windowMinutes * 60L);
             List<string> actors = MergeStringLists(new[] { npcId, playerId }, new List<string>())
@@ -1063,7 +1064,8 @@ namespace ReignBetaServer
             return FirstNonEmpty(prefix, "memory") + ":" + string.Join("+", actors.ToArray()) + ":" + (locationId ?? "") + ":" + bucket.ToString(CultureInfo.InvariantCulture);
         }
 
-        private static string MemoryGroupKeyFromRow(Dictionary<string, object> row, string ownerId)
+        private static string MemoryGroupKeyFromRow(Dictionary<string, object> row, string ownerId,
+            Dictionary<string, object> settings)
         {
             Dictionary<string, object> payload = TryParseJsonObject(ReadString(row, "payload_json", "")) ?? new Dictionary<string, object>();
             string existing = ReadFirstString(payload, "memoryGroupKey", "memory_group_key");
@@ -1083,7 +1085,8 @@ namespace ReignBetaServer
             string prefix = source.IndexOf("social", StringComparison.OrdinalIgnoreCase) >= 0 || source.IndexOf("event", StringComparison.OrdinalIgnoreCase) >= 0
                 ? "social_event"
                 : "conversation";
-            return BuildMemoryGroupKey(new Dictionary<string, object>(), ownerId, other, ReadString(row, "location_id", ""), prefix, ReadLong(row, "ts", 0));
+            return BuildMemoryGroupKey(new Dictionary<string, object>(), ownerId, other, ReadString(row, "location_id", ""),
+                prefix, ReadLong(row, "ts", 0), settings);
         }
 
         internal static string StoredConversationArtifactCorrelationId(
@@ -1117,7 +1120,40 @@ namespace ReignBetaServer
                     "liveTestCorrelationId"));
         }
 
-        internal static Dictionary<string, object> ConsolidateNpcMemory(string campaignId, string npcId, bool force, string requestedGroupKey)
+        private static List<IGrouping<string, Dictionary<string, object>>> SelectMemoryConsolidationGroups(
+            IEnumerable<Dictionary<string, object>> rows, string ownerId, string requestedGroupKey, bool verifiedOwnerSnapshot,
+            Dictionary<string, object> settings)
+        {
+            var matching = rows.Where(row =>
+                {
+                    string source = ReadString(row, "source", "");
+                    return source.IndexOf("dialogue", StringComparison.OrdinalIgnoreCase) >= 0
+                        || source.IndexOf("conversation", StringComparison.OrdinalIgnoreCase) >= 0
+                        || source.IndexOf("social_event", StringComparison.OrdinalIgnoreCase) >= 0
+                        || TextListFromJson(ReadString(row, "tags_json", "[]")).Any(tag =>
+                            tag.Equals("conversation", StringComparison.OrdinalIgnoreCase)
+                            || tag.Equals("event", StringComparison.OrdinalIgnoreCase));
+                })
+                .Select(row => (Key: MemoryGroupKeyFromRow(row, ownerId, settings), Row: row))
+                .Where(item => string.IsNullOrWhiteSpace(requestedGroupKey)
+                    || string.Equals(item.Key, requestedGroupKey, StringComparison.OrdinalIgnoreCase));
+
+            if (verifiedOwnerSnapshot)
+            {
+                // Named jobs already have the full active owner snapshot for their source hash.
+                // Apply the same 400-row lookback to eligible members of this group.
+                matching = matching.OrderByDescending(item => ReadLong(item.Row, "ts", 0))
+                    .ThenBy(item => ReadString(item.Row, "memory_id", ""), StringComparer.Ordinal)
+                    .Take(400);
+            }
+
+            return matching.GroupBy(item => item.Key, item => item.Row, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(group => group.Max(row => ReadLong(row, "ts", 0)))
+                .ToList();
+        }
+
+        internal static Dictionary<string, object> ConsolidateNpcMemory(string campaignId, string npcId, bool force,
+            string requestedGroupKey, List<Dictionary<string, object>> verifiedOwnerRows = null)
         {
             Dictionary<string, object> settings = SettingsService.LoadSettings();
             if (!force && !ReadBool(settings, "enableMemoryConsolidation", true))
@@ -1128,29 +1164,14 @@ namespace ReignBetaServer
             int minEvents = Math.Max(2, Math.Min(20, ReadInt(settings, "memoryConsolidationMinItems", 4)));
             int maxGroups = Math.Max(1, Math.Min(10, ReadInt(settings, "memoryConsolidationMaxGroups", 3)));
             int maxSourceItems = Math.Max(4, Math.Min(80, ReadInt(settings, "memoryConsolidationMaxSourceItems", 24)));
-            List<Dictionary<string, object>> candidates;
-            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+            List<Dictionary<string, object>> candidates = verifiedOwnerRows;
+            if (candidates == null)
             {
+                using ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId);
                 candidates = DialogueStore.SelectMemories10(connection, new Dictionary<string, object> { ["owner_id"] = npcId });
             }
 
-            candidates = candidates
-                .Where(row =>
-                {
-                    List<string> tags = TextListFromJson(ReadString(row, "tags_json", "[]"));
-                    string source = ReadString(row, "source", "");
-                    return tags.Any(tag => tag.Equals("conversation", StringComparison.OrdinalIgnoreCase) || tag.Equals("event", StringComparison.OrdinalIgnoreCase))
-                        || source.IndexOf("dialogue", StringComparison.OrdinalIgnoreCase) >= 0
-                        || source.IndexOf("conversation", StringComparison.OrdinalIgnoreCase) >= 0
-                        || source.IndexOf("social_event", StringComparison.OrdinalIgnoreCase) >= 0;
-                })
-                .ToList();
-
-            List<IGrouping<string, Dictionary<string, object>>> groups = candidates
-                .GroupBy(row => MemoryGroupKeyFromRow(row, npcId), StringComparer.OrdinalIgnoreCase)
-                .Where(group => string.IsNullOrWhiteSpace(requestedGroupKey) || string.Equals(group.Key, requestedGroupKey, StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(group => group.Max(row => ReadLong(row, "ts", 0)))
-                .ToList();
+            var groups = SelectMemoryConsolidationGroups(candidates, npcId, requestedGroupKey, verifiedOwnerRows != null, settings);
 
             List<Dictionary<string, object>> created = new List<Dictionary<string, object>>();
             foreach (IGrouping<string, Dictionary<string, object>> group in groups)

@@ -23,16 +23,17 @@ namespace ReignBetaServer
             DialogueSchema.CreateIndexMemoryBackgroundDue(connection);
         }
 
-        private static string MemoryJobSourceHash(ReignDbConnection connection, string type, string owner, string session)
+        private static List<Dictionary<string, object>> ReadMemoryJobSources(
+            ReignDbConnection connection, string type, string owner, string session)
         {
             if (type == "scene_summary")
-                return MemorySourceHash(DialogueStore.SelectConversationTurns58(connection, new Dictionary<string, object> { ["session"] = session }));
-            return MemorySourceHash(DialogueStore.SelectMemories8(connection, new Dictionary<string, object> { ["owner"] = owner }));
+                return DialogueStore.SelectConversationTurns58(connection, new Dictionary<string, object> { ["session"] = session });
+            return DialogueStore.SelectMemories8(connection, new Dictionary<string, object> { ["owner"] = owner });
         }
 
         private static string EnqueueMemoryJob(ReignDbConnection connection, string campaign, string type, string owner, string group, string session)
         {
-            string sourceHash = MemoryJobSourceHash(connection, type, owner, session);
+            string sourceHash = MemorySourceHash(ReadMemoryJobSources(connection, type, owner, session));
             string generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
             string jobId = "memory_" + PromptHash(campaign + "|" + type + "|" + owner + "|" + group + "|" + session
                 + "|" + sourceHash + "|" + MemoryPrecisionVersion + "|" + generation).Substring(0, 32);
@@ -101,15 +102,20 @@ namespace ReignBetaServer
                 try
                 {
                     string type = ReadString(job, "job_type", ""), owner = ReadString(job, "owner_id", ""), sessionId = ReadString(job, "session_id", "");
+                    string groupKey = ReadString(job, "group_key", "");
+                    List<Dictionary<string, object>> verifiedOwnerRows = null;
                     using (var connection = ReignDatabase.OpenCampaignConnection(campaignId))
                     {
-                        if (ReadString(job, "source_hash", "") != MemoryJobSourceHash(connection, type, owner, sessionId)
+                        var sourceRows = ReadMemoryJobSources(connection, type, owner, sessionId);
+                        if (ReadString(job, "source_hash", "") != MemorySourceHash(sourceRows)
                             || CurrentMemoryJob.Value.Generation != ReadString(ReadMemoryPrecisionState(connection), "restore_generation", ""))
                         {
                             FinishMemoryJob(connection, jobId, token, "superseded", new Dictionary<string, object> { ["reason"] = "source_changed" });
-                            EnqueueMemoryJob(connection, campaignId, type, owner, ReadString(job, "group_key", ""), sessionId);
+                            EnqueueMemoryJob(connection, campaignId, type, owner, groupKey, sessionId);
                             return;
                         }
+                        if (type == "memory_consolidation" && !string.IsNullOrWhiteSpace(groupKey))
+                            verifiedOwnerRows = sourceRows;
                     }
                     Dictionary<string, object> result;
                     if (type == "scene_summary")
@@ -136,7 +142,7 @@ namespace ReignBetaServer
                         }
                     }
                     else if (type == "memory_consolidation")
-                        result = DialogueService.ConsolidateNpcMemory(campaignId, owner, false, ReadString(job, "group_key", ""));
+                        result = DialogueService.ConsolidateNpcMemory(campaignId, owner, false, groupKey, verifiedOwnerRows);
                     else throw new InvalidOperationException("Unknown memory job type.");
                     using (var connection = ReignDatabase.OpenCampaignConnection(campaignId))
                     {
