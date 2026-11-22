@@ -260,13 +260,15 @@ ON CONFLICT(message_id) DO NOTHING;", parameters, transaction);
 
         internal static List<Dictionary<string, object>> SelectCommunicationHistory3(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
-            return ReignDatabase.QuerySql(connection, @"SELECT * FROM communication_history WHERE owner_id=$owner AND peer_id=$peer AND timeline_id=$timeline
-AND acquired_day<=$day AND acquired_ts<=$ts AND accepted_sequence<=$sequence ORDER BY acquired_day DESC,receipt_id LIMIT 30;", parameters, transaction);
-        }
-
-        internal static List<Dictionary<string, object>> SelectConversationTurns9(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
-        {
-            return ReignDatabase.QuerySql(connection, "SELECT text,participants_json,speaker_id FROM conversation_turns WHERE session_id=$id AND status='active';", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, @"SELECT sent.* FROM communication_history sent
+WHERE sent.owner_id=$owner AND sent.peer_id=$peer AND sent.timeline_id=$timeline
+AND sent.acquired_day<=$day AND sent.acquired_ts<=$ts AND sent.accepted_sequence<=$sequence
+AND EXISTS (
+    SELECT 1 FROM communication_history other WHERE other.owner_id=$peer AND other.peer_id=$owner
+    AND other.timeline_id=sent.timeline_id AND other.message_id=sent.message_id AND other.payload_json=sent.payload_json
+    AND other.acquired_day<=$day AND other.acquired_ts<=$ts AND other.accepted_sequence<=$sequence
+)
+ORDER BY sent.acquired_day DESC,sent.receipt_id LIMIT 30;", parameters, transaction);
         }
 
         internal static List<Dictionary<string, object>> SelectCommunicationMessages12(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)

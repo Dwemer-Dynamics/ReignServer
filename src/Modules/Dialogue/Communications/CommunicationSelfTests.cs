@@ -287,9 +287,30 @@ namespace ReignBetaServer
                     return TestDict("ok", true, "content", Json.Serialize(TestDict("body", "This stale reply must be discarded.", "answerKind", "opinion", "sourceQuote", "", "privacy", "public")));
                 });
                 Check("late_reply_cannot_write_across_restore_generation", DialogueSelfTestStore.SelectCommunicationMessages3(c).Count == 0);
+                const string groupSession = "communication_reply_group";
+                double evidenceDay = Math.Max(0d, due - 0.25d);
+                DialogueStore.InsertOrIgnoreConversationSessions(c, TestDict("id", groupSession, "campaign", campaign, "owner", "target",
+                    "ts", 102L, "day", evidenceDay, "participants", Json.Serialize(new[] { "target", "source", "player" }),
+                    "json", Json.Serialize(TestDict("timelineId", "main"))));
+                const string commonWords = "We discussed paying the teachers when the school opens.";
+                const string privateWords = "I expect an unannounced appointment at the winter court.";
+                InsertConversationTurn(c, "comm_reply_common", groupSession, "comm_reply_group", 0, "comm_reply_group", "npc",
+                    "target", "Target", commonWords, "party_chat", evidenceDay, 103L, "", new() { "target", "source", "player" },
+                    TestDict("timelineId", "main"));
+                InsertConversationTurn(c, "comm_reply_private", groupSession, "comm_reply_group", 1, "comm_reply_group", "npc",
+                    "target", "Target", privateWords, "party_chat", evidenceDay, 104L, "", new() { "target", "player" },
+                    TestDict("timelineId", "main"));
                 int replyCalls = 0;
-                ProcessCommunicationReplies(campaign, _ => { replyCalls++; return TestDict("ok", true, "content", Json.Serialize(TestDict(
-                    "body", "I think paying the teachers first is wise.", "answerKind", "opinion", "sourceQuote", "", "privacy", "public"))); });
+                bool wholeAudienceScoped = false;
+                ProcessCommunicationReplies(campaign, request => {
+                    replyCalls++;
+                    string prompt = ReadString(ReadDictionaryList(request, "messages").Last(), "content", "");
+                    wholeAudienceScoped = prompt.Contains(commonWords, StringComparison.Ordinal)
+                        && !prompt.Contains(privateWords, StringComparison.Ordinal);
+                    return TestDict("ok", true, "content", Json.Serialize(TestDict(
+                        "body", "I think paying the teachers first is wise.", "answerKind", "opinion", "sourceQuote", "", "privacy", "public")));
+                });
+                Check("reply_worker_sends_only_exact_turns_shared_with_addressed_peer", wholeAudienceScoped);
                 var returnMessage = DialogueSelfTestStore.SelectCommunicationMessages3(c).Single();
                 Check("one_reply_is_queued_after_acquisition", replyCalls == 1 && ReadString(returnMessage, "status", "") == "queued");
                 AdvanceCommunications(c, campaign, "main", due, people);
@@ -431,10 +452,15 @@ namespace ReignBetaServer
                 const string rememberedTerms = "The offer is 2,400 denars for the school; teachers must be paid before decoration.";
                 void LetterMemory(string id, string owner, string peer, string timeline, double day, long ts, long sequence, string body)
                 {
-                    DialogueSelfTestStore.InsertCommunicationHistory(c, TestDict("id", id, "timeline", timeline, "owner", owner, "peer", peer,
-                        "day", day, "ts", ts, "sequence", sequence, "json", Json.Serialize(TestDict("body", body, "speakerId", peer))));
+                    DialogueSelfTestStore.InsertCommunicationHistory(c, TestDict("id", id, "receipt", id + "_" + owner,
+                        "timeline", timeline, "owner", owner, "peer", peer, "day", day, "ts", ts, "sequence", sequence,
+                        "json", Json.Serialize(TestDict("body", body, "speakerId", "memory_sender"))));
                 }
                 LetterMemory("reply_memory_valid", "memory_receiver", "memory_sender", "reply_memory", 5, 100, 10, rememberedTerms);
+                LetterMemory("reply_memory_valid", "memory_sender", "memory_receiver", "reply_memory", 4, 90, 9, rememberedTerms);
+                LetterMemory("reply_memory_in_transit", "memory_receiver", "memory_sender", "reply_memory", 5, 100, 11, "IN_TRANSIT_CONFIDENCE");
+                LetterMemory("reply_memory_future_peer", "memory_receiver", "memory_sender", "reply_memory", 5, 100, 12, "FUTURE_PEER_CONFIDENCE");
+                LetterMemory("reply_memory_future_peer", "memory_sender", "memory_receiver", "reply_memory", 5, 151, 13, "FUTURE_PEER_CONFIDENCE");
                 LetterMemory("reply_memory_future_day", "memory_receiver", "memory_sender", "reply_memory", 11, 100, 11, "FUTURE_DAY_CONFIDENCE");
                 LetterMemory("reply_memory_future_ts", "memory_receiver", "memory_sender", "reply_memory", 5, 151, 12, "FUTURE_TIMESTAMP_CONFIDENCE");
                 LetterMemory("reply_memory_future_sequence", "memory_receiver", "memory_sender", "reply_memory", 5, 100, 21, "FUTURE_SEQUENCE_CONFIDENCE");
@@ -450,10 +476,20 @@ namespace ReignBetaServer
                     && ReadDictionaryList(acquiredContext, "replyEvidence").Count == 1);
                 Check("reply_letter_memory_keeps_owner_peer_timeline_and_asof_cutoffs", !acquiredMemory.Contains("CONFIDENCE", StringComparison.Ordinal));
                 var acquiredAnswer = ComposeCommunicationReply(campaign, acquiredQuestion, TestDict("body", "What amount was offered, and what must be paid first?"), acquiredContext,
-                    _ => TestDict("ok", true, "content", Json.Serialize(TestDict("body", "2,400 denars; teachers must be paid first.",
+                    _ => TestDict("ok", true, "content", Json.Serialize(TestDict("body", rememberedTerms,
                         "answerKind", "answered", "sourceQuote", rememberedTerms, "privacy", "personal"))));
                 Check("factual_answer_can_ground_on_acquired_letter", ReadBool(acquiredAnswer, "ok", false)
-                    && ReadString(acquiredAnswer, "sourceQuote", "") == rememberedTerms);
+                    && ReadString(acquiredAnswer, "sourceQuote", "") == rememberedTerms
+                    && ReadString(acquiredAnswer, "body", "") == "From our earlier exchange:\n“" + rememberedTerms + "”");
+                foreach (var sample in new[] {
+                    (Name: "extra_claim", Quote: rememberedTerms, Body: rememberedTerms + " The king already sent it."),
+                    (Name: "missing_condition", Quote: "The offer is 2,400 denars for the school", Body: "The offer is 2,400 denars for the school") })
+                {
+                    var answer = ComposeCommunicationReply(campaign, acquiredQuestion, TestDict("body", "What was offered?"), acquiredContext,
+                        _ => TestDict("ok", true, "content", Json.Serialize(TestDict("body", sample.Body,
+                            "answerKind", "answered", "sourceQuote", sample.Quote, "privacy", "personal"))));
+                    Check("factual_reply_rejects_" + sample.Name, !ReadBool(answer, "ok", true));
+                }
                 Check("unacquired_letters_cannot_support_factual_answer", !ReadBool(ComposeCommunicationReply(campaign, acquiredQuestion,
                     TestDict("body", "What was offered?"), acquiredContext, _ => TestDict("ok", true, "content", Json.Serialize(TestDict("body", "Invented terms.",
                         "answerKind", "answered", "sourceQuote", "FUTURE_DAY_CONFIDENCE", "privacy", "personal")))), "ok", true));
@@ -555,8 +591,9 @@ namespace ReignBetaServer
                     string system = ReadString(ReadDictionaryList(request, "messages").First(), "content", "");
                     directReplyFraming = system.Contains("IS your actual return letter", StringComparison.Ordinal)
                         && ReadString(directAskData, "body", "").Contains("named recipient mean you", StringComparison.Ordinal);
-                    return TestDict("ok", true, "content", Json.Serialize(TestDict("body", "The reference is Olive 17. No payment is authorized.", "answerKind", "answered",
-                        "sourceQuote", "Ask Pharon to repeat Olive 17 and whether this note authorizes payment; it authorizes no spending.", "privacy", "personal")));
+                    string received = ReadString(directAskData, "body", "");
+                    return TestDict("ok", true, "content", Json.Serialize(TestDict("body", received, "answerKind", "answered",
+                        "sourceQuote", received, "privacy", "personal")));
                 });
                 Check("first_received_question_is_addressed_to_recipient_for_actual_return_letter", directReplyFraming && ReadBool(directAnswer, "ok", false));
                 regressionPayload["conversationSessionId"] = "pharon_pronoun_regression";
