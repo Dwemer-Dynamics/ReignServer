@@ -238,6 +238,7 @@ namespace ReignBetaServer
             // Reign's local vector worker uses its own loopback port 5102.
             settings["vectorWorkerUrl"] = "http://127.0.0.1:5102";
             PersistInstalledSettingsSecrets(settings);
+            LlmProviderService.ApplySettingsProviderConcurrency(settings);
             return settings;
         }
 
@@ -375,13 +376,18 @@ namespace ReignBetaServer
             LlmProviderService.NormalizeLlmProviderSettings(settings);
             if(clearKeys.Count==0 && Json.Serialize(settings)==settingsBeforeMerge)
             {
+                if (settingsPathForTests == null) LlmProviderService.ApplySettingsProviderConcurrency(settings);
                 var unchanged=SettingsForUi(settings);unchanged["ok"]=true;unchanged["unchanged"]=true;return unchanged;
             }
             SanitizeBoundKeySlots(settings);
             settings["settingsRevision"] = DateTime.UtcNow.ToString("o");
             Directory.CreateDirectory(Path.GetDirectoryName(settingsPath));
             CampaignFileService.WriteJsonObject(settingsPath, settings);
-            if (settingsPathForTests == null) PersistInstalledSettingsSecrets(settings, clearKeys.Count > 0);
+            if (settingsPathForTests == null)
+            {
+                LlmProviderService.ApplySettingsProviderConcurrency(settings);
+                PersistInstalledSettingsSecrets(settings, clearKeys.Count > 0);
+            }
             applied = settings;
             invalidate = previousCodexSettingsIdentity != LlmProviderService.CodexSettingsIdentity(settings);
 
