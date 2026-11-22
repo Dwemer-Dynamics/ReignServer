@@ -1214,6 +1214,7 @@ namespace ReignBetaServer
             finally { WriteSaveSyncLedger(campaignId, originalLedger); }
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static void VerifyCampaignRetirementVectors(Action<string, bool, string> add,
             string campaignId)
         {
@@ -1301,6 +1302,7 @@ namespace ReignBetaServer
                 TryDeleteDirectory(CampaignPortraitCacheDirectory(campaignId));
             }
         }
+#endif
 
         private static void PrepareCampaignRetirementTestPoint(
             string campaignId,
