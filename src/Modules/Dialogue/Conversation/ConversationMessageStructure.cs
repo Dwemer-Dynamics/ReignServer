@@ -203,8 +203,9 @@ The final LATEST PLAYER TURN contains the current contribution, including its co
                     // and known IDs remain governed by the original formatter.
                     string actor = player ? "player" : own ? "responding_npc" : speakerId.Length > 0
                         ? "witness_" + PromptHash(speakerId).Substring(0, 16) : "unknown";
+                    // The first piece already carries the canonical exchange source list.
                     string metadata = Json.Serialize(TestDict("turnId", ConversationTranscriptSourceId(line),
-                        "actor", actor, "storedRole", role, "source", record.SourceId));
+                        "actor", actor, "storedRole", role));
                     messages.Add(TestDict("role", own ? "assistant" : "user", "content", label + " " + metadata + "\n" + piece));
                     pieces.Add(piece); structured++;
                 }
