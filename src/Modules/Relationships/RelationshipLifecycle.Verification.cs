@@ -14,6 +14,7 @@ namespace ReignBetaServer
             results.AddRange(RunAutonomousCorrespondenceSelfTests());
             results.AddRange(RunPlayerApproachSelfTests());
             results.AddRange(RunRelationshipLifecycleSelfTests());
+            results.AddRange(RunPregnancyChoiceSelfTests());
             results.AddRange(RunRelationshipFlingSelfTests());
             results.AddRange(RunArrangedMarriageSelfTests());
             results.AddRange(RunWorldRelationshipModelSelfTests());

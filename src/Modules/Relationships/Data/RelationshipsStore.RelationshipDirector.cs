@@ -633,13 +633,33 @@ SELECT roll_id,'main',period_index,leader_id,clan_id,world_day,chance,roll,urgen
 
         internal static List<Dictionary<string, object>> SelectConceptions2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
-            return ReignDatabase.QuerySql(connection, "SELECT * FROM conceptions WHERE attempt_id=$id LIMIT 1;", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, "SELECT * FROM conceptions WHERE attempt_id=$id LIMIT 2;", parameters, transaction);
         }
 
-        internal static void InsertConceptionAttempts(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static bool TryInsertPlayerConceptionAttempt(ReignDbConnection connection, Dictionary<string, object> parameters, ReignDbTransaction transaction = null)
         {
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO conception_attempts(attempt_id,source,event_id,mother_id,father_id,mother_age,chance,roll,success,world_day,payload_json,created_ts,status)
-VALUES($id,'player_dialogue_action',$event,$mother,$father,$age,$chance,$roll,$success,$day,$payload,$ts,$status);", parameters, transaction);
+            bool inserted = ReignDatabase.QuerySql(connection, @"INSERT INTO conception_attempts(attempt_id,source,event_id,mother_id,father_id,mother_age,chance,roll,success,world_day,payload_json,created_ts,status)
+VALUES($id,'player_dialogue_action',$event,$mother,$father,$age,$chance,$roll,$success,$day,$payload,$ts,$status)
+ON CONFLICT(attempt_id) DO NOTHING RETURNING attempt_id;", parameters, transaction).Count == 1;
+            if (inserted)
+            {
+                // QuerySql returns the winning attempt but does not perform the dirty marking of ExecuteSql.
+                string campaignId = ReignPostgreSqlStorage.CampaignIdForConnection(connection);
+                if (!string.IsNullOrWhiteSpace(campaignId))
+                {
+                    try { PersistenceService.MarkSaveSyncActiveStateDirty(campaignId); }
+                    catch { }
+                }
+            }
+            return inserted;
+        }
+
+        internal static List<Dictionary<string, object>> SelectPlayerConceptionActions(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
+        {
+            return ReignDatabase.QuerySql(connection, @"SELECT payload_json FROM relationship_director_actions
+WHERE action_type='start_conception' AND actor_id=$actor AND target_id=$target AND world_day=$day;
+", parameters, transaction);
         }
 
         internal static void InsertConceptions(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)

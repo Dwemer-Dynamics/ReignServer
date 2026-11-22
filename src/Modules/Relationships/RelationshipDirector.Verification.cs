@@ -59,6 +59,8 @@ namespace ReignBetaServer
                     &&ReadBool(proceededAgain,"idempotent",false)&&Math.Abs(ReadDouble(proceeded,"roll",-1d)-ReadDouble(proceededAgain,"roll",-2d))<double.Epsilon,
                     "Proceed performs one deterministic roll and retries return the same stored outcome.");
 
+                VerifyPlayerConceptionAtomicity(campaign, request, add);
+
                 Dictionary<string, object> gate=ActionPipelineService.NormalizeConceptionGate(new Dictionary<string, object>{{"needed",true},{"completed",true},{"confidence",0.95d}},"",false);
                 Dictionary<string, object> suppressed=ActionPipelineService.NormalizeConceptionGate(new Dictionary<string, object>{{"needed",true},{"completed",true},{"confidence",0.95d}},"*She inseminates him.*",true);
                 add("llm_gate_and_pull_out_suppression",
@@ -79,6 +81,95 @@ namespace ReignBetaServer
             }
             return rows;
         }
+
+        private static void VerifyPlayerConceptionAtomicity(string campaign,
+            Func<string, string, Dictionary<string, object>> request, Action<string, bool, string> add)
+        {
+            string WinningAttempt(string prefix) => Enumerable.Range(0, 1000).Select(i => prefix + i)
+                .First(id => StableUnit(id + "|player_conception") < PlayerConceptionChance(30d));
+            string attempt = WinningAttempt("d43_atomic_");
+            var key = new Dictionary<string, object> { ["id"] = attempt };
+            const string addConstraint = "ALTER TABLE relationship_director_actions ADD CONSTRAINT d43_fixture_reject_queue CHECK (action_type <> 'start_conception') NOT VALID;";
+            const string dropConstraint = "ALTER TABLE relationship_director_actions DROP CONSTRAINT d43_fixture_reject_queue;";
+            bool failedAtQueue = false;
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+            {
+                ReignDatabase.ExecuteSql(connection, addConstraint);
+                try { VerifyPlayerConceptionAttemptApi(request(attempt, "proceed")); }
+                catch (Npgsql.PostgresException ex) when (ex.SqlState == Npgsql.PostgresErrorCodes.CheckViolation
+                    && ex.ConstraintName == "d43_fixture_reject_queue") { failedAtQueue = true; }
+                finally { ReignDatabase.ExecuteSql(connection, dropConstraint); }
+                add("conception_queue_failure_rolls_back_whole_attempt", failedAtQueue
+                    && RelationshipsStore.SelectConceptionAttempts2(connection, key).Count == 0
+                    && RelationshipsStore.SelectConceptions2(connection, key).Count == 0,
+                    "A rejected queue insert leaves neither the successful attempt nor its conception committed.");
+            }
+
+            var recovered = VerifyPlayerConceptionAttemptApi(request(attempt, "proceed"));
+            var replayed = VerifyPlayerConceptionAttemptApi(request(attempt, "proceed"));
+            string conception = ReadString(recovered, "conceptionId", "");
+            add("conception_retry_commits_original_deterministic_outcome", ReadBool(recovered, "success", false)
+                && ReadBool(replayed, "success", false) && ReadBool(replayed, "idempotent", false)
+                && conception.Length > 0 && conception == ReadString(replayed, "conceptionId", "")
+                && ReadDouble(replayed, "roll", -1d) == StableUnit(attempt + "|player_conception"),
+                "Retry after rollback commits the original deterministic roll and one linked native action.");
+
+            var concurrentAttempt = WinningAttempt("d43_concurrent_");
+            Dictionary<string, object> first = null, second = null;
+            System.Threading.Tasks.Parallel.Invoke(
+                () => first = VerifyPlayerConceptionAttemptApi(request(concurrentAttempt, "proceed")),
+                () => second = VerifyPlayerConceptionAttemptApi(request(concurrentAttempt, "proceed")));
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+            using (var transaction = connection.BeginTransaction())
+            {
+                var rows = RelationshipsStore.SelectConceptions2(connection,
+                    new Dictionary<string, object> { ["id"] = concurrentAttempt }, transaction);
+                var candidates = RelationshipsStore.SelectPlayerConceptionActions(connection,
+                    new Dictionary<string, object> { ["actor"] = "partner_hero", ["target"] = "main_hero", ["day"] = 42d }, transaction);
+                add("conception_concurrent_retry_has_single_durable_owner", ReadBool(first, "success", false)
+                    && ReadBool(second, "success", false) && ReadBool(first, "idempotent", false) != ReadBool(second, "idempotent", false)
+                    && ReadString(first, "conceptionId", "") == ReadString(second, "conceptionId", "")
+                    && rows.Count == 1 && candidates.Count(row => IsPlayerConceptionFollowUp(row, rows[0])) == 1,
+                    "Competing requests share one successful attempt, conception ID and native action.");
+            }
+
+            const string historicalAttempt = "d43_legacy_partial";
+            var historicalKey = new Dictionary<string, object> { ["id"] = historicalAttempt };
+            const double historicalRoll = 0.0125d;
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+            {
+                RelationshipsStore.TryInsertPlayerConceptionAttempt(connection, new Dictionary<string, object>
+                {
+                    ["id"] = historicalAttempt, ["event"] = historicalAttempt, ["mother"] = "partner_hero", ["father"] = "main_hero",
+                    ["age"] = 30d, ["chance"] = 0.09d, ["roll"] = historicalRoll, ["success"] = 1, ["day"] = 42d,
+                    ["payload"] = "{}", ["ts"] = 1L, ["status"] = "resolved",
+                });
+                var missingConception = VerifyPlayerConceptionAttemptApi(request(historicalAttempt, "proceed"));
+                add("conception_legacy_success_without_conception_is_held",
+                    IsIncompleteConceptionReceipt(missingConception, "missing_conception", historicalRoll)
+                    && RelationshipsStore.SelectConceptions2(connection, historicalKey).Count == 0,
+                    "A historical winning roll without a linked conception is reported without inventing a conception or roll.");
+
+                RelationshipsStore.InsertConceptions(connection, new Dictionary<string, object>
+                {
+                    ["id"] = "d43_legacy_conception", ["attempt"] = historicalAttempt, ["mother"] = "partner_hero",
+                    ["bio"] = "main_hero", ["legal"] = "main_hero", ["day"] = 42d, ["due"] = 78d,
+                    ["secrecy"] = 0d, ["payload"] = "{}", ["ts"] = 1L,
+                });
+                var missingAction = VerifyPlayerConceptionAttemptApi(request(historicalAttempt, "proceed"));
+                var again = VerifyPlayerConceptionAttemptApi(request(historicalAttempt, "proceed"));
+                add("conception_legacy_pending_without_exact_action_is_held",
+                    IsIncompleteConceptionReceipt(missingAction, "missing_native_action", historicalRoll)
+                    && IsIncompleteConceptionReceipt(again, "missing_native_action", historicalRoll)
+                    && ReadString(again, "conceptionId", "") == "d43_legacy_conception",
+                    "Actions for the same pair and day cannot stand in for this conception or authorize a new native effect.");
+            }
+        }
+
+        private static bool IsIncompleteConceptionReceipt(Dictionary<string, object> result, string status, double roll) =>
+            !ReadBool(result, "ok", true) && !ReadBool(result, "success", true) && ReadBool(result, "idempotent", false)
+            && ReadBool(result, "rollSucceeded", false) && ReadDouble(result, "roll", -1d) == roll
+            && ReadString(result, "followUpStatus", "") == status;
 
         private static List<Dictionary<string, object>> RunRelationshipSubsystemSelfTests()
         {
