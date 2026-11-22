@@ -124,8 +124,7 @@ namespace ReignBetaServer
 
                 string operationId = CampaignFileService.SafePathSegment(campaignId, "campaign") + "_" +
                     Guid.NewGuid().ToString("N");
-                string dataStageRoot = Path.Combine(
-                    Program.DataDir, "campaign-retirement-staging", operationId);
+                string dataStageRoot = Path.Combine(CampaignRetirementDataStagingRoot(), operationId);
                 string portraitParent = Directory.GetParent(
                     Path.GetFullPath(portraitRoot).TrimEnd(
                         Path.DirectorySeparatorChar,
@@ -189,6 +188,8 @@ namespace ReignBetaServer
                         ReignPostgreSqlStorage.DropCampaign(campaignId);
                         databaseDropped = true;
                     }
+                    if (CampaignRetirementFailureInjectionForTests == "after_sql_drop_before_commit_receipt")
+                        throw new IOException("Injected failure before the campaign retirement commit receipt.");
                     WriteCampaignRetirementTransaction(
                         dataStageRoot, campaignId, "committed");
                     WriteCampaignRetirementTransaction(
