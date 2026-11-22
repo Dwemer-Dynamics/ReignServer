@@ -258,8 +258,8 @@ namespace ReignBetaServer
                     if (current == null) continue;
                     if (CommunicationPlayerControlled(campaign, generation, ReadString(row, "recipient_id", ""), ReadString(row, "player_id", "")))
                     { SetCommunicationStatus(c, current, "awaiting_player", data); continue; }
-                    if (ReadBool(result, "ok", false) && !CommunicationReplyDisclosureAllowed(c, row, replyContext, result))
-                        result = TestDict("ok", false, "error", "The proposed reply would disclose a protected confidence.");
+                    if (ReadBool(result, "ok", false) && !CommunicationReplyEvidenceCurrent(c, campaign, current, replyContext))
+                        result = TestDict("ok", false, "error", "Evidence available to both participants changed while the reply was written.");
                     if (!ReadBool(result, "ok", false))
                     {
                         data["lastError"] = ReadString(result, "error", "The reply was not source supported.");
@@ -271,8 +271,7 @@ namespace ReignBetaServer
                     data["replyBody"] = ReadString(result, "body", ""); data["replyKind"] = answer;
                     data["replySourceQuote"] = ReadString(result, "sourceQuote", "");
                     data["replyEvidenceSourceIds"] = ReadDictionaryList(replyContext, "replyEvidence")
-                        .Where(e => ReadString(result, "sourceQuote", "").Length > 0
-                            && ReadString(e, "text", "").Contains(ReadString(result, "sourceQuote", ""), StringComparison.Ordinal))
+                        .Where(e => CommunicationEvidenceTextMatches(ReadString(e, "text", ""), ReadString(result, "sourceQuote", "")))
                         .Select(e => ReadString(e, "sourceId", "")).Distinct().ToList();
                     if (data.ContainsKey("lastError")) { data["previousCompositionError"] = data["lastError"]; data.Remove("lastError"); }
                     if (summons) data["acceptanceHash"] = PromptHash(CanonicalJson(TestDict("messageId", ReadString(row, "message_id", ""),
@@ -291,10 +290,12 @@ namespace ReignBetaServer
 
         private static void PrepareCommunicationReply(ReignDbConnection c, string campaign, Dictionary<string, object> row, Dictionary<string, object> context)
         {
-            PreparePersonalGossipReply(c, campaign, row, context);
             string owner = ReadString(context, "speakerId", ""), peer = ReadString(row, "speaker_id", "");
+            context["traits"] = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, owner, "traits.json"));
             var scope = CloneDictionary(context); scope["worldDay"] = ReadDouble(context, "currentDay", 0);
-            var access = DialogueService.BuildKnowledgeAccessContext(owner, ReadString(context, "playerId", ""), "", scope);
+            string player = ReadString(context, "playerId", "");
+            var access = DialogueService.BuildKnowledgeAccessContext(owner, player, "", scope);
+            var peerAccess = DialogueService.BuildKnowledgeAccessContext(peer, player, "", scope);
             // Only correspondence already exchanged with this addressee belongs
             // in this reply. Another NPC's private letters grant no disclosure.
             var acquired = DialogueStore.SelectCommunicationHistory3(c, TestDict("owner", owner, "peer", peer, "timeline", ReadString(context, "timelineId", "main"), "day", ReadDouble(context, "currentDay", 0),
@@ -303,11 +304,19 @@ namespace ReignBetaServer
                     "sourceRootId", "communication:" + ReadString(r, "message_id", ""), "speakerId", ReadString(p, "speakerId", ""),
                     "text", ReadString(p, "body", "")); }).Where(e => ReadString(e, "text", "").Length > 0);
             var selected = new List<Dictionary<string, object>>(); var memory = new System.Text.StringBuilder();
-            var conversation = ReadDictionaryList(context, "replyEvidence").Where(e =>
-            {
-                var source = DialogueStore.SelectConversationTurns6(c, TestDict("id", ReadString(e, "sourceId", ""))).FirstOrDefault();
-                return source != null && PrecisionTurnVisible(source, owner, access, c);
-            });
+            string commonAudienceSql = MemorySessionObserverSql("s", "t")
+                + " AND (t.speaker_id=$peer OR " + MemoryJsonContainsSql("t.participants_json", "$peer") + ")"
+                + " AND t.ts<=$ts AND t.accepted_sequence<=$sequence AND t.channel<>'npc_correspondence'";
+            var candidates = peer.Length == 0 ? new List<Dictionary<string, object>>()
+                : DialogueStore.SelectConversationTurns38(c, commonAudienceSql, TestDict("npc", owner, "peer", peer,
+                    "day", access.WorldDay, "ts", access.AsOfTimestamp, "sequence", access.AsOfAcceptedSequence));
+            var conversation = candidates.Select(candidate =>
+                DialogueStore.SelectConversationTurns6(c, TestDict("id", ReadString(candidate, "turn_id", ""))).FirstOrDefault())
+                .Where(source => source != null
+                    && PrecisionTurnVisible(source, owner, access, c) && PrecisionTurnVisible(source, peer, peerAccess, c))
+                .Select(source => TestDict("sourceId", ReadString(source, "turn_id", ""),
+                    "sourceRootId", "conversation:" + ReadString(source, "session_id", ""),
+                    "speakerId", ReadString(source, "speaker_id", ""), "text", ConversationTurnTextForRecall(source)));
             foreach (var evidence in acquired.Concat(conversation))
             {
                 string line = Json.Serialize(PersonalGossipReplyEvidenceBrief(context, evidence));
@@ -324,15 +333,17 @@ namespace ReignBetaServer
             if (ReadString(row, "recipient_id", "") == ReadString(row, "player_id", "") && ReadString(row, "player_id", "").Length > 0)
                 return TestDict("ok", false, "error", "A background communication cannot speak or decide for the player.");
             string instruction = "You are the named NPC receiving this private communication now, after its travel. Write one short reply in your own voice. "
-                + "Use only the message, your personality and your own accessible memory. Treat quotations as attributed speech, not independently established facts. "
+                + "Use only the received message, your personality, and the supplied passages that both you and the addressee already know. Treat quotations as attributed speech, not independently established facts. "
                 + "For a summons choose accepted, refused or delayed based on your own duties and willingness; acceptance commits only to the supplied meeting terms. "
                 + "Otherwise answer its actual question if you know, offer an explicitly framed personal opinion, refuse, or acknowledge. "
                 + "This body IS your actual return letter. For kind ask, answer the request now; do not promise to write another reply later or treat a quoted 'ask him/her' as an instruction to contact somebody else. The named recipient is you. "
                 + "Return JSON {body,answerKind:'answered|opinion|refused|delayed|acknowledged|accepted',sourceQuote,privacy:'public|personal|intimate|secret'}. "
-                + "A factual answer must copy a complete supporting passage from your own accessible memory into sourceQuote. Do not expose another person's confidence. "
-                + "An opinion is your present view, not an invented past event. Do not issue resource transfers, claim someone arrived, or start more messages.";
+                + "For answered, copy one complete supplied passage or the complete received message verbatim into both body and sourceQuote. "
+                + "For other decisions leave sourceQuote empty and do not assert factual claims about earlier events. An opinion is your present view. "
+                + "Do not issue resource transfers, claim someone arrived, or start more messages.";
+            string received = ReadString(data, "body", "");
             var brief = TestDict("name", ReadString(ReadDictionary(data, "recipient"), "name", ReadString(row, "recipient_id", "")),
-                "personality", ReadDictionary(context, "traits"), "message", ReadString(data, "body", ""), "kind", ReadString(row, "kind", ""),
+                "personality", ReadDictionary(context, "traits"), "message", received, "kind", ReadString(row, "kind", ""),
                 "destinationId", ReadString(data, "destinationId", ""), "stayDays", ReadDouble(data, "stayDays", 0),
                 "ownAccessibleMemory", ReadString(context, "recipientMemory", ""));
             var response = respond(TestDict("campaignId", campaign, "heroStringId", ReadString(row, "recipient_id", ""),
@@ -341,31 +352,34 @@ namespace ReignBetaServer
                 "response_format", TestDict("type", "json_object")));
             if (!ReadBool(response, "ok", false)) return TestDict("ok", false, "error", ReadString(response, "error", "Reply provider failed."));
             var result = TryParseJsonObject(ReadString(response, "content", "")) ?? TestDict();
-            string body = ReadString(result, "body", ""), quote = ReadString(result, "sourceQuote", ""), kind = ReadString(result, "answerKind", "");
-            bool supported = kind != "answered" || GossipQuoteSupported(quote, ReadString(context, "recipientMemory", ""));
+            string body = ReadString(result, "body", "").Trim(), quote = ReadString(result, "sourceQuote", "").Trim();
+            string kind = ReadString(result, "answerKind", "");
+            bool fromMessage = CommunicationEvidenceTextMatches(received, quote);
+            bool supported = kind == "answered" ? CommunicationEvidenceTextMatches(body, quote)
+                && (fromMessage || ReadDictionaryList(context, "replyEvidence").Any(e => CommunicationEvidenceTextMatches(ReadString(e, "text", ""), quote)))
+                : quote.Length == 0;
+            if (supported && kind == "answered")
+                body = (fromMessage ? "Your message said:\n" : "From our earlier exchange:\n") + "“" + quote + "”";
             bool allowed = new[] { "answered", "opinion", "refused", "delayed", "acknowledged", "accepted" }.Contains(kind)
                 && (kind != "accepted" || ReadString(row, "kind", "").StartsWith("summon", StringComparison.Ordinal));
             string privacy = ReadString(result, "privacy", "secret").ToLowerInvariant();
             if (body.Length < 1 || body.Length > 2000 || !supported || !allowed || !new[] { "public", "personal", "intimate" }.Contains(privacy))
                 return TestDict("ok", false, "error", "Reply content, evidence, decision or confidentiality was invalid.");
+            result["body"] = body;
+            result["sourceQuote"] = quote;
             result["ok"] = true; return result;
         }
 
-        private static bool CommunicationReplyDisclosureAllowed(ReignDbConnection c, Dictionary<string, object> message,
-            Dictionary<string, object> context, Dictionary<string, object> result)
+        private static bool CommunicationEvidenceTextMatches(string text, string quote) =>
+            quote.Length > 0 && string.Equals(text.Trim(), quote, StringComparison.Ordinal);
+
+        private static bool CommunicationReplyEvidenceCurrent(ReignDbConnection c, string campaign,
+            Dictionary<string, object> message, Dictionary<string, object> context)
         {
-            string quote = ReadString(result, "sourceQuote", ""), receiver = ReadString(message, "speaker_id", "");
-            if (quote.Length == 0) return true;
-            foreach (var evidence in ReadDictionaryList(context, "replyEvidence").Where(e => ReadString(e, "text", "").Contains(quote, StringComparison.Ordinal)))
-            {
-                string session = ReadString(evidence, "sourceRootId", "").Replace("conversation:", "");
-                var sources = DialogueStore.SelectConversationTurns9(c, TestDict("id", session));
-                if (sources.Any(s => DialogueService.TextListFromJson(ReadString(s, "participants_json", "[]")).Contains(receiver, StringComparer.OrdinalIgnoreCase))) continue;
-                if (sources.Any(s => System.Text.RegularExpressions.Regex.IsMatch(ReadString(s, "text", ""),
-                    @"\b(?:keep\s+(?:this|that|it)\s+between\s+us|(?:do\s+not|don't)\s+tell|keep\s+.{0,40}\bsecret|promise\s+.{0,30}\bnot\s+to\s+tell)\b",
-                    System.Text.RegularExpressions.RegexOptions.IgnoreCase))) return false;
-            }
-            return true;
+            // A reply of any kind may already reflect a passage withdrawn while the model was writing.
+            var refreshed = CloneDictionary(context);
+            PrepareCommunicationReply(c, campaign, message, refreshed);
+            return string.Equals(ReadString(context, "recipientMemory", ""), ReadString(refreshed, "recipientMemory", ""), StringComparison.Ordinal);
         }
 
         internal static void AcceptCommunicationNativeReceipt(ReignDbConnection c, NpcLivesState state, Dictionary<string, object> p, double day)

@@ -98,7 +98,7 @@ namespace ReignBetaServer
         internal static void InsertCommunicationHistory(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             ReignDatabase.ExecuteSql(connection, @"INSERT INTO communication_history(receipt_id,message_id,timeline_id,owner_id,peer_id,acquired_day,acquired_ts,accepted_sequence,payload_json)
-VALUES($id,$id,$timeline,$owner,$peer,$day,$ts,$sequence,$json);", parameters, transaction);
+VALUES($receipt,$id,$timeline,$owner,$peer,$day,$ts,$sequence,$json);", parameters, transaction);
         }
 
         internal static List<Dictionary<string, object>> SelectCommunicationMessages10(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
