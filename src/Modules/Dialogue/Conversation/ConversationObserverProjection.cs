@@ -227,13 +227,95 @@ namespace ReignBetaServer
             return result;
         }
 
+        private const int SharedSceneSourceLimit = 48;
+
+        private static bool IsSharedConversationSceneSummary(Dictionary<string, object> row) =>
+            ReadString(row, "summary_id", "").Length > 0
+            && (ReadString(row, "source", "") == "conversation_scene" || ReadString(row, "summary_type", "") == "scene"
+                || ReadString(row, "scope", "").StartsWith("scene:", StringComparison.Ordinal));
+
+        private static bool RequiresSharedSceneSourceProjection(Dictionary<string, object> row, string observer)
+        {
+            string owner = ReadString(row, "owner_id", "");
+            return (owner.Length == 0 || owner != observer) && IsSharedConversationSceneSummary(row);
+        }
+
+        private static Dictionary<string, object> ProjectSharedSceneSummary(ReignDbConnection connection,
+            Dictionary<string, object> row, DialogueService.KnowledgeAccessContext knowledge)
+        {
+            var payload = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
+            if (payload == null) return null;
+            string scope = ReadString(row, "scope", "");
+            string session = scope.StartsWith("scene:", StringComparison.Ordinal) ? scope.Substring(6) : "";
+            string boundSession = ReadString(payload, "sessionId", "");
+            if (session.Length > 0 && boundSession.Length > 0 && session != boundSession) return null;
+            if (session.Length == 0) session = boundSession;
+            if (session.Length == 0) return null;
+
+            // Do not downgrade an invalid modern source reference to a broader legacy event.
+            bool hasTurnReferences = payload.ContainsKey("sourceReferences");
+            var references = ReadDictionaryList(payload, "sourceReferences")
+                .Where(reference => ReadString(reference, "sourceType", "") == "turn"
+                    && ReadString(reference, "sourceId", "").Length > 0)
+                .GroupBy(reference => ReadString(reference, "sourceId", ""), StringComparer.Ordinal)
+                .Where(group => group.Count() == 1).TakeLast(SharedSceneSourceLimit)
+                .ToDictionary(group => group.Key, group => group.Single(), StringComparer.Ordinal);
+            var ids = hasTurnReferences ? references.Keys.ToList() : TextListFromJson(ReadString(row, "source_events_json", "[]"))
+                .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).TakeLast(SharedSceneSourceLimit).ToList();
+            if (ids.Count == 0) return null;
+
+            var candidates = DialogueStore.SelectSharedSceneSummaryTurns(connection, hasTurnReferences, TestDict(
+                "session", session, "ids", Json.Serialize(ids), "limit", SharedSceneSourceLimit));
+            var originals = new List<string>();
+            var sourceReferences = new List<Dictionary<string, object>>();
+            var events = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var turn in candidates.AsEnumerable().Reverse())
+            {
+                string role = ReadString(turn, "role", ""), speaker = ReadString(turn, "speaker_id", "");
+                if (speaker.Length == 0 || (role != "npc" && role != "player")
+                    || !PrecisionTurnVisible(turn, knowledge.NpcId, knowledge, connection)) continue;
+                string id = ReadString(turn, "turn_id", ""), sourceHash = MemorySourceHash(new[] { turn });
+                if (id.Length == 0 || (hasTurnReferences && (!references.TryGetValue(id, out var reference)
+                    || ReadString(reference, "speakerId", "") != speaker || ReadString(reference, "role", "") != role
+                    || ReadString(reference, "sourceHash", "") != sourceHash))) continue;
+
+                var text = RenderExactHistoryTurn(turn, knowledge, npcSpeechOnly: role == "npc" && speaker != knowledge.NpcId);
+                if (text.Length == 0) continue;
+                originals.Add(text);
+                sourceReferences.Add(TestDict("sourceType", "turn", "sourceId", id, "sourceHash", sourceHash,
+                    "viewHash", PromptHash(text), "view", "bounded_shared_scene_render", "speakerId", speaker, "role", role,
+                    "worldDay", ReadDouble(turn, "world_day", 0d)));
+                string eventId = ReadString(turn, "event_id", "");
+                if (eventId.Length > 0) events.Add(eventId);
+            }
+            if (originals.Count == 0) return null;
+            var copy = new Dictionary<string, object>(row)
+            {
+                ["summary"] = string.Join("\n---\n", originals),
+                ["observerProjection"] = "bound_shared_scene_sources",
+                ["source_events_json"] = Json.Serialize(events.OrderBy(id => id, StringComparer.Ordinal)),
+                ["payload_json"] = Json.Serialize(TestDict("sessionId", session,
+                    "timelineId", ReadString(payload, "timelineId", ""), "worldDay", ReadDouble(payload, "worldDay", 0d),
+                    "compactionStatus", "incomplete", "sourceCoverage", "bounded_eligible_sources",
+                    "sourceReferences", sourceReferences))
+            };
+            return copy;
+        }
+
         internal static List<Dictionary<string, object>> ProjectRetrievedConversationMemories(ReignDbConnection connection,
             List<Dictionary<string, object>> rows, DialogueService.KnowledgeAccessContext knowledge)
         {
             var result = new List<Dictionary<string, object>>();
             foreach (var row in rows ?? new List<Dictionary<string, object>>())
             {
-                if (ReadString(row, "owner_id", "") == knowledge.NpcId || !HasPrivateNarrativeMeaning(ReadString(row, "summary", "")))
+                string owner = ReadString(row, "owner_id", "");
+                if (RequiresSharedSceneSourceProjection(row, knowledge.NpcId))
+                {
+                    var scoped = ProjectSharedSceneSummary(connection, row, knowledge);
+                    if (scoped != null) result.Add(scoped);
+                    continue;
+                }
+                if (owner == knowledge.NpcId || !HasPrivateNarrativeMeaning(ReadString(row, "summary", "")))
                 { result.Add(row); continue; }
                 string eventId = ReadString(row, "event_id", "");
                 var originals = eventId.Length == 0 ? new List<Dictionary<string, object>>() : DialogueStore.SelectConversationTurns25(connection, TestDict("event", eventId))

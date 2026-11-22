@@ -71,7 +71,12 @@ namespace ReignBetaServer
                 add("redelivery_backed_off_row_delivered_when_due_never_expired", dueHeld == 1 && ReadLong(afterDue, "deliveryCount", 0) == 9
                     && ReadLong(afterDue, "deliveredTs", 0) >= now && ReadString(afterDue, "status", "") == "delivered"
                     && !afterDue.ContainsKey("expiredTs"), afterDue);
-                add("redelivery_capped_row_still_delivered", pollHeld(40, 1800, liveGeneration) == 1 && pollHeld(41, 1799, liveGeneration) == 0, null);
+                // Exercise the polling path with time to spare, then test the exact cutoff against a fixed clock.
+                var cappedDelivery = TestDict("deliveryCount", 41L, "deliveredTs", now - 1800, "deliveryGeneration", liveGeneration);
+                add("redelivery_capped_row_still_delivered", pollHeld(40, 1800, liveGeneration) == 1
+                    && pollHeld(41, 900, liveGeneration) == 0
+                    && !DurableRedeliveryDue(cappedDelivery, now - 1, () => liveGeneration)
+                    && DurableRedeliveryDue(cappedDelivery, now, () => liveGeneration), null);
                 add("redelivery_restore_generation_resets_wait", pollHeld(12, 100, "superseded_generation") == 1
                     && ReadString(ReadDurableConversationAction(campaign, heldId), "deliveryGeneration", "") == liveGeneration, null);
                 var executing = ReadDurableConversationAction(campaign, heldId); executing["status"] = "executing"; SaveDurableConversationAction(campaign, executing);

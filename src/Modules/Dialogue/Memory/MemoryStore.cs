@@ -230,7 +230,8 @@ namespace ReignBetaServer
             }
 
             string groupKey = ReadFirstString(payload, "memoryGroupKey", "groupKey", "conversationId", "sceneId", "eventId");
-            return ConsolidateNpcMemory(campaignId, npcId, ReadBool(payload, "force", true), groupKey);
+            return ConsolidateNpcMemory(campaignId, npcId, ReadBool(payload, "force", true), groupKey,
+                lookupNamedHistory: !string.IsNullOrWhiteSpace(groupKey));
         }
 
         private static string CampaignMemoryDbPath(string campaignId)
@@ -1120,31 +1121,33 @@ namespace ReignBetaServer
                     "liveTestCorrelationId"));
         }
 
+        private const int NamedMemoryConsolidationLookback = 400;
+
+        private static bool IsMemoryConsolidationSource(Dictionary<string, object> row)
+        {
+            string source = ReadString(row, "source", "");
+            return source.IndexOf("dialogue", StringComparison.OrdinalIgnoreCase) >= 0
+                || source.IndexOf("conversation", StringComparison.OrdinalIgnoreCase) >= 0
+                || source.IndexOf("social_event", StringComparison.OrdinalIgnoreCase) >= 0
+                || TextListFromJson(ReadString(row, "tags_json", "[]")).Any(tag =>
+                    tag.Equals("conversation", StringComparison.OrdinalIgnoreCase)
+                    || tag.Equals("event", StringComparison.OrdinalIgnoreCase));
+        }
+
         private static List<IGrouping<string, Dictionary<string, object>>> SelectMemoryConsolidationGroups(
-            IEnumerable<Dictionary<string, object>> rows, string ownerId, string requestedGroupKey, bool verifiedOwnerSnapshot,
+            IEnumerable<Dictionary<string, object>> rows, string ownerId, string requestedGroupKey, bool applyNamedLookback,
             Dictionary<string, object> settings)
         {
-            var matching = rows.Where(row =>
-                {
-                    string source = ReadString(row, "source", "");
-                    return source.IndexOf("dialogue", StringComparison.OrdinalIgnoreCase) >= 0
-                        || source.IndexOf("conversation", StringComparison.OrdinalIgnoreCase) >= 0
-                        || source.IndexOf("social_event", StringComparison.OrdinalIgnoreCase) >= 0
-                        || TextListFromJson(ReadString(row, "tags_json", "[]")).Any(tag =>
-                            tag.Equals("conversation", StringComparison.OrdinalIgnoreCase)
-                            || tag.Equals("event", StringComparison.OrdinalIgnoreCase));
-                })
+            var matching = rows.Where(IsMemoryConsolidationSource)
                 .Select(row => (Key: MemoryGroupKeyFromRow(row, ownerId, settings), Row: row))
                 .Where(item => string.IsNullOrWhiteSpace(requestedGroupKey)
                     || string.Equals(item.Key, requestedGroupKey, StringComparison.OrdinalIgnoreCase));
 
-            if (verifiedOwnerSnapshot)
+            if (applyNamedLookback)
             {
-                // Named jobs already have the full active owner snapshot for their source hash.
-                // Apply the same 400-row lookback to eligible members of this group.
                 matching = matching.OrderByDescending(item => ReadLong(item.Row, "ts", 0))
                     .ThenBy(item => ReadString(item.Row, "memory_id", ""), StringComparer.Ordinal)
-                    .Take(400);
+                    .Take(NamedMemoryConsolidationLookback);
             }
 
             return matching.GroupBy(item => item.Key, item => item.Row, StringComparer.OrdinalIgnoreCase)
@@ -1152,8 +1155,45 @@ namespace ReignBetaServer
                 .ToList();
         }
 
+        private static List<Dictionary<string, object>> ReadNamedMemoryConsolidationRows(ReignDbConnection connection,
+            string ownerId, string requestedGroupKey, Dictionary<string, object> settings)
+        {
+            const int pageSize = 128;
+            using var snapshot = connection.BeginTransaction(System.Data.IsolationLevel.RepeatableRead);
+            var matching = new List<Dictionary<string, object>>();
+            bool hasCursor = false;
+            long lastTimestamp = 0;
+            string lastId = "";
+            while (true)
+            {
+                var page = DialogueStore.SelectMemoryConsolidationPage(connection,
+                    TestDict("owner_id", ownerId, "has_cursor", hasCursor, "ts", lastTimestamp, "id", lastId, "limit", pageSize), snapshot);
+                if (page.Count == 0) break;
+
+                matching.AddRange(page.Where(row => IsMemoryConsolidationSource(row)
+                    && string.Equals(MemoryGroupKeyFromRow(row, ownerId, settings), requestedGroupKey, StringComparison.OrdinalIgnoreCase)));
+                lastTimestamp = ReadLong(page[^1], "ts", 0);
+                if (matching.Count >= NamedMemoryConsolidationLookback)
+                {
+                    matching = matching.OrderByDescending(row => ReadLong(row, "ts", 0))
+                        .ThenBy(row => ReadString(row, "memory_id", ""), StringComparer.Ordinal)
+                        .Take(NamedMemoryConsolidationLookback).ToList();
+                    // SQL's cursor order and .NET ordinal ID order can differ within the same timestamp.
+                    if (lastTimestamp < ReadLong(matching[^1], "ts", 0)) break;
+                }
+                if (page.Count < pageSize) break;
+                lastId = ReadString(page[^1], "memory_id", "");
+                hasCursor = true;
+            }
+
+            var rows = matching.Count == 0 ? matching : DialogueStore.SelectMemoryConsolidationRows(connection,
+                TestDict("owner_id", ownerId, "ids", Json.Serialize(matching.Select(row => ReadString(row, "memory_id", "")))), snapshot);
+            snapshot.Commit();
+            return rows;
+        }
+
         internal static Dictionary<string, object> ConsolidateNpcMemory(string campaignId, string npcId, bool force,
-            string requestedGroupKey, List<Dictionary<string, object>> verifiedOwnerRows = null)
+            string requestedGroupKey, List<Dictionary<string, object>> verifiedOwnerRows = null, bool lookupNamedHistory = false)
         {
             Dictionary<string, object> settings = SettingsService.LoadSettings();
             if (!force && !ReadBool(settings, "enableMemoryConsolidation", true))
@@ -1168,10 +1208,13 @@ namespace ReignBetaServer
             if (candidates == null)
             {
                 using ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId);
-                candidates = DialogueStore.SelectMemories10(connection, new Dictionary<string, object> { ["owner_id"] = npcId });
+                candidates = lookupNamedHistory
+                    ? ReadNamedMemoryConsolidationRows(connection, npcId, requestedGroupKey, settings)
+                    : DialogueStore.SelectMemories10(connection, new Dictionary<string, object> { ["owner_id"] = npcId });
             }
 
-            var groups = SelectMemoryConsolidationGroups(candidates, npcId, requestedGroupKey, verifiedOwnerRows != null, settings);
+            var groups = SelectMemoryConsolidationGroups(candidates, npcId, requestedGroupKey,
+                verifiedOwnerRows != null || lookupNamedHistory, settings);
 
             List<Dictionary<string, object>> created = new List<Dictionary<string, object>>();
             foreach (IGrouping<string, Dictionary<string, object>> group in groups)

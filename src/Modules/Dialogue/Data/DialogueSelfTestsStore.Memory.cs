@@ -5,6 +5,14 @@ namespace ReignBetaServer
 {
     internal static partial class DialogueSelfTestStore
     {
+        internal static void InsertNamedConsolidationFixtureRows(ReignDbConnection connection, Dictionary<string, object> parameters)
+        {
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO memories(memory_id,event_id,owner_id,ts,source,status,summary,participants_json,location_id,payload_json)
+SELECT memory_id,memory_id,owner_id,ts,source,status,summary,'[""owner"",""peer""]','keep',payload_json
+FROM jsonb_to_recordset(CAST($rows AS jsonb)) AS seed(memory_id text,owner_id text,ts bigint,source text,status text,summary text,payload_json text);",
+                parameters);
+        }
+
         internal static void InsertConversationSessions13(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             ReignDatabase.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)

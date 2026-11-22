@@ -532,6 +532,7 @@ namespace ReignBetaServer
                     && actionRendered.Contains("\"structuredActionDecision\"")
                     && (actionExample == customExample || actionRendered.StartsWith(wrappedExample, StringComparison.Ordinal)), null);
             }
+            RunNamedForegroundConsolidationSelfTests(add);
             results.AddRange(RunRecentMemoryWindowSelfTests());
             results.AddRange(RunMemorySelectionHelperSelfTests());
             results.AddRange(RunMemorySnapshotSourceAssertions());
@@ -539,6 +540,63 @@ namespace ReignBetaServer
             results.AddRange(RunDerivedMemoryTimeSelfTests());
             results.AddRange(RunConversationArchiveStorageSelfTests());
             return results;
+        }
+
+        private static void RunNamedForegroundConsolidationSelfTests(Action<string, bool, object> check)
+        {
+            const string owner = "owner", group = "conversation:older";
+            string campaign = "named_foreground_memory_test_" + Guid.NewGuid().ToString("N");
+            string oldKey = Json.Serialize(TestDict("memoryGroupKey", group));
+            string newKey = Json.Serialize(TestDict("memoryGroupKey", "conversation:recent"));
+            var settings = TestDict("enableMemoryConsolidation", true, "useMemoryLlmForConsolidation", false,
+                "enableSemanticMemory", false, "memoryConsolidationWindowMinutes", 30);
+            Dictionary<string, object> Row(string id, long ts, string payload, string rowOwner = owner,
+                string status = "active", string source = "dialogue_turn") => TestDict(
+                "memory_id", id, "owner_id", rowOwner, "ts", ts, "source", source,
+                "status", status, "summary", "Original report " + id, "payload_json", payload);
+            var fixtures = Enumerable.Range(0, 420).Select(i => Row("new_" + i, 1000 + i, newKey)).ToList();
+            fixtures.AddRange(new[] {
+                Row("older_root", 20, oldKey),
+                Row("older_nested", 21, Json.Serialize(TestDict("payload", TestDict("memory_group_key", group.ToUpperInvariant())))),
+                Row("older_fenced", 22, "```json\n" + oldKey + "\n```"),
+                Row("other_owner", 23, oldKey, "Owner"),
+                Row("inactive", 24, oldKey, status: "superseded"),
+                Row("ineligible", 25, oldKey, source: "profile"),
+                Row("legacy_missing", 3650, "{}", source: "social_event_move"),
+                Row("legacy_malformed", 3651, "{broken", source: "social_event_move"),
+                Row("\uE000", 100, oldKey, "ties"),
+                Row("\U00010000", 100, oldKey, "ties"),
+                Row("tail", 99, oldKey, "ties"),
+            });
+            fixtures.AddRange(Enumerable.Range(0, 383).Select(i => Row("later_" + i, 200, oldKey, "ties")));
+            fixtures.AddRange(Enumerable.Range(0, 16).Select(i => Row("equal_" + i, 100, oldKey, "ties")));
+            var priorSettings = LlmProviderService.CodexPerformanceSettings.Value;
+            LlmProviderService.CodexPerformanceSettings.Value = settings;
+            try
+            {
+                using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                DialogueSelfTestStore.InsertNamedConsolidationFixtureRows(connection, TestDict("rows", Json.Serialize(fixtures)));
+                var recent = DialogueStore.SelectMemories10(connection, TestDict("owner_id", owner));
+                check("named_foreground_older_group_is_outside_recent_window", recent.Count == 400
+                    && SelectMemoryConsolidationGroups(recent, owner, group, false, settings).Count == 0, null);
+                var legacy = ReadNamedMemoryConsolidationRows(connection, owner, "social_event:owner+peer:keep:2", settings);
+                check("named_foreground_preserves_legacy_derived_keys", legacy.Select(row => ReadString(row, "memory_id", ""))
+                    .ToHashSet(StringComparer.Ordinal).SetEquals(new[] { "legacy_missing", "legacy_malformed" }), null);
+                var limited = ReadNamedMemoryConsolidationRows(connection, "ties", group, settings);
+                var limitedIds = limited.Select(row => ReadString(row, "memory_id", "")).ToHashSet(StringComparer.Ordinal);
+                check("named_foreground_keeps_newest_400_across_ordinal_tie", limited.Count == 400
+                    && limitedIds.Contains("\U00010000") && !limitedIds.Contains("\uE000") && !limitedIds.Contains("tail"), null);
+                var result = MemoryConsolidateApi(TestDict("campaignId", campaign, "npcId", owner, "memoryGroupKey", group.ToUpperInvariant()));
+                var summary = ReadDictionaryList(result, "summaries").SingleOrDefault();
+                check("named_foreground_api_compacts_only_exact_active_owner_sources", ReadBool(result, "ok", false)
+                    && ReadStringList(summary, "sourceEventIds").ToHashSet(StringComparer.Ordinal)
+                        .SetEquals(new[] { "older_root", "older_nested", "older_fenced" }), null);
+            }
+            finally
+            {
+                LlmProviderService.CodexPerformanceSettings.Value = priorSettings;
+                ReignPostgreSqlStorage.DropCampaign(campaign);
+            }
         }
 
         private static List<Dictionary<string, object>> RunConversationArchiveStorageSelfTests()
