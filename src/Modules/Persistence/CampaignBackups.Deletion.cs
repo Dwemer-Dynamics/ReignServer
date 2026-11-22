@@ -144,12 +144,9 @@ namespace ReignBetaServer
                 try
                 {
                     ReignPostgreSqlStorage.ClearAllPools();
-                    int vectorsDeleted = databaseExists
-                        ? DeleteCampaignSemanticVectors(campaignId)
-                        : 0;
-                    Dictionary<string, object> semanticCounts =
-                        ReadDictionary(counts, "semanticVectors") ?? new Dictionary<string, object>();
-                    semanticCounts["records"] = vectorsDeleted;
+                    List<string> vectorIds = databaseExists
+                        ? ReadCampaignRetirementVectorIds(campaignId)
+                        : new List<string>();
 
                     Directory.CreateDirectory(dataStageRoot);
                     Directory.CreateDirectory(portraitStageRoot);
@@ -157,17 +154,20 @@ namespace ReignBetaServer
                         dataStageRoot, campaignId, "staging");
                     WriteCampaignRetirementTransaction(
                         portraitStageRoot, campaignId, "staging");
+                    if (vectorIds.Count > 0)
+                        WriteCampaignRetirementVectorCleanup(dataStageRoot, campaignId,
+                            CampaignRetirementVectorRoute(SettingsService.LoadSettings()), vectorIds);
                     if (campaignExists)
                     {
                         MoveDirectoryWithRetries(campaignDir, movedCampaign);
-                        VerifyStagedCampaignDirectory(campaignDir, movedCampaign);
                         movedCampaignReady = true;
+                        VerifyStagedCampaignDirectory(campaignDir, movedCampaign);
                     }
                     if (saveSyncExists)
                     {
                         MoveDirectoryWithRetries(saveSyncDir, movedSaveSync);
-                        VerifyStagedCampaignDirectory(saveSyncDir, movedSaveSync);
                         movedSaveSyncReady = true;
+                        VerifyStagedCampaignDirectory(saveSyncDir, movedSaveSync);
                     }
                     if (journalsExist)
                     {
@@ -178,8 +178,8 @@ namespace ReignBetaServer
                     if (portraitExists)
                     {
                         MoveDirectoryWithRetries(portraitDir, movedPortrait);
-                        VerifyStagedCampaignDirectory(portraitDir, movedPortrait);
                         movedPortraitReady = true;
+                        VerifyStagedCampaignDirectory(portraitDir, movedPortrait);
                     }
                     if (CampaignRetirementFailureInjectionForTests == "after_stage")
                         throw new IOException("Injected campaign-retirement staging failure.");
@@ -204,7 +204,14 @@ namespace ReignBetaServer
                     }
                     else
                     {
-                        DeleteCampaignStagingRoot(dataStageRoot, residuals);
+                        // SQL owns the vector IDs until the retirement commit. A worker
+                        // failure after commit leaves those IDs in the staged cleanup receipt.
+                        if (TryFinishCampaignRetirementVectorCleanup(dataStageRoot,
+                            CampaignSemanticDeleteTimeoutMs, int.MaxValue, out int vectorsDeleted))
+                            DeleteCampaignStagingRoot(dataStageRoot, residuals);
+                        else
+                            residuals.Add(dataStageRoot);
+                        ReadDictionary(counts, "semanticVectors")["records"] = vectorsDeleted;
                         DeleteCampaignStagingRoot(portraitStageRoot, residuals);
                     }
                     bool rootsGone = !Directory.Exists(campaignDir)
@@ -230,7 +237,7 @@ namespace ReignBetaServer
                         ["sharedPortraitLibraryPreserved"] = true,
                         ["message"] = residuals.Count == 0
                             ? "Campaign data, Save Sync storage, semantic vectors, and its portrait cache were permanently deleted."
-                            : "The campaign is no longer active, but staged files remain for startup cleanup."
+                            : "The campaign is no longer active, but staged cleanup is still pending."
                     };
                     OperationsService.LogOperational("campaign.deleted", result);
                     return result;
@@ -248,6 +255,13 @@ namespace ReignBetaServer
                             movedJournals, journalDir, movedJournalsReady, rollbackErrors);
                         RestoreStagedCampaignDirectory(
                             movedPortrait, portraitDir, movedPortraitReady, rollbackErrors);
+                        if (rollbackErrors.Count == 0)
+                        {
+                            // Leaving a rolled-back intent would let a later retirement
+                            // mistake these IDs for pending work from a committed operation.
+                            DeleteCampaignStagingRoot(dataStageRoot, rollbackErrors);
+                            DeleteCampaignStagingRoot(portraitStageRoot, rollbackErrors);
+                        }
                     }
                     Dictionary<string, object> failed = new Dictionary<string, object>
                     {

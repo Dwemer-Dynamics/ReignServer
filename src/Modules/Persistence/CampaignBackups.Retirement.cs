@@ -171,14 +171,18 @@ namespace ReignBetaServer
         {
             Task.Run(async () =>
             {
+                DateTime nextVectorCleanupUtc = DateTime.UtcNow;
                 while (!Program.ShutdownRequested)
                 {
                     await Task.Delay(2000).ConfigureAwait(false);
                     if (Program.ShutdownRequested || !string.IsNullOrWhiteSpace(
                         CampaignMutationBlockReason())) continue;
                     if (ReadDictionaryList(
-                        ReadCampaignRetirementLedger(), "pending").Count == 0) continue;
-                    ProcessPendingCampaignRetirements(false);
+                        ReadCampaignRetirementLedger(), "pending").Count > 0)
+                        ProcessPendingCampaignRetirements(false);
+                    if (DateTime.UtcNow < nextVectorCleanupUtc) continue;
+                    RetryCampaignRetirementVectorCleanup();
+                    nextVectorCleanupUtc = DateTime.UtcNow.AddSeconds(30);
                 }
             });
         }
@@ -272,15 +276,20 @@ namespace ReignBetaServer
             };
         }
 
-        private static int DeleteCampaignSemanticVectors(string campaignId)
+        private const string CampaignRetirementVectorCleanupReceipt = "semantic-cleanup.json";
+
+#if !REIGN_EXCLUDE_VERIFICATION
+        private static Action<IReadOnlyList<string>> CampaignRetirementDeleteVectorsForTests;
+#endif
+
+        private static List<string> ReadCampaignRetirementVectorIds(string campaignId)
         {
-            if (SaveSyncSkipSemanticForTests) return 0;
-            List<string> ids;
+            if (SaveSyncSkipSemanticForTests) return new List<string>();
             using (ReignDbConnection connection =
                 ReignPostgreSqlStorage.OpenCampaignConnection(campaignId))
             {
                 bool hasEmbeddingDocuments = ReadInt(PersistenceStore.CountTables(connection).FirstOrDefault(), "count", 0) > 0;
-                ids = hasEmbeddingDocuments
+                return hasEmbeddingDocuments
                     ? PersistenceStore.SelectEmbeddingDocuments(connection)
                         .Select(row => ReadString(row, "vector_id", ""))
                         .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -288,25 +297,127 @@ namespace ReignBetaServer
                         .ToList()
                     : new List<string>();
             }
-            if (ids.Count == 0) return 0;
-            Dictionary<string, object> settings = SettingsService.LoadSettings();
-            DialogueService.StartManagedSemanticWorker(settings);
-            for (int offset = 0; offset < ids.Count;
-                offset += CampaignSemanticDeleteBatchSize)
+        }
+
+        private static string CampaignRetirementVectorRoute(Dictionary<string, object> settings)
+        {
+            string provider = ReadString(settings, "vectorProvider", "local");
+            string target = Json.Serialize(new[]
             {
-                Dictionary<string, object> request = DialogueService.SemanticProviderRequest(settings);
-                request["collection"] = DialogueService.SemanticCollection;
-                request["ids"] = ids.Skip(offset)
-                    .Take(CampaignSemanticDeleteBatchSize).ToList();
-                Dictionary<string, object> response = TryParseJsonObject(
-                    DialogueService.PostJsonToUrl(DialogueService.SemanticWorkerUrl(settings, "/vectors/delete"),
-                        Json.Serialize(request), CampaignSemanticDeleteTimeoutMs))
-                    ?? new Dictionary<string, object>();
-                if (!ReadBool(response, "ok", false))
-                    throw new IOException(ReadString(response, "error",
-                        "Campaign semantic vector deletion failed."));
+                provider,
+                DialogueService.SemanticWorkerUrl(settings, "/vectors/delete"),
+                ReadString(settings, "qdrantUrl", ""),
+                DialogueService.SemanticCollection
+            });
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(target)));
+        }
+
+        private static void WriteCampaignRetirementVectorCleanup(string stagingRoot,
+            string campaignId, string route, List<string> ids)
+        {
+            CampaignFileService.WriteJsonObject(
+                Path.Combine(stagingRoot, CampaignRetirementVectorCleanupReceipt),
+                TestDict("campaignId", campaignId, "route", route, "ids", ids));
+        }
+
+        private static bool TryFinishCampaignRetirementVectorCleanup(string stagingRoot,
+            int timeoutMs, int maxBatches, out int vectorsDeleted)
+        {
+            vectorsDeleted = 0;
+            string path = Path.Combine(stagingRoot, CampaignRetirementVectorCleanupReceipt);
+            if (!File.Exists(path)) return true;
+            try
+            {
+                ValidateCampaignRetirementStagingRoot(stagingRoot);
+                if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+                    throw new InvalidDataException("Campaign retirement vector receipt cannot be a reparse point.");
+                Dictionary<string, object> receipt = CampaignFileService.ReadJsonObject(path);
+                string campaignId = ReadString(receipt, "campaignId", "");
+                RequireSaveSyncJournalCampaign(campaignId);
+                if (CampaignIdFromRetirementStagingName(stagingRoot) != campaignId)
+                    throw new InvalidDataException("Campaign retirement vector receipt does not match its staging directory.");
+                // A restored or recreated campaign can reuse the same deterministic vector IDs.
+                if (ReignPostgreSqlStorage.CampaignExists(campaignId)) return false;
+                if (!receipt.TryGetValue("ids", out object rawIds) || !(rawIds is object[] storedIds)
+                    || storedIds.Length == 0 || storedIds.Any(id => !(id is string value) || string.IsNullOrWhiteSpace(value)))
+                    throw new InvalidDataException("Campaign retirement vector receipt is missing its vector IDs.");
+                List<string> ids = storedIds.Cast<string>().ToList();
+                Dictionary<string, object> settings = SettingsService.LoadSettings();
+                string route = ReadString(receipt, "route", "");
+                if (CampaignRetirementVectorRoute(settings) != route)
+                    throw new InvalidDataException("Campaign retirement vector backend differs from the original route.");
+                for (int batchIndex = 0; batchIndex < maxBatches && vectorsDeleted < ids.Count; batchIndex++)
+                {
+                    List<string> batch = ids.Skip(vectorsDeleted).Take(CampaignSemanticDeleteBatchSize).ToList();
+                    DeleteCampaignSemanticVectorBatch(settings, batch, timeoutMs);
+                    vectorsDeleted += batch.Count;
+                }
+                if (vectorsDeleted == ids.Count)
+                {
+                    File.Delete(path);
+                    return true;
+                }
+                WriteCampaignRetirementVectorCleanup(stagingRoot, campaignId, route,
+                    ids.Skip(vectorsDeleted).ToList());
+                return false;
             }
-            return ids.Count;
+            catch (Exception ex)
+            {
+                OperationsService.LogOperational("campaign.retirement_vector_cleanup_deferred",
+                    TestDict("stagingRoot", stagingRoot, "error", ex.GetType().Name));
+                return false;
+            }
+        }
+
+        private static void DeleteCampaignSemanticVectorBatch(Dictionary<string, object> settings,
+            List<string> ids, int timeoutMs)
+        {
+#if !REIGN_EXCLUDE_VERIFICATION
+            if (CampaignRetirementDeleteVectorsForTests != null)
+            {
+                CampaignRetirementDeleteVectorsForTests(ids);
+                return;
+            }
+#endif
+            DialogueService.StartManagedSemanticWorker(settings);
+            Dictionary<string, object> request = DialogueService.SemanticProviderRequest(settings);
+            request["collection"] = DialogueService.SemanticCollection;
+            request["ids"] = ids;
+            Dictionary<string, object> response = TryParseJsonObject(
+                DialogueService.PostJsonToUrl(DialogueService.SemanticWorkerUrl(settings, "/vectors/delete"),
+                    Json.Serialize(request), timeoutMs))
+                ?? new Dictionary<string, object>();
+            if (!ReadBool(response, "ok", false))
+                throw new IOException("Campaign semantic vector deletion failed.");
+        }
+
+        private static void RetryCampaignRetirementVectorCleanup()
+        {
+            string root = Path.Combine(Program.DataDir, "campaign-retirement-staging");
+            try
+            {
+                if (!Directory.Exists(root)) return;
+                foreach (string stagingRoot in Directory.GetDirectories(root))
+                {
+                    if (Program.ShutdownRequested || !string.IsNullOrWhiteSpace(CampaignMutationBlockReason())) return;
+                    if (!File.Exists(Path.Combine(stagingRoot, CampaignRetirementVectorCleanupReceipt))) continue;
+                    Program.CampaignDataGate.EnterWriteLock();
+                    try
+                    {
+                        if (TryFinishCampaignRetirementVectorCleanup(stagingRoot, 5000, 1, out _))
+                        {
+                            List<string> residuals = new List<string>();
+                            DeleteCampaignStagingRoot(stagingRoot, residuals);
+                        }
+                    }
+                    finally { Program.CampaignDataGate.ExitWriteLock(); }
+                }
+            }
+            catch (Exception ex)
+            {
+                OperationsService.LogOperational("campaign.retirement_vector_retry_failed",
+                    TestDict("stagingRoot", root, "error", ex.GetType().Name));
+            }
         }
 
         private static void ValidateCampaignOwnedDirectory(
@@ -445,14 +556,15 @@ namespace ReignBetaServer
                             campaignId = CampaignIdFromRetirementStagingName(child);
                         RequireSaveSyncJournalCampaign(campaignId);
                         bool databaseExists = ReignPostgreSqlStorage.CampaignExists(campaignId);
-                        if (databaseExists)
+                        if (databaseExists && ReadString(transaction, "state", "") != "committed")
                         {
                             RestoreRetirementTransactionRoot(child, campaignId);
                         }
-                        else
+                        else if (!File.Exists(Path.Combine(child, CampaignRetirementVectorCleanupReceipt)))
                         {
                             DeleteDirectoryCompletely(child);
                         }
+                        // The monitor retries pending vector cleanup after HTTP startup.
                     }
                     catch (Exception ex)
                     {
@@ -486,7 +598,8 @@ namespace ReignBetaServer
             HashSet<string> allowedEntries = new HashSet<string>(
                 StringComparer.OrdinalIgnoreCase)
             {
-                "campaign", "save-sync", "save-sync-journals", "portrait-cache", "transaction.json"
+                "campaign", "save-sync", "save-sync-journals", "portrait-cache",
+                "transaction.json", CampaignRetirementVectorCleanupReceipt
             };
             if (Directory.GetFileSystemEntries(path).Any(entry =>
                 !allowedEntries.Contains(Path.GetFileName(entry))))
