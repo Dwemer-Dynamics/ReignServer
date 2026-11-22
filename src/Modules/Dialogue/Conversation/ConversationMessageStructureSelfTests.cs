@@ -53,6 +53,21 @@ namespace ReignBetaServer
                 var history = envelope.Messages.Where(m => ReadString(m, "content", "").StartsWith("HISTORICAL ", StringComparison.Ordinal)).ToList();
                 Check("source_roles_and_chronology_" + route, history.Select(m => ReadString(m, "role", "")).SequenceEqual(new[] { "user", "assistant", "assistant", "user" })
                     && new[] { "p1", "n1", "n2", "p2" }.Select((id, i) => ReadString(history[i], "content", "").Contains("\"turnId\":\"" + id + "\"", StringComparison.Ordinal)).All(x => x), envelope.Diagnostics["conversationMessageStructure"]);
+                var historicalContents = history.Select(m => ReadString(m, "content", "")).ToList();
+                var attribution = historicalContents.Select(content =>
+                {
+                    int start = content.IndexOf(" {", StringComparison.Ordinal);
+                    int end = content.IndexOf('\n');
+                    return start >= 0 && end > start ? TryParseJsonObject(content.Substring(start + 1, end - start - 1)) : null;
+                }).ToList();
+                Check("canonical_group_list_appears_once_without_redundant_span_source_" + route,
+                    historicalContents.Count(content => content.Contains(
+                        "[[continuity source=p1,n1 kind=accepted_exchange observer=current_observer session=session ", StringComparison.Ordinal)) == 1
+                    && attribution.Count == 4 && attribution.All(header => header != null && !header.ContainsKey("source"))
+                    && attribution.Select(header => ReadString(header, "storedRole", ""))
+                        .SequenceEqual(new[] { "player", "npc", "npc", "player" })
+                    && attribution.Select(header => ReadString(header, "actor", ""))
+                        .SequenceEqual(new[] { "player", "responding_npc", "responding_npc", "player" }));
                 Check("npc_requests_stay_assistant_" + route, history.Where(m => ReadString(m, "role", "") == "assistant").Any(m => ReadString(m, "content", "").Contains("empty hands"))
                     && history.Any(m => ReadString(m, "role", "") == "assistant" && ReadString(m, "content", "").Contains("don't go")));
                 Check("current_narrative_verbatim_" + route, ReadString(envelope.Messages.Last(), "role", "") == "user"
@@ -142,7 +157,11 @@ namespace ReignBetaServer
             var duplicates = new List<Dictionary<string, object>> { Line("same1", "player", "player", "Player", "*I hold her hand.*", "d1"),
                 Line("same2", "player", "player", "Player", "*I hold her hand.*", "d2") };
             var duplicateEnvelope = Build(duplicates, false);
-            Check("identical_bodies_keep_distinct_source_turns", duplicateEnvelope.Messages.Count(m => ReadString(m, "content", "").StartsWith("HISTORICAL PLAYER TURN")) == 2);
+            var duplicateHistory = duplicateEnvelope.Messages.Select(m => ReadString(m, "content", ""))
+                .Where(content => content.StartsWith("HISTORICAL PLAYER TURN", StringComparison.Ordinal)).ToList();
+            Check("identical_bodies_keep_distinct_source_turns", duplicateHistory.Count == 2
+                && duplicateHistory[0].Contains("\"turnId\":\"same1\"", StringComparison.Ordinal)
+                && duplicateHistory[1].Contains("\"turnId\":\"same2\"", StringComparison.Ordinal));
             var boundaryLines = Enumerable.Range(0, 31).Select(i => Line("boundary_" + i, i % 2 == 0 ? "npc" : "player",
                 i % 2 == 0 ? "npc" : "player", i % 2 == 0 ? "Ingeiyna" : "Player", "The counted measure was " + i + ".",
                 i is 1 or 2 ? "crossing" : "group_" + i)).ToList();
