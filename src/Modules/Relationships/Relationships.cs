@@ -1092,6 +1092,7 @@ namespace ReignBetaServer
             if (phase != "all" && phase != "delivery" && phase != "replies")
                 return TestDict("ok", false, "error", "Unknown correspondence phase.");
             if (phase != "replies") DeliverDueCorrespondence(campaignId, playerId, day, timeline);
+            ReconcileCorrespondenceArrivalHistory(campaignId, playerId, timeline);
             if (phase != "delivery") ProcessPendingCorrespondence(campaignId, playerId, day, timeline);
             var result = ReadCorrespondenceDeliveryResults(campaignId, playerId, timeline, ReadStringList(payload, "deliveryReceiptAcks"));
             // Legacy clients do not support receipt acknowledgments. Preserve
@@ -1391,26 +1392,52 @@ namespace ReignBetaServer
             return merged;
         }
 
-        private static void AppendDeliveredLetterHistory(string campaignId, string playerId, Dictionary<string, object> letter, double day)
+        private static string DeliveredLetterHistoryNpc(string playerId, Dictionary<string, object> letter)
         {
             string senderId = ReadString(letter, "sender_id", "");
-            string recipientId = ReadString(letter, "recipient_id", "");
-            string npcId = senderId.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? recipientId : senderId;
-            if (string.IsNullOrWhiteSpace(npcId)) return;
-            Dictionary<string, object> line = DialogueService.DialogueLine(DateTimeOffset.UtcNow.ToUnixTimeSeconds(), senderId.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? "player" : "npc", ReadString(letter, "sender_name", senderId), ReadString(letter, "body", ""));
+            return senderId.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? ReadString(letter, "recipient_id", "") : senderId;
+        }
+
+        private static Dictionary<string, object> DeliveredLetterHistoryLine(string playerId, Dictionary<string, object> letter,
+            double day, long timestamp)
+        {
+            string senderId = ReadString(letter, "sender_id", "");
+            bool outgoing = senderId.Equals(playerId, StringComparison.OrdinalIgnoreCase);
+            Dictionary<string, object> line = DialogueService.DialogueLine(timestamp, outgoing ? "player" : "npc",
+                ReadString(letter, "sender_name", senderId), ReadString(letter, "body", ""));
             line["channel"] = "correspondence";
             line["letterId"] = ReadString(letter, "letter_id", "");
             line["threadId"] = ReadString(letter, "thread_id", "");
             line["senderId"] = senderId;
-            line["recipientId"] = recipientId;
+            line["recipientId"] = ReadString(letter, "recipient_id", "");
             line["worldDay"] = day;
-            line["direction"] = senderId.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? "sent" : "received";
-            CampaignFileService.AppendJsonLineToPath(CampaignFileService.CharacterFile(campaignId, npcId, "history", "dialogue.jsonl"), line);
-            DialogueService.StoreCorrespondenceTurn(campaignId, npcId, playerId, letter, day);
-            using (var pregnancyConnection = ReignDatabase.OpenCampaignConnection(campaignId))
-                AcceptPregnancyDisclosures(pregnancyConnection, ReadString(letter, "timeline_id", "main"), senderId,
-                    ReadString(letter, "body", ""), TryParseJsonObject(ReadString(letter, "payload_json", "{}")),
-                    new[] { recipientId }, "delivered_letter:" + ReadString(letter, "letter_id", ""), day);
+            line["direction"] = outgoing ? "sent" : "received";
+            return line;
+        }
+
+        private static void RecordDeliveredLetterDisclosures(ReignDbConnection connection, Dictionary<string, object> letter, double day,
+            bool schemaPrepared = false)
+        {
+            AcceptPregnancyDisclosures(connection, ReadString(letter, "timeline_id", "main"), ReadString(letter, "sender_id", ""),
+                ReadString(letter, "body", ""), TryParseJsonObject(ReadString(letter, "payload_json", "{}")),
+                new[] { ReadString(letter, "recipient_id", "") }, "delivered_letter:" + ReadString(letter, "letter_id", ""), day, schemaPrepared);
+        }
+
+        private static void AppendDeliveredLetterHistory(string campaignId, string playerId, Dictionary<string, object> letter, double day)
+        {
+            // Immediate command reports retain their existing synchronous path.
+            string npcId = DeliveredLetterHistoryNpc(playerId, letter);
+            if (string.IsNullOrWhiteSpace(npcId)) return;
+            long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            CampaignFileService.AppendJsonLineToPath(CampaignFileService.CharacterFile(campaignId, npcId, "history", "dialogue.jsonl"),
+                DeliveredLetterHistoryLine(playerId, letter, day, now));
+            using var connection = ReignDatabase.OpenCampaignConnection(campaignId);
+            using (var transaction = connection.BeginTransaction())
+            {
+                DialogueService.StoreCorrespondenceTurn(connection, campaignId, npcId, playerId, letter, day, now);
+                transaction.Commit();
+            }
+            RecordDeliveredLetterDisclosures(connection, letter, day);
         }
 
         private static double ClampRelationship(double value) => DialogueService.ClampDouble(value, -100d, 100d);

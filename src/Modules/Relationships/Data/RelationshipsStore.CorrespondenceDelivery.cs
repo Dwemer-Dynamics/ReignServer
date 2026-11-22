@@ -7,8 +7,9 @@ namespace ReignBetaServer
     {
         internal static List<Dictionary<string, object>> SelectLetters6(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
-            return ReignDatabase.QuerySql(connection, @"SELECT * FROM letters WHERE status='in_transit' AND delivery_day<=$day
-ORDER BY delivery_day,letter_id LIMIT 100 FOR UPDATE SKIP LOCKED;", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, @"SELECT * FROM letters
+WHERE status='in_transit' AND delivery_day<=$day AND arrival_retry_after_ts<=$now
+ORDER BY arrival_retry_after_ts,delivery_day,letter_id LIMIT 100 FOR UPDATE SKIP LOCKED;", parameters, transaction);
         }
 
         internal static void UpdateLetters(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
@@ -17,11 +18,40 @@ ORDER BY delivery_day,letter_id LIMIT 100 FOR UPDATE SKIP LOCKED;", parameters, 
 delivery_timeline_id=$timeline,updated_ts=$ts WHERE letter_id=$id AND status='in_transit';", parameters, transaction);
         }
 
+        internal static void DeferCorrespondenceArrival(ReignDbConnection connection, Dictionary<string, object> parameters, ReignDbTransaction transaction)
+        {
+            ReignDatabase.ExecuteSql(connection, @"UPDATE letters SET arrival_retry_after_ts=$retry
+WHERE letter_id=$id AND status='in_transit';", parameters, transaction);
+        }
+
         internal static void InsertOrIgnoreCorrespondenceDeliveryJobs(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             ReignDatabase.ExecuteSql(connection, @"INSERT INTO correspondence_delivery_jobs
-(letter_id,player_id,timeline_id,restore_generation,source_hash,status,result_json,created_ts,updated_ts)
-VALUES($id,$player,$timeline,$generation,$hash,$status,$result,$now,$now) ON CONFLICT(letter_id) DO NOTHING;", parameters, transaction);
+(letter_id,player_id,timeline_id,restore_generation,source_hash,status,result_json,created_ts,updated_ts,arrival_history_json)
+VALUES($id,$player,$timeline,$generation,$hash,$status,$result,$now,$now,$history) ON CONFLICT(letter_id) DO NOTHING;", parameters, transaction);
+        }
+
+        internal static List<Dictionary<string, object>> SelectPendingCorrespondenceArrivalHistory(ReignDbConnection connection, Dictionary<string, object> parameters)
+        {
+            return ReignDatabase.QuerySql(connection, @"SELECT letter_id,source_hash,arrival_history_json FROM correspondence_delivery_jobs
+WHERE player_id=$player AND timeline_id=$timeline AND restore_generation=$generation
+AND arrival_history_json<>'' AND arrival_history_terminal_error='' AND arrival_history_retry_after_ts<=$now
+ORDER BY arrival_history_retry_after_ts,created_ts,letter_id LIMIT 100;", parameters);
+        }
+
+        internal static void CompleteCorrespondenceArrivalHistory(ReignDbConnection connection, Dictionary<string, object> parameters)
+        {
+            ReignDatabase.ExecuteSql(connection, @"UPDATE correspondence_delivery_jobs SET arrival_history_json=''
+WHERE letter_id=$id AND player_id=$player AND timeline_id=$timeline AND restore_generation=$generation
+AND source_hash=$hash AND arrival_history_json=$history AND arrival_history_terminal_error='';", parameters);
+        }
+
+        internal static void DeferCorrespondenceArrivalHistory(ReignDbConnection connection, Dictionary<string, object> parameters)
+        {
+            ReignDatabase.ExecuteSql(connection, @"UPDATE correspondence_delivery_jobs
+SET arrival_history_terminal_error=$terminal,arrival_history_retry_after_ts=$retry
+WHERE letter_id=$id AND player_id=$player AND timeline_id=$timeline AND restore_generation=$generation
+AND source_hash=$hash AND arrival_history_json=$history AND arrival_history_terminal_error='';", parameters);
         }
 
         internal static List<Dictionary<string, object>> SelectMemoryRestoredLetters(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)

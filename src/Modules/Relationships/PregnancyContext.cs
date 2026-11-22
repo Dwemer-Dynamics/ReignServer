@@ -156,11 +156,12 @@ namespace ReignBetaServer
         }
 
         internal static void AcceptPregnancyDisclosures(ReignDbConnection c, string timeline, string speaker,
-            string reply, Dictionary<string, object> parsed, IEnumerable<string> audience, string sourceId, double day)
+            string reply, Dictionary<string, object> parsed, IEnumerable<string> audience, string sourceId, double day,
+            bool schemaPrepared = false)
         {
             var disclosures = ReadDictionaryList(parsed, "pregnancyDisclosures");
             if (disclosures.Count == 0) return;
-            EnsurePregnancyContextSchema(c);
+            if (!schemaPrepared) EnsurePregnancyContextSchema(c);
             foreach (var disclosure in disclosures.Take(6))
             {
                 string id = ReadString(disclosure, "pregnancyId", ""), kind = ReadString(disclosure, "kind", ""), quote = ReadString(disclosure, "evidenceQuote", "");

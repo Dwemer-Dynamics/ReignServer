@@ -24,7 +24,13 @@ namespace ReignBetaServer
         {
             if (string.IsNullOrWhiteSpace(contactId) || firstId == secondId) return;
             EnsureSocialReputationSchema(connection);
-            ExpireRulerFavorContact(connection, campaignId, timelineId, day);
+            RecordRulerFavorContactCore(connection, campaignId, timelineId, firstId, secondId, day, contactId, schemaPrepared: false);
+        }
+
+        private static void RecordRulerFavorContactCore(ReignDbConnection connection, string campaignId,
+            string timelineId, string firstId, string secondId, double day, string contactId, bool schemaPrepared)
+        {
+            ExpireRulerFavorContact(connection, campaignId, timelineId, day, schemaPrepared);
             foreach (string rulerId in new[] { firstId, secondId })
             {
                 string favoriteId = rulerId == firstId ? secondId : firstId;
@@ -76,9 +82,10 @@ namespace ReignBetaServer
             return contacts;
         }
 
-        private static List<string> ExpireRulerFavorContact(ReignDbConnection connection, string campaignId, string timelineId, double day)
+        private static List<string> ExpireRulerFavorContact(ReignDbConnection connection, string campaignId, string timelineId,
+            double day, bool schemaPrepared = false)
         {
-            EnsureRulerFavorContactSchema(connection);
+            if (!schemaPrepared) EnsureRulerFavorContactSchema(connection);
             var changed = new List<string>();
             var tags = ActiveRulerFavorRows(connection, campaignId, timelineId, day);
             var contacts = InitializeRulerFavorContacts(connection, campaignId, timelineId, day, tags);
@@ -131,8 +138,11 @@ namespace ReignBetaServer
             if (string.IsNullOrWhiteSpace(parentId) || string.IsNullOrWhiteSpace(ReadString(reply, "body", "")) || !IsPersonalFavorLetter(reply)) return;
             var parent = ReputationStore.SelectLetters(connection, new Dictionary<string, object> { ["id"] = parentId, ["sender"] = sender, ["recipient"] = recipient }).FirstOrDefault();
             if (parent == null || string.IsNullOrWhiteSpace(ReadString(parent, "body", "")) || !IsPersonalFavorLetter(parent)) return;
-            RecordRulerFavorContact(connection, campaignId, timelineId, sender, recipient, day,
-                "correspondence:" + ReadString(reply, "letter_id", ""));
+            // Courier arrival runs inside its own transaction. The normal
+            // campaign connection has already initialized reputation and its catalog.
+            if (sender != recipient)
+                RecordRulerFavorContactCore(connection, campaignId, timelineId, sender, recipient, day,
+                    "correspondence:" + ReadString(reply, "letter_id", ""), schemaPrepared: true);
         }
 
         internal static bool IsPersonalFavorLetter(Dictionary<string, object> letter)

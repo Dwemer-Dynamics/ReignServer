@@ -229,6 +229,35 @@ last_error TEXT NOT NULL DEFAULT '',created_ts BIGINT NOT NULL,updated_ts BIGINT
 CREATE INDEX IF NOT EXISTS idx_correspondence_delivery_work ON correspondence_delivery_jobs(status,next_attempt_ts,lease_until);", parameters, transaction);
         }
 
+        internal static void ApplyCorrespondenceArrivalHistoryDdl(ReignDbConnection connection)
+        {
+            // Prepare the old job and disclosure tables before the courier can acquire letter row locks.
+            CreateCorrespondenceDeliveryJobs(connection);
+            CreateConceptionContexts(connection);
+            ReignDatabase.EnsureDatabaseColumn(connection, "letters", "arrival_retry_after_ts", "BIGINT NOT NULL DEFAULT 0");
+            ReignDatabase.EnsureDatabaseColumn(connection, "correspondence_delivery_jobs", "arrival_history_json", "TEXT NOT NULL DEFAULT ''");
+            ReignDatabase.EnsureDatabaseColumn(connection, "correspondence_delivery_jobs", "arrival_history_terminal_error", "TEXT NOT NULL DEFAULT ''");
+            ReignDatabase.EnsureDatabaseColumn(connection, "correspondence_delivery_jobs", "arrival_history_retry_after_ts", "BIGINT NOT NULL DEFAULT 0");
+            ReignDatabase.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_correspondence_arrival_history
+ON correspondence_delivery_jobs(player_id,timeline_id,restore_generation,arrival_history_retry_after_ts,created_ts,letter_id)
+WHERE arrival_history_json<>'' AND arrival_history_terminal_error='';
+CREATE INDEX IF NOT EXISTS idx_letters_arrival_retry
+ON letters(arrival_retry_after_ts,delivery_day,letter_id) WHERE status='in_transit';");
+        }
+
+#if !REIGN_EXCLUDE_VERIFICATION
+        internal static void DowngradeCorrespondenceArrivalHistoryForTests(ReignDbConnection connection)
+        {
+            using var transaction = connection.BeginTransaction();
+            ReignDatabase.ExecuteSql(connection, @"ALTER TABLE correspondence_delivery_jobs DROP COLUMN arrival_history_json,
+DROP COLUMN arrival_history_terminal_error, DROP COLUMN arrival_history_retry_after_ts;
+ALTER TABLE letters DROP COLUMN arrival_retry_after_ts;", transaction: transaction);
+            ReignDatabase.ExecuteSql(connection, "UPDATE schema_meta SET value='2' WHERE key=$key;",
+                TestDict("key", PersistenceService.CampaignMigrationVersionKey), transaction);
+            transaction.Commit();
+        }
+#endif
+
         internal const string CreateRelationshipPairChemistryStageSql = @"
 CREATE TEMP TABLE IF NOT EXISTS relationship_pair_chemistry_stage(
 pair text NOT NULL,a text NOT NULL,b text NOT NULL,

@@ -1031,30 +1031,25 @@ namespace ReignBetaServer
             DialogueStore.InsertConversationTurnFts(connection, new Dictionary<string, object> { ["id"] = turnId, ["text"] = text ?? "", ["speaker"] = speaker ?? "", ["participants"] = participants ?? "", ["channel"] = channel ?? "" });
         }
 
-        internal static void StoreCorrespondenceTurn(string campaignId, string npcId, string playerId, Dictionary<string, object> letter, double worldDay)
+        internal static void StoreCorrespondenceTurn(ReignDbConnection connection, string campaignId, string npcId,
+            string playerId, Dictionary<string, object> letter, double worldDay, long timestamp)
         {
             string letterId = ReadFirstString(letter, "letter_id", "letterId");
             string text = ReadFirstString(letter, "body", "text");
             if (string.IsNullOrWhiteSpace(letterId) || string.IsNullOrWhiteSpace(npcId) || string.IsNullOrWhiteSpace(text)) return;
             string sessionId = "mail_" + SafeMemoryKey(letterId);
-            long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             string senderId = ReadString(letter, "sender_id", "");
             string recipientId = ReadString(letter, "recipient_id", "");
             List<string> participants = DialogueService.MergeStringLists(new[] { senderId, recipientId, npcId, playerId }, new List<string>());
-            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
-            {
-                using var transaction = connection.BeginTransaction();
-                LockConversationSourcePublication(connection, sessionId);
-                DialogueStore.InsertOrIgnoreConversationSessions7(connection, new Dictionary<string, object>
-                    {
-                        ["id"] = sessionId, ["campaign"] = campaignId, ["npc"] = npcId, ["player"] = playerId ?? "",
-                        ["ts"] = ts, ["day"] = worldDay, ["participants"] = Json.Serialize(participants), ["payload"] = Json.Serialize(letter)
-                    });
-                InsertConversationTurn(connection, "turn_" + SafeMemoryKey(letterId), sessionId, "mail_delivery_" + letterId, 0, letterId,
-                    senderId.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? "player" : "npc", senderId,
-                    ReadString(letter, "sender_name", senderId), text, "correspondence", worldDay, ts, "", participants, letter);
-                transaction.Commit();
-            }
+            LockConversationSourcePublication(connection, sessionId);
+            DialogueStore.InsertOrIgnoreConversationSessions7(connection, new Dictionary<string, object>
+                {
+                    ["id"] = sessionId, ["campaign"] = campaignId, ["npc"] = npcId, ["player"] = playerId ?? "",
+                    ["ts"] = timestamp, ["day"] = worldDay, ["participants"] = Json.Serialize(participants), ["payload"] = Json.Serialize(letter)
+                });
+            InsertConversationTurn(connection, "turn_" + SafeMemoryKey(letterId), sessionId, "mail_delivery_" + letterId, 0, letterId,
+                senderId.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? "player" : "npc", senderId,
+                ReadString(letter, "sender_name", senderId), text, "correspondence", worldDay, timestamp, "", participants, letter);
         }
     }
 }

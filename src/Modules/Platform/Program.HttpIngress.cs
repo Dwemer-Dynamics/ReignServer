@@ -488,10 +488,10 @@ namespace ReignBetaServer
 
             lock (FileLock)
             {
-                return File.ReadAllLines(path, Encoding.UTF8)
-                    .Where(x => !string.IsNullOrWhiteSpace(x))
-                    .Select(x => Json.Deserialize<Dictionary<string, object>>(x))
-                    .ToList();
+                var lines = File.ReadLines(path, Encoding.UTF8).Where(line => !string.IsNullOrWhiteSpace(line));
+                if (CampaignFileService.IsDialogueHistoryPath(path))
+                    return lines.Select(CampaignFileService.ParseDialogueHistoryLine).Where(line => line != null).ToList();
+                return lines.Select(line => Json.Deserialize<Dictionary<string, object>>(line)).ToList();
             }
         }
 

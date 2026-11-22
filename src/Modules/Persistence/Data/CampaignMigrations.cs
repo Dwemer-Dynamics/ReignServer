@@ -13,6 +13,7 @@ namespace ReignBetaServer
     {
         internal const string CampaignMigrationVersionKey = "campaign_migration_version";
         internal const int PlayerApproachSchemaMigrationVersion = 2;
+        internal const int CorrespondenceArrivalHistoryMigrationVersion = 3;
 
         private sealed class CampaignSchemaMigration
         {
@@ -38,6 +39,8 @@ namespace ReignBetaServer
             new CampaignSchemaMigration(1, "core_baseline", null),
             new CampaignSchemaMigration(PlayerApproachSchemaMigrationVersion,
                 "player_approach_tables", RelationshipsService.ApplyPlayerApproachSchemaDdl),
+            new CampaignSchemaMigration(CorrespondenceArrivalHistoryMigrationVersion,
+                "correspondence_arrival_history", RelationshipsSchema.ApplyCorrespondenceArrivalHistoryDdl),
         };
 
         internal static int LatestCampaignMigrationVersion =>
