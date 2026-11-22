@@ -3518,6 +3518,9 @@ namespace ReignBetaServer
                     && !repairedQueue.Any(row => ReadString(row, "id", "") == "pa_rolled_back_reconciliation_fixture"),
                     "Ordinary action recovery persists its terminal queue status and excludes stale player handover cache rows absent from PostgreSQL.", repairedCache);
                 add("provider_middleware_status", ReadBool(LlmProviderService.ProviderMiddlewareStatus(), "ok", false), "Provider middleware exposes circuit, concurrency, idempotency, and latency state.", LlmProviderService.ProviderMiddlewareStatus());
+                add("provider_concurrency_change_updates_active_queue",
+                    LlmProviderService.VerifyProviderConcurrencyChange(),
+                    "Changing the provider limit drains existing calls when reduced and wakes a queued request when raised.", null);
                 add("provider_transient_connection_closed_variants",
                     LlmProviderService.IsTransientLlmFailure("The underlying connection was closed: The connection was closed unexpectedly.")
                     && LlmProviderService.IsTransientLlmFailure("The connection was closed by the upstream provider.")
@@ -3653,4 +3656,44 @@ namespace ReignBetaServer
             }
         }
     }
+
+    internal static partial class LlmProviderService
+    {
+        internal static bool VerifyProviderConcurrencyChange()
+        {
+            var state = new ProviderState(2);
+            if (!AcquireProviderSlot(state, true, 0) || !AcquireProviderSlot(state, true, 0))
+                return false;
+
+            state.SetConcurrencyLimit(1);
+            bool blockedWithTwo = !AcquireProviderSlot(state, true, 0);
+            ReleaseProviderSlot(state);
+            bool blockedWithOne = !AcquireProviderSlot(state, true, 0);
+            ReleaseProviderSlot(state);
+            if (!blockedWithTwo || !blockedWithOne || !AcquireProviderSlot(state, true, 0))
+                return false;
+
+            bool admitted = false;
+            var waiter = new Thread(() =>
+            {
+                admitted = AcquireProviderSlot(state, true, 4000);
+                if (admitted) ReleaseProviderSlot(state);
+            }) { IsBackground = true };
+            waiter.Start();
+            try
+            {
+                bool queued = SpinWait.SpinUntil(() =>
+                {
+                    lock (state.Gate) return state.WaitingInteractive == 1;
+                }, 2000);
+                state.SetConcurrencyLimit(2);
+                return waiter.Join(5000) && queued && admitted;
+            }
+            finally
+            {
+                ReleaseProviderSlot(state);
+            }
+        }
+    }
+
 }

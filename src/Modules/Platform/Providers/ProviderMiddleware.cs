@@ -14,7 +14,7 @@ namespace ReignBetaServer
         internal sealed class ProviderState
         {
             public readonly object Gate = new object();
-            public readonly int MaxConcurrency;
+            public int MaxConcurrency { get; private set; }
             public int ActiveCount;
             public int WaitingInteractive;
             public int WaitingBackground;
@@ -27,10 +27,21 @@ namespace ReignBetaServer
             public long TotalDurationMs;
             public string LastError = "";
             public ProviderState(int concurrency) { MaxConcurrency = concurrency; }
+
+            public void SetConcurrencyLimit(int concurrency)
+            {
+                lock (Gate)
+                {
+                    bool increased = concurrency > MaxConcurrency;
+                    MaxConcurrency = concurrency;
+                    if (increased) Monitor.PulseAll(Gate);
+                }
+            }
         }
 
         private sealed class ProviderCachedResponse { public string Response; public DateTime ExpiresUtc; }
         internal static readonly object ProviderMiddlewareLock = new object();
+        private static int? _settingsProviderConcurrency;
         private static readonly Dictionary<string, ProviderState> ProviderStates = new Dictionary<string, ProviderState>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, ProviderCachedResponse> ProviderResponses = new Dictionary<string, ProviderCachedResponse>(StringComparer.Ordinal);
 
@@ -221,7 +232,14 @@ namespace ReignBetaServer
                 }
                 finally
                 {
-                    if (interactive) state.WaitingInteractive--; else state.WaitingBackground--;
+                    if (interactive)
+                    {
+                        state.WaitingInteractive--;
+                        if (state.WaitingInteractive == 0 && state.WaitingBackground > 0
+                            && state.ActiveCount < state.MaxConcurrency)
+                            Monitor.PulseAll(state.Gate);
+                    }
+                    else state.WaitingBackground--;
                 }
             }
         }
@@ -235,11 +253,26 @@ namespace ReignBetaServer
         {
             if (!ProviderStates.TryGetValue(key, out ProviderState state))
             {
-                state = new ProviderState(Math.Max(1, Math.Min(16, ReadInt(settings, "providerMaxConcurrency", 4))));
+                state = new ProviderState(_settingsProviderConcurrency ?? ReadProviderConcurrency(settings));
                 ProviderStates[key] = state;
             }
             return state;
         }
+
+        internal static void ApplySettingsProviderConcurrency(Dictionary<string, object> settings)
+        {
+            int concurrency = ReadProviderConcurrency(settings);
+            lock (ProviderMiddlewareLock)
+            {
+                if (_settingsProviderConcurrency == concurrency) return;
+                _settingsProviderConcurrency = concurrency;
+                foreach (ProviderState state in ProviderStates.Values)
+                    state.SetConcurrencyLimit(concurrency);
+            }
+        }
+
+        private static int ReadProviderConcurrency(Dictionary<string, object> settings) =>
+            Math.Clamp(ReadInt(settings, "providerMaxConcurrency", 4), 1, 16);
 
         private static void PruneProviderResponseCacheLocked()
         {
