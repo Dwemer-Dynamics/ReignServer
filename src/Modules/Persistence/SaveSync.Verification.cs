@@ -335,6 +335,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> newest = SaveSyncLoadApi(newPayload, false);
                 add("newest_save_no_op", ReadBool(newest, "ok", false) && ReadBool(newest, "noOp", false) && ReadString(newest, "result", "") == "no_op", "Loading the newest unchanged save is a zero-write no-op.");
 
+                VerifyD60RawChangedFileCount(token, add);
                 RunSaveSyncFencedRecoveryTests(add, token, campaignId);
                 RunSaveSyncCommitJournalTest(add, token);
                 string legacyRecovery = Path.Combine(SaveSyncCampaignRoot(campaignId), "r", "legacy-unowned");
@@ -373,7 +374,8 @@ namespace ReignBetaServer
                 Dictionary<string, object> loadSessionPayload =
                     new Dictionary<string, object>(oldPayload)
                     {
-                        ["loadSessionId"] = loadSessionId
+                        ["loadSessionId"] = loadSessionId,
+                        ["skipCleanLoadComparison"] = true
                     };
                 // Terminal report recovery authority: the old snapshot's own restore generation, read
                 // directly from its immutable schema. The live generation is advanced first, so the
@@ -404,6 +406,20 @@ namespace ReignBetaServer
                     && !previewAfterLoad.ContainsKey("idempotentReplay")
                     && !previewAfterLoad.ContainsKey("restoreGeneration"),
                     "A preview using a completed load session compares the current state without returning the applied load receipt.");
+                add("d60_dirty_opt_in_keeps_rollback_comparison",
+                    ReadString(rolledBack, "result", "") == "rolled_back"
+                    && !rolledBack.ContainsKey("comparisonDiagnosticsOmitted")
+                    && ReadString(rolledBack, "currentStateToken", "").Length > 0
+                    && ReadString(rolledBack, "targetStateToken", "").Length > 0
+                    && ReadDictionary(rolledBack, "countsBySubsystem") != null
+                    && ReadInt(rolledBack, "changedFiles", 0) > 0,
+                    "A dirty native load requesting lightweight comparison still reports its measured differences and rolls back.");
+                add("d60_preview_opt_in_keeps_full_comparison",
+                    ReadString(previewAfterLoad, "result", "") == "preview"
+                    && !previewAfterLoad.ContainsKey("comparisonDiagnosticsOmitted")
+                    && ReadDictionary(previewAfterLoad, "countsBySubsystem") != null
+                    && previewAfterLoad.ContainsKey("changedFiles"),
+                    "An opted-in preview, even after a completed load with the same session, still measures diagnostic differences.");
                 string rollbackSourceGeneration = SaveSyncTestSqlValue(campaignId,
                     PersistenceStore.SelectMemoryRestoredSourceContextSql, "source_generation");
                 string rollbackLoadSession = SaveSyncTestSqlValue(campaignId,
@@ -501,7 +517,12 @@ namespace ReignBetaServer
                 // state clean (the next load of the same save stays a no-op), and both a rollback
                 // and a no-op echo the restore generation bound to their own session.
                 Dictionary<string, object> boundNoOp = SaveSyncLoadApi(new Dictionary<string, object>(newPayload) { ["loadSessionId"] = "noop_a_" + token }, false);
-                Dictionary<string, object> repeatNoOp = SaveSyncLoadApi(new Dictionary<string, object>(newPayload) { ["loadSessionId"] = "noop_b_" + token }, false);
+                var lightPayload = new Dictionary<string, object>(newPayload)
+                {
+                    ["loadSessionId"] = "noop_b_" + token,
+                    ["skipCleanLoadComparison"] = true
+                };
+                Dictionary<string, object> repeatNoOp = SaveSyncLoadApi(lightPayload, false);
                 string boundSession = SaveSyncTestSqlValue(campaignId,
                     PersistenceStore.SelectMemoryRestoredSourceContextSql2, "load_session_id");
                 string liveRestoreGeneration = SaveSyncTestSqlValue(campaignId,
@@ -513,6 +534,36 @@ namespace ReignBetaServer
                     && ReadString(repeatNoOp, "restoreGeneration", "") == liveRestoreGeneration
                     && ReadString(rolledBack, "restoreGeneration", "").Length > 0,
                     "A verified no-op load binds its session without dirtying Save Sync state, and each verified load echoes the restore generation bound to it.");
+                add("d60_clean_legacy_request_keeps_full_comparison",
+                    ReadString(boundNoOp, "result", "") == "no_op"
+                    && ReadString(boundNoOp, "loadSessionId", "") == "noop_a_" + token
+                    && ReadString(boundNoOp, "restoreGeneration", "") == liveRestoreGeneration
+                    && !boundNoOp.ContainsKey("comparisonDiagnosticsOmitted")
+                    && ReadDictionary(boundNoOp, "countsBySubsystem") != null
+                    && boundNoOp.ContainsKey("changedFiles"),
+                    "A clean load with a valid session and no comparison preference keeps the original diagnostics and verified owner.");
+                string[] omittedDiagnostics = { "currentStateToken", "targetStateToken", "currentDatabaseBytes",
+                    "targetDatabaseBytes", "recordsRolledBack", "recordsRestored", "changedFiles", "countsBySubsystem" };
+                bool LightResult(Dictionary<string, object> value) => value != null
+                    && ReadBool(value, "comparisonDiagnosticsOmitted", false)
+                    && omittedDiagnostics.All(key => !value.ContainsKey(key));
+                Dictionary<string, object> lightLedger = ReadSaveSyncLedger(campaignId);
+                Dictionary<string, object> lightReceipt = ReadDictionary(ReadDictionary(lightLedger, "lastLoadReceipt"), "response");
+                Dictionary<string, object> lightAudit = Program.ReadJsonLinesFromPath(Path.Combine(
+                    SaveSyncCampaignRoot(campaignId), "audit.jsonl")).LastOrDefault(
+                        row => ReadString(row, "eventType", "") == "load.no_op");
+                Dictionary<string, object> lightReplay = SaveSyncLoadApi(lightPayload, false);
+                add("d60_clean_opt_in_retains_owner_and_light_receipt",
+                    ReadString(repeatNoOp, "result", "") == "no_op"
+                    && ReadString(repeatNoOp, "campaignId", "") == campaignId
+                    && ReadString(repeatNoOp, "savePointId", "") == newPoint
+                    && ReadString(repeatNoOp, "loadSessionId", "") == "noop_b_" + token
+                    && ReadString(repeatNoOp, "restoreGeneration", "") == liveRestoreGeneration
+                    && LightResult(repeatNoOp) && LightResult(lightReceipt)
+                    && LightResult(ReadDictionary(lightLedger, "lastSyncResult")) && LightResult(lightAudit)
+                    && LightResult(lightReplay) && ReadBool(lightReplay, "idempotentReplay", false)
+                    && ReadString(lightReplay, "restoreGeneration", "") == liveRestoreGeneration,
+                    "Verified clean native alignment and its replay preserve exact ownership and explicitly omit unmeasured diagnostics.");
                 add("cross_campaign_isolation", FileSha256(siblingFile) == siblingHash, "Save-point registration and backward/forward restores never write to a sibling campaign.");
                 VerifyCalendarCheckpointInstallation("ssc_" + token, add);
 
@@ -1071,6 +1122,41 @@ namespace ReignBetaServer
                 TryDeleteDirectory(nativeSaveFixture);
             }
             return results;
+        }
+
+        private static void VerifyD60RawChangedFileCount(string token, Action<string, bool, string> add)
+        {
+            string campaignId = "ssd60_" + token;
+            string current = StrictCampaignDirectory(campaignId);
+            string snapshot = Path.Combine(Path.GetTempPath(), "ReignSaveSyncD60_" + token);
+            string target = Path.Combine(snapshot, "campaign");
+            try
+            {
+                Directory.CreateDirectory(current);
+                Directory.CreateDirectory(target);
+                File.WriteAllText(Path.Combine(current, "added.txt"), "added");
+                File.WriteAllText(Path.Combine(target, "removed.txt"), "removed");
+                File.WriteAllText(Path.Combine(current, "changed.txt"), "after");
+                File.WriteAllText(Path.Combine(target, "changed.txt"), "before");
+                File.WriteAllText(Path.Combine(current, "unchanged.txt"), "stable");
+                File.WriteAllText(Path.Combine(target, "unchanged.txt"), "stable");
+                File.WriteAllText(Path.Combine(current, "campaign.json"), Json.Serialize(TestDict("retained", true)));
+                var counts = TestDict("other", TestDict());
+                int rawChanges = ComparePostgreSqlSaveSyncFiles(campaignId, snapshot,
+                    TestDict("files", new List<Dictionary<string, object>>(), "integrityDeferred", true), counts);
+                var rawCounts = ReadDictionary(counts, "other");
+                int declaredChanges = ComparePostgreSqlSaveSyncFiles(campaignId, snapshot,
+                    TestDict("files", BackupFileManifest(target), "integrityDeferred", false), TestDict("other", TestDict()));
+                add("d60_changed_files_counts_distinct_measured_paths",
+                    rawChanges == 3 && declaredChanges == 3
+                    && ReadLong(rawCounts, "removed", 0) == 2 && ReadLong(rawCounts, "restored", 0) == 2,
+                    "Both deferred raw and declared inventories count one added, one removed, and one content-changed path, excluding unchanged and retained files.");
+            }
+            finally
+            {
+                TryDeleteDirectory(current);
+                TryDeleteDirectory(snapshot);
+            }
         }
 #endif
 

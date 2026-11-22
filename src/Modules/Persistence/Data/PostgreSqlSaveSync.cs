@@ -120,14 +120,6 @@ namespace ReignBetaServer
             bool activeClean =
                 IsSaveSyncActiveStateCleanForPoint(campaignId, savePointId)
                 && (dryRun || calendarSha == SaveSyncCalendarDigest(ReadSaveSyncCalendar(StrictCampaignDirectory(campaignId))));
-            string currentToken =
-                ReignPostgreSqlStorage.CampaignStateToken(campaignId);
-            string targetToken =
-                ReignPostgreSqlStorage.SnapshotStateToken(
-                    campaignId, postgresSnapshotPointId);
-            Dictionary<string, object> countsBySubsystem =
-                ComparePostgreSqlSaveSyncRows(
-                    campaignId, postgresSnapshotPointId, pointRoot, manifest);
             Dictionary<string, object> result =
                 new Dictionary<string, object>
                 {
@@ -143,21 +135,30 @@ namespace ReignBetaServer
                     ["savePoint"] = PublicSaveSyncPoint(point),
                     ["databaseProvider"] = "postgresql",
                     ["databaseName"] = ReignPostgreSqlOptions.RequiredDatabaseName,
-                    ["currentStateToken"] = currentToken,
-                    ["targetStateToken"] = targetToken,
-                    ["currentDatabaseBytes"] =
-                        ReignPostgreSqlStorage.CampaignSizeBytes(campaignId),
-                    ["targetDatabaseBytes"] =
-                        ReignPostgreSqlStorage.SnapshotSizeBytes(
-                            campaignId, postgresSnapshotPointId),
-                    ["countsBySubsystem"] = countsBySubsystem,
-                    ["recordsRolledBack"] =
-                        SumSaveSyncCount(countsBySubsystem, "removed"),
-                    ["recordsRestored"] =
-                        SumSaveSyncCount(countsBySubsystem, "restored"),
-                    ["changedFiles"] = activeClean ? 0 : 1,
                     ["backupPlanned"] = !activeClean
                 };
+            // The native handshake needs the verified load outcome and owner, not a second inventory.
+            // Replays and the existing calendar/clean-state decisions have already been resolved.
+            bool skipComparison = !dryRun && activeClean && !string.IsNullOrWhiteSpace(loadSessionId)
+                && ReadString(point, "savePointKind", "") == "native_save"
+                && payload.TryGetValue("skipCleanLoadComparison", out object preference) && preference is true;
+            if (skipComparison)
+                result["comparisonDiagnosticsOmitted"] = true;
+            else
+            {
+                result["currentStateToken"] = ReignPostgreSqlStorage.CampaignStateToken(campaignId);
+                result["targetStateToken"] = ReignPostgreSqlStorage.SnapshotStateToken(
+                    campaignId, postgresSnapshotPointId);
+                Dictionary<string, object> countsBySubsystem = ComparePostgreSqlSaveSyncRows(
+                    campaignId, postgresSnapshotPointId, pointRoot, manifest, out int changedFiles);
+                result["currentDatabaseBytes"] = ReignPostgreSqlStorage.CampaignSizeBytes(campaignId);
+                result["targetDatabaseBytes"] = ReignPostgreSqlStorage.SnapshotSizeBytes(
+                    campaignId, postgresSnapshotPointId);
+                result["countsBySubsystem"] = countsBySubsystem;
+                result["recordsRolledBack"] = SumSaveSyncCount(countsBySubsystem, "removed");
+                result["recordsRestored"] = SumSaveSyncCount(countsBySubsystem, "restored");
+                result["changedFiles"] = changedFiles;
+            }
             if (!string.IsNullOrWhiteSpace(loadSessionId))
                 result["loadSessionId"] = loadSessionId;
             if (dryRun)
@@ -274,7 +275,8 @@ namespace ReignBetaServer
                 string campaignId,
                 string savePointId,
                 string targetSnapshotRoot,
-                Dictionary<string, object> targetManifest)
+                Dictionary<string, object> targetManifest,
+                out int changedFiles)
         {
             Dictionary<string, object> counts =
                 new Dictionary<string, object>(
@@ -356,7 +358,7 @@ namespace ReignBetaServer
                 }
             }
 
-            ComparePostgreSqlSaveSyncFiles(
+            changedFiles = ComparePostgreSqlSaveSyncFiles(
                 campaignId, targetSnapshotRoot,
                 targetManifest, counts);
             foreach (Dictionary<string, object> row
@@ -372,7 +374,7 @@ namespace ReignBetaServer
             return counts;
         }
 
-        private static void ComparePostgreSqlSaveSyncFiles(
+        private static int ComparePostgreSqlSaveSyncFiles(
             string campaignId,
             string targetSnapshotRoot,
             Dictionary<string, object> targetManifest,
@@ -387,14 +389,19 @@ namespace ReignBetaServer
                         row => ReadString(row, "path", ""),
                         row => row,
                         StringComparer.OrdinalIgnoreCase);
+            var targetInventory = ReadDictionaryList(targetManifest, "files");
+            // Raw checkpoints defer file hashes, so their empty table is not an empty snapshot.
+            if (ReadBool(targetManifest, "integrityDeferred", targetInventory.Count == 0))
+                targetInventory = BackupFileManifest(Path.Combine(targetSnapshotRoot, "campaign"));
             Dictionary<string, Dictionary<string, object>> targetFiles =
-                ReadDictionaryList(targetManifest, "files")
+                targetInventory
                     .Where(row => !IsSaveSyncFingerprintExcluded(
                         ReadString(row, "path", "")))
                     .ToDictionary(
                         row => ReadString(row, "path", ""),
                         row => row,
                         StringComparer.OrdinalIgnoreCase);
+            int changedFiles = 0;
             foreach (string relative in currentFiles.Keys.Union(
                 targetFiles.Keys, StringComparer.OrdinalIgnoreCase))
             {
@@ -411,6 +418,7 @@ namespace ReignBetaServer
                             StringComparison.OrdinalIgnoreCase))
                     continue;
 
+                changedFiles++;
                 string currentPath = hasCurrent
                     ? Path.Combine(
                         currentRoot,
@@ -448,6 +456,7 @@ namespace ReignBetaServer
                     removed,
                     restored);
             }
+            return changedFiles;
         }
 
         private static string SaveSyncDatabaseHash(string schema)

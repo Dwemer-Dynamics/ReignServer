@@ -441,17 +441,29 @@ namespace ReignBetaServer
         private static void UpdateSaveSyncLastResult(Dictionary<string, object> ledger, Dictionary<string, object> point, Dictionary<string, object> result, string backupId)
         {
             ledger["lastLoadedSavePoint"] = PublicSaveSyncPoint(point);
-            ledger["lastSyncResult"] = new Dictionary<string, object>
+            var lastResult = new Dictionary<string, object>
             {
                 ["result"] = ReadString(result, "result", ""), ["ok"] = ReadBool(result, "ok", false),
                 ["completedUtc"] = DateTime.UtcNow.ToString("o"), ["durationMs"] = ReadLong(result, "durationMs", 0),
-                ["recordsRolledBack"] = ReadLong(result, "recordsRolledBack", 0), ["recordsRestored"] = ReadLong(result, "recordsRestored", 0),
-                ["changedFiles"] = ReadInt(result, "changedFiles", 0),
-                ["countsBySubsystem"] = ReadDictionary(result, "countsBySubsystem") ?? new Dictionary<string, object>(),
                 ["error"] = DialogueService.LimitText(ReadString(result, "error", ""), 2000), ["backupId"] = backupId ?? ""
             };
+            RecordSaveSyncComparisonDiagnostics(lastResult, result);
+            ledger["lastSyncResult"] = lastResult;
             ledger["lastBackupId"] = backupId ?? "";
             ledger["updatedUtc"] = DateTime.UtcNow.ToString("o");
+        }
+
+        private static void RecordSaveSyncComparisonDiagnostics(Dictionary<string, object> record, Dictionary<string, object> result)
+        {
+            if (ReadBool(result, "comparisonDiagnosticsOmitted", false))
+            {
+                record["comparisonDiagnosticsOmitted"] = true;
+                return;
+            }
+            record["recordsRolledBack"] = ReadLong(result, "recordsRolledBack", 0);
+            record["recordsRestored"] = ReadLong(result, "recordsRestored", 0);
+            record["changedFiles"] = ReadInt(result, "changedFiles", 0);
+            record["countsBySubsystem"] = ReadDictionary(result, "countsBySubsystem") ?? new Dictionary<string, object>();
         }
 
         private static void AppendSaveSyncAudit(string campaignId, string eventType, Dictionary<string, object> data)
@@ -466,11 +478,10 @@ namespace ReignBetaServer
                     ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["utc"] = DateTime.UtcNow.ToString("o"),
                     ["eventType"] = eventType, ["campaignId"] = campaignId,
                     ["savePointId"] = ReadString(data, "savePointId", ""), ["result"] = ReadString(data, "result", ""),
-                    ["durationMs"] = ReadLong(data, "durationMs", 0), ["recordsRolledBack"] = ReadLong(data, "recordsRolledBack", 0),
-                    ["recordsRestored"] = ReadLong(data, "recordsRestored", 0), ["changedFiles"] = ReadInt(data, "changedFiles", 0),
-                    ["backupId"] = ReadString(data, "backupId", ""), ["countsBySubsystem"] = ReadDictionary(data, "countsBySubsystem") ?? new Dictionary<string, object>(),
+                    ["durationMs"] = ReadLong(data, "durationMs", 0), ["backupId"] = ReadString(data, "backupId", ""),
                     ["error"] = DialogueService.LimitText(ReadString(data, "error", ""), 4000)
                 };
+                RecordSaveSyncComparisonDiagnostics(row, data);
                 CampaignFileService.AppendBoundedJsonLineToPath(path, row, 4L * 1024L * 1024L, 2L * 1024L * 1024L);
                 OperationsService.LogOperational("save_sync." + eventType, row);
             }
