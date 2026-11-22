@@ -465,43 +465,124 @@ namespace ReignBetaServer
             }
 
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+            using (ReignDbTransaction transaction = connection.BeginTransaction(System.Data.IsolationLevel.ReadCommitted))
             {
-                Dictionary<string, object> prior = RelationshipsStore.SelectConceptionAttempts2(connection, new Dictionary<string, object> { ["id"] = attemptId }).FirstOrDefault();
+                var key = new Dictionary<string, object> { ["id"] = attemptId };
+                var prior = RelationshipsStore.SelectConceptionAttempts2(connection, key, transaction).FirstOrDefault();
                 if (prior != null)
-                {
-                    Dictionary<string, object> priorConception = RelationshipsStore.SelectConceptions2(connection, new Dictionary<string, object>{{"id",attemptId}}).FirstOrDefault() ?? new Dictionary<string, object>();
-                    string priorStatus = ReadString(prior,"status","resolved");
-                    bool cancelled = priorStatus.Equals("cancelled",StringComparison.OrdinalIgnoreCase);
-                    return new Dictionary<string, object> { ["ok"] = true, ["idempotent"] = true, ["attemptId"] = attemptId, ["decision"] = priorStatus, ["verified"] = verified, ["eligible"] = ReadInt(prior, "success", 0) == 1 || ReadDouble(prior, "chance", 0d) > 0d, ["chance"] = ReadDouble(prior, "chance", 0d), ["roll"] = ReadDouble(prior, "roll", -1d), ["rollPerformed"] = !cancelled, ["cancelled"] = cancelled, ["success"] = !cancelled && ReadInt(prior, "success", 0) == 1,
-                        ["conceptionId"] = ReadString(priorConception,"conception_id",""),["motherId"] = ReadString(priorConception,"mother_id",""),["biologicalFatherId"] = ReadString(priorConception,"biological_father_id",""),["legalFatherId"] = ReadString(priorConception,"legal_father_id",""),["dueDay"] = ReadDouble(priorConception,"due_day",0d) };
-                }
+                    return ReadPlayerConceptionAttempt(connection, transaction, attemptId, verified, prior);
 
                 bool cancelledNow = decision == "pull_out";
                 double roll = cancelledNow ? -1d : StableUnit(attemptId + "|player_conception");
                 bool success = !cancelledNow && chance > 0d && roll < chance;
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                RelationshipsStore.InsertConceptionAttempts(connection, new Dictionary<string, object>
+                string storedPayload = Json.Serialize(payload);
+                if (!RelationshipsStore.TryInsertPlayerConceptionAttempt(connection, new Dictionary<string, object>
                 {
-                    ["id"] = attemptId,["event"] = ReadString(payload,"eventId",attemptId),["mother"] = motherId,["father"] = fatherId,["age"] = age,
-                    ["chance"] = chance,["roll"] = roll,["success"] = success ? 1 : 0,["day"] = day,["payload"] = Json.Serialize(payload),["ts"] = ts,
-                    ["status"] = cancelledNow ? "cancelled" : "resolved"
-                });
+                    ["id"] = attemptId, ["event"] = ReadString(payload, "eventId", attemptId), ["mother"] = motherId,
+                    ["father"] = fatherId, ["age"] = age, ["chance"] = chance, ["roll"] = roll, ["success"] = success ? 1 : 0,
+                    ["day"] = day, ["payload"] = storedPayload, ["ts"] = ts, ["status"] = cancelledNow ? "cancelled" : "resolved"
+                }, transaction))
+                {
+                    // The unique attempt row waits for a concurrent winner. A fresh read
+                    // in this READ COMMITTED transaction sees that whole committed result.
+                    prior = RelationshipsStore.SelectConceptionAttempts2(connection, key, transaction).Single();
+                    return ReadPlayerConceptionAttempt(connection, transaction, attemptId, verified, prior);
+                }
+
                 string conceptionId = "";
+                string legalFatherId = "";
                 if (success)
                 {
                     conceptionId = "conception_" + Guid.NewGuid().ToString("N");
                     string spouseId = ReadString(mother, "spouseId", "");
-                    string legalFatherId = !string.IsNullOrWhiteSpace(spouseId) ? spouseId : fatherId;
+                    legalFatherId = !string.IsNullOrWhiteSpace(spouseId) ? spouseId : fatherId;
                     double secrecy = !string.IsNullOrWhiteSpace(spouseId) && !spouseId.Equals(fatherId, StringComparison.OrdinalIgnoreCase) ? 0.75d : 0d;
                     RelationshipsStore.InsertConceptions(connection, new Dictionary<string, object>
                     {
-                        ["id"] = conceptionId,["attempt"] = attemptId,["mother"] = motherId,["bio"] = fatherId,["legal"] = legalFatherId,
-                        ["day"] = day,["due"] = day + 36d,["secrecy"] = secrecy,["payload"] = Json.Serialize(payload),["ts"] = ts
-                    });
-                    QueueDirectorAction(connection,"start_conception",day,motherId,fatherId,new Dictionary<string, object>{{"conceptionId",conceptionId},{"motherId",motherId},{"biologicalFatherId",fatherId},{"legalFatherId",legalFatherId},{"conceptionDay",day},{"dueDay",day+36d},{"secrecy",secrecy},{"playerInvolved",true}});
+                        ["id"] = conceptionId, ["attempt"] = attemptId, ["mother"] = motherId, ["bio"] = fatherId,
+                        ["legal"] = legalFatherId, ["day"] = day, ["due"] = day + 36d, ["secrecy"] = secrecy,
+                        ["payload"] = storedPayload, ["ts"] = ts
+                    }, transaction);
+                    InsertDirectorAction(connection, "director_action_" + Guid.NewGuid().ToString("N"),
+                        "start_conception", day, motherId, fatherId, new Dictionary<string, object>
+                        {
+                            ["conceptionId"] = conceptionId, ["motherId"] = motherId, ["biologicalFatherId"] = fatherId,
+                            ["legalFatherId"] = legalFatherId, ["conceptionDay"] = day, ["dueDay"] = day + 36d,
+                            ["secrecy"] = secrecy, ["playerInvolved"] = true, ["scheduledWorldDay"] = day
+                        }, transaction);
                 }
-                return new Dictionary<string, object> { ["ok"] = true,["attemptId"] = attemptId,["decision"] = decision,["verified"] = verified,["eligible"] = eligible,["chance"] = chance,["roll"] = roll,["rollPerformed"] = !cancelledNow,["cancelled"] = cancelledNow,["success"] = success,["conceptionId"] = conceptionId,["motherId"] = motherId,["biologicalFatherId"] = fatherId,["legalFatherId"] = success ? (!string.IsNullOrWhiteSpace(ReadString(mother,"spouseId","")) ? ReadString(mother,"spouseId","") : fatherId) : "",["dueDay"] = success ? day + 36d : 0d };
+                transaction.Commit();
+                return new Dictionary<string, object>
+                {
+                    ["ok"] = true, ["attemptId"] = attemptId, ["decision"] = decision, ["verified"] = verified,
+                    ["eligible"] = eligible, ["chance"] = chance, ["roll"] = roll, ["rollPerformed"] = !cancelledNow,
+                    ["cancelled"] = cancelledNow, ["success"] = success, ["conceptionId"] = conceptionId, ["motherId"] = motherId,
+                    ["biologicalFatherId"] = fatherId, ["legalFatherId"] = legalFatherId, ["dueDay"] = success ? day + 36d : 0d
+                };
             }
+        }
+
+        private static Dictionary<string, object> ReadPlayerConceptionAttempt(ReignDbConnection connection,
+            ReignDbTransaction transaction, string attemptId, bool verified, Dictionary<string, object> prior)
+        {
+            string status = ReadString(prior, "status", "resolved");
+            bool cancelled = status.Equals("cancelled", StringComparison.OrdinalIgnoreCase);
+            double chance = ReadDouble(prior, "chance", 0d);
+            bool won = ReadInt(prior, "success", 0) == 1;
+            var priorConception = new Dictionary<string, object>();
+            string incomplete = "";
+            if (!cancelled && won)
+            {
+                var conceptions = RelationshipsStore.SelectConceptions2(connection,
+                    new Dictionary<string, object> { ["id"] = attemptId }, transaction);
+                if (conceptions.Count != 1)
+                    incomplete = conceptions.Count == 0 ? "missing_conception" : "ambiguous_conception";
+                else
+                {
+                    priorConception = conceptions[0];
+                    if (ReadString(priorConception, "status", "") == "pending_game")
+                    {
+                        int actions = RelationshipsStore.SelectPlayerConceptionActions(connection, new Dictionary<string, object>
+                        {
+                            ["actor"] = ReadString(priorConception, "mother_id", ""),
+                            ["target"] = ReadString(priorConception, "biological_father_id", ""),
+                            ["day"] = priorConception["conception_day"]
+                        }, transaction).Count(action => IsPlayerConceptionFollowUp(action, priorConception));
+                        if (actions != 1) incomplete = actions == 0 ? "missing_native_action" : "ambiguous_native_action";
+                    }
+                }
+            }
+
+            var result = new Dictionary<string, object>
+            {
+                ["ok"] = incomplete.Length == 0, ["idempotent"] = true, ["attemptId"] = attemptId, ["decision"] = status,
+                ["verified"] = verified, ["eligible"] = won || chance > 0d, ["chance"] = chance,
+                ["roll"] = ReadDouble(prior, "roll", -1d), ["rollPerformed"] = !cancelled, ["cancelled"] = cancelled,
+                ["success"] = !cancelled && won && incomplete.Length == 0,
+                ["conceptionId"] = ReadString(priorConception, "conception_id", ""),
+                ["motherId"] = ReadString(priorConception, "mother_id", ""),
+                ["biologicalFatherId"] = ReadString(priorConception, "biological_father_id", ""),
+                ["legalFatherId"] = ReadString(priorConception, "legal_father_id", ""),
+                ["dueDay"] = ReadDouble(priorConception, "due_day", 0d)
+            };
+            if (incomplete.Length > 0)
+            {
+                result["rollSucceeded"] = true;
+                result["followUpStatus"] = incomplete;
+                result["error"] = "This stored player conception roll succeeded, but its follow-up could not be verified.";
+            }
+            return result;
+        }
+
+        private static bool IsPlayerConceptionFollowUp(Dictionary<string, object> action, Dictionary<string, object> conception)
+        {
+            var payload = TryParseStrictJsonObject(ReadString(action, "payload_json", ""));
+            string id = ReadString(conception, "conception_id", "");
+            return id.Length > 0 && ReadBool(payload, "playerInvolved", false)
+                && ReadString(payload, "conceptionId", "") == id
+                && ReadString(payload, "motherId", "") == ReadString(conception, "mother_id", "")
+                && ReadString(payload, "biologicalFatherId", "") == ReadString(conception, "biological_father_id", "");
         }
 
         internal static Dictionary<string, object> FamilyConceptionReportApi(Dictionary<string, object> payload)
@@ -877,8 +958,18 @@ namespace ReignBetaServer
                     return "";
                 }
             }
-            RelationshipsStore.InsertRelationshipDirectorActions2(connection, new Dictionary<string, object>{{"id",id},{"type",type},{"day",day},{"actor",actor},{"target",target},{"payload",Json.Serialize(payload)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});
+            InsertDirectorAction(connection, id, type, day, actor, target, payload);
             return id;
+        }
+
+        private static void InsertDirectorAction(ReignDbConnection connection, string id, string type, double day,
+            string actor, string target, Dictionary<string, object> payload, ReignDbTransaction transaction = null)
+        {
+            RelationshipsStore.InsertRelationshipDirectorActions2(connection, new Dictionary<string, object>
+            {
+                ["id"] = id, ["type"] = type, ["day"] = day, ["actor"] = actor, ["target"] = target,
+                ["payload"] = Json.Serialize(payload), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+            }, transaction);
         }
 
         internal static Dictionary<string, object> RelationshipDirectorPollActionsApi(Dictionary<string, object> payload)
