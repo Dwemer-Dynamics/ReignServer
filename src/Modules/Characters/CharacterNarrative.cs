@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -397,9 +398,9 @@ namespace ReignBetaServer
             if (string.IsNullOrWhiteSpace(hero)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "heroId is required." };
             Dictionary<string, object> narrative;
             var dynamic = new Dictionary<string, object>();
-            var catalog = ReadShippedNarrativeCatalog();
+            var shipped = ReadShippedNarrativeInspection();
             if (string.IsNullOrWhiteSpace(campaign))
-                narrative = ReadDictionary(ReadDictionaryList(catalog, "profiles").FirstOrDefault(x => ReadString(x, "heroStringId", "") == hero), "narrative");
+                narrative = shipped.ReadNarrative(hero);
             else
             {
                 narrative = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "narrative.json"));
@@ -410,7 +411,52 @@ namespace ReignBetaServer
                 ["available"] = narrative != null && narrative.Count > 0, ["baseNarrative"] = narrative,
                 ["effectiveNarrative"] = ResolveEffectiveNarrative(stack), ["selection"] = NarrativePromptDiagnostics(stack),
                 ["developmentHistory"] = dynamic, ["historyScope"] = "retained character projection; no materialization or database writes",
-                ["catalogDiversity"] = AuditNarrativeCatalog(catalog) };
+                ["catalogDiversity"] = shipped.ReadDiversity() };
+        }
+
+        private static readonly ConditionalWeakTable<Dictionary<string, object>, ShippedNarrativeInspection>
+            ShippedNarrativeInspections = new ConditionalWeakTable<Dictionary<string, object>, ShippedNarrativeInspection>();
+
+        private static ShippedNarrativeInspection ReadShippedNarrativeInspection()
+        {
+            Dictionary<string, object> catalog;
+            lock (CharacterProfileLibraryLock)
+                catalog = CharacterProfilesById?.Count > 0 ? CharacterProfileLibraryRoot : null;
+
+            // Startup loads the shipped pack once. A replacement library root starts a new inspection snapshot.
+            if (ReadString(catalog, "packVersion", "") == NarrativePack)
+                return ShippedNarrativeInspections.GetValue(catalog, root => new ShippedNarrativeInspection(root));
+
+            return new ShippedNarrativeInspection(ReadShippedNarrativeCatalog());
+        }
+
+        private sealed class ShippedNarrativeInspection
+        {
+            private readonly Dictionary<string, Dictionary<string, object>> narratives = new(StringComparer.Ordinal);
+            private readonly Dictionary<string, object> catalog;
+            private readonly object diversityLock = new();
+            private string diversityJson;
+
+            internal ShippedNarrativeInspection(Dictionary<string, object> catalog)
+            {
+                this.catalog = catalog;
+                foreach (var profile in ReadDictionaryList(catalog, "profiles"))
+                    narratives.TryAdd(ReadString(profile, "heroStringId", "") ?? "", ReadDictionary(profile, "narrative"));
+            }
+
+            internal Dictionary<string, object> ReadNarrative(string hero)
+            {
+                return narratives.TryGetValue(hero, out var narrative) && narrative != null
+                    ? Json.Deserialize<Dictionary<string, object>>(Json.Serialize(narrative)) : null;
+            }
+
+            internal Dictionary<string, object> ReadDiversity()
+            {
+                string json;
+                lock (diversityLock)
+                    json = diversityJson ??= Json.Serialize(AuditNarrativeCatalog(catalog));
+                return Json.Deserialize<Dictionary<string, object>>(json);
+            }
         }
 
         private static Dictionary<string, object> AuditNarrativeCatalog(Dictionary<string, object> catalog)
