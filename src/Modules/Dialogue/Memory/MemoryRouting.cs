@@ -708,12 +708,8 @@ namespace ReignBetaServer
                 .Where(content => !string.IsNullOrWhiteSpace(content)));
             if (string.IsNullOrWhiteSpace(authoritativePrompt)) return visibleReply;
 
-            // Prefer compact exact identifiers that the model itself selected in its private
-            // decision evidence or memory proposal. If the model also lost the identifier there,
-            // a uniquely relevant identifier from authoritative prompt evidence may still repair
-            // the visible answer. That fallback is deliberately narrow: the identifier's nearby
-            // source text must overlap the recall question, and a competing identifier with the
-            // same score makes the result ambiguous and therefore ineligible for repair.
+            // Complete an identifier only when the model selected it and spoke its short form.
+            // Nearby words in the prompt cannot establish the missing name.
             Dictionary<string, object> decisionBrief = ReadDictionary(parsed, "decisionBrief")
                 ?? ReadDictionary(parsed, "decision_brief")
                 ?? new Dictionary<string, object>();
@@ -757,78 +753,6 @@ namespace ReignBetaServer
                     ["visibleToken"] = visibleMatch.Value,
                     ["authoritativeIdentifier"] = candidate,
                     ["evidence"] = "model_selected_and_prompt_grounded"
-                });
-                return repairedReply;
-            }
-
-            HashSet<string> questionTerms = new HashSet<string>(
-                Regex.Matches(playerText ?? string.Empty, @"\b[\p{L}]{4,}\b",
-                        RegexOptions.CultureInvariant)
-                    .Cast<Match>()
-                    .Select(match => match.Value.ToLowerInvariant())
-                    .Where(term => !new[]
-                    {
-                        "what", "which", "where", "when", "whose", "earlier",
-                        "asked", "remember", "exact", "exactly", "name", "called",
-                        "said", "tell", "please"
-                    }.Contains(term, StringComparer.OrdinalIgnoreCase)),
-                StringComparer.OrdinalIgnoreCase);
-            List<Dictionary<string, object>> groundedCandidates =
-                identifierPattern.Matches(authoritativePrompt)
-                    .Cast<Match>()
-                    .Where(match => match.Success
-                        && visibleReply.IndexOf(
-                            match.Value, StringComparison.OrdinalIgnoreCase) < 0)
-                    .GroupBy(match => match.Value, StringComparer.OrdinalIgnoreCase)
-                    .Select(group =>
-                    {
-                        Match match = group.First();
-                        int start = Math.Max(0, match.Index - 240);
-                        int length = Math.Min(
-                            authoritativePrompt.Length - start,
-                            match.Length + 480);
-                        string window = authoritativePrompt.Substring(start, length);
-                        int score = questionTerms.Count(term =>
-                            Regex.IsMatch(
-                                window,
-                                @"\b" + Regex.Escape(term) + @"\b",
-                                RegexOptions.IgnoreCase
-                                    | RegexOptions.CultureInvariant));
-                        return new Dictionary<string, object>
-                        {
-                            ["identifier"] = match.Value,
-                            ["base"] = match.Groups["base"].Value,
-                            ["score"] = score
-                        };
-                    })
-                    .OrderByDescending(candidate => ReadInt(candidate, "score", 0))
-                    .ThenBy(candidate => ReadString(candidate, "identifier", ""),
-                        StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-            Dictionary<string, object> best = groundedCandidates.FirstOrDefault();
-            int bestScore = ReadInt(best, "score", 0);
-            bool uniquelyGrounded = best != null
-                && bestScore >= 2
-                && !groundedCandidates.Skip(1).Any(candidate =>
-                    ReadInt(candidate, "score", 0) == bestScore);
-            if (uniquelyGrounded)
-            {
-                string candidate = ReadString(best, "identifier", "");
-                string candidateBase = ReadString(best, "base", "");
-                Regex visibleBase = new Regex(
-                    @"\b" + Regex.Escape(candidateBase) + @"\b(?![-_])",
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-                Match visibleMatch = visibleBase.Match(visibleReply);
-                string repairedReply = visibleMatch.Success
-                    ? visibleBase.Replace(visibleReply, _ => candidate, 1)
-                    : visibleReply.TrimEnd() + " Its exact name was " + candidate + ".";
-                repairs.Add(new Dictionary<string, object>
-                {
-                    ["kind"] = "exact_recall_identifier_completion",
-                    ["visibleToken"] = visibleMatch.Success ? visibleMatch.Value : "",
-                    ["authoritativeIdentifier"] = candidate,
-                    ["evidence"] = "unique_prompt_grounded_recall_match",
-                    ["questionOverlapScore"] = bestScore
                 });
                 return repairedReply;
             }

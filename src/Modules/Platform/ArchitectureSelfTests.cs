@@ -1447,8 +1447,8 @@ namespace ReignBetaServer
                     && DialogueService.IsPureConversationRecallRequest(askedToRememberRecall)
                     && exactRecallReply.Contains("Selca-49", StringComparison.Ordinal)
                     && exactRecallRepairs.Count == 1
-                    && privateOmissionReply.Contains("Selca-49", StringComparison.Ordinal)
-                    && privateOmissionRepairs.Count == 1
+                    && privateOmissionReply == "It was blue and kept beneath the cedar box, but the exact name escapes me."
+                    && privateOmissionRepairs.Count == 0
                     && ambiguousRecallReply.IndexOf("Selca-49", StringComparison.Ordinal) < 0
                     && ambiguousRecallReply.IndexOf("Velra-52", StringComparison.Ordinal) < 0
                     && ambiguousRecallRepairs.Count == 0
