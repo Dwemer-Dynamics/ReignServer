@@ -922,6 +922,8 @@ namespace ReignBetaServer
                     && !ReignPostgreSqlStorage.SnapshotExists(recoveredFailureId, terminal.RecoverySnapshotId),
                     "Confirmed campaign retirement releases the previously settled work and its terminal journal, SQL and file backup.");
 
+                VerifyCampaignRetirementVectors(add, "ssvec_" + token);
+
                 PrepareSaveSyncTestCampaign(residualCleanupId, "residual");
                 string longResidualDirectory =
                     StrictCampaignDirectory(residualCleanupId);
@@ -1211,6 +1213,149 @@ namespace ReignBetaServer
             }
             finally { WriteSaveSyncLedger(campaignId, originalLedger); }
         }
+
+#if !REIGN_EXCLUDE_VERIFICATION
+        private static void VerifyCampaignRetirementVectors(Action<string, bool, string> add,
+            string campaignId)
+        {
+            string vectorId = Guid.NewGuid().ToString();
+            string pendingRoot = "";
+            string crashRoot = "";
+            bool previousSkip = SaveSyncSkipSemanticForTests;
+            string previousFailure = CampaignRetirementFailureInjectionForTests;
+            Action<IReadOnlyList<string>> previousTransport = CampaignRetirementDeleteVectorsForTests;
+            try
+            {
+                PrepareSaveSyncTestCampaign(campaignId, "semantic");
+                SeedRetirementVectorFixture(campaignId, new[] { vectorId });
+                SaveSyncSkipSemanticForTests = false;
+                List<string> attempts = new List<string>();
+                bool transportSawRetiredSql = true;
+                bool rejectVectorDelete = true;
+                CampaignRetirementDeleteVectorsForTests = ids =>
+                {
+                    attempts.AddRange(ids);
+                    transportSawRetiredSql &= !ReignPostgreSqlStorage.CampaignExists(campaignId);
+                    if (rejectVectorDelete) throw new IOException("Injected vector worker failure.");
+                };
+
+                CampaignRetirementFailureInjectionForTests = "after_stage";
+                Dictionary<string, object> rollback = DeleteCampaignOwnedDataCore(
+                    campaignId, "Semantic Retirement", true, "test_vector_rollback");
+                CampaignRetirementFailureInjectionForTests = "";
+                add("retirement_rollback_never_deletes_semantic_vectors",
+                    ReadString(rollback, "result", "") == "delete_failed_recovered"
+                    && attempts.Count == 0
+                    && ReignPostgreSqlStorage.CampaignExists(campaignId)
+                    && Directory.Exists(StrictCampaignDirectory(campaignId))
+                    && ReadCampaignRetirementVectorIds(campaignId).SequenceEqual(new[] { vectorId }),
+                    "The staged failure restores the active campaign and preserves indexed vector IDs without calling the vector worker.");
+
+                Dictionary<string, object> retired = DeleteCampaignOwnedDataCore(
+                    campaignId, "Semantic Retirement", true, "test_vector_retry");
+                pendingRoot = ReadStringList(retired, "residualCleanup").FirstOrDefault(path =>
+                    File.Exists(Path.Combine(path, CampaignRetirementVectorCleanupReceipt))) ?? "";
+                CleanupCampaignRetirementStagingAtStartup();
+                string receipt = Path.Combine(pendingRoot, CampaignRetirementVectorCleanupReceipt);
+                add("retirement_vector_cleanup_is_durable_after_commit",
+                    ReadBool(retired, "ok", false)
+                    && ReadString(retired, "result", "") == "deleted_cleanup_pending"
+                    && !ReadBool(retired, "cleanupComplete", true)
+                    && attempts.SequenceEqual(new[] { vectorId }) && transportSawRetiredSql
+                    && !ReignPostgreSqlStorage.CampaignExists(campaignId)
+                    && !Directory.Exists(StrictCampaignDirectory(campaignId))
+                    && pendingRoot.Length > 0
+                    && ReadStringList(CampaignFileService.ReadJsonObject(receipt), "ids").SequenceEqual(new[] { vectorId }),
+                    "Worker failure leaves a committed cleanup receipt with the original IDs. Startup preserves it and does not contact the worker.");
+
+                rejectVectorDelete = false;
+                PrepareSaveSyncTestCampaign(campaignId, "replacement");
+                CleanupCampaignRetirementStagingAtStartup();
+                RetryCampaignRetirementVectorCleanup("");
+                bool replacementProtected = attempts.Count == 1 && File.Exists(receipt)
+                    && Directory.Exists(StrictCampaignDirectory(campaignId));
+                ReignPostgreSqlStorage.DropCampaign(campaignId);
+                RetryCampaignRetirementVectorCleanup("");
+                add("retirement_vector_retry_respects_recreated_campaign",
+                    replacementProtected && transportSawRetiredSql
+                    && attempts.SequenceEqual(new[] { vectorId, vectorId })
+                    && pendingRoot.Length > 0 && !Directory.Exists(pendingRoot),
+                    "A recreated SQL campaign blocks old vector cleanup. Once it is absent, the monitor retries the captured IDs and clears the staged receipt.");
+
+                PrepareSaveSyncTestCampaign(campaignId, "retirement_receipt_crash");
+                string[] seededIds = Enumerable.Range(0, CampaignSemanticDeleteBatchSize + 1)
+                    .Select(_ => Guid.NewGuid().ToString()).ToArray();
+                SeedRetirementVectorFixture(campaignId, seededIds);
+                attempts.Clear();
+                CampaignRetirementFailureInjectionForTests = "after_sql_drop_before_commit_receipt";
+                Dictionary<string, object> interrupted = DeleteCampaignOwnedDataCore(
+                    campaignId, "Semantic Retirement", true, "test_vector_commit_receipt_crash");
+                CampaignRetirementFailureInjectionForTests = "";
+                crashRoot = ReadStringList(interrupted, "residualCleanup").FirstOrDefault(path =>
+                    File.Exists(Path.Combine(path, CampaignRetirementVectorCleanupReceipt))) ?? "";
+                if (crashRoot.Length == 0)
+                {
+                    add("retirement_vector_retry_resumes_after_interrupted_receipt", false,
+                        "The SQL-drop boundary did not retain a vector cleanup receipt.");
+                    return;
+                }
+                string transactionPath = Path.Combine(crashRoot, "transaction.json");
+                string crashReceiptPath = Path.Combine(crashRoot, CampaignRetirementVectorCleanupReceipt);
+                List<string> captured = ReadStringList(CampaignFileService.ReadJsonObject(crashReceiptPath), "ids");
+                bool sqlCommitted = ReadBool(interrupted, "campaignDeleted", false)
+                    && !ReignPostgreSqlStorage.CampaignExists(campaignId)
+                    && ReadString(CampaignFileService.ReadJsonObject(transactionPath), "state", "") == "staging"
+                    && captured.Count == seededIds.Length && seededIds.ToHashSet().SetEquals(captured);
+                string temporaryFile = Path.Combine(crashRoot, "~0123abcd");
+                File.WriteAllText(temporaryFile, "interrupted atomic replacement");
+                CleanupCampaignRetirementStagingAtStartup();
+                bool startupSealedCommit = attempts.Count == 0 && File.Exists(temporaryFile) &&
+                    ReadString(CampaignFileService.ReadJsonObject(transactionPath), "state", "") == "committed";
+                string unexpectedDirectory = Path.Combine(crashRoot, "~fedcba98");
+                Directory.CreateDirectory(unexpectedDirectory);
+                RetryCampaignRetirementVectorCleanup("");
+                bool rejectsUnexpectedDirectory = attempts.Count == 0 && File.Exists(crashReceiptPath);
+                Directory.Delete(unexpectedDirectory);
+                RetryCampaignRetirementVectorCleanup("");
+                bool firstBatchRecorded = attempts.SequenceEqual(captured.Take(CampaignSemanticDeleteBatchSize))
+                    && ReadStringList(CampaignFileService.ReadJsonObject(crashReceiptPath), "ids")
+                        .SequenceEqual(captured.Skip(CampaignSemanticDeleteBatchSize));
+                RetryCampaignRetirementVectorCleanup("");
+                add("retirement_vector_retry_resumes_after_interrupted_receipt",
+                    sqlCommitted && startupSealedCommit && rejectsUnexpectedDirectory
+                    && firstBatchRecorded && attempts.SequenceEqual(captured) && transportSawRetiredSql
+                    && !Directory.Exists(crashRoot),
+                    "Startup seals the witnessed SQL commit without worker access, and the monitor advances the remaining IDs despite the interrupted atomic write file.");
+            }
+            finally
+            {
+                CampaignRetirementDeleteVectorsForTests = previousTransport;
+                CampaignRetirementFailureInjectionForTests = previousFailure;
+                SaveSyncSkipSemanticForTests = previousSkip;
+                if (pendingRoot.Length > 0)
+                    DeleteCampaignStagingRoot(pendingRoot, new List<string>());
+                if (crashRoot.Length > 0)
+                    DeleteCampaignStagingRoot(crashRoot, new List<string>());
+                if (ReignPostgreSqlStorage.CampaignExists(campaignId))
+                    ReignPostgreSqlStorage.DropCampaign(campaignId);
+                TryDeleteDirectory(StrictCampaignDirectory(campaignId));
+                TryDeleteDirectory(SaveSyncCampaignRoot(campaignId));
+                TryDeleteDirectory(CampaignPortraitCacheDirectory(campaignId));
+            }
+        }
+        private static void SeedRetirementVectorFixture(string campaignId, IEnumerable<string> vectorIds)
+        {
+            using (ReignDbConnection connection = ReignPostgreSqlStorage.OpenCampaignConnection(campaignId))
+            {
+                DialogueSchema.CreateEmbeddingDocuments(connection);
+                foreach (string vectorId in vectorIds)
+                    DialogueStore.UpsertEmbeddingDocuments(connection, TestDict("type", "memory",
+                        "id", "retirement_fixture_" + vectorId, "model", "fixture", "provider", "local",
+                        "campaign", campaignId, "timeline", "fixture", "hash", "fixture",
+                        "vector", vectorId, "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds(), "payload", "{}"));
+            }
+        }
+#endif
 
         private static void PrepareCampaignRetirementTestPoint(
             string campaignId,
