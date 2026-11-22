@@ -321,12 +321,14 @@ OR (k.audience_type='kingdom' AND k.audience_id=$kingdom))) ORDER BY e.world_day
 
         internal static void UpdateDynamicCharacteristics(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
-            ReignDatabase.ExecuteSql(connection, "UPDATE dynamic_characteristics SET status='source_unavailable' WHERE owner_id=$owner AND category='life_transition';", parameters, transaction);
+            ReignDatabase.ExecuteSql(connection, @"UPDATE dynamic_characteristics SET status='source_unavailable'
+WHERE owner_id=$owner AND category='life_transition' AND status IS DISTINCT FROM 'source_unavailable'
+AND characteristic_id NOT IN (SELECT jsonb_array_elements_text(CAST($observed AS jsonb)));", parameters, transaction);
         }
 
         internal static void UpdateDynamicCharacteristics2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
-            ReignDatabase.ExecuteSql(connection, "UPDATE dynamic_characteristics SET status=$status WHERE characteristic_id=$id;", parameters, transaction);
+            ReignDatabase.ExecuteSql(connection, "UPDATE dynamic_characteristics SET status=$status WHERE characteristic_id=$id AND status IS DISTINCT FROM $status;", parameters, transaction);
         }
 
         internal static List<Dictionary<string, object>> SelectDynamicCharacteristics2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)

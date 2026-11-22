@@ -95,7 +95,29 @@ namespace ReignBetaServer
                 RefreshCharacterLifeProjection(campaign,"npc",access);
                 using(var reopened=ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    Check("source_projection_survives_connection_reload",CharactersSelfTestStore.SelectDynamicCharacteristics(reopened).Count>=3);
+                    var originalProjection=CharactersSelfTestStore.SelectDynamicCharacteristics(reopened);
+                    Check("source_projection_survives_connection_reload",originalProjection.Count>=3);
+                    string VersionedState(Dictionary<string,object> row)=>ReadString(row,"status","")+"|"+ReadString(row,"projection_row_version","");
+                    var originalVersions=originalProjection.ToDictionary(r=>ReadString(r,"characteristic_id",""),VersionedState,StringComparer.Ordinal);
+                    RefreshCharacterLifeProjection(campaign,"npc",access);
+                    var repeated=CharactersSelfTestStore.SelectDynamicCharacteristics(reopened);
+                    Check("unchanged_refresh_keeps_every_projection_row_version",
+                        originalVersions.Count>=3&&repeated.Count==originalVersions.Count
+                        &&originalProjection.All(r=>ReadString(r,"projection_row_version","").Length>0)
+                        &&repeated.All(r=>originalVersions.TryGetValue(ReadString(r,"characteristic_id",""),out var revision)&&revision==VersionedState(r)));
+                    CharactersSelfTestStore.UpdateWorldHistoryEntities(reopened);
+                    RefreshCharacterLifeProjection(campaign,"npc",access);
+                    var unavailable=CharactersSelfTestStore.SelectDynamicCharacteristics(reopened).Single(r=>ReadString(r,"source_event_id","")=="marriage");
+                    Check("lost_source_projection_becomes_unavailable",ReadString(unavailable,"status","")=="source_unavailable"
+                        &&VersionedState(unavailable)!=originalVersions[ReadString(unavailable,"characteristic_id","")]);
+                    RefreshCharacterLifeProjection(campaign,"npc",access);
+                    var stillUnavailable=CharactersSelfTestStore.SelectDynamicCharacteristics(reopened).Single(r=>ReadString(r,"source_event_id","")=="marriage");
+                    Check("repeated_unavailable_source_keeps_row_version",VersionedState(stillUnavailable)==VersionedState(unavailable));
+                    CharactersSelfTestStore.UpdateWorldHistoryEntities3(reopened);
+                    RefreshCharacterLifeProjection(campaign,"npc",access);
+                    var availableAgain=CharactersSelfTestStore.SelectDynamicCharacteristics(reopened).Single(r=>ReadString(r,"source_event_id","")=="marriage");
+                    Check("returned_source_restores_projection",ReadString(availableAgain,"status","")=="active"
+                        &&VersionedState(availableAgain)!=VersionedState(stillUnavailable));
                     Check("historical_acceptance_marked_superseded",ReadString(CharactersSelfTestStore.SelectDynamicCharacteristics2(reopened).Single(),"status","")=="superseded");
                     var dynamics=TestDict("active",new[]{TestDict("category","life_transition","text",reply,"status","active"),
                         TestDict("category","preference","text","I like quiet gardens.","status","active")});
