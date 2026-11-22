@@ -363,7 +363,11 @@ namespace ReignBetaServer
                 SaveSyncFailureInjectionForTests = "after_install";
                 Dictionary<string, object> failed = SaveSyncLoadApi(oldPayload, false);
                 SaveSyncFailureInjectionForTests = "";
-                add("failed_rollback_recovers_active_state", !ReadBool(failed, "ok", true) && ReadString(failed, "result", "") == "failed_recovered" && SaveSyncTestMarkerExists(campaignId, "future"), "An injected mid-swap failure restores the exact pre-sync campaign and retains a recovery snapshot.");
+                add("failed_rollback_recovers_active_state",
+                    !ReadBool(failed, "ok", true) && ReadString(failed, "result", "") == "failed_recovered"
+                    && ReadString(failed, "failedPhase", "") == "installing_target_files"
+                    && SaveSyncTestMarkerExists(campaignId, "future"),
+                    "An injected mid-swap failure reports the exact journal phase, restores the pre-sync campaign and retains a recovery snapshot.");
 
                 string loadSessionId = "load_session_" + token;
                 Dictionary<string, object> loadSessionPayload =

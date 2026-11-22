@@ -1386,6 +1386,9 @@ namespace ReignBetaServer
                 : "";
             string continuousRelationshipSource = File.Exists(continuousRelationshipPath) ? File.ReadAllText(continuousRelationshipPath) : "";
             string saveSyncSource = serverSplitSource("SaveSync.cs");
+            string saveSyncApplySource = string.IsNullOrWhiteSpace(sourceRoot)
+                ? "" : VerificationSourceLocator.ReadServerSplitMemberSourceText(
+                    Path.Combine(sourceRoot, "ReignServer"), "SaveSync.cs", "ApplyPostgreSqlSaveSync", "src");
             string postgreSqlSaveSyncSource = File.Exists(postgreSqlSaveSyncPath) ? File.ReadAllText(postgreSqlSaveSyncPath) : "";
             string campaignBackupsSource = serverSplitSource("CampaignBackups.cs");
             string worldDiplomacyDirectorSource = serverSplitSource("WorldDiplomacyDirector.cs");
@@ -1734,12 +1737,14 @@ namespace ReignBetaServer
                 && continuousRelationshipSource.Contains("CampaignDataGate.EnterReadLock()")
                 && continuousRelationshipSource.Contains("CampaignDataGate.ExitReadLock()")
                 && saveSyncSource.Contains("return SaveSyncLoadPostgreSql(payload, dryRun)")
-                && postgreSqlSaveSyncSource.Contains("phase = \"move_active_campaign\"")
-                && postgreSqlSaveSyncSource.Contains("phase = \"install_target_campaign\"")
-                && postgreSqlSaveSyncSource.Contains("[\"failedPhase\"] = phase")
+                && postgreSqlSaveSyncSource.Contains("return ApplyPostgreSqlSaveSync(")
+                && saveSyncApplySource.Contains("PublishSaveSyncPhase(op, \"moving_active_files\")")
+                && saveSyncApplySource.Contains("PublishSaveSyncPhase(op, \"installing_target_files\")")
+                && saveSyncApplySource.Contains("op.FailedPhase = op.Phase")
+                && saveSyncApplySource.Contains("[\"failedPhase\"] = op.FailedPhase")
                 && campaignBackupsSource.Contains("Parallel.For(")
                 && campaignBackupsSource.Contains("MaxDegreeOfParallelism = Math.Max(1, Math.Min(8, Environment.ProcessorCount))"),
-                "The continuous relationship writer participates in Save Sync's global campaign barrier, failures retain their exact swap phase and stack, and exact manifest hashing uses bounded parallelism for large character stores.");
+                "The continuous relationship writer participates in Save Sync's global campaign barrier, failures report their exact journaled swap phase, and exact manifest hashing uses bounded parallelism for large character stores.");
             add("diplomacy_feedback_avoids_file_relationship_lock_inversion",
                 worldDiplomacyDirectorSource.Contains(
                     "List<Dictionary<string, object>> pendingRelationshipFeedback")
