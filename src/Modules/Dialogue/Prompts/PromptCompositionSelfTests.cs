@@ -136,6 +136,35 @@ namespace ReignBetaServer
                     && ReadDictionaryList(actionOutput, "suggestedActions").Count == 0, actionOutput);
             }
 
+            const string nativeBiography = "The native biography belongs to this speaker.";
+            const string personalSummary = "The speaker remembers the private history.";
+            const string publicSummary = "The public record includes the market.";
+            string combinedSummary = CharactersService.BuildAroundNativeBackground(nativeBiography, personalSummary);
+            string encyclopedia = CharactersService.BuildAroundNativeBackground(nativeBiography, publicSummary);
+            var background = TestDict("nativeEncyclopediaText", nativeBiography, "summary", combinedSummary,
+                "encyclopediaText", encyclopedia, "origin", "Raised near the old gate.");
+            var backgroundKeys = new[] { "summary", "encyclopediaText", "origin", "upbringing", "formativeEvents" };
+            var expected = new Dictionary<string, object>(background) { ["summary"] = personalSummary };
+            string expectedBackground = FormatNamedObjectForPrompt(expected, backgroundKeys);
+            string backgroundFoundation = BuildStableCharacterPrompt("background-fixture", "Fixture Speaker", TestDict(),
+                TestDict("background", background));
+            add("stable_background_uses_one_native_biography_and_keeps_both_details",
+                backgroundFoundation.Split(new[] { nativeBiography }, StringSplitOptions.None).Length == 2
+                && backgroundFoundation.Contains(NormalizePromptSegment(expectedBackground))
+                && ReadString(background, "summary", "") == combinedSummary
+                && ReadString(background, "encyclopediaText", "") == encyclopedia, null);
+
+            var nativeOnly = TestDict("nativeEncyclopediaText", nativeBiography, "summary", nativeBiography,
+                "encyclopediaText", nativeBiography);
+            add("stable_background_keeps_native_only_text_under_encyclopedia",
+                FormatStableCharacterBackground(nativeOnly) == FormatNamedObjectForPrompt(
+                    TestDict("encyclopediaText", nativeBiography), backgroundKeys), null);
+
+            var legacyBackground = TestDict("nativeEncyclopediaText", nativeBiography, "summary", nativeBiography + " Extra context.",
+                "encyclopediaText", encyclopedia);
+            add("stable_background_preserves_a_partial_prose_prefix",
+                FormatStableCharacterBackground(legacyBackground) == FormatNamedObjectForPrompt(legacyBackground, backgroundKeys), null);
+
             var cultureVoices = new Dictionary<string, string> {
                 ["empire"] = "Imperial voice:", ["vlandia"] = "Vlandian voice:",
                 ["sturgia"] = "Sturgian voice:", ["battania"] = "Battanian voice:",
