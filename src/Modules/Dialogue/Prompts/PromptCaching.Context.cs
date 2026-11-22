@@ -449,7 +449,7 @@ namespace ReignBetaServer
             string personality = ReadString(traits, "basePersonalitySummary", "");
             if (string.IsNullOrWhiteSpace(personality)) personality = CharactersService.BuildRuleBasedPersonalitySummary(nativeName, foundations);
             AppendPromptSection(builder, "BASE PERSONALITY", personality);
-            AppendPromptSection(builder, "BACKGROUND", DialogueService.FormatNamedObjectForPrompt(ReadDictionary(characteristics, "background") ?? new Dictionary<string, object>(), new[] { "summary", "encyclopediaText", "origin", "upbringing", "formativeEvents" }));
+            AppendPromptSection(builder, "BACKGROUND", FormatStableCharacterBackground(ReadDictionary(characteristics, "background")));
             AppendPromptSection(builder, "PUBLIC REPUTATION", CharacterFoundationReputation(characteristics));
             AppendPromptSection(builder, "CENTRAL WOUNDS — PRIVATE CHARACTER KNOWLEDGE, NOT AUTOMATIC DISCLOSURE", CharacterFoundationWounds(characteristics));
             AppendPromptSection(builder, "VOICE AND SOCIAL MASK", DialogueService.FormatNamedObjectForPrompt(ReadDictionary(characteristics, "voice") ?? new Dictionary<string, object>(), new[] { "speechStyle", "socialMask", "tells" }));
@@ -459,6 +459,31 @@ namespace ReignBetaServer
             AppendPromptSection(builder, "PRIVATE NUMERIC MOTIVE EVIDENCE", BuildStableMotiveVector(characteristics));
             builder.AppendLine(CharactersService.RequiredPoliticalPrompt(heroId, profile, characteristics));
             return builder.ToString();
+        }
+
+        private static string FormatStableCharacterBackground(Dictionary<string, object> background)
+        {
+            if (background?.GetValueOrDefault("nativeEncyclopediaText") is string nativeText
+                && background.GetValueOrDefault("summary") is string summary
+                && background.GetValueOrDefault("encyclopediaText") is string publicText)
+            {
+                nativeText = nativeText.Trim();
+                summary = summary.Trim();
+                publicText = publicText.Trim();
+                string nativeParagraph = nativeText + "\n\n";
+                if (nativeText.Length > 0
+                    && (publicText.Equals(nativeText, StringComparison.Ordinal) || publicText.StartsWith(nativeParagraph, StringComparison.Ordinal))
+                    && (summary.Equals(nativeText, StringComparison.Ordinal) || summary.StartsWith(nativeParagraph, StringComparison.Ordinal)))
+                {
+                    // Keep the shared public biography under its encyclopedia label.
+                    background = new Dictionary<string, object>(background, background.Comparer)
+                    {
+                        ["summary"] = summary.Length == nativeText.Length ? "" : summary.Substring(nativeParagraph.Length)
+                    };
+                }
+            }
+
+            return FormatNamedObjectForPrompt(background, new[] { "summary", "encyclopediaText", "origin", "upbringing", "formativeEvents" });
         }
 
         private static string CharacterFoundationReputation(Dictionary<string, object> characteristics)
