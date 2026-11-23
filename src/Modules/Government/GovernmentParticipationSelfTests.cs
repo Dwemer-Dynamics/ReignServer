@@ -6,11 +6,11 @@ using Reign.Core.Contracts.Government;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class GovernmentService
     {
         private static void AddGovernmentParticipationSelfTests(Action<string, bool, string, object> add)
         {
-            var traits = CoreTraitKeys.ToDictionary(x => x, x => 50);
+            var traits = CharactersService.CoreTraitKeys.ToDictionary(x => x, x => 50);
             var profile = GovernmentPoliticalBeliefs.Seed("participation_test", "merchant_a", "timeline_a", traits,
                 new Dictionary<ReignGovernmentPlank, double> { [ReignGovernmentPlank.Trade] = 1 }, false);
             var repeated = GovernmentPoliticalBeliefs.Seed("participation_test", "merchant_a", "timeline_a", traits,
@@ -122,8 +122,8 @@ namespace ReignBetaServer
                 "My challenge ties; I do not seize the speaker's office without a majority.", null);
             add("government.participation_docket_aliases_do_not_identify_options", new[] { 0, 25, 26, 27, 701, 702 }.Select(GovernmentParticipationRules.DocketAlias).SequenceEqual(new[] { "A", "Z", "AA", "AB", "ZZ", "AAA" }),
                 "I choose docket AA, then choose its separate voting option. The sentence renderer names the actual proposal.", null);
-            var stack = TestDict("traits", BuildTraitDocument(TestDict("heroStringId", "test_character")), "politicalProfile", TryParseJsonObject(JsonSerializer.Serialize(profile)));
-            string prompt = BuildStableCharacterPrompt("merchant_a", "A merchant", TestDict("name", "A merchant"), stack);
+            var stack = TestDict("traits", CharactersService.BuildTraitDocument(TestDict("heroStringId", "test_character")), "politicalProfile", TryParseJsonObject(JsonSerializer.Serialize(profile)));
+            string prompt = DialogueService.BuildStableCharacterPrompt("merchant_a", "A merchant", TestDict("name", "A merchant"), stack);
             add("government.participation_required_prompt_is_complete_outside_motive_cap", prompt.Contains("REQUIRED PRIVATE POLITICAL BELIEFS")
                 && Enum.GetValues(typeof(ReignGovernmentPlank)).Cast<ReignGovernmentPlank>().All(x => prompt.Contains(x + ":"))
                 && prompt.Contains("PRIVATE NUMERIC MOTIVE EVIDENCE") && prompt.Contains("BASE PERSONALITY"),
@@ -148,37 +148,37 @@ namespace ReignBetaServer
             {
                 var native = TestDict("heroStringId", "local_notable", "name", "A local notable", "age", 35, "isChild", false,
                     "isAlive", true, "occupation", "Merchant", "isNotable", true, "politicalTimelineId", "original", "campaignId", campaign);
-                var traits = BuildTraitDocument(native); EnsureTraitPercentageData(traits, "local_notable");
-                WriteJsonObject(CharacterFile(campaign, "local_notable", "traits.json"), traits);
-                WriteJsonObject(CharacterFile(campaign, "local_notable", "profile.json"), native);
-                var first = EnsurePoliticalProfile(campaign, "local_notable", native, traits);
+                var traits = CharactersService.BuildTraitDocument(native); CharactersService.EnsureTraitPercentageData(traits, "local_notable");
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "local_notable", "traits.json"), traits);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, "local_notable", "profile.json"), native);
+                var first = CharactersService.EnsurePoliticalProfile(campaign, "local_notable", native, traits);
                 native["appliedPoliticalProfile"] = TryParseJsonObject(JsonSerializer.Serialize(first));
                 var evidence = new GovernmentPoliticalWorldEvidence { Id = "government:actual_law", CampaignId = campaign,
                     TimelineId = "original", KingdomId = "realm", Kind = "edict", TargetId = "public_granary",
                     OptionId = "accept", Applied = true, Interval = 2, WorldDay = 20, AffectedHeroes = new List<string> { "local_notable" } };
                 var record = TryParseJsonObject(JsonSerializer.Serialize(evidence));
-                var evolved = ApplyPoliticalWorldEvidence(campaign, "local_notable", first, new List<Dictionary<string, object>> { record }, 20);
-                var replay = ApplyPoliticalWorldEvidence(campaign, "local_notable", first, new List<Dictionary<string, object>> { record }, 20);
+                var evolved = CharactersService.ApplyPoliticalWorldEvidence(campaign, "local_notable", first, new List<Dictionary<string, object>> { record }, 20);
+                var replay = CharactersService.ApplyPoliticalWorldEvidence(campaign, "local_notable", first, new List<Dictionary<string, object>> { record }, 20);
                 add("government.participation_world_effect_replay_reuses_revision", evolved.Revision > first.Revision
                     && JsonSerializer.Serialize(evolved) == JsonSerializer.Serialize(replay)
                     && evolved.Values.Zip(first.Values, (a, b) => a.Stance == b.Stance).All(x => x)
                     && evolved.Changes.Count == 2 && evolved.Changes.All(x => x.Importance - x.PreviousImportance == 1),
                     "I live through a verified law taking effect. Its concerns gain slight importance; replaying synchronization neither changes my stance nor issues another revision.", null);
                 add("government.participation_future_and_unaffected_events_do_nothing",
-                    ApplyPoliticalWorldEvidence(campaign, "local_notable", first, new List<Dictionary<string, object>> { record }, 19).Revision == first.Revision
+                    CharactersService.ApplyPoliticalWorldEvidence(campaign, "local_notable", first, new List<Dictionary<string, object>> { record }, 19).Revision == first.Revision
                     && GovernmentPoliticalBeliefs.WorldEventChanges(evidence, "distant_stranger").Count == 0
-                    && EnsurePoliticalProfile(campaign, "local_notable", native, traits).Revision == first.Revision,
+                    && CharactersService.EnsurePoliticalProfile(campaign, "local_notable", native, traits).Revision == first.Revision,
                     "I reload an older applied snapshot. Future effects and another person's experience do not leak into my current beliefs.", null);
                 var forged = CloneDictionary(native);
                 var forgedProfile = JsonSerializer.Deserialize<GovernmentPoliticalProfile>(JsonSerializer.Serialize(first));
                 forgedProfile.Values[0].Stance = forgedProfile.Values[0].Stance == 100 ? 99 : 100;
                 forged["appliedPoliticalProfile"] = TryParseJsonObject(JsonSerializer.Serialize(forgedProfile));
                 bool refused = false;
-                try { EnsurePoliticalProfile(campaign, "local_notable", forged, traits); } catch (InvalidOperationException) { refused = true; }
+                try { CharactersService.EnsurePoliticalProfile(campaign, "local_notable", forged, traits); } catch (InvalidOperationException) { refused = true; }
                 add("government.participation_unissued_profile_refused", refused,
                     "An invented private profile cannot replace the character's issued political record.", null);
                 var fork = CloneDictionary(native); fork["politicalTimelineId"] = "restored_branch";
-                var forked = EnsurePoliticalProfile(campaign, "local_notable", fork, traits);
+                var forked = CharactersService.EnsurePoliticalProfile(campaign, "local_notable", fork, traits);
                 add("government.participation_branch_keeps_applied_history", forked.TimelineId == "restored_branch"
                     && forked.Values.Zip(first.Values, (a, b) => a.Stance == b.Stance && a.Importance == b.Importance).All(x => x)
                     && forked.Changes.Count == first.Changes.Count,
@@ -192,27 +192,27 @@ namespace ReignBetaServer
                 {
                     var request = TestDict("campaignId", campaign, "heroStringId", "local_notable", "hero", native, "requestType", route,
                         "politicalAuthors", new[] { native }, "messages", messages);
-                    var outbound = BuildChatRequestBody(TestDict(), request, messages, "offline-capture");
+                    var outbound = LlmProviderService.BuildChatRequestBody(TestDict(), request, messages, "offline-capture");
                     var actual = ReadDictionaryList(outbound, "messages");
                     string joined = string.Join("\n", actual.Select(x => ReadString(x, "content", "")));
                     add("government.participation_final_provider_" + route, actual.Count == 3
                         && ReadString(actual[1], "content", "") == history
                         && Enum.GetValues(typeof(ReignGovernmentPlank)).Cast<ReignGovernmentPlank>().All(x => joined.Contains(x + ":"))
                         && joined.Contains("revision " + first.Revision + " — timeline original")
-                        && ReadDictionaryList(BuildChatRequestBody(TestDict(), request, actual, "offline-capture"), "messages").Count == 3,
+                        && ReadDictionaryList(LlmProviderService.BuildChatRequestBody(TestDict(), request, actual, "offline-capture"), "messages").Count == 3,
                         "I use " + route + "; the outgoing provider request retains all 16 beliefs and all earlier conversation, with one private block.", null);
                 }
                 var other = TestDict("heroStringId", "companion", "campaignId", campaign, "politicalTimelineId", "original",
                     "name", "A companion", "age", 25, "isAlive", true);
-                var combined = RequiredPoliticalMessages(TestDict("campaignId", campaign, "politicalAuthors", new[] { native, other }), messages);
+                var combined = CharactersService.RequiredPoliticalMessages(TestDict("campaignId", campaign, "politicalAuthors", new[] { native, other }), messages);
                 var singlePoliticalRequest = TestDict("campaignId", campaign, "politicalAuthors", new[] { native });
-                string currentPolitical = ReadString(RequiredPoliticalMessages(singlePoliticalRequest, messages).Last(), "content", "");
+                string currentPolitical = ReadString(CharactersService.RequiredPoliticalMessages(singlePoliticalRequest, messages).Last(), "content", "");
                 foreach (var frame in new[] { currentPolitical.TrimEnd(), currentPolitical.Replace("\r\n", "\n").TrimEnd(), currentPolitical.TrimEnd() + "\r\n" }
                     .Select((content, index) => new { content, index }))
                     add("government.participation_complete_block_framing_" + frame.index,
-                        RequiredPoliticalMessages(singlePoliticalRequest, new() { TestDict("role", "user", "content", frame.content) }).Count == 1,
+                        CharactersService.RequiredPoliticalMessages(singlePoliticalRequest, new() { TestDict("role", "user", "content", frame.content) }).Count == 1,
                         "The complete current political block survives foundation framing without another copy.", null);
-                add("government.participation_partial_block_does_not_suppress_current", RequiredPoliticalMessages(singlePoliticalRequest,
+                add("government.participation_partial_block_does_not_suppress_current", CharactersService.RequiredPoliticalMessages(singlePoliticalRequest,
                     new() { TestDict("role", "user", "content", currentPolitical.Substring(0, currentPolitical.Length / 2)) }).Count == 2,
                     "A partial block cannot suppress the current private political foundation.", null);
                 add("government.participation_multispeaker_private_ownership", combined.Count == 4
@@ -220,33 +220,33 @@ namespace ReignBetaServer
                     && ReadString(combined[3], "content", "").Contains("— companion —")
                     && combined.Skip(2).All(x => ReadString(x, "content", "").Contains("only to this character")),
                     "Two people converse; each authored character has their own complete private foundation, without treating either profile as the other's knowledge.", null);
-                var unit = new AcceptedConversationUnit { Hero = "local_notable", EventId = "accepted_fixture",
+                var unit = new DialogueService.AcceptedConversationUnit { Hero = "local_notable", EventId = "accepted_fixture",
                     Profile = TestDict("politicalInterval", 2), Payload = TestDict("timelineId", "original", "worldDay", 20d),
                     PlayerText = "The public granary kept our families alive through winter.",
                     Reply = "That winter has convinced me to care more about public welfare.",
                     Parsed = TestDict("politicalReflection", new[] { TestDict("value", "PopularWelfare", "stanceChange", 0, "importanceChange", 1,
                         "sourceQuote", "The public granary kept our families alive through winter.",
                         "evidenceQuote", "That winter has convinced me to care more about public welfare.") }) };
-                var reflection = AcceptedPoliticalReflection(unit, false);
+                var reflection = CharactersService.AcceptedPoliticalReflection(unit, false);
                 bool good = reflection.Count > 0;
                 unit.CommitEffects = false;
-                bool draftIgnored = AcceptedPoliticalReflection(unit, false).Count == 0;
+                bool draftIgnored = CharactersService.AcceptedPoliticalReflection(unit, false).Count == 0;
                 unit.CommitEffects = true; unit.Reply = "Perhaps, but I am not convinced.";
                 add("government.participation_discussion_requires_accepted_visible_evidence", good && draftIgnored
-                    && AcceptedPoliticalReflection(unit, false).Count == 0 && AcceptedPoliticalReflection(unit, true).Count == 0,
+                    && CharactersService.AcceptedPoliticalReflection(unit, false).Count == 0 && CharactersService.AcceptedPoliticalReflection(unit, true).Count == 0,
                     "My substantive argument can matter only when the accepted reply actually acknowledges it. Unspoken drafts, technical notices and fabricated quotes do nothing.", null);
                 var subject = TestDict("heroStringId", "player", "kingdomId", "realm", "isAlive", true, "isChild", false, "isRuler", false,
                     "governmentOfficeTitle", "Senator and party speaker", "governmentOfficeKingdomId", "realm");
                 var context = TestDict("nativePoliticalContext", TestDict("authoritative", true, "subject", subject,
                     "observer", TestDict("heroStringId", "local_notable", "kingdomId", "realm")));
-                var known = BuildCurrentPoliticalAuthorityView(TestDict("canonicalNameAllowed", true), context);
-                var unknown = BuildCurrentPoliticalAuthorityView(TestDict("canonicalNameAllowed", false), context);
+                var known = CharactersService.BuildCurrentPoliticalAuthorityView(TestDict("canonicalNameAllowed", true), context);
+                var unknown = CharactersService.BuildCurrentPoliticalAuthorityView(TestDict("canonicalNameAllowed", false), context);
                 add("government.participation_title_follows_verified_current_office", ReadBool(known, "governmentMemberOfficeKnown", false)
                     && ReadStringList(known, "validFormalAddresses").Contains("Senator")
                     && !ReadBool(known, "subjectIsObserverSovereign", true) && !ReadBool(unknown, "governmentMemberOfficeKnown", true),
                     "A character who recognizes my current office can call me Senator. Membership never makes me their sovereign or reveals my identity to strangers.", null);
                 subject["governmentOfficeTitle"] = ""; subject["governmentOfficeKingdomId"] = "";
-                add("government.participation_revoked_title_is_not_reused", !ReadBool(BuildCurrentPoliticalAuthorityView(TestDict("canonicalNameAllowed", true), context), "governmentMemberOfficeKnown", true),
+                add("government.participation_revoked_title_is_not_reused", !ReadBool(CharactersService.BuildCurrentPoliticalAuthorityView(TestDict("canonicalNameAllowed", true), context), "governmentMemberOfficeKnown", true),
                     "After losing the office, my former title stops being supplied as current authority.", null);
             }
             catch (Exception ex)

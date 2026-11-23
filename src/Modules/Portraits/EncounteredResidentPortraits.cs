@@ -5,9 +5,9 @@ using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
-        private static bool PreserveResidentClothing(Dictionary<string, object> payload)
+        internal static bool PreserveResidentClothing(Dictionary<string, object> payload)
         {
             if (ReadString(payload, "promptPurpose", "portrait") != "portrait") return false;
             var snapshot = ReadDictionary(payload, "nativeCharacterSnapshot");
@@ -20,7 +20,7 @@ namespace ReignBetaServer
                     || ReadString(snapshot, "portraitSourceProfile", "") == ResidentOutfitRenderContract);
         }
 
-        private static bool IsTavernHousePortrait(Dictionary<string, object> payload)
+        internal static bool IsTavernHousePortrait(Dictionary<string, object> payload)
         {
             if (!PreserveResidentClothing(payload) || ReadBool(payload, "sharedCacheOutput", false)) return false;
             var snapshot = ReadDictionary(payload, "nativeCharacterSnapshot");
@@ -36,7 +36,7 @@ namespace ReignBetaServer
             => ReadBool(ReadDictionary(ReadDictionary(payload, "nativeCharacterSnapshot"), "tavernHouse"), "madam", false)
                 ? "madam" : "worker";
 
-        private static string BuildResidentPortraitPrompt(Dictionary<string, object> payload)
+        internal static string BuildResidentPortraitPrompt(Dictionary<string, object> payload)
         {
             // The ordinary identity and exclusion layers ALSO change clothes (status, armor,
             // helmets). None is appended here; an instruction at the end cannot undo a conflict.

@@ -6,10 +6,10 @@ using Reign.Core.Contracts.Court;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CourtService
     {
         // Shared by the docket hearing and subsequent ordinary social conversations.
-        private static string BuildNobleVisitorPrompt(string campaignId, string heroId, Dictionary<string, object> context)
+        internal static string BuildNobleVisitorPrompt(string campaignId, string heroId, Dictionary<string, object> context)
         {
             if (context == null || !ReadBool(context, "enabled", false)) return string.Empty;
             List<Dictionary<string, object>> members = ReadDictionaryList(context, "members");
@@ -26,10 +26,10 @@ namespace ReignBetaServer
             foreach (Dictionary<string, object> initiator in initiators)
             {
                 string id = ReadString(initiator, "heroId", "");
-                Dictionary<string, object> document = ReadJsonObject(CharacterFile(campaignId, id, "traits.json"));
+                Dictionary<string, object> document = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, id, "traits.json"));
                 Dictionary<string, object> virtues = ReadDictionary(document, "courtVirtues");
                 Dictionary<string, object> percentages = ReadDictionary(document, "traitPercentages");
-                if (virtues == null && percentages != null) virtues = CalculateCourtVirtues(percentages);
+                if (virtues == null && percentages != null) virtues = CharactersService.CalculateCourtVirtues(percentages);
                 int boldness = Math.Max(0, Math.Min(100, ReadInt(virtues, "boldness", 50)));
                 int honor = Math.Max(0, Math.Min(100, ReadInt(virtues, "honor", 50)));
                 if (ReignNobleVisitorRules.CanInitiatePrivateRomance(married, boldness, honor)) permittedInitiators.Add(id);
@@ -37,7 +37,7 @@ namespace ReignBetaServer
             bool privateInitiative = romantic && permittedInitiators.Count > 0;
             var prompt = new StringBuilder();
             prompt.AppendLine("CURRENT NOBLE VISIT: You are a real visiting noble, with your ordinary personality, knowledge, relationships, and agency intact.");
-            prompt.AppendLine("Visit purpose: " + LimitText(ReadString(context, "purpose", ""), 600));
+            prompt.AppendLine("Visit purpose: " + DialogueService.LimitText(ReadString(context, "purpose", ""), 600));
             prompt.AppendLine("During introductions, naturally state the planned stay of " + ReadInt(context, "stayDays", 3) + " days. The stay is temporary; later conversation remains possible while you are resident.");
             prompt.AppendLine("Your household role: " + role + ". Present household: " + Json.Serialize(members));
             if (romantic && matchmaking)
@@ -53,7 +53,9 @@ namespace ReignBetaServer
             else
                 prompt.AppendLine("A discreet romantic private invitation is personality-eligible for these initiating adults: " + string.Join(", ", permittedInitiators)
                     + ". This permits an attempt, never guarantees one. Other household members may make appropriate conversational space; the candidate decides for themselves. A married ruler's spouse and witnessed attention can matter through known relationships and rumors.");
-            prompt.AppendLine("Accepted invitation memory: " + Json.Serialize(ReadDictionaryList(context, "agreedInvitations")));
+            var invitations = ReadDictionaryList(context, "proposedInvitations");
+            if (invitations.Count > 0)
+                prompt.AppendLine("Earlier private conversation proposals, with agreement unconfirmed: " + Json.Serialize(invitations));
             prompt.AppendLine("An invitation refers to a later conversation only. Do not transition the scene, narrate a private meeting as completed, decide for the player, assume romantic consent, or fabricate an affair. State mechanical thresholds and private motives nowhere in visible speech.");
             return prompt.ToString();
         }

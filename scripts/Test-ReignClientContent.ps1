@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 $workspaceRoot = (Resolve-Path -LiteralPath $Workspace).Path
 $sourceModule = Join-Path $workspaceRoot 'ReignBeta'
 $shipped = @('GUI','ModuleData','EventArt','TavernArt','Videos','PortraitCache','TavernHousePortraits')
-$authoring = @('artwork','docs','src','tools')
+$authoring = @('artwork','Core','docs','src','Testing','tools')
 $known = @($shipped) + @($authoring)
 $unknown = @(Get-ChildItem -LiteralPath $sourceModule -Directory | Where-Object { $_.Name -notin $known -and $_.Name -notin @('bin','obj','staging','server') })
 if ($unknown.Count) { throw "Unclassified ReignBeta directories: $($unknown.Name -join ', ')" }

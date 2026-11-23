@@ -6,11 +6,11 @@ using Reign.Core.Contracts.Government;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         // The receipt is written inside the accepted conversation's existing transaction.
         // A generated answer or proposed deal alone never changes a political profile.
-        private static Dictionary<string, object> AcceptedPoliticalReflection(AcceptedConversationUnit unit, bool technicalNotice)
+        internal static Dictionary<string, object> AcceptedPoliticalReflection(DialogueService.AcceptedConversationUnit unit, bool technicalNotice)
         {
             var rows = ReadDictionaryList(unit.Parsed, "politicalReflection");
             int interval = ReadInt(unit.Profile, "politicalInterval", -1);
@@ -27,8 +27,8 @@ namespace ReignBetaServer
                     return TestDict();
                 accepted.Add(TestDict("value", (int)value, "stance", stance, "importance", importance, "evidenceQuote", quote, "sourceQuote", source));
             }
-            string identity = PromptHash(string.Join("|", rows.Select(x => ReadString(x, "sourceQuote", "").Trim().ToLowerInvariant()).OrderBy(x => x, StringComparer.Ordinal)));
-            return TestDict("heroId", unit.Hero, "timelineId", ContinuityTimeline(unit.Payload), "interval", interval,
+            string identity = DialogueService.PromptHash(string.Join("|", rows.Select(x => ReadString(x, "sourceQuote", "").Trim().ToLowerInvariant()).OrderBy(x => x, StringComparer.Ordinal)));
+            return TestDict("heroId", unit.Hero, "timelineId", DialogueService.ContinuityTimeline(unit.Payload), "interval", interval,
                 "worldDay", ReadDouble(unit.Payload, "worldDay", -1), "receiptId", "political_discussion:" + identity,
                 "acceptedUnitId", unit.EventId, "changes", accepted);
         }
@@ -37,12 +37,9 @@ namespace ReignBetaServer
             GovernmentPoliticalProfile profile, double worldDay)
         {
             if (worldDay < 0) return profile;
-            using var connection = OpenCampaignConnection(campaign);
-            EnsureAcceptedConversationUnitSchema(connection);
-            var receipts = QuerySql(connection, @"SELECT receipt_json FROM conversation_accepted_units
-WHERE receipt_json::jsonb->'politicalReflection'->>'heroId'=$hero
-AND receipt_json::jsonb->'politicalReflection'->>'timelineId'=$timeline
-ORDER BY created_ts,unit_id;", TestDict("hero", hero, "timeline", profile.TimelineId));
+            using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+            DialogueService.EnsureAcceptedConversationUnitSchema(connection);
+            var receipts = CharactersStore.SelectConversationAcceptedUnits(connection, TestDict("hero", hero, "timeline", profile.TimelineId));
             var revised = JsonSerializer.Deserialize<GovernmentPoliticalProfile>(JsonSerializer.Serialize(profile));
             foreach (var row in receipts)
             {
@@ -58,7 +55,7 @@ ORDER BY created_ts,unit_id;", TestDict("hero", hero, "timeline", profile.Timeli
             return revised;
         }
 
-        private static GovernmentPoliticalProfile ApplyPoliticalWorldEvidence(string campaign, string hero,
+        internal static GovernmentPoliticalProfile ApplyPoliticalWorldEvidence(string campaign, string hero,
             GovernmentPoliticalProfile profile, List<Dictionary<string, object>> records, double worldDay)
         {
             if (records.Count == 0 || worldDay < 0) return profile;
@@ -70,12 +67,12 @@ ORDER BY created_ts,unit_id;", TestDict("hero", hero, "timeline", profile.Timeli
                     || !evidence.Applied || string.IsNullOrEmpty(evidence.TimelineId)) continue;
                 var changes = GovernmentPoliticalBeliefs.WorldEventChanges(evidence, hero);
                 if (changes.Count == 0) continue;
-                string path = CharacterFile(campaign, hero, "politics", "event-" + SafeMemoryKey(profile.TimelineId)
-                    + "-" + PromptHash(evidence.Id) + ".json");
-                var prior = ReadJsonObject(path);
+                string path = CampaignFileService.CharacterFile(campaign, hero, "politics", "event-" + DialogueService.SafeMemoryKey(profile.TimelineId)
+                    + "-" + DialogueService.PromptHash(evidence.Id) + ".json");
+                var prior = CampaignFileService.ReadJsonObject(path);
                 if (prior.Count > 0 && CanonicalJson(prior) != CanonicalJson(record))
                     throw new InvalidOperationException("A completed political event cannot change its facts.");
-                if (prior.Count == 0) WriteJsonObject(path, record);
+                if (prior.Count == 0) CampaignFileService.WriteJsonObject(path, record);
                 GovernmentPoliticalBeliefs.Evolve(revised, evidence.Id, evidence.Kind + ":" + evidence.TargetId,
                     evidence.Interval, true, false, changes);
             }

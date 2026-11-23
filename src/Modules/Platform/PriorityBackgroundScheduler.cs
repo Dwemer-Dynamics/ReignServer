@@ -12,7 +12,7 @@ namespace ReignBetaServer
         Stopping = 2
     }
 
-    internal static partial class Program
+    internal static partial class OperationsService
     {
         // Provisional bound on queued items (at most one more is active). Interactive work may use
         // all 128 slots, normal work is admitted below 112 and maintenance below 96, reserving 16
@@ -36,6 +36,7 @@ namespace ReignBetaServer
             public Action<string> NotStarted;
             public TaskCompletionSource<bool> Completion;
             public DateTime EnqueuedUtc;
+            public DateTime StartedUtc;
         }
 
         /// <summary>
@@ -46,7 +47,7 @@ namespace ReignBetaServer
         /// continuations and, like NotStarted releases and logging, are settled outside the gate.
         /// The first stop transition publishes one fence under the gate; every Stop returns it.
         /// </summary>
-        private sealed class BoundedPriorityScheduler
+        internal sealed class BoundedPriorityScheduler
         {
             private const int IdleWaitMs = 250;
             private const int QuietPollMs = 100;
@@ -156,9 +157,16 @@ namespace ReignBetaServer
             {
                 lock (gate)
                 {
+                    DateTime now = DateTime.UtcNow;
+                    DateTime oldest = now;
+                    foreach (Queue<PriorityWorkItem> queue in queues)
+                        if (queue.TryPeek(out PriorityWorkItem first) && first.EnqueuedUtc < oldest)
+                            oldest = first.EnqueuedUtc;
                     return new Dictionary<string, object>
                     {
                         ["running"] = worker != null && worker.IsAlive, ["active"] = active?.Name ?? "",
+                        ["activeDurationMs"] = active == null ? (long?)null : Math.Max(0, (long)(now - active.StartedUtc).TotalMilliseconds),
+                        ["oldestQueuedAgeMs"] = queued == 0 ? (long?)null : (long)(now - oldest).TotalMilliseconds,
                         ["interactiveQueued"] = queues[0].Count, ["normalQueued"] = queues[1].Count,
                         ["maintenanceQueued"] = queues[2].Count, ["queued"] = queued,
                         ["interactiveLimit"] = limits[0], ["normalLimit"] = limits[1], ["maintenanceLimit"] = limits[2],
@@ -232,7 +240,7 @@ namespace ReignBetaServer
                 catch (Exception ex)
                 {
                     Log("background.work_release_failed", () => new Dictionary<string, object>
-                    { ["name"] = name, ["reason"] = reason, ["error"] = LimitText(ex.Message, 400) });
+                    { ["name"] = name, ["reason"] = reason, ["error"] = DialogueService.LimitText(ex.Message, 400) });
                 }
             }
 
@@ -272,6 +280,7 @@ namespace ReignBetaServer
                                 if (level > 0 && QuietPeriodPending(level)) { waitMs = QuietPollMs; break; }
                                 item = queues[level].Dequeue();
                                 queued--;
+                                item.StartedUtc = DateTime.UtcNow;
                                 active = item;
                                 break;
                             }
@@ -317,7 +326,7 @@ namespace ReignBetaServer
                     return;
                 }
                 Log("background.work_failed", () => new Dictionary<string, object>
-                { ["name"] = item.Name, ["error"] = LimitText(error.Message, 800) });
+                { ["name"] = item.Name, ["error"] = DialogueService.LimitText(error.Message, 800) });
                 item.Completion.TrySetException(error);
             }
         }
@@ -326,16 +335,16 @@ namespace ReignBetaServer
         // RequestServerShutdown and from the listener teardown (covering exceptional listener exit).
         private static readonly BoundedPriorityScheduler PriorityWork = new BoundedPriorityScheduler(
             "Reign priority background scheduler", PriorityWorkCapacity, PriorityWorkReserve,
-            level => InteractiveRequestActiveOrRecent(level >= 2 ? 5000 : 2000), true);
+            level => Program.InteractiveRequestActiveOrRecent(level >= 2 ? 5000 : 2000), true);
 
-        private static void StartPriorityBackgroundScheduler() => PriorityWork.Start();
+        internal static void StartPriorityBackgroundScheduler() => PriorityWork.Start();
 
         // Program stop seam; see BoundedPriorityScheduler.Stop for the shared settlement fence.
-        private static Task StopPriorityBackgroundScheduler(string reason) => PriorityWork.Stop(reason);
+        internal static Task StopPriorityBackgroundScheduler(string reason) => PriorityWork.Stop(reason);
 
         // Legacy admission for callers without ownership to release: on refusal the callback never
         // runs and the returned task is already canceled.
-        private static Task EnqueuePriorityBackgroundWork(string name, string priority, Action work)
+        internal static Task EnqueuePriorityBackgroundWork(string name, string priority, Action work)
         {
             if (work == null) return Task.FromResult(true);
             TryEnqueuePriorityBackgroundWork(name, priority, work, null, out Task completion);
@@ -348,7 +357,7 @@ namespace ReignBetaServer
         /// lock, iff the work never starts: on this thread before a Busy/Stopping return, or on the
         /// stopping thread for queued work. It must be a cheap, non-blocking ownership release.
         /// </summary>
-        private static PriorityWorkAdmission TryEnqueuePriorityBackgroundWork(string name, string priority, Action work,
+        internal static PriorityWorkAdmission TryEnqueuePriorityBackgroundWork(string name, string priority, Action work,
             Action<string> notStarted, out Task completion)
         {
             return PriorityWork.TryEnqueue(name ?? "background_work", NormalizeWorkPriority(priority), work, notStarted, out completion);
@@ -356,23 +365,23 @@ namespace ReignBetaServer
 
         private static int NormalizeWorkPriority(string priority)
         {
-            string value = NormalizeLookup(priority);
+            string value = ActionPipelineService.NormalizeLookup(priority);
             return value == "interactive" || value == "high" ? 0 : value == "maintenance" || value == "low" ? 2 : 1;
         }
 
-        private static bool PriorityBackgroundWorkShouldYield()
+        internal static bool PriorityBackgroundWorkShouldYield()
         {
-            if (ShutdownRequested || InteractiveRequestActiveOrRecent()) return true;
+            if (Program.ShutdownRequested || Program.InteractiveRequestActiveOrRecent()) return true;
             return PriorityWork.HasQueuedInteractiveOrStopping();
         }
 
-        private static Dictionary<string, object> PriorityBackgroundStatus()
+        internal static Dictionary<string, object> PriorityBackgroundStatus()
         {
             Dictionary<string, object> status = PriorityWork.Status();
             status["ok"] = true;
-            status["chatViewPending"] = ChatViewWorkers.Count;
-            status["interactiveRequests"] = Volatile.Read(ref InteractiveRequestCount);
-            status["reputationReasonResumeOutcome"] = Volatile.Read(ref ReputationReasonResumeOutcome) ?? "";
+            status["chatViewPending"] = PortraitsService.ChatViewWorkers.Count;
+            status["interactiveRequests"] = Volatile.Read(ref Program.InteractiveRequestCount);
+            status["reputationReasonResumeOutcome"] = Volatile.Read(ref ReputationService.ReputationReasonResumeOutcome) ?? "";
             return status;
         }
     }

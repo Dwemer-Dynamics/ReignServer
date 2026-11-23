@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DiplomacyService
     {
         private static List<Dictionary<string, object>> RunClanAccordServerSelfTests()
         {
@@ -68,7 +68,7 @@ namespace ReignBetaServer
             };
             var bindErrors = new List<string>();
             BindAndValidateClanAccord(action, terms, bindPayload,
-                BuildRouterResolutionText(ReadString(bindPayload, "playerText", ""), "I agree to trade."), "create_clan_accord", bindErrors);
+                ActionPipelineService.BuildRouterResolutionText(ReadString(bindPayload, "playerText", ""), "I agree to trade."), "create_clan_accord", bindErrors);
             add("multiline_actual_player_turn_preserved", bindErrors.Contains("clan_accord_conditional_or_refused"));
             terms.Remove("playerConfirmed");
             add("no_inferred_player_consent", validate("Agreed to trade.", "I agree to trade.") != "");
@@ -95,13 +95,10 @@ namespace ReignBetaServer
                 ["evidence"] = new Dictionary<string, object> { ["layer"] = "isolated-campaign-database", ["campaignId"] = campaign } });
             try
             {
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    EnsureMbtiRelationshipSchema(connection);
-                    ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
-pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,affinity_a_to_b,affinity_b_to_a,
-tag_a_to_b,tag_b_to_a,first_day,last_day,projected_native_relation,updated_ts)
-VALUES('npc|player','npc','player','INTJ','ESFP',18,25,'neutral','neutral',1,1,18,1);");
+                    RelationshipsService.EnsureMbtiRelationshipSchema(connection);
+                    DiplomacySelfTestStore.InsertRelationshipPairChemistry(connection);
                 }
                 var record = new Dictionary<string, object> {
                     ["Id"] = "accord:test", ["ActionId"] = "action:test", ["Type"] = 0,
@@ -122,33 +119,33 @@ VALUES('npc|player','npc','player','INTJ','ESFP',18,25,'neutral','neutral',1,1,1
                 };
                 add("formation", ReadBool(ClanAccordsSyncApi(payload), "ok", false), "Native formation commits a server snapshot and scoped attributed memory.");
                 string originalMemory;
-                using (var connection = OpenCampaignConnection(campaign))
-                    originalMemory = Json.Serialize(QuerySql(connection, "SELECT memory_id FROM memories ORDER BY memory_id;"));
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                    originalMemory = Json.Serialize(DiplomacySelfTestStore.SelectMemories(connection));
                 add("retry_ack", ReadBool(ClanAccordsSyncApi(payload), "ok", false), "Lost native acknowledgement can replay the exact event.");
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    add("memory_identity_stable", originalMemory == Json.Serialize(QuerySql(connection, "SELECT memory_id FROM memories ORDER BY memory_id;")), "Replay retains memory identities without delete/regenerate.");
-                    var memory = QuerySql(connection, "SELECT visibility,known_by_json,summary FROM events WHERE event_id='clan_accord:main:formed:test';").FirstOrDefault();
+                    add("memory_identity_stable", originalMemory == Json.Serialize(DiplomacySelfTestStore.SelectMemories(connection)), "Replay retains memory identities without delete/regenerate.");
+                    var memory = DiplomacySelfTestStore.SelectEvents(connection).FirstOrDefault();
                     add("memory_scope_attribution", ReadString(memory, "visibility", "") == "private"
                         && ReadString(memory, "known_by_json", "").Contains("clan_leader")
                         && ReadString(memory, "summary", "").Contains("Lesser Noble"), "Private clan knowledge names the actual lesser-member arranger.");
-                    ExecuteSql(connection, "UPDATE clan_accord_event_receipts SET memory_done=0 WHERE event_id='formed:test';");
+                    DiplomacySelfTestStore.UpdateClanAccordEventReceipts(connection);
                 }
                 ClanAccordsSyncApi(payload);
-                using (var connection = OpenCampaignConnection(campaign))
-                    add("receipt_crash_recovery", originalMemory == Json.Serialize(QuerySql(connection, "SELECT memory_id FROM memories ORDER BY memory_id;")), "Crash between memory storage and receipt completion preserves existing complete projection.");
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                    add("receipt_crash_recovery", originalMemory == Json.Serialize(DiplomacySelfTestStore.SelectMemories(connection)), "Crash between memory storage and receipt completion preserves existing complete projection.");
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    ExecuteSql(connection, "DELETE FROM knowledge_receipts WHERE event_id='clan_accord:main:formed:test' AND npc_id='clan_leader';");
-                    ExecuteSql(connection, "UPDATE clan_accord_event_receipts SET memory_done=0 WHERE event_id='formed:test';");
+                    DiplomacySelfTestStore.DeleteKnowledgeReceipts(connection);
+                    DiplomacySelfTestStore.UpdateClanAccordEventReceipts(connection);
                 }
                 ClanAccordsSyncApi(payload);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     add("failure_after_participants_restores_clan_knowledge",
-                        QuerySql(connection, "SELECT receipt_id FROM knowledge_receipts WHERE event_id='clan_accord:main:formed:test' AND npc_id='clan_leader' AND status='active';").Count == 1
-                        && originalMemory == Json.Serialize(QuerySql(connection, "SELECT memory_id FROM memories ORDER BY memory_id;"))
-                        && ReadInt(QuerySql(connection, "SELECT memory_done FROM clan_accord_event_receipts WHERE event_id='formed:test';").First(), "memory_done", 0) == 1,
+                        DiplomacySelfTestStore.SelectKnowledgeReceipts(connection).Count == 1
+                        && originalMemory == Json.Serialize(DiplomacySelfTestStore.SelectMemories(connection))
+                        && ReadInt(DiplomacySelfTestStore.SelectClanAccordEventReceipts(connection).First(), "memory_done", 0) == 1,
                         "Interrupted knowledge tail is completed for the clan leader before acknowledgement, without regenerating participant memories.");
                 }
                 evt = new Dictionary<string, object> {
@@ -160,12 +157,12 @@ VALUES('npc|player','npc','player','INTJ','ESFP',18,25,'neutral','neutral',1,1,1
                 add("season_commits", ReadBool(ClanAccordsSyncApi(payload), "ok", false), "Season event is accepted without a record object.");
                 evt["eventId"] = "season:same-tick-new-id";
                 ClanAccordsSyncApi(payload);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var pair = QuerySql(connection, "SELECT affinity_a_to_b,affinity_b_to_a FROM relationship_pair_chemistry WHERE pair_key='npc|player';").First();
+                    var pair = DiplomacySelfTestStore.SelectRelationshipPairChemistry(connection).First();
                     add("directional_cap_and_season_receipts", ReadInt(pair, "affinity_a_to_b", 0) == 20 && ReadInt(pair, "affinity_b_to_a", 0) == 25,
                         "18 becomes 20, 25 stays 25; duplicate member and alternate event ID cannot double-award a season.");
-                    add("native_target_projection", QuerySql(connection, "SELECT pair_key FROM relationship_native_targets WHERE pair_key='npc|player';").Count == 1,
+                    add("native_target_projection", DiplomacySelfTestStore.SelectRelationshipNativeTargets(connection).Count == 1,
                         "Authoritative relationships publish one native target for the pair, not direct native deltas.");
                 }
                 record["IsActive"] = false; record["EndReason"] = 1; record["EndDay"] = 22d;
@@ -177,9 +174,9 @@ VALUES('npc|player','npc','player','INTJ','ESFP',18,25,'neutral','neutral',1,1,1
                 };
                 payload["events"] = new[] { evt };
                 ClanAccordsSyncApi(payload); ClanAccordsSyncApi(payload);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    var pair = QuerySql(connection, "SELECT affinity_a_to_b,affinity_b_to_a FROM relationship_pair_chemistry WHERE pair_key='npc|player';").First();
+                    var pair = DiplomacySelfTestStore.SelectRelationshipPairChemistry(connection).First();
                     add("cancellation_once", ReadInt(pair, "affinity_a_to_b", 0) == 10 && ReadInt(pair, "affinity_b_to_a", 0) == 15,
                         "One cancellation costs ten in each direction despite replay.");
                 }
@@ -208,10 +205,10 @@ VALUES('npc|player','npc','player','INTJ','ESFP',18,25,'neutral','neutral',1,1,1
                 // Drop only this freshly generated internal fixture, never a caller-supplied ID.
                 try { ReignPostgreSqlStorage.DropCampaign(campaign); }
                 catch (Exception ex) { add("fixture_cleanup", false, "Could not remove isolated fixture storage: " + ex.Message); }
-                string root = Path.GetFullPath(CampaignsRoot()) + Path.DirectorySeparatorChar;
-                string path = Path.GetFullPath(CampaignDirectory(campaign));
+                string root = Path.GetFullPath(CampaignFileService.CampaignsRoot()) + Path.DirectorySeparatorChar;
+                string path = Path.GetFullPath(CampaignFileService.CampaignDirectory(campaign));
                 if (path.StartsWith(root, StringComparison.OrdinalIgnoreCase) && Path.GetFileName(path) == campaign)
-                    TryDeleteDirectory(path);
+                    PersistenceService.TryDeleteDirectory(path);
             }
         }
     }

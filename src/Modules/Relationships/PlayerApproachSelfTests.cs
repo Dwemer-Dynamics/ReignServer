@@ -5,28 +5,28 @@ using ReignBeta.Shared;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RelationshipsService
     {
         private static List<Dictionary<string, object>> RunPlayerApproachSelfTests()
         {
             var results = new List<Dictionary<string, object>>();
             void Check(string id, bool passed, string detail) => results.Add(TestDict("ok", true, "passed", passed,
                 "suite", "relationship_system", "caseId", "player_approach_" + id, "name", id, "summary", detail, "durationMs", 0));
-            var defaults = ReadPlayerApproachOptions(TestDict());
+            var defaults = SettingsService.ReadPlayerApproachOptions(TestDict());
             Check("options_legacy_defaults", defaults.TrackAttention && new[] { "shared", "keep", "patrol", "battle_rescue", "prison_rescue" }.All(defaults.Allows),
                 "Old settings without any approach fields retain every enabled feature.");
             bool strictBooleans = true;
             foreach (string key in PlayerApproachOptions.SettingKeys)
                 foreach (object invalid in new object[] { "false", 0, 1, null, TestDict() })
-                    strictBooleans &= ValidatePlayerApproachOptions(TestDict(key, invalid)).Length > 0;
-            Check("options_strict_boolean_validation", strictBooleans && ValidatePlayerApproachOptions(TestDict(PlayerApproachOptions.MasterKey, false)).Length == 0,
+                    strictBooleans &= SettingsService.ValidatePlayerApproachOptions(TestDict(key, invalid)).Length > 0;
+            Check("options_strict_boolean_validation", strictBooleans && SettingsService.ValidatePlayerApproachOptions(TestDict(PlayerApproachOptions.MasterKey, false)).Length == 0,
                 "Every supplied switch requires a real JSON boolean; partial updates remain valid.");
-            var savedOptions = DefaultSettings();
-            MergeProviderSettings(savedOptions, TestDict(PlayerApproachOptions.JealousyKey, false, PlayerApproachOptions.PatrolKey, false));
-            MergeProviderSettings(savedOptions, TestDict(PlayerApproachOptions.MasterKey, false));
-            var publicOptions = PlayerApproachOptionsForClient(TryParseJsonObject(Json.Serialize(savedOptions)));
-            MergeProviderSettings(savedOptions, TestDict(PlayerApproachOptions.MasterKey, true));
-            var resumed = ReadPlayerApproachOptions(savedOptions);
+            var savedOptions = SettingsService.DefaultSettings();
+            LlmProviderService.MergeProviderSettings(savedOptions, TestDict(PlayerApproachOptions.JealousyKey, false, PlayerApproachOptions.PatrolKey, false));
+            LlmProviderService.MergeProviderSettings(savedOptions, TestDict(PlayerApproachOptions.MasterKey, false));
+            var publicOptions = SettingsService.PlayerApproachOptionsForClient(TryParseJsonObject(Json.Serialize(savedOptions)));
+            LlmProviderService.MergeProviderSettings(savedOptions, TestDict(PlayerApproachOptions.MasterKey, true));
+            var resumed = SettingsService.ReadPlayerApproachOptions(savedOptions);
             Check("options_partial_save_roundtrip", publicOptions.Count == 7 && publicOptions.Values.All(value => value is bool)
                 && !ReadBool(publicOptions, PlayerApproachOptions.MasterKey, true) && !ReadBool(publicOptions, PlayerApproachOptions.JealousyKey, true)
                 && !resumed.Allows("shared") && !resumed.Allows("patrol") && resumed.Allows("keep") && resumed.TrackAttention,
@@ -83,7 +83,7 @@ namespace ReignBetaServer
             Check("repair_delivers_explicit_hidden_output_contract", repairContractDelivered && ReadBool(contractRepair, "ok", false),
                 "The one repair receives the complete opening instructions and exact additional top-level evidence shape.");
             Check("exhausted_repair_retains_actual_rejection_reasons", ReadStringList(failed, "approachOpeningViolations").Count >= 2
-                && LlmFailureForDisplay(failed).Contains("NPC's approach") && !LlmFailureForDisplay(failed).Contains("provider"),
+                && DialogueService.LlmFailureForDisplay(failed).Contains("NPC's approach") && !DialogueService.LlmFailureForDisplay(failed).Contains("provider"),
                 "Operational failure retains specific approach violations instead of losing the reason behind a generic provider message.");
             var unsafeRepair = EnforceApproachOpening(TestDict("ok", true, "content", Json.Serialize(missingProof)), TestDict(), opening,
                 _ => TestDict("ok", true, "content", Json.Serialize(valid)), _ => false);
@@ -100,14 +100,14 @@ namespace ReignBetaServer
                 var people = new[] { TestDict("heroId", "npc", "alive", true, "scopes", new[] { "settlement:town" }),
                     TestDict("heroId", "observer", "alive", true, "scopes", new[] { "settlement:town" }),
                     TestDict("heroId", "absent", "alive", true, "scopes", new[] { "settlement:other" }) };
-                AcceptedConversationUnit Unit(string hero, string exchange, int day) => new AcceptedConversationUnit
+                DialogueService.AcceptedConversationUnit Unit(string hero, string exchange, int day) => new DialogueService.AcceptedConversationUnit
                 {
                     Campaign = campaign, Hero = hero, HeroName = hero, Player = "player", Reply = "A successful spoken response.", Location = "town",
                     Payload = TestDict("campaignId", campaign, "timelineId", "attention_test", "playerHeroStringId", "player", "channel", "in_person",
                         "sceneTurnId", exchange, "worldDay", (double)day, "playerAttentionPresence", people)
                 };
                 List<Dictionary<string, object>> Sources(string hero, string id) => new List<Dictionary<string, object>> { TestDict("speaker_id", hero, "turn_id", id) };
-                using (var c = OpenCampaignConnection(campaign))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
                     EnsurePlayerApproachSchema(c);
                     var individualBrief = CloneDictionary(brief); individualBrief["heroId"] = "npc"; individualBrief["name"] = "Mira";
@@ -124,15 +124,15 @@ namespace ReignBetaServer
                         "An accepted individual invitation permits an empty player contribution and binds the saved opening brief without manufacturing player speech.");
                     // Reproduce the empty immutable original that replaced the old
                     // playerText cue, then exercise real prompt packing and message separation.
-                    ApplyPlayerInputAudienceToPayload(individualOpening, "npc", allowInterpretation: false);
-                    string emptyOriginal = ProjectCurrentPlayerPromptText(IndividualNpcOpeningCue, "npc", individualOpening);
+                    DialogueService.ApplyPlayerInputAudienceToPayload(individualOpening, "npc", allowInterpretation: false);
+                    string emptyOriginal = DialogueService.ProjectCurrentPlayerPromptText(IndividualNpcOpeningCue, "npc", individualOpening);
                     string attentionPrompt = PlayerAttentionPrompt(campaign, "npc", individualOpening);
-                    var packed = BuildBudgetedConversationLiveTurn("dialogue_live_turn_template.txt", "priorDialogueText",
+                    var packed = DialogueService.BuildBudgetedConversationLiveTurn("dialogue_live_turn_template.txt", "priorDialogueText",
                         new Dictionary<string, string> { ["playerText"] = emptyOriginal, ["contextPullText"] = attentionPrompt,
                             ["priorDialogueText"] = "" }, "Current camp.", "Speak for yourself.", "", "Rules.", "Profile.",
                         targetOverride: 1000, capacity: TestDict("inputAllowance", 990976, "outputFits", true, "capacityVerified", true));
-                    var packedEnvelope = CreatePromptEnvelope("dialogue", "test", "Rules.", "Profile.", packed.LiveTurn);
-                    StructureConversationMessages(packedEnvelope, packed.Structure, "", new(), FormatDialogueForPrompt,
+                    var packedEnvelope = DialogueService.CreatePromptEnvelope("dialogue", "test", "Rules.", "Profile.", packed.LiveTurn);
+                    DialogueService.StructureConversationMessages(packedEnvelope, packed.Structure, "", new(), DialogueService.FormatDialogueForPrompt,
                         "npc", "Player", emptyOriginal, false, text => text);
                     string outbound = string.Join("\n", packedEnvelope.Messages.Select(message => ReadString(message, "content", "")));
                     Check("saved_brief_and_cue_survive_empty_original_and_budget_pressure", emptyOriginal == ""
@@ -140,7 +140,7 @@ namespace ReignBetaServer
                         && outbound.Contains("approachOpeningEvidence") && outbound.Contains("rivalDays")
                         && packed.ContextPullText.Contains("required=true") && ReadString(individualOpening, "playerText", "missing") == "",
                         "Required saved authority and NPC-first instructions reach the outbound messages despite an empty player source and a full working budget.");
-                    var protectedRecords = ContinuityPromptRecords(attentionPrompt, false).Where(record => record.Required).ToList();
+                    var protectedRecords = DialogueService.ContinuityPromptRecords(attentionPrompt, false).Where(record => record.Required).ToList();
                     Check("frozen_approach_brief_is_one_complete_required_record", protectedRecords.Count == 1
                         && protectedRecords[0].Text.Contains(Json.Serialize(individualBrief))
                         && protectedRecords[0].Text.Contains(JealousyOpeningInstructions(individualBrief)),
@@ -164,35 +164,35 @@ namespace ReignBetaServer
                     var ordinary = CloneDictionary(individualOpening); ordinary["playerText"] = "Hello.";
                     Check("individual_player_reply_stays_player_reply", !PrepareIndividualNpcOpening(campaign, "npc", ordinary)
                         && ReadString(ordinary, "playerText", "") == "Hello.", "A real player contribution cannot be promoted into NPC-first speech.");
-                    var openingUnit = new AcceptedConversationUnit { Campaign = campaign, Hero = "npc", Player = "player", HeroName = "Mira", PlayerName = "Player",
+                    var openingUnit = new DialogueService.AcceptedConversationUnit { Campaign = campaign, Hero = "npc", Player = "player", HeroName = "Mira", PlayerName = "Player",
                         EventId = "individual_opening_accepted", EventType = "dialogue_turn", PlayerText = "", Reply = ReadString(valid, "reply", ""), Timestamp = 8,
-                        Generation = ReadString(ReadMemoryPrecisionState(c), "restore_generation", ""), Payload = individualOpening, Parsed = valid,
+                        Generation = ReadString(DialogueService.ReadMemoryPrecisionState(c), "restore_generation", ""), Payload = individualOpening, Parsed = valid,
                         Memories = new(), Beliefs = new(), Relationships = new(), Obligations = new(), Comprehensions = new(), Continuity = new() };
-                    var acceptedOpening = PublishAcceptedConversationUnit(openingUnit, accept => StoreConversationExchange(campaign, individualOpening,
+                    var acceptedOpening = DialogueService.PublishAcceptedConversationUnit(openingUnit, accept => DialogueService.StoreConversationExchange(campaign, individualOpening,
                         "npc", "player", "Player", "Mira", "", openingUnit.Reply, openingUnit.EventId, 8, acceptance: accept));
                     string openingSession = ReadString(acceptedOpening, "sessionId", "");
                     Check("individual_opening_only_npc_source_and_heard_receipt", ReadBool(acceptedOpening, "ok", false)
-                        && QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id=$session AND role='player';", TestDict("session", openingSession)).Count == 0
-                        && QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id=$session AND role='npc';", TestDict("session", openingSession)).Count == 1
+                        && RelationshipsSelfTestStore.SelectConversationTurns(c, TestDict("session", openingSession)).Count == 0
+                        && RelationshipsSelfTestStore.SelectConversationTurns2(c, TestDict("session", openingSession)).Count == 1
                         && ReadStringList(ApproachState(c, "individual_opening_test", "request:individual_invitation"), "heard").Contains("npc"),
                         "Accepted opening speech and the heard/contact receipt commit together with no empty player source.");
                     Check("individual_heard_opening_cannot_restart", !PrepareIndividualNpcOpening(campaign, "npc", CloneDictionary(individualOpening)),
                         "A heard invitation cannot reauthorize an empty NPC-first opening.");
-                    ExecuteSql(c, "DELETE FROM player_attention_events WHERE timeline_id='individual_opening_test';");
+                    RelationshipsSelfTestStore.DeletePlayerAttentionEvents(c);
                     foreach (string key in new[] { PlayerApproachOptions.AttentionKey, PlayerApproachOptions.MasterKey })
                     {
                         var disabled = new PlayerApproachOptions(field => field != key);
                         var tracking = RecordAcceptedPlayerAttention(c, Unit("npc", "tracking_off_" + key, 9), Sources("npc", "off_source"), disabled);
-                        Check("tracking_off_" + key, ReadBool(tracking, "trackingDisabled", false) && QuerySql(c, "SELECT * FROM player_attention_events;").Count == 0
+                        Check("tracking_off_" + key, ReadBool(tracking, "trackingDisabled", false) && RelationshipsSelfTestStore.SelectPlayerAttentionEvents(c).Count == 0
                             && ReadInt(ApproachState(c, "attention_test", "contact:player:npc"), "day", 0) == 9,
                             "Disabling tracking inserts no observation while successful player contact still clears stale neglect.");
                     }
                     RecordAcceptedPlayerAttention(c, Unit("npc", "first", 10), Sources("npc", "source1"));
                     RecordAcceptedPlayerAttention(c, Unit("npc", "again", 10), Sources("npc", "source2"));
-                    Check("daily_observer_deduplication", QuerySql(c, "SELECT * FROM player_attention_events;").Count == 1,
+                    Check("daily_observer_deduplication", RelationshipsSelfTestStore.SelectPlayerAttentionEvents(c).Count == 1,
                         "Two successful conversations create one generic event for the present observer and none for the absent observer.");
                     var historyInput = TestDict("campaignId", campaign, "timelineId", "attention_test", "playerId", "player", "heroStringId", "observer");
-                    var visibleHistory = DialogueHistory(historyInput);
+                    var visibleHistory = DialogueService.DialogueHistory(historyInput);
                     Check("saved_attention_never_appears_in_visible_conversation_history", PlayerAttentionHistory(campaign, "observer", historyInput).Count == 1
                         && ReadDictionaryList(visibleHistory, "lines").All(line => ReadString(line, "channel", "") != "witnessed_player_attention")
                         && PlayerAttentionPrompt(campaign, "observer", Unit("observer", "prompt", 10).Payload).Contains("spent time talking"),
@@ -200,32 +200,31 @@ namespace ReignBetaServer
                     var newcomer = people.Concat(new[] { TestDict("heroId", "newcomer", "alive", true, "scopes", new[] { "settlement:town" }) }).ToList();
                     var afterArrival = Unit("npc", "new-arrival", 10); afterArrival.Payload["playerAttentionPresence"] = newcomer;
                     RecordAcceptedPlayerAttention(c, afterArrival, Sources("npc", "source3"));
-                    Check("newcomer_observes_same_day", QuerySql(c, "SELECT * FROM player_attention_events WHERE observer_id='newcomer';").Count == 1,
+                    Check("newcomer_observes_same_day", RelationshipsSelfTestStore.SelectPlayerAttentionEvents2(c).Count == 1,
                         "Per-observer deduplication preserves same-day observation by a newly arrived character.");
                     string baselineBeforeFailure = CanonicalJson(ApproachState(c, "attention_test", "contact:player:npc"));
                     bool noticesExcluded = true;
                     foreach (string failure in new[] { "action_verification", "continuity_evidence", "memory_rewrite", "dialogue_validation" })
                     {
                         var notice = Unit("npc", "failure_" + failure, 11);
-                        notice.Reply = ReadString(VisibleFailedRepairWithoutEffects(TestDict("reply", "An unverified attempted response."), failure), "reply", "");
+                        notice.Reply = ReadString(DialogueService.VisibleFailedRepairWithoutEffects(TestDict("reply", "An unverified attempted response."), failure), "reply", "");
                         noticesExcluded &= ReadString(RecordAcceptedPlayerAttention(c, notice, Sources("npc", "bad_" + failure)), "status", "") == "excluded";
                     }
                     var letter = Unit("npc", "letter", 11); letter.Payload["channel"] = "correspondence";
                     RecordAcceptedPlayerAttention(c, letter, Sources("npc", "mail"));
                     Check("failed_and_remote_excluded", noticesExcluded
-                        && QuerySql(c, "SELECT * FROM player_attention_events WHERE calendar_day=11;").Count == 0
+                        && RelationshipsSelfTestStore.SelectPlayerAttentionEvents3(c).Count == 0
                         && CanonicalJson(ApproachState(c, "attention_test", "contact:player:npc")) == baselineBeforeFailure,
                         "Technical notices and letters neither observe attention nor reset a successful-contact baseline.");
-                    ExecuteSql(c, "BEGIN;");
+                    RelationshipsSelfTestStore.Begin(c);
                     RecordAcceptedPlayerAttention(c, Unit("npc", "rollback", 12), Sources("npc", "rollback_source"));
-                    ExecuteSql(c, "ROLLBACK;");
-                    Check("accepted_transaction_rollback", QuerySql(c, "SELECT * FROM player_attention_events WHERE calendar_day=12;").Count == 0,
+                    RelationshipsSelfTestStore.Rollback(c);
+                    Check("accepted_transaction_rollback", RelationshipsSelfTestStore.SelectPlayerAttentionEvents4(c).Count == 0,
                         "An accepted-source transaction rollback also removes attention and its contact effects.");
                     RecordAcceptedPlayerAttention(c, Unit("observer", "group", 13), Sources("observer", "group_a"));
                     RecordAcceptedPlayerAttention(c, Unit("npc", "group", 13), Sources("npc", "group_b"));
                     var contact = ApproachState(c, "attention_test", "contact:player:observer");
-                    var live = QuerySql(c, "SELECT * FROM player_attention_events WHERE observer_id='observer' AND sequence_id>$sequence AND exchange_id<>$exchange;",
-                        TestDict("sequence", ReadLong(contact, "sequence", 0), "exchange", ReadString(contact, "exchange", "")));
+                    var live = RelationshipsSelfTestStore.SelectPlayerAttentionEvents5(c, TestDict("sequence", ReadLong(contact, "sequence", 0), "exchange", ReadString(contact, "exchange", "")));
                     Check("group_participants_not_neglected", live.Count == 0, "Later speakers in the same successful group exchange do not artificially neglect an earlier speaker.");
                     var request = TestDict("requestId", "accepted_request", "playerId", "player", "kind", "shared", "status", "accepted", "heroes", new[] { TestDict("heroId", "observer", "name", "Observer", "severityLevel", 2) }, "heard", new List<string>());
                     PutApproachState(c, "attention_test", "request:accepted_request", request);
@@ -237,9 +236,7 @@ namespace ReignBetaServer
                     var nobles = Enumerable.Range(0, 5).Select(i => TestDict("heroId", "noble_" + i, "name", "Noble " + i,
                         "alive", true, "adult", true, "free", true, "coPresent", true, "isLord", true, "known", false, "nativeRelation", 100)).ToList();
                     foreach (var noble in nobles)
-                        ExecuteSql(c, @"INSERT INTO relationship_pair_chemistry(pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,
-affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts) VALUES($pair,$hero,'player','ENFP','INTJ',100,0,1,20,123);",
-                            TestDict("pair", AmbientPairKey(ReadString(noble, "heroId", ""), "player"), "hero", ReadString(noble, "heroId", "")));
+                        RelationshipsSelfTestStore.InsertRelationshipPairChemistry(c, TestDict("pair", AmbientPairKey(ReadString(noble, "heroId", ""), "player"), "hero", ReadString(noble, "heroId", "")));
                     foreach (var scope in new[] { (kind: "shared", key: PlayerApproachOptions.JealousyKey), (kind: "keep", key: PlayerApproachOptions.KeepKey), (kind: "patrol", key: PlayerApproachOptions.PatrolKey) })
                     {
                         foreach (string offKey in new[] { scope.key, PlayerApproachOptions.MasterKey })
@@ -250,7 +247,7 @@ affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts) VALUES($pair,$her
                                 "kind", scope.kind, "candidates", nobles);
                             var offResult = PlayerApproachEvaluateApi(evaluate, disabled);
                             Check("disabled_evaluation_" + isolated, ReadString(offResult, "status", "") == "disabled"
-                                && QuerySql(c, "SELECT * FROM player_approach_state WHERE timeline_id=$timeline;", TestDict("timeline", isolated)).Count == 0,
+                                && RelationshipsSelfTestStore.SelectPlayerApproachState(c, TestDict("timeline", isolated)).Count == 0,
                                 "Disabled evaluation consumes no roll, cadence, daily quota or cooldown and returns no request.");
                             string requestKey = "off_request";
                             PutApproachState(c, isolated, "request:" + requestKey, TestDict("requestId", requestKey, "playerId", "player", "kind", scope.kind,
@@ -261,8 +258,7 @@ affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts) VALUES($pair,$her
                             Check("disabled_decision_" + isolated, ReadString(ReadDictionary(cancelled, "request"), "status", "") == "cancelled"
                                 && ReadDictionaryList(ReadDictionary(cancelled, "request"), "receipts").Count == 0
                                 && ReadBool(replayed, "idempotent", false)
-                                && ReadInt(QuerySql(c, "SELECT affinity_a_to_b FROM relationship_pair_chemistry WHERE pair_key=$pair;",
-                                    TestDict("pair", AmbientPairKey("noble_0", "player"))).Single(), "affinity_a_to_b", 0) == 100,
+                                && ReadInt(RelationshipsSelfTestStore.SelectRelationshipPairChemistry(c, TestDict("pair", AmbientPairKey("noble_0", "player"))).Single(), "affinity_a_to_b", 0) == 100,
                                 "A pending disabled invitation cancels without affinity loss or native receipts; re-enabling cannot replay it.");
                             PutApproachState(c, isolated, "request:off_accept", TestDict("requestId", "off_accept", "playerId", "player", "kind", scope.kind,
                                 "status", "pending", "heroes", new[] { TestDict("heroId", "noble_0", "lastContact", TestDict(), "penalty", 8) }));
@@ -286,8 +282,7 @@ affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts) VALUES($pair,$her
                     var firstDecline = PlayerApproachDecisionApi(decline);
                     var secondDecline = PlayerApproachDecisionApi(decline);
                     Check("refusal_atomic_replay", ReadBool(firstDecline, "ok", false) && ReadBool(secondDecline, "idempotent", false)
-                        && invitedHeroes.All(h => ReadInt(QuerySql(c, "SELECT affinity_a_to_b FROM relationship_pair_chemistry WHERE pair_key=$pair;",
-                            TestDict("pair", AmbientPairKey(ReadString(h, "heroId", ""), "player"))).Single(), "affinity_a_to_b", 0) == 100 - ReadInt(h, "penalty", 0))
+                        && invitedHeroes.All(h => ReadInt(RelationshipsSelfTestStore.SelectRelationshipPairChemistry(c, TestDict("pair", AmbientPairKey(ReadString(h, "heroId", ""), "player"))).Single(), "affinity_a_to_b", 0) == 100 - ReadInt(h, "penalty", 0))
                         && ReadDictionaryList(ReadDictionary(firstDecline, "request"), "receipts").Count == 4,
                         "A repeated decline applies each saved 1d5 penalty once and returns the same four native receipt identities.");
                     var effect = ReadDictionaryList(ReadDictionary(firstDecline, "request"), "receipts")[0];
@@ -305,13 +300,37 @@ affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts) VALUES($pair,$her
                     Check("native_observation_immutable", !ReadBool(PlayerApproachDecisionApi(acknowledgment), "ok", true), "A retained native observation cannot be replaced by different before/after values.");
                     var cadenceInput = TestDict("campaignId", campaign, "timelineId", "cadence_test", "playerId", "player", "worldDay", 1d,
                         "kind", "shared", "candidates", new[] { TestDict("heroId", "observer", "alive", true, "adult", true, "free", true, "coPresent", true, "known", true) });
+                    var witnessedAttention = Unit("npc", "witnessed_before_contact", 0);
+                    witnessedAttention.Payload["timelineId"] = "cadence_test";
+                    RecordAcceptedPlayerAttention(c, witnessedAttention, Sources("npc", "witnessed_before_contact_source"));
+                    var noContact = PlayerApproachEvaluateApi(cadenceInput);
+                    Check("shared_approach_requires_direct_contact", ReadBool(noContact, "ok", false)
+                        && ReadDictionaryList(noContact, "checks").Count == 0 && ReadDictionaryList(noContact, "requests").Count == 0
+                        && ApproachState(c, "cadence_test", "cadence:player:observer").Count == 0,
+                        "A native-known observer who witnessed the player's attention still has no jealousy cadence, roll or invitation without prior contact.");
+
+                    const string preContactRequest = "old_request_without_contact";
+                    PutApproachState(c, "cadence_test", "request:" + preContactRequest,
+                        TestDict("requestId", preContactRequest, "playerId", "player", "kind", "shared", "status", "pending",
+                            "heroes", new[] { TestDict("heroId", "observer", "lastContact", TestDict(), "penalty", 8) }));
+                    var preContactDecline = CloneDictionary(decline);
+                    preContactDecline["timelineId"] = "cadence_test";
+                    preContactDecline["requestId"] = preContactRequest;
+                    var cancelledPreContactRequest = ReadDictionary(PlayerApproachDecisionApi(preContactDecline), "request");
+                    Check("legacy_unmet_jealousy_invitation_cancels", ReadString(cancelledPreContactRequest, "status", "") == "cancelled"
+                        && ReadDictionaryList(cancelledPreContactRequest, "receipts").Count == 0,
+                        "Refusing a queued legacy invitation without contact cancels it without a relationship penalty.");
+
+                    var firstConversation = Unit("observer", "cadence_first_contact", 0);
+                    firstConversation.Payload["timelineId"] = "cadence_test";
+                    RecordAcceptedPlayerAttention(c, firstConversation, Sources("observer", "cadence_contact_source"));
                     PlayerApproachEvaluateApi(cadenceInput); PlayerApproachEvaluateApi(cadenceInput);
                     int sameDayCount = ReadInt(ApproachState(c, "cadence_test", "cadence:player:observer"), "sharedDays", 0);
                     cadenceInput["worldDay"] = 8d; PlayerApproachEvaluateApi(cadenceInput);
                     Check("shared_days_pause_and_resume", sameDayCount == 1 && ReadInt(ApproachState(c, "cadence_test", "cadence:player:observer"), "sharedDays", 0) == 2,
                         "Multiple hourly evaluations count one shared day; six absent days add no cadence credit on return.");
                     var stale = TestDict("requestId", "stale", "playerId", "player", "kind", "shared", "status", "pending",
-                        "heroes", new[] { TestDict("heroId", "observer", "lastContact", TestDict(), "penalty", 8) });
+                        "heroes", new[] { TestDict("heroId", "observer", "lastContact", TestDict("exchange", "older_contact"), "penalty", 8) });
                     PutApproachState(c, "attention_test", "request:stale", stale);
                     var staleDecision = CloneDictionary(decline); staleDecision["requestId"] = "stale";
                     Check("contact_resolves_queued_neglect", ReadString(ReadDictionary(PlayerApproachDecisionApi(staleDecision), "request"), "status", "") == "cancelled",
@@ -320,26 +339,26 @@ affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts) VALUES($pair,$her
                         "Public attention history cannot cross campaign timeline boundaries.");
                 }
                 long savedEvents, savedSequence; string savedRequest;
-                using (var c = OpenCampaignConnection(campaign))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    savedEvents = ReadLong(QuerySql(c, "SELECT COUNT(*) AS count FROM player_attention_events;").Single(), "count", 0);
-                    savedSequence = ReadLong(QuerySql(c, "SELECT MAX(sequence_id) AS sequence FROM player_attention_events;").Single(), "sequence", 0);
+                    savedEvents = ReadLong(RelationshipsSelfTestStore.CountPlayerAttentionEvents(c).Single(), "count", 0);
+                    savedSequence = ReadLong(RelationshipsSelfTestStore.SelectPlayerAttentionEvents6(c).Single(), "sequence", 0);
                     savedRequest = CanonicalJson(ApproachState(c, "attention_test", "request:accepted_request"));
                 }
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "approach_checkpoint");
-                using (var c = OpenCampaignConnection(campaign))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    ExecuteSql(c, "DELETE FROM player_attention_events;");
+                    RelationshipsSelfTestStore.DeletePlayerAttentionEvents2(c);
                     PutApproachState(c, "attention_test", "request:accepted_request", TestDict("status", "changed_after_save"));
                 }
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "approach_checkpoint");
-                using (var c = OpenCampaignConnection(campaign))
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign))
                 {
-                    bool restored = ReadLong(QuerySql(c, "SELECT COUNT(*) AS count FROM player_attention_events;").Single(), "count", 0) == savedEvents
+                    bool restored = ReadLong(RelationshipsSelfTestStore.CountPlayerAttentionEvents(c).Single(), "count", 0) == savedEvents
                         && CanonicalJson(ApproachState(c, "attention_test", "request:accepted_request")) == savedRequest;
                     RecordAcceptedPlayerAttention(c, Unit("npc", "after_restore", 30), Sources("npc", "restored_source"));
                     Check("snapshot_restore_and_sequence", restored
-                        && ReadLong(QuerySql(c, "SELECT MAX(sequence_id) AS sequence FROM player_attention_events;").Single(), "sequence", 0) > savedSequence,
+                        && ReadLong(RelationshipsSelfTestStore.SelectPlayerAttentionEvents6(c).Single(), "sequence", 0) > savedSequence,
                         "A real isolated PostgreSQL Save Sync schema snapshot restores attention and frozen requests, then preserves monotonic accepted-source ordering.");
                     var individualContact = Unit("observer", "", 31); individualContact.Payload.Remove("sceneTurnId"); individualContact.EventId = "individual_contact";
                     RecordAcceptedPlayerAttention(c, individualContact, Sources("observer", "individual_contact_source"));
@@ -347,8 +366,7 @@ affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts) VALUES($pair,$her
                     RecordAcceptedPlayerAttention(c, individualRival, Sources("npc", "individual_rival_source"));
                     var individualBaseline = ApproachState(c, "attention_test", "contact:player:observer");
                     Check("individual_exchange_identity", ReadString(individualBaseline, "exchange", "") == "individual_contact"
-                        && QuerySql(c, "SELECT * FROM player_attention_events WHERE observer_id='observer' AND sequence_id>$sequence AND exchange_id<>$exchange;",
-                            TestDict("sequence", ReadLong(individualBaseline, "sequence", 0), "exchange", ReadString(individualBaseline, "exchange", ""))).Count == 1,
+                        && RelationshipsSelfTestStore.SelectPlayerAttentionEvents5(c, TestDict("sequence", ReadLong(individualBaseline, "sequence", 0), "exchange", ReadString(individualBaseline, "exchange", ""))).Count == 1,
                         "Individual dialogue uses its accepted event identity when no group turn key exists; later individual rival attention remains visible.");
                 }
             }
@@ -357,7 +375,7 @@ affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts) VALUES($pair,$her
             {
                 try { ReignPostgreSqlStorage.DropCampaign(campaign); }
                 catch (Exception ex) { Check("fixture_cleanup", false, ex.Message); }
-                TryDeleteDirectory(CampaignDirectory(campaign));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaign));
             }
             return results;
         }

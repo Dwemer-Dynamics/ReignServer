@@ -3,17 +3,18 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
-        private const string NarrativeSchema = "reign-narrative-v1";
+        internal const string NarrativeSchema = "reign-narrative-v1";
         private const string NarrativePack = "reign_profiles_v5";
         private static readonly object NarrativeLibraryLock = new object();
-        private static readonly object NarrativeStateLock = new object();
+        internal static readonly object NarrativeStateLock = new object();
         private static List<Dictionary<string, object>> NarrativeLibraryCache;
         private static readonly int[] NarrativeInfluenceWeights = { 5, 10, 15, 20, 20, 12, 8, 5, 3, 2 };
         private static readonly string[] NarrativeInfluenceLevels = {
@@ -102,7 +103,7 @@ namespace ReignBetaServer
                             string title = raw.Trim();
                             if (title.Length == 0) throw new InvalidOperationException("Empty narrative library concept.");
                             result.Add(new Dictionary<string, object> {
-                                ["id"] = category + "_" + PromptHash(category + "|" + title).Substring(0, 16).ToLowerInvariant(),
+                                ["id"] = category + "_" + DialogueService.PromptHash(category + "|" + title).Substring(0, 16).ToLowerInvariant(),
                                 ["category"] = category, ["family"] = parts[0], ["title"] = title,
                                 ["minAge"] = parts[0].Contains("/child_") ? 0 : 12,
                                 ["maxAge"] = parts[0].Contains("/child_") ? 11 : 150
@@ -151,7 +152,7 @@ namespace ReignBetaServer
                 }
             }
             var narrative = new Dictionary<string, object> {
-                ["schema"] = NarrativeSchema, ["heroStringId"] = CharacterIdFrom(hero), ["seed"] = seed,
+                ["schema"] = NarrativeSchema, ["heroStringId"] = CampaignFileService.CharacterIdFrom(hero), ["seed"] = seed,
                 ["revision"] = 1, ["status"] = "blueprint", ["items"] = items,
                 ["definingIds"] = SelectDefiningNarrativeIds(items, seed, new List<string>()),
                 ["influenceLevels"] = NarrativeInfluenceLevels, ["realismPolicy"] = NarrativeRealismPolicy
@@ -194,7 +195,7 @@ namespace ReignBetaServer
                 .Take(3).Select(x => ReadString(x, "id", "")).ToList();
         }
 
-        private static List<string> ValidateCharacterNarrative(Dictionary<string, object> narrative, bool requireWritten)
+        internal static List<string> ValidateCharacterNarrative(Dictionary<string, object> narrative, bool requireWritten)
         {
             var errors = new List<string>();
             if (ReadString(narrative, "schema", "") != NarrativeSchema) errors.Add("Unsupported narrative schema.");
@@ -226,15 +227,15 @@ namespace ReignBetaServer
 
         private static string NarrativeMeaningKey(Dictionary<string, object> item)
         {
-            return NormalizeLookup(FirstNonEmpty(ReadString(item, "meaningKey", ""), ReadString(item, "title", "")));
+            return ActionPipelineService.NormalizeLookup(FirstNonEmpty(ReadString(item, "meaningKey", ""), ReadString(item, "title", "")));
         }
 
-        private static bool NarrativeDocumentReady(Dictionary<string, object> narrative)
+        internal static bool NarrativeDocumentReady(Dictionary<string, object> narrative)
         {
             return ReadString(narrative, "status", "") == "ready" && ValidateCharacterNarrative(narrative, true).Count == 0;
         }
 
-        private static Dictionary<string, object> ResolveEffectiveNarrative(Dictionary<string, object> characteristics)
+        internal static Dictionary<string, object> ResolveEffectiveNarrative(Dictionary<string, object> characteristics)
         {
             var baseNarrative = ReadDictionary(characteristics, "narrative") ?? new Dictionary<string, object>();
             if (ReadString(baseNarrative, "schema", "") != NarrativeSchema) return new Dictionary<string, object>();
@@ -254,19 +255,30 @@ namespace ReignBetaServer
                 string basisFingerprint = ReadString(development, "baseItemFingerprint", "");
                 var baseItem = baseItems.FirstOrDefault(x => ReadString(x, "id", "") == ReadString(target, "id", ""));
                 if (basisFingerprint.Length > 0 && basisFingerprint != NarrativeItemFingerprint(baseItem)) continue;
+                if (IsReportedDynamicCharacteristic(row))
+                {
+                    if (ReadString(development, "sourceEvidenceVersion", "") != ReportedSpeechSchema) continue;
+                    string owner = ReadString(dynamic, "heroStringId", "");
+                    if (ReadString(row, "owner_id", "") != owner) continue;
+                    string speech = FormatReportedCharacteristicSpeech(ReadDictionary(development, "sourceEvidence"), owner);
+                    if (speech.Length > 0 && speech.Length <= 1600) target["reportedDevelopment"] = speech;
+                    continue;
+                }
                 target["description"] = ReadString(development, "description", ReadString(target, "description", ""));
                 target["personalMeaning"] = ReadString(development, "personalMeaning", ReadString(target, "personalMeaning", ""));
                 target["influence"] = ReadInt(development, "influence", ReadInt(target, "influence", 1));
                 target["developmentId"] = ReadString(row, "characteristic_id", "");
+                target["legacyDevelopmentInterpretation"] = true;
             }
             effective["items"] = items;
             effective["definingIds"] = SelectDefiningNarrativeIds(items, ReadString(effective, "seed", ""), ReadStringList(baseNarrative, "definingIds"));
             return effective;
         }
 
-        private static string FormatNarrativeInterest(Dictionary<string, object> item)
+        private static string FormatNarrativeInterest(Dictionary<string, object> item, bool includeReportedSpeech)
         {
             string category = ReadString(item, "category", "");
+            string speech = includeReportedSpeech ? ReadString(item, "reportedDevelopment", "") : "";
             return "- " + ReadString(item, "title", "") + " [PRIVATE reference " + ReadString(item, "id", "") + "; influence " + ReadInt(item, "influence", 1) + "/10]: " + ReadString(item, "description", "")
                 + " Personal meaning: " + ReadString(item, "personalMeaning", "") + " "
                 + NarrativeInfluenceDescription(category, ReadInt(item, "influence", 1))
@@ -274,7 +286,10 @@ namespace ReignBetaServer
                     ? " In safe voluntary time, show this strong interest through sustained attention, concrete curiosity and a wish to return to it; fit the expression to this person's voice. Actual obligations still bound that time." : "")
                 + (category == "hobby" && ReadInt(item, "influence", 1) == 10
                     ? " This consuming interest deserves substantial available leisure, not merely an occasional pleasant hour." : "")
-                + (ReadString(item, "visibility", "private") == "private" ? " PRIVATE: influence conduct without automatic disclosure." : " Personal information is not automatically known to other speakers.");
+                + (ReadString(item, "visibility", "private") == "private" ? " PRIVATE: influence conduct without automatic disclosure." : " Personal information is not automatically known to other speakers.")
+                + (ReadBool(item, "legacyDevelopmentInterpretation", false)
+                    ? " Legacy development interpretation; original wording and meaning unverified." : "")
+                + (speech.Length > 0 ? " PRIVATE development evidence. Preserve attribution and qualifications. " + speech : "");
         }
 
         private static string BuildDefiningInterestsPrompt(Dictionary<string, object> characteristics)
@@ -286,10 +301,11 @@ namespace ReignBetaServer
             return NarrativeRealismPolicy + "\nCURRENT PERSONAL IMPORTANCE: the supplied current influence governs present strength, including after development or an editor correction. Historical examples of occasional practice do not cap a now-strong interest. "
                 + "When responsibilities are finished and the subject is personally relevant, let strong interests noticeably shape voluntary attention, enthusiasm, plans and personal tradeoffs. Do not invent extra duties merely to suppress them. "
                 + "The three concerns below are the strongest distinct personal priorities; other concerns enter when relevant.\n"
-                + string.Join("\n", ids.Select(id => items.FirstOrDefault(x => ReadString(x, "id", "") == id)).Where(x => x != null).Select(FormatNarrativeInterest));
+                + string.Join("\n", ids.Select(id => items.FirstOrDefault(x => ReadString(x, "id", "") == id)).Where(x => x != null)
+                    .Select(item => FormatNarrativeInterest(item, ReadBool(characteristics, "reportedSpeechPromptScope", false))));
         }
 
-        private static string BuildRelevantInterestsPrompt(Dictionary<string, object> characteristics, string query)
+        internal static string BuildRelevantInterestsPrompt(Dictionary<string, object> characteristics, string query)
         {
             var narrative = ResolveEffectiveNarrative(characteristics);
             string question = (query ?? "").ToLowerInvariant();
@@ -318,20 +334,20 @@ namespace ReignBetaServer
                         : ReadString(x, "description", "").IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0 ? 1 : 0) })
                 .Where(x => x.Score > 0).OrderByDescending(x => x.Score).ThenByDescending(x => ReadInt(x.Item, "influence", 0)).Take(3).ToList();
             return relevant.Count == 0 ? "" : "Additional interests relevant to this question; their disclosure boundaries still apply.\n"
-                + string.Join("\n", relevant.Select(x => FormatNarrativeInterest(x.Item)));
+                + string.Join("\n", relevant.Select(x => FormatNarrativeInterest(x.Item, ReadBool(characteristics, "reportedSpeechPromptScope", false))));
         }
 
         private static Dictionary<string, object> NarrativePromptDiagnostics(Dictionary<string, object> characteristics)
         {
             var narrative = ResolveEffectiveNarrative(characteristics);
             return new Dictionary<string, object> { ["schema"] = ReadString(narrative, "schema", "unavailable"),
-                ["definingIds"] = ReadStringList(narrative, "definingIds"), ["effectiveFingerprint"] = PromptHash(Json.Serialize(narrative)),
+                ["definingIds"] = ReadStringList(narrative, "definingIds"), ["effectiveFingerprint"] = DialogueService.PromptHash(Json.Serialize(narrative)),
                 ["realismGuard"] = true, ["selection"] = "highest_influence_persisted_random_ties" };
         }
 
         // All prompt routes consume the same effective snapshot. Derived legacy fields
         // are replaced together so an accepted development cannot compete with its past.
-        private static void ApplyNarrativePromptProjection(Dictionary<string, object> stack)
+        internal static void ApplyNarrativePromptProjection(Dictionary<string, object> stack)
         {
             var narrative = ResolveEffectiveNarrative(stack);
             if (ReadString(narrative, "status", "") != "ready") return;
@@ -341,10 +357,10 @@ namespace ReignBetaServer
             var life = ReadDictionary(narrative, "life") ?? new Dictionary<string, object>();
             var previousBackground = ReadDictionary(stack, "background") ?? new Dictionary<string, object>();
             stack["background"] = new Dictionary<string, object> {
-                ["version"] = 5, ["summary"] = BuildAroundNativeBackground(ReadString(previousBackground, "nativeEncyclopediaText", ""), ReadString(life, "summary", "")),
+                ["version"] = 5, ["summary"] = CharactersService.BuildAroundNativeBackground(ReadString(previousBackground, "nativeEncyclopediaText", ""), ReadString(life, "summary", "")),
                 ["nativeEncyclopediaText"] = ReadString(previousBackground, "nativeEncyclopediaText", ""),
                 ["nativeTextPreserved"] = !string.IsNullOrWhiteSpace(ReadString(previousBackground, "nativeEncyclopediaText", "")),
-                ["encyclopediaText"] = BuildAroundNativeBackground(ReadString(previousBackground, "nativeEncyclopediaText", ""), ReadString(life, "publicSummary", "")),
+                ["encyclopediaText"] = CharactersService.BuildAroundNativeBackground(ReadString(previousBackground, "nativeEncyclopediaText", ""), ReadString(life, "publicSummary", "")),
                 ["origin"] = ReadString(life, "origin", ""), ["upbringing"] = ReadString(life, "upbringing", ""),
                 ["reputation"] = ReadString(life, "reputation", ""), ["formativeEvents"] = values("formative") };
             stack["voice"] = DeepCloneProfileDictionary(ReadDictionary(narrative, "voice"));
@@ -361,7 +377,7 @@ namespace ReignBetaServer
 
         private static string NarrativeItemFingerprint(Dictionary<string, object> item)
         {
-            return PromptHash(string.Join("\n", new[] { "id", "category", "title", "description", "personalMeaning", "meaningKey", "influence", "visibility" }
+            return DialogueService.PromptHash(string.Join("\n", new[] { "id", "category", "title", "description", "personalMeaning", "meaningKey", "influence", "visibility" }
                 .Select(key => Convert.ToString(item != null && item.ContainsKey(key) ? item[key] : "", CultureInfo.InvariantCulture))));
         }
 
@@ -375,27 +391,72 @@ namespace ReignBetaServer
             if (errors.Count > 0) throw new InvalidOperationException("Interests were not saved: " + string.Join(" ", errors));
         }
 
-        private static Dictionary<string, object> InspectCharacterNarrative(Dictionary<string, string> query)
+        internal static Dictionary<string, object> InspectCharacterNarrative(Dictionary<string, string> query)
         {
             string campaign = query.ContainsKey("campaignId") ? query["campaignId"] : "";
             string hero = query.ContainsKey("heroId") ? query["heroId"] : "";
             if (string.IsNullOrWhiteSpace(hero)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "heroId is required." };
             Dictionary<string, object> narrative;
             var dynamic = new Dictionary<string, object>();
-            var catalog = ReadShippedNarrativeCatalog();
+            var shipped = ReadShippedNarrativeInspection();
             if (string.IsNullOrWhiteSpace(campaign))
-                narrative = ReadDictionary(ReadDictionaryList(catalog, "profiles").FirstOrDefault(x => ReadString(x, "heroStringId", "") == hero), "narrative");
+                narrative = shipped.ReadNarrative(hero);
             else
             {
-                narrative = ReadJsonObject(CharacterFile(campaign, hero, "narrative.json"));
-                dynamic = ReadJsonObject(CharacterFile(campaign, hero, "dynamic_characteristics.json"));
+                narrative = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "narrative.json"));
+                dynamic = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "dynamic_characteristics.json"));
             }
             var stack = new Dictionary<string, object> { ["narrative"] = narrative, ["dynamicCharacteristics"] = dynamic };
             return new Dictionary<string, object> { ["ok"] = true, ["schema"] = NarrativeSchema,
                 ["available"] = narrative != null && narrative.Count > 0, ["baseNarrative"] = narrative,
                 ["effectiveNarrative"] = ResolveEffectiveNarrative(stack), ["selection"] = NarrativePromptDiagnostics(stack),
                 ["developmentHistory"] = dynamic, ["historyScope"] = "retained character projection; no materialization or database writes",
-                ["catalogDiversity"] = AuditNarrativeCatalog(catalog) };
+                ["catalogDiversity"] = shipped.ReadDiversity() };
+        }
+
+        private static readonly ConditionalWeakTable<Dictionary<string, object>, ShippedNarrativeInspection>
+            ShippedNarrativeInspections = new ConditionalWeakTable<Dictionary<string, object>, ShippedNarrativeInspection>();
+
+        private static ShippedNarrativeInspection ReadShippedNarrativeInspection()
+        {
+            Dictionary<string, object> catalog;
+            lock (CharacterProfileLibraryLock)
+                catalog = CharacterProfilesById?.Count > 0 ? CharacterProfileLibraryRoot : null;
+
+            // Startup loads the shipped pack once. A replacement library root starts a new inspection snapshot.
+            if (ReadString(catalog, "packVersion", "") == NarrativePack)
+                return ShippedNarrativeInspections.GetValue(catalog, root => new ShippedNarrativeInspection(root));
+
+            return new ShippedNarrativeInspection(ReadShippedNarrativeCatalog());
+        }
+
+        private sealed class ShippedNarrativeInspection
+        {
+            private readonly Dictionary<string, Dictionary<string, object>> narratives = new(StringComparer.Ordinal);
+            private readonly Dictionary<string, object> catalog;
+            private readonly object diversityLock = new();
+            private string diversityJson;
+
+            internal ShippedNarrativeInspection(Dictionary<string, object> catalog)
+            {
+                this.catalog = catalog;
+                foreach (var profile in ReadDictionaryList(catalog, "profiles"))
+                    narratives.TryAdd(ReadString(profile, "heroStringId", "") ?? "", ReadDictionary(profile, "narrative"));
+            }
+
+            internal Dictionary<string, object> ReadNarrative(string hero)
+            {
+                return narratives.TryGetValue(hero, out var narrative) && narrative != null
+                    ? Json.Deserialize<Dictionary<string, object>>(Json.Serialize(narrative)) : null;
+            }
+
+            internal Dictionary<string, object> ReadDiversity()
+            {
+                string json;
+                lock (diversityLock)
+                    json = diversityJson ??= Json.Serialize(AuditNarrativeCatalog(catalog));
+                return Json.Deserialize<Dictionary<string, object>>(json);
+            }
         }
 
         private static Dictionary<string, object> AuditNarrativeCatalog(Dictionary<string, object> catalog)
@@ -434,15 +495,15 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> ReadShippedNarrativeCatalog()
         {
-            var catalog = ReadJsonObject(CharacterProfileCatalogPath);
+            var catalog = CampaignFileService.ReadJsonObject(CharacterProfileCatalogPath);
             if (ReadString(catalog, "packVersion", "") != NarrativePack) return catalog;
             var profiles = ReadDictionaryList(catalog, "profiles");
             foreach (var profile in profiles)
             {
                 string id = ReadString(profile, "heroStringId", "");
-                string file = PromptHash(id).Substring(0, 24) + ".json";
+                string file = DialogueService.PromptHash(id).Substring(0, 24) + ".json";
                 if (ReadString(profile, "narrativeFile", "") != file) throw new InvalidDataException("Invalid shipped narrative reference: " + id);
-                var narrative = ReadJsonObject(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "profiles", "narrative", "profiles", file));
+                var narrative = CampaignFileService.ReadJsonObject(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "profiles", "narrative", "profiles", file));
                 if (ReadString(narrative, "heroStringId", "") != id || ReadString(narrative, "status", "") != "ready"
                     || ValidateCharacterNarrative(narrative, true).Count > 0) throw new InvalidDataException("Incomplete shipped narrative: " + id);
                 profile["narrative"] = narrative;

@@ -5,7 +5,7 @@ using ReignBeta.Shared;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class SettingsService
     {
         private static readonly string[] CorrespondenceOptionKeys = {
             "correspondenceFrequencyMultiplier", "correspondenceTravelTimeMultiplier"
@@ -32,11 +32,11 @@ namespace ReignBetaServer
             return "";
         }
 
-        private static double CorrespondenceOption(Dictionary<string, object> settings, string key)
+        internal static double CorrespondenceOption(Dictionary<string, object> settings, string key)
             => settings != null && settings.TryGetValue(key, out var raw) && ValidCorrespondenceOption(key, raw)
                 ? Convert.ToDouble(raw, CultureInfo.InvariantCulture) : 1d;
 
-        private static int AutonomousLetterChance(int affinity, double frequency)
+        internal static int AutonomousLetterChance(int affinity, double frequency)
             => (int)Math.Round(Math.Clamp(affinity * frequency, 0d, 100d), MidpointRounding.AwayFromZero);
 
         private static List<Dictionary<string, object>> RunCorrespondenceOptionsAssertions()
@@ -60,8 +60,8 @@ namespace ReignBetaServer
             }
             var settings = DefaultSettings();
             settings["private_fixture"] = "retain";
-            MergeProviderSettings(settings, TestDict(CorrespondenceOptionKeys[0], 0d));
-            MergeProviderSettings(settings, TestDict(CorrespondenceOptionKeys[1], .5d));
+            LlmProviderService.MergeProviderSettings(settings, TestDict(CorrespondenceOptionKeys[0], 0d));
+            LlmProviderService.MergeProviderSettings(settings, TestDict(CorrespondenceOptionKeys[1], .5d));
             var restored = TryParseJsonObject(Json.Serialize(settings));
             Check("independent_partial_merge_roundtrip", CorrespondenceOption(restored, CorrespondenceOptionKeys[0]) == 0
                 && CorrespondenceOption(restored, CorrespondenceOptionKeys[1]) == .5

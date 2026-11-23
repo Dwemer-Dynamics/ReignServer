@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private static readonly HashSet<string> DynamicCharacteristicCategories = new HashSet<string>(new[]
         {
@@ -15,52 +15,26 @@ namespace ReignBetaServer
             "local_connection", "skill_practice", "personal_value", "social_tendency", "aspiration"
         }, StringComparer.OrdinalIgnoreCase);
 
-        private const string DynamicCharacteristicsPromptPolicy =
-            "Dynamic Characteristics are generated personal history: low-impact details the current NPC creates about their own past, habits, preferences, formative experiences, local ties, practiced skills, values, social tendencies, or aspirations. " +
-            "They are soft character canon, not objective proof about the campaign world or another person. Emit exactly one dynamicCharacteristicWrites item whenever the visible reply actually introduces or materially develops a stable compatible self-detail; otherwise emit []. Do not omit the write merely because the detail appears in natural dialogue rather than a formal biography. " +
-            "Do not create one merely because the player asks a recall question. Never use this lane for current location, current ownership, troop counts, titles, clan or kingdom membership, named relatives, marriages, deaths, crimes by another person, wars, conquests, rescues, gifts, or other externally verifiable events. " +
-            "A turn-specific stance, accusation, conversational tally, bargaining metaphor or poetic self-description is not a stable biographical detail. Do not turn apologies into debts or repeated dialogue framing into a new personality trait. " +
-            "Use a stable topicKey such as upbringing_place, market_morning_habit, woodworking_training, or fear_of_deep_water. If an existing entry covers that topic, develop it consistently instead of writing a duplicate or contradiction. Authoritative native and world-history evidence always overrides soft canon. " +
-            "A skill_practice detail may explain where or how the NPC practiced, but it never changes or outranks the supplied native skill value and proficiency description; do not turn low proficiency into factual expertise.";
+        internal const string DynamicCharacteristicsPromptPolicy =
+            "Dynamic Characteristics preserve attributed speech about the NPC's own low-impact past, habits, preferences, formative experiences, local ties, skills, values, social tendencies, or aspirations. Preserve wording, scope and uncertainty. " +
+            "A query, temporary mood, accusation, bargaining metaphor or apology is not a new stable self-detail. Use a consistent topicKey when developing an existing detail. " +
+            "Use native or world-history evidence for location, ownership, quantities, title, membership, family, military and political events, actions affecting others, and other verifiable facts. A skill_practice detail cannot change native proficiency.";
 
-        private const string DynamicCharacteristicsOutputContract =
-            "Required JSON field: dynamicCharacteristicWrites is an array containing at most one object with text, category, topicKey, confidence, importance, and sourceBasis. Before returning JSON, inspect the visible reply you wrote: if it establishes or materially develops a stable compatible self-detail, this array must contain that detail; use [] only when the reply contains no such detail. " +
-            "text is a concise third-person fact about the speaking NPC which was actually expressed in the visible reply. category must be personal_history, formative_experience, habit, preference, aversion, local_connection, skill_practice, personal_value, social_tendency, or aspiration. " +
-            "sourceBasis must be npc_generated_personal_history. Use [] when no compatible new personal detail was introduced." + NarrativeDevelopmentContract;
+        internal const string DynamicCharacteristicsOutputContract =
+            "Return dynamicCharacteristicWrites with one entry for a new or developed stable self-detail, or [] otherwise. Include text, category, topicKey, confidence, importance, sourceBasis and sourceEvidence. " +
+            "text is a proposed interpretation. Cite turnId current_npc, your canonical speakerId and one unique verbatim quote from your spoken reply. " +
+            "category must be personal_history, formative_experience, habit, preference, aversion, local_connection, skill_practice, personal_value, social_tendency, or aspiration. " +
+            "Set sourceBasis to npc_generated_personal_history." + NarrativeDevelopmentContract;
 
-        private static void EnsureDynamicCharacteristicsSchema(ReignDbConnection connection)
+        internal static void EnsureDynamicCharacteristicsSchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS dynamic_characteristics (
-characteristic_id TEXT PRIMARY KEY,
-owner_id TEXT NOT NULL,
-category TEXT NOT NULL DEFAULT 'personal_history',
-topic_key TEXT NOT NULL DEFAULT '',
-text TEXT NOT NULL,
-normalized_key TEXT NOT NULL,
-status TEXT NOT NULL DEFAULT 'active',
-confidence REAL NOT NULL DEFAULT 0.65,
-importance REAL NOT NULL DEFAULT 0.5,
-provenance TEXT NOT NULL DEFAULT 'npc_generated_personal_history',
-compatibility_status TEXT NOT NULL DEFAULT 'compatible_soft_canon',
-rejection_reason TEXT NOT NULL DEFAULT '',
-source_event_id TEXT NOT NULL DEFAULT '',
-source_session_id TEXT NOT NULL DEFAULT '',
-source_exchange_id TEXT NOT NULL DEFAULT '',
-source_turn_ids_json TEXT NOT NULL DEFAULT '[]',
-source_mode TEXT NOT NULL DEFAULT '',
-location_id TEXT NOT NULL DEFAULT '',
-world_day REAL NOT NULL DEFAULT 0,
-known_by_json TEXT NOT NULL DEFAULT '[]',
-first_ts INTEGER NOT NULL,
-last_ts INTEGER NOT NULL,
-repeat_count INTEGER NOT NULL DEFAULT 1,
-payload_json TEXT NOT NULL DEFAULT '{}');");
-            ExecuteSql(connection, "CREATE UNIQUE INDEX IF NOT EXISTS idx_dynamic_characteristic_owner_key ON dynamic_characteristics(owner_id,normalized_key);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_dynamic_characteristic_owner_status ON dynamic_characteristics(owner_id,status,last_ts DESC);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_dynamic_characteristic_topic ON dynamic_characteristics(owner_id,topic_key,status);");
+            CharactersSchema.CreateDynamicCharacteristics(connection);
+            CharactersSchema.CreateIndexDynamicCharacteristicOwnerKey(connection);
+            CharactersSchema.CreateIndexDynamicCharacteristicOwnerStatus(connection);
+            CharactersSchema.CreateIndexDynamicCharacteristicTopic(connection);
         }
 
-        private static List<Dictionary<string, object>> NormalizeDynamicCharacteristicWrites(
+        internal static List<Dictionary<string, object>> NormalizeDynamicCharacteristicWrites(
             Dictionary<string, object> parsed,
             string heroId,
             Dictionary<string, object> profile,
@@ -71,7 +45,8 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
             if (parsed == null || string.IsNullOrWhiteSpace(heroId) || string.IsNullOrWhiteSpace(visibleReply)) return result;
             List<Dictionary<string, object>> raw = ReadDictionaryList(parsed, "dynamicCharacteristicWrites")
                 .Concat(ReadDictionaryList(parsed, "dynamic_characteristic_writes")).Take(1).ToList();
-            if (raw.Count == 0)
+            bool rawInference = raw.Count == 0;
+            if (rawInference)
             {
                 Dictionary<string, object> inferred = InferExplicitDynamicPreferenceOrAversion(profile, visibleReply);
                 if (inferred == null)
@@ -83,16 +58,15 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
             foreach (Dictionary<string, object> item in raw)
             {
                 string text = ReadFirstString(item, "text", "fact", "characteristic", "summary").Trim();
-                string category = NormalizeLookup(ReadString(item, "category", "personal_history")).Replace(' ', '_').Replace('-', '_');
+                string category = ActionPipelineService.NormalizeLookup(ReadString(item, "category", "personal_history")).Replace(' ', '_').Replace('-', '_');
                 if (!DynamicCharacteristicCategories.Contains(category)) category = "personal_history";
                 string topicKey = NormalizeDynamicTopicKey(ReadFirstString(item, "topicKey", "topic_key"), category, text);
-                string sourceBasis = NormalizeLookup(ReadFirstString(item, "sourceBasis", "source_basis"));
+                string sourceBasis = ActionPipelineService.NormalizeLookup(ReadFirstString(item, "sourceBasis", "source_basis"));
                 if (string.IsNullOrWhiteSpace(sourceBasis)) sourceBasis = "npc_generated_personal_history";
                 string rejection = DynamicCharacteristicRejectionReason(text, heroId, profile, payload, visibleReply);
-                var evidence = BindConversationSource(item, CurrentConversationSources("", heroId, "", visibleReply,
-                    ReadString(payload, "sceneTurnId", "")), heroId, ReadString(payload, "sceneTurnId", ""));
-                if (ReadDictionary(item, "sourceEvidence") != null && ReadString(evidence, "status", "") != "supported_span")
-                    rejection = "unverified_source_span";
+                var citation = ReadDictionary(item, "sourceEvidence");
+                if (rawInference)
+                    citation = TestDict("turnId", "current_npc", "speakerId", heroId, "quote", ReadString(item, "inferredQuote", ""));
                 var development = NormalizeNarrativeDevelopmentProposal(ReadDictionary(item, "narrativeDevelopment"), visibleReply);
                 if (development != null)
                     development["compatibilityValidated"] = string.IsNullOrWhiteSpace(rejection)
@@ -103,13 +77,12 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                     ["text"] = text,
                     ["category"] = category,
                     ["topicKey"] = topicKey,
-                    ["confidence"] = ClampDouble(ReadDouble(item, "confidence", 0.65d), 0.35d, 0.9d),
-                    ["importance"] = ClampDouble(ReadDouble(item, "importance", 0.5d), 0.15d, 0.85d),
+                    ["confidence"] = DialogueService.ClampDouble(ReadDouble(item, "confidence", 0.65d), 0.35d, 0.9d),
+                    ["importance"] = DialogueService.ClampDouble(ReadDouble(item, "importance", 0.5d), 0.15d, 0.85d),
                     ["sourceBasis"] = sourceBasis,
-                    ["sourceEvidence"] = evidence,
+                    ["proposedCitation"] = citation,
                     ["narrativeDevelopment"] = development,
-                    ["status"] = string.IsNullOrWhiteSpace(rejection) ? "active" : "rejected",
-                    ["compatibilityStatus"] = string.IsNullOrWhiteSpace(rejection) ? "compatible_soft_canon" : "rejected_conflict_or_scope",
+                    ["status"] = string.IsNullOrWhiteSpace(rejection) ? "proposed" : "rejected",
                     ["rejectionReason"] = rejection
                 });
             }
@@ -154,13 +127,14 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
             string name = FirstNonEmpty(ReadString(profile, "name", ""), "The speaking character");
             return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
-                ["text"] = LimitText(name + " " + thirdPersonVerb + " " + detail + ".", 500),
+                ["text"] = DialogueService.LimitText(name + " " + thirdPersonVerb + " " + detail + ".", 500),
                 ["category"] = aversion ? "aversion" : sourceVerb.Equals("value", StringComparison.OrdinalIgnoreCase)
                     || sourceVerb.Equals("admire", StringComparison.OrdinalIgnoreCase) ? "personal_value" : "preference",
                 ["topicKey"] = "",
                 ["confidence"] = 0.7d,
                 ["importance"] = 0.45d,
                 ["sourceBasis"] = "npc_generated_personal_history",
+                ["inferredQuote"] = match.Value.TrimEnd(),
                 ["inference"] = "deterministic_explicit_visible_reply"
             };
         }
@@ -179,23 +153,24 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
             string frequency = match.Groups[1].Value.Trim().ToLowerInvariant();
             string detail = Regex.Replace(match.Groups[2].Value.Trim(), @"\s+", " ")
                 .Trim(' ', ',', ';', ':', '-', '\u2014');
-            string normalized = NormalizeLookup(detail);
+            string normalized = ActionPipelineService.NormalizeLookup(detail);
             if (detail.Length < 3
                 || DynamicCharacteristicMatchIsMetalinguistic(reply, match, detail)
                 || Regex.IsMatch(normalized,
                     @"^(?:do|did|feel|find|keep|have|remember|think|believe|want|mean)\s+(?:it|this|that|so)\b",
                     RegexOptions.IgnoreCase)
-                || MemoryQueryTerms(detail).Distinct(StringComparer.OrdinalIgnoreCase).Count() < 2)
+                || DialogueService.MemoryQueryTerms(detail).Distinct(StringComparer.OrdinalIgnoreCase).Count() < 2)
                 return null;
             string name = FirstNonEmpty(ReadString(profile, "name", ""), "The speaking character");
             return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
-                ["text"] = LimitText(name + " " + frequency + " " + detail + ".", 500),
+                ["text"] = DialogueService.LimitText(name + " " + frequency + " " + detail + ".", 500),
                 ["category"] = "habit",
                 ["topicKey"] = "",
                 ["confidence"] = 0.7d,
                 ["importance"] = 0.45d,
                 ["sourceBasis"] = "npc_generated_personal_history",
+                ["inferredQuote"] = match.Value.TrimEnd(),
                 ["inference"] = "deterministic_explicit_visible_reply"
             };
         }
@@ -222,10 +197,10 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                 string article = match.Groups[1].Value.Trim().ToLowerInvariant();
                 string detail = Regex.Replace(match.Groups[2].Value.Trim(), @"\s+", " ")
                     .Trim(' ', ',', ';', ':', '-', '\u2014');
-                string normalized = NormalizeLookup(detail);
+                string normalized = ActionPipelineService.NormalizeLookup(detail);
                 if (detail.Length < 3
                     || DynamicCharacteristicMatchIsMetalinguistic(reply, match, detail)
-                    || MemoryQueryTerms(detail).Distinct(StringComparer.OrdinalIgnoreCase).Count() < 1
+                    || DialogueService.MemoryQueryTerms(detail).Distinct(StringComparer.OrdinalIgnoreCase).Count() < 1
                     || Regex.IsMatch(normalized,
                         @"^(?:record|records|ledger|list|account|accounts|track|watch|guard|troops?|soldiers?|gold|denars?|prisoners?|inventory)\b",
                         RegexOptions.IgnoreCase))
@@ -237,12 +212,13 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                     // invention, this lets the normal grounding check prove even a
                     // one-word object ("I keep a die") without depending on the
                     // visible prose to repeat the speaker's full name.
-                    ["text"] = LimitText("I keep " + article + " " + detail + ".", 500),
+                    ["text"] = DialogueService.LimitText("I keep " + article + " " + detail + ".", 500),
                     ["category"] = "personal_history",
                     ["topicKey"] = "",
                     ["confidence"] = 0.7d,
                     ["importance"] = 0.45d,
                     ["sourceBasis"] = "npc_generated_personal_history",
+                    ["inferredQuote"] = match.Value.TrimEnd(),
                     ["inference"] = "deterministic_explicit_visible_reply"
                 };
             }
@@ -262,7 +238,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                     RegexOptions.IgnoreCase);
         }
 
-        private static bool ReplyLikelyIntroducesDynamicCharacteristic(string visibleReply)
+        internal static bool ReplyLikelyIntroducesDynamicCharacteristic(string visibleReply)
         {
             string reply = visibleReply ?? "";
             if (InferExplicitDynamicPreferenceOrAversion(new Dictionary<string, object>(), reply) != null) return true;
@@ -274,27 +250,23 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
 
         private static string NormalizeDynamicTopicKey(string supplied, string category, string text)
         {
-            string value = Regex.Replace(NormalizeLookup(supplied), @"[^a-z0-9]+", "_").Trim('_');
-            if (!string.IsNullOrWhiteSpace(value)) return LimitText(value, 80);
-            List<string> terms = MemoryQueryTerms(text).Take(5).ToList();
-            return LimitText((category ?? "personal_history") + "_" + string.Join("_", terms), 80);
+            string value = Regex.Replace(ActionPipelineService.NormalizeLookup(supplied), @"[^a-z0-9]+", "_").Trim('_');
+            if (!string.IsNullOrWhiteSpace(value)) return DialogueService.LimitText(value, 80);
+            List<string> terms = DialogueService.MemoryQueryTerms(text).Take(5).ToList();
+            return DialogueService.LimitText((category ?? "personal_history") + "_" + string.Join("_", terms), 80);
         }
 
-        private static string DynamicCharacteristicRejectionReason(string text, string heroId,
-            Dictionary<string, object> profile, Dictionary<string, object> payload, string visibleReply)
+        internal static string DynamicCharacteristicRejectionReason(string text, string heroId,
+            Dictionary<string, object> profile, Dictionary<string, object> payload, string visibleReply, bool sourceQuote = false)
         {
             string clean = (text ?? "").Trim();
-            if (clean.Length < 12) return "too_short";
+            if (clean.Length < (sourceQuote ? 8 : 12)) return "too_short";
             if (clean.Length > 500) return "oversize_detail_retained_without_clipping";
             if (Regex.IsMatch(clean, @"\b(?:hates?|dislikes?|resents?)\s+(?:that\b|having to\b)|\b(?:tonight|right now|in this moment|this particular conversation)\b", RegexOptions.IgnoreCase))
                 return "temporary_reaction_is_not_stable_characterization";
-            if (string.IsNullOrWhiteSpace(visibleReply)
-                || visibleReply.IndexOf(FirstDynamicEvidencePhrase(clean), StringComparison.OrdinalIgnoreCase) < 0
-                    && !HasDynamicTextEvidence(clean, visibleReply))
-                return "not_expressed_in_visible_reply";
-            if (IsConversationCharacteristicRhetoric(clean)) return "conversation_rhetoric_is_not_stable_characterization";
-            string q = NormalizeLookup(clean);
-            if (!DynamicCharacteristicIsAboutSpeaker(clean, profile))
+            if (DialogueService.IsConversationCharacteristicRhetoric(clean)) return "conversation_rhetoric_is_not_stable_characterization";
+            string q = ActionPipelineService.NormalizeLookup(clean);
+            if (!sourceQuote && !DynamicCharacteristicIsAboutSpeaker(clean, profile))
                 return "not_about_speaking_character";
             if (Regex.IsMatch(q, @"\b(?:we|i)\s+(?:am|are|'m|'re)\s+(?:currently|presently|now)\s+(?:in|at)\b", RegexOptions.IgnoreCase)
                 || Regex.IsMatch(q, @"\bcurrently\s+(?:owns?|rules?|commands?|has)\b", RegexOptions.IgnoreCase))
@@ -303,7 +275,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                 || Regex.IsMatch(clean, @"\b[A-Z][\p{L}'-]+(?:'s|\u2019s)\s+(?i:wife|husband|spouse|father|mother|parent|son|daughter|child|brother|sister)\s+(?i:is|was|named|called)\s+(?!(?i:a|an|the)\b)[A-Z][\p{L}'-]+")
                 || Regex.IsMatch(q, @"\b(?:i am|i'm|he is|he's|she is|she's|they are|they're)\s+(?:unmarried|married|widowed)\b", RegexOptions.IgnoreCase))
                 return "family_links_require_native_evidence";
-            if (ContainsAny(q, "conquered ", "captured ", "declared war", "made peace", "became king", "became queen",
+            if (DialogueService.ContainsAny(q, "conquered ", "captured ", "declared war", "made peace", "became king", "became queen",
                     "rules the kingdom", "owns the town", "owns the castle", "murdered ", "assassinated ", "saved your family"))
                 return "externally_verifiable_event_requires_world_history";
             if (Regex.IsMatch(q, @"\b\d+\s+(?:troops|men|soldiers|denars|gold)\b", RegexOptions.IgnoreCase))
@@ -311,24 +283,10 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
             return "";
         }
 
-        private static string FirstDynamicEvidencePhrase(string text)
+        internal static bool HasDynamicTextEvidence(string summary, string visibleReply)
         {
-            return string.Join(" ", Regex.Split(text ?? "", @"\s+").Where(x => x.Length > 2).Take(3));
-        }
-
-        private static double DynamicTextOverlap(string left, string right)
-        {
-            HashSet<string> a = new HashSet<string>(MemoryQueryTerms(left), StringComparer.OrdinalIgnoreCase);
-            HashSet<string> b = new HashSet<string>(MemoryQueryTerms(right), StringComparer.OrdinalIgnoreCase);
-            if (a.Count == 0) return 0d;
-            return a.Count(x => b.Contains(x)) / (double)a.Count;
-        }
-
-        private static bool HasDynamicTextEvidence(string summary, string visibleReply)
-        {
-            // Grounding must inspect the complete visible reply. MemoryQueryTerms intentionally
-            // keeps only the first 32 distinct terms for retrieval, which made valid details late
-            // in a longer roleplay response look absent.
+            // This overlap heuristic supports replay diagnostics and relevance checks.
+            // Admission uses a committed exact source span instead.
             HashSet<string> summaryTerms = DynamicEvidenceTerms(summary);
             HashSet<string> replyTerms = DynamicEvidenceTerms(visibleReply);
             int shared = summaryTerms.Count(x => replyTerms.Contains(x));
@@ -341,7 +299,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
             return shared >= Math.Min(3, summaryTerms.Count);
         }
 
-        private static HashSet<string> DynamicEvidenceTerms(string text)
+        internal static HashSet<string> DynamicEvidenceTerms(string text)
         {
             HashSet<string> stopWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -380,7 +338,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
 
         private static bool DynamicCharacteristicIsAboutSpeaker(string text, Dictionary<string, object> profile)
         {
-            string normalized = NormalizeLookup(text);
+            string normalized = ActionPipelineService.NormalizeLookup(text);
             if (Regex.IsMatch(normalized, @"\b(i|my|me|mine|we|our|this character|the speaker)\b", RegexOptions.IgnoreCase)) return true;
             string fullName = ReadString(profile, "name", "").Trim();
             if (!string.IsNullOrWhiteSpace(fullName) && text.IndexOf(fullName, StringComparison.OrdinalIgnoreCase) >= 0) return true;
@@ -394,121 +352,93 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
             return distinctiveNameTerms.Any(term => Regex.IsMatch(text, @"\b" + Regex.Escape(term) + @"\b", RegexOptions.IgnoreCase));
         }
 
-        private static Dictionary<string, object> StoreDynamicCharacteristicWrites(
+        internal static Dictionary<string, object> StoreDynamicCharacteristicWrites(
             string campaignId,
             string heroId,
             List<Dictionary<string, object>> writes,
             Dictionary<string, object> payload,
             Dictionary<string, object> conversationExchange,
             string sourceEventId,
-            string sourceMode,
             string locationId,
-            long ts,
-            IEnumerable<string> audienceIds)
+            string acceptedReply, string displayPrefix, string queuedActionNotice)
         {
             List<Dictionary<string, object>> stored = new List<Dictionary<string, object>>();
             List<Dictionary<string, object>> rejected = new List<Dictionary<string, object>>();
             if (writes == null || writes.Count == 0)
                 return new Dictionary<string, object> { ["ok"] = true, ["stored"] = stored, ["rejected"] = rejected, ["storedCount"] = 0, ["rejectedCount"] = 0 };
 
-            string sessionId = ReadFirstString(conversationExchange, "sessionId", "session_id");
-            string exchangeId = ReadFirstString(conversationExchange, "exchangeId", "exchange_id");
-            List<string> turnIds = ReadStringList(conversationExchange, "turnIds");
-            List<string> knownBy = MergeStringLists(audienceIds, new[] { heroId });
-            double worldDay = ReadDouble(payload, "worldDay", 0d);
             lock (NarrativeStateLock)
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                foreach (Dictionary<string, object> write in writes.Take(1))
-                {
-                    var development = ReadDictionary(write, "narrativeDevelopment");
-                    if (development != null && development.Count > 0)
-                    {
-                        var result = StoreNarrativeDevelopment(connection, campaignId, heroId, development, sessionId, exchangeId, sourceEventId, worldDay, ts);
-                        if (ReadString(result, "status", "") == "active") stored.Add(result); else rejected.Add(result);
-                        continue;
-                    }
-                    string text = ReadString(write, "text", "").Trim();
-                    string normalized = NormalizeLookup(text);
-                    if (string.IsNullOrWhiteSpace(normalized)) continue;
-                    string id = "dynamic_" + PromptHash(heroId + "|" + normalized).Substring(0, 24).ToLowerInvariant();
-                    string status = ReadString(write, "status", "rejected");
-                    string topicKey = ReadString(write, "topicKey", "");
-                    string rejection = ReadString(write, "rejectionReason", "");
-                    Dictionary<string, object> existing = QuerySql(connection,
-                        "SELECT * FROM dynamic_characteristics WHERE owner_id=$owner AND normalized_key=$normalized LIMIT 1;",
-                        new Dictionary<string, object> { ["owner"] = heroId, ["normalized"] = normalized }).FirstOrDefault();
-                    if (existing != null)
-                    {
-                        knownBy = MergeStringLists(knownBy, TextListFromJson(ReadString(existing, "known_by_json", "[]")));
-                        turnIds = MergeStringLists(turnIds, TextListFromJson(ReadString(existing, "source_turn_ids_json", "[]")));
-                    }
-                    if (existing == null && status.Equals("active", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Preserve the original and record the new rejected paraphrase with its own
-                        // lineage. Changing a topic key must not create a second active self-story.
-                        var equivalent = QuerySql(connection,
-                            "SELECT characteristic_id,text FROM dynamic_characteristics WHERE owner_id=$owner AND status='active' AND category<>'narrative_development' ORDER BY last_ts DESC LIMIT 250;",
-                            new Dictionary<string, object> { ["owner"] = heroId })
-                            .FirstOrDefault(row => DynamicCharacteristicsEquivalent(ReadString(row, "text", ""), text));
-                        if (equivalent != null)
-                        {
-                            status = "rejected";
-                            rejection = "duplicate_characteristic:" + ReadString(equivalent, "characteristic_id", "");
-                            write["status"] = status;
-                            write["compatibilityStatus"] = "rejected_duplicate";
-                            write["rejectionReason"] = rejection;
-                        }
-                    }
-                    if (status.Equals("active", StringComparison.OrdinalIgnoreCase))
-                    {
-                        Dictionary<string, object> conflict = QuerySql(connection, @"SELECT characteristic_id,text FROM dynamic_characteristics
-WHERE owner_id=$owner AND topic_key=$topic AND status='active' AND normalized_key<>$normalized ORDER BY last_ts DESC LIMIT 1;",
-                            new Dictionary<string, object> { ["owner"] = heroId, ["topic"] = topicKey, ["normalized"] = normalized }).FirstOrDefault();
-                        if (conflict != null)
-                        {
-                            status = "rejected";
-                            rejection = "topic_conflicts_with_active_characteristic:" + ReadString(conflict, "characteristic_id", "");
-                            write["status"] = status;
-                            write["compatibilityStatus"] = "rejected_conflict_or_scope";
-                            write["rejectionReason"] = rejection;
-                        }
-                    }
+                var accepted = FindAcceptedCharacteristicSource(connection, payload, conversationExchange, heroId,
+                    sourceEventId, acceptedReply);
+                if (accepted == null)
+                    return TestDict("ok", true, "stored", stored, "rejected", new[] { TestDict("reason", "missing_accepted_npc_source") },
+                        "storedCount", 0, "rejectedCount", 1);
 
-                    Dictionary<string, object> rowPayload = new Dictionary<string, object>
+                string id = ReportedSpeechRecordId(heroId, sourceEventId);
+                // An accepted unit has one immutable record even if a replay suggests a
+                // different category, source span, or narrative item.
+                var previous = CharactersStore.SelectDynamicCharacteristics7(connection, TestDict("id", id)).FirstOrDefault();
+                if (previous != null)
+                {
+                    // Repair a missing display projection after an interrupted write.
+                    string path = CampaignFileService.CharacterFile(campaignId, heroId, "dynamic_characteristics.json");
+                    if (!System.IO.File.Exists(path)) ProjectDynamicCharacteristicsFile(campaignId, heroId, connection);
+                    if (ReadString(previous, "status", "") == "active") stored.Add(previous); else rejected.Add(previous);
+                    return TestDict("ok", true, "stored", stored, "rejected", rejected,
+                        "storedCount", stored.Count, "rejectedCount", rejected.Count);
+                }
+                var write = writes[0];
+                string speech = CharacteristicSpeechBody(acceptedReply, displayPrefix, queuedActionNotice);
+                var proof = BindCharacteristicSpeech(accepted, ReadDictionary(write, "proposedCitation"),
+                    acceptedReply, displayPrefix.Length, speech);
+                string rejection = ReadString(write, "rejectionReason", "");
+                if (proof == null && rejection.Length == 0) rejection = "unverified_source_span";
+                string sessionId = ReadString(accepted, "sessionId", "");
+                string exchangeId = ReadString(accepted, "exchangeId", "");
+                double worldDay = ReadDouble(accepted, "worldDay", 0);
+                long ts = ReadLong(accepted, "timestamp", 0);
+                var development = ReadDictionary(write, "narrativeDevelopment");
+                if (development != null && development.Count > 0)
+                {
+                    var developmentCitation = ReadDictionary(write, "proposedCitation");
+                    var developmentProof = BindCharacteristicSpeech(accepted, TestDict(
+                        "turnId", ReadString(developmentCitation, "turnId", ""), "speakerId", ReadString(developmentCitation, "speakerId", ""),
+                        "quote", ReadString(development, "supportingQuote", "")), acceptedReply, displayPrefix.Length, speech);
+                    development = new Dictionary<string, object>(development)
                     {
-                        ["sourceBasis"] = ReadString(write, "sourceBasis", "npc_generated_personal_history"),
-                        ["sourceEvidence"] = ReadDictionary(write, "sourceEvidence"),
-                        ["sourceCorrelationId"] = ReadFirstString(payload, "correlationId", "requestId"),
-                        ["audienceIds"] = knownBy
+                        ["sourceEvidenceVersion"] = ReportedSpeechSchema,
+                        ["sourceEvidence"] = developmentProof,
+                        ["quoteValidated"] = developmentProof != null && ReadBool(development, "quoteValidated", false),
+                        ["compatibilityValidated"] = developmentProof != null && rejection.Length == 0
+                            && ReadBool(development, "compatibilityValidated", false)
                     };
-                    ExecuteSql(connection, @"INSERT INTO dynamic_characteristics(
-characteristic_id,owner_id,category,topic_key,text,normalized_key,status,confidence,importance,provenance,compatibility_status,rejection_reason,
-source_event_id,source_session_id,source_exchange_id,source_turn_ids_json,source_mode,location_id,world_day,known_by_json,first_ts,last_ts,repeat_count,payload_json)
-VALUES($id,$owner,$category,$topic,$text,$normalized,$status,$confidence,$importance,'npc_generated_personal_history',$compatibility,$rejection,
-$event,$session,$exchange,$turns,$mode,$location,$day,$known,$ts,$ts,1,$payload)
-ON CONFLICT(owner_id,normalized_key) DO UPDATE SET
-last_ts=$ts,
-repeat_count=dynamic_characteristics.repeat_count+1,
-known_by_json=$known,
-source_turn_ids_json=$turns,
-status=CASE WHEN dynamic_characteristics.status='active' THEN 'active' ELSE excluded.status END,
-compatibility_status=CASE WHEN dynamic_characteristics.status='active' THEN dynamic_characteristics.compatibility_status ELSE excluded.compatibility_status END,
-rejection_reason=CASE WHEN dynamic_characteristics.status='active' THEN dynamic_characteristics.rejection_reason ELSE excluded.rejection_reason END,
-payload_json=$payload;",
-                        new Dictionary<string, object>
-                        {
-                            ["id"] = id, ["owner"] = heroId, ["category"] = ReadString(write, "category", "personal_history"), ["topic"] = topicKey,
-                            ["text"] = text, ["normalized"] = normalized, ["status"] = status,
-                            ["confidence"] = ReadDouble(write, "confidence", 0.65d), ["importance"] = ReadDouble(write, "importance", 0.5d),
-                            ["compatibility"] = ReadString(write, "compatibilityStatus", "compatible_soft_canon"), ["rejection"] = rejection,
-                            ["event"] = sourceEventId ?? "", ["session"] = sessionId, ["exchange"] = exchangeId,
-                            ["turns"] = Json.Serialize(turnIds), ["mode"] = sourceMode ?? "", ["location"] = locationId ?? "",
-                            ["day"] = worldDay, ["known"] = Json.Serialize(knownBy), ["ts"] = ts, ["payload"] = Json.Serialize(rowPayload)
-                        });
-                    Dictionary<string, object> saved = QuerySql(connection, "SELECT * FROM dynamic_characteristics WHERE characteristic_id=$id LIMIT 1;",
-                        new Dictionary<string, object> { ["id"] = id }).FirstOrDefault() ?? new Dictionary<string, object>();
-                    if (ReadString(saved, "status", status).Equals("active", StringComparison.OrdinalIgnoreCase)) stored.Add(saved); else rejected.Add(saved);
+                    var result = StoreNarrativeDevelopment(connection, campaignId, heroId, development, sessionId, exchangeId, sourceEventId, worldDay, ts);
+                    if (ReadString(result, "status", "") == "active") stored.Add(result); else rejected.Add(result);
+                }
+                else
+                {
+                    string quote = ReadString(proof, "quote", "");
+                    var profile = TestDict("name", ReadString(accepted, "speakerName", ""));
+                    if (rejection.Length == 0)
+                        rejection = DynamicCharacteristicRejectionReason(quote, heroId, profile, payload, acceptedReply, sourceQuote: true);
+                    string status = rejection.Length == 0 ? "active" : "rejected";
+                    var knownBy = ReadStringList(accepted, "audienceIds");
+                    var rowPayload = TestDict("sourceBasis", ReadString(write, "sourceBasis", "npc_generated_personal_history"),
+                        "sourceEvidenceVersion", ReportedSpeechSchema, "sourceEvidence", proof,
+                        "proposedInterpretation", ReadString(write, "text", ""), "proposedCitation", ReadDictionary(write, "proposedCitation"));
+                    CharactersStore.InsertReportedDynamicCharacteristic(connection, TestDict(
+                        "id", id, "owner", heroId, "category", ReadString(write, "category", "personal_history"),
+                        "topic", ReadString(write, "topicKey", ""), "text", quote, "status", status,
+                        "confidence", ReadDouble(write, "confidence", 0.65d), "importance", ReadDouble(write, "importance", 0.5d),
+                        "compatibility", status == "active" ? "attributed_spoken_source" : "rejected_source_or_scope",
+                        "provenance", ReportedSpeechProvenance, "rejection", rejection, "event", sourceEventId,
+                        "session", sessionId, "exchange", exchangeId, "turns", Json.Serialize(new[] { ReadString(accepted, "turnId", "") }),
+                        "mode", ReadString(accepted, "channel", ""), "location", locationId ?? "", "day", worldDay, "known", Json.Serialize(knownBy),
+                        "ts", ts, "payload", Json.Serialize(rowPayload)));
+                    var saved = CharactersStore.SelectDynamicCharacteristics7(connection, TestDict("id", id)).Single();
+                    if (status == "active") stored.Add(saved); else rejected.Add(saved);
                 }
                 ProjectDynamicCharacteristicsFile(campaignId, heroId, connection);
             }
@@ -521,16 +451,12 @@ payload_json=$payload;",
 
         private static void ProjectDynamicCharacteristicsFile(string campaignId, string heroId, ReignDbConnection connection)
         {
-            List<Dictionary<string, object>> rows = QuerySql(connection,
-                "SELECT * FROM dynamic_characteristics WHERE owner_id=$owner ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'superseded' THEN 1 ELSE 2 END,importance DESC,last_ts DESC LIMIT 250;",
-                new Dictionary<string, object> { ["owner"] = heroId });
+            List<Dictionary<string, object>> rows = CharactersStore.SelectDynamicCharacteristics8(connection, new Dictionary<string, object> { ["owner"] = heroId });
             // Current narrative overrides must not disappear when ordinary memories fill
             // the bounded display projection. History remains in the temporal database.
-            var narrativeRows = QuerySql(connection,
-                "SELECT * FROM dynamic_characteristics WHERE owner_id=$owner AND category='narrative_development' AND status='active';",
-                new Dictionary<string, object> { ["owner"] = heroId });
+            var narrativeRows = CharactersStore.SelectDynamicCharacteristics9(connection, new Dictionary<string, object> { ["owner"] = heroId });
             rows = rows.Concat(narrativeRows).GroupBy(x => ReadString(x, "characteristic_id", "")).Select(x => x.First()).ToList();
-            WriteJsonObject(CharacterFile(campaignId, heroId, "dynamic_characteristics.json"), new Dictionary<string, object>
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "dynamic_characteristics.json"), new Dictionary<string, object>
             {
                 ["schemaVersion"] = 1,
                 ["sectionName"] = "Dynamic Characteristics",
@@ -542,255 +468,328 @@ payload_json=$payload;",
             });
         }
 
-        private static string FormatDynamicCharacteristicsForPrompt(Dictionary<string, object> document)
+        internal static string FormatDynamicCharacteristicsForPrompt(Dictionary<string, object> document)
         {
             return FormatDynamicCharacteristicsForPrompt(document, "");
         }
 
-        private static string FormatDynamicCharacteristicsForPrompt(
+        internal static string FormatDynamicCharacteristicsForPrompt(
             Dictionary<string, object> document,
-            string relevanceQuery)
+            string relevanceQuery, bool includeReportedSpeech = true)
         {
-            List<Dictionary<string, object>> active = SelectNaturalDynamicCharacteristics(document, relevanceQuery)
-                .Where(row => ReadString(row, "category", "") != "life_transition").ToList();
+            if (!includeReportedSpeech && ReadDictionaryList(document, "active").Any(IsReportedDynamicCharacteristic))
+                document = new Dictionary<string, object>(document)
+                {
+                    ["active"] = ReadDictionaryList(document, "active").Where(row => !IsReportedDynamicCharacteristic(row)).ToList()
+                };
+            List<Dictionary<string, object>> active = DialogueService.SelectNaturalDynamicCharacteristics(document, relevanceQuery);
             if (active.Count == 0) return "";
             StringBuilder builder = new StringBuilder();
-            builder.AppendLine("These compatible details were generated through prior roleplay and are now soft personal canon.");
-            builder.AppendLine("Use a detail only when it helps this exchange; it is not an instruction to repeat its wording, metaphor or attitude. Authoritative native or world-history evidence overrides them. They prove only this character's own established self-story, not external claims about other people or world events.");
+            string owner = ReadString(document, "heroStringId", "");
+            builder.AppendLine("Use relevant attributed speech with its original scope, time and qualifications. A speaker may be mistaken, hypothetical, or quoting someone else. Use native and world-history evidence for campaign facts.");
+            int introductionLength = builder.Length;
             int remaining = 5200 - builder.Length;
             foreach (Dictionary<string, object> row in active)
             {
-                string line = "- [" + ReadString(row, "category", "personal_history") + "] " + ReadString(row, "text", "");
+                string text;
+                if (IsReportedDynamicCharacteristic(row))
+                {
+                    var evidence = ReadCharacteristicSpeechProof(row);
+                    if (ReadString(row, "owner_id", "") != owner) continue;
+                    text = FormatReportedCharacteristicSpeech(evidence, owner);
+                    if (text.Length == 0) continue;
+                }
+                else
+                    text = "Legacy roleplay detail (original wording and meaning unverified): " + ReadString(row, "text", "");
+                string line = "- [" + ReadString(row, "category", "personal_history") + "] " + text;
                 if (line.Length + Environment.NewLine.Length > remaining) continue;
                 builder.AppendLine(line);
                 remaining -= line.Length + Environment.NewLine.Length;
             }
-            return builder.ToString().Trim();
+            return builder.Length == introductionLength ? "" : builder.ToString().Trim();
         }
 
-        private static List<Dictionary<string, object>> RunDynamicCharacteristicsSelfTests()
+        internal static bool IsReportedDynamicCharacteristic(Dictionary<string, object> row) =>
+            ReadString(row, "provenance", "") == ReportedSpeechProvenance;
+
+#if !REIGN_EXCLUDE_VERIFICATION
+        internal static List<Dictionary<string, object>> RunDynamicCharacteristicsSelfTests()
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
             Action<string, bool, string, object> add = (id, pass, summary, data) => rows.Add(new Dictionary<string, object>
             { ["id"] = "dynamic_characteristics_" + id, ["suite"] = "dynamic_characteristics", ["passed"] = pass, ["summary"] = summary, ["data"] = data });
             string campaign = "dynamic_characteristics_test_" + Guid.NewGuid().ToString("N");
-            string hero = "npc_dynamic";
-            Dictionary<string, object> profile = new Dictionary<string, object>
-            { ["heroStringId"] = hero, ["name"] = "Purios", ["currentSettlementName"] = "Danustica", ["currentSettlementId"] = "town_ES1" };
-            UpsertCharacterProfile(campaign, profile);
-            Dictionary<string, object> payload = new Dictionary<string, object>
-            { ["worldDay"] = 42d, ["playerHeroStringId"] = "main_hero", ["locationId"] = "town_ES1", ["mode"] = "dialogue" };
-            Dictionary<string, object> parsed = new Dictionary<string, object>
+            const string hero = "npc_dynamic", other = "other_npc";
+            var profile = TestDict("heroStringId", hero, "name", "Purios");
+            try
             {
-                ["dynamicCharacteristicWrites"] = new List<Dictionary<string, object>>
+                CharactersService.UpsertCharacterProfile(campaign, profile);
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                    CharactersSelfTestStore.InsertDynamicCharacteristics(connection, TestDict("id", "legacy-characteristic", "hero", hero));
+                Dictionary<string, object> ReadLegacy()
                 {
-                    new Dictionary<string, object>
-                    {
-                        ["text"] = "I learned the market lanes of Danustica while carrying baskets for merchants as a youth.",
-                        ["category"] = "formative_experience", ["topicKey"] = "market_youth", ["confidence"] = 0.7d,
-                        ["sourceBasis"] = "npc_generated_personal_history"
-                    }
+                    using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                    return CharactersStore.SelectDynamicCharacteristics7(connection, TestDict("id", "legacy-characteristic")).Single();
                 }
-            };
-            List<Dictionary<string, object>> accepted = NormalizeDynamicCharacteristicWrites(parsed, hero, profile, payload,
-                "I learned the market lanes of Danustica while carrying baskets for merchants as a youth.");
-            Dictionary<string, object> stored = StoreDynamicCharacteristicWrites(campaign, hero, accepted, payload,
-                new Dictionary<string, object> { ["sessionId"] = "session_a", ["exchangeId"] = "exchange_a", ["turnIds"] = new List<string> { "turn_a" } },
-                "event_a", "dialogue", "town_ES1", 100, new[] { hero, "main_hero" });
-            add("compatible_personal_history_persists", ReadInt(stored, "storedCount", 0) == 1,
-                "A compatible self-created personal detail becomes durable soft canon with source lineage.", stored);
-            Dictionary<string, object> projected = ReadJsonObject(CharacterFile(campaign, hero, "dynamic_characteristics.json"));
-            string prompt = FormatDynamicCharacteristicsForPrompt(projected);
-            add("active_entries_reach_prompt", prompt.Contains("market lanes", StringComparison.OrdinalIgnoreCase)
-                && prompt.Contains("soft personal canon", StringComparison.OrdinalIgnoreCase),
-                "Active Dynamic Characteristics are explicitly included in the stable character prompt.", prompt);
-            List<Dictionary<string, object>> overflowRows = new List<Dictionary<string, object>>();
-            overflowRows.Add(new Dictionary<string, object>
-            {
-                ["status"] = "active", ["category"] = "habit", ["topic_key"] = "first_lamp_habit",
-                ["text"] = "The speaker's earliest established habit was counting blue lamps before entering a room.",
-                ["importance"] = 0.1d, ["first_ts"] = 1L, ["last_ts"] = 1L
-            });
-            for (int index = 1; index < 22; index++)
-            {
-                overflowRows.Add(new Dictionary<string, object>
+                string legacyBefore = Json.Serialize(ReadLegacy());
+
+                var cases = new[]
                 {
-                    ["status"] = "active", ["category"] = "preference", ["topic_key"] = "newer_topic_" + index,
-                    ["text"] = "Newer unrelated preference number " + index + " concerns an ordinary cup.",
-                    ["importance"] = 0.9d, ["first_ts"] = 100L + index, ["last_ts"] = 100L + index
-                });
+                    ("negation", "I do not enjoy sailing across cold rivers.", "sailing across cold rivers.", "Purios enjoys sailing across cold rivers."),
+                    ("conditional", "If I had my own horse, I would ride every morning.", "I would ride every morning.", "Purios rides every morning."),
+                    ("temporal", "I used to carve wooden horses. I gave it up years ago.", "I used to carve wooden horses.", "Purios carves wooden horses every night."),
+                    ("reported_other", "Col told me, \"I collect painted lamps.\" I never have.", "I collect painted lamps.", "Purios collects painted lamps."),
+                    ("late", string.Join(" ", Enumerable.Range(0, 50).Select(i => "We passed marker" + i.ToString(CultureInfo.InvariantCulture) + "."))
+                        + " I still knock twice on every doorframe.", "I still knock twice on every doorframe.", "Purios knocks to protect the people inside.")
+                };
+                Dictionary<string, object> Fixture(string id, string reply, Dictionary<string, object> citation, string proposed,
+                    string mode = "dialogue", double day = 41, string session = null, Dictionary<string, object> development = null)
+                {
+                    var write = TestDict("text", proposed, "category", "habit", "topicKey", id, "sourceEvidence", citation);
+                    if (development != null) write["narrativeDevelopment"] = development;
+                    return StoreReportedSpeechFixture(campaign, profile, id, mode, day, reply, reply,
+                        TestDict("dynamicCharacteristicWrites", new[] { write }), session);
+                }
+                Dictionary<string, object> Cite(string quote, string speaker = hero, string turn = "current_npc") =>
+                    TestDict("quote", quote, "speakerId", speaker, "turnId", turn);
+                foreach (var (id, reply, quote, proposed) in cases)
+                {
+                    var result = Fixture(id, reply, Cite(quote), proposed,
+                        id == "conditional" ? "social_event" : id == "reported_other" ? "party_chat" : "dialogue");
+                    var saved = ReadDictionaryList(result, "stored").SingleOrDefault();
+                    var savedPayload = TryParseJsonObject(ReadString(saved, "payload_json", "{}"));
+                    var proof = ReadDictionary(savedPayload, "sourceEvidence");
+                    var projection = TestDict("heroStringId", hero, "active", new[] { saved }.Where(row => row != null).ToList());
+                    string prompt = FormatDynamicCharacteristicsForPrompt(projection);
+                    add(id, saved != null && ReadString(savedPayload, "proposedInterpretation", "") == proposed
+                        && ReadString(proof, "sourceHash", "") == DialogueService.ConversationExactTextHash(reply)
+                        && ReadString(proof, "speakerId", "") == hero && ReadInt(proof, "start", -1) == reply.IndexOf(quote, StringComparison.Ordinal)
+                        && ReadInt(proof, "length", -1) == quote.Length && ReadString(proof, "responseHash", "").Length > 0
+                        && prompt.Contains(Json.Serialize(reply), StringComparison.Ordinal) && !prompt.Contains(proposed, StringComparison.Ordinal),
+                        "Store the accepted NPC's attributed speech with intact qualifications and keep its proposed interpretation out of prompts.", result);
+                    add(id + "_wrong_observer",
+                        FormatDynamicCharacteristicsForPrompt(TestDict("heroStringId", other, "active", ReadDictionaryList(projection, "active"))) == "",
+                        "Do not render reported speech as part of another character's profile.", null);
+                }
+                var negation = cases[0];
+                var replay = Fixture(negation.Item1, negation.Item2, Cite(negation.Item3), "Purios sails only at dawn.");
+                var replayRow = ReadDictionaryList(replay, "stored").SingleOrDefault();
+                add("same_speaker_accepted_replay", ReadInt(replayRow, "repeat_count", 0) == 1
+                    && ReadString(TryParseJsonObject(ReadString(replayRow, "payload_json", "{}")), "proposedInterpretation", "") == negation.Item4,
+                    "An accepted same-speaker replay returns the original immutable row.", replay);
+
+                const string quoteText = "I enjoy carving wooden horses.";
+                foreach (var (id, reply, citation) in new[]
+                {
+                    ("missing", quoteText, (Dictionary<string, object>)null),
+                    ("forged", quoteText, Cite("I enjoy carving golden statues.")),
+                    ("wrong_speaker", quoteText, Cite(quoteText, other)),
+                    ("wrong_turn", quoteText, Cite(quoteText, hero, "current_player")),
+                    ("repeated", quoteText + " " + quoteText, Cite(quoteText)),
+                    ("narrated", "*" + quoteText + "* The weather looks fair today.", Cite(quoteText))
+                })
+                {
+                    var result = Fixture(id, reply, citation, "Purios enjoys carving wooden horses.");
+                    add(id, ReadInt(result, "storedCount", -1) == 0
+                        && ReadString(ReadDictionaryList(result, "rejected").SingleOrDefault(), "rejection_reason", "") == "unverified_source_span",
+                        "Missing, forged, ambiguous or unspoken spans cannot activate reported evidence.", result);
+                }
+                foreach (var (mode, notice) in new[]
+                {
+                    ("dialogue", ConversationResponseService.DialogueActionQueuedNoticePrefix + " sample.]"),
+                    ("social_event", "[Bannerlord Reign event action queued: sample.]"),
+                    ("party_chat", ConversationResponseService.DialogueActionFailureNotice)
+                })
+                {
+                    var scene = TestDict("conversationDateLabel", "1085 Spring 25 Morning",
+                        "conversationSceneState", TestDict("conversationVenue", "the tavern"));
+                    string display = DialogueService.RenderGroundedSceneHeading(scene, hero, TestDict(),
+                        quoteText + "\n\n" + notice, out string heading);
+                    Dictionary<string, object> Framed(string id, string cited) => StoreReportedSpeechFixture(campaign, profile,
+                        id + "-" + mode, mode, 41, quoteText, display, TestDict("dynamicCharacteristicWrites", new[]
+                        {
+                            TestDict("text", "Purios enjoys carving wooden horses.", "category", "habit", "sourceEvidence", Cite(cited))
+                        }), displayPrefix: heading, queuedActionNotice: mode == "party_chat" ? "" : notice);
+                    var framed = Framed("display-boundary", quoteText);
+                    var row = ReadDictionaryList(framed, "stored").SingleOrDefault();
+                    var proof = ReadCharacteristicSpeechProof(row);
+                    string prompt = FormatDynamicCharacteristicsForPrompt(TestDict("heroStringId", hero, "active", new[] { row }));
+                    add("engine_display_text_stays_out_of_speech_" + mode,
+                        heading.Length > 0 && row != null && ReadInt(proof, "start", -1) == heading.Length
+                        && ReadString(proof, "sourceHash", "") == DialogueService.ConversationExactTextHash(display)
+                        && prompt.Contains(quoteText, StringComparison.Ordinal)
+                        && !prompt.Contains(heading.TrimEnd(), StringComparison.Ordinal) && !prompt.Contains(notice, StringComparison.Ordinal)
+                        && ReadInt(Framed("display-citation", notice), "storedCount", -1) == 0,
+                        "The raw accepted reply keeps its heading and notice, while only authored segments can be cited or attributed.", framed);
+                }
+                var newer = StoreReportedSpeechFixture(campaign, profile, "rewrite", "dialogue", 41,
+                    quoteText, "I used to carve wooden horses.", TestDict("dynamicCharacteristicWrites", new[]
+                    {
+                        TestDict("text", "Purios enjoys carving wooden horses.", "category", "habit", "sourceEvidence", Cite(quoteText))
+                    }));
+                add("final_reply_rewrite_cannot_reuse_draft_span", ReadInt(newer, "storedCount", -1) == 0,
+                    "A citation to words removed before acceptance cannot activate.", newer);
+
+                var privateResult = Fixture("whisper", "I still keep a carved ivory rook in my coat.", Cite("I still keep a carved ivory rook in my coat."),
+                    "Purios still keeps an ivory rook in his coat.", "private_whisper");
+                var whisperProof = ReadDictionary(TryParseJsonObject(ReadString(ReadDictionaryList(privateResult, "stored").SingleOrDefault(),
+                    "payload_json", "{}")), "sourceEvidence");
+                add("whisper_scope_uses_committed_private_row", ReadString(whisperProof, "channel", "") == "private_whisper"
+                    && ReadStringList(whisperProof, "audienceIds").ToHashSet(StringComparer.Ordinal).SetEquals(new[] { hero, "main_hero" }),
+                    "A private citation is bound to its private turn and excludes a public listener.", privateResult);
+
+                foreach (var (id, native) in new[] { ("family", "My father is Caladog."),
+                    ("world_state", "I am currently in Vostrum with 200 troops.") })
+                {
+                    var result = Fixture(id, native, Cite(native), native);
+                    add("native_evidence_" + id, ReadInt(result, "storedCount", -1) == 0,
+                        "Native family and world facts stay out of the reported-characteristic lane.", result);
+                }
+                const string kept = "I keep a die. It was my father's and I carry it in a leather pouch.";
+                var inferred = StoreReportedSpeechFixture(campaign, profile, "fallback", "dialogue", 41, kept, kept, TestDict());
+                add("deterministic_fallback_binds_same_accepted_speech", ReadInt(inferred, "storedCount", 0) == 1,
+                    "The narrow provider-free fallback supplies an exact quote of an explicitly stated keepsake.", inferred);
+
+                const string developmentQuote = "I have learned to carve wooden horses for comfort since then.";
+                const string itemId = "carving";
+                var baseItem = TestDict("id", itemId, "title", "Wood carving", "category", "hobby", "influence", 4,
+                    "description", "Purios often carves during quiet evenings.", "personalMeaning", "Carving grounds him.", "visibility", "private");
+                var basis = TestDict("schema", NarrativeSchema, "status", "ready", "items", new[] { baseItem });
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, hero, "narrative.json"), basis);
+                Dictionary<string, object> Develop(string turn, string session, double day, string quote = developmentQuote, string mode = "dialogue", string reply = null) =>
+                    Fixture(turn, reply ?? quote, Cite(quote), "Purios has learned to carve wooden horses.", mode, day, session,
+                        TestDict("itemId", itemId, "influence", 8, "description", "Purios relies on carving wooden horses for comfort.",
+                            "personalMeaning", "Carving wooden horses gives Purios comfort.", "supportingQuote", quote));
+                const string reportedChange = "Col told me, \"I have learned to carve wooden horses for comfort since then.\" I never have.";
+                var nestedChange = new[]
+                {
+                    Develop("reported-1", "report-1", 1, reply: reportedChange),
+                    Develop("reported-2", "report-2", 15, reply: reportedChange),
+                    Develop("reported-3", "report-3", 31, reply: reportedChange)
+                };
+                add("reported_third_party_words_cannot_qualify_across_encounters", nestedChange.All(result =>
+                    ReadString(ReadDictionary(ReadDictionaryList(result, "rejected").SingleOrDefault(), "narrativeDevelopment"), "decision", "") == "rejected"),
+                    "Repeated exact words attributed to Col do not become evidence of the speaker's own lasting change.", nestedChange);
+                foreach (string indirectChange in new[]
+                {
+                    reportedChange,
+                    "If I were to change, I would resolve to spend my evenings carving.",
+                    "I have learned to carve wooden horses, but I gave it up years ago.",
+                    "I have learned to carve wooden horses if someone else guides me.",
+                    "I have learned to say I enjoy carving wooden horses without believing it.",
+                    "I have learned to trust no one according to Col.",
+                    "I have learned to trust them as the elder put it."
+                })
+                {
+                    var indirect = Develop("indirect-" + DialogueService.PromptHash(indirectChange), "indirect", 31, indirectChange);
+                    add("whole_indirect_reply_cannot_qualify_" + DialogueService.PromptHash(indirectChange).Substring(0, 8),
+                        ReadString(ReadDictionary(ReadDictionaryList(indirect, "rejected").SingleOrDefault(), "narrativeDevelopment"), "decision", "") == "rejected",
+                        "An entire reply with a quotation, hypothetical or temporal qualification stays outside the development gate.", indirect);
+                }
+
+                var narrated = Develop("pronounced-quotation", "report-narration", 31,
+                    reply: "*He says the next words in imitation of Col.* " + developmentQuote);
+                add("narrated_imitation_is_not_the_npcs_own_change",
+                    ReadString(ReadDictionary(ReadDictionaryList(narrated, "rejected").SingleOrDefault(), "narrativeDevelopment"), "decision", "") == "rejected",
+                    "The exact supporting quote cannot omit authored narration that qualifies who meant the words.", narrated);
+
+                Develop("carving-1", "session-1", 1);
+                Develop("carving-2", "session-2", 15);
+                var within = Develop("carving-early", "session-1", 30);
+                var earlyThird = Develop("carving-early-third", "session-3", 30);
+                var different = Develop("carving-different", "session-3", 31, "I have learned to carve wooden horses since then. It brings me no comfort.");
+                var privateScope = Develop("carving-private", "session-private", 31, developmentQuote, "private_whisper");
+                var sustained = Develop("carving-accepted", "session-4", 31);
+                var decision = ReadDictionary(ReadDictionaryList(sustained, "stored").SingleOrDefault(), "narrativeDevelopment");
+                add("development_preserves_encounter_day_and_scope_gate", ReadInt(within, "storedCount", -1) == 0
+                    && ReadInt(earlyThird, "storedCount", -1) == 0 && ReadInt(different, "storedCount", -1) == 0 && ReadInt(privateScope, "storedCount", -1) == 0
+                    && ReadString(decision, "decision", "") == "accepted" && ReadString(decision, "interpretationStatus", "") == "proposed"
+                    && ReadInt(decision, "encounterCount", 0) == 4 && ReadDouble(decision, "daySpan", 0) == 30,
+                    "Only three separate encounters with matching exact evidence and comparable audience count toward the thirty-day gate.", sustained);
+                var eventProposal = new Dictionary<string, object>(decision ?? TestDict());
+                var nativeDeath = TestDict("source", "native", "event_type", "hero_death", "is_complete", 1, "phase", "completed");
+                var griefConcern = TestDict("id", itemId, "title", "Death of family", "category", "wound", "influence", 4);
+                const string griefQuote = "Since my father's death, I have learned to seek grief in company.";
+                eventProposal["supportingQuote"] = griefQuote;
+                eventProposal["sourceEvidence"] = TestDict("schema", ReportedSpeechSchema, "quote", griefQuote, "quoteCoversAuthoredBody", true);
+                bool nativeMajor = NarrativeMajorEventRelevant(griefConcern, nativeDeath, hero, new List<string>(), new List<string> { hero }, griefQuote);
+                bool modelEvent = NarrativeMajorEventRelevant(griefConcern, TestDict("source", "model", "event_type", "hero_death",
+                    "is_complete", 1, "phase", "completed"), hero, new List<string>(), new List<string> { hero }, griefQuote);
+                add("native_major_event_still_qualifies_the_documented_path", nativeMajor && !modelEvent
+                    && ReadString(EvaluateNarrativeDevelopment(griefConcern, eventProposal, "new-encounter", 31, new(), nativeMajor), "decision", "") == "accepted"
+                    && ReadString(EvaluateNarrativeDevelopment(griefConcern, eventProposal, "new-encounter", 31, new(), modelEvent), "decision", "") == "pending",
+                    "A typed completed native event can qualify reported evidence before the multi-encounter threshold.", null);
+                eventProposal["sourceEvidence"] = TestDict("schema", ReportedSpeechSchema, "quote", griefQuote, "quoteCoversAuthoredBody", false);
+                add("native_major_event_cannot_qualify_a_nested_quote",
+                    ReadString(EvaluateNarrativeDevelopment(griefConcern, eventProposal, "new-encounter", 31, new(), nativeMajor), "decision", "") == "rejected",
+                    "A typed event cannot substitute for direct lasting speech by the canonical NPC.", null);
+                var storedDocument = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "dynamic_characteristics.json"));
+                var effective = ResolveEffectiveNarrative(TestDict("narrative", basis, "dynamicCharacteristics", storedDocument));
+                var current = ReadDictionaryList(effective, "items").Single();
+                add("eligible_development_keeps_proposed_meaning_and_influence_out_of_profile", ReadInt(current, "influence", 0) == 4
+                    && ReadString(current, "description", "") == ReadString(baseItem, "description", "")
+                    && ReadString(current, "reportedDevelopment", "").Contains(developmentQuote, StringComparison.Ordinal),
+                    "The effective private profile can draw on exact eligible speech and keeps the original description and influence.", current);
+                add("legacy_row_byte_fields_preserved", Json.Serialize(ReadLegacy()) == legacyBefore,
+                    "A versioned write never updates the stored fields of a historical row.", null);
+                add("legacy_prompt_retains_uncertainty", FormatDynamicCharacteristicsForPrompt(TestDict("active", new[] { ReadLegacy() }))
+                    .Contains("original wording and meaning unverified", StringComparison.Ordinal),
+                    "A legacy paraphrase is labelled as historical and unverified in the prompt.", null);
             }
-            string overflowPrompt = FormatDynamicCharacteristicsForPrompt(
-                new Dictionary<string, object> { ["active"] = overflowRows },
-                "Return to the first small habit you shared at our earliest meeting.");
-            add("relevance_selects_older_entry_beyond_sixteen",
-                overflowPrompt.Contains("counting blue lamps", StringComparison.OrdinalIgnoreCase)
-                && Regex.Matches(overflowPrompt, @"(?m)^- \[").Count == 1,
-                "Per-turn relevance can retrieve an old matching characteristic after more than sixteen active entries without filling the prompt with unrelated entries (at most six relevant details).",
-                overflowPrompt);
-            StoreDynamicCharacteristicWrites(campaign, hero, accepted, payload,
-                new Dictionary<string, object> { ["sessionId"] = "session_b", ["exchangeId"] = "exchange_b", ["turnIds"] = new List<string> { "turn_b" } },
-                "event_b", "party_chat", "town_ES1", 110, new[] { hero, "main_hero", "npc_witness" });
-            StoreDynamicCharacteristicWrites(campaign, hero, accepted, payload,
-                new Dictionary<string, object> { ["sessionId"] = "session_c", ["exchangeId"] = "exchange_c", ["turnIds"] = new List<string> { "turn_c" } },
-                "event_c", "dialogue", "town_ES1", 115, new[] { hero, "main_hero" });
-            using (ReignDbConnection connection = OpenCampaignConnection(campaign))
+            catch (Exception ex)
             {
-                Dictionary<string, object> duplicate = QuerySql(connection, "SELECT * FROM dynamic_characteristics WHERE owner_id=$owner AND status='active';",
-                    new Dictionary<string, object> { ["owner"] = hero }).Single();
-                add("duplicate_is_exactly_once", ReadInt(duplicate, "repeat_count", 0) == 3
-                    && TextListFromJson(ReadString(duplicate, "known_by_json", "[]")).Contains("npc_witness", StringComparer.OrdinalIgnoreCase),
-                    "Repeated details update one record, expand its audience, and never forget an earlier group witness.", duplicate);
+                add("exception", false, "Provider-free accepted-speech cases complete.", ex.ToString());
             }
-            Dictionary<string, object> badParsed = new Dictionary<string, object>
+            finally
             {
-                ["dynamicCharacteristicWrites"] = new List<Dictionary<string, object>>
-                {
-                    new Dictionary<string, object> { ["text"] = "I am currently in Vostrum with exactly 200 troops.", ["category"] = "personal_history", ["topicKey"] = "current_location" }
-                }
-            };
-            List<Dictionary<string, object>> rejected = NormalizeDynamicCharacteristicWrites(badParsed, hero, profile, payload,
-                "I am currently in Vostrum with exactly 200 troops.");
-            Dictionary<string, object> rejectedStore = StoreDynamicCharacteristicWrites(campaign, hero, rejected, payload,
-                new Dictionary<string, object> { ["sessionId"] = "session_d", ["exchangeId"] = "exchange_d" },
-                "event_d", "dialogue", "town_ES1", 120, new[] { hero, "main_hero" });
-            add("world_state_claim_is_rejected", ReadInt(rejectedStore, "rejectedCount", 0) == 1,
-                "Current location and troop assertions cannot be promoted into Dynamic Characteristics.", rejectedStore);
-            Dictionary<string, object> parentAnecdote = new Dictionary<string, object>
-            {
-                ["dynamicCharacteristicWrites"] = new List<Dictionary<string, object>>
-                {
-                    new Dictionary<string, object>
-                    {
-                        ["text"] = "Menor's father taught him to tap cask staves and listen for hidden cracks when he was eight.",
-                        ["category"] = "formative_experience", ["topicKey"] = "cask_listening"
-                    }
-                }
-            };
-            List<Dictionary<string, object>> parentAccepted = NormalizeDynamicCharacteristicWrites(parentAnecdote, "npc_menor",
-                new Dictionary<string, object> { ["name"] = "Menor" }, payload,
-                "My father taught me to tap every cask in the cellar and listen for a hidden crack. I was eight when I began.");
-            add("unnamed_parent_anecdote_is_soft_canon", parentAccepted.Count == 1 && ReadString(parentAccepted[0], "status", "") == "active",
-                "An unnamed parent can be part of generated personal history without asserting a native family identity.", parentAccepted);
-            Dictionary<string, object> namedFamily = new Dictionary<string, object>
-            {
-                ["dynamicCharacteristicWrites"] = new List<Dictionary<string, object>>
-                {
-                    new Dictionary<string, object>
-                    {
-                        ["text"] = "My father is Caladog.", ["category"] = "personal_history", ["topicKey"] = "father_identity"
-                    }
-                }
-            };
-            List<Dictionary<string, object>> namedFamilyRejected = NormalizeDynamicCharacteristicWrites(namedFamily, hero, profile, payload, "My father is Caladog.");
-            add("named_family_requires_native_evidence", namedFamilyRejected.Count == 1 && ReadString(namedFamilyRejected[0], "status", "") == "rejected",
-                "An explicit named family identity is not promoted into soft canon.", namedFamilyRejected);
-            Dictionary<string, object> paraphrasedHabit = new Dictionary<string, object>
-            {
-                ["dynamicCharacteristicWrites"] = new List<Dictionary<string, object>>
-                {
-                    new Dictionary<string, object>
-                    {
-                        ["text"] = "Purios privately recites the names of ordinary people in his district — children, widows, laborers — because he believes knowing someone's name is the foundation of belonging and authority.",
-                        ["category"] = "habit", ["topicKey"] = "name_memorization_habit"
-                    }
-                }
-            };
-            List<Dictionary<string, object>> paraphraseAccepted = NormalizeDynamicCharacteristicWrites(paraphrasedHabit, "npc_purios",
-                new Dictionary<string, object> { ["name"] = "Purios the Viper" }, payload,
-                "When no one's watching, I recite names. The ordinary ones—the widow, the fishmonger's daughter, the temple boy. I keep their names in my head because the day I cannot greet someone by name is the day I have stopped belonging here.");
-            add("faithful_paraphrase_is_grounded", paraphraseAccepted.Count == 1 && ReadString(paraphraseAccepted[0], "status", "") == "active",
-                "A concise third-person summary can be grounded by several shared content terms without copying the reply verbatim.", paraphraseAccepted);
-            Dictionary<string, object> shortNameKeepsake = new Dictionary<string, object>
-            {
-                ["dynamicCharacteristicWrites"] = new List<Dictionary<string, object>>
-                {
-                    new Dictionary<string, object>
-                    {
-                        ["text"] = "Col keeps a smooth dark grey river stone found behind his family's stead as a reminder of permanence.",
-                        ["category"] = "preference", ["topicKey"] = "keepsake_river_stone"
-                    }
-                }
-            };
-            List<Dictionary<string, object>> shortNameAccepted = NormalizeDynamicCharacteristicWrites(shortNameKeepsake, "npc_col",
-                new Dictionary<string, object> { ["name"] = "Col of Diantogmail" }, payload,
-                "I keep a smooth dark grey river stone I found behind my family's stead. It reminds me that some things endure.");
-            add("short_given_name_is_valid_speaker_evidence",
-                shortNameAccepted.Count == 1 && ReadString(shortNameAccepted[0], "status", "") == "active",
-                "A generated third-person history using the speaker's valid three-letter given name remains attributable to that speaker.",
-                shortNameAccepted);
-            List<Dictionary<string, object>> shortNameThirdPartyRejected = NormalizeDynamicCharacteristicWrites(shortNameKeepsake, "npc_ceroc",
-                new Dictionary<string, object> { ["name"] = "Ceroc of Fen Uvain" }, payload,
-                "Col keeps a smooth dark grey river stone found behind his family's stead as a reminder of permanence.");
-            add("short_name_does_not_override_different_speaker",
-                shortNameThirdPartyRejected.Count == 1 && ReadString(shortNameThirdPartyRejected[0], "rejectionReason", "") == "not_about_speaking_character",
-                "Recognizing short names does not attach a named third party's personal history to a different speaker.",
-                shortNameThirdPartyRejected);
-            Dictionary<string, object> lateReplyHabit = new Dictionary<string, object>
-            {
-                ["dynamicCharacteristicWrites"] = new List<Dictionary<string, object>>
-                {
-                    new Dictionary<string, object>
-                    {
-                        ["text"] = "Purios knocks twice on any doorframe before entering a room where people wait — once for the living, once for whoever built the wall — a habit taught by an old woman in the fishmonger's district when he was young.",
-                        ["category"] = "habit", ["topicKey"] = "doorframe_knocking_superstition"
-                    }
-                }
-            };
-            string longReply = "He adjusts the brim of his merchant hat and speaks at length about Rhovarion's cup, reciprocity, suspicion, names, bargains, markets, merchants, roads, tools, guards, patience, trust, habit, and keeping promises. "
-                + "Mine. Before I walk through any doorframe where people are waiting for me, I knock twice. Once for the living, once for whoever built the wall. An old woman in the fishmonger's district taught me that when I was still running errands.";
-            List<Dictionary<string, object>> lateReplyAccepted = NormalizeDynamicCharacteristicWrites(lateReplyHabit, "npc_purios",
-                new Dictionary<string, object> { ["name"] = "Purios the Viper" }, payload, longReply);
-            add("late_reply_detail_is_grounded", lateReplyAccepted.Count == 1 && ReadString(lateReplyAccepted[0], "status", "") == "active",
-                "A characteristic expressed after the retrieval tokenizer's first 32 terms remains eligible for Dynamic Characteristics.", lateReplyAccepted);
-            string explicitAversionReply = "Fine. I cannot stand courtiers who talk around a thing instead of through it. State your purpose plainly.";
-            List<Dictionary<string, object>> inferredAversion = NormalizeDynamicCharacteristicWrites(
-                new Dictionary<string, object> { ["dynamicCharacteristicWrites"] = new List<Dictionary<string, object>>() },
-                "npc_aevenes",
-                new Dictionary<string, object> { ["name"] = "Aevenes Damaranion" },
-                payload,
-                explicitAversionReply);
-            add("explicit_aversion_fallback_is_grounded",
-                inferredAversion.Count == 1
-                && ReadString(inferredAversion[0], "status", "") == "active"
-                && ReadString(inferredAversion[0], "category", "") == "aversion"
-                && ReadString(inferredAversion[0], "text", "").Contains("courtiers", StringComparison.OrdinalIgnoreCase),
-                "An explicit stable first-person preference or aversion is preserved when the model omits only its structured companion write.",
-                inferredAversion);
-            string explicitHabitReply = "When I was a boy I counted the boundary stones each morning. I still count things whenever I enter a new camp.";
-            List<Dictionary<string, object>> inferredHabit = NormalizeDynamicCharacteristicWrites(
-                new Dictionary<string, object> { ["dynamicCharacteristicWrites"] = new List<Dictionary<string, object>>() },
-                "npc_acarion",
-                new Dictionary<string, object> { ["name"] = "Acarion of Atrion" },
-                payload,
-                explicitHabitReply);
-            add("explicit_habit_fallback_is_grounded",
-                inferredHabit.Count == 1
-                && ReadString(inferredHabit[0], "status", "") == "active"
-                && ReadString(inferredHabit[0], "category", "") == "habit"
-                && ReadString(inferredHabit[0], "text", "").Contains("count things", StringComparison.OrdinalIgnoreCase),
-                "An explicit stable first-person habit is preserved when the model omits only its structured companion write.",
-                inferredHabit);
-            string malformedKeptObjectReply =
-                "You keep a blue glass token beneath a cedar box. I will remember that. "
-                + "I keep a die. A single bone die, chipped on one corner, worn smooth on the others. "
-                + "It was my father's, and it sits in a locked drawer in my chamber.";
-            List<Dictionary<string, object>> inferredKeptObject = NormalizeDynamicCharacteristicWrites(
-                new Dictionary<string, object>
-                {
-                    ["dynamicCharacteristicWrites"] = new List<object> { 0, 0, 0 }
-                },
-                "npc_aevonion",
-                new Dictionary<string, object> { ["name"] = "Aevonion Aurelerides" },
-                payload,
-                malformedKeptObjectReply);
-            add("malformed_collection_kept_object_fallback_is_grounded",
-                inferredKeptObject.Count == 1
-                && ReadString(inferredKeptObject[0], "status", "") == "active"
-                && ReadString(inferredKeptObject[0], "text", "").Contains("keep a die", StringComparison.OrdinalIgnoreCase),
-                "A malformed companion-write array cannot suppress an explicit stable keepsake already grounded in the visible reply.",
-                inferredKeptObject);
+                ReignPostgreSqlStorage.DropCampaign(campaign);
+            }
             return rows;
         }
+
+        internal static Dictionary<string, object> StoreReportedSpeechFixture(string campaign, Dictionary<string, object> profile,
+            string turn, string mode, double day, string draftReply, string finalReply, Dictionary<string, object> parsed,
+            string session = null, string timeline = "main", string displayPrefix = "", string queuedActionNotice = "")
+        {
+            string hero = ReadString(profile, "heroStringId", ""), name = ReadString(profile, "name", hero);
+            const string player = "main_hero", playerText = "Tell me about yourself.";
+            bool whisper = mode == "private_whisper", party = mode == "party_chat" || whisper, social = mode == "social_event";
+            var payload = TestDict("campaignId", campaign, "timelineId", timeline, "mode", mode, "worldDay", day,
+                "sceneTurnId", turn, "heroStringId", hero, "playerHeroStringId", player, "playerText", playerText,
+                "participants", party || social ? new[] { hero, player, "listener" } : new[] { hero, player });
+            session ??= "a1-session-" + DialogueService.PromptHash(turn).Substring(0, 24);
+            payload["conversationSessionId"] = session;
+            DialogueService.ConversationStartApi(TestDict("campaignId", campaign, "sessionId", session, "npcId", hero,
+                "timelineId", timeline, "playerId", player, "worldDay", day,
+                "participants", ReadStringList(payload, "participants")));
+            DialogueService.BeginSinglePassConversation(payload);
+            string generation;
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                generation = ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "");
+            string eventId = "a1_fixture_" + DialogueService.PromptHash(turn).Substring(0, 24);
+            long timestamp = 1000 + (long)day;
+            var unit = new DialogueService.AcceptedConversationUnit
+            {
+                Campaign = campaign, Hero = hero, Player = player, HeroName = name, PlayerName = "Player", PlayerText = playerText,
+                Location = "", EventId = eventId, EventType = party ? "party_chat_turn" : social ? "social_event_turn" : "dialogue_turn",
+                Reply = finalReply, Generation = generation, Timestamp = timestamp, Payload = payload, Profile = profile,
+                Parsed = parsed, CommitEffects = false, GroupConversation = party, PrivateWhisper = whisper,
+                Participants = whisper ? new List<string> { hero, player } : ReadStringList(payload, "participants"),
+                Memories = new(), Beliefs = new(), Relationships = new(), Obligations = new(), Comprehensions = new()
+            };
+            var exchange = DialogueService.PublishAcceptedConversationUnit(unit,
+                accept => party
+                    ? DialogueService.StorePartyConversationExchange(campaign, payload, hero, player, "Player", name,
+                        playerText, whisper ? "*The speaker replies privately to the player.*" : finalReply, eventId, timestamp, accept)
+                    : social
+                        ? DialogueService.StoreSocialEventConversationExchange(campaign, payload, hero, player, "Player", name,
+                            playerText, finalReply, eventId, turn, timestamp, accept)
+                        : DialogueService.StoreConversationExchange(campaign, payload, hero, player, "Player", name,
+                            playerText, finalReply, eventId, timestamp, acceptance: accept));
+            var writes = NormalizeDynamicCharacteristicWrites(parsed, hero, profile, payload, draftReply);
+            return StoreDynamicCharacteristicWrites(campaign, hero, writes, payload, exchange, eventId, "",
+                finalReply, displayPrefix, queuedActionNotice);
+        }
+#endif
     }
 }

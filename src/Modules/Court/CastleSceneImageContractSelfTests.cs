@@ -32,7 +32,7 @@ namespace ReignBetaServer
                 int width = dimensions[index, 0];
                 int height = dimensions[index, 1];
                 byte[] source = BuildOpaqueTestPng(width, height);
-                byte[] output = Program.NormalizeCastleScene16By9(source, out int sourceWidth, out int sourceHeight);
+                byte[] output = CourtService.NormalizeCastleScene16By9(source, out int sourceWidth, out int sourceHeight);
                 byte[] rgba = PngReencode.DecodeToRgba(output, out int outputWidth, out int outputHeight);
                 bool opaque = rgba != null;
                 if (opaque)

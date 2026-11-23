@@ -7,11 +7,11 @@ using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private static IReadOnlyList<NpcStoryDefinition> ReadNpcStoryDefinitions()
         {
-            string path = Path.Combine(DataDir, "npc-lives-stories.json");
+            string path = Path.Combine(Program.DataDir, "npc-lives-stories.json");
             if (!File.Exists(path)) return NpcStoryCatalog.All;
             var edits = Json.Deserialize<List<NpcStoryDefinition>>(File.ReadAllText(path, Encoding.UTF8));
             var errors = NpcStoryCatalog.Validate(edits);
@@ -46,7 +46,7 @@ namespace ReignBetaServer
             NpcPurposePromptWindows.GetValue(p, _ => new System.Collections.Concurrent.ConcurrentDictionary<string, string>())[hero] = b.ToString();
         }
 
-        private static void AttachNpcPurposePrompt(PromptEnvelope envelope, Dictionary<string, object> p, string hero)
+        internal static void AttachNpcPurposePrompt(DialogueService.PromptEnvelope envelope, Dictionary<string, object> p, string hero)
         {
             if (p == null || !NpcPurposePromptWindows.TryGetValue(p, out var windows)
                 || !windows.TryGetValue(hero, out var body) || body.Length == 0) return;
@@ -54,7 +54,7 @@ namespace ReignBetaServer
             envelope.TotalChars = envelope.Messages.Sum(m => ReadString(m, "content", "").Length);
             envelope.Diagnostics["messageCount"] = envelope.Messages.Count;
             envelope.Diagnostics["npcPersonalPurpose"] = TestDict("source", "server_snapshot", "heroId", hero,
-                "characters", body.Length, "sha256", PromptHash(body));
+                "characters", body.Length, "sha256", DialogueService.PromptHash(body));
         }
 
         private static void AppendNpcStoryPrompt(StringBuilder b, NpcLivesState state, string hero, Dictionary<string, object> p)
@@ -120,7 +120,7 @@ namespace ReignBetaServer
                     foreach (bool compelling in new[] { false, true })
                         b.AppendLine(reason + ", compelling=" + compelling + ": " + NpcLeaveNegotiation.Response(
                             NpcLeaveNegotiation.Persuaded(leave, reason, compelling, state.CampaignId + "|" + state.TimelineId),
-                            NpcLivesPolicy.ReaskDelay(ReadNpcLivesOptions())));
+                            NpcLivesPolicy.ReaskDelay(SettingsService.ReadNpcLivesOptions())));
                 b.AppendLine("Your reason for wanting to leave remains the subject. Do not replace it with a different errand or agree to unrelated terms. Ordinary friendly speech cannot authorize departure or remove the request. Only the explicit current proposal can set a wait or departure. Waiting before departure is separate from time away.");
                 b.AppendLine("Listen to a concrete reason to stay. Return npcLeaveAssessment:{leaveId,revision,reasonKind,evidenceQuote,compelling}, where reasonKind is medical_need,imminent_danger,prior_commitment,alternative_arrangement,emotional_appeal or authority_demand. Quote the player's exact new argument. Tangents and repeated arguments do not change your decision. The engine fixes the result for each reason; never contradict its saved decision.");
                 b.AppendLine("When responding to a new request to wait or stay, include that assessment with this exact saved leave identity and revision. Omitting it or naming another request cannot agree to a wait: the engine will replace the complete draft with an unresolved-request clarification and discard its memories, plans and other effects. Do not claim that scheduling words alone have changed the agreed dates.");
@@ -130,7 +130,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static bool NpcLivesOwnsRelationshipReward(NpcLivesState state, string hero, Dictionary<string, object> payload)
+        internal static bool NpcLivesOwnsRelationshipReward(NpcLivesState state, string hero, Dictionary<string, object> payload)
         {
             string storyId = ReadString(payload, "npcStoryId", "");
             string location = ReadFirstString(payload, "locationId", "currentSettlementId", "settlementId");
@@ -141,7 +141,7 @@ namespace ReignBetaServer
                 || state.Leaves.Any(l => l.HeroId == hero && l.Id == ReadString(payload, "npcLifeRequestId", "") && l.Status == "discussing");
         }
 
-        private static bool ApplyNpcLivesRelationshipOwnership(Dictionary<string, object> exchange,
+        internal static bool ApplyNpcLivesRelationshipOwnership(Dictionary<string, object> exchange,
             List<Dictionary<string, object>> assessments, string player)
         {
             var accepted = ReadDictionary(exchange, "acceptedUnit");
@@ -162,8 +162,7 @@ namespace ReignBetaServer
             {
                 // Compare the immutable accepted contribution, not the excerpt
                 // selected by the writer. Choosing another quote cannot reroll it.
-                var original = QuerySql(c, "SELECT text FROM conversation_turns WHERE turn_id=$source AND speaker_id=$player AND role='player' LIMIT 1;",
-                    TestDict("source", id, "player", player)).FirstOrDefault();
+                var original = CharactersStore.SelectConversationTurns7(c, TestDict("source", id, "player", player)).FirstOrDefault();
                 if (original != null && string.Equals(current, Normalize(ReadString(original, "text", "")), StringComparison.OrdinalIgnoreCase)) return true;
             }
             return false;
@@ -180,7 +179,7 @@ namespace ReignBetaServer
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         }
 
-        private static void AcceptNpcStoryAssessment(ReignDbConnection c, NpcLivesState state, AcceptedConversationUnit unit, List<Dictionary<string, object>> sources)
+        private static void AcceptNpcStoryAssessment(ReignDbConnection c, NpcLivesState state, DialogueService.AcceptedConversationUnit unit, List<Dictionary<string, object>> sources)
         {
             string current = ReadFirstString(unit.Payload, "locationId", "currentSettlementId", "settlementId");
             var playerSources = sources.Where(r => ReadString(r, "speaker_id", "") == unit.Player && ReadString(r, "role", "") == "player").ToList();
@@ -205,7 +204,7 @@ namespace ReignBetaServer
                     SourceId = ReadString(source, "turn_id", ""), Quote = quote, LocationId = current,
                     Outcome = resolved ? outcome : "", ResolutionQuote = resolved ? resolution : "" },
                     ReadInt(row, "revision", -1), accepted, false, resolved);
-                state.Advance(story, ReadDouble(unit.Payload, "worldDay", 0), ReadNpcLivesOptions());
+                state.Advance(story, ReadDouble(unit.Payload, "worldDay", 0), SettingsService.ReadNpcLivesOptions());
             }
             var assessment = ReadDictionary(unit.Parsed, "npcLeaveAssessment");
             if (assessment != null)
@@ -222,7 +221,7 @@ namespace ReignBetaServer
                     bool persuaded = NpcLeaveNegotiation.Persuaded(leave, kind, ReadBool(assessment, "compelling", false), state.CampaignId + "|" + state.TimelineId);
                     if (ReadBool(assessment, "compelling", false)) leave.RefusalMitigation = 4;
                     leave.LastArgumentResult = kind + ": " + (persuaded ? "agreed to stay for now" : "still intends to leave");
-                    if (persuaded) leave.StayForNow(leave.Revision, ReadDouble(unit.Payload, "worldDay", 0), NpcLivesPolicy.ReaskDelay(ReadNpcLivesOptions()));
+                    if (persuaded) leave.StayForNow(leave.Revision, ReadDouble(unit.Payload, "worldDay", 0), NpcLivesPolicy.ReaskDelay(SettingsService.ReadNpcLivesOptions()));
                 }
             }
             ApplyNpcLifeAffinity(c, state, unit.Player, ReadDouble(unit.Payload, "worldDay", 0));
@@ -234,7 +233,7 @@ namespace ReignBetaServer
             string id = ReadString(p, "id", ""), choice = ReadString(p, "choice", ""), operation = ReadString(p, "operationId", "");
             int revision = ReadInt(p, "revision", -1);
             if (operation.Length == 0) throw new InvalidOperationException("A stable decision receipt is required.");
-            string hash = PromptHash(CanonicalJson(TestDict("id", id, "revision", revision, "choice", choice,
+            string hash = DialogueService.PromptHash(CanonicalJson(TestDict("id", id, "revision", revision, "choice", choice,
                 "heroId", ReadString(p, "heroId", ""), "playerId", player, "agreementHash", ReadString(p, "agreementHash", ""),
                 "proposalId", ReadString(p, "proposalId", ""), "waitDays", ReadDouble(p, "waitDays", 0), "awayDays", ReadDouble(p, "awayDays", 5))));
             if (state.OperationReceipts.TryGetValue(operation, out var prior))
@@ -288,32 +287,32 @@ namespace ReignBetaServer
         {
             if (!state.Effects.Any(e => e.Id == id)) state.Effects.Add(new NpcLifeEffect { Id = id, StoryId = id.Split(':')[0],
                 HeroId = hero, Kind = "affinity", Amount = (int)Math.Round(Math.Min(0, NpcLivesPolicy.RefusalLoss(category) + mitigation)
-                    * ReadNpcLivesOptions().Scale("RefusalLoss"), MidpointRounding.AwayFromZero) });
+                    * SettingsService.ReadNpcLivesOptions().Scale("RefusalLoss"), MidpointRounding.AwayFromZero) });
         }
         private static void ApplyNpcLifeAffinity(ReignDbConnection c, NpcLivesState state, string player, double day)
         {
             foreach (var effect in state.Effects.Where(e => e.Kind == "affinity" && e.Status == "pending"))
             {
-                string key = AmbientPairKey(effect.HeroId, player);
+                string key = RelationshipsService.AmbientPairKey(effect.HeroId, player);
                 var ids = new[] { effect.HeroId, player }.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray();
-                EnsureMbtiRelationshipSchema(c); EnsureRelationshipNativeTargetSchema(c);
-                EnsurePoliticalRelationshipPair(c, state.CampaignId, state.TimelineId, key, ids[0], ids[1], day, true);
-                var pair = QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", key)).Single();
+                RelationshipsService.EnsureMbtiRelationshipSchema(c); RelationshipsService.EnsureRelationshipNativeTargetSchema(c);
+                RelationshipsService.EnsurePoliticalRelationshipPair(c, state.CampaignId, state.TimelineId, key, ids[0], ids[1], day, true);
+                var pair = CharactersStore.SelectRelationshipPairChemistry4(c, TestDict("pair", key)).Single();
                 string column = ReadString(pair, "hero_a_id", "") == effect.HeroId ? "affinity_a_to_b" : "affinity_b_to_a";
                 int affinity = Clamp(ReadInt(pair, column, 0) + effect.Amount, -100, 100);
-                ExecuteSql(c, "UPDATE relationship_pair_chemistry SET " + column + "=$value WHERE pair_key=$pair;", TestDict("value", affinity, "pair", key));
+                CharactersStore.UpdateRelationshipPairChemistry(c, column,TestDict("value", affinity, "pair", key));
                 pair[column] = affinity;
-                RefreshEffectivePairProjection(c, state.CampaignId, state.TimelineId, pair, day, "npc_personal_story");
-                InvalidateRelationshipPairStateCache(state.CampaignId);
+                RelationshipsService.RefreshEffectivePairProjection(c, state.CampaignId, state.TimelineId, pair, day, "npc_personal_story");
+                RelationshipsService.InvalidateRelationshipPairStateCache(state.CampaignId);
                 effect.Status = "applied"; effect.NativeReceipt = effect.Id;
             }
         }
 
-        private static void NpcLivesNativeReceipt(ReignDbConnection c, NpcLivesState state, Dictionary<string, object> p, string player, double day)
+        internal static void NpcLivesNativeReceipt(ReignDbConnection c, NpcLivesState state, Dictionary<string, object> p, string player, double day)
         {
             string kind = ReadString(p, "kind", ""), id = ReadString(p, "id", ""), operation = ReadString(p, "operationId", "");
             if (operation.Length == 0) throw new InvalidOperationException("Native evidence requires its stable operation identity.");
-            string hash = PromptHash(CanonicalJson(TestDict("kind", kind, "id", id, "revision", ReadInt(p, "revision", -1),
+            string hash = DialogueService.PromptHash(CanonicalJson(TestDict("kind", kind, "id", id, "revision", ReadInt(p, "revision", -1),
                 "heroId", ReadString(p, "heroId", ""), "objectiveId", ReadString(p, "objectiveId", ""), "nativeReceipt", ReadString(p, "nativeReceipt", ""),
                 "encounterId", ReadString(p, "encounterId", ""), "outcome", ReadString(p, "outcome", ""), "locationId", ReadString(p, "locationId", ""),
                 "meeting", ReadDictionary(p, "meeting"), "bindings", ReadDictionary(p, "bindings"),
@@ -386,7 +385,7 @@ namespace ReignBetaServer
                             HeroId = story.HeroId, LocationId = ReadString(p, "locationId", ""), EncounterId = ReadString(p, "encounterId", ""), Outcome = outcome },
                             story.Revision, new HashSet<string>(), true);
                         if (!accepted) throw new InvalidOperationException("The native evidence did not match the saved objective, location or encounter.");
-                        state.Advance(story, day, ReadNpcLivesOptions());
+                        state.Advance(story, day, SettingsService.ReadNpcLivesOptions());
                     }
                 }
             }

@@ -5,11 +5,11 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class SettingsService
     {
         private const string RuntimeMigrationMarkerName = ".runtime-root-v1";
 
-        private static void MigrateLegacyRuntimeDataIfNeeded()
+        internal static void MigrateLegacyRuntimeDataIfNeeded()
         {
             string configuredRoot = Environment.GetEnvironmentVariable(
                 "REIGN_DATA_ROOT");
@@ -19,7 +19,7 @@ namespace ReignBetaServer
             string legacyRoot = Path.GetFullPath(Path.Combine(
                 AppDomain.CurrentDomain.BaseDirectory,
                 "data"));
-            string targetRoot = Path.GetFullPath(DataDir);
+            string targetRoot = Path.GetFullPath(Program.DataDir);
             if (legacyRoot.Equals(
                     targetRoot,
                     StringComparison.OrdinalIgnoreCase)
@@ -60,7 +60,7 @@ namespace ReignBetaServer
                     File.Copy(file, destination, false);
             }
 
-            string stableSaveSyncRoot = SaveSyncRoot();
+            string stableSaveSyncRoot = PersistenceService.SaveSyncRoot();
             foreach (string legacyName in redirectedDirectories)
             {
                 string source = Path.Combine(legacyRoot, legacyName);
@@ -77,7 +77,7 @@ namespace ReignBetaServer
                 Encoding.UTF8);
         }
 
-        private static void CopyDirectoryMissingOnly(
+        internal static void CopyDirectoryMissingOnly(
             string sourceRoot,
             string destinationRoot)
         {

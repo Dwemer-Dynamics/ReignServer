@@ -6,44 +6,46 @@ using ReignBeta.Shared;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RelationshipsService
     {
-        private const string JealousyApproachPrompt = @"You requested this meeting because the player has neglected you while giving particular other people attention. You speak FIRST; the player has accepted an invitation, not uttered a greeting or apology. In your first spoken reply, explain that you feel overlooked and NAME the primary rival in the authoritative brief, connecting their repeated attention to your own unmet wish for time. Use the supplied intensity: slight means a gentle request; moderate means clear disappointment; strong means pointed hurt or irritation; huge means deep resentment, still governed by your patience, pride, tact and existing relationship. Use only the individually witnessed days supplied for each rival. Never pool everyone into one rival, invent an affair, romance, promise, private conversation or motive. Do not read numerical scores aloud. Subsequent replies respond to the player without repeating the opening accusation. Return approachOpeningEvidence containing primaryRivalId, severityLevel and rivalDays (a map of any mentioned rival IDs to their exact witnessed day counts).";
+        internal const string JealousyApproachPrompt = @"You requested this meeting because the player has neglected you while giving particular other people attention. You speak FIRST; the player has accepted an invitation, not uttered a greeting or apology. In your first spoken reply, explain that you feel overlooked and NAME the primary rival in the authoritative brief, connecting their repeated attention to your own unmet wish for time. Use the supplied intensity: slight means a gentle request; moderate means clear disappointment; strong means pointed hurt or irritation; huge means deep resentment, still governed by your patience, pride, tact and existing relationship. Use only the individually witnessed days supplied for each rival. Never pool everyone into one rival, invent an affair, romance, promise, private conversation or motive. Do not read numerical scores aloud. Subsequent replies respond to the player without repeating the opening accusation. Return approachOpeningEvidence containing primaryRivalId, severityLevel and rivalDays (a map of any mentioned rival IDs to their exact witnessed day counts).";
 
-        private static void EnsurePlayerApproachSchema(ReignDbConnection c)
+        // Owned by campaign migration 2. Callers keep this guard for connections
+        // whose campaign has not completed the migration runner in this process.
+        internal static void EnsurePlayerApproachSchema(ReignDbConnection c)
         {
-            ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS player_attention_events (
-sequence_id BIGSERIAL PRIMARY KEY,timeline_id TEXT NOT NULL,player_id TEXT NOT NULL,
-observer_id TEXT NOT NULL,target_id TEXT NOT NULL,calendar_day INTEGER NOT NULL,
-target_name TEXT NOT NULL,location_id TEXT NOT NULL,exchange_id TEXT NOT NULL,source_id TEXT NOT NULL,event_text TEXT NOT NULL,created_ts BIGINT NOT NULL DEFAULT 0,
-UNIQUE(timeline_id,player_id,observer_id,target_id,calendar_day));");
-            ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS player_approach_state (
-timeline_id TEXT NOT NULL,state_key TEXT NOT NULL,value_json TEXT NOT NULL,
-PRIMARY KEY(timeline_id,state_key));");
+            if (PersistenceService.IsCampaignMigrationReady(c, PersistenceService.PlayerApproachSchemaMigrationVersion)) return;
+            ApplyPlayerApproachSchemaDdl(c);
         }
 
-        private static Dictionary<string, object> ApproachState(ReignDbConnection c, string timeline, string key) =>
-            TryParseJsonObject(ReadString(QuerySql(c, "SELECT value_json FROM player_approach_state WHERE timeline_id=$timeline AND state_key=$key;",
-                TestDict("timeline", timeline, "key", key)).FirstOrDefault(), "value_json", "{}")) ?? TestDict();
+        internal static void ApplyPlayerApproachSchemaDdl(ReignDbConnection c)
+        {
+            RelationshipsSchema.CreatePlayerAttentionEvents(c);
+            RelationshipsSchema.CreatePlayerApproachState(c);
+        }
+
+        internal static Dictionary<string, object> ApproachState(ReignDbConnection c, string timeline, string key) =>
+            TryParseJsonObject(ReadString(RelationshipsStore.SelectPlayerApproachState(c, TestDict("timeline", timeline, "key", key)).FirstOrDefault(), "value_json", "{}")) ?? TestDict();
+
+        private static bool HasRecordedApproachContact(Dictionary<string, object> contact) =>
+            !string.IsNullOrWhiteSpace(ReadString(contact, "exchange", ""));
 
         private static void PutApproachState(ReignDbConnection c, string timeline, string key, Dictionary<string, object> value) =>
-            ExecuteSql(c, @"INSERT INTO player_approach_state(timeline_id,state_key,value_json) VALUES($timeline,$key,$value)
-ON CONFLICT(timeline_id,state_key) DO UPDATE SET value_json=EXCLUDED.value_json;",
-                TestDict("timeline", timeline, "key", key, "value", Json.Serialize(value)));
+            RelationshipsStore.UpsertPlayerApproachState(c, TestDict("timeline", timeline, "key", key, "value", Json.Serialize(value)));
 
         // Runs on the accepted-source transaction: observations and contact resets
         // can never outlive a rolled-back reply. Presence is captured on the game thread.
-        private static Dictionary<string, object> RecordAcceptedPlayerAttention(ReignDbConnection c, AcceptedConversationUnit unit,
+        internal static Dictionary<string, object> RecordAcceptedPlayerAttention(ReignDbConnection c, DialogueService.AcceptedConversationUnit unit,
             List<Dictionary<string, object>> sourceRows, PlayerApproachOptions options = null)
         {
             string mode = ReadFirstString(unit.Payload, "channel", "conversationMode");
-            if (mode.Contains("letter") || mode.Contains("correspondence") || IsTechnicalConversationNotice(unit.Reply))
+            if (mode.Contains("letter") || mode.Contains("correspondence") || DialogueService.IsTechnicalConversationNotice(unit.Reply))
                 return TestDict("status", "excluded");
             var presence = ReadDictionaryList(unit.Payload, "playerAttentionPresence");
             var speaker = presence.FirstOrDefault(p => ReadString(p, "heroId", "") == unit.Hero);
             if (speaker == null || unit.Hero == unit.Player) return TestDict("status", "no_native_presence");
             EnsurePlayerApproachSchema(c);
-            string timeline = ContinuityTimeline(unit.Payload);
+            string timeline = DialogueService.ContinuityTimeline(unit.Payload);
             int day = (int)Math.Floor(ReadDouble(unit.Payload, "worldDay", 0d));
             string exchange = ReadFirstString(unit.Payload, "sceneTurnId", "exchangeId", "turnId");
             string source = ReadString(sourceRows.LastOrDefault(r => ReadString(r, "speaker_id", "") == unit.Hero), "turn_id", "");
@@ -52,20 +54,18 @@ ON CONFLICT(timeline_id,state_key) DO UPDATE SET value_json=EXCLUDED.value_json;
             // would exclude every later individual conversation after contact.
             exchange = FirstNonEmpty(exchange, unit.EventId, source);
             var scopes = ReadStringList(speaker, "scopes");
-            options ??= ReadPlayerApproachOptions();
+            options ??= SettingsService.ReadPlayerApproachOptions();
             int observed = 0;
             foreach (var observer in presence.Take(512).Where(p => options.TrackAttention && ReadBool(p, "alive", false)))
             {
                 string id = ReadString(observer, "heroId", "");
                 if (id.Length == 0 || id == unit.Hero || id == unit.Player || !ReadStringList(observer, "scopes").Intersect(scopes).Any()) continue;
-                ExecuteSql(c, @"INSERT INTO player_attention_events(timeline_id,player_id,observer_id,target_id,calendar_day,target_name,location_id,exchange_id,source_id,event_text,created_ts)
-VALUES($timeline,$player,$observer,$target,$day,$name,$location,$exchange,$source,$text,$ts) ON CONFLICT DO NOTHING;",
-                    TestDict("timeline", timeline, "player", unit.Player, "observer", id, "target", unit.Hero, "day", day,
+                RelationshipsStore.InsertOrIgnorePlayerAttentionEvents(c, TestDict("timeline", timeline, "player", unit.Player, "observer", id, "target", unit.Hero, "day", day,
                         "name", unit.HeroName, "location", unit.Location ?? "", "exchange", exchange, "source", source,
                         "ts", unit.Timestamp, "text", "On day " + day + ", the player spent time talking to " + unit.HeroName + " at " + unit.Location + "."));
                 observed++;
             }
-            long sequence = ReadLong(QuerySql(c, "SELECT COALESCE(MAX(sequence_id),0) AS sequence FROM player_attention_events;").First(), "sequence", 0);
+            long sequence = ReadLong(RelationshipsStore.SelectPlayerAttentionEvents(c).First(), "sequence", 0);
             PutApproachState(c, timeline, "contact:" + unit.Player + ":" + unit.Hero,
                 TestDict("sequence", sequence, "exchange", exchange, "day", day));
             PutApproachState(c, timeline, "cadence:" + unit.Player + ":" + unit.Hero, TestDict("day", day, "sharedDays", 0));
@@ -84,21 +84,21 @@ VALUES($timeline,$player,$observer,$target,$day,$name,$location,$exchange,$sourc
             return TestDict("status", "committed", "observers", observed, "sourceId", source, "trackingDisabled", !options.TrackAttention);
         }
 
-        private static Dictionary<string, object> PlayerApproachEvaluateApi(Dictionary<string, object> p, PlayerApproachOptions options = null)
+        internal static Dictionary<string, object> PlayerApproachEvaluateApi(Dictionary<string, object> p, PlayerApproachOptions options = null)
         {
-            string campaign = ReadString(p, "campaignId", "default"), timeline = ContinuityTimeline(p), player = ReadString(p, "playerId", "");
+            string campaign = ReadString(p, "campaignId", "default"), timeline = DialogueService.ContinuityTimeline(p), player = ReadString(p, "playerId", "");
             string kind = ReadString(p, "kind", "shared");
             double worldDay = ReadDouble(p, "worldDay", -1);
             if (player.Length == 0 || worldDay < 0 || double.IsNaN(worldDay) || double.IsInfinity(worldDay)
                 || !new[] { "shared", "keep", "patrol" }.Contains(kind)) return TestDict("ok", false, "error", "Invalid approach scope.");
-            options ??= ReadPlayerApproachOptions();
+            options ??= SettingsService.ReadPlayerApproachOptions();
             if (!options.Allows(kind)) return TestDict("ok", true, "status", "disabled", "requests", new List<Dictionary<string, object>>());
             int day = (int)Math.Floor(worldDay);
             lock (CampaignRelationshipWriteLock(campaign))
-            using (var c = OpenCampaignConnection(campaign))
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsurePlayerApproachSchema(c); EnsureMbtiRelationshipSchema(c);
-                ExecuteSql(c, "BEGIN;");
+                RelationshipsStore.Begin2(c);
                 try
                 {
                     var winners = new List<Dictionary<string, object>>();
@@ -120,24 +120,22 @@ VALUES($timeline,$player,$observer,$target,$day,$name,$location,$exchange,$sourc
                             || ReadBool(candidate, "protected", true))) continue;
                         string check = "check:" + kind + ":" + player + ":" + hero + ":" + day;
                         if (ApproachState(c, timeline, check).Count > 0) continue;
-                        var traits = ReadJsonObject(CharacterFile(campaign, hero, "traits.json"));
-                        if (traits == null || traits.Count == 0) traits = BuildTraitDocument(ReadDictionary(candidate, "profile"));
+                        var contact = ApproachState(c, timeline, "contact:" + player + ":" + hero);
+                        // Native familiarity alone does not establish contact with this NPC.
+                        if (kind == "shared" && !HasRecordedApproachContact(contact)) continue;
+                        var traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "traits.json"));
+                        if (traits == null || traits.Count == 0) traits = CharactersService.BuildTraitDocument(ReadDictionary(candidate, "profile"));
                         double jealousy = RelationshipTraitPercent(traits, "jealousy"), patience = RelationshipTraitPercent(traits, "patience");
                         double boldness = RelationshipTraitPercent(traits, "boldness"), pride = RelationshipTraitPercent(traits, "pride"), irritability = RelationshipTraitPercent(traits, "irritability");
-                        var pair = QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", AmbientPairKey(hero, player))).FirstOrDefault();
+                        var pair = RelationshipsStore.SelectRelationshipPairChemistry18(c, TestDict("pair", AmbientPairKey(hero, player))).FirstOrDefault();
                         int affinity = pair == null ? ReadInt(candidate, "nativeRelation", 0)
                             : ReadInt(pair, ReadString(pair, "hero_a_id", "") == hero ? "affinity_a_to_b" : "affinity_b_to_a", 0);
-                        var contact = ApproachState(c, timeline, "contact:" + player + ":" + hero);
-                        var rivals = QuerySql(c, @"SELECT target_id,MAX(target_name) AS target_name,COUNT(*) AS days,
-MIN(calendar_day) AS first_day,MAX(calendar_day) AS last_day,
-array_to_json((array_agg(source_id ORDER BY sequence_id DESC))[1:64])::text AS source_ids_json FROM player_attention_events
-WHERE timeline_id=$timeline AND player_id=$player AND observer_id=$hero AND sequence_id>$sequence AND exchange_id<>$exchange
-GROUP BY target_id;", TestDict("timeline", timeline, "player", player, "hero", hero,
+                        var rivals = RelationshipsStore.SelectPlayerAttentionEvents2(c, TestDict("timeline", timeline, "player", player, "hero", hero,
                             "sequence", ReadLong(contact, "sequence", 0), "exchange", ReadString(contact, "exchange", "")))
                             .Select(r => TestDict("heroId", ReadString(r, "target_id", ""), "name", ReadString(r, "target_name", ""), "days", ReadInt(r, "days", 0),
                                 "score", ReadInt(r, "days", 0) * PlayerApproachPolicy.Sensitivity(jealousy, patience),
                                 "firstDay", ReadInt(r, "first_day", 0), "lastDay", ReadInt(r, "last_day", 0),
-                                "sourceIds", TextListFromJson(ReadString(r, "source_ids_json", "[]")), "sourceCoverage", "latest_64_sources_full_day_count"))
+                                "sourceIds", DialogueService.TextListFromJson(ReadString(r, "source_ids_json", "[]")), "sourceCoverage", "latest_64_sources_full_day_count"))
                             .OrderByDescending(r => ReadDouble(r, "score", 0)).ThenBy(r => ReadString(r, "heroId", ""), StringComparer.Ordinal).ToList();
                         double score = PlayerApproachPolicy.NeglectScore(rivals.Select(r => ReadInt(r, "days", 0)), jealousy, patience);
                         int level = PlayerApproachPolicy.NeglectLevel(score), interval = PlayerApproachPolicy.SharedDayInterval(jealousy, patience);
@@ -195,23 +193,23 @@ GROUP BY target_id;", TestDict("timeline", timeline, "player", player, "hero", h
                     }
                     return FinishApproachEvaluation(c, TestDict("ok", true, "requests", requests, "checks", diagnostics));
                 }
-                catch { ExecuteSql(c, "ROLLBACK;"); throw; }
+                catch { RelationshipsStore.Rollback(c); throw; }
             }
         }
 
         private static Dictionary<string, object> FinishApproachEvaluation(ReignDbConnection c, Dictionary<string, object> result)
-        { ExecuteSql(c, "COMMIT;"); return result; }
+        { RelationshipsStore.Commit(c); return result; }
 
-        private static Dictionary<string, object> PlayerApproachDecisionApi(Dictionary<string, object> p, PlayerApproachOptions options = null)
+        internal static Dictionary<string, object> PlayerApproachDecisionApi(Dictionary<string, object> p, PlayerApproachOptions options = null)
         {
-            string campaign = ReadString(p, "campaignId", "default"), timeline = ContinuityTimeline(p), id = ReadString(p, "requestId", "");
+            string campaign = ReadString(p, "campaignId", "default"), timeline = DialogueService.ContinuityTimeline(p), id = ReadString(p, "requestId", "");
             string choice = ReadString(p, "choice", "");
             if (id.Length == 0 || !new[] { "accept", "refuse", "cancel", "acknowledge" }.Contains(choice)) return TestDict("ok", false, "error", "Invalid approach decision.");
             lock (CampaignRelationshipWriteLock(campaign))
-            using (var c = OpenCampaignConnection(campaign))
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsurePlayerApproachSchema(c); EnsureMbtiRelationshipSchema(c);
-                ExecuteSql(c, "BEGIN;");
+                RelationshipsStore.Begin2(c);
                 try
                 {
                     var request = ApproachState(c, timeline, "request:" + id);
@@ -249,11 +247,15 @@ GROUP BY target_id;", TestDict("timeline", timeline, "player", player, "hero", h
                         return FinishApproachEvaluation(c, TestDict("ok", true, "idempotent", true, "request", request));
                     // Only unanswered invitations are cancelled. Committed decisions
                     // and native receipt acknowledgments retain their exact-once route.
-                    options ??= ReadPlayerApproachOptions();
+                    options ??= SettingsService.ReadPlayerApproachOptions();
                     if (!options.Allows(ReadString(request, "kind", ""))) choice = "cancel";
                     if (ReadString(request, "kind", "") == "shared" && ReadDictionaryList(request, "heroes").Any(h =>
-                        CanonicalJson(ApproachState(c, timeline, "contact:" + ReadString(request, "playerId", "") + ":" + ReadString(h, "heroId", "")))
-                            != CanonicalJson(ReadDictionary(h, "lastContact") ?? TestDict()))) choice = "cancel";
+                    {
+                        var lastContact = ReadDictionary(h, "lastContact");
+                        return !HasRecordedApproachContact(lastContact)
+                            || CanonicalJson(ApproachState(c, timeline, "contact:" + ReadString(request, "playerId", "") + ":" + ReadString(h, "heroId", "")))
+                                != CanonicalJson(lastContact);
+                    })) choice = "cancel";
                     var receipts = new List<Dictionary<string, object>>();
                     if (choice == "refuse") foreach (var hero in ReadDictionaryList(request, "heroes"))
                     {
@@ -268,7 +270,7 @@ GROUP BY target_id;", TestDict("timeline", timeline, "player", player, "hero", h
                     PutApproachState(c, timeline, "request:" + id, request);
                     return FinishApproachEvaluation(c, TestDict("ok", true, "request", request));
                 }
-                catch { ExecuteSql(c, "ROLLBACK;"); throw; }
+                catch { RelationshipsStore.Rollback(c); throw; }
             }
         }
 
@@ -276,20 +278,18 @@ GROUP BY target_id;", TestDict("timeline", timeline, "player", player, "hero", h
         {
             string player = ReadFirstString(payload, "playerHeroStringId", "playerId");
             if (player.Length == 0) return new List<Dictionary<string, object>>();
-            using (var c = OpenCampaignConnection(campaign))
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsurePlayerApproachSchema(c);
-                return QuerySql(c, @"SELECT event_text,source_id,calendar_day,created_ts FROM player_attention_events
-WHERE timeline_id=$timeline AND observer_id=$hero AND player_id=$player ORDER BY sequence_id DESC LIMIT 80;",
-                    TestDict("timeline", ContinuityTimeline(payload), "hero", hero, "player", player)).Select(r => TestDict("role", "system", "speaker", "Bannerlord Reign",
+                return RelationshipsStore.SelectPlayerAttentionEvents3(c, TestDict("timeline", DialogueService.ContinuityTimeline(payload), "hero", hero, "player", player)).Select(r => TestDict("role", "system", "speaker", "Bannerlord Reign",
                         "text", ReadString(r, "event_text", ""), "channel", "witnessed_player_attention", "sourceId", ReadString(r, "source_id", ""),
                         "worldDay", ReadInt(r, "calendar_day", 0), "ts", ReadLong(r, "created_ts", 0))).Reverse().ToList();
             }
         }
 
-        private const string IndividualNpcOpeningCue = "[MEETING CUE: The player accepted your request to speak and has not said anything. Speak first in character about the supplied authoritative approach or rescue evidence. Do not invent player speech, consent or a completed action.]";
+        internal const string IndividualNpcOpeningCue = "[MEETING CUE: The player accepted your request to speak and has not said anything. Speak first in character about the supplied authoritative approach or rescue evidence. Do not invent player speech, consent or a completed action.]";
 
-        private static bool PrepareIndividualNpcOpening(string campaign, string hero, Dictionary<string, object> payload)
+        internal static bool PrepareIndividualNpcOpening(string campaign, string hero, Dictionary<string, object> payload)
         {
             // Recompute authority from the saved invitation, never from caller proof flags.
             payload.Remove("authoritativeApproachOpening");
@@ -308,16 +308,14 @@ WHERE timeline_id=$timeline AND observer_id=$hero AND player_id=$player ORDER BY
             return true;
         }
 
-        private static string PlayerAttentionPrompt(string campaign, string hero, Dictionary<string, object> payload)
+        internal static string PlayerAttentionPrompt(string campaign, string hero, Dictionary<string, object> payload)
         {
             if (payload == null || !payload.ContainsKey("playerAttentionPresence")) return "";
-            string timeline = ContinuityTimeline(payload), player = ReadFirstString(payload, "playerHeroStringId", "playerId");
-            using (var c = OpenCampaignConnection(campaign))
+            string timeline = DialogueService.ContinuityTimeline(payload), player = ReadFirstString(payload, "playerHeroStringId", "playerId");
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsurePlayerApproachSchema(c);
-                var events = QuerySql(c, @"SELECT event_text,source_id FROM player_attention_events WHERE timeline_id=$timeline
-AND observer_id=$hero AND player_id=$player ORDER BY calendar_day DESC,sequence_id DESC LIMIT 64;",
-                    TestDict("timeline", timeline, "hero", hero, "player", player));
+                var events = RelationshipsStore.SelectPlayerAttentionEvents4(c, TestDict("timeline", timeline, "hero", hero, "player", player));
                 string context = events.Count == 0 ? "" : "\n\nWITNESSED PLAYER ATTENTION (generic public history only)\n" + Json.Serialize(events);
                 var rescue = ReadDictionary(payload, "rescueContext");
                 if (rescue != null && rescue.Count > 0)
@@ -326,11 +324,11 @@ AND observer_id=$hero AND player_id=$player ORDER BY calendar_day DESC,sequence_
                         || !new[] { "battle_rescue", "prison_rescue" }.Contains(ReadString(rescue, "kind", "")))
                         throw new InvalidOperationException("The rescue evidence does not match this conversation.");
                     string rescuePrompt = "NATIVE RESCUE EVIDENCE\n" + Json.Serialize(rescue) + "\n"
-                        + (ReadBool(payload, "rescueOpening", false) ? LoadPromptTemplate("rescue_opening.txt")
+                        + (ReadBool(payload, "rescueOpening", false) ? PromptService.LoadPromptTemplate("rescue_opening.txt")
                             : "The rescue opening has already been heard. Respond to the player's current contribution; do not restart your thanks or invent further rescue facts.");
                     if (ReadBool(payload, "rescueOpening", false)) rescuePrompt += "\n" + IndividualNpcOpeningCue;
-                    context += "\n\n" + RenderContinuityRecord("rescue_" + PromptHash(Json.Serialize(rescue)).Substring(0, 24),
-                        "native_rescue", hero, GroupConversationSessionId(payload), ReadDouble(payload, "worldDay", 0d), 115, true, rescuePrompt);
+                    context += "\n\n" + DialogueService.RenderContinuityRecord("rescue_" + DialogueService.PromptHash(Json.Serialize(rescue)).Substring(0, 24),
+                        "native_rescue", hero, DialogueService.GroupConversationSessionId(payload), ReadDouble(payload, "worldDay", 0d), 115, true, rescuePrompt);
                 }
                 string id = ReadString(payload, "approachRequestId", "");
                 if (id.Length == 0) return context;
@@ -352,8 +350,8 @@ AND observer_id=$hero AND player_id=$player ORDER BY calendar_day DESC,sequence_
                 // Keep them with the saved authority through whole-record packing;
                 // projecting an empty original player turn must not erase the cue.
                 if (opening) approachPrompt += "\n" + IndividualNpcOpeningCue;
-                context += "\n\n" + RenderContinuityRecord("player_approach_" + PromptHash(id + "|" + hero).Substring(0, 24),
-                    "player_approach_brief", hero, GroupConversationSessionId(payload), ReadDouble(payload, "worldDay", 0d), 115, true, approachPrompt);
+                context += "\n\n" + DialogueService.RenderContinuityRecord("player_approach_" + DialogueService.PromptHash(id + "|" + hero).Substring(0, 24),
+                    "player_approach_brief", hero, DialogueService.GroupConversationSessionId(payload), ReadDouble(payload, "worldDay", 0d), 115, true, approachPrompt);
                 return context;
             }
         }
@@ -364,7 +362,7 @@ AND observer_id=$hero AND player_id=$player ORDER BY calendar_day DESC,sequence_
             string primaryId = ReadString(primary, "heroId", "");
             int days = ReadInt(primary, "days", ReadInt(ReadDictionaryList(brief, "rivals")
                 .FirstOrDefault(r => ReadString(r, "heroId", "") == primaryId), "days", 0));
-            return LoadPromptTemplate("jealousy_approach.txt")
+            return PromptService.LoadPromptTemplate("jealousy_approach.txt")
                 + "\nEvery named rival in spoken dialogue must have an exact rivalDays entry. If mentioning a number of days, use one separate sentence per rival. Never pool their days or infer consecutive days from the count."
                 + "\nREQUIRED ADDITIONAL TOP-LEVEL JSON FIELD (alongside the ordinary output schema, never inside reply or decisionBrief): "
                 + Json.Serialize(TestDict("approachOpeningEvidence", TestDict("primaryRivalId", primaryId,
@@ -372,7 +370,7 @@ AND observer_id=$hero AND player_id=$player ORDER BY calendar_day DESC,sequence_
                 + "\nRetain these exact primary values. Add the exact individual count for any other rival you mention. The spoken opening must explain your own unmet wish for time, not only mention the rival.";
         }
 
-        private static List<string> ApproachOpeningViolations(Dictionary<string, object> parsed, Dictionary<string, object> payload)
+        internal static List<string> ApproachOpeningViolations(Dictionary<string, object> parsed, Dictionary<string, object> payload)
         {
             var errors = new List<string>();
             if (ReadBool(payload, "rescueOpening", false))
@@ -427,7 +425,7 @@ AND observer_id=$hero AND player_id=$player ORDER BY calendar_day DESC,sequence_
             if (!ReadBool(llm, "ok", false)) return llm;
             var parsed = TryParseJsonObject(ReadString(llm, "content", ""));
             var errors = ApproachOpeningViolations(parsed, payload);
-            DiagnosticValidation("Check approach opening", errors.Count == 0, errors, parsed);
+            ConversationResponseService.DiagnosticValidation("Check approach opening", errors.Count == 0, errors, parsed);
             if (errors.Count == 0) return llm;
             var repair = CloneDictionary(request);
             var messages = ReadDictionaryList(request, "messages").Select(CloneDictionary).ToList();
@@ -437,14 +435,14 @@ AND observer_id=$hero AND player_id=$player ORDER BY calendar_day DESC,sequence_
                     ? "\n" + JealousyOpeningInstructions(ReadDictionary(payload, "authoritativeApproachBrief")) : "")
                 + "\n" + IndividualNpcOpeningCue + "\nINVALID RESPONSE: " + ReadString(llm, "content", "")));
             repair["messages"] = messages; repair["temperature"] = 0d;
-            var result = (responder ?? ChatWithLlm)(repair);
+            var result = (responder ?? LlmProviderService.ChatWithLlm)(repair);
             var repaired = TryParseJsonObject(ReadString(result, "content", ""));
             var repairErrors = ApproachOpeningViolations(repaired, payload);
             if (!ReadBool(result, "ok", false)) repairErrors.Add(ReadString(result, "error", "The opening repair failed to generate a response."));
             if (repaired == null) repairErrors.Add("The opening repair did not return a JSON object.");
             if (repairErrors.Count == 0 && validateRepair != null && !validateRepair(repaired))
                 repairErrors.Add("The repaired opening failed the ordinary conversation checks.");
-            DiagnosticValidation("Recheck approach opening", repairErrors.Count == 0, repairErrors, repaired);
+            ConversationResponseService.DiagnosticValidation("Recheck approach opening", repairErrors.Count == 0, repairErrors, repaired);
             if (repairErrors.Count == 0) return result;
             return TestDict("ok", false, "error", "The approach opening did not match its witnessed attention history. You may retry.",
                 "approachOpeningFailed", true, "approachOpeningViolations", repairErrors);

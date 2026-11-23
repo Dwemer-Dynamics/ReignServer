@@ -5,7 +5,7 @@ using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private static List<Dictionary<string, object>> RunNpcApproachConversationSelfTests(string campaign)
         {
@@ -30,7 +30,7 @@ namespace ReignBetaServer
                 && ReadBool(p, "suppressPlayerTranscript", false) && IsNpcLifeApproach(p)
                 && ReadString(source, "playerText", "") == "FORGED_PLAYER_SPEECH");
             Check("serialized_flags_cannot_grant_draft_authority", !IsNpcLifeApproach(TryParseJsonObject(Json.Serialize(p))));
-            Check("server_arrival_selects_shipping_action_protocol", UsesStructuredActions(p)
+            Check("server_arrival_selects_shipping_action_protocol", DialogueService.UsesStructuredActions(p)
                 && ReadInt(source, "structuredActionProtocolVersion", 0) == -1);
             int legacyRepairCalls = 0;
             var leaveOpening = TestDict("ok", true, "content", Json.Serialize(TestDict("reply",
@@ -38,25 +38,25 @@ namespace ReignBetaServer
             var leaveMotive = TestDict("conversationAgency", TestDict("peerId", "player", "playerText", "",
                 "facts", TestDict(), "records", new object[0]));
             string originalLeaveOpening = Json.Serialize(leaveOpening);
-            var routedLeaveOpening = EnforceConversationAgencyResponse(leaveOpening, TestDict(), leaveMotive, p,
+            var routedLeaveOpening = DialogueService.EnforceConversationAgencyResponse(leaveOpening, TestDict(), leaveMotive, p,
                 campaign, "arrival_leave_protocol_fixture", "individual_chat", encounter.HeroId,
                 _ => { legacyRepairCalls++; return TestDict("ok", false); }, persist: false);
             Check("typed_arrival_does_not_require_incompatible_legacy_proposal_metadata",
                 legacyRepairCalls == 0 && ReferenceEquals(leaveOpening, routedLeaveOpening)
                 && Json.Serialize(routedLeaveOpening) == originalLeaveOpening);
             var admission = System.Threading.Tasks.Task.Run(() => {
-                int before = System.Threading.Volatile.Read(ref InteractiveRequestCount);
+                int before = System.Threading.Volatile.Read(ref Program.InteractiveRequestCount);
                 var result = RunNpcApproachDialogue(p); // Its fixture generation is deliberately obsolete.
                 return TestDict("status", ReadString(result, "status", ""), "ok", ReadBool(result, "ok", true),
-                    "leaseReleased", !CampaignDataGate.IsReadLockHeld && CurrentCampaignRequestLease == null,
-                    "noPreparationStarted", before == System.Threading.Volatile.Read(ref InteractiveRequestCount));
+                    "leaseReleased", !Program.CampaignDataGate.IsReadLockHeld && PersistenceService.CurrentCampaignRequestLease == null,
+                    "noPreparationStarted", before == System.Threading.Volatile.Read(ref Program.InteractiveRequestCount));
             }).GetAwaiter().GetResult();
             Check("obsolete_generation_stops_before_character_preparation_and_releases_lease",
                 !ReadBool(admission, "ok", true) && ReadString(admission, "status", "") == "superseded"
                 && ReadBool(admission, "leaseReleased", false) && ReadBool(admission, "noPreparationStarted", false));
 
             Dictionary<string, object> validAdmission;
-            using (var admissionConnection = OpenCampaignConnection(campaign))
+            using (var admissionConnection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 var admissionState = new NpcLivesState { CampaignId = campaign, TimelineId = "approach_admission" };
                 var admissionEncounter = new NpcConversationEncounter { Id = "admission", HeroId = encounter.HeroId,
@@ -68,29 +68,29 @@ namespace ReignBetaServer
             }
             var admitted = System.Threading.Tasks.Task.Run(() => {
                 var result = RunNpcApproachDialogue(validAdmission, _ => TestDict("ok", true,
-                    "held", CampaignDataGate.IsReadLockHeld && CurrentCampaignRequestLease != null));
-                bool successReleased = !CampaignDataGate.IsReadLockHeld && CurrentCampaignRequestLease == null;
+                    "held", Program.CampaignDataGate.IsReadLockHeld && PersistenceService.CurrentCampaignRequestLease != null));
+                bool successReleased = !Program.CampaignDataGate.IsReadLockHeld && PersistenceService.CurrentCampaignRequestLease == null;
                 bool threw = false;
                 try { RunNpcApproachDialogue(validAdmission, _ => throw new InvalidOperationException("fixture preparation failure")); }
                 catch (InvalidOperationException) { threw = true; }
                 return TestDict("held", ReadBool(result, "held", false), "successReleased", successReleased,
-                    "exceptionReleased", threw && !CampaignDataGate.IsReadLockHeld && CurrentCampaignRequestLease == null);
+                    "exceptionReleased", threw && !Program.CampaignDataGate.IsReadLockHeld && PersistenceService.CurrentCampaignRequestLease == null);
             }).GetAwaiter().GetResult();
             Check("current_preparation_has_campaign_admission_and_releases_on_success_and_exception",
                 ReadBool(admitted, "held", false) && ReadBool(admitted, "successReleased", false) && ReadBool(admitted, "exceptionReleased", false));
 
-            var characteristics = PromptParityCharacteristics();
+            var characteristics = DialogueService.PromptParityCharacteristics();
             characteristics["traits"] = TestDict("basePersonalitySummary", "Patient, compassionate and careful with difficult truths.");
             characteristics["background"] = TestDict("summary", "Her responsibility for Ostican weighs heavily on her.");
             characteristics["voice"] = TestDict("speechStyle", "Direct, familiar with trusted friends.");
             var live = TestDict("mood", "worried about the town's stores", "currentPlan", "await Michael's return with supplies or news", "currentCrisis", "uncertain supplies");
-            var identity = PromptParityIdentity(); identity["usableName"] = "Michael";
+            var identity = DialogueService.PromptParityIdentity(); identity["usableName"] = "Michael";
             const string expected = "Come back with wagons or come back with word. A rider ahead of the wagons.";
             const string letter = "I sent a letter asking for news; delivery and reading remain unknown.";
             const string revised = "The old exact arrival date was withdrawn. No new date is fixed.";
-            string memory = RenderContinuityRecord("arrival_commitment", "obligation", encounter.HeroId, state.TimelineId, 19, 120, true, expected)
-                + "\n" + RenderContinuityRecord("arrival_letter", "letter", encounter.HeroId, state.TimelineId, 20, 120, true, letter)
-                + "\n" + RenderContinuityRecord("arrival_revision", "correction", encounter.HeroId, state.TimelineId, 20, 120, true, revised);
+            string memory = DialogueService.RenderContinuityRecord("arrival_commitment", "obligation", encounter.HeroId, state.TimelineId, 19, 120, true, expected)
+                + "\n" + DialogueService.RenderContinuityRecord("arrival_letter", "letter", encounter.HeroId, state.TimelineId, 20, 120, true, letter)
+                + "\n" + DialogueService.RenderContinuityRecord("arrival_revision", "correction", encounter.HeroId, state.TimelineId, 20, 120, true, revised);
             var prior = new List<Dictionary<string, object>> {
                 TestDict("turnId", "arrival_old_npc", "role", "npc", "speakerHeroStringId", encounter.HeroId, "speaker", "Ingunde",
                     "text", "Go safely, friend. I will set aside an evening when you return."),
@@ -98,7 +98,7 @@ namespace ReignBetaServer
                     "text", "I will be back. I do not know the date yet.")
             };
             var empty = TestDict(); var noLines = new List<Dictionary<string, object>>();
-            PromptEnvelope Envelope(Dictionary<string, object> payload) => BuildDialoguePromptEnvelope(campaign,
+            DialogueService.PromptEnvelope Envelope(Dictionary<string, object> payload) => DialogueService.BuildDialoguePromptEnvelope(campaign,
                 encounter.HeroId, "Ingunde", "Michael", "Michael", NpcLifeArrivalCue, ReadString(payload, "sceneContext", ""),
                 profile, characteristics, live, empty, empty, prior, noLines, noLines, noLines, identity, payload, memory, "");
             var ordinary = DeepCloneProfileDictionary(p);
@@ -115,15 +115,15 @@ namespace ReignBetaServer
                 && final.Contains("neutral score does not erase acquaintance") && final.Contains("Preserve uncertainty and audience privacy"));
             Check("old_minimal_prompt_and_tiny_output_budget_retired", !final.Contains("under 240 characters")
                 && !final.Contains("activity already occupying you"));
-            var request = BuildConversationGenerationRequest(TestDict("maxTokens", 900), approachEnvelope, campaign, "arrival_fixture", encounter.HeroId, "", false);
+            var request = DialogueService.BuildConversationGenerationRequest(TestDict("maxTokens", 900), approachEnvelope, campaign, "arrival_fixture", encounter.HeroId, "", false);
             ConfigureNpcApproachGeneration(request, p);
             Check("normal_schema_budget_and_repair_policy_remain", ReadInt(request, "maxTokens", 0) >= 8000
                 && ReadString(request, "requestType", "") == "npc_approach"
                 && !ReadBool(request, "singleProviderAttempt", false) && !ReadBool(request, "reasoningDisabled", false)
                 && ReadString(request, "heroStringId", "") == encounter.HeroId && ReadString(request, "heroName", "") == "Ingunde");
-            var wireSettings = TestDict("llmProvider", NanoGptProvider, "reasoningMode", "always", "reasoningEffort", "medium");
+            var wireSettings = TestDict("llmProvider", LlmProviderService.NanoGptProvider, "reasoningMode", "always", "reasoningEffort", "medium");
             request["model"] = "approach_fixture_model";
-            var wire = ReadDictionary(CaptureMemoryReplayProviderRequest(request, wireSettings), "providerWireCapture");
+            var wire = ReadDictionary(DialogueService.CaptureMemoryReplayProviderRequest(request, wireSettings), "providerWireCapture");
             var wireBody = TryParseJsonObject(ReadString(wire, "requestJson", ""));
             string wireText = string.Join("\n", ReadDictionaryList(wireBody, "messages").Select(m => ReadString(m, "content", "")));
             Check("actual_provider_wire_retains_history_and_required_return_sources", ReadString(wire, "status", "") == "captured"
@@ -135,10 +135,10 @@ namespace ReignBetaServer
                 && Enum.GetValues(typeof(Reign.Core.Contracts.Government.ReignGovernmentPlank))
                     .Cast<Reign.Core.Contracts.Government.ReignGovernmentPlank>().All(value => wireText.Contains(value + ":")),
                 "An opening carries its actual native speaker into political construction even before a stored profile exists.");
-            var provider = BanterProviderSettings(TestDict("requestType", "npc_approach"), TestDict("reasoningMode", "always"));
+            var provider = SettingsService.BanterProviderSettings(TestDict("requestType", "npc_approach"), TestDict("reasoningMode", "always"));
             Check("approach_preserves_reasoning_preference", ReadString(provider, "reasoningMode", "") == "always"
-                && ReadString(BanterProviderSettings(TestDict("requestType", "party_banter"), TestDict("reasoningMode", "always")), "reasoningMode", "") == "off");
-            var repairProvider = BanterProviderSettings(TestDict("requestType", "npc_approach_continuity_repair"),
+                && ReadString(SettingsService.BanterProviderSettings(TestDict("requestType", "party_banter"), TestDict("reasoningMode", "always")), "reasoningMode", "") == "off");
+            var repairProvider = SettingsService.BanterProviderSettings(TestDict("requestType", "npc_approach_continuity_repair"),
                 TestDict("npcLivesApproachModel", "approach_fixture_model", "reasoningMode", "always"));
             Check("repairs_retain_configured_approach_model", ReadString(repairProvider, "dialogueModel", "") == "approach_fixture_model");
 

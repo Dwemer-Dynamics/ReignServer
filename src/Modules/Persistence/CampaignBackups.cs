@@ -13,13 +13,13 @@ using System.Threading.Tasks;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PersistenceService
     {
         private const string CampaignBackupFormat = "bannerlord-reign-campaign-backup";
         private const int CampaignBackupVersion = 3;
         private const int CampaignBackupMinimumSupportedVersion = 2;
         private const int CampaignBackupMaxEntries = 250000;
-        private const long CampaignBackupMaxExpandedBytes = 32L * 1024L * 1024L * 1024L;
+        internal const long CampaignBackupMaxExpandedBytes = 32L * 1024L * 1024L * 1024L;
         private const int CampaignRetirementVersion = 1;
         private const int CampaignSemanticDeleteBatchSize = 200;
         private const int CampaignSemanticDeleteTimeoutMs = 180000;
@@ -30,7 +30,7 @@ namespace ReignBetaServer
         private static string CampaignRetirementFailureInjectionForTests = "";
         private static string CampaignNativeSaveRootOverrideForTests = "";
 
-        private static Dictionary<string, object> CampaignListApi()
+        internal static Dictionary<string, object> CampaignListApi()
         {
             List<Dictionary<string, object>> campaigns = new List<Dictionary<string, object>>();
             foreach (Dictionary<string, object> databaseCampaign
@@ -38,10 +38,16 @@ namespace ReignBetaServer
             {
                 string campaignId =
                     ReadString(databaseCampaign, "campaignId", "");
-                string directory = CampaignDirectory(campaignId);
+                string blocked = FencedSaveSyncOperation(campaignId);
+                if (blocked != null)
+                {
+                    campaigns.Add(SaveSyncFencedResult(campaignId, blocked));
+                    continue;
+                }
+                string directory = CampaignFileService.CampaignDirectory(campaignId);
                 if (!Directory.Exists(directory)) continue;
                 DirectoryInfo directoryInfo = new DirectoryInfo(directory);
-                if (!IsRealCampaignDirectory(directoryInfo)) continue;
+                if (!CampaignFileService.IsRealCampaignDirectory(directoryInfo)) continue;
                 campaigns.Add(BuildCampaignBackupSummary(
                     campaignId,
                     directoryInfo,
@@ -64,7 +70,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> CampaignStorageAuditApi()
+        internal static Dictionary<string, object> CampaignStorageAuditApi()
         {
             return CampaignStorageAuditCore();
         }
@@ -74,17 +80,20 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> databaseCampaigns =
                 ReignPostgreSqlStorage.ListCampaigns();
             HashSet<string> databaseIds = new HashSet<string>(
-                StringComparer.OrdinalIgnoreCase);
+                StringComparer.Ordinal);
             int ignoredDatabaseRecords = 0;
             Dictionary<string, Dictionary<string, object>> pending =
                 ReadDictionaryList(ReadCampaignRetirementLedger(), "pending")
                     .Where(row => !string.IsNullOrWhiteSpace(ReadString(row, "campaignId", "")))
-                    .GroupBy(row => ReadString(row, "campaignId", ""), StringComparer.OrdinalIgnoreCase)
-                    .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
+                    .GroupBy(row => ReadString(row, "campaignId", ""), StringComparer.Ordinal)
+                    .ToDictionary(group => group.Key, group => group.Last(), StringComparer.Ordinal);
             List<Dictionary<string, object>> campaigns = new List<Dictionary<string, object>>();
+            List<string> fenced = FencedSaveSyncCampaignIds();
+            databaseIds.UnionWith(fenced);
             foreach (Dictionary<string, object> databaseCampaign in databaseCampaigns)
             {
                 string campaignId = ReadString(databaseCampaign, "campaignId", "");
+                if (FencedSaveSyncOperation(campaignId) != null) continue;
                 if (!TryResolveAuditableCampaignDirectory(
                     campaignId, out string directory))
                 {
@@ -106,15 +115,21 @@ namespace ReignBetaServer
 
             Dictionary<string, object> nativeSaveInventory =
                 ApplyNativeSaveInventory(campaigns, pending);
+            campaigns.AddRange(fenced.Select(id => SaveSyncFencedResult(id, FencedSaveSyncOperation(id))));
 
             List<Dictionary<string, object>> orphanPortraitRoots =
                 EnumerateOrphanPortraitRoots(databaseIds);
             List<Dictionary<string, object>> orphanCampaignRoots =
                 EnumerateOrphanCampaignRoots(databaseIds);
+            // The active directory stays owned by the journal even if a partially
+            // restored metadata file identifies another campaign.
+            orphanCampaignRoots.RemoveAll(row => FencedSaveSyncOperation(ReadString(row, "name", "")) != null);
             List<Dictionary<string, object>> orphanSaveSyncRoots =
                 EnumerateOrphanSaveSyncRoots(databaseIds);
+            var protectedRoots = fenced.Select(SaveSyncCampaignRoot).ToHashSet(StringComparer.Ordinal);
+            orphanSaveSyncRoots.RemoveAll(row => protectedRoots.Contains(ReadString(row, "path", "")));
             string portraitCacheRoot = CampaignPortraitCacheRoot();
-            string installedPortraitCacheRoot = CharacterEditorPortraitCacheRoot();
+            string installedPortraitCacheRoot = CharactersService.CharacterEditorPortraitCacheRoot();
             string installedSharedRoot = string.IsNullOrWhiteSpace(installedPortraitCacheRoot)
                 ? ""
                 : Path.Combine(installedPortraitCacheRoot, "_shared");
@@ -278,7 +293,7 @@ namespace ReignBetaServer
                 saveSync["matchingNativeSavePoints"] = matching;
                 saveSync["staleNativeSavePoints"] = stale;
 
-                Dictionary<string, object> metadata = ReadJsonObject(Path.Combine(
+                Dictionary<string, object> metadata = CampaignFileService.ReadJsonObject(Path.Combine(
                     StrictCampaignDirectory(campaignId), "campaign.json"));
                 string lifecycle = ReadString(metadata, "saveSyncLifecycle", "");
                 bool pendingRetirement = pending.ContainsKey(campaignId);
@@ -358,7 +373,7 @@ namespace ReignBetaServer
                 return Path.GetFullPath(
                     CampaignNativeSaveRootOverrideForTests);
             // Local deployment records the selected Windows user's save folder in WSL notation.
-            string saveRoot = ReadString(ReadJsonObject(Path.Combine(DataDir, "windows-bridge.json")), "nativeSaveRoot", "");
+            string saveRoot = ReadString(CampaignFileService.ReadJsonObject(Path.Combine(Program.DataDir, "windows-bridge.json")), "nativeSaveRoot", "");
             if (!saveRoot.StartsWith("/mnt/", StringComparison.Ordinal)
                 || !saveRoot.EndsWith("/Mount and Blade II Bannerlord/Game Saves", StringComparison.Ordinal)
                 || Path.GetFullPath(saveRoot) != saveRoot)
@@ -417,7 +432,7 @@ namespace ReignBetaServer
         {
             directory = "";
             if (string.IsNullOrWhiteSpace(campaignId)
-                || IsInternalCampaignId(campaignId)) return false;
+                || CampaignFileService.IsInternalCampaignId(campaignId)) return false;
             try
             {
                 directory = StrictCampaignDirectory(campaignId);
@@ -430,10 +445,10 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> CleanupZeroSaveCampaignsApi(
+        internal static Dictionary<string, object> CleanupZeroSaveCampaignsApi(
             Dictionary<string, object> payload)
         {
-            CampaignDataGate.EnterWriteLock();
+            Program.CampaignDataGate.EnterWriteLock();
             try
             {
                 payload = payload ?? new Dictionary<string, object>();
@@ -503,7 +518,7 @@ namespace ReignBetaServer
                 List<Dictionary<string, object>> orphanResults =
                     new List<Dictionary<string, object>>();
                 DeleteAuditedOrphanRoots(ReadDictionaryList(
-                        audit, "orphanCampaignRoots"), CampaignsRoot(), false,
+                        audit, "orphanCampaignRoots"), CampaignFileService.CampaignsRoot(), false,
                     orphanResults);
                 DeleteAuditedOrphanRoots(ReadDictionaryList(
                         audit, "orphanSaveSyncRoots"), SaveSyncRoot(), false,
@@ -546,10 +561,10 @@ namespace ReignBetaServer
                             " stale Save Sync registration(s) were removed. The _shared portrait library was preserved."
                         : "Some campaigns were deleted, but residual cleanup requires attention. Review the per-campaign results."
                 };
-                LogOperational("campaign.zero_save_cleanup", response);
+                OperationsService.LogOperational("campaign.zero_save_cleanup", response);
                 return response;
             }
-            finally { CampaignDataGate.ExitWriteLock(); }
+            finally { Program.CampaignDataGate.ExitWriteLock(); }
         }
 
         private static void DeleteAuditedOrphanRoots(
@@ -603,7 +618,7 @@ namespace ReignBetaServer
         {
             Dictionary<string, object> meta = dir == null
                 ? new Dictionary<string, object>()
-                : ReadJsonObject(Path.Combine(dir.FullName, "campaign.json"));
+                : CampaignFileService.ReadJsonObject(Path.Combine(dir.FullName, "campaign.json"));
             string cacheDir = CampaignPortraitCacheDirectory(campaignId);
             long campaignFileBytes =
                 dir == null ? 0 : SafeDirectorySize(dir.FullName);
@@ -655,21 +670,21 @@ namespace ReignBetaServer
             };
         }
 
-        private static void WriteCampaignBackupDownload(NetworkStream stream, Dictionary<string, string> query)
+        internal static void WriteCampaignBackupDownload(NetworkStream stream, Dictionary<string, string> query)
         {
             string campaignId = query != null && query.TryGetValue("campaignId", out string requested) ? requested : "";
             if (string.IsNullOrWhiteSpace(campaignId))
             {
-                WriteJson(stream, 400, new Dictionary<string, object> { ["ok"] = false, ["error"] = "campaignId is required." });
+                Program.WriteJson(stream, 400, new Dictionary<string, object> { ["ok"] = false, ["error"] = "campaignId is required." });
                 return;
             }
             Dictionary<string, object> archive;
-            CampaignDataGate.EnterWriteLock();
+            Program.CampaignDataGate.EnterWriteLock();
             try { archive = CreateCampaignBackupArchive(campaignId); }
-            finally { CampaignDataGate.ExitWriteLock(); }
+            finally { Program.CampaignDataGate.ExitWriteLock(); }
             if (!ReadBool(archive, "ok", false))
             {
-                WriteJson(stream, 500, archive);
+                Program.WriteJson(stream, 500, archive);
                 return;
             }
             string path = ReadString(archive, "path", "");
@@ -685,7 +700,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> CreateCampaignBackupArchive(string campaignId)
         {
-            string campaignDir = CampaignDirectory(campaignId);
+            string campaignDir = CampaignFileService.CampaignDirectory(campaignId);
             bool databaseExists = ReignPostgreSqlStorage.ListCampaignMetadata().Any(
                 row => ReadString(row, "campaignId", "")
                     .Equals(campaignId, StringComparison.OrdinalIgnoreCase));
@@ -696,7 +711,7 @@ namespace ReignBetaServer
                     ["error"] = "Campaign was not found in PostgreSQL."
                 };
             string operationId = Guid.NewGuid().ToString("N");
-            string backupRoot = Path.Combine(DataDir, "backups");
+            string backupRoot = Path.Combine(Program.DataDir, "backups");
             // Recovery folders already contain long campaign-relative paths. Staging
             // beneath the installed Steam module adds another avoidable directory chain.
             string stagingRoot = Path.Combine(Path.GetTempPath(), "reign-b", operationId.Substring(0, 12));
@@ -755,7 +770,7 @@ namespace ReignBetaServer
                         Path.Combine(stagedNativeSaves, nativeFileName), false);
                 }
 
-                Dictionary<string, object> meta = ReadJsonObject(Path.Combine(campaignDir, "campaign.json"));
+                Dictionary<string, object> meta = CampaignFileService.ReadJsonObject(Path.Combine(campaignDir, "campaign.json"));
                 List<Dictionary<string, object>> files = BackupFileManifest(stagingRoot);
                 Dictionary<string, object> manifest = new Dictionary<string, object>
                 {
@@ -789,8 +804,8 @@ namespace ReignBetaServer
                     ["expandedBytes"] = files.Sum(x => ReadLong(x, "bytes", 0)),
                     ["files"] = files
                 };
-                WriteJsonObject(Path.Combine(stagingRoot, "manifest.json"), manifest);
-                string safeLabel = SafePathSegment(ReadString(manifest, "campaignLabel", campaignId), campaignId);
+                CampaignFileService.WriteJsonObject(Path.Combine(stagingRoot, "manifest.json"), manifest);
+                string safeLabel = CampaignFileService.SafePathSegment(ReadString(manifest, "campaignLabel", campaignId), campaignId);
                 if (safeLabel.Length > 70) safeLabel = safeLabel.Substring(0, 70);
                 string fileName = "Bannerlord-Reign-" + safeLabel + "-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".reignbackup";
                 string archivePath = Path.Combine(generatedRoot, operationId + ".reignbackup");
@@ -806,7 +821,7 @@ namespace ReignBetaServer
                     ["fileCount"] = files.Count,
                     ["nativeSaveCount"] = matchingNativeSaves.Count
                 };
-                LogOperational("campaign.backup_exported", result);
+                OperationsService.LogOperational("campaign.backup_exported", result);
                 return result;
             }
             catch (Exception ex)
@@ -819,14 +834,23 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> ImportCampaignBackup(string uploadPath, Dictionary<string, string> query)
+        private enum DatabaseImportPhase { Untouched, MutationAttempted, Installed }
+        private enum ImportRename { Untouched, Attempted, Completed }
+
+        internal static Dictionary<string, object> ImportCampaignBackup(string uploadPath, Dictionary<string, string> query)
+            => ImportCampaignBackup(uploadPath, query, null);
+
+        // The optional callbacks belong to a single isolated self-test invocation.
+        private static Dictionary<string, object> ImportCampaignBackup(string uploadPath, Dictionary<string, string> query,
+            Action<string, string> beforeStep, Func<string, bool> entryExists = null)
         {
-            CampaignDataGate.EnterWriteLock();
-            try { return ImportCampaignBackupCore(uploadPath, query); }
-            finally { CampaignDataGate.ExitWriteLock(); }
+            Program.CampaignDataGate.EnterWriteLock();
+            try { return ImportCampaignBackupCore(uploadPath, query, beforeStep, entryExists ?? Path.Exists); }
+            finally { Program.CampaignDataGate.ExitWriteLock(); }
         }
 
-        private static Dictionary<string, object> ImportCampaignBackupCore(string uploadPath, Dictionary<string, string> query)
+        private static Dictionary<string, object> ImportCampaignBackupCore(string uploadPath, Dictionary<string, string> query,
+            Action<string, string> beforeStep, Func<string, bool> entryExists)
         {
             bool replace = query != null && query.TryGetValue("replace", out string replaceText) && replaceText.Equals("true", StringComparison.OrdinalIgnoreCase);
             bool replaceNativeSaves = query != null
@@ -837,60 +861,69 @@ namespace ReignBetaServer
             if (string.IsNullOrWhiteSpace(uploadPath) || !File.Exists(uploadPath)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "No backup archive was uploaded." };
             string running = CampaignMutationBlockReason();
             if (!string.IsNullOrWhiteSpace(running)) { TryDeleteFile(uploadPath); return new Dictionary<string, object> { ["ok"] = false, ["error"] = running }; }
-            string extractRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ".x", Guid.NewGuid().ToString("N").Substring(0, 12));
+            string operationRoot = Path.Combine(Program.DataDir, "backups", "import-recovery", Guid.NewGuid().ToString("N"));
+            string extractRoot = Path.Combine(operationRoot, "archive");
+            bool retainOperation = false;
             try
             {
                 ExtractCampaignBackupSecurely(uploadPath, extractRoot);
-                Dictionary<string, object> manifest = ReadJsonObject(Path.Combine(extractRoot, "manifest.json"));
+                Dictionary<string, object> manifest = CampaignFileService.ReadJsonObject(Path.Combine(extractRoot, "manifest.json"));
                 ValidateCampaignBackupManifest(extractRoot, manifest);
                 string campaignId = ReadString(manifest, "campaignId", "");
                 ValidateSaveSyncId(campaignId, "campaignId");
+                string destinationPortraits = CampaignPortraitCacheDirectory(campaignId);
+                if (Path.GetFileName(destinationPortraits).Equals("_shared", StringComparison.OrdinalIgnoreCase))
+                    return new Dictionary<string, object>
+                    {
+                        ["ok"] = false, ["conflict"] = true, ["campaignId"] = campaignId,
+                        ["error"] = "A campaign backup cannot replace the shared portrait library."
+                    };
                 string sourceCampaign = Path.Combine(extractRoot, "campaign");
                 string sourcePortraits = Path.Combine(extractRoot, "portrait_cache");
                 string sourceSaveSync = Path.Combine(extractRoot, "save_sync");
                 string sourceNativeSaves = Path.Combine(
                     extractRoot, "native_saves");
-                string sourceDatabase =
-                    Path.Combine(extractRoot,
-                        ReadString(manifest, "databaseArchive",
-                            "postgresql.dump"));
+                string sourceDatabase = SafeBackupPath(extractRoot, ReadString(manifest, "databaseArchive", "postgresql.dump"));
                 string destinationCampaign = StrictCampaignDirectory(campaignId);
-                string destinationPortraits = CampaignPortraitCacheDirectory(campaignId);
                 string destinationSaveSync = SaveSyncCampaignRoot(campaignId);
-                bool databaseExists =
-                    ReignPostgreSqlStorage.ListCampaignMetadata().Any(row =>
-                        ReadString(row, "campaignId", "")
-                            .Equals(
-                                campaignId,
-                                StringComparison.OrdinalIgnoreCase));
+                string destinationJournals = SaveSyncJournalDirectory(campaignId);
+                bool MatchesCampaign(Dictionary<string, object> row) =>
+                    string.Equals(ReadString(row, "campaignId", ""), campaignId, StringComparison.Ordinal);
+                var campaigns = ReignPostgreSqlStorage.ListCampaignMetadata();
+                var originalMetadata = campaigns.FirstOrDefault(MatchesCampaign);
+                string[] otherSpellings = campaigns.Select(row => ReadString(row, "campaignId", ""))
+                    .Where(id => id != campaignId && id.Equals(campaignId, StringComparison.OrdinalIgnoreCase)).ToArray();
+                void CheckDirectoryOwnership()
+                {
+                    CheckImportDirectorySpelling(destinationCampaign, otherSpellings, entryExists);
+                    CheckImportDirectorySpelling(destinationPortraits, otherSpellings, entryExists);
+                    CheckImportDirectorySpelling(destinationJournals, otherSpellings, entryExists);
+                }
+                CheckDirectoryOwnership();
+                bool databaseExists = originalMetadata != null;
                 if (databaseExists && !replace)
                     return new Dictionary<string, object> { ["ok"] = false, ["conflict"] = true, ["campaignId"] = campaignId, ["error"] = "This campaign already exists. Enable Replace existing campaign to restore over it." };
 
                 List<string> nativeSaveSources = Directory.Exists(
                         sourceNativeSaves)
-                    ? Directory.GetFiles(sourceNativeSaves, "*",
-                        SearchOption.TopDirectoryOnly)
-                        .Select(path =>
-                        {
-                            ValidateNativeSaveFileName(
-                                Path.GetFileName(path));
-                            return path;
-                        }).ToList()
+                    ? Directory.GetFiles(sourceNativeSaves, "*", SearchOption.TopDirectoryOnly).ToList()
                     : new List<string>();
                 string nativeSaveRoot = CampaignNativeSaveRoot();
-                List<string> nativeSaveConflicts = nativeSaveSources
-                    .Where(source =>
+                var nativeSaveConflicts = new List<string>();
+                bool occupiedNativeSlot = false;
+                foreach (string source in nativeSaveSources)
+                {
+                    string name = ValidateNativeSaveFileName(Path.GetFileName(source));
+                    string destination = Path.Combine(nativeSaveRoot, name);
+                    if (Directory.Exists(destination))
                     {
-                        string destination = Path.Combine(nativeSaveRoot,
-                            Path.GetFileName(source));
-                        return File.Exists(destination)
-                            && !FileSha256(destination).Equals(
-                                FileSha256(source),
-                                StringComparison.OrdinalIgnoreCase);
-                    })
-                    .Select(Path.GetFileName).ToList();
-                if (nativeSaveConflicts.Count > 0
-                    && !replaceNativeSaves)
+                        occupiedNativeSlot = true;
+                        nativeSaveConflicts.Add(name);
+                    }
+                    else if (File.Exists(destination) && FileSha256(destination) != FileSha256(source) && !replaceNativeSaves)
+                        nativeSaveConflicts.Add(name);
+                }
+                if (nativeSaveConflicts.Count > 0)
                     return new Dictionary<string, object>
                     {
                         ["ok"] = false,
@@ -898,53 +931,81 @@ namespace ReignBetaServer
                         ["nativeSaveConflict"] = true,
                         ["campaignId"] = campaignId,
                         ["nativeSaveConflicts"] = nativeSaveConflicts,
-                        ["error"] = "Native Bannerlord save files with the same names already exist. Enable Replace native saves to import this diagnostic bundle without silently overwriting them."
+                        ["error"] = occupiedNativeSlot
+                            ? "A directory occupies a requested native Bannerlord save path."
+                            : "Native Bannerlord save files with the same names already exist. Enable Replace native saves to import this diagnostic bundle without silently overwriting them."
                     };
 
-                string oldCampaign = "", oldPortraits = "", oldSaveSync = "";
-                string oldDatabase = Path.Combine(
-                    extractRoot, "recovery-postgresql.dump");
-                List<Dictionary<string, object>> oldSnapshots =
-                    new List<Dictionary<string, object>>();
-                string nativeSaveRecoveryRoot = Path.Combine(
-                    nativeSaveRoot,
-                    ".reign-import-" + Guid.NewGuid().ToString("N")
-                        .Substring(0, 12));
-                List<Dictionary<string, object>> nativeSaveRollback =
-                    new List<Dictionary<string, object>>();
-                List<Dictionary<string, object>> nativeSaveResults =
-                    new List<Dictionary<string, object>>();
+                var directories = new List<ImportDirectory>
+                {
+                    new ImportDirectory(sourceCampaign, destinationCampaign, operationRoot),
+                    new ImportDirectory(sourcePortraits, destinationPortraits, operationRoot),
+                    new ImportDirectory(sourceSaveSync, destinationSaveSync, operationRoot)
+                };
+                if (!replace && (directories.Any(dir => Path.Exists(dir.Destination))
+                    || Path.Exists(destinationJournals)))
+                    return new Dictionary<string, object> { ["ok"] = false, ["conflict"] = true, ["campaignId"] = campaignId,
+                        ["error"] = "A destination directory already exists. Enable Replace existing campaign to restore over it." };
+
+                var snapshots = ReadDictionaryList(manifest, "saveSyncSnapshots");
+                ReignPostgreSqlStorage.VerifyCampaignArchive(campaignId, sourceDatabase, snapshots);
+                if (replace && PrepareSaveSyncJournalsForCampaignRemoval(campaignId) is string journalDirectory)
+                {
+                    directories.Insert(0, new ImportDirectory(null, journalDirectory, operationRoot, "save_sync_journals"));
+                    // Journal settlement may prune recovery snapshots from the original registry inventory.
+                    originalMetadata = ReignPostgreSqlStorage.ListCampaignMetadata().FirstOrDefault(MatchesCampaign);
+                    if (databaseExists != (originalMetadata != null))
+                        throw new IOException("Campaign registration changed during backup import preflight.");
+                }
+                string oldDatabase = Path.Combine(operationRoot, "original.dump");
+                string oldDatabaseHash = null;
+                var oldSnapshots = new List<Dictionary<string, object>>();
+                var databasePhase = DatabaseImportPhase.Untouched;
+                var nativeSaves = new List<ImportNativeSave>();
+                List<Dictionary<string, object>> nativeSaveResults;
                 try
                 {
                     if (databaseExists)
                     {
-                        oldSnapshots =
-                            ReignPostgreSqlStorage.ListSnapshots(campaignId);
-                        ReignPostgreSqlStorage.ExportCampaignArchive(
-                            campaignId, oldDatabase);
+                        beforeStep?.Invoke("list_snapshots", campaignId);
+                        oldSnapshots = ReignPostgreSqlStorage.ListSnapshots(campaignId);
+                        if (ReadString(originalMetadata, "schemaName", "") != ReignPostgreSqlStorage.CampaignSchemaName(campaignId)
+                            || ReadLong(originalMetadata, "snapshotCount", -1) != oldSnapshots.Count)
+                            throw new InvalidDataException("The existing PostgreSQL campaign and snapshot registry cannot be fully backed up.");
+                        string partial = oldDatabase + ".partial";
+                        beforeStep?.Invoke("export_recovery", partial);
+                        ReignPostgreSqlStorage.ExportCampaignArchive(campaignId, partial);
+                        beforeStep?.Invoke("verify_recovery", partial);
+                        ReignPostgreSqlStorage.VerifyCampaignArchive(campaignId, partial, oldSnapshots);
+                        oldDatabaseHash = FileSha256(partial);
+                        File.Move(partial, oldDatabase);
                     }
-                    oldCampaign = InstallImportedDirectory(sourceCampaign, destinationCampaign, replace);
-                    if (Directory.Exists(sourcePortraits)) oldPortraits = InstallImportedDirectory(sourcePortraits, destinationPortraits, replace);
-                    else if (replace && Directory.Exists(destinationPortraits))
+                    CampaignFileService.WriteJsonObject(Path.Combine(operationRoot, "inventory.json"), new Dictionary<string, object>
                     {
-                        oldPortraits = MoveImportedDirectoryAside(destinationPortraits);
-                    }
-                    if (Directory.Exists(sourceSaveSync)) oldSaveSync = InstallImportedDirectory(sourceSaveSync, destinationSaveSync, replace);
-                    else if (replace && Directory.Exists(destinationSaveSync))
-                    {
-                        oldSaveSync = MoveImportedDirectoryAside(destinationSaveSync);
-                    }
-                    ReignPostgreSqlStorage.ImportCampaignArchive(
-                        campaignId,
-                        sourceDatabase,
-                        ReadDictionaryList(manifest, "saveSyncSnapshots"),
-                        replace);
-                    nativeSaveResults = InstallImportedNativeSaves(
-                        nativeSaveSources,
-                        nativeSaveRoot,
-                        replaceNativeSaves,
-                        nativeSaveRecoveryRoot,
-                        nativeSaveRollback);
+                        ["campaignId"] = campaignId,
+                        ["directories"] = directories.Select(dir => dir.Inventory()).ToArray(),
+                        ["nativeSaveRoot"] = nativeSaveRoot,
+                        ["originalRegisteredCampaignFound"] = databaseExists,
+                        ["originalCampaign"] = originalMetadata,
+                        ["originalDatabaseSha256"] = oldDatabaseHash,
+                        ["originalDatabaseBytes"] = databaseExists ? new FileInfo(oldDatabase).Length : 0,
+                        ["originalSnapshots"] = oldSnapshots
+                    });
+                    foreach (ImportDirectory directory in directories)
+                        directory.Install(replace, beforeStep);
+                    // Installing the first entry in an empty parent can expose a registered sibling's alias.
+                    // The renames are still reversible here and PostgreSQL is untouched.
+                    if (otherSpellings.Length > 0) CheckDirectoryOwnership();
+                    ReignPostgreSqlStorage.ImportCampaignArchive(campaignId, sourceDatabase, snapshots, databaseExists,
+                        () =>
+                        {
+                            databasePhase = DatabaseImportPhase.MutationAttempted;
+                            beforeStep?.Invoke("database_mutation", sourceDatabase);
+                        });
+                    databasePhase = DatabaseImportPhase.Installed;
+                    nativeSaveResults = InstallImportedNativeSaves(nativeSaveSources, nativeSaveRoot, replaceNativeSaves,
+                        Path.Combine(operationRoot, "original-native"), nativeSaves);
+                    beforeStep?.Invoke("finalize", operationRoot);
                     int importedSavePoints = ReadDictionaryList(
                         ReadSaveSyncLedger(campaignId), "points").Count;
                     MarkCampaignSaveSyncLifecycle(
@@ -955,31 +1016,68 @@ namespace ReignBetaServer
                         importedSavePoints > 0);
                     CancelPendingCampaignRetirement(
                         campaignId, "campaign_backup_imported");
-                    TryDeleteDirectory(oldCampaign);
-                    TryDeleteDirectory(oldPortraits);
-                    TryDeleteDirectory(oldSaveSync);
-                    TryDeleteDirectory(nativeSaveRecoveryRoot);
                 }
-                catch
+                catch (Exception failure)
                 {
-                    RestoreImportedNativeSaves(nativeSaveRollback);
-                    TryDeleteDirectory(nativeSaveRecoveryRoot);
-                    RestoreImportedDirectory(destinationCampaign, oldCampaign);
-                    RestoreImportedDirectory(destinationPortraits, oldPortraits);
-                    RestoreImportedDirectory(destinationSaveSync, oldSaveSync);
-                    if (File.Exists(oldDatabase))
+                    retainOperation = true;
+                    var errors = new List<string>();
+                    void Recover(string resource, Action restore)
                     {
-                        try
-                        {
-                            ReignPostgreSqlStorage.ImportCampaignArchive(
-                                campaignId,
-                                oldDatabase,
-                                oldSnapshots,
-                                true);
-                        }
-                        catch { }
+                        try { restore(); }
+                        catch (Exception ex) { errors.Add(resource + ": " + ex.Message); }
                     }
-                    throw;
+                    foreach (ImportNativeSave save in nativeSaves.AsEnumerable().Reverse())
+                        Recover(save.Destination, save.Restore);
+                    string databaseState = "untouched";
+                    if (databasePhase == DatabaseImportPhase.Installed && databaseExists)
+                    {
+                        databaseState = "recovery_required";
+                        Recover("PostgreSQL", () =>
+                        {
+                            if (oldDatabaseHash == null || FileSha256(oldDatabase) != oldDatabaseHash)
+                                throw new InvalidDataException("The verified recovery export has changed.");
+                            ReignPostgreSqlStorage.ImportCampaignArchive(campaignId, oldDatabase, oldSnapshots, true);
+                            databaseState = "archive_reapplied";
+                            // Archive import rebuilds registry metadata and stamps the restored load context.
+                            // Keep the original even when pg_restore and that metadata transaction both succeed.
+                            errors.Add("The original PostgreSQL archive was reapplied. Its prior registry and load context require reconciliation.");
+                        });
+                    }
+                    else if (databasePhase == DatabaseImportPhase.Installed)
+                    {
+                        // A missing joined campaign-registry row does not establish that every
+                        // snapshot DropCampaign would delete was created by this import.
+                        databaseState = "new_install_retained";
+                        errors.Add("The installed PostgreSQL campaign was retained for reconciliation.");
+                    }
+                    else if (databasePhase == DatabaseImportPhase.MutationAttempted)
+                    {
+                        databaseState = "recovery_required";
+                        errors.Add("PostgreSQL import stopped during mutation. Its schema and registry state require inspection.");
+                    }
+                    foreach (ImportDirectory directory in directories.AsEnumerable().Reverse())
+                        Recover(directory.Destination, directory.Restore);
+                    if (errors.Count == 0)
+                    {
+                        retainOperation = false;
+                        throw;
+                    }
+                    var recovery = new Dictionary<string, object>
+                    {
+                        ["ok"] = false,
+                        ["campaignId"] = campaignId,
+                        ["error"] = failure.Message + " Backup import requires recovery. Retained operation files are at " + operationRoot + ".",
+                        ["recoveryRequired"] = true,
+                        ["recoveryPath"] = operationRoot,
+                        ["recoveryErrors"] = errors,
+                        ["databaseState"] = databaseState,
+                        ["directories"] = directories.Select(dir => dir.Inventory()).ToArray(),
+                        ["nativeSaves"] = nativeSaves.Select(save => save.Inventory()).ToArray()
+                    };
+                    Recover("recovery receipt", () =>
+                        CampaignFileService.WriteJsonObject(Path.Combine(operationRoot, "recovery-required.json"), recovery));
+                    OperationsService.LogOperational("campaign.backup_import_failed", recovery);
+                    return recovery;
                 }
                 Dictionary<string, object> result = new Dictionary<string, object>
                 {
@@ -999,751 +1097,144 @@ namespace ReignBetaServer
                         ? "Campaign and native Bannerlord save files restored. Load the imported save to continue with its fully paired Reign history."
                         : "Legacy Reign campaign restored. Supply its matching native Bannerlord save before loading it."
                 };
-                LogOperational("campaign.backup_imported", result);
+                OperationsService.LogOperational("campaign.backup_imported", result);
                 return result;
+            }
+            catch (ImportDirectoryAliasException ex)
+            {
+                return new Dictionary<string, object> { ["ok"] = false, ["conflict"] = true, ["campaignId"] = ex.CampaignId, ["error"] = ex.Message };
             }
             catch (Exception ex)
             {
-                LogOperational("campaign.backup_import_failed", new Dictionary<string, object> { ["error"] = ex.Message });
+                OperationsService.LogOperational("campaign.backup_import_failed", new Dictionary<string, object> { ["error"] = ex.Message });
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = ex.Message };
             }
             finally
             {
                 TryDeleteFile(uploadPath);
-                TryDeleteDirectory(extractRoot);
+                if (!retainOperation) TryDeleteDirectory(operationRoot);
+            }
+        }
+
+        private sealed class ImportDirectoryAliasException : IOException
+        {
+            internal readonly string CampaignId;
+
+            internal ImportDirectoryAliasException(string destination)
+                : base("The import destination shares a filesystem name with a differently spelled campaign: " + destination)
+                => CampaignId = Path.GetFileName(destination);
+        }
+
+        private static void CheckImportDirectorySpelling(string destination, string[] otherSpellings, Func<string, bool> entryExists)
+        {
+            if (!entryExists(destination)) return;
+            string parent = Path.GetDirectoryName(destination);
+            string requested = Path.GetFileName(destination);
+            // Enumeration returns stored spellings even when a lookup accepts a case variant.
+            var stored = Directory.EnumerateFileSystemEntries(parent).Select(Path.GetFileName)
+                .Where(name => requested.Equals(name, StringComparison.OrdinalIgnoreCase)).ToHashSet(StringComparer.Ordinal);
+            if (!stored.Contains(requested)
+                || otherSpellings.Any(id => !stored.Contains(id) && entryExists(Path.Combine(parent, id))))
+                throw new ImportDirectoryAliasException(destination);
+        }
+
+        private sealed class ImportNativeSave
+        {
+            internal readonly string Destination;
+            private readonly string backup, originalHash, incomingHash;
+            private ImportRename installation;
+
+            internal ImportNativeSave(string destination, string backup, string originalHash, string incomingHash)
+            {
+                Destination = destination;
+                this.backup = backup;
+                this.originalHash = originalHash;
+                this.incomingHash = incomingHash;
+            }
+
+            internal void Install(string source)
+            {
+                if (originalHash != null)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(backup));
+                    CopyVerified(Destination, backup, originalHash, false);
+                }
+                installation = ImportRename.Attempted;
+                CopyVerified(source, Destination, incomingHash, originalHash != null);
+                installation = ImportRename.Completed;
+                if (FileSha256(Destination) != incomingHash)
+                    throw new InvalidDataException("Imported native save verification failed: " + Destination);
+            }
+
+            internal void Restore()
+            {
+                if (installation == ImportRename.Untouched) return;
+                bool present = File.Exists(Destination);
+                if (Directory.Exists(Destination))
+                    throw new IOException("A directory occupies the native save path. Recovery copy retained.");
+                if (installation == ImportRename.Attempted)
+                {
+                    if ((present ? FileSha256(Destination) : null) != originalHash)
+                        throw new IOException("Native installation did not complete and the original state cannot be confirmed.");
+                    return;
+                }
+                if (present && FileSha256(Destination) != incomingHash)
+                    throw new IOException("Native save changed since installation. Recovery copy retained.");
+                if (originalHash != null)
+                    CopyVerified(backup, Destination, originalHash, present);
+                else if (present)
+                    File.Delete(Destination);
+                installation = ImportRename.Untouched;
+            }
+
+            internal Dictionary<string, object> Inventory() => new Dictionary<string, object>
+            {
+                ["destination"] = Destination, ["original"] = backup, ["originalSha256"] = originalHash,
+                ["incomingSha256"] = incomingHash, ["installation"] = installation.ToString()
+            };
+
+            private static void CopyVerified(string source, string destination, string hash, bool overwrite)
+            {
+                string temporary = Path.Combine(Path.GetDirectoryName(destination), ".ri-" + Guid.NewGuid().ToString("N") + ".tmp");
+                try
+                {
+                    File.Copy(source, temporary, false);
+                    if (FileSha256(temporary) != hash)
+                        throw new InvalidDataException("Native save copy failed hash verification: " + source);
+                    File.Move(temporary, destination, overwrite);
+                }
+                finally { TryDeleteFile(temporary); }
             }
         }
 
         private static List<Dictionary<string, object>> InstallImportedNativeSaves(
-            IEnumerable<string> sourceFiles,
-            string destinationRoot,
-            bool replace,
-            string recoveryRoot,
-            List<Dictionary<string, object>> rollback)
+            List<string> sources, string destinationRoot, bool replace, string recoveryRoot, List<ImportNativeSave> rollback)
         {
-            List<Dictionary<string, object>> results =
-                new List<Dictionary<string, object>>();
-            List<string> sources = (sourceFiles ?? Enumerable.Empty<string>())
-                .ToList();
+            var results = new List<Dictionary<string, object>>();
             if (sources.Count == 0) return results;
             Directory.CreateDirectory(destinationRoot);
             foreach (string source in sources)
             {
-                string fileName = ValidateNativeSaveFileName(
-                    Path.GetFileName(source));
+                string fileName = ValidateNativeSaveFileName(Path.GetFileName(source));
                 string destination = Path.Combine(destinationRoot, fileName);
-                if (File.Exists(destination)
-                    && FileSha256(destination).Equals(
-                        FileSha256(source),
-                        StringComparison.OrdinalIgnoreCase))
+                string incomingHash = FileSha256(source);
+                string originalHash = File.Exists(destination) ? FileSha256(destination) : null;
+                string result = "already_present";
+                if (incomingHash != originalHash)
                 {
-                    results.Add(new Dictionary<string, object>
-                    {
-                        ["fileName"] = fileName,
-                        ["result"] = "already_present",
-                        ["bytes"] = new FileInfo(destination).Length
-                    });
-                    continue;
+                    if (originalHash != null && !replace)
+                        throw new IOException("Native Bannerlord save conflict: " + fileName);
+                    var save = new ImportNativeSave(destination, Path.Combine(recoveryRoot, fileName), originalHash, incomingHash);
+                    rollback.Add(save);
+                    save.Install(source);
+                    result = originalHash == null ? "installed" : "replaced";
                 }
-                if (File.Exists(destination) && !replace)
-                    throw new IOException(
-                        "Native Bannerlord save conflict: " + fileName);
-
-                Directory.CreateDirectory(recoveryRoot);
-                string backup = Path.Combine(recoveryRoot, fileName);
-                bool existed = File.Exists(destination);
-                if (existed) File.Copy(destination, backup, false);
-                rollback.Add(new Dictionary<string, object>
-                {
-                    ["destination"] = destination,
-                    ["backup"] = backup,
-                    ["existed"] = existed
-                });
-                string temporary = Path.Combine(destinationRoot,
-                    ".ri-" + Guid.NewGuid().ToString("N")
-                        .Substring(0, 12) + ".tmp");
-                try
-                {
-                    File.Copy(source, temporary, true);
-                    if (existed)
-                    {
-                        // Use the same atomic rename primitive as profile persistence. The
-                        // separate recovery copy above retains the original native save.
-                        const uint replaceExisting = 0x1;
-                        const uint writeThrough = 0x8;
-                        if (!MoveFileEx(ExtendedLengthPath(temporary), ExtendedLengthPath(destination),
-                            replaceExisting | writeThrough))
-                            throw new IOException("Atomic native-save replacement failed for " + fileName + ".",
-                                new System.ComponentModel.Win32Exception(
-                                    System.Runtime.InteropServices.Marshal.GetLastWin32Error()));
-                    }
-                    else
-                        File.Move(temporary, destination);
-                }
-                finally
-                {
-                    TryDeleteFile(temporary);
-                }
-                if (!FileSha256(destination).Equals(
-                    FileSha256(source), StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException(
-                        "Imported native save hash verification failed: " +
-                        fileName);
                 results.Add(new Dictionary<string, object>
                 {
-                    ["fileName"] = fileName,
-                    ["result"] = existed ? "replaced" : "installed",
-                    ["bytes"] = new FileInfo(destination).Length
+                    ["fileName"] = fileName, ["result"] = result, ["bytes"] = new FileInfo(destination).Length
                 });
             }
             return results;
-        }
-
-        private static void RestoreImportedNativeSaves(
-            IEnumerable<Dictionary<string, object>> rollback)
-        {
-            foreach (Dictionary<string, object> item in
-                (rollback ?? Enumerable.Empty<Dictionary<string, object>>())
-                    .Reverse())
-            {
-                string destination = ReadString(
-                    item, "destination", "");
-                string backup = ReadString(item, "backup", "");
-                try
-                {
-                    if (ReadBool(item, "existed", false)
-                        && File.Exists(backup))
-                        File.Copy(backup, destination, true);
-                    else
-                        TryDeleteFile(destination);
-                }
-                catch { }
-            }
-        }
-
-        private static Dictionary<string, object> DeleteCampaignBackupData(Dictionary<string, object> payload)
-        {
-            CampaignDataGate.EnterWriteLock();
-            try { return DeleteCampaignBackupDataCore(payload); }
-            finally { CampaignDataGate.ExitWriteLock(); }
-        }
-
-        private static Dictionary<string, object> DeleteCampaignBackupDataCore(Dictionary<string, object> payload)
-        {
-            payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", "");
-            ValidateSaveSyncId(campaignId, "campaignId");
-            string confirmation = ReadString(payload, "confirmation", "");
-            string campaignDir = CampaignDirectory(campaignId);
-            bool databaseExists =
-                ReignPostgreSqlStorage.ListCampaignMetadata().Any(row =>
-                    ReadString(row, "campaignId", "")
-                        .Equals(campaignId, StringComparison.OrdinalIgnoreCase));
-            if (string.IsNullOrWhiteSpace(campaignId) || !databaseExists)
-                return new Dictionary<string, object>
-                {
-                    ["ok"] = false,
-                    ["error"] = "Campaign was not found."
-                };
-            Dictionary<string, object> meta = ReadJsonObject(Path.Combine(campaignDir, "campaign.json"));
-            string label = ReadString(meta, "campaignLabel", ReadString(meta, "mainHeroName", campaignId));
-            if (!confirmation.Equals(campaignId, StringComparison.OrdinalIgnoreCase) && !confirmation.Equals(label, StringComparison.OrdinalIgnoreCase))
-                return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Confirmation must exactly match the campaign ID or label." };
-            return DeleteCampaignOwnedDataCore(
-                campaignId, label, false, "confirmed_campaign_delete");
-        }
-
-        private static Dictionary<string, object> DeleteCampaignOwnedDataCore(
-            string campaignId,
-            string label,
-            bool allowBannerlordRunning,
-            string reason)
-        {
-            ValidateSaveSyncId(campaignId, "campaignId");
-            if (campaignId.Equals("_shared", StringComparison.OrdinalIgnoreCase))
-                return new Dictionary<string, object>
-                {
-                    ["ok"] = false,
-                    ["campaignDeleted"] = false,
-                    ["error"] = "The shared portrait library cannot be deleted as a campaign."
-                };
-            if (!allowBannerlordRunning)
-            {
-                string running = CampaignMutationBlockReason();
-                if (!string.IsNullOrWhiteSpace(running))
-                    return new Dictionary<string, object>
-                    {
-                        ["ok"] = false,
-                        ["campaignDeleted"] = false,
-                        ["error"] = running
-                    };
-            }
-
-            lock (CampaignBackupMutationLock)
-            {
-                string campaignDir = StrictCampaignDirectory(campaignId);
-                string portraitDir = CampaignPortraitCacheDirectory(campaignId);
-                string saveSyncDir = SaveSyncCampaignRoot(campaignId);
-                string campaignRoot = CampaignsRoot();
-                string portraitRoot = CampaignPortraitCacheRoot();
-                string saveSyncRoot = SaveSyncRoot();
-                ValidateCampaignOwnedDirectory(campaignDir, campaignRoot, false);
-                ValidateCampaignOwnedDirectory(portraitDir, portraitRoot, true);
-                ValidateCampaignOwnedDirectory(saveSyncDir, saveSyncRoot, false);
-
-                bool databaseExists = ReignPostgreSqlStorage.ListCampaignMetadata().Any(row =>
-                    ReadString(row, "campaignId", "").Equals(
-                        campaignId, StringComparison.OrdinalIgnoreCase));
-                bool campaignExists = Directory.Exists(campaignDir);
-                bool portraitExists = Directory.Exists(portraitDir);
-                bool saveSyncExists = Directory.Exists(saveSyncDir);
-                if (!databaseExists && !campaignExists && !portraitExists && !saveSyncExists)
-                {
-                    CancelPendingCampaignRetirement(campaignId, "already_deleted");
-                    return new Dictionary<string, object>
-                    {
-                        ["ok"] = true,
-                        ["result"] = "already_deleted",
-                        ["campaignId"] = campaignId,
-                        ["campaignDeleted"] = true,
-                        ["cleanupComplete"] = true,
-                        ["countsBySubsystem"] = EmptyCampaignDeletionCounts()
-                    };
-                }
-
-                Dictionary<string, object> counts = EmptyCampaignDeletionCounts();
-                counts["campaignFiles"] = CampaignDeletionCount(campaignDir);
-                counts["portraitCache"] = CampaignDeletionCount(portraitDir);
-                counts["saveSync"] = CampaignDeletionCount(saveSyncDir);
-                Dictionary<string, object> databaseCounts =
-                    ReadDictionary(counts, "postgresql") ?? new Dictionary<string, object>();
-                databaseCounts["schemas"] = databaseExists ? 1 : 0;
-                databaseCounts["snapshots"] = databaseExists
-                    ? ReignPostgreSqlStorage.ListSnapshots(campaignId).Count
-                    : 0;
-
-                string operationId = SafePathSegment(campaignId, "campaign") + "_" +
-                    Guid.NewGuid().ToString("N");
-                string dataStageRoot = Path.Combine(
-                    DataDir, "campaign-retirement-staging", operationId);
-                string portraitParent = Directory.GetParent(
-                    Path.GetFullPath(portraitRoot).TrimEnd(
-                        Path.DirectorySeparatorChar,
-                        Path.AltDirectorySeparatorChar))?.FullName ?? DataDir;
-                string portraitStageRoot = Path.Combine(
-                    portraitParent, ".reign-campaign-retirement-staging", operationId);
-                string movedCampaign = Path.Combine(dataStageRoot, "campaign");
-                string movedSaveSync = Path.Combine(dataStageRoot, "save-sync");
-                string movedPortrait = Path.Combine(portraitStageRoot, "portrait-cache");
-                bool movedCampaignReady = false;
-                bool movedPortraitReady = false;
-                bool movedSaveSyncReady = false;
-                bool databaseDropped = false;
-                try
-                {
-                    ReignPostgreSqlStorage.ClearAllPools();
-                    int vectorsDeleted = databaseExists
-                        ? DeleteCampaignSemanticVectors(campaignId)
-                        : 0;
-                    Dictionary<string, object> semanticCounts =
-                        ReadDictionary(counts, "semanticVectors") ?? new Dictionary<string, object>();
-                    semanticCounts["records"] = vectorsDeleted;
-
-                    Directory.CreateDirectory(dataStageRoot);
-                    Directory.CreateDirectory(portraitStageRoot);
-                    WriteCampaignRetirementTransaction(
-                        dataStageRoot, campaignId, "staging");
-                    WriteCampaignRetirementTransaction(
-                        portraitStageRoot, campaignId, "staging");
-                    if (campaignExists)
-                    {
-                        MoveDirectoryWithRetries(campaignDir, movedCampaign);
-                        VerifyStagedCampaignDirectory(campaignDir, movedCampaign);
-                        movedCampaignReady = true;
-                    }
-                    if (saveSyncExists)
-                    {
-                        MoveDirectoryWithRetries(saveSyncDir, movedSaveSync);
-                        VerifyStagedCampaignDirectory(saveSyncDir, movedSaveSync);
-                        movedSaveSyncReady = true;
-                    }
-                    if (portraitExists)
-                    {
-                        MoveDirectoryWithRetries(portraitDir, movedPortrait);
-                        VerifyStagedCampaignDirectory(portraitDir, movedPortrait);
-                        movedPortraitReady = true;
-                    }
-                    if (CampaignRetirementFailureInjectionForTests == "after_stage")
-                        throw new IOException("Injected campaign-retirement staging failure.");
-
-                    if (databaseExists)
-                    {
-                        ReignPostgreSqlStorage.DropCampaign(campaignId);
-                        databaseDropped = true;
-                    }
-                    WriteCampaignRetirementTransaction(
-                        dataStageRoot, campaignId, "committed");
-                    WriteCampaignRetirementTransaction(
-                        portraitStageRoot, campaignId, "committed");
-                    ClearSaveSyncCampaignRuntime(campaignId);
-                    CancelPendingCampaignRetirement(campaignId, "campaign_deleted");
-
-                    List<string> residuals = new List<string>();
-                    if (CampaignRetirementFailureInjectionForTests == "after_database_drop")
-                    {
-                        if (Directory.Exists(dataStageRoot)) residuals.Add(dataStageRoot);
-                        if (Directory.Exists(portraitStageRoot)) residuals.Add(portraitStageRoot);
-                    }
-                    else
-                    {
-                        DeleteCampaignStagingRoot(dataStageRoot, residuals);
-                        DeleteCampaignStagingRoot(portraitStageRoot, residuals);
-                    }
-                    bool rootsGone = !Directory.Exists(campaignDir)
-                        && !Directory.Exists(saveSyncDir)
-                        && !Directory.Exists(portraitDir);
-                    bool databaseGone = !ReignPostgreSqlStorage.ListCampaignMetadata().Any(row =>
-                        ReadString(row, "campaignId", "").Equals(
-                            campaignId, StringComparison.OrdinalIgnoreCase));
-                    bool campaignDeleted = rootsGone && databaseGone;
-                    Dictionary<string, object> result = new Dictionary<string, object>
-                    {
-                        ["ok"] = campaignDeleted,
-                        ["result"] = campaignDeleted
-                            ? residuals.Count == 0 ? "deleted" : "deleted_cleanup_pending"
-                            : "delete_verification_failed",
-                        ["campaignId"] = campaignId,
-                        ["label"] = label ?? campaignId,
-                        ["reason"] = reason ?? "",
-                        ["campaignDeleted"] = campaignDeleted,
-                        ["campaignDeletionPending"] = false,
-                        ["cleanupComplete"] = residuals.Count == 0,
-                        ["residualCleanup"] = residuals,
-                        ["countsBySubsystem"] = counts,
-                        ["sharedPortraitLibraryPreserved"] = true,
-                        ["message"] = residuals.Count == 0
-                            ? "Campaign data, Save Sync storage, semantic vectors, and its portrait cache were permanently deleted."
-                            : "The campaign is no longer active, but staged files remain for startup cleanup."
-                    };
-                    LogOperational("campaign.deleted", result);
-                    return result;
-                }
-                catch (Exception ex)
-                {
-                    List<string> rollbackErrors = new List<string>();
-                    if (!databaseDropped)
-                    {
-                        RestoreStagedCampaignDirectory(
-                            movedCampaign, campaignDir, movedCampaignReady, rollbackErrors);
-                        RestoreStagedCampaignDirectory(
-                            movedSaveSync, saveSyncDir, movedSaveSyncReady, rollbackErrors);
-                        RestoreStagedCampaignDirectory(
-                            movedPortrait, portraitDir, movedPortraitReady, rollbackErrors);
-                    }
-                    Dictionary<string, object> failed = new Dictionary<string, object>
-                    {
-                        ["ok"] = false,
-                        ["result"] = databaseDropped
-                            ? "deleted_cleanup_pending"
-                            : "delete_failed_recovered",
-                        ["campaignId"] = campaignId,
-                        ["campaignDeleted"] = databaseDropped,
-                        ["campaignDeletionPending"] = !databaseDropped,
-                        ["cleanupComplete"] = false,
-                        ["countsBySubsystem"] = counts,
-                        ["residualCleanup"] = new[] { dataStageRoot, portraitStageRoot }
-                            .Where(Directory.Exists).ToList(),
-                        ["rollbackErrors"] = rollbackErrors,
-                        ["error"] = ex.Message
-                    };
-                    LogOperational("campaign.delete_failed", failed);
-                    return failed;
-                }
-            }
-        }
-
-        private static Dictionary<string, object> DeleteAllCampaignBackupData(Dictionary<string, object> payload)
-        {
-            return DeleteAllCampaignBackupData(payload, out _);
-        }
-
-        // Validates and schedules only; it makes no destructive call. scheduled is true only for the
-        // one request that published the pending owner, which then owns the response-sent signal.
-        private static Dictionary<string, object> DeleteAllCampaignBackupData(Dictionary<string, object> payload, out bool scheduled)
-        {
-            scheduled = false;
-            CampaignDataGate.EnterWriteLock();
-            try { return DeleteAllCampaignBackupDataCore(payload, ref scheduled); }
-            finally
-            {
-                CampaignDataGate.ExitWriteLock();
-                // After both campaign locks are released: the first scheduler stop settles queued
-                // never-started releases synchronously on this thread.
-                if (scheduled) RequestServerShutdown("campaign_delete_all");
-            }
-        }
-
-        private static Dictionary<string, object> DeleteAllCampaignBackupDataCore(Dictionary<string, object> payload, ref bool scheduled)
-        {
-            payload = payload ?? new Dictionary<string, object>();
-            if (!ReadString(payload, "confirmation", "").Equals("delete", StringComparison.Ordinal))
-                return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Type delete exactly to confirm permanent removal of every Reign campaign." };
-
-            string running = CampaignMutationBlockReason();
-            if (!string.IsNullOrWhiteSpace(running)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = running };
-            if (VerificationTask != null && !VerificationTask.IsCompleted)
-                return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Wait for the active verification run to finish before deleting all campaign and test data." };
-
-            lock (CampaignBackupMutationLock)
-            {
-                string campaignsRoot = CampaignsRoot();
-                string backupsRoot = Path.Combine(DataDir, "backups");
-                string vectorsRoot = Path.Combine(DataDir, "vectors");
-                string portraitsRoot = CampaignPortraitCacheRoot();
-                string saveSyncRoot = SaveSyncRoot();
-                string legacySaveSyncRoot = Path.Combine(DataDir, "save-sync");
-                string testRunsRoot = Path.Combine(TestsDir, "runs");
-                string testSnapshotsRoot = Path.Combine(TestsDir, "snapshots");
-                string verificationRoot = Path.Combine(TestsDir, "verification");
-                Dictionary<string, object> settings = LoadSettings();
-                bool localVectors = !ReadString(settings, "vectorProvider", "local").Equals("qdrant", StringComparison.OrdinalIgnoreCase);
-                int campaignCount = SafeDirectoryCount(campaignsRoot);
-                int backupCount = SafeFileCount(backupsRoot, "*.reignbackup");
-                long bytesDeleted = SafeDirectorySize(campaignsRoot) + SafeDirectorySize(backupsRoot) + CampaignPortraitDataSizeExcludingShared(portraitsRoot)
-                    + SafeDirectorySize(saveSyncRoot) + SafeDirectorySize(legacySaveSyncRoot)
-                    + SafeDirectorySize(testRunsRoot) + SafeDirectorySize(testSnapshotsRoot) + SafeDirectorySize(verificationRoot);
-                if (localVectors) bytesDeleted += SafeDirectorySize(vectorsRoot);
-                string legacyActionQueue = Path.Combine(DataDir, "action-queue.json");
-                try { if (File.Exists(legacyActionQueue)) bytesDeleted += new FileInfo(legacyActionQueue).Length; } catch { }
-                string refusal = "";
-                // Validate the trusted configured external target without contacting it.
-                if (!localVectors && string.IsNullOrWhiteSpace(ReadString(settings, "qdrantUrl", "")))
-                    refusal = "External Qdrant is selected, but its URL is not configured. No campaign data was deleted.";
-                else
-                {
-                    lock (DeleteAllScheduleLock)
-                    {
-                        if (DeleteAllSchedulingClosed)
-                            refusal = "Reign is already shutting down, so campaign deletion was not scheduled. No campaign data was deleted. Restart the Reign server and try again.";
-                        else if (DeleteAllCampaignDataPending)
-                            refusal = "Campaign deletion is already scheduled and Reign is shutting down.";
-                        else
-                        {
-                            // Exactly this request's selection is carried to teardown; never overwritten.
-                            DeleteAllScheduledSettings = settings;
-                            DeleteAllCampaignResponseSent.Reset();
-                            DeleteAllCampaignDataPending = true;
-                            scheduled = true;
-                        }
-                    }
-                }
-                if (!scheduled)
-                {
-                    LogOperational("campaign.all_delete_failed", new Dictionary<string, object> { ["error"] = refusal });
-                    return new Dictionary<string, object> { ["ok"] = false, ["error"] = refusal };
-                }
-                Dictionary<string, object> result = new Dictionary<string, object>
-                {
-                    ["ok"] = true,
-                    ["serverStopping"] = true,
-                    ["campaignsScheduled"] = campaignCount,
-                    ["backupArchivesScheduled"] = backupCount,
-                    ["bytesScheduled"] = bytesDeleted,
-                    ["semanticProvider"] = localVectors ? "local" : "qdrant",
-                    ["cleanupMode"] = "server_shutdown",
-                    ["message"] = "Campaign deletion is scheduled. Reign is shutting down; once background work has stopped, this same server process will remove all campaign data, campaign-specific portraits, backups, queued actions, semantic indexes, and accumulated test results. If cleanup cannot start safely, nothing is deleted; logs/delete-all-last.json records the outcome and how to retry after restarting. The pregenerated shared portrait library, test definitions, global settings, API key, and native Bannerlord saves are preserved. Restart the Reign server after this page disconnects."
-                };
-                LogOperational("campaign.all_delete_scheduled", result);
-                return result;
-            }
-        }
-
-        // Re-evaluated after quiescence, before any delete phase. Local teardown rechecks Bannerlord itself.
-        private static string DeleteAllPreDeleteBlockReason()
-        {
-            string running = CampaignMutationBlockReason();
-            if (!string.IsNullOrWhiteSpace(running)) return running;
-            if (VerificationTask != null && !VerificationTask.IsCompleted)
-                return "A verification run was still active.";
-            return "";
-        }
-
-        private static void WriteDeleteAllFailureReceipt(Dictionary<string, object> result)
-        {
-            try
-            {
-                Directory.CreateDirectory(LogsDir);
-                WriteJsonObject(Path.Combine(LogsDir, "delete-all-last.json"), result);
-                LogOperational("campaign.all_delete_failed", result);
-            }
-            catch { }
-        }
-
-        /// <summary>
-        /// API teardown for a scheduled delete-all, after the listener claimed it. Runs with no
-        /// campaign/backup lock held. Unless quiescence settled and the guard passes, it makes no
-        /// external or local delete call. The captured external collection is erased first, while the
-        /// vector worker can serve; semantic memory is then stopped on every path; local teardown runs
-        /// only after external success and a clean semantic stop. Failures write the existing
-        /// delete-all-last.json receipt; the first known failure is kept and a stop fault is added.
-        /// </summary>
-        private static int CompleteScheduledDeleteAllCampaignData(Dictionary<string, object> settings, Dictionary<string, object> quiescence,
-            Func<string> preDeleteBlockReason, Action<Dictionary<string, object>> deleteExternal, Action stopSemantic,
-            Func<int> deleteLocal, Action<Dictionary<string, object>> recordFailure)
-        {
-            const string retry = " No campaign data was deleted. Restart the Reign server and run Delete all again.";
-            // Once the external call has been made, the external index may be erased (fully or partly).
-            const string externalRetry = " Local campaign data was not deleted, but the external semantic index may already be erased. Restart the Reign server and run Delete all again.";
-            settings = settings ?? new Dictionary<string, object>();
-            string failure = "";
-            bool externalAttempted = false;
-            try
-            {
-                if (!ReadBool(quiescence, "settled", false))
-                    failure = "Background work, in-flight requests or semantic indexing did not stop within the shutdown limit." + retry;
-                else
-                {
-                    string blocked = preDeleteBlockReason();
-                    if (!string.IsNullOrWhiteSpace(blocked)) failure = blocked + retry;
-                    else if (ReadString(settings, "vectorProvider", "local").Equals("qdrant", StringComparison.OrdinalIgnoreCase))
-                    {
-                        externalAttempted = true;
-                        deleteExternal(settings);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                string message = string.IsNullOrWhiteSpace(ex.Message) ? "Campaign deletion failed." : ex.Message.Trim();
-                failure = message + (externalAttempted ? externalRetry : retry);
-            }
-            string stopFailure = "";
-            try { stopSemantic(); }
-            catch (Exception ex) { stopFailure = string.IsNullOrWhiteSpace(ex.Message) ? "unknown error" : ex.Message.Trim(); }
-            if (failure.Length == 0 && stopFailure.Length != 0)
-                failure = "Semantic memory did not stop cleanly (" + stopFailure + ")." + (externalAttempted ? externalRetry : retry);
-            if (failure.Length == 0) return deleteLocal();
-            Dictionary<string, object> receipt = new Dictionary<string, object>
-            {
-                ["ok"] = false,
-                ["completedUtc"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
-                ["error"] = failure,
-                ["externalDeleteAttempted"] = externalAttempted,
-                ["quiescence"] = quiescence ?? new Dictionary<string, object>()
-            };
-            if (stopFailure.Length != 0) receipt["semanticStopError"] = stopFailure;
-            recordFailure(receipt);
-            return 1;
-        }
-
-        private static int CompleteDeferredDeleteAllCampaignData(string[] args)
-        {
-            int parentPid = ReadIntArgument(args ?? new string[0], "--wait-pid", 0);
-            try
-            {
-                if (parentPid > 0)
-                {
-                    try
-                    {
-                        using (Process parent = Process.GetProcessById(parentPid))
-                        {
-                            if (!parent.WaitForExit(60000)) throw new IOException("The Reign server did not release its campaign files within 60 seconds.");
-                        }
-                    }
-                    catch (ArgumentException)
-                    {
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                try
-                {
-                    Dictionary<string, object> result = new Dictionary<string, object>
-                    {
-                        ["ok"] = false,
-                        ["completedUtc"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
-                        ["error"] = ex.Message
-                    };
-                    Directory.CreateDirectory(LogsDir);
-                    WriteJsonObject(Path.Combine(LogsDir, "delete-all-last.json"), result);
-                    LogOperational("campaign.all_delete_failed", result);
-                }
-                catch { }
-                return 1;
-            }
-            return CompleteDeleteAllCampaignData();
-        }
-
-        private static int CompleteDeleteAllCampaignData()
-        {
-            Dictionary<string, object> result = new Dictionary<string, object>
-            {
-                ["ok"] = false,
-                ["completedUtc"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture)
-            };
-            try
-            {
-                string running = CampaignMutationBlockReason();
-                if (!string.IsNullOrWhiteSpace(running)) throw new InvalidOperationException(running);
-                ReignPostgreSqlStorage.ClearAllPools();
-                ReignPostgreSqlStorage.DropAllCampaigns();
-                List<string> directoryTargets = new List<string>
-                {
-                    CampaignsRoot(),
-                    Path.Combine(DataDir, "backups"),
-                    SaveSyncRoot(),
-                    Path.Combine(DataDir, "save-sync"),
-                    Path.Combine(DataDir, "vectors"),
-                    Path.Combine(DataDir, ".i"),
-                    Path.Combine(TestsDir, "runs"),
-                    Path.Combine(TestsDir, "snapshots"),
-                    Path.Combine(TestsDir, "verification")
-                };
-                int rootsDeleted = 0;
-                foreach (string target in directoryTargets.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase))
-                {
-                    if (!Directory.Exists(target)) continue;
-                    DeleteDirectoryCompletely(target);
-                    rootsDeleted++;
-                }
-                int portraitCachesDeleted = DeleteCampaignPortraitDataPreservingShared(CampaignPortraitCacheRoot());
-                TryDeleteFile(Path.Combine(DataDir, "action-queue.json"));
-                TryDeleteFile(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "verification-latest.json"));
-                lock (WorldHistoryCacheLock) WorldHistoryClaimCache.Clear();
-                lock (CharacterEditorAuthorityCacheLock) CharacterEditorAuthorityByCampaign.Clear();
-                result["ok"] = true;
-                result["rootsDeleted"] = rootsDeleted;
-                result["portraitCachesDeleted"] = portraitCachesDeleted;
-                result["sharedPortraitLibraryPreserved"] = Directory.Exists(Path.Combine(CampaignPortraitCacheRoot(), "_shared"));
-                result["testDefinitionsPreserved"] = Directory.Exists(Path.Combine(TestsDir, "cases"));
-                result["settingsPreserved"] = File.Exists(SettingsPath);
-                result["message"] = "All Reign campaign and accumulated test data was deleted after the server released its files. The pregenerated shared portrait library, test definitions, global settings, API key, and native Bannerlord saves were preserved.";
-                Directory.CreateDirectory(LogsDir);
-                WriteJsonObject(Path.Combine(LogsDir, "delete-all-last.json"), result);
-                LogOperational("campaign.all_deleted", result);
-                return 0;
-            }
-            catch (Exception ex)
-            {
-                result["error"] = ex.Message;
-                try
-                {
-                    Directory.CreateDirectory(LogsDir);
-                    WriteJsonObject(Path.Combine(LogsDir, "delete-all-last.json"), result);
-                    LogOperational("campaign.all_delete_failed", result);
-                }
-                catch { }
-                return 1;
-            }
-        }
-
-        private static void DeleteExternalSemanticCollection(Dictionary<string, object> settings)
-        {
-            if (string.IsNullOrWhiteSpace(ReadString(settings, "qdrantUrl", "")))
-                throw new InvalidOperationException("External Qdrant is selected, but its URL is not configured. No campaign data was deleted.");
-
-            StartManagedSemanticWorker(settings);
-            Dictionary<string, object> request = SemanticProviderRequest(settings);
-            request["collection"] = SemanticCollection;
-            request["deleteCollection"] = true;
-            Exception last = null;
-            for (int attempt = 0; attempt < 20; attempt++)
-            {
-                try
-                {
-                    Dictionary<string, object> response = TryParseJsonObject(PostJsonToUrl(SemanticWorkerUrl(settings, "/vectors/delete"), Json.Serialize(request), 15000)) ?? new Dictionary<string, object>();
-                    if (!ReadBool(response, "ok", false)) throw new InvalidOperationException(ReadString(response, "error", "Qdrant collection deletion failed."));
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    last = ex;
-                    if (attempt < 19) Thread.Sleep(250);
-                }
-            }
-            throw new InvalidOperationException("Reign could not remove its external Qdrant campaign index. No local campaign data was deleted. " + (last?.Message ?? ""));
-        }
-
-        private static void DeleteAllCampaignStorageCore(IEnumerable<string> directoryTargets, IEnumerable<string> fileTargets, string stagingRoot)
-        {
-            List<KeyValuePair<string, string>> movedDirectories = new List<KeyValuePair<string, string>>();
-            List<KeyValuePair<string, string>> movedFiles = new List<KeyValuePair<string, string>>();
-            Directory.CreateDirectory(stagingRoot);
-            try
-            {
-                int rootSerial = 0;
-                foreach (string root in (directoryTargets ?? Enumerable.Empty<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase))
-                {
-                    if (!Directory.Exists(root)) continue;
-                    string stagedRoot = Path.Combine(stagingRoot, "root_" + (++rootSerial).ToString("D2", CultureInfo.InvariantCulture) + "_" + SafePathSegment(Path.GetFileName(root), "data"));
-                    Directory.CreateDirectory(stagedRoot);
-                    int entrySerial = 0;
-                    foreach (string source in Directory.GetDirectories(root, "*", SearchOption.TopDirectoryOnly))
-                    {
-                        string destination = Path.Combine(stagedRoot, "directory_" + (++entrySerial).ToString("D4", CultureInfo.InvariantCulture));
-                        MoveDirectoryWithRetries(source, destination);
-                        movedDirectories.Add(new KeyValuePair<string, string>(source, destination));
-                    }
-                    foreach (string source in Directory.GetFiles(root, "*", SearchOption.TopDirectoryOnly))
-                    {
-                        string destination = Path.Combine(stagedRoot, "file_" + (++entrySerial).ToString("D4", CultureInfo.InvariantCulture));
-                        MoveFileWithRetries(source, destination);
-                        movedFiles.Add(new KeyValuePair<string, string>(source, destination));
-                    }
-                }
-                int serial = 0;
-                foreach (string source in (fileTargets ?? Enumerable.Empty<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase))
-                {
-                    if (!File.Exists(source)) continue;
-                    string destination = Path.Combine(stagingRoot, "file_" + (++serial).ToString("D2", CultureInfo.InvariantCulture) + "_" + SafePathSegment(Path.GetFileName(source), "data"));
-                    MoveFileWithRetries(source, destination);
-                    movedFiles.Add(new KeyValuePair<string, string>(source, destination));
-                }
-            }
-            catch
-            {
-                foreach (KeyValuePair<string, string> item in movedFiles.AsEnumerable().Reverse())
-                    try { if (!File.Exists(item.Key) && File.Exists(item.Value)) MoveFileWithRetries(item.Value, item.Key); } catch { }
-                foreach (KeyValuePair<string, string> item in movedDirectories.AsEnumerable().Reverse())
-                    try { if (!Directory.Exists(item.Key) && Directory.Exists(item.Value)) MoveDirectoryWithRetries(item.Value, item.Key); } catch { }
-                TryDeleteDirectory(stagingRoot);
-                throw;
-            }
-            DeleteDirectoryCompletely(stagingRoot);
-        }
-
-        private static long CampaignPortraitDataSizeExcludingShared(string portraitRoot)
-        {
-            if (string.IsNullOrWhiteSpace(portraitRoot) || !Directory.Exists(portraitRoot)) return 0;
-            long bytes = 0;
-            foreach (string directory in Directory.GetDirectories(portraitRoot, "*", SearchOption.TopDirectoryOnly))
-            {
-                if (Path.GetFileName(directory).Equals("_shared", StringComparison.OrdinalIgnoreCase)) continue;
-                bytes += SafeDirectorySize(directory);
-            }
-            foreach (string file in Directory.GetFiles(portraitRoot, "*", SearchOption.TopDirectoryOnly))
-            {
-                try { bytes += new FileInfo(file).Length; } catch { }
-            }
-            return bytes;
-        }
-
-        private static int DeleteCampaignPortraitDataPreservingShared(string portraitRoot)
-        {
-            if (string.IsNullOrWhiteSpace(portraitRoot) || !Directory.Exists(portraitRoot)) return 0;
-            int deleted = 0;
-            foreach (string directory in Directory.GetDirectories(portraitRoot, "*", SearchOption.TopDirectoryOnly))
-            {
-                if (Path.GetFileName(directory).Equals("_shared", StringComparison.OrdinalIgnoreCase)) continue;
-                DeleteDirectoryCompletely(directory);
-                deleted++;
-            }
-            foreach (string file in Directory.GetFiles(portraitRoot, "*", SearchOption.TopDirectoryOnly))
-            {
-                TryDeleteFile(file);
-            }
-            return deleted;
         }
 
         private static void ValidateCampaignBackupManifest(string root, Dictionary<string, object> manifest)
@@ -1768,10 +1259,10 @@ namespace ReignBetaServer
                     "This archive is not a UTF-8 PostgreSQL Reign database backup.");
             string campaignId = ReadString(manifest, "campaignId", "");
             ValidateSaveSyncId(campaignId, "campaignId");
+            if (campaignId != campaignId.Trim())
+                throw new InvalidDataException("The campaign ID in the backup must exactly match its storage identity.");
             if (!Directory.Exists(Path.Combine(root, "campaign"))) throw new InvalidDataException("The backup does not contain campaign data.");
-            string databaseArchive = Path.Combine(
-                root,
-                ReadString(manifest, "databaseArchive", "postgresql.dump"));
+            string databaseArchive = SafeBackupPath(root, ReadString(manifest, "databaseArchive", "postgresql.dump"));
             if (!File.Exists(databaseArchive)
                 || new FileInfo(databaseArchive).Length <= 0)
                 throw new InvalidDataException(
@@ -1830,46 +1321,68 @@ namespace ReignBetaServer
             }
         }
 
-        private static string InstallImportedDirectory(string source, string destination, bool replace)
+        private sealed class ImportDirectory
         {
-            if (!Directory.Exists(source)) return "";
-            Directory.CreateDirectory(Path.GetDirectoryName(destination));
-            string incoming = Path.Combine(DataDir, ".i", Guid.NewGuid().ToString("N").Substring(0, 12));
-            Directory.CreateDirectory(Path.GetDirectoryName(incoming));
-            CopyDirectoryTree(source, incoming, null);
-            string old = "";
-            if (Directory.Exists(destination))
+            internal readonly string Destination;
+            private readonly string source, incoming, original;
+            private ImportRename moveAside, installation;
+
+            internal ImportDirectory(string source, string destination, string operationRoot, string stagingName = null)
             {
-                if (!replace) { TryDeleteDirectory(incoming); throw new IOException("Destination campaign already exists."); }
-                old = MoveImportedDirectoryAside(destination);
+                this.source = source;
+                Destination = destination;
+                string name = stagingName ?? Path.GetFileName(source);
+                incoming = Path.Combine(operationRoot, "incoming", name);
+                original = Path.Combine(operationRoot, "original", name);
             }
-            MoveDirectoryWithRetries(incoming, destination);
-            return old;
-        }
 
-        private static string MoveImportedDirectoryAside(string destination)
-        {
-            string old = Path.Combine(DataDir, ".r", Guid.NewGuid().ToString("N").Substring(0, 12));
-            Directory.CreateDirectory(Path.GetDirectoryName(old));
-            MoveDirectoryWithRetries(destination, old);
-            return old;
-        }
-
-        private static void RestoreImportedDirectory(string destination, string old)
-        {
-            string failed = "";
-            try
+            internal void Install(bool replace, Action<string, string> beforeStep)
             {
-                if (Directory.Exists(destination))
+                bool hasSource = source != null && Directory.Exists(source);
+                if (hasSource) CopyDirectoryTree(source, incoming, null);
+                if (Directory.Exists(Destination))
                 {
-                    failed = Path.Combine(DataDir, ".f", Guid.NewGuid().ToString("N").Substring(0, 12));
-                    Directory.CreateDirectory(Path.GetDirectoryName(failed));
-                    MoveDirectoryWithRetries(destination, failed);
+                    if (!replace) throw new IOException("Destination campaign already exists: " + Destination);
+                    Directory.CreateDirectory(Path.GetDirectoryName(original));
+                    moveAside = ImportRename.Attempted;
+                    beforeStep?.Invoke("move_original", Destination);
+                    MoveDirectoryWithRetries(Destination, original);
+                    moveAside = ImportRename.Completed;
                 }
-                if (!string.IsNullOrWhiteSpace(old) && Directory.Exists(old)) MoveDirectoryWithRetries(old, destination);
+                // Missing optional directories in a replacement intentionally retire the old tree.
+                if (!hasSource) return;
+                Directory.CreateDirectory(Path.GetDirectoryName(Destination));
+                installation = ImportRename.Attempted;
+                beforeStep?.Invoke("install_directory", Destination);
+                MoveDirectoryWithRetries(incoming, Destination);
+                installation = ImportRename.Completed;
             }
-            catch { }
-            finally { TryDeleteDirectory(failed); }
+
+            internal void Restore()
+            {
+                // If a rename failed and its source is gone, ownership is uncertain.
+                // Preserve both paths for inspection instead of issuing another rename.
+                if (moveAside == ImportRename.Attempted && (!Directory.Exists(Destination) || Directory.Exists(original)))
+                    throw new IOException("The original directory move has an unconfirmed outcome.");
+                if (installation == ImportRename.Attempted && !Directory.Exists(incoming))
+                    throw new IOException("The incoming directory move has an unconfirmed outcome.");
+                if (installation == ImportRename.Completed)
+                {
+                    MoveDirectoryWithRetries(Destination, incoming);
+                    installation = ImportRename.Untouched;
+                }
+                if (moveAside == ImportRename.Completed)
+                {
+                    MoveDirectoryWithRetries(original, Destination);
+                    moveAside = ImportRename.Untouched;
+                }
+            }
+
+            internal Dictionary<string, object> Inventory() => new Dictionary<string, object>
+            {
+                ["destination"] = Destination, ["incoming"] = incoming, ["original"] = original,
+                ["moveAside"] = moveAside.ToString(), ["installation"] = installation.ToString()
+            };
         }
 
         private static List<Dictionary<string, object>> BackupFileManifest(string root)
@@ -1903,1000 +1416,15 @@ namespace ReignBetaServer
             return rows.ToList();
         }
 
-        private static string CampaignPortraitCacheDirectory(string campaignId)
+        internal static string CampaignPortraitCacheDirectory(string campaignId)
         {
             string root = CampaignPortraitCacheRoot();
-            return string.IsNullOrWhiteSpace(root) ? "" : Path.Combine(root, SafePathSegment(campaignId, "unknown"));
+            return string.IsNullOrWhiteSpace(root) ? "" : Path.Combine(root, CampaignFileService.SafePathSegment(campaignId, "unknown"));
         }
 
         private static string CampaignPortraitCacheRoot()
         {
-            return Path.Combine(DataDir, "PortraitCache");
-        }
-
-        private static string CampaignRetirementLedgerPath()
-        {
-            return Path.Combine(DataDir, "campaign-retirements.json");
-        }
-
-        private static Dictionary<string, object> ReadCampaignRetirementLedger()
-        {
-            lock (CampaignRetirementLedgerLock)
-            {
-                Dictionary<string, object> ledger =
-                    ReadJsonObject(CampaignRetirementLedgerPath());
-                ledger["version"] = CampaignRetirementVersion;
-                if (!ledger.ContainsKey("pending"))
-                    ledger["pending"] = new List<Dictionary<string, object>>();
-                return ledger;
-            }
-        }
-
-        private static void WriteCampaignRetirementLedger(
-            Dictionary<string, object> ledger)
-        {
-            lock (CampaignRetirementLedgerLock)
-            {
-                ledger = ledger ?? new Dictionary<string, object>();
-                ledger["version"] = CampaignRetirementVersion;
-                ledger["updatedUtc"] = DateTime.UtcNow.ToString(
-                    "o", CultureInfo.InvariantCulture);
-                if (!ledger.ContainsKey("pending"))
-                    ledger["pending"] = new List<Dictionary<string, object>>();
-                WriteJsonObject(CampaignRetirementLedgerPath(), ledger);
-            }
-        }
-
-        private static Dictionary<string, object> SchedulePendingCampaignRetirement(
-            string campaignId,
-            string savePointId,
-            string nativeSaveName)
-        {
-            ValidateSaveSyncId(campaignId, "campaignId");
-            lock (CampaignRetirementLedgerLock)
-            {
-                Dictionary<string, object> ledger = ReadCampaignRetirementLedger();
-                List<Dictionary<string, object>> pending =
-                    ReadDictionaryList(ledger, "pending");
-                Dictionary<string, object> entry = pending.FirstOrDefault(row =>
-                    ReadString(row, "campaignId", "").Equals(
-                        campaignId, StringComparison.OrdinalIgnoreCase));
-                if (entry == null)
-                {
-                    entry = new Dictionary<string, object>();
-                    pending.Add(entry);
-                }
-                entry["campaignId"] = campaignId;
-                entry["state"] = "pending_final_save_deletion";
-                entry["savePointId"] = savePointId ?? "";
-                entry["nativeSaveName"] = nativeSaveName ?? "";
-                entry["requestedUtc"] = DateTime.UtcNow.ToString(
-                    "o", CultureInfo.InvariantCulture);
-                entry["reason"] = "confirmed_final_native_save_deleted";
-                ledger["pending"] = pending;
-                WriteCampaignRetirementLedger(ledger);
-                LogOperational("campaign.retirement_pending", entry);
-                return entry;
-            }
-        }
-
-        private static bool CancelPendingCampaignRetirement(
-            string campaignId,
-            string reason)
-        {
-            if (string.IsNullOrWhiteSpace(campaignId)) return false;
-            lock (CampaignRetirementLedgerLock)
-            {
-                Dictionary<string, object> ledger = ReadCampaignRetirementLedger();
-                List<Dictionary<string, object>> pending =
-                    ReadDictionaryList(ledger, "pending");
-                int removed = pending.RemoveAll(row =>
-                    ReadString(row, "campaignId", "").Equals(
-                        campaignId, StringComparison.OrdinalIgnoreCase));
-                if (removed == 0) return false;
-                ledger["pending"] = pending;
-                WriteCampaignRetirementLedger(ledger);
-                LogOperational("campaign.retirement_cancelled", new Dictionary<string, object>
-                {
-                    ["campaignId"] = campaignId,
-                    ["reason"] = reason ?? ""
-                });
-                return true;
-            }
-        }
-
-        private static bool IsCampaignRetirementPending(string campaignId)
-        {
-            return ReadDictionaryList(ReadCampaignRetirementLedger(), "pending")
-                .Any(row => ReadString(row, "campaignId", "").Equals(
-                    campaignId ?? "", StringComparison.OrdinalIgnoreCase));
-        }
-
-        private static Dictionary<string, object> CampaignUnloadedApi(
-            Dictionary<string, object> payload)
-        {
-            payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", "");
-            ValidateSaveSyncId(campaignId, "campaignId");
-            CampaignDataGate.EnterWriteLock();
-            try
-            {
-                if (!IsCampaignRetirementPending(campaignId))
-                    return new Dictionary<string, object>
-                    {
-                        ["ok"] = true,
-                        ["result"] = "no_pending_retirement",
-                        ["campaignId"] = campaignId,
-                        ["campaignDeleted"] = false,
-                        ["campaignDeletionPending"] = false,
-                        ["noOp"] = true
-                    };
-                int remaining = ReadDictionaryList(
-                    ReadSaveSyncLedger(campaignId), "points").Count;
-                if (remaining > 0)
-                {
-                    CancelPendingCampaignRetirement(
-                        campaignId, "confirmed_save_exists_at_unload");
-                    return new Dictionary<string, object>
-                    {
-                        ["ok"] = true,
-                        ["result"] = "retirement_cancelled",
-                        ["campaignId"] = campaignId,
-                        ["remainingSavePoints"] = remaining,
-                        ["campaignDeleted"] = false,
-                        ["campaignDeletionPending"] = false
-                    };
-                }
-                Dictionary<string, object> metadata = ReadJsonObject(
-                    Path.Combine(StrictCampaignDirectory(campaignId), "campaign.json"));
-                return DeleteCampaignOwnedDataCore(
-                    campaignId,
-                    ReadString(metadata, "campaignLabel",
-                        ReadString(metadata, "mainHeroName", campaignId)),
-                    true,
-                    "active_campaign_unloaded_after_final_save_deletion");
-            }
-            finally { CampaignDataGate.ExitWriteLock(); }
-        }
-
-        private static void ProcessPendingCampaignRetirementsAtStartup()
-        {
-            CleanupCampaignRetirementStagingAtStartup();
-            // Recover interrupted filesystem transactions before accepting campaign
-            // requests, but leave pending retirement to the monitor. Semantic
-            // deletion can outlast systemd's startup deadline; running it here
-            // prevents even /health from reaching the HTTP accept loop and
-            // makes systemd kill and restart the same unfinished deletion.
-        }
-
-        private static void StartCampaignRetirementMonitor()
-        {
-            Task.Run(async () =>
-            {
-                while (!ShutdownRequested)
-                {
-                    await Task.Delay(2000).ConfigureAwait(false);
-                    if (ShutdownRequested || !string.IsNullOrWhiteSpace(
-                        CampaignMutationBlockReason())) continue;
-                    if (ReadDictionaryList(
-                        ReadCampaignRetirementLedger(), "pending").Count == 0) continue;
-                    ProcessPendingCampaignRetirements(false);
-                }
-            });
-        }
-
-        private static void ProcessPendingCampaignRetirements(
-            bool allowBannerlordRunning)
-        {
-            if (!allowBannerlordRunning
-                && !string.IsNullOrWhiteSpace(CampaignMutationBlockReason())) return;
-            CampaignDataGate.EnterWriteLock();
-            try
-            {
-                List<Dictionary<string, object>> pending = ReadDictionaryList(
-                    ReadCampaignRetirementLedger(), "pending").ToList();
-                foreach (Dictionary<string, object> entry in pending)
-                {
-                    string campaignId = ReadString(entry, "campaignId", "");
-                    try
-                    {
-                        ValidateSaveSyncId(campaignId, "campaignId");
-                        int remaining = ReadDictionaryList(
-                            ReadSaveSyncLedger(campaignId), "points").Count;
-                        if (remaining > 0)
-                        {
-                            CancelPendingCampaignRetirement(
-                                campaignId, "confirmed_save_created_before_retirement");
-                            continue;
-                        }
-                        Dictionary<string, object> metadata = ReadJsonObject(
-                            Path.Combine(StrictCampaignDirectory(campaignId), "campaign.json"));
-                        DeleteCampaignOwnedDataCore(
-                            campaignId,
-                            ReadString(metadata, "campaignLabel",
-                                ReadString(metadata, "mainHeroName", campaignId)),
-                            allowBannerlordRunning,
-                            "pending_final_save_deletion_recovery");
-                    }
-                    catch (Exception ex)
-                    {
-                        LogOperational("campaign.retirement_retry_failed", new Dictionary<string, object>
-                        {
-                            ["campaignId"] = campaignId,
-                            ["error"] = ex.Message
-                        });
-                    }
-                }
-            }
-            finally { CampaignDataGate.ExitWriteLock(); }
-        }
-
-        private static void MarkCampaignSaveSyncLifecycle(
-            string campaignId,
-            string lifecycle,
-            bool everRegistered)
-        {
-            string directory = StrictCampaignDirectory(campaignId);
-            string path = Path.Combine(directory, "campaign.json");
-            Dictionary<string, object> metadata = ReadJsonObject(path);
-            metadata["campaignId"] = campaignId;
-            metadata["saveSyncLifecycle"] = lifecycle ?? "";
-            metadata["everRegisteredSaveSyncPoint"] = everRegistered;
-            metadata["updatedUtc"] = DateTime.UtcNow.ToString(
-                "o", CultureInfo.InvariantCulture);
-            WriteJsonObject(path, metadata);
-        }
-
-        private static Dictionary<string, object> EmptyCampaignDeletionCounts()
-        {
-            return new Dictionary<string, object>
-            {
-                ["postgresql"] = new Dictionary<string, object>
-                    { ["schemas"] = 0, ["snapshots"] = 0 },
-                ["campaignFiles"] = new Dictionary<string, object>
-                    { ["roots"] = 0, ["files"] = 0, ["bytes"] = 0L },
-                ["saveSync"] = new Dictionary<string, object>
-                    { ["roots"] = 0, ["files"] = 0, ["bytes"] = 0L },
-                ["portraitCache"] = new Dictionary<string, object>
-                    { ["roots"] = 0, ["files"] = 0, ["bytes"] = 0L },
-                ["semanticVectors"] = new Dictionary<string, object>
-                    { ["records"] = 0 }
-            };
-        }
-
-        private static Dictionary<string, object> CampaignDeletionCount(string path)
-        {
-            return new Dictionary<string, object>
-            {
-                ["roots"] = Directory.Exists(path) ? 1 : 0,
-                ["files"] = SafeFileCount(path, "*"),
-                ["bytes"] = SafeDirectorySize(path)
-            };
-        }
-
-        private static int DeleteCampaignSemanticVectors(string campaignId)
-        {
-            if (SaveSyncSkipSemanticForTests) return 0;
-            List<string> ids;
-            using (ReignDbConnection connection =
-                ReignPostgreSqlStorage.OpenCampaignConnection(campaignId))
-            {
-                bool hasEmbeddingDocuments = ReadInt(QuerySql(connection, @"
-SELECT COUNT(*) AS count
-FROM information_schema.tables
-WHERE table_schema=current_schema()
-  AND table_name='embedding_documents';").FirstOrDefault(), "count", 0) > 0;
-                ids = hasEmbeddingDocuments
-                    ? QuerySql(connection,
-                            "SELECT vector_id FROM embedding_documents WHERE vector_id<>'' AND status<>'deleted';")
-                        .Select(row => ReadString(row, "vector_id", ""))
-                        .Where(id => !string.IsNullOrWhiteSpace(id))
-                        .Distinct(StringComparer.OrdinalIgnoreCase)
-                        .ToList()
-                    : new List<string>();
-            }
-            if (ids.Count == 0) return 0;
-            Dictionary<string, object> settings = LoadSettings();
-            StartManagedSemanticWorker(settings);
-            for (int offset = 0; offset < ids.Count;
-                offset += CampaignSemanticDeleteBatchSize)
-            {
-                Dictionary<string, object> request = SemanticProviderRequest(settings);
-                request["collection"] = SemanticCollection;
-                request["ids"] = ids.Skip(offset)
-                    .Take(CampaignSemanticDeleteBatchSize).ToList();
-                Dictionary<string, object> response = TryParseJsonObject(
-                    PostJsonToUrl(SemanticWorkerUrl(settings, "/vectors/delete"),
-                        Json.Serialize(request), CampaignSemanticDeleteTimeoutMs))
-                    ?? new Dictionary<string, object>();
-                if (!ReadBool(response, "ok", false))
-                    throw new IOException(ReadString(response, "error",
-                        "Campaign semantic vector deletion failed."));
-            }
-            return ids.Count;
-        }
-
-        private static void ValidateCampaignOwnedDirectory(
-            string path,
-            string root,
-            bool rejectShared)
-        {
-            if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(root))
-                throw new InvalidDataException("Campaign storage root is unavailable.");
-            string fullRoot = Path.GetFullPath(root).TrimEnd(
-                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            string fullPath = Path.GetFullPath(path).TrimEnd(
-                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            string parent = Path.GetDirectoryName(fullPath) ?? "";
-            if (!parent.Equals(fullRoot, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException(
-                    "Campaign deletion target escaped its owned storage root.");
-            if (rejectShared && Path.GetFileName(fullPath).Equals(
-                "_shared", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException(
-                    "The shared portrait library cannot be staged for campaign deletion.");
-            if (Directory.Exists(fullPath)
-                && (new DirectoryInfo(fullPath).Attributes & FileAttributes.ReparsePoint) != 0)
-                throw new InvalidDataException(
-                    "Campaign deletion refused a reparse-point storage root: " + fullPath);
-        }
-
-        private static void VerifyStagedCampaignDirectory(
-            string source,
-            string staged)
-        {
-            if (Directory.Exists(source) || !Directory.Exists(staged))
-                throw new IOException(
-                    "Campaign deletion staging could not be verified for " + source + ".");
-        }
-
-        private static void RestoreStagedCampaignDirectory(
-            string staged,
-            string destination,
-            bool wasMoved,
-            List<string> errors)
-        {
-            if (!wasMoved || !Directory.Exists(staged)) return;
-            try
-            {
-                if (Directory.Exists(destination))
-                    throw new IOException("Rollback destination already exists: " + destination);
-                MoveDirectoryWithRetries(staged, destination);
-            }
-            catch (Exception ex)
-            {
-                errors.Add(ex.Message);
-            }
-        }
-
-        private static void DeleteCampaignStagingRoot(
-            string path,
-            List<string> residuals)
-        {
-            if (!Directory.Exists(path)) return;
-            try
-            {
-                ValidateCampaignRetirementStagingRoot(path);
-                DeleteDirectoryCompletely(path);
-            }
-            catch
-            {
-                residuals.Add(path);
-            }
-        }
-
-        private static void WriteCampaignRetirementTransaction(
-            string stagingRoot,
-            string campaignId,
-            string state)
-        {
-            WriteJsonObject(Path.Combine(stagingRoot, "transaction.json"),
-                new Dictionary<string, object>
-                {
-                    ["version"] = CampaignRetirementVersion,
-                    ["campaignId"] = campaignId,
-                    ["state"] = state,
-                    ["updatedUtc"] = DateTime.UtcNow.ToString(
-                        "o", CultureInfo.InvariantCulture)
-                });
-        }
-
-        private static void ValidateCampaignRetirementStagingRoot(string path)
-        {
-            string full = Path.GetFullPath(path).TrimEnd(
-                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            bool owned = CampaignRetirementStagingRoots().Any(root =>
-                (Path.GetDirectoryName(full) ?? "").Equals(
-                    Path.GetFullPath(root).TrimEnd(
-                        Path.DirectorySeparatorChar,
-                        Path.AltDirectorySeparatorChar),
-                    StringComparison.OrdinalIgnoreCase));
-            if (!owned) throw new InvalidDataException(
-                "Campaign retirement staging path escaped its owned root.");
-            if ((new DirectoryInfo(full).Attributes & FileAttributes.ReparsePoint) != 0)
-                throw new InvalidDataException(
-                    "Campaign retirement cleanup refused a reparse point.");
-        }
-
-        private static List<string> CampaignRetirementStagingRoots()
-        {
-            string portraitRoot = CampaignPortraitCacheRoot();
-            string portraitParent = string.IsNullOrWhiteSpace(portraitRoot)
-                ? DataDir
-                : Directory.GetParent(Path.GetFullPath(portraitRoot).TrimEnd(
-                    Path.DirectorySeparatorChar,
-                    Path.AltDirectorySeparatorChar))?.FullName ?? DataDir;
-            return new[]
-            {
-                Path.Combine(DataDir, "campaign-retirement-staging"),
-                Path.Combine(portraitParent, ".reign-campaign-retirement-staging")
-            }.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        }
-
-        private static void CleanupCampaignRetirementStagingAtStartup()
-        {
-            foreach (string root in CampaignRetirementStagingRoots())
-            {
-                if (!Directory.Exists(root)) continue;
-                foreach (string child in Directory.GetDirectories(
-                    root, "*", SearchOption.TopDirectoryOnly))
-                {
-                    try
-                    {
-                        ValidateCampaignRetirementStagingRoot(child);
-                        Dictionary<string, object> transaction = ReadJsonObject(
-                            Path.Combine(child, "transaction.json"));
-                        string campaignId = ReadString(
-                            transaction, "campaignId", "");
-                        if (string.IsNullOrWhiteSpace(campaignId))
-                            campaignId = CampaignIdFromRetirementStagingName(child);
-                        ValidateSaveSyncId(campaignId, "campaignId");
-                        bool databaseExists = ReignPostgreSqlStorage.ListCampaignMetadata().Any(row =>
-                            ReadString(row, "campaignId", "").Equals(
-                                campaignId, StringComparison.OrdinalIgnoreCase));
-                        if (databaseExists)
-                        {
-                            RestoreRetirementTransactionRoot(child, campaignId);
-                        }
-                        else
-                        {
-                            DeleteDirectoryCompletely(child);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        LogOperational("campaign.retirement_staging_cleanup_failed",
-                            new Dictionary<string, object>
-                            {
-                                ["path"] = child,
-                                ["error"] = ex.Message
-                            });
-                    }
-                }
-            }
-        }
-
-        private static string CampaignIdFromRetirementStagingName(string path)
-        {
-            string name = Path.GetFileName(Path.GetFullPath(path).TrimEnd(
-                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-            const int operationTokenLength = 32;
-            int separator = name.Length - operationTokenLength - 1;
-            if (separator <= 0 || name[separator] != '_')
-                throw new InvalidDataException(
-                    "Campaign retirement staging receipt is missing or invalid.");
-            string operationToken = name.Substring(separator + 1);
-            if (operationToken.Length != operationTokenLength
-                || operationToken.Any(ch => !Uri.IsHexDigit(ch)))
-                throw new InvalidDataException(
-                    "Campaign retirement staging receipt is missing or invalid.");
-            string campaignId = name.Substring(0, separator);
-            ValidateSaveSyncId(campaignId, "campaignId");
-            HashSet<string> allowedEntries = new HashSet<string>(
-                StringComparer.OrdinalIgnoreCase)
-            {
-                "campaign", "save-sync", "portrait-cache", "transaction.json"
-            };
-            if (Directory.GetFileSystemEntries(path).Any(entry =>
-                !allowedEntries.Contains(Path.GetFileName(entry))))
-                throw new InvalidDataException(
-                    "Campaign retirement staging receipt is missing and its contents are not recognized.");
-            return campaignId;
-        }
-
-        private static void RestoreRetirementTransactionRoot(
-            string stagingRoot,
-            string campaignId)
-        {
-            Dictionary<string, string> candidates = new Dictionary<string, string>(
-                StringComparer.OrdinalIgnoreCase)
-            {
-                [Path.Combine(stagingRoot, "campaign")] =
-                    StrictCampaignDirectory(campaignId),
-                [Path.Combine(stagingRoot, "save-sync")] =
-                    SaveSyncCampaignRoot(campaignId),
-                [Path.Combine(stagingRoot, "portrait-cache")] =
-                    CampaignPortraitCacheDirectory(campaignId)
-            };
-            foreach (KeyValuePair<string, string> candidate in candidates)
-            {
-                if (!Directory.Exists(candidate.Key)) continue;
-                if (Directory.Exists(candidate.Value))
-                    throw new IOException(
-                        "Campaign retirement recovery found both staged and active roots for "
-                        + campaignId + ". Manual review is required.");
-                if (candidate.Key.EndsWith("portrait-cache",
-                    StringComparison.OrdinalIgnoreCase))
-                    ValidateCampaignOwnedDirectory(candidate.Value,
-                        CampaignPortraitCacheRoot(), true);
-                else if (candidate.Key.EndsWith("save-sync",
-                    StringComparison.OrdinalIgnoreCase))
-                    ValidateCampaignOwnedDirectory(candidate.Value,
-                        SaveSyncRoot(), false);
-                else
-                    ValidateCampaignOwnedDirectory(candidate.Value,
-                        CampaignsRoot(), false);
-                MoveDirectoryWithRetries(candidate.Key, candidate.Value);
-            }
-            DeleteDirectoryCompletely(stagingRoot);
-            LogOperational("campaign.retirement_staging_recovered",
-                new Dictionary<string, object>
-                {
-                    ["campaignId"] = campaignId,
-                    ["stagingRoot"] = stagingRoot
-                });
-        }
-
-        private static List<Dictionary<string, object>> EnumerateOrphanPortraitRoots(
-            HashSet<string> campaignIds)
-        {
-            string root = CampaignPortraitCacheRoot();
-            if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
-                return new List<Dictionary<string, object>>();
-            return Directory.GetDirectories(root, "*", SearchOption.TopDirectoryOnly)
-                .Where(path => !Path.GetFileName(path).Equals(
-                    "_shared", StringComparison.OrdinalIgnoreCase))
-                .Where(path => !campaignIds.Contains(Path.GetFileName(path)))
-                .Select(path => OrphanStorageRoot("orphan_portrait_root", path))
-                .ToList();
-        }
-
-        private static List<Dictionary<string, object>> EnumerateOrphanCampaignRoots(
-            HashSet<string> campaignIds)
-        {
-            string root = CampaignsRoot();
-            if (!Directory.Exists(root))
-                return new List<Dictionary<string, object>>();
-            return Directory.GetDirectories(root, "*", SearchOption.TopDirectoryOnly)
-                .Where(path => !Path.GetFileName(path).StartsWith(".", StringComparison.Ordinal))
-                .Select(path => new
-                {
-                    Path = path,
-                    Id = ReadString(ReadJsonObject(Path.Combine(path, "campaign.json")),
-                        "campaignId", Path.GetFileName(path))
-                })
-                .Where(item => !campaignIds.Contains(item.Id))
-                .Select(item => OrphanStorageRoot("orphan_campaign_root", item.Path))
-                .ToList();
-        }
-
-        private static List<Dictionary<string, object>> EnumerateOrphanSaveSyncRoots(
-            HashSet<string> campaignIds)
-        {
-            string root = SaveSyncRoot();
-            if (!Directory.Exists(root))
-                return new List<Dictionary<string, object>>();
-            return Directory.GetDirectories(root, "*", SearchOption.TopDirectoryOnly)
-                .Where(path => !Path.GetFileName(path).Equals(
-                    "t", StringComparison.OrdinalIgnoreCase))
-                .Select(path => new
-                {
-                    Path = path,
-                    Id = ReadString(ReadJsonObject(Path.Combine(path, "ledger.json")),
-                        "campaignId", "")
-                })
-                .Where(item => string.IsNullOrWhiteSpace(item.Id)
-                    || !campaignIds.Contains(item.Id))
-                .Select(item => OrphanStorageRoot("orphan_save_sync_root", item.Path))
-                .ToList();
-        }
-
-        private static Dictionary<string, object> OrphanStorageRoot(
-            string category,
-            string path)
-        {
-            bool reparse = Directory.Exists(path)
-                && (new DirectoryInfo(path).Attributes & FileAttributes.ReparsePoint) != 0;
-            return new Dictionary<string, object>
-            {
-                ["category"] = category,
-                ["name"] = Path.GetFileName(path),
-                ["path"] = path,
-                ["reparsePoint"] = reparse,
-                ["fileCount"] = reparse ? 0 : SafeFileCount(path, "*"),
-                ["bytes"] = reparse ? 0L : SafeDirectorySize(path),
-                ["eligibleForPermanentDeletion"] = !reparse
-            };
-        }
-
-        private static string CampaignMutationBlockReason()
-        {
-            if (CampaignMutationAllowDuringTests) return "";
-            try
-            {
-                bool running = Process.GetProcesses().Any(x => x.ProcessName.IndexOf("Bannerlord", StringComparison.OrdinalIgnoreCase) >= 0);
-                return running ? "Close Bannerlord before importing or deleting campaign data." : "";
-            }
-            catch { return ""; }
-        }
-
-        private static void CopyDirectoryTree(string source, string destination, Func<string, bool> include)
-        {
-            Directory.CreateDirectory(destination);
-            foreach (string directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
-                Directory.CreateDirectory(Path.Combine(destination, RelativeBackupPath(source, directory).Replace('/', Path.DirectorySeparatorChar)));
-            foreach (string file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
-            {
-                if (include != null && !include(file)) continue;
-                string target = Path.Combine(destination, RelativeBackupPath(source, file).Replace('/', Path.DirectorySeparatorChar));
-                Directory.CreateDirectory(Path.GetDirectoryName(target));
-                File.Copy(file, target, true);
-            }
-        }
-
-        private static bool IsLiveSqliteSidecar(string path)
-        {
-            string name = Path.GetFileName(path);
-            return name.Equals("world_memory.sqlite", StringComparison.OrdinalIgnoreCase) || name.Equals("world_memory.sqlite-wal", StringComparison.OrdinalIgnoreCase) || name.Equals("world_memory.sqlite-shm", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static string RelativeBackupPath(string root, string path)
-        {
-            Uri rootUri = new Uri(Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar);
-            return Uri.UnescapeDataString(rootUri.MakeRelativeUri(new Uri(Path.GetFullPath(path))).ToString()).Replace('\\', '/');
-        }
-
-        private static string SafeBackupPath(string root, string relative)
-        {
-            string fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            string full = Path.GetFullPath(Path.Combine(root, relative ?? ""));
-            if (!full.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase) && !full.Equals(fullRoot.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Archive contains an unsafe path.");
-            return full;
-        }
-
-        private static string FileSha256(string path)
-        {
-            using (SHA256 sha = SHA256.Create())
-            using (FileStream stream = File.OpenRead(path)) return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
-        }
-
-        private static long SafeDirectorySize(string path)
-        {
-            try { return string.IsNullOrWhiteSpace(path) || !Directory.Exists(path) ? 0 : Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories).Sum(x => new FileInfo(x).Length); }
-            catch { return 0; }
-        }
-
-        private static int SafeDirectoryCount(string path) { try { return Directory.Exists(path) ? Directory.EnumerateDirectories(path).Count() : 0; } catch { return 0; } }
-        private static int SafeFileCount(string path, string pattern) { try { return string.IsNullOrWhiteSpace(path) || !Directory.Exists(path) ? 0 : Directory.EnumerateFiles(path, pattern, SearchOption.AllDirectories).Count(); } catch { return 0; } }
-        private static void TryDeleteDirectory(string path)
-        {
-            if (string.IsNullOrWhiteSpace(path)) return;
-            ReignPostgreSqlStorage.ClearAllPools();
-            for (int attempt = 0; attempt < 4; attempt++)
-            {
-                try { if (Directory.Exists(path)) Directory.Delete(path, true); return; }
-                catch { if (attempt < 3) Thread.Sleep(100 * (attempt + 1)); }
-            }
-        }
-        private static void MoveDirectoryWithRetries(string source, string destination)
-        {
-            ReignPostgreSqlStorage.ClearAllPools();
-            Exception last = null;
-            for (int attempt = 0; attempt < 5; attempt++)
-            {
-                try { Directory.Move(source, destination); return; }
-                catch (Exception ex) { last = ex; if (attempt < 4) Thread.Sleep(120 * (attempt + 1)); }
-            }
-            throw last ?? new IOException("Directory move failed.");
-        }
-        private static void MoveFileWithRetries(string source, string destination)
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(destination));
-            Exception last = null;
-            for (int attempt = 0; attempt < 5; attempt++)
-            {
-                try { File.Move(source, destination); return; }
-                catch (Exception ex) { last = ex; if (attempt < 4) Thread.Sleep(120 * (attempt + 1)); }
-            }
-            throw last ?? new IOException("File move failed.");
-        }
-        private static void DeleteDirectoryCompletely(string path)
-        {
-            if (string.IsNullOrWhiteSpace(path)) return;
-            ReignPostgreSqlStorage.ClearAllPools();
-            Exception last = null;
-            for (int attempt = 0; attempt < 8; attempt++)
-            {
-                try
-                {
-                    if (!Directory.Exists(path)) return;
-                    DeleteDirectoryTreePass(path);
-                    if (!Directory.Exists(path)) return;
-                }
-                catch (Exception ex) { last = ex; }
-                if (attempt < 7) Thread.Sleep(200 * (attempt + 1));
-            }
-            throw new IOException("Reign staged the campaign data but could not finish deleting it. " + (last?.Message ?? ""));
-        }
-
-        private static void DeleteDirectoryTreePass(string path)
-        {
-            Stack<string> pending = new Stack<string>();
-            List<string> directories = new List<string>();
-            pending.Push(ExtendedLengthPath(path));
-            while (pending.Count > 0)
-            {
-                string current = pending.Pop();
-                if (!Directory.Exists(current)) continue;
-                directories.Add(current);
-                string[] entries;
-                try { entries = Directory.GetFileSystemEntries(current); }
-                catch (DirectoryNotFoundException) { continue; }
-                foreach (string entry in entries)
-                {
-                    FileAttributes attributes;
-                    try { attributes = File.GetAttributes(entry); }
-                    catch (FileNotFoundException) { continue; }
-                    catch (DirectoryNotFoundException) { continue; }
-                    bool directory = (attributes & FileAttributes.Directory) != 0;
-                    bool reparse = (attributes & FileAttributes.ReparsePoint) != 0;
-                    if (directory && !reparse)
-                    {
-                        pending.Push(entry);
-                        continue;
-                    }
-                    try
-                    {
-                        File.SetAttributes(entry,
-                            attributes & ~FileAttributes.ReadOnly);
-                        if (directory) Directory.Delete(entry, false);
-                        else File.Delete(entry);
-                    }
-                    catch (FileNotFoundException) { }
-                    catch (DirectoryNotFoundException) { }
-                }
-            }
-
-            foreach (string directory in directories
-                .OrderByDescending(value => value.Length))
-            {
-                if (!Directory.Exists(directory)) continue;
-                try
-                {
-                    FileAttributes attributes = File.GetAttributes(directory);
-                    File.SetAttributes(directory,
-                        attributes & ~FileAttributes.ReadOnly);
-                }
-                catch (FileNotFoundException) { continue; }
-                catch (DirectoryNotFoundException) { continue; }
-                try { Directory.Delete(directory, false); }
-                catch (DirectoryNotFoundException) { }
-            }
-        }
-
-        private static string ExtendedLengthPath(string path)
-        {
-            string full = Path.GetFullPath(path);
-            if (Path.DirectorySeparatorChar != '\\'
-                || full.StartsWith("\\\\?\\", StringComparison.Ordinal))
-                return full;
-            if (full.StartsWith("\\\\", StringComparison.Ordinal))
-                return "\\\\?\\UNC\\" + full.Substring(2);
-            return "\\\\?\\" + full;
-        }
-        private static void TryDeleteFile(string path) { try { if (!string.IsNullOrWhiteSpace(path) && File.Exists(path)) File.Delete(path); } catch { } }
-
-        private static void WriteDownloadFile(NetworkStream stream, string path, string contentType, string downloadName)
-        {
-            if (!File.Exists(path)) { WriteJson(stream, 404, new Dictionary<string, object> { ["ok"] = false, ["error"] = "File not found." }); return; }
-            FileInfo info = new FileInfo(path);
-            string header = "HTTP/1.1 200 OK\r\nContent-Type: " + contentType + "\r\nContent-Length: " + info.Length.ToString(CultureInfo.InvariantCulture) + "\r\nContent-Disposition: attachment; filename=\"" + (downloadName ?? "campaign.reignbackup").Replace("\"", "") + "\"\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";
-            byte[] headerBytes = Encoding.ASCII.GetBytes(header);
-            stream.Write(headerBytes, 0, headerBytes.Length);
-            byte[] buffer = new byte[1024 * 1024];
-            using (FileStream input = File.OpenRead(path))
-            {
-                int read;
-                while ((read = input.Read(buffer, 0, buffer.Length)) > 0) stream.Write(buffer, 0, read);
-            }
-        }
-
-        private static List<Dictionary<string, object>> RunCampaignBackupSelfTests()
-        {
-            List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
-            Action<string, bool, string> add = (id, passed, summary) => results.Add(new Dictionary<string, object> { ["ok"] = true, ["passed"] = passed, ["suite"] = "campaign_backups", ["caseId"] = id, ["name"] = id, ["summary"] = summary, ["durationMs"] = 0 });
-            string campaignId = "cbt_" + Guid.NewGuid().ToString("N");
-            string campaignDir = CampaignDirectory(campaignId), portraitDir = CampaignPortraitCacheDirectory(campaignId), archivePath = "";
-            string purgeFixture = Path.Combine(TestsDir, "campaign_delete_all_" + Guid.NewGuid().ToString("N"));
-            string priorNativeSaveRootOverride =
-                CampaignNativeSaveRootOverrideForTests;
-            try
-            {
-                CampaignMutationAllowDuringTests = true;
-                Dictionary<string, object> rejected = DeleteAllCampaignBackupData(new Dictionary<string, object> { ["confirmation"] = "DELETE" });
-                add("delete_all_requires_exact_confirmation", !ReadBool(rejected, "ok", true), "Delete all requires the exact lowercase word delete.");
-
-                // Scheduled teardown phases with inert recording callbacks: no deletion, no receipt write.
-                string lastReceiptError = "";
-                string RunPhases(string provider, bool settled, bool externalFails, string blocked, bool stopFails = false)
-                {
-                    List<string> calls = new List<string>();
-                    int code = CompleteScheduledDeleteAllCampaignData(
-                        new Dictionary<string, object> { ["vectorProvider"] = provider, ["qdrantUrl"] = "http://qdrant.invalid" },
-                        new Dictionary<string, object> { ["settled"] = settled },
-                        () => { calls.Add("guard"); return blocked; },
-                        _ => { calls.Add("external"); if (externalFails) throw new InvalidOperationException("external failed"); },
-                        () => { calls.Add("stop"); if (stopFails) throw new InvalidOperationException("stop failed"); },
-                        () => { calls.Add("local"); return 0; },
-                        receipt =>
-                        {
-                            lastReceiptError = ReadString(receipt, "error", "");
-                            calls.Add(ReadBool(receipt, "ok", true) ? "receipt_ok" : "receipt_failed");
-                        });
-                    return string.Join(",", calls) + ":" + code;
-                }
-                add("delete_all_timeout_deletes_nothing", RunPhases("qdrant", false, false, "") == "stop,receipt_failed:1",
-                    "Unsettled shutdown quiescence writes a failure receipt and makes no external or local delete call.");
-                add("delete_all_guard_recheck_deletes_nothing", RunPhases("qdrant", true, false, "blocked") == "guard,stop,receipt_failed:1",
-                    "A failed pre-delete guard recheck makes no external or local delete call.");
-                add("delete_all_external_failure_skips_local", RunPhases("qdrant", true, true, "") == "guard,external,stop,receipt_failed:1",
-                    "External index failure stops semantic memory and never reaches local teardown.");
-                add("delete_all_external_then_local", RunPhases("qdrant", true, false, "") == "guard,external,stop,local:0"
-                    && RunPhases("local", true, false, "") == "guard,stop,local:0",
-                    "After quiescence the captured external index is erased before semantic memory stops, and local teardown runs last.");
-                add("delete_all_stop_fault_skips_local", RunPhases("qdrant", true, false, "", true) == "guard,external,stop,receipt_failed:1"
-                    && lastReceiptError.Contains("Restart the Reign server") && !lastReceiptError.Contains("No campaign data was deleted")
-                    && RunPhases("qdrant", true, true, "", true) == "guard,external,stop,receipt_failed:1"
-                    && lastReceiptError.StartsWith("external failed", StringComparison.Ordinal),
-                    "A semantic stop fault is surfaced and skips local teardown, keeping the earlier failure and never claiming nothing was deleted after the external call.");
-
-                List<string> purgeDirectories = new List<string>
-                {
-                    Path.Combine(purgeFixture, "campaigns"), Path.Combine(purgeFixture, "backups"),
-                    Path.Combine(purgeFixture, "vectors"),
-                    Path.Combine(purgeFixture, "save-sync")
-                };
-                foreach (string directory in purgeDirectories)
-                {
-                    Directory.CreateDirectory(directory);
-                    File.WriteAllText(Path.Combine(directory, "campaign-data.txt"), "delete me", Encoding.UTF8);
-                }
-                string purgePortraits = Path.Combine(purgeFixture, "portraits");
-                string sharedPortraits = Path.Combine(purgePortraits, "_shared");
-                string campaignPortraits = Path.Combine(purgePortraits, "campaign_test");
-                Directory.CreateDirectory(sharedPortraits);
-                Directory.CreateDirectory(campaignPortraits);
-                File.WriteAllText(Path.Combine(sharedPortraits, "pregenerated-portrait.png"), "preserve me", Encoding.UTF8);
-                File.WriteAllText(Path.Combine(campaignPortraits, "campaign-portrait.png"), "delete me", Encoding.UTF8);
-                string purgeQueue = Path.Combine(purgeFixture, "action-queue.json");
-                string preservedSettings = Path.Combine(purgeFixture, "settings.json");
-                File.WriteAllText(purgeQueue, "[]", Encoding.UTF8);
-                File.WriteAllText(preservedSettings, "{\"apiKey\":\"preserved\"}", Encoding.UTF8);
-                DeleteAllCampaignStorageCore(purgeDirectories, new List<string> { purgeQueue }, Path.Combine(purgeFixture, ".delete_all_test"));
-                DeleteCampaignPortraitDataPreservingShared(purgePortraits);
-                bool allTargetsDeleted = purgeDirectories.All(x => Directory.Exists(x) && !Directory.EnumerateFileSystemEntries(x).Any()) && !File.Exists(purgeQueue);
-                bool sharedPortraitsPreserved = File.Exists(Path.Combine(sharedPortraits, "pregenerated-portrait.png")) && !Directory.Exists(campaignPortraits);
-                add("delete_all_wipes_campaign_storage", allTargetsDeleted && sharedPortraitsPreserved, "Delete all empties campaign, backup, vector, Save Sync, and campaign-portrait storage while preserving the pregenerated shared portrait library.");
-                add("delete_all_preserves_shared_portrait_library", sharedPortraitsPreserved, "Delete all never removes the pregenerated _shared portrait seed library.");
-                add("delete_all_preserves_global_settings", File.Exists(preservedSettings), "Delete all leaves global settings and API keys outside the campaign purge.");
-
-                Directory.CreateDirectory(Path.Combine(campaignDir, "characters", "hero_test", "memory"));
-                File.WriteAllText(Path.Combine(campaignDir, "characters", "hero_test", "memory", "memories.jsonl"), "{\"memory\":\"kept\"}\n", Encoding.UTF8);
-                WriteJsonObject(Path.Combine(campaignDir, "campaign.json"), new Dictionary<string, object> { ["campaignId"] = campaignId, ["campaignLabel"] = "Backup Test", ["mainHeroName"] = "Tester" });
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId)) ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('backup_test','preserved');");
-                Directory.CreateDirectory(Path.Combine(portraitDir, "hero_test"));
-                File.WriteAllBytes(Path.Combine(portraitDir, "hero_test", "custom.png"), new byte[] { 1, 2, 3, 4, 5 });
-                string nativeSaveFixture = Path.Combine(
-                    purgeFixture, "native-game-saves");
-                Directory.CreateDirectory(nativeSaveFixture);
-                string nativeSavePath = Path.Combine(
-                    nativeSaveFixture, "Diagnostic Campaign.sav");
-                byte[] nativeSaveBytes = new byte[] { 9, 7, 5, 3, 1 };
-                File.WriteAllBytes(nativeSavePath, nativeSaveBytes);
-                CampaignNativeSaveRootOverrideForTests = nativeSaveFixture;
-                Dictionary<string, object> ledger =
-                    ReadSaveSyncLedger(campaignId);
-                ledger["points"] = new List<Dictionary<string, object>>
-                {
-                    new Dictionary<string, object>
-                    {
-                        ["campaignId"] = campaignId,
-                        ["savePointId"] = "diagnostic_backup_point",
-                        ["nativeSaveName"] = "Diagnostic Campaign",
-                        ["registeredUtc"] = DateTime.UtcNow.ToString("o"),
-                        ["status"] = "ready"
-                    }
-                };
-                WriteSaveSyncLedger(campaignId, ledger);
-                Dictionary<string, object> export = CreateCampaignBackupArchive(campaignId);
-                archivePath = ReadString(export, "path", "");
-                add("export_archive_created", ReadBool(export, "ok", false) && File.Exists(archivePath), "A complete campaign archive is created.");
-                if (!ReadBool(export, "ok", false)) throw new InvalidOperationException("Export failed: " + ReadString(export, "error", "unknown error"));
-                string uploadCopy = Path.Combine(DataDir, "backups", "importing", Guid.NewGuid().ToString("N") + ".reignbackup");
-                Directory.CreateDirectory(Path.GetDirectoryName(uploadCopy));
-                File.Copy(archivePath, uploadCopy, true);
-                File.Delete(nativeSavePath);
-                TryDeleteDirectory(campaignDir);
-                TryDeleteDirectory(portraitDir);
-                TryDeleteDirectory(SaveSyncCampaignRoot(campaignId));
-                ReignPostgreSqlStorage.DropCampaign(campaignId);
-                if (Directory.Exists(campaignDir) || Directory.Exists(portraitDir)) throw new IOException("The disposable source campaign could not be cleared before the import round trip.");
-                Dictionary<string, object> imported = ImportCampaignBackup(uploadCopy, new Dictionary<string, string> { ["replace"] = "false" });
-                bool importRoundTrip = ReadBool(imported, "ok", false) && File.Exists(Path.Combine(campaignDir, "characters", "hero_test", "memory", "memories.jsonl")) && File.Exists(Path.Combine(portraitDir, "hero_test", "custom.png"))
-                    && File.Exists(nativeSavePath)
-                    && File.ReadAllBytes(nativeSavePath).SequenceEqual(nativeSaveBytes)
-                    && ReadInt(imported, "nativeSavesRestored", 0) == 1;
-                add("import_round_trip", importRoundTrip, importRoundTrip ? "Import restores campaign files, the external portrait cache, and the exact native Bannerlord save." : "Import round trip failed: " + Json.Serialize(imported));
-                bool postgresPreserved = false;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId)) postgresPreserved = ReadString(QuerySql(connection, "SELECT value FROM schema_meta WHERE key='backup_test';").FirstOrDefault(), "value", "") == "preserved";
-                add("postgresql_snapshot_preserved", postgresPreserved, postgresPreserved ? "The consistent PostgreSQL campaign archive survives export and import." : "The imported PostgreSQL schema did not contain the exported backup_test marker. Import result: " + Json.Serialize(imported));
-                add("manifest_hashes_present", ReadInt(export, "fileCount", 0) >= 4 && ReadInt(export, "nativeSaveCount", 0) == 1, "The archive manifest covers campaign, database, portrait, Save Sync, and native Bannerlord save files.");
-
-                File.WriteAllBytes(nativeSavePath,
-                    new byte[] { 8, 6, 4, 2 });
-                string conflictUpload = Path.Combine(DataDir, "backups",
-                    "importing", Guid.NewGuid().ToString("N") +
-                        ".reignbackup");
-                File.Copy(archivePath, conflictUpload, true);
-                Dictionary<string, object> conflictImport =
-                    ImportCampaignBackup(conflictUpload,
-                        new Dictionary<string, string>
-                        {
-                            ["replace"] = "true",
-                            ["replaceNativeSaves"] = "false"
-                        });
-                add("native_save_conflict_requires_explicit_replace",
-                    !ReadBool(conflictImport, "ok", true)
-                    && ReadBool(conflictImport,
-                        "nativeSaveConflict", false)
-                    && File.ReadAllBytes(nativeSavePath)
-                        .SequenceEqual(new byte[] { 8, 6, 4, 2 }),
-                    "Import never silently overwrites a different native Bannerlord save with the same slot name.");
-
-                string replaceUpload = Path.Combine(DataDir, "backups",
-                    "importing", Guid.NewGuid().ToString("N") +
-                        ".reignbackup");
-                File.Copy(archivePath, replaceUpload, true);
-                Dictionary<string, object> replacedImport =
-                    ImportCampaignBackup(replaceUpload,
-                        new Dictionary<string, string>
-                        {
-                            ["replace"] = "true",
-                            ["replaceNativeSaves"] = "true"
-                        });
-                bool replacementVerified = ReadBool(replacedImport, "ok", false)
-                    && File.ReadAllBytes(nativeSavePath)
-                        .SequenceEqual(nativeSaveBytes)
-                    && ReadInt(replacedImport,
-                        "nativeSavesRestored", 0) == 1;
-                add("native_save_conflict_replace_is_verified", replacementVerified,
-                    replacementVerified
-                        ? "A separately confirmed native-save replacement restores the archive bytes and verifies their hash before completing import."
-                        : "Confirmed native-save replacement failed: " + Json.Serialize(replacedImport));
-            }
-            catch (Exception ex) { add("campaign_backup_exception", false, ex.Message); }
-            finally
-            {
-                CampaignMutationAllowDuringTests = false;
-                CampaignNativeSaveRootOverrideForTests =
-                    priorNativeSaveRootOverride;
-                TryDeleteFile(archivePath);
-                try { ReignPostgreSqlStorage.DropCampaign(campaignId); } catch { }
-                TryDeleteDirectory(campaignDir);
-                TryDeleteDirectory(portraitDir);
-                TryDeleteDirectory(purgeFixture);
-            }
-            return results;
+            return Path.Combine(Program.DataDir, "PortraitCache");
         }
     }
 }

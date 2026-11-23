@@ -1,0 +1,1458 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Text.RegularExpressions;
+
+namespace ReignBetaServer
+{
+    internal static partial class DialogueService
+    {
+        private static int ContinuityRepairOutputAllowance(Dictionary<string, object> request,
+            Dictionary<string, object> original)
+        {
+            const int ceiling = 24000;
+            int requested = Math.Max(3000, Math.Min(ceiling, ReadInt(request, "maxTokens", 8000)));
+            // A rewrite must return the complete structured response, including
+            // its unchanged action decision. Reuse the conservative serialized
+            // estimate with 25% grace and room for the correction itself.
+            int estimated = EstimateContinuityTokens(Json.Serialize(original));
+            int withGrace = (int)Math.Min(ceiling, Math.Ceiling(estimated * 1.25d) + 1024d);
+            return Math.Max(requested, withGrace);
+        }
+
+        private static List<Dictionary<string, object>> RecallRepairAuthoredWindow(Dictionary<string, object> request,
+            out HashSet<(string Id, string Text)> completeExchanges)
+        {
+            completeExchanges = new();
+            var envelope = ReadDictionary(request, "promptEnvelope");
+            if (envelope == null || !ConversationStructureReceipts.TryGetValue(envelope, out var receipt)
+                || !ConversationStructureMatches(envelope, ReadDictionaryList(request, "messages"))
+                || receipt.Messages.Any(message => ReadString(message, "content", "").StartsWith("HISTORICAL REFERENCE ", StringComparison.Ordinal)))
+                return null;
+            if (!ReadString(receipt.Messages.LastOrDefault(), "content", "").StartsWith("LATEST PLAYER TURN ", StringComparison.Ordinal))
+                return null;
+
+            // The current contribution is part of the window. Keep the role
+            // and exact observer-projected body that the initial writer received.
+            var window = receipt.Messages.Select((message, index) => (Message: message, Index: index)).Where(entry => {
+                string content = ReadString(entry.Message, "content", "");
+                return content.StartsWith("HISTORICAL ", StringComparison.Ordinal)
+                    || content.StartsWith("LATEST PLAYER TURN ", StringComparison.Ordinal);
+            }).TakeLast(30).ToList();
+            var historicalIndices = window.Take(window.Count - 1).Select(entry => entry.Index).ToHashSet();
+            // The original builder bound these ranges to source-tagged bytes. A
+            // partial exchange at the window boundary needs its separate original.
+            foreach (var exchange in receipt.Exchanges ?? new())
+                if (Enumerable.Range(exchange.FirstMessageIndex, exchange.MessageCount).All(historicalIndices.Contains))
+                    completeExchanges.Add((exchange.SourceId, exchange.Text));
+            return window.Select(entry => CloneDictionary(entry.Message)).ToList();
+        }
+
+        internal static Dictionary<string, object> RetryRoleplayContinuityViolation(
+            Dictionary<string, object> llm,
+            Dictionary<string, object> request,
+            Dictionary<string, object> payload,
+            Dictionary<string, object> identityView,
+            List<Dictionary<string, object>> priorLines,
+            string campaignId,
+            string correlationId,
+            string auditMode,
+            string heroId,
+            string heroName,
+            string playerName,
+            string eventId,
+            Func<Dictionary<string, object>, Dictionary<string, object>> responder = null)
+        {
+            if (!ReadBool(llm, "ok", false)) return llm;
+            Dictionary<string, object> parsed = TryParseJsonObject(ReadString(llm, "content", ""));
+            if (parsed == null) return llm;
+            List<Dictionary<string, object>> continuityLines = LoadRecentNpcRoleplayContinuityLines(
+                campaignId, heroId, heroName, priorLines);
+            // Freeze the attributed current-route snapshot once. SQL history used by
+            // older safety checks must not leak another scene or branch into style evidence.
+            var expressionHistory = ConversationExpressionHistory(priorLines, heroId, heroName, payload);
+            List<Dictionary<string, object>> violations = FindRoleplayContinuityViolations(
+                parsed, identityView, continuityLines, heroName, playerName);
+            string latestPlayerText = ReadFirstString(payload, "playerText", "text", "message");
+            violations.AddRange(FindConversationNaturalnessViolations(parsed, latestPlayerText,
+                continuityLines, priorLines, heroId, heroName, expressionHistory));
+            violations.AddRange(FindTemporaryGuestDepartureViolations(parsed, payload, heroId));
+            violations.AddRange(FindCriticalConversationContinuityViolations(parsed, payload, heroId));
+            violations.AddRange(FindConversationCorrectionViolations(parsed, latestPlayerText, priorLines, heroId, payload));
+            if (violations.Count == 0) return llm;
+
+            // An unsupported durable write must not suppress an otherwise usable
+            // reply. Remove only writes whose evidence cannot bind to visible prose,
+            // then let the normal role-play checks validate the remaining response.
+            Dictionary<string, object> originalForRepair = RemoveUnsupportedContinuityWrites(parsed);
+            List<Dictionary<string, object>> originalRemaining = FindRoleplayContinuityViolations(
+                originalForRepair, identityView, continuityLines, heroName, playerName);
+            originalRemaining.AddRange(FindConversationNaturalnessViolations(originalForRepair,
+                latestPlayerText, continuityLines, priorLines, heroId, heroName, expressionHistory));
+            originalRemaining.AddRange(FindTemporaryGuestDepartureViolations(originalForRepair, payload, heroId));
+            originalRemaining.AddRange(FindCriticalConversationContinuityViolations(originalForRepair, payload, heroId));
+            originalRemaining.AddRange(FindConversationCorrectionViolations(originalForRepair, latestPlayerText, priorLines, heroId, payload));
+
+            bool removedUnsupportedWrites = ReadDictionaryList(parsed, "continuityWrites").Count
+                != ReadDictionaryList(originalForRepair, "continuityWrites").Count;
+            if (originalRemaining.Any(IsConversationExpressionViolation)
+                && originalRemaining.All(v => IsConversationExpressionViolation(v) || IsConversationStyleWarning(v)))
+                return RepairConversationExpression(llm, originalForRepair, request, payload, identityView,
+                    continuityLines, priorLines, expressionHistory, originalRemaining, campaignId, correlationId,
+                    auditMode, heroId, heroName, playerName, eventId, responder);
+            bool stageDirectionsRemoved = TryRemoveRepeatedStageDirectionsOnly(originalForRepair, originalRemaining, identityView,
+                continuityLines, heroName, playerName, out Dictionary<string, object> sanitizedOriginal,
+                out List<Dictionary<string, object>> sanitizedOriginalRemaining,
+                out int sanitizedOriginalStageCount);
+            if (removedUnsupportedWrites && originalRemaining.Count == 0)
+            {
+                sanitizedOriginal = originalForRepair;
+                sanitizedOriginalRemaining = originalRemaining;
+            }
+            if ((stageDirectionsRemoved || (removedUnsupportedWrites && originalRemaining.Count == 0))
+                && FindCriticalConversationContinuityViolations(sanitizedOriginal, payload, heroId).Count == 0)
+            {
+                string sanitizedContent = Json.Serialize(sanitizedOriginal);
+                if (ConversationResponseService.StructuredResponseIsComplete(sanitizedContent, auditMode))
+                {
+                    MarkRepairedVisibleResponse(
+                        sanitizedOriginal, true);
+                    sanitizedContent = Json.Serialize(sanitizedOriginal);
+                    Dictionary<string, object> deterministicEvidence = new Dictionary<string, object>
+                    {
+                        ["detected"] = violations,
+                        ["remaining"] = sanitizedOriginalRemaining,
+                        ["accepted"] = true,
+                        ["method"] = stageDirectionsRemoved
+                            ? "deterministic_metadata_and_stage_direction_repair"
+                            : "deterministic_unsupported_continuity_write_removal",
+                        ["visibleRepairMarker"] = "..",
+                        ["removedStageDirectionCount"] = sanitizedOriginalStageCount,
+                        ["continuityHistoryLineCount"] = continuityLines.Count,
+                        ["repairRequestChars"] = 0,
+                        ["originalResponseChars"] = Json.Serialize(parsed).Length
+                    };
+                    llm["content"] = sanitizedContent;
+                    llm["roleplayContinuityRepair"] = deterministicEvidence;
+                    OperationsService.WriteAudit(campaignId, correlationId, "server", auditMode,
+                        "llm.roleplay_continuity_repair", heroId, "", eventId,
+                        "completed", 0,
+                        "Unsupported continuity writes and repeated stage directions were removed deterministically while preserving the substantive in-character answer.",
+                        deterministicEvidence);
+                    return llm;
+                }
+            }
+
+            if (originalRemaining.All(IsConversationStyleWarning)
+                && ConversationResponseService.StructuredResponseIsComplete(Json.Serialize(originalForRepair), auditMode))
+            {
+                if (removedUnsupportedWrites) MarkRepairedVisibleResponse(originalForRepair, true);
+                llm["content"] = Json.Serialize(originalForRepair);
+                var styleEvidence = new Dictionary<string, object>
+                {
+                    ["accepted"] = true, ["revalidationCleared"] = true,
+                    ["method"] = "style_warning_no_provider_rewrite", ["detected"] = violations,
+                    ["remaining"] = new List<Dictionary<string, object>>(), ["warnings"] = originalRemaining,
+                    ["repairRequestChars"] = 0, ["providerCalls"] = 0
+                };
+                llm["roleplayContinuityRepair"] = styleEvidence;
+                OperationsService.WriteAudit(campaignId, correlationId, "server", auditMode, "llm.roleplay_continuity_style",
+                    heroId, "", eventId, "completed", 0,
+                    "Repetitive phrasing was retained as a style warning without rewriting valid dialogue or its effects.", styleEvidence);
+                return llm;
+            }
+
+            // A continuity rewrite must retain the verified speaker roles even
+            // when the trigger concerns the current scene.
+            var authoredWindow = RecallRepairAuthoredWindow(request, out var completeExchanges);
+            var presentedViolations = violations.Select(violation =>
+            {
+                var presented = new Dictionary<string, object>(violation);
+                if (ReadString(violation, "type", "").StartsWith("critical_continuity_recall_", StringComparison.Ordinal))
+                {
+                    // The exact authored window or a dedicated evidence message
+                    // carries the source prose. The violation needs only its IDs.
+                    presented.Remove("deliveredOriginals");
+                    presented["deliveredSourceIds"] = ReadDictionaryList(violation, "deliveredOriginals")
+                        .Select(r => ReadString(r, "sourceId", "")).ToList();
+                }
+                return presented;
+            }).ToList();
+            Dictionary<string, object> repairRequest = new Dictionary<string, object>
+            {
+                ["requestType"] = ReadString(request, "requestType", "dialogue") + "_continuity_repair",
+                ["campaignId"] = campaignId,
+                ["correlationId"] = correlationId + "-continuity-repair",
+                ["heroStringId"] = heroId,
+                ["eventId"] = eventId,
+                ["promptCacheEligible"] = false,
+                ["reasoningDisabled"] = true,
+                ["temperature"] = 0d,
+                ["maxTokens"] = ContinuityRepairOutputAllowance(request, parsed),
+                ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" },
+                ["messages"] = new List<Dictionary<string, object>>
+                {
+                    new Dictionary<string, object>
+                    {
+                        ["role"] = "system",
+                        ["content"] =
+                            "You are Bannerlord Reign's compact role-play continuity repair. Return exactly one complete JSON object and no commentary. "
+                            + "Preserve the original object's structure, supported facts, choices, tone, and private classifications except where a listed violation makes a field unsafe. "
+                            + "The current NPC speaker is physically present and speaking now; they may refuse or end the exchange, but cannot describe themselves as absent. "
+                            + "Never narrate the player's speech, thoughts, consent, feelings, or physical actions. An NPC may consent to a proposed gift or action, but must not narrate a transfer, payment, release, marriage, ownership change, or other world action as already completed in this reply; execution happens only after validation. Unknown identity should normally use second-person address; a supplied descriptive label may appear at most once and is never the person's name. "
+                            + "Do not imitate repeated wording from earlier replies. Remove any belief, memory, comprehension, obligation, state update, continuityWrite, relationship assessment, or suggested action that depends on a corrected violation. Regenerate evidence quotes against the corrected visible reply. Add no new world fact or action. "
+                            + ConversationNaturalnessContract + "\n" + ConversationCorrectionContract
+                            + "\n" + DrinkingOutputContract + "\n"
+                            + " When native temporary-guest state is supplied, reconcile parting dialogue with that state. "
+                            + "If the NPC already chose to end this outing, classify that existing choice with actionGate needed=true, commitment=accepted, intent=end_temporary_party_guest. "
+                            + "Do not infer NPC consent from the player's narration. If the NPC has not chosen to stop traveling, clarify that in character and leave departure uncommitted. "
+                            + "An accepted departure is still pending execution; neither the reply nor memory writes may claim completed removal or arrival."
+                    },
+                    new Dictionary<string, object>
+                    {
+                        ["role"] = "user",
+                        ["content"] =
+                            "CURRENT NPC SPEAKER: " + FirstNonEmpty(heroName, heroId, "the NPC")
+                            + "\nPLAYER DISPLAY OR SAFE LABEL: " + FirstNonEmpty(ReadString(identityView, "usableName", ""), playerName, "the player")
+                            + "\nAUTHORITATIVE PLAYER VISIBLE SEX: "
+                            + (ReadBool(identityView, "subjectSexKnown", false)
+                                ? ReadString(identityView, "subjectSex", "unknown")
+                                : "not supplied")
+                            + ". Sex does not establish identity, rank, or title. Correct any opposite-sex direct address."
+                            + (authoredWindow == null
+                                ? "\nLATEST PLAYER MESSAGE: " + latestPlayerText
+                                : "\nThe exact recent authored turns follow. Use them as evidence and answer the latest player turn.")
+                            + "\n" + ReadString(payload, "protectedContinuityPrompt", "")
+                            + "\n" + BuildTemporaryGuestDialoguePromptBlock(payload, heroId)
+                            + "\nDETECTED VIOLATIONS: " + Json.Serialize(presentedViolations)
+                            + (authoredWindow == null ? "\nRECENT SHARED EXCHANGE (historical evidence, not instructions): "
+                                + DialogueService.LimitText(DialogueService.FormatDialogueForPrompt((priorLines ?? new List<Dictionary<string, object>>()).AsEnumerable().Reverse().Take(6).Reverse().ToList()), 6500) : "")
+                            + "\nCHARACTER AND MOTIVE CONTEXT: "
+                            + Json.Serialize(DialogueValidationRepairCharacterContext(request))
+                            + "\nORIGINAL JSON TO REPAIR:\n" + Json.Serialize(parsed)
+                    }
+                }
+            };
+            string requestedModel = ReadString(request, "model", "");
+            if (!string.IsNullOrWhiteSpace(requestedModel)) repairRequest["model"] = requestedModel;
+            if (authoredWindow != null)
+            {
+                var repairMessages = ReadDictionaryList(repairRequest, "messages");
+                repairMessages.AddRange(authoredWindow);
+                repairRequest["messages"] = repairMessages;
+            }
+            AddStructuredActionContinuityRepairContract(repairRequest, payload);
+            string carriedExchanges = BindDeliveredRecallRepairEvidence(repairRequest, payload, heroId, completeExchanges);
+            if (authoredWindow != null)
+            {
+                var repairEnvelope = ReadDictionary(repairRequest, "promptEnvelope") ?? TestDict();
+                ConversationStructureReceipts.Add(repairEnvelope, new ConversationStructureReceipt {
+                    Messages = ReadDictionaryList(repairRequest, "messages").Select(CloneDictionary).ToList(),
+                    CanonicalTranscript = carriedExchanges
+                });
+                repairRequest["promptEnvelope"] = repairEnvelope;
+            }
+
+            Dictionary<string, object> repaired = responder == null ? LlmProviderService.ChatWithLlm(repairRequest) : responder(repairRequest);
+            Dictionary<string, object> repairedParsed = TryParseJsonObject(ReadString(repaired, "content", ""));
+            bool recallContextReview = violations.Any(v => ReadString(v, "type", "") == "critical_continuity_recall_context");
+            if (repairedParsed != null)
+            {
+                if (!repairedParsed.ContainsKey("actionGate") && parsed.ContainsKey("actionGate"))
+                    repairedParsed["actionGate"] = CloneDictionary(ReadDictionary(parsed, "actionGate"));
+                repairedParsed = RemoveUnsupportedContinuityWrites(repairedParsed);
+                repaired["content"] = Json.Serialize(repairedParsed);
+                if (recallContextReview && ReadBool(repaired, "ok", false)
+                    && ConversationResponseService.StructuredResponseIsComplete(ReadString(repaired, "content", ""), auditMode))
+                    BindDeliveredRecallRewrite(payload, heroId, repairedParsed);
+            }
+            List<Dictionary<string, object>> remaining = repairedParsed == null
+                ? violations
+                : FindRoleplayContinuityViolations(repairedParsed, identityView, continuityLines, heroName, playerName);
+            if (repairedParsed != null)
+            {
+                remaining.AddRange(FindConversationNaturalnessViolations(repairedParsed, latestPlayerText,
+                    continuityLines, priorLines, heroId, heroName, expressionHistory));
+                remaining.AddRange(FindTemporaryGuestDepartureViolations(repairedParsed, payload, heroId));
+                remaining.AddRange(FindCriticalConversationContinuityViolations(repairedParsed, payload, heroId));
+                remaining.AddRange(FindConversationCorrectionViolations(repairedParsed, latestPlayerText, priorLines, heroId, payload));
+                if (!StructuredActionContinuityDecisionPreserved(payload, parsed, repairedParsed))
+                    remaining.Add(TestDict("type", "structured_action_decision_changed", "detail",
+                        "The continuity repair omitted or changed the original structured action decision."));
+            }
+            string repairMethod = "compact_llm_rewrite";
+            int removedRepairStageCount = 0;
+            if (repairedParsed != null
+                && TryRemoveRepeatedStageDirectionsOnly(repairedParsed, remaining, identityView,
+                    continuityLines, heroName, playerName, out Dictionary<string, object> sanitizedRepair,
+                    out List<Dictionary<string, object>> sanitizedRepairRemaining,
+                    out removedRepairStageCount))
+            {
+                repairedParsed = sanitizedRepair;
+                remaining = sanitizedRepairRemaining;
+                // The narration-only helper rechecks role-play structure, not the
+                // full semantic/naturalness set. Never lose those checks here.
+                remaining.AddRange(FindConversationNaturalnessViolations(repairedParsed, latestPlayerText,
+                    continuityLines, priorLines, heroId, heroName, expressionHistory));
+                remaining.AddRange(FindTemporaryGuestDepartureViolations(repairedParsed, payload, heroId));
+                remaining.AddRange(FindCriticalConversationContinuityViolations(repairedParsed, payload, heroId));
+                remaining.AddRange(FindConversationCorrectionViolations(repairedParsed, latestPlayerText, priorLines, heroId, payload));
+                repaired["content"] = Json.Serialize(repairedParsed);
+                repairMethod = "compact_llm_rewrite_then_deterministic_stage_direction_removal";
+            }
+            bool usableRepair = ReadBool(repaired, "ok", false)
+                && repairedParsed != null
+                && StructuredActionContinuityDecisionPreserved(payload, parsed, repairedParsed)
+                && !remaining.Any(IsBlockingContinuityViolation)
+                && !remaining.Any(IsConversationExpressionViolation)
+                && ConversationResponseService.StructuredResponseIsComplete(
+                    ReadString(repaired, "content", ""), auditMode);
+            bool revalidationCleared = usableRepair
+                && remaining.All(IsConversationStyleWarning);
+            bool markedFailure = false;
+            if (usableRepair)
+            {
+                CarryConversationRepairState(parsed, repairedParsed);
+                MarkRepairedVisibleResponse(
+                    repairedParsed, revalidationCleared);
+                if (recallContextReview) BindDeliveredRecallRewrite(payload, heroId, repairedParsed);
+                repaired["content"] = Json.Serialize(repairedParsed);
+            }
+            else
+            {
+                if (recallContextReview) BindDeliveredRecallRewrite(payload, heroId, null);
+                repaired["technicalFailureClass"] = remaining.Any(v => ReadString(v, "type", "").StartsWith("critical_continuity_", StringComparison.Ordinal))
+                    ? "continuity_evidence" : "dialogue_validation";
+                markedFailure = TryReturnMarkedVisibleFailure(repaired, repairedParsed, parsed, request, auditMode);
+                if (!markedFailure)
+                {
+                    repaired["ok"] = false;
+                    repaired["errorCode"] = "roleplay_continuity_repair_unusable";
+                    repaired["error"] = "The role-play continuity repair returned no usable visible reply.";
+                }
+            }
+            Dictionary<string, object> evidence = new Dictionary<string, object>
+            {
+                ["detected"] = violations,
+                ["remaining"] = remaining,
+                ["warnings"] = remaining.Where(IsConversationStyleWarning).ToList(),
+                ["accepted"] = usableRepair,
+                ["structuredResponseComplete"] = repairedParsed != null && ConversationResponseService.StructuredResponseIsComplete(Json.Serialize(repairedParsed), auditMode),
+                ["structuredDecisionPreserved"] = repairedParsed != null && StructuredActionContinuityDecisionPreserved(payload, parsed, repairedParsed),
+                ["revalidationCleared"] = revalidationCleared,
+                ["secondAttemptReturned"] = usableRepair || markedFailure,
+                ["deterministicFallback"] = false,
+                ["visibleRepairMarker"] = usableRepair
+                    ? (revalidationCleared ? ".." : ".,")
+                    : markedFailure ? ".," : "",
+                ["method"] = repairMethod,
+                ["removedStageDirectionCount"] = removedRepairStageCount,
+                ["continuityHistoryLineCount"] = continuityLines.Count,
+                ["repairRequestChars"] = Json.Serialize(repairRequest).Length,
+                ["originalResponseChars"] = Json.Serialize(parsed).Length
+            };
+            OperationsService.WriteAudit(campaignId, correlationId, "server", auditMode,
+                "llm.roleplay_continuity_repair", heroId, "", eventId,
+                !usableRepair && !markedFailure ? "failed"
+                    : revalidationCleared ? "completed"
+                    : "completed_with_revalidation_override",
+                ReadLong(repaired, "durationMs", 0),
+                !usableRepair && !markedFailure
+                    ? "The role-play continuity repair did not return usable visible dialogue."
+                    : revalidationCleared
+                        ? "An impossible or degrading role-play response was corrected before it entered the transcript or memory pipeline."
+                        : "The role-play continuity repair remained validator-rejected; marked dialogue was returned without structured effects.",
+                evidence);
+            repaired["roleplayContinuityRepair"] = evidence;
+            return repaired;
+        }
+
+        private static Dictionary<string, object> RemoveUnsupportedContinuityWrites(
+            Dictionary<string, object> parsed)
+        {
+            Dictionary<string, object> candidate = new Dictionary<string, object>(
+                parsed ?? new Dictionary<string, object>(), StringComparer.OrdinalIgnoreCase);
+            string reply = ReadFirstString(candidate, "reply", "response", "text", "content");
+            List<Dictionary<string, object>> writes = ReadDictionaryList(candidate, "continuityWrites");
+            if (writes.Count == 0) return candidate;
+            candidate["continuityWrites"] = writes.Where(write =>
+            {
+                return AcceptedContinuityEvidenceSpans(write, reply).Count > 0;
+            }).ToList();
+            return candidate;
+        }
+
+        private static List<Dictionary<string, object>> LoadRecentNpcRoleplayContinuityLines(
+            string campaignId,
+            string heroId,
+            string heroName,
+            List<Dictionary<string, object>> currentLines)
+        {
+            int limit = Math.Max(10, Math.Min(60,
+                ReadInt(SettingsService.LoadSettings(), "recentRawConversationTurns", 30)));
+            List<Dictionary<string, object>> combined = new List<Dictionary<string, object>>();
+            if (!string.IsNullOrWhiteSpace(campaignId) && !string.IsNullOrWhiteSpace(heroId))
+            {
+                try
+                {
+                    using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+                    {
+                        List<Dictionary<string, object>> stored = DialogueStore.SelectConversationTurns36(connection, new Dictionary<string, object>
+                            {
+                                ["hero"] = heroId,
+                                ["limit"] = limit
+                            });
+                        combined.AddRange(stored.AsEnumerable().Reverse());
+                    }
+                }
+                catch (Exception ex)
+                {
+                    OperationsService.LogOperational("roleplay_continuity.history_lookup_failed",
+                        new Dictionary<string, object>
+                        {
+                            ["campaignId"] = campaignId,
+                            ["heroStringId"] = heroId,
+                            ["error"] = DialogueService.LimitText(ex.Message, 1000)
+                        });
+                }
+            }
+
+            foreach (Dictionary<string, object> line in currentLines ?? new List<Dictionary<string, object>>())
+            {
+                if (!ReadString(line, "role", "").Equals("npc", StringComparison.OrdinalIgnoreCase)) continue;
+                string speakerId = ReadFirstString(line, "speaker_id", "speakerHeroStringId", "heroStringId");
+                string speaker = ReadFirstString(line, "speaker", "speaker_name");
+                if (!string.IsNullOrWhiteSpace(speakerId)
+                    && !string.Equals(speakerId, heroId, StringComparison.OrdinalIgnoreCase)) continue;
+                if (string.IsNullOrWhiteSpace(speakerId)
+                    && !string.IsNullOrWhiteSpace(speaker)
+                    && !string.IsNullOrWhiteSpace(heroName)
+                    && !string.Equals(speaker, heroName, StringComparison.OrdinalIgnoreCase)) continue;
+                combined.Add(line);
+            }
+
+            List<Dictionary<string, object>> unique = new List<Dictionary<string, object>>();
+            HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (Dictionary<string, object> line in combined)
+            {
+                string text = ConversationTurnTextForRecall(line).Trim();
+                if (string.IsNullOrWhiteSpace(text)) continue;
+                string key = FirstNonEmpty(ReadFirstString(line, "turn_id", "turnId"), text);
+                if (!seen.Add(key)) continue;
+                unique.Add(ProjectConversationTurnForRecall(line));
+            }
+            return unique.Count <= limit
+                ? unique
+                : unique.Skip(unique.Count - limit).ToList();
+        }
+
+        private static List<Dictionary<string, object>> FindRoleplayContinuityViolations(
+            Dictionary<string, object> parsed,
+            Dictionary<string, object> identityView,
+            List<Dictionary<string, object>> priorLines,
+            string heroName,
+            string playerName)
+        {
+            List<Dictionary<string, object>> found = new List<Dictionary<string, object>>();
+            string reply = ReadFirstString(parsed, "reply", "response", "text", "content");
+            if (string.IsNullOrWhiteSpace(reply)) return found;
+            Action<string, string, string> add = (type, match, detail) =>
+                found.Add(new Dictionary<string, object>
+                {
+                    ["type"] = type,
+                    ["match"] = DialogueService.LimitText(match, 220),
+                    ["detail"] = detail
+                });
+
+            List<string> speakerAliases = new[] { heroName, WorldSimulationService.FirstName(heroName) }
+                .Where(value => !string.IsNullOrWhiteSpace(value) && value.Length >= 3)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            List<string> absencePatterns = new List<string>
+            {
+                @"\bI\s+(?:am|remain|stand)\s+(?:not\s+here|absent|elsewhere)\b",
+                @"\bmy\s+(?:absence|withdrawal)\s+(?:is|remains|will\s+be)\s+(?:absolute|permanent|indefinite)\b",
+                @"\bI\s+(?:have\s+)?(?:left|withdrawn)\s+(?:permanently|for\s+good)\b"
+            };
+            absencePatterns.AddRange(speakerAliases.Select(alias =>
+                @"(?<![\p{L}\p{N}])" + Regex.Escape(alias)
+                + @"(?![\p{L}\p{N}])\s+(?:is|remains|stays)\s+(?:not\s+here|absent|elsewhere)\b"));
+            foreach (string pattern in absencePatterns)
+            {
+                Match match = Regex.Match(reply, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                if (match.Success)
+                {
+                    add("current_speaker_claimed_absent", match.Value,
+                        "The active NPC cannot be physically absent from the reply they are currently producing.");
+                    break;
+                }
+            }
+
+            identityView = identityView ?? new Dictionary<string, object>();
+            bool unknownIdentity = !ReadBool(identityView, "knowsIdentity", false)
+                && !ReadBool(identityView, "canonicalNameAllowed", false);
+            string safeLabel = FirstNonEmpty(ReadString(identityView, "safeLabel", ""),
+                unknownIdentity ? ReadString(identityView, "usableName", "") : "");
+            List<string> playerLabels = new[]
+            {
+                playerName, safeLabel, "the armed stranger", "armed stranger", "the stranger", "the player"
+            }.Where(value => !string.IsNullOrWhiteSpace(value) && value.Length >= 3)
+             .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            foreach (string label in playerLabels)
+            {
+                Match narration = Regex.Match(reply,
+                    @"(?:^|[.!?]\s+|\*\s*)" + Regex.Escape(label)
+                    + @"\s+(?:stands|steps|moves|turns|looks|glances|nods|smiles|frowns|speaks|says|asks|replies|thinks|feels|decides|draws|reaches|walks|leaves|enters|approaches|shrugs|laughs)\b",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Multiline);
+                if (narration.Success)
+                {
+                    add("player_narration", narration.Value.Trim(),
+                        "The NPC response may not author the player's speech, thoughts, feelings, consent, or physical action.");
+                    break;
+                }
+            }
+            if (unknownIdentity)
+            {
+                List<string> epithets = new[] { safeLabel, "the armed stranger", "armed stranger", "the stranger" }
+                    .Where(value => !string.IsNullOrWhiteSpace(value) && value.Length >= 4)
+                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                int count = CountNonOverlappingIdentityLabels(reply, epithets);
+                if (count > 1)
+                {
+                    add("identity_epithet_repetition", count.ToString(CultureInfo.InvariantCulture),
+                        "Unknown identity should normally use second-person address; a descriptive label may appear at most once.");
+                }
+            }
+
+            if (ReadBool(identityView, "subjectSexKnown", false)
+                && TryFindOppositeSexPlayerAddress(
+                    reply,
+                    ReadString(identityView, "subjectSex", ""),
+                    playerName,
+                    out string oppositeSexAddress))
+            {
+                add("player_sex_misidentification", oppositeSexAddress,
+                    "The response directly addresses or describes the player as the opposite of their authoritative visible sex.");
+            }
+
+            if (VisibleReplyClaimsCompletedWorldAction(
+                    reply, out string completedActionMatch))
+            {
+                add("unverified_action_completion", completedActionMatch,
+                    "The reply narrates a proposed physical or world action as completed before the production validator and executor can confirm it.");
+            }
+
+            Dictionary<string, object> closest = (priorLines ?? new List<Dictionary<string, object>>())
+                .Where(line => ReadString(line, "role", "").Equals("npc", StringComparison.OrdinalIgnoreCase))
+                .Reverse()
+                .Take(10)
+                .Select(line => new Dictionary<string, object>
+                {
+                    ["text"] = ReadString(line, "text", ""),
+                    ["similarity"] = RoleplayTextSimilarity(reply, ReadString(line, "text", ""))
+                })
+                .OrderByDescending(row => ReadDouble(row, "similarity", 0d))
+                .FirstOrDefault();
+            if (closest != null && reply.Length >= 100 && ReadDouble(closest, "similarity", 0d) >= 0.72d)
+            {
+                add("near_duplicate_reply", ReadString(closest, "text", ""),
+                    "The visible reply substantially repeats a recent NPC reply instead of advancing the current beat.");
+            }
+            Dictionary<string, object> repeatedStageDirection = FindRepeatedDistinctiveStageDirection(
+                reply, priorLines, heroName);
+            if (repeatedStageDirection != null)
+            {
+                add("repeated_distinctive_phrase", ReadString(repeatedStageDirection, "current", ""),
+                    "A distinctive gesture or descriptive phrase was reused from a recent reply. Preserve the character and meaning, but express this beat through fresh behavior and language.");
+            }
+            return found;
+        }
+
+        private static bool TryFindOppositeSexPlayerAddress(
+            string reply,
+            string subjectSex,
+            string playerName,
+            out string matchedText)
+        {
+            matchedText = string.Empty;
+            if (string.IsNullOrWhiteSpace(reply)) return false;
+            bool female = string.Equals(
+                subjectSex, "female",
+                StringComparison.OrdinalIgnoreCase);
+            bool male = string.Equals(
+                subjectSex, "male",
+                StringComparison.OrdinalIgnoreCase);
+            if (!female && !male) return false;
+
+            List<string> patterns = female
+                ? new List<string>
+                {
+                    @"\bmy\s+lord\b",
+                    @"(?:^|[.!?\r\n]\s*|,\s*)sir(?=\s*[,!?.:]|\s*$)",
+                    @"\byou(?:'re|\s+are)\s+(?:a\s+)?(?:man|lord)\b",
+                    @"\b(?:man|lord)\s+(?:such\s+as|like)\s+you\b"
+                }
+                : new List<string>
+                {
+                    @"\bmy\s+lady\b",
+                    @"\bmilady\b",
+                    @"(?:^|[.!?\r\n]\s*|,\s*)madam(?=\s*[,!?.:]|\s*$)",
+                    @"\byou(?:'re|\s+are)\s+(?:a\s+)?(?:woman|lady)\b",
+                    @"\b(?:woman|lady)\s+(?:such\s+as|like)\s+you\b"
+                };
+            string safePlayerName = (playerName ?? string.Empty).Trim();
+            if (safePlayerName.Length >= 2)
+            {
+                patterns.Add(
+                    female
+                        ? @"\b(?:lord|ser)\s+"
+                            + Regex.Escape(safePlayerName) + @"\b"
+                        : @"\b(?:lady|dame)\s+"
+                            + Regex.Escape(safePlayerName) + @"\b");
+            }
+            foreach (string pattern in patterns)
+            {
+                Match match = Regex.Match(
+                    reply,
+                    pattern,
+                    RegexOptions.IgnoreCase
+                    | RegexOptions.CultureInvariant);
+                if (!match.Success) continue;
+                matchedText = match.Value.Trim();
+                return true;
+            }
+            return false;
+        }
+
+        internal static bool VisibleReplyClaimsCompletedWorldAction(
+            string reply,
+            out string matchedText)
+        {
+            matchedText = string.Empty;
+            if (string.IsNullOrWhiteSpace(reply)) return false;
+            string[] patterns =
+            {
+                @"\b(?:denars?|gold|coins?)\s+in\s+my\s+(?:purse|pocket|hand)\b",
+                @"\b(?:the\s+)?payment\s+(?:has\s+)?(?:arrived|cleared|been\s+made|gone\s+through)\b",
+                @"\b(?:the\s+)?prisoner\s+(?:is|has\s+been)\s+released\b",
+                @"\bownership\s+(?:is|has\s+been)\s+(?:transferred|ceded|surrendered)\b",
+                @"\b(?:we|you\s+and\s+I)\s+are\s+now\s+married\b",
+                @"\b(?:the\s+)?(?:gold|coins?|deed|fief|settlement|horse|weapon|brooch|ring|gift)\s+(?:is|are|has\s+been|have\s+been)\s+(?:yours|mine|transferred|delivered|received)\b"
+            };
+            foreach (string pattern in patterns)
+            {
+                Match match = Regex.Match(
+                    reply,
+                    pattern,
+                    RegexOptions.IgnoreCase
+                    | RegexOptions.CultureInvariant
+                    | RegexOptions.Singleline);
+                if (!match.Success) continue;
+                matchedText = match.Value.Trim();
+                return true;
+            }
+            string[] stagePatterns =
+            {
+                @"\*[^*]{0,180}\b(?:counts?|counting|pockets?|pocketing|takes?|taking)\b[^*]{0,60}\b(?:denars?|gold|coins?)\b[^*]{0,180}\*",
+                @"\*[^*]{0,180}\b(?:(?:pockets?|tucks?|stows?|fastens?|pins?|puts?\s+on|takes?|accepts?)\s+(?:the\s+)?(?:[\p{L}-]+\s+){0,2}(?:gift|brooch|ring|coins?|gold|deed|key|weapon|item)\b)[^*]{0,180}\*"
+            };
+            // Pair full narration spans before applying the physical-action bounds.
+            // Otherwise a closing star can match the next opening star and turn
+            // spoken future terms between two gestures into a completed receipt.
+            foreach (Match narration in Regex.Matches(reply,
+                @"(?<delimiter>\*{1,2})(?<body>[^*]*)\k<delimiter>",
+                RegexOptions.CultureInvariant | RegexOptions.Singleline))
+            {
+                string stage = "*" + narration.Groups["body"].Value + "*";
+                foreach (string pattern in stagePatterns)
+                {
+                    Match match = Regex.Match(stage, pattern,
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                        | RegexOptions.Singleline);
+                    if (!match.Success) continue;
+                    matchedText = match.Value.Trim();
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static bool TryRemoveRepeatedStageDirectionsOnly(
+            Dictionary<string, object> parsed,
+            List<Dictionary<string, object>> violations,
+            Dictionary<string, object> identityView,
+            List<Dictionary<string, object>> priorLines,
+            string heroName,
+            string playerName,
+            out Dictionary<string, object> sanitized,
+            out List<Dictionary<string, object>> remaining,
+            out int removedStageDirectionCount)
+        {
+            sanitized = null;
+            remaining = violations ?? new List<Dictionary<string, object>>();
+            removedStageDirectionCount = 0;
+            Dictionary<string, object> candidate = new Dictionary<string, object>(
+                parsed ?? new Dictionary<string, object>(), StringComparer.OrdinalIgnoreCase);
+            if (parsed == null || remaining.Count == 0) return false;
+
+            for (int pass = 0; pass < 8 && remaining.Count > 0; pass++)
+            {
+                if (remaining.Any(row => !ReadString(row, "type", "")
+                    .Equals("repeated_distinctive_phrase", StringComparison.OrdinalIgnoreCase)))
+                    return false;
+
+                HashSet<string> repeatedSegments = new HashSet<string>(
+                    remaining.Select(row => NormalizeStageDirectionForComparison(ReadString(row, "match", "")))
+                        .Where(value => !string.IsNullOrWhiteSpace(value)),
+                    StringComparer.Ordinal);
+                if (repeatedSegments.Count == 0) return false;
+
+                string reply = ReadFirstString(candidate, "reply", "response", "text", "content");
+                int removedThisPass = 0;
+                string cleaned = Regex.Replace(reply ?? string.Empty, @"\*([^*]{10,700})\*",
+                    match =>
+                    {
+                        string normalized = NormalizeStageDirectionForComparison(match.Groups[1].Value);
+                        if (!repeatedSegments.Contains(normalized)) return match.Value;
+                        if (ReadNarratedDrink(match.Groups[1].Value, heroName) != null) return match.Value;
+                        removedThisPass++;
+                        return string.Empty;
+                    }, RegexOptions.CultureInvariant | RegexOptions.Singleline);
+                if (removedThisPass == 0) return false;
+                removedStageDirectionCount += removedThisPass;
+                cleaned = Regex.Replace(cleaned, @"[ \t]+\r?\n", "\n",
+                    RegexOptions.CultureInvariant);
+                cleaned = Regex.Replace(cleaned, @"(?:\r?\n[ \t]*){3,}", "\n\n",
+                    RegexOptions.CultureInvariant).Trim();
+                if (Regex.Matches(cleaned, @"[\p{L}\p{N}']+").Count < 6) return false;
+
+                RebindDrinkingEventsAfterCleanup(candidate, reply, cleaned, heroName);
+                candidate["reply"] = cleaned;
+                remaining = FindRoleplayContinuityViolations(
+                    candidate, identityView, priorLines, heroName, playerName);
+            }
+
+            if (remaining.Count != 0 || removedStageDirectionCount == 0) return false;
+            sanitized = candidate;
+            return true;
+        }
+
+        private static string NormalizeStageDirectionForComparison(string value)
+        {
+            return Regex.Replace(value ?? string.Empty, @"\s+", " ",
+                RegexOptions.CultureInvariant).Trim();
+        }
+
+        private static Dictionary<string, object> FindRepeatedDistinctiveStageDirection(
+            string reply,
+            List<Dictionary<string, object>> priorLines,
+            string heroName)
+        {
+            Match currentOwnershipPause = FindPauseOwnershipStageDirection(reply);
+            if (currentOwnershipPause.Success && ReadNarratedDrink(currentOwnershipPause.Groups[1].Value, heroName) == null)
+            {
+                Dictionary<string, object> priorOwnershipLine =
+                    (priorLines ?? new List<Dictionary<string, object>>())
+                    .Where(row => ReadString(row, "role", "").Equals("npc", StringComparison.OrdinalIgnoreCase))
+                    .Reverse()
+                    .Take(10)
+                    .FirstOrDefault(row => FindPauseOwnershipStageDirection(
+                        ReadString(row, "text", "")).Success);
+                if (priorOwnershipLine != null)
+                {
+                    Match priorOwnershipPause = FindPauseOwnershipStageDirection(
+                        ReadString(priorOwnershipLine, "text", ""));
+                    return new Dictionary<string, object>
+                    {
+                        ["current"] = currentOwnershipPause.Groups[1].Value.Trim(),
+                        ["prior"] = priorOwnershipPause.Groups[1].Value.Trim(),
+                        ["semanticSignature"] = "pause_take_ownership"
+                    };
+                }
+            }
+            // Repeated consumption is a new physical event. Style deduplication
+            // must not erase it or turn the following action into its evidence.
+            List<string> currentSegments = RoleplayStageDirections(reply)
+                .Where(segment => ReadNarratedDrink(segment, heroName) == null).ToList();
+            if (currentSegments.Count == 0) return null;
+            foreach (Dictionary<string, object> line in (priorLines ?? new List<Dictionary<string, object>>())
+                .Where(row => ReadString(row, "role", "").Equals("npc", StringComparison.OrdinalIgnoreCase))
+                .Reverse()
+                .Take(10))
+            {
+                foreach (string prior in RoleplayStageDirections(ReadString(line, "text", "")))
+                {
+                    HashSet<string> priorGrams = RoleplayWordNgrams(prior, 3);
+                    if (priorGrams.Count < 4) continue;
+                    foreach (string current in currentSegments)
+                    {
+                        HashSet<string> currentGrams = RoleplayWordNgrams(current, 3);
+                        if (currentGrams.Count < 4) continue;
+                        int shared = currentGrams.Count(gram => priorGrams.Contains(gram));
+                        int smaller = Math.Min(currentGrams.Count, priorGrams.Count);
+                        double containment = smaller <= 0 ? 0d : shared / (double)smaller;
+                        HashSet<string> priorTokens = RoleplayDistinctiveTokens(prior);
+                        HashSet<string> currentTokens = RoleplayDistinctiveTokens(current);
+                        int sharedTokens = currentTokens.Count(token => priorTokens.Contains(token));
+                        int smallerTokenSet = Math.Min(currentTokens.Count, priorTokens.Count);
+                        double tokenContainment = smallerTokenSet <= 0
+                            ? 0d
+                            : sharedTokens / (double)smallerTokenSet;
+                        bool repeatedTrigrams = shared >= 3 && containment >= 0.45d;
+                        bool repeatedDistinctiveTokens = smallerTokenSet >= 4
+                            && sharedTokens >= 3
+                            && tokenContainment >= 0.70d;
+                        bool repeatedPauseOwnershipGesture = priorTokens.Contains("pause")
+                            && currentTokens.Contains("pause")
+                            && priorTokens.Contains("take")
+                            && currentTokens.Contains("take")
+                            && sharedTokens >= 3;
+                        if (!repeatedTrigrams && !repeatedDistinctiveTokens
+                            && !repeatedPauseOwnershipGesture) continue;
+                        return new Dictionary<string, object>
+                        {
+                            ["current"] = current,
+                            ["prior"] = prior,
+                            ["sharedTrigrams"] = shared,
+                            ["trigramContainment"] = Math.Round(containment, 4),
+                            ["sharedDistinctiveTokens"] = sharedTokens,
+                            ["distinctiveTokenContainment"] = Math.Round(tokenContainment, 4)
+                        };
+                    }
+                }
+            }
+            return null;
+        }
+
+        private static Match FindPauseOwnershipStageDirection(string text)
+        {
+            foreach (Match match in Regex.Matches(text ?? string.Empty, @"\*([^*]{10,700})\*",
+                RegexOptions.CultureInvariant | RegexOptions.Singleline))
+            {
+                string segment = match.Groups[1].Value;
+                bool pause = Regex.IsMatch(segment, @"\bpause(?:s|d|ing)?\b",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                bool take = Regex.IsMatch(segment, @"\b(?:take|takes|taking|taken|took)\b",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                bool ownershipBeat = Regex.IsMatch(segment,
+                    @"\b(?:always|possess(?:ion|es|ed|ing)?|silence|hold|holds|held|holding|owns?|owned|ownership)\b",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                bool silenceOrTimingBeat = Regex.IsMatch(segment,
+                    @"\b(?:pause(?:s|d|ing)?|silence|quiet|stillness|beat|timing)\b|\bair\s+(?:settle(?:s|d|ing)?|still(?:s|ed|ing)?)\b",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                bool explicitOwnership = Regex.IsMatch(segment,
+                    @"\b(?:possess(?:ion|es|ed|ing)?|owns?|owned|ownership|belong(?:s|ed|ing)?|claim(?:s|ed|ing)?|occup(?:y|ies|ied|ying))\b",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                if ((pause && take && ownershipBeat)
+                    || (silenceOrTimingBeat && explicitOwnership)) return match;
+            }
+            return Match.Empty;
+        }
+
+        private static List<string> RoleplayStageDirections(string text)
+        {
+            return Regex.Matches(text ?? string.Empty, @"\*([^*]{20,700})\*",
+                    RegexOptions.CultureInvariant | RegexOptions.Singleline)
+                .Cast<Match>()
+                .Select(match => Regex.Replace(match.Groups[1].Value, @"\s+", " ").Trim())
+                .Where(value => Regex.Matches(value, @"[\p{L}\p{N}']+").Count >= 4)
+                .ToList();
+        }
+
+        private static HashSet<string> RoleplayDistinctiveTokens(string text)
+        {
+            HashSet<string> stopWords = new HashSet<string>(new[]
+            {
+                "a", "an", "and", "as", "at", "be", "been", "being", "by", "for", "from",
+                "he", "her", "hers", "him", "his", "in", "into", "is", "it", "its", "of",
+                "on", "or", "she", "that", "the", "their", "them", "they", "this", "to", "was",
+                "were", "which", "who", "with", "without"
+            }, StringComparer.Ordinal);
+            Dictionary<string, string> stems = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["takes"] = "take", ["taking"] = "take", ["took"] = "take", ["taken"] = "take",
+                ["pauses"] = "pause", ["paused"] = "pause", ["pausing"] = "pause",
+                ["looks"] = "look", ["looked"] = "look", ["looking"] = "look",
+                ["folds"] = "fold", ["folded"] = "fold", ["folding"] = "fold",
+                ["clasps"] = "clasp", ["clasped"] = "clasp", ["clasping"] = "clasp",
+                ["hands"] = "hand", ["does"] = "do", ["did"] = "do", ["done"] = "do",
+                ["holds"] = "hold", ["held"] = "hold", ["holding"] = "hold",
+                ["turns"] = "turn", ["turned"] = "turn", ["turning"] = "turn",
+                ["steps"] = "step", ["stepped"] = "step", ["stepping"] = "step"
+            };
+            HashSet<string> result = new HashSet<string>(StringComparer.Ordinal);
+            foreach (Match match in Regex.Matches((text ?? string.Empty).ToLowerInvariant(), @"[\p{L}\p{N}']+"))
+            {
+                string token = match.Value;
+                if (stopWords.Contains(token)) continue;
+                if (stems.TryGetValue(token, out string stem)) token = stem;
+                else if (token.Length > 5 && token.EndsWith("s", StringComparison.Ordinal))
+                    token = token.Substring(0, token.Length - 1);
+                if (token.Length >= 3) result.Add(token);
+            }
+            return result;
+        }
+
+        private static int CountNonOverlappingIdentityLabels(
+            string text,
+            IEnumerable<string> labels)
+        {
+            int count = 0;
+            string remaining = text ?? string.Empty;
+            foreach (string label in (labels ?? Enumerable.Empty<string>())
+                .OrderByDescending(value => value.Length))
+            {
+                remaining = Regex.Replace(
+                    remaining,
+                    Regex.Escape(label),
+                    match =>
+                    {
+                        count++;
+                        return new string(' ', match.Length);
+                    },
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            }
+            return count;
+        }
+
+        internal static double RoleplayTextSimilarity(string left, string right)
+        {
+            HashSet<string> a = RoleplayWordNgrams(left, 4);
+            HashSet<string> b = RoleplayWordNgrams(right, 4);
+            if (a.Count == 0 || b.Count == 0) return 0d;
+            int intersection = a.Count(value => b.Contains(value));
+            int union = a.Count + b.Count - intersection;
+            return union <= 0 ? 0d : intersection / (double)union;
+        }
+
+        internal static string NormalizeUnknownIdentityVisibleAddress(
+            string reply,
+            Dictionary<string, object> identityView)
+        {
+            identityView = identityView ?? new Dictionary<string, object>();
+            if (ReadBool(identityView, "knowsIdentity", false)
+                || ReadBool(identityView, "canonicalNameAllowed", false)
+                || string.IsNullOrWhiteSpace(reply))
+                return reply ?? string.Empty;
+            string label = FirstNonEmpty(
+                ReadString(identityView, "safeLabel", ""),
+                ReadString(identityView, "usableName", ""));
+            if (string.IsNullOrWhiteSpace(label)) return reply;
+            List<string> equivalentLabels = new[]
+            {
+                label,
+                Regex.Replace(label, @"^\s*the\s+", "",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant),
+                label.IndexOf("stranger", StringComparison.OrdinalIgnoreCase) >= 0
+                    ? "the stranger"
+                    : string.Empty
+            }.Where(value => !string.IsNullOrWhiteSpace(value) && value.Length >= 4)
+             .Distinct(StringComparer.OrdinalIgnoreCase)
+             .OrderByDescending(value => value.Length)
+             .ToList();
+            int occurrence = 0;
+            return Regex.Replace(
+                reply,
+                "(?:" + string.Join("|", equivalentLabels.Select(Regex.Escape))
+                + ")(?<possessive>'s)?",
+                match =>
+                {
+                    occurrence++;
+                    if (occurrence == 1) return match.Value;
+                    return match.Groups["possessive"].Success ? "your" : "you";
+                },
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
+        private static HashSet<string> RoleplayWordNgrams(string text, int width)
+        {
+            string[] words = Regex.Matches((text ?? string.Empty).ToLowerInvariant(), @"[\p{L}\p{N}']+")
+                .Cast<Match>().Select(match => match.Value).ToArray();
+            HashSet<string> grams = new HashSet<string>(StringComparer.Ordinal);
+            for (int index = 0; index + width <= words.Length; index++)
+                grams.Add(string.Join(" ", words.Skip(index).Take(width)));
+            return grams;
+        }
+
+        private static bool IsRoleplayFeedbackLoopText(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return false;
+            return Regex.IsMatch(text,
+                @"\b(?:permanent\s+withdrawal|withdrawal\s+(?:is|was|remains)\s+absolute|continue(?:d|s|ing)?\s+absence|compulsive\s+loop|"
+                + @"(?:I|[\p{L}][\p{L}'-]{2,})\s+(?:is|am|remains|stays)\s+(?:not\s+here|absent)|"
+                + @"(?:did|does|would|will)\s+not\s+re[-\s]?engage(?:\s+on\s+the\s+same\s+terms)?|"
+                + @"will\s+never\s+(?:stop|comply|answer|leave|change|relent))\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
+        private enum HistoricalTextPurpose { PromptView, StoredArchive }
+
+        private static string HistoricalConversationScopeNote(bool laterReengagementProven) => laterReengagementProven
+            ? "Later listed conversations establish that the participants subsequently re-engaged; any earlier departure, silence, refusal, or closure applies only to its historical scene and does not describe the current physical situation."
+            : "Any absence, departure, refusal, or closure described here is a reported outcome of that historical scene, not the participant's current physical situation.";
+
+        private static string NormalizeHistoricalRoleplayContinuityText(
+            string text,
+            int maxChars,
+            bool laterReengagementProven,
+            HistoricalTextPurpose purpose = HistoricalTextPurpose.PromptView)
+        {
+            string value = (text ?? string.Empty).Trim();
+            if (purpose == HistoricalTextPurpose.StoredArchive)
+            {
+                // Retain every attributed original. Prompt projection owns its
+                // separate budget; historical framing must not clip the archive
+                // or rewrite words inside an original source record.
+                if (!IsRoleplayFeedbackLoopText(value)) return value;
+                // Storage records only the stable historical boundary. Whether
+                // later re-engagement is proven belongs to the current view;
+                // changing that view must not accumulate archive annotations.
+                string archiveNote = HistoricalConversationScopeNote(false);
+                return value.EndsWith(archiveNote, StringComparison.Ordinal) ? value : value + "\n" + archiveNote;
+            }
+            maxChars = Math.Max(500, Math.Min(5000, maxChars));
+            if (!IsRoleplayFeedbackLoopText(value)) return DialogueService.LimitText(value, maxChars);
+
+            value = Regex.Replace(value,
+                @"\b(?:I|[\p{L}][\p{L}'-]{2,})\s+(?:is|am|remain(?:s)?|stay(?:s)?)\s+(?:not\s+here|absent)\b",
+                "the speaker was described as unavailable within that scene",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            value = Regex.Replace(value,
+                @"\b(?:permanent\s+withdrawal|withdrawal\s+(?:is|was|remains)\s+absolute|continue(?:d|s|ing)?\s+absence)\b",
+                "an emphatic refusal within that scene",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            value = Regex.Replace(value,
+                @"\b(?:did|does|would|will)\s+not\s+re[-\s]?engage(?:\s+on\s+the\s+same\s+terms)?\b",
+                "did not continue that earlier exchange",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            value = Regex.Replace(value,
+                @"\bwill\s+never\s+(?:stop|comply|answer|leave|change|relent)\b",
+                "declared an emphatic refusal within that scene",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            value = Regex.Replace(value, @"\s+", " ").Trim();
+
+            string note = HistoricalConversationScopeNote(laterReengagementProven);
+            int bodyLimit = Math.Max(64, maxChars - note.Length - 4);
+            string body = value.Length <= bodyLimit
+                ? value
+                : value.Substring(0, bodyLimit).TrimEnd() + "...";
+            return (body + " " + note).Trim();
+        }
+
+        internal static bool IsRoleplayFeedbackLoopEvidence(Dictionary<string, object> row, string text)
+        {
+            if (ReadBool(TryParseJsonObject(ReadString(row, "payload_json", "{}")), "continuityQuarantined", false)) return true;
+            if (!IsRoleplayFeedbackLoopText(text)) return false;
+            string provenance = string.Join(" ", new[]
+            {
+                ReadFirstString(row, "source", "source_type", "sourceType"),
+                ReadFirstString(row, "event_type", "eventType", "type"),
+                ReadFirstString(row, "memory_group_key", "memoryGroupKey"),
+                ReadFirstString(row, "source_session_id", "sessionId")
+            }).ToLowerInvariant();
+            return string.IsNullOrWhiteSpace(provenance)
+                || provenance.Contains("dialogue")
+                || provenance.Contains("conversation")
+                || provenance.Contains("party_chat")
+                || provenance.Contains("social_event");
+        }
+
+        internal static List<Dictionary<string, object>> FilterRoleplayFeedbackWrites(
+            List<Dictionary<string, object>> writes,
+            string kind,
+            List<Dictionary<string, object>> rejections,
+            Dictionary<string, object> payload = null, string observer = "", string campaign = "")
+        {
+            List<Dictionary<string, object>> safe = new List<Dictionary<string, object>>();
+            foreach (Dictionary<string, object> write in writes ?? new List<Dictionary<string, object>>())
+            {
+                string text = FirstNonEmpty(
+                    ReadFirstString(write, "text", "summary", "claim", "description", "content", "value"),
+                    FlattenFinalRoleplayWriteText(write));
+                bool recallAbsence = (kind == "memory" || kind == "belief" || kind == "comprehension") && IsUnsupportedRecallAbsenceState(text)
+                    && !HasKnownRecallLossSupport(text, payload, observer, campaign);
+                if (!IsRoleplayFeedbackLoopText(text) && !IsUnsupportedWordingJudgment(text) && !recallAbsence)
+                {
+                    safe.Add(write);
+                    continue;
+                }
+                rejections?.Add(new Dictionary<string, object>
+                {
+                    ["kind"] = kind,
+                    ["reason"] = recallAbsence ? "unsupported_recall_absence" : "roleplay_feedback_loop",
+                    ["text"] = DialogueService.LimitText(text, 320)
+                });
+            }
+            return safe;
+        }
+
+        private static string FlattenFinalRoleplayWriteText(object value)
+        {
+            if (value == null) return string.Empty;
+            if (value is Dictionary<string, object> map)
+                return string.Join(" ", map.Select(pair => FlattenFinalRoleplayWriteText(pair.Value)));
+            if (value is System.Collections.ArrayList list)
+                return string.Join(" ", list.Cast<object>().Select(FlattenFinalRoleplayWriteText));
+            if (value is IEnumerable<object> enumerable)
+                return string.Join(" ", enumerable.Select(FlattenFinalRoleplayWriteText));
+            return Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
+        }
+
+        internal static Dictionary<string, object> NormalizeSafeConversationStateUpdates(
+            Dictionary<string, object> raw,
+            List<Dictionary<string, object>> rejections,
+            Dictionary<string, object> payload = null, string observer = "", string campaign = "")
+        {
+            HashSet<string> allowed = new HashSet<string>(
+                new[] { "mood", "currentPlan", "currentCrisis" },
+                StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, object> updates = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            foreach (KeyValuePair<string, object> pair in raw ?? new Dictionary<string, object>())
+            {
+                string key = pair.Key == null ? string.Empty : pair.Key.Trim();
+                string value = Convert.ToString(pair.Value, CultureInfo.InvariantCulture) ?? string.Empty;
+                string reason = string.Empty;
+                if (!allowed.Contains(key)) reason = "state_key_not_allowlisted";
+                else if (pair.Value == null || string.IsNullOrWhiteSpace(value)) reason = "empty_state_value";
+                else if (pair.Value is Dictionary<string, object> || pair.Value is System.Collections.IEnumerable && !(pair.Value is string))
+                    reason = "non_scalar_state_value";
+                else if (IsRoleplayFeedbackLoopText(value)) reason = "roleplay_feedback_loop";
+                else if (IsUnsupportedRecallAbsenceState(value) && !HasKnownRecallLossSupport(value, payload, observer, campaign)) reason = "unsupported_recall_absence";
+                if (string.IsNullOrWhiteSpace(reason))
+                {
+                    updates[key] = DialogueService.LimitText(value.Trim(), key.Equals("mood", StringComparison.OrdinalIgnoreCase) ? 120 : 420);
+                    continue;
+                }
+                rejections?.Add(new Dictionary<string, object>
+                {
+                    ["kind"] = "state",
+                    ["key"] = key,
+                    ["reason"] = reason,
+                    ["value"] = DialogueService.LimitText(value, 320)
+                });
+            }
+            return updates;
+        }
+
+        internal static List<Dictionary<string, object>> CompactRoleplayTranscriptForPrompt(
+            List<Dictionary<string, object>> lines)
+        {
+            // Similar wording is not proof of an identical contribution. A later
+            // correction may differ by one name, number or negation. Canonical
+            // identity deduplication owns repeated delivery; preserve the selected
+            // original turns here as attributed speech, including mistakes.
+            return (lines ?? new List<Dictionary<string, object>>()).Where(line => line != null).ToList();
+        }
+
+        internal static Dictionary<string, object> QuarantineRoleplayFeedbackExactHistory(
+            Dictionary<string, object> exactHistory,
+            out int quarantinedLines)
+        {
+            Dictionary<string, object> safe = new Dictionary<string, object>(
+                exactHistory ?? new Dictionary<string, object>(),
+                StringComparer.OrdinalIgnoreCase);
+            quarantinedLines = 0;
+            string text = ReadString(safe, "text", "");
+            if (string.IsNullOrWhiteSpace(text)) return safe;
+            List<string> retained = new List<string>();
+            foreach (string line in text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None))
+            {
+                if (IsRoleplayFeedbackLoopText(line))
+                {
+                    quarantinedLines++;
+                    continue;
+                }
+                retained.Add(line);
+            }
+            if (quarantinedLines > 0)
+            {
+                retained.Insert(0, "[Continuity guard withheld "
+                    + quarantinedLines.ToString(CultureInfo.InvariantCulture)
+                    + " impossible or recursively degrading role-play line(s); canonical audit history remains stored.]");
+                safe["text"] = string.Join("\n", retained).Trim();
+                safe["roleplayFeedbackQuarantinedLines"] = quarantinedLines;
+            }
+            return safe;
+        }
+
+        internal static List<Dictionary<string, object>> RunRoleplayContinuitySelfTests()
+        {
+            List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
+            Action<string, bool, string> add = (id, passed, summary) => results.Add(new Dictionary<string, object>
+            {
+                ["id"] = id, ["passed"] = passed, ["summary"] = summary
+            });
+            Dictionary<string, object> unknown = new Dictionary<string, object>
+            {
+                ["knowsIdentity"] = false,
+                ["canonicalNameAllowed"] = false,
+                ["safeLabel"] = "the armed stranger",
+                ["usableName"] = "the armed stranger",
+                ["subjectSexKnown"] = true,
+                ["subjectSex"] = "male"
+            };
+            add("active_speaker_absence_is_rejected",
+                FindRoleplayContinuityViolations(
+                    new Dictionary<string, object> { ["reply"] = "Lucon is not here. His withdrawal is permanent." },
+                    unknown, null, "Lucon", "Raven").Any(row => ReadString(row, "type", "") == "current_speaker_claimed_absent"),
+                "An NPC cannot recursively convert a conversational refusal into fictional physical absence while actively speaking.");
+            add("unknown_identity_epithet_is_bounded",
+                FindRoleplayContinuityViolations(
+                    new Dictionary<string, object> { ["reply"] = "The armed stranger asks again. I answer you plainly, armed stranger." },
+                    unknown, null, "Lucon", "Raven").Any(row => ReadString(row, "type", "") == "identity_epithet_repetition"),
+                "Unknown identity uses second person by default and cannot collapse into a repeated epithet catchphrase.");
+            string boundedAddress = NormalizeUnknownIdentityVisibleAddress(
+                "The armed stranger may answer. I ask the armed stranger's purpose, armed stranger.",
+                unknown);
+            add("post_sanitization_identity_epithet_is_bounded",
+                Regex.Matches(boundedAddress, "armed stranger",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant).Count == 1
+                && boundedAddress.Contains("your purpose", StringComparison.OrdinalIgnoreCase),
+                "Identity privacy replacement cannot itself multiply a safe stranger label throughout the visible reply.");
+            add("player_narration_is_rejected",
+                FindRoleplayContinuityViolations(
+                    new Dictionary<string, object> { ["reply"] = "Raven steps closer and nods. I watch in silence." },
+                    unknown, null, "Lucon", "Raven").Any(row => ReadString(row, "type", "") == "player_narration"),
+                "Visible NPC output cannot author the player's physical conduct.");
+            add("male_player_cannot_be_addressed_as_lady",
+                FindRoleplayContinuityViolations(
+                    new Dictionary<string, object>
+                    {
+                        ["reply"] = "My lady, you have chosen a dangerous road."
+                    },
+                    unknown, null, "Lucon", "Raven")
+                    .Any(row => ReadString(row, "type", "")
+                        == "player_sex_misidentification"),
+                "An unmistakable feminine direct address to a male player is repaired before persistence.");
+            add("third_party_lady_reference_remains_valid",
+                FindRoleplayContinuityViolations(
+                    new Dictionary<string, object>
+                    {
+                        ["reply"] = "Lady Aveline is waiting in the hall; you may speak with her."
+                    },
+                    unknown, null, "Lucon", "Raven")
+                    .All(row => ReadString(row, "type", "")
+                        != "player_sex_misidentification"),
+                "The guard does not mistake a grounded reference to another lady for player misidentification.");
+            foreach (var addressCase in new (string Id, string Sex, bool Expected, string Reply)[]
+            {
+                ("captured_pet_self_description", "male", false, "So it's done, Your Grace. She's mine, and she rides with us. A madam, a king, and a rabbit named Ledger — Zeonica would laugh itself sick. Let them."),
+                ("pet_given_to_speaker", "male", false, "You bought a madam a rabbit, Your Grace."),
+                ("speaker_is_madam", "male", false, "I'm a madam, and I keep my own accounts."),
+                ("third_party_madam", "male", false, "The madam is waiting in the tavern."),
+                ("third_party_sir", "female", false, "Sir Rolf is waiting in the hall."),
+                ("speaker_is_sir", "female", false, "They call me sir, though I dislike the title."),
+                ("initial_madam_address", "male", true, "Madam, I accept your invitation."),
+                ("final_madam_address", "male", true, "Thank you, madam."),
+                ("later_madam_address", "male", true, "I must refuse. Madam, you ask too much."),
+                ("heading_then_madam_address", "male", true, "Amprela - 22:00\n\nMadam, you ask too much."),
+                ("initial_sir_address", "female", true, "Sir, I accept your invitation."),
+                ("final_sir_address", "female", true, "Thank you, sir."),
+                ("gesture_then_sir_address", "female", true, "*She nods.*\n\nSir, I accept."),
+                ("second_person_woman", "male", true, "You are a woman of your word."),
+                ("second_person_man", "female", true, "You're a man of your word."),
+            })
+            {
+                add("player_sex_address_scope_" + addressCase.Id,
+                    TryFindOppositeSexPlayerAddress(addressCase.Reply, addressCase.Sex, "Raven", out _)
+                        == addressCase.Expected,
+                    "Bare honorifics require a direct-address boundary; self descriptions and named third parties do not identify the player.");
+            }
+            Dictionary<string, object> unknownFemale =
+                new Dictionary<string, object>(unknown,
+                    StringComparer.OrdinalIgnoreCase)
+                {
+                    ["subjectSex"] = "female"
+                };
+            add("female_player_cannot_be_addressed_as_lord",
+                FindRoleplayContinuityViolations(
+                    new Dictionary<string, object>
+                    {
+                        ["reply"] = "My lord, I cannot accept those terms."
+                    },
+                    unknownFemale, null, "Lucon", "Raven")
+                    .Any(row => ReadString(row, "type", "")
+                        == "player_sex_misidentification"),
+                "An unmistakable masculine direct address to a female player is repaired before persistence.");
+            add("clean_refusal_remains_valid",
+                FindRoleplayContinuityViolations(
+                    new Dictionary<string, object> { ["reply"] = "No. I will not answer that question, and you may take the refusal as final." },
+                    unknown, null, "Lucon", "Raven").Count == 0,
+                "A present NPC may refuse firmly without being forced into generic cooperation.");
+            foreach (var completionCase in new (string Id, bool Expected, string Reply)[]
+            {
+                ("captured_repaired_elideth_future_activation", false, "1084 Winter Morning - Zeonica\n\n*Elideth straightens, pulling her scarf tight across one shoulder with a deliberate tug \u2014 the kind of gesture that settles a woman into a role rather than out of the cold.*\n\nYou say settled, and I'll take you at your word, Your Grace.\n\nI'll take up active duties at the next morning bell. Five hundred denars per Active day, as agreed. The seal, the correspondence, the petitions \u2014 whatever crosses the chancellor's desk before it reaches yours \u2014 that's mine to sort.\n\n*She pauses, holding the moment the way a falconer holds a leash before the cast \u2014 not reluctance, just the weight of it registering.*\n\nOne thing I'll say now so I don't have to say it later: a chancellor who only works when the king is watching isn't worth the ink on her commission. I'll be at that desk whether your eye falls on Zeonica or rides three kingdoms away. That's what you're paying for.\n\nWake me at first light or don't \u2014 I'll be there either way."),
+                ("spoken_chancellor_future_between_narrations", false, "*Elideth straightens and adjusts her scarf.*\n\nYou say settled, and I'll take you at your word, Your Grace.\n\nI'll take up active duties at the next morning bell. Five hundred denars per Active day, as agreed.\n\n*She pauses, weighing the responsibility.*"),
+                ("spoken_future_gold_between_narrations", false, "*She nods.* I will take the gold tomorrow if you return. *She waits.*"),
+                ("spoken_future_gift_between_narrations", false, "*She nods.* I will accept the silver brooch after we agree. *She waits.*"),
+                ("long_stage_does_not_repair_pairing", false, "*She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. * I will take the gold tomorrow. *She nods.*"),
+                ("stage_counts_gold", true, "*She counts the gold in her hands.* I accept."),
+                ("stage_pockets_gift", true, "*She pockets the silver brooch beneath her cloak.* I accept your gift."),
+                ("later_stage_counts_gold", true, "*She nods.* I agree. *She takes the denars.*"),
+                ("stage_receipt_with_future_spoken_terms", true, "*She pockets the coins.* I will start duties tomorrow."),
+                ("plain_payment_arrived", true, "The payment has arrived."),
+                ("plain_gold_yours", true, "The gold is yours."),
+                ("plain_prisoner_released", true, "The prisoner has been released."),
+                ("plain_marriage_completed", true, "We are now married."),
+                ("harmless_gesture", false, "*She tucks her own scarf into her belt.* I agree."),
+                ("unclosed_stage_is_not_physical_receipt", false, "*She nods and I will take the gold tomorrow."),
+                ("empty", false, ""),
+                ("double_star_physical_receipt", true, "**She counts the gold in her hands.** I accept."),
+                ("double_star_spoken_future_between_gestures", false, "**She nods.** I will take the gold tomorrow. **She waits.**"),
+                ("adjacent_stage_later_receipt", true, "*She nods.**She takes the gold.*"),
+            })
+            {
+                bool detected = VisibleReplyClaimsCompletedWorldAction(
+                    completionCase.Reply, out string completionMatch);
+                add("completion_narration_" + completionCase.Id,
+                    detected == completionCase.Expected,
+                    "Completed-action guard expected " + completionCase.Expected
+                    + "; matched: " + completionMatch);
+            }
+            add("unexecuted_physical_transfer_is_rejected",
+                FindRoleplayContinuityViolations(
+                    new Dictionary<string, object>
+                    {
+                        ["reply"] = "*She pockets the silver brooch beneath her cloak.* I accept your gift."
+                    },
+                    unknown, null, "Lucon", "Raven")
+                    .Any(row => ReadString(row, "type", "")
+                        == "unverified_action_completion"),
+                "A generated reply may consent to a gift but cannot make the physical transfer true before validation and execution.");
+            add("self_directed_clothing_gesture_remains_valid",
+                FindRoleplayContinuityViolations(
+                    new Dictionary<string, object>
+                    {
+                        ["reply"] = "*She tucks her own scarf into her belt and leaves her hand at her side.* I agree to go with you."
+                    },
+                    unknown, null, "Lucon", "Raven").Count == 0,
+                "A harmless self-directed clothing gesture is not mistaken for an unexecuted item transfer and cannot erase a substantive answer.");
+            add("unexecuted_tucked_gift_transfer_is_rejected",
+                FindRoleplayContinuityViolations(
+                    new Dictionary<string, object>
+                    {
+                        ["reply"] = "*She tucks the silver brooch beneath her cloak.* I accept your gift."
+                    },
+                    unknown, null, "Lucon", "Raven")
+                    .Any(row => ReadString(row, "type", "")
+                        == "unverified_action_completion"),
+                "Narrowing the transfer detector still rejects a model-authored completed transfer of a proposed gift.");
+            add("future_action_consent_remains_valid",
+                FindRoleplayContinuityViolations(
+                    new Dictionary<string, object>
+                    {
+                        ["reply"] = "I accept. Have the brooch transferred once the quartermaster verifies it."
+                    },
+                    unknown, null, "Lucon", "Raven").Count == 0,
+                "Consent and a future conditional action remain valid role-play while the production executor is still pending.");
+            List<Dictionary<string, object>> catchphraseHistory = new List<Dictionary<string, object>>
+            {
+                new Dictionary<string, object>
+                {
+                    ["role"] = "npc",
+                    ["speaker"] = "Lucon",
+                    ["text"] = "*He pauses - taking possession of it the way he always does.* I will answer this once."
+                },
+                new Dictionary<string, object>
+                {
+                    ["role"] = "npc",
+                    ["speaker"] = "Lucon",
+                    ["text"] = "*A pause - taken and held, the way he always takes possession of silence.* I will answer this once."
+                }
+            };
+            add("distinctive_stage_direction_repetition_is_rejected",
+                FindRoleplayContinuityViolations(
+                    new Dictionary<string, object>
+                    {
+                        ["reply"] = "*A pause - taken, held, released.* This answer is different."
+                    },
+                    unknown, catchphraseHistory, "Lucon", "Raven")
+                    .Any(row => ReadString(row, "type", "") == "repeated_distinctive_phrase"),
+                "A recurring gesture or signature descriptive phrase is repaired before it becomes a visible catchphrase loop.");
+            Dictionary<string, object> stageOnlyResponse = new Dictionary<string, object>
+            {
+                ["reply"] = "*A pause - taken and held, the way he always takes possession of silence.* The Senate may never vote away its own existence, whatever the count."
+            };
+            List<Dictionary<string, object>> stageOnlyViolations = FindRoleplayContinuityViolations(
+                stageOnlyResponse, unknown, catchphraseHistory, "Lucon", "Raven");
+            bool stageOnlySanitized = TryRemoveRepeatedStageDirectionsOnly(
+                stageOnlyResponse, stageOnlyViolations, unknown, catchphraseHistory,
+                "Lucon", "Raven", out Dictionary<string, object> sanitizedStageOnly,
+                out List<Dictionary<string, object>> sanitizedStageOnlyRemaining,
+                out int removedStageOnlyCount);
+            add("repeated_stage_direction_is_removed_without_losing_answer",
+                stageOnlySanitized
+                && removedStageOnlyCount == 1
+                && sanitizedStageOnlyRemaining.Count == 0
+                && ReadString(sanitizedStageOnly, "reply", "").StartsWith("The Senate may never", StringComparison.Ordinal)
+                && !ReadString(sanitizedStageOnly, "reply", "").Contains("possession of silence", StringComparison.OrdinalIgnoreCase),
+                "A stylistic repetition is removed locally so a valid substantive answer does not degrade into a generic fallback or require another provider call.");
+            Dictionary<string, object> mixedUnsafeResponse = new Dictionary<string, object>
+            {
+                ["reply"] = "*A pause - taken and held, the way he always takes possession of silence.* I am not here, and I will not answer."
+            };
+            List<Dictionary<string, object>> mixedUnsafeViolations = FindRoleplayContinuityViolations(
+                mixedUnsafeResponse, unknown, catchphraseHistory, "Lucon", "Raven");
+            add("stage_direction_removal_cannot_mask_other_continuity_failures",
+                !TryRemoveRepeatedStageDirectionsOnly(
+                    mixedUnsafeResponse, mixedUnsafeViolations, unknown, catchphraseHistory,
+                    "Lucon", "Raven", out _, out _, out _),
+                "Deterministic stage-direction removal is permitted only when every violation is purely stylistic; presence, identity, narration, and factual failures still require a safe repair.");
+            Dictionary<string, object> semanticOwnershipResponse = new Dictionary<string, object>
+            {
+                ["reply"] = "*Lucon lets the air settle. The quiet is his, simply occupied the way a man occupies a chair he owns.* "
+                    + "The Senate may never vote away its own existence. "
+                    + "*A beat is held one count longer, demonstrating that the timing belongs to him.* "
+                    + "Even unanimity cannot make institutional suicide lawful."
+            };
+            List<Dictionary<string, object>> semanticOwnershipViolations = FindRoleplayContinuityViolations(
+                semanticOwnershipResponse, unknown, catchphraseHistory, "Lucon", "Raven");
+            bool semanticOwnershipSanitized = TryRemoveRepeatedStageDirectionsOnly(
+                semanticOwnershipResponse, semanticOwnershipViolations, unknown, catchphraseHistory,
+                "Lucon", "Raven", out Dictionary<string, object> sanitizedSemanticOwnership,
+                out List<Dictionary<string, object>> sanitizedSemanticOwnershipRemaining,
+                out int removedSemanticOwnershipCount);
+            add("semantic_silence_ownership_variants_are_removed_iteratively",
+                semanticOwnershipSanitized
+                && removedSemanticOwnershipCount == 2
+                && sanitizedSemanticOwnershipRemaining.Count == 0
+                && ReadString(sanitizedSemanticOwnership, "reply", "").Contains("institutional suicide", StringComparison.OrdinalIgnoreCase)
+                && !ReadString(sanitizedSemanticOwnership, "reply", "").Contains("timing belongs", StringComparison.OrdinalIgnoreCase)
+                && !ReadString(sanitizedSemanticOwnership, "reply", "").Contains("quiet is his", StringComparison.OrdinalIgnoreCase),
+                "Ownership-of-silence paraphrases are recognized without requiring the literal word 'take', and multiple offending beats are removed while preserving the answer.");
+            string normalizedArc = NormalizeHistoricalRoleplayContinuityText(
+                "Lucon departed and declared his withdrawal permanent. He did not re-engage on the same terms.",
+                1800,
+                true);
+            add("historical_scene_closure_cannot_become_current_absence",
+                !IsRoleplayFeedbackLoopText(normalizedArc)
+                && normalizedArc.Contains("subsequently re-engaged", StringComparison.OrdinalIgnoreCase)
+                && normalizedArc.Contains("historical scene", StringComparison.OrdinalIgnoreCase),
+                "A closed-scene refusal remains historical context and later conversation deterministically supersedes any implied current absence.");
+            List<Dictionary<string, object>> rejected = new List<Dictionary<string, object>>();
+            Dictionary<string, object> state = NormalizeSafeConversationStateUpdates(
+                new Dictionary<string, object>
+                {
+                    ["currentPlan"] = "Maintain permanent withdrawal and remain absent.",
+                    ["mood"] = "irritated",
+                    ["unboundedModelField"] = "unsafe"
+                }, rejected);
+            add("durable_state_is_allowlisted_and_grounded",
+                state.Count == 1 && ReadString(state, "mood", "") == "irritated" && rejected.Count == 2,
+                "Only bounded conversational state fields persist, and impossible absence plans are rejected before prompt feedback.");
+            List<Dictionary<string, object>> compacted = CompactRoleplayTranscriptForPrompt(new List<Dictionary<string, object>>
+            {
+                new Dictionary<string, object> { ["role"] = "npc", ["speaker"] = "Lucon", ["text"] = "Lucon is not here. His withdrawal is permanent." },
+                new Dictionary<string, object> { ["role"] = "player", ["speaker"] = "Raven", ["text"] = "Can we discuss another matter?" },
+                new Dictionary<string, object> { ["role"] = "npc", ["speaker"] = "Lucon", ["text"] = "I am here. Ask what you came to ask, and I will decide whether it deserves an answer." }
+            });
+            add("attributed_mistake_and_later_correction_remain_originals",
+                compacted.Count == 3 && ReadString(compacted[0], "speaker", "") == "Lucon"
+                && ReadString(compacted[0], "text", "").Contains("withdrawal is permanent")
+                && ReadString(compacted[2], "text", "").Contains("I am here"),
+                "No deterministic semantic judge removes a historical statement; its author and later correction survive.");
+            return results;
+        }
+    }
+}

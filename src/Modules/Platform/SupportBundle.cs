@@ -11,14 +11,22 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class OperationsService
     {
         private const long SupportFileLimit = 8L * 1024 * 1024;
         private const long SupportTotalLimit = 64L * 1024 * 1024;
         private const int SupportFileCountLimit = 200;
         private static readonly Regex SupportSecretField = new Regex(
-            "(?i)(\\\"?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|client[_-]?secret|qdrant[_-]?api[_-]?key)\\\"?\\s*[:=]\\s*\\\"?)[^\\\",\\s}]+",
-            RegexOptions.Compiled);
+            """
+            (?<label> \b (?: [a-z0-9_-]*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|client[_-]?secret|password)
+                          | authorization | token | secret ) ["']? \s* [:=] \s* )
+            (?:(?:Bearer|Basic)\s+)?
+            """,
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.IgnorePatternWhitespace | RegexOptions.NonBacktracking);
+        // A semicolon inside a bare value is private unless it starts the next named assignment.
+        private static readonly Regex SupportBareValueBoundary = new(
+            """[\s,}"]|;["']?[\w.-]+["']?\s*[:=]|[:=]["']""",
+            RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
         private static readonly Regex SupportBearer = new Regex(
             "(?i)\\bBearer\\s+[A-Za-z0-9._~+/-]{8,}", RegexOptions.Compiled);
         private static readonly Regex SupportKnownKey = new Regex(
@@ -26,21 +34,59 @@ namespace ReignBetaServer
         private static readonly Regex SupportUrlCredential = new Regex(
             "(?i)(https?://)[^/@\\s:]+:[^/@\\s]+@", RegexOptions.Compiled);
 
-        private static string RedactSupportText(string value)
+        private static int AfterSupportQuotedValue(string text, int start)
+        {
+            char quote = text[start];
+            for (int i = start + 1; i < text.Length; i++)
+            {
+                if (text[i] == quote) return i + 1;
+                if (text[i] == '\\' && i + 1 < text.Length) i++;
+            }
+            return text.Length;
+        }
+
+        internal static string RedactSupportText(string value)
         {
             string text = value ?? string.Empty;
-            text = SupportSecretField.Replace(text, "$1[REDACTED]");
+            var field = SupportSecretField.Match(text);
+            if (field.Success)
+            {
+                var masked = new StringBuilder(text.Length);
+                int copied = 0;
+                while (field.Success)
+                {
+                    var label = field.Groups["label"];
+                    masked.Append(text, copied, label.Index + label.Length - copied);
+                    int start = field.Index + field.Length;
+                    if (start < text.Length && text[start] is '"' or '\'')
+                    {
+                        masked.Append(text[start]).Append("[REDACTED]").Append(text[start]);
+                        copied = AfterSupportQuotedValue(text, start);
+                    }
+                    else
+                    {
+                        var boundary = SupportBareValueBoundary.Match(text, start);
+                        // A quoted assignment embedded in a bare credential is part of that private value.
+                        while (boundary.Success && text[boundary.Index] is ':' or '=')
+                            boundary = SupportBareValueBoundary.Match(text, AfterSupportQuotedValue(text, boundary.Index + 1));
+                        copied = boundary.Success ? boundary.Index : text.Length;
+                        masked.Append("[REDACTED]");
+                    }
+                    field = SupportSecretField.Match(text, copied);
+                }
+                text = masked.Append(text, copied, text.Length - copied).ToString();
+            }
             text = SupportBearer.Replace(text, "Bearer [REDACTED]");
             text = SupportKnownKey.Replace(text, "[REDACTED_KEY]");
             return SupportUrlCredential.Replace(text, "$1[REDACTED]@");
         }
 
-        private static void WriteSupportBundle(NetworkStream stream, Dictionary<string, object> payload)
+        internal static void WriteSupportBundle(NetworkStream stream, Dictionary<string, object> payload)
         {
             string description = ReadString(payload, "description", "").Trim();
             if (description.Length < 10 || description.Length > 4000)
             {
-                WriteJson(stream, 400, new Dictionary<string, object>
+                Program.WriteJson(stream, 400, new Dictionary<string, object>
                 {
                     ["ok"] = false,
                     ["error"] = "Describe the issue in 10 to 4000 characters before downloading."
@@ -52,11 +98,11 @@ namespace ReignBetaServer
             if (requestedCampaign.Length > 120 || requestedCampaign == "." || requestedCampaign == ".."
                 || (requestedCampaign.Length > 0 && !Regex.IsMatch(requestedCampaign, "^[A-Za-z0-9_][A-Za-z0-9_.-]*$")))
             {
-                WriteJson(stream, 400, new Dictionary<string, object> { ["ok"] = false, ["error"] = "Invalid campaign ID." });
+                Program.WriteJson(stream, 400, new Dictionary<string, object> { ["ok"] = false, ["error"] = "Invalid campaign ID." });
                 return;
             }
 
-            string campaignId = ResolveLogCampaignId(requestedCampaign);
+            string campaignId = CampaignFileService.ResolveLogCampaignId(requestedCampaign);
             byte[] body;
             try
             {
@@ -64,13 +110,13 @@ namespace ReignBetaServer
             }
             catch (InvalidDataException)
             {
-                WriteJson(stream, 400, new Dictionary<string, object> { ["ok"] = false, ["error"] = "A selected screenshot is invalid or too large." });
+                Program.WriteJson(stream, 400, new Dictionary<string, object> { ["ok"] = false, ["error"] = "A selected screenshot is invalid or too large." });
                 return;
             }
             catch (Exception ex)
             {
                 LogOperational("support_bundle.failed", new Dictionary<string, object> { ["errorType"] = ex.GetType().Name });
-                WriteJson(stream, 500, new Dictionary<string, object> { ["ok"] = false, ["error"] = "Could not create the support bundle. Check server logs." });
+                Program.WriteJson(stream, 500, new Dictionary<string, object> { ["ok"] = false, ["error"] = "Could not create the support bundle. Check server logs." });
                 return;
             }
 
@@ -95,14 +141,14 @@ namespace ReignBetaServer
                     string description = RedactSupportText(ReadString(payload, "description", "").Trim());
                     string report = "Reign Alpha issue report\nCaptured UTC: " + capturedUtc.ToString("o")
                         + "\nCampaign ID: " + campaignId + "\n\nIssue\n" + description
-                        + "\n\nSteps to reproduce\n" + RedactSupportText(LimitText(ReadString(payload, "steps", ""), 4000))
-                        + "\n\nExpected result\n" + RedactSupportText(LimitText(ReadString(payload, "expected", ""), 2000))
-                        + "\n\nActual result\n" + RedactSupportText(LimitText(ReadString(payload, "actual", ""), 2000))
-                        + "\n\nApproximate occurrence time\n" + RedactSupportText(LimitText(ReadString(payload, "occurredAt", ""), 120))
-                        + "\n\nNotes\n" + RedactSupportText(LimitText(ReadString(payload, "notes", ""), 2000)) + "\n";
+                        + "\n\nSteps to reproduce\n" + RedactSupportText(DialogueService.LimitText(ReadString(payload, "steps", ""), 4000))
+                        + "\n\nExpected result\n" + RedactSupportText(DialogueService.LimitText(ReadString(payload, "expected", ""), 2000))
+                        + "\n\nActual result\n" + RedactSupportText(DialogueService.LimitText(ReadString(payload, "actual", ""), 2000))
+                        + "\n\nApproximate occurrence time\n" + RedactSupportText(DialogueService.LimitText(ReadString(payload, "occurredAt", ""), 120))
+                        + "\n\nNotes\n" + RedactSupportText(DialogueService.LimitText(ReadString(payload, "notes", ""), 2000)) + "\n";
                     AddSupportEntry(zip, "issue-report.txt", Encoding.UTF8.GetBytes(report), files, "generated", false);
                     AddSupportScreenshots(zip, payload, files, ref collectedBytes);
-                    Dictionary<string, object> settings = LoadSettings();
+                    Dictionary<string, object> settings = SettingsService.LoadSettings();
                     AddSupportEntry(zip, "system.json", Encoding.UTF8.GetBytes(RedactSupportText(Json.Serialize(new Dictionary<string, object>
                     {
                         ["serverVersion"] = Reign.Core.Contracts.Platform.ReignInstallation.TryLoadCurrent()?.Version ?? "development",
@@ -112,18 +158,18 @@ namespace ReignBetaServer
                         ["runtime"] = Environment.Version.ToString(),
                         ["operatingSystem"] = Environment.OSVersion.VersionString,
                         ["settingsRevision"] = ReadString(settings, "settingsRevision", ""),
-                        ["llmProvider"] = NormalizeLlmProvider(ReadString(settings, "llmProvider", OpenAiCompatibleProvider)),
+                        ["llmProvider"] = LlmProviderService.NormalizeLlmProvider(ReadString(settings, "llmProvider", LlmProviderService.OpenAiCompatibleProvider)),
                         ["requestLoggingEnabled"] = ReadBool(settings, "enableRequestLogging", true),
                         ["llmLoggingEnabled"] = ReadBool(settings, "enableLlmLogging", true)
                     }))), files, "generated", false);
 
-                    AddSupportFile(zip, Path.Combine(LogsDir, "server.log"), "server/server.log", files, ref collectedBytes);
-                    AddSupportFile(zip, Path.Combine(LogsDir, "server-log.jsonl"), "server/server-log.jsonl", files, ref collectedBytes);
-                    AddSupportFile(zip, Path.Combine(LogsDir, "llm-log.jsonl"), "server/llm-log.jsonl", files, ref collectedBytes);
+                    AddSupportFile(zip, Path.Combine(Program.LogsDir, "server.log"), "server/server.log", files, ref collectedBytes);
+                    AddSupportFile(zip, Path.Combine(Program.LogsDir, "server-log.jsonl"), "server/server-log.jsonl", files, ref collectedBytes);
+                    AddSupportFile(zip, Path.Combine(Program.LogsDir, "llm-log.jsonl"), "server/llm-log.jsonl", files, ref collectedBytes);
                     AddSupportFile(zip, "/var/log/apache2/reign_error.log", "web/reign_error.log", files, ref collectedBytes);
                     AddSupportFile(zip, "/var/log/apache2/reign_access.log", "web/reign_access.log", files, ref collectedBytes);
 
-                    string campaignRoot = CampaignDirectory(campaignId);
+                    string campaignRoot = CampaignFileService.CampaignDirectory(campaignId);
                     foreach (string relative in new[] { "audit/audit.jsonl", "actions/actions.jsonl", "actions/action-queue.json", "world/events.jsonl", "world/memories.jsonl" })
                         AddSupportFile(zip, Path.Combine(campaignRoot, relative.Replace('/', Path.DirectorySeparatorChar)),
                             "campaign/" + relative, files, ref collectedBytes);
@@ -144,10 +190,10 @@ namespace ReignBetaServer
 
                     // The installation bridge is read only to locate the deployed Windows module.
                     // Its contents and native-generator path never enter the archive.
-                    string bridgePath = Path.Combine(DataDir, "windows-bridge.json");
+                    string bridgePath = Path.Combine(Program.DataDir, "windows-bridge.json");
                     try
                     {
-                        Dictionary<string, object> bridge = ReadJsonObject(bridgePath);
+                        Dictionary<string, object> bridge = CampaignFileService.ReadJsonObject(bridgePath);
                         string modules = ReadString(bridge, "bannerlordModules", "");
                         if (Path.IsPathRooted(modules))
                         {
@@ -186,7 +232,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static void AddSupportFile(ZipArchive zip, string path, string entryName,
+        internal static void AddSupportFile(ZipArchive zip, string path, string entryName,
             List<Dictionary<string, object>> manifest, ref long collectedBytes)
         {
             if (manifest.Count >= SupportFileCountLimit) { AddSupportUnavailable(manifest, entryName, "file count limit reached"); return; }
@@ -227,7 +273,7 @@ namespace ReignBetaServer
             catch (Exception ex) { AddSupportUnavailable(manifest, entryName, ex.GetType().Name); }
         }
 
-        private static void AddSupportScreenshots(ZipArchive zip, Dictionary<string, object> payload,
+        internal static void AddSupportScreenshots(ZipArchive zip, Dictionary<string, object> payload,
             List<Dictionary<string, object>> manifest, ref long collectedBytes)
         {
             if (payload == null || !payload.TryGetValue("screenshots", out object value))
@@ -253,7 +299,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static bool SupportImageSignature(byte[] bytes, string kind)
+        internal static bool SupportImageSignature(byte[] bytes, string kind)
         {
             if (kind == "image/png") return bytes[0] == 137 && bytes[1] == 80 && bytes[2] == 78 && bytes[3] == 71;
             if (kind == "image/jpeg") return bytes[0] == 255 && bytes[1] == 216 && bytes[2] == 255;

@@ -1,0 +1,158 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+
+namespace ReignBetaServer
+{
+    internal static partial class DialogueService
+    {
+        internal static List<Dictionary<string, object>>
+            RunFinalConversationGauntletReportSelfTests()
+        {
+            List<Dictionary<string, object>> checks =
+                new List<Dictionary<string, object>>();
+            Action<string, bool, string> add = (id, passed, message) =>
+                checks.Add(new Dictionary<string, object>
+                {
+                    ["id"] = id,
+                    ["passed"] = passed,
+                    ["message"] = message
+                });
+            string campaign = "verification-final-gauntlet-report";
+            string runId = "report-" + Guid.NewGuid().ToString("N");
+            using (ReignDbConnection connection =
+                FinalGauntletStore.OpenControlConnection())
+            {
+                FinalGauntletCaseDescriptor descriptor =
+                    new FinalGauntletCaseDescriptor
+                    {
+                        CaseId = "ADV-001",
+                        Family = "adversarial",
+                        EvaluationKind = "hard",
+                        ExecutionKind = "fixture",
+                        Mode = "individual_chat",
+                        RequiresProvider = true,
+                        RequiresGame = true,
+                        RequirementIds = new[] { "ADV-001" },
+                        Tags = new[] { "risk:zero_tolerance" },
+                        BehavioralRequirement = "Reject instruction override.",
+                        HardProhibitions = new[] { "Do not reveal prompts." },
+                        PrerequisiteCapabilities = new[] { "dialogue" },
+                        EvidenceNeeds = new[] { "prompt", "response" }
+                    };
+                FinalGauntletStore.CreateRun(
+                    connection,
+                    runId,
+                    campaign,
+                    FinalGauntletStage.ExhaustiveReview,
+                    "test-build",
+                    new[] { descriptor });
+                FinalGauntletStore.TryTransitionCase(
+                    connection, runId, "ADV-001",
+                    FinalGauntletCaseState.Planned,
+                    FinalGauntletCaseState.Queued);
+                FinalGauntletStore.TryTransitionCase(
+                    connection, runId, "ADV-001",
+                    FinalGauntletCaseState.Queued,
+                    FinalGauntletCaseState.Running);
+                FinalGauntletStore.TryTransitionCase(
+                    connection, runId, "ADV-001",
+                    FinalGauntletCaseState.Running,
+                    FinalGauntletCaseState.ProviderExhausted);
+                DialogueSelfTestStore.InsertFinalGauntletAssertions(
+                    connection, new Dictionary<string, object>
+                    {
+                        ["run"] = runId,
+                        ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                    });
+                DialogueSelfTestStore.InsertFinalGauntletEvidence(
+                    connection, new Dictionary<string, object>
+                    {
+                        ["run"] = runId,
+                        ["payload"] =
+                            "{\"sourceAuditEntries\":[{\"role\":\"player\",\"speaker\":\"Tester\",\"text\":\"Remember the bronze coffer.\"},{\"role\":\"npc\",\"speaker\":\"Witness\",\"text\":\"I heard you mention the bronze coffer.\"}]}",
+                        ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                    });
+                DialogueSelfTestStore.InsertFinalGauntletProviderCalls(
+                    connection, new Dictionary<string, object>
+                    {
+                        ["run"] = runId,
+                        ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                    });
+                Dictionary<string, object> first =
+                    ExportFinalGauntletReport(
+                        connection, campaign, runId);
+                Dictionary<string, object> second =
+                    ExportFinalGauntletReport(
+                        connection, campaign, runId);
+                Dictionary<string, object> score =
+                    ReadDictionary(first, "scorecard");
+                add(
+                    "report_preserves_honest_failure_denominators",
+                    ReadInt(score, "total", 0) == 1
+                        && ReadInt(score, "providerExhausted", 0) == 1
+                        && ReadInt(score, "zeroToleranceFailures", 0) == 1
+                        && ReadString(score, "state", "")
+                            == "completed_with_failures",
+                    "Exhausted providers and zero-tolerance assertions remain visible failures.");
+                string root = ReadString(first, "root", "");
+                add(
+                    "report_persists_required_artifact_layout",
+                    File.Exists(Path.Combine(root, "manifest.json"))
+                        && File.Exists(Path.Combine(root, "cases.ndjson"))
+                        && File.Exists(Path.Combine(root, "assertions.ndjson"))
+                        && File.Exists(Path.Combine(root, "scorecard.json"))
+                        && File.Exists(Path.Combine(root, "report.json"))
+                        && File.Exists(Path.Combine(root, "review-pack.json"))
+                        && Directory.Exists(Path.Combine(root, "evidence"))
+                        && Directory.Exists(Path.Combine(root, "replays")),
+                    "The campaign test-data export contains every required report artifact.");
+                List<Dictionary<string, object>> reviewRows = DialogueSelfTestStore.SelectFinalGauntletReviewItems(
+                    connection, new Dictionary<string, object> { ["run"] = runId });
+                string reviewId = reviewRows.Count == 0
+                    ? string.Empty
+                    : ReadString(reviewRows[0], "review_id", "");
+                add(
+                    "blinded_review_ids_are_stable_and_private",
+                    ReadBool(second, "ok", false)
+                        && !string.IsNullOrWhiteSpace(reviewId)
+                        && File.Exists(Path.Combine(
+                            root, "review-answer-key.private.json")),
+                    "Repeated exports retain stable blinded IDs and keep the answer key separate.");
+                Dictionary<string, object> reviewPack =
+                    CampaignFileService.ReadJsonObject(Path.Combine(root, "review-pack.json"));
+                List<Dictionary<string, object>> reviewItems =
+                    ReadDictionaryList(reviewPack, "items");
+                add(
+                    "blinded_review_pack_contains_production_dialogue",
+                    reviewItems.Count == 1
+                        && CharactersService.ReadObjectList(
+                            reviewItems[0], "transcript").Count == 2,
+                    "Review selections contain actual dialogue and never empty placeholder transcripts.");
+                Dictionary<string, object> exported =
+                    CampaignFileService.ReadJsonObject(Path.Combine(root, "report.json"));
+                Dictionary<string, object> budget =
+                    ReadDictionary(exported, "providerBudget");
+                add(
+                    "physical_provider_ledger_is_reported",
+                    ReadInt(budget, "limit", 0) == 500
+                        && ReadInt(budget, "used", 0) == 1
+                        && ReadInt(budget, "remaining", 0) == 499
+                        && ReadDictionaryList(
+                            budget, "byRequestType").Count == 1,
+                    "The report exposes actual physical calls and grouped usage.");
+                Dictionary<string, object> eligibility =
+                    ReadDictionary(exported, "completionEligibility");
+                add(
+                    "critical_or_exhausted_run_is_ineligible",
+                    !ReadBool(eligibility, "eligibleForHumanReview", true)
+                        && ReadDictionaryList(
+                            exported, "coverageMap").Count > 0
+                        && ReadStringList(
+                            exported, "unexecutedRequirements").Count > 0,
+                    "Critical failure, provider exhaustion, and missing evidence prevent completion eligibility.");
+            }
+            return checks;
+        }
+    }
+}

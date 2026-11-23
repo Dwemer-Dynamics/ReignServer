@@ -2,7 +2,7 @@
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
         private static string ImageProfileOptions(string[] values)
         {
@@ -62,7 +62,7 @@ namespace ReignBetaServer
                 .Replace("@OPENROUTER@", ImageProfileOptions(OpenRouterImageModels)).Replace("@NANO@", ImageProfileOptions(NanoImageModels)).Replace("@ATLAS@", ImageProfileOptions(AtlasImageModels));
         }
 
-        private static string ImageProfileCards()
+        internal static string ImageProfileCards()
         {
             return @"<style>
                 .imageProfileCard { background:#121211FF; border:1px solid #7E6A4DFF; color:#C5BDAFFF; box-shadow:none; font-family:Georgia,serif; min-width:0; }

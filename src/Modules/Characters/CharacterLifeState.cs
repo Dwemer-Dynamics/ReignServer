@@ -7,12 +7,12 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private const string CharacterLifeStateSchema = "reign-character-life-state-v1";
 
         private static bool IsLastingCharacterDecision(Dictionary<string, object> decision) =>
-            AgencyAccepted(ReadString(decision, "disposition", ""))
+            DialogueService.AgencyAccepted(ReadString(decision, "disposition", ""))
             && (ReadString(decision, "topic", "") == "allegiance"
                 || ReadString(decision, "stakes", "ordinary") == "life_changing");
 
@@ -20,8 +20,8 @@ namespace ReignBetaServer
             string owner, string peer, string sourceId, string sourceHash, string timeline)
         {
             string disposition = ReadString(decision, "disposition", ""), topic = ReadString(decision, "topic", "");
-            bool accepted = AgencyAccepted(disposition);
-            return TestDict("schema", CharacterLifeStateSchema, "id", "life_decision_" + PromptHash(sourceId + "|" + ReadString(decision, "id", "")),
+            bool accepted = DialogueService.AgencyAccepted(disposition);
+            return TestDict("schema", CharacterLifeStateSchema, "id", "life_decision_" + DialogueService.PromptHash(sourceId + "|" + ReadString(decision, "id", "")),
                 "stateKey", "decision:" + ReadString(decision, "id", ""), "ownerId", owner, "peerId", peer,
                 "timelineId", timeline, "sourceId", sourceId, "sourceHash", sourceHash, "sourceKind", "accepted_decision",
                 "revision", ReadInt(decision, "revision", 1), "worldDay", ReadDouble(decision, "worldDay", 0),
@@ -41,28 +41,17 @@ namespace ReignBetaServer
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             // This is a rebuildable projection of retained receipts/native events.
             // It grants no new membership, action, emotion, or public knowledge.
-            ExecuteSql(connection, @"INSERT INTO dynamic_characteristics
-(characteristic_id,owner_id,category,topic_key,text,normalized_key,status,confidence,importance,provenance,
-compatibility_status,source_event_id,world_day,known_by_json,first_ts,last_ts,payload_json)
-VALUES($id,$owner,'life_transition',$topic,$text,$id,'active',1,1,'source_backed_life_transition',
-'verified_source_projection',$source,$day,$known,$ts,$ts,$payload)
-ON CONFLICT(owner_id,normalized_key) DO UPDATE SET text=$text,payload_json=$payload,last_ts=$ts
-WHERE dynamic_characteristics.payload_json<>excluded.payload_json;",
-                TestDict("id", id, "owner", owner, "topic", ReadString(transition, "stateKey", id), "text", text,
+            CharactersStore.UpsertDynamicCharacteristics(connection, TestDict("id", id, "owner", owner, "topic", ReadString(transition, "stateKey", id), "text", text,
                     "source", ReadString(transition, "sourceId", ""), "day", ReadDouble(transition, "worldDay", 0),
                     "known", Json.Serialize(new[] { owner }), "ts", ts, "payload", Json.Serialize(TestDict("lifeTransition", transition))));
         }
 
         private static List<Dictionary<string, object>> ReadCharacterDecisionTransitions(ReignDbConnection connection,
-            string owner, KnowledgeAccessContext access)
+            string owner, DialogueService.KnowledgeAccessContext access)
         {
             var result = new List<Dictionary<string, object>>();
-            if (!TableExists(connection, "conversation_negotiation_turns")) return result;
-            var receipts = QuerySql(connection, @"SELECT n.*,d.value AS decision_json FROM conversation_negotiation_turns n
-CROSS JOIN LATERAL jsonb_array_elements(COALESCE(n.payload_json::jsonb->'updates','[]'::jsonb)) d(value)
-WHERE n.owner_id=$owner
-ORDER BY n.receipt_id;",
-                TestDict("owner", owner, "day", access.WorldDay));
+            if (!WorldSimulationService.TableExists(connection, "conversation_negotiation_turns")) return result;
+            var receipts = CharactersStore.SelectConversationNegotiationTurns(connection, TestDict("owner", owner, "day", access.WorldDay));
             foreach (var row in receipts)
             {
                 var receipt = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
@@ -72,26 +61,23 @@ ORDER BY n.receipt_id;",
                 string turn = ReadString(row, "turn_id", ""), reply = ReadString(decision, "reply", "");
                 // Membership in a group or an unchecked generated summary cannot
                 // supply this NPC's acceptance. Follow their own original words.
-                var sources = QuerySql(connection, @"SELECT * FROM conversation_turns WHERE speaker_id=$owner
-AND (turn_id=$turn OR turn_id=$npcTurn OR event_id=$turn OR exchange_id=$turn) ORDER BY turn_order;",
-                    TestDict("owner", owner, "turn", turn, "npcTurn", turn + "_npc"));
-                var source = sources.FirstOrDefault(s => PrecisionTurnVisible(s, owner, access, connection)
-                    && reply.Length > 0 && AgencyContainsExactQuote(ConversationTurnTextForRecall(s), reply));
+                var sources = CharactersStore.SelectConversationTurns4(connection, TestDict("owner", owner, "turn", turn, "npcTurn", turn + "_npc"));
+                var source = sources.FirstOrDefault(s => DialogueService.PrecisionTurnVisible(s, owner, access, connection)
+                    && reply.Length > 0 && DialogueService.AgencyContainsExactQuote(DialogueService.ConversationTurnTextForRecall(s), reply));
                 Dictionary<string, object> letter = null;
-                if (source == null && TableExists(connection, "letters"))
+                if (source == null && WorldSimulationService.TableExists(connection, "letters"))
                 {
-                    letter = QuerySql(connection, "SELECT * FROM letters WHERE sender_id=$owner AND (letter_id=$turn OR 'turn_letter_'||letter_id=$turn);",
-                        TestDict("owner", owner, "turn", turn)).FirstOrDefault();
-                    if (letter == null || !LetterVisibleToObserver(connection, letter, owner, access, out _)
-                        || reply.Length == 0 || !AgencyContainsExactQuote(ReadString(letter, "body", ""), reply)) continue;
+                    letter = CharactersStore.SelectLetters2(connection, TestDict("owner", owner, "turn", turn)).FirstOrDefault();
+                    if (letter == null || !DialogueService.LetterVisibleToObserver(connection, letter, owner, access, out _)
+                        || reply.Length == 0 || !DialogueService.AgencyContainsExactQuote(ReadString(letter, "body", ""), reply)) continue;
                 }
                 if (source == null && letter == null) continue;
                 string decisionQuote = ReadString(decision, "replyQuote", "");
-                if (decisionQuote.Length > 0 && !AgencyContainsExactQuote(reply, decisionQuote)) continue;
+                if (decisionQuote.Length > 0 && !DialogueService.AgencyContainsExactQuote(reply, decisionQuote)) continue;
                 var transition = CharacterDecisionTransition(decision, owner, ReadString(row, "peer_id", ""),
                     source != null ? ReadString(source, "turn_id", "") : ReadString(letter, "letter_id", ""),
-                    source != null ? MemorySpecialistSourceHash(source) : LetterContentHash(letter),
-                    source != null ? FirstNonEmpty(ReadString(source, "timeline_id", ""), ReadString(TryParseJsonObject(ReadString(source, "payload_json", "{}")), "timelineId", ""), access.TimelineId) : LetterSourceTimeline(letter));
+                    source != null ? DialogueService.MemorySpecialistSourceHash(source) : DialogueService.LetterContentHash(letter),
+                    source != null ? FirstNonEmpty(ReadString(source, "timeline_id", ""), ReadString(TryParseJsonObject(ReadString(source, "payload_json", "{}")), "timelineId", ""), access.TimelineId) : DialogueService.LetterSourceTimeline(letter));
                 transition["receiptId"] = ReadString(row, "receipt_id", "");
                 transition["lastingAcceptance"] = IsLastingCharacterDecision(decision);
                 transition["decisionQuote"] = decisionQuote;
@@ -103,33 +89,24 @@ AND (turn_id=$turn OR turn_id=$npcTurn OR event_id=$turn OR exchange_id=$turn) O
         }
 
         private static List<Dictionary<string, object>> ReadCharacterNativeLifeTransitions(ReignDbConnection connection,
-            string owner, KnowledgeAccessContext access, Dictionary<string, object> profile = null)
+            string owner, DialogueService.KnowledgeAccessContext access, Dictionary<string, object> profile = null)
         {
             var result = new List<Dictionary<string, object>>();
-            if (!TableExists(connection, "world_history_events") || !TableExists(connection, "world_history_entities")
-                || !TableExists(connection, "world_history_knowledge_rules")) return result;
-            var family = CharacterIdFrom(profile) == owner ? ReadStringList(profile, "childrenIds").Concat(new[] {
+            if (!WorldSimulationService.TableExists(connection, "world_history_events") || !WorldSimulationService.TableExists(connection, "world_history_entities")
+                || !WorldSimulationService.TableExists(connection, "world_history_knowledge_rules")) return result;
+            var family = CampaignFileService.CharacterIdFrom(profile) == owner ? ReadStringList(profile, "childrenIds").Concat(new[] {
                 ReadString(profile, "fatherId", ""), ReadString(profile, "motherId", ""), ReadString(profile, "spouseId", "") })
                 .Where(id => id.Length > 0 && id != owner).Distinct().ToList() : new List<string>();
-            var rows = QuerySql(connection, @"SELECT e.* FROM world_history_events e WHERE e.timeline_id=$timeline
-AND e.world_day<=$day AND e.is_complete=1 AND e.phase='completed' AND e.source IN ('native','bannerlord_native')
-AND e.event_type ~* '(marri|divorc|birth|concep|death|killed|executed|prisoner|captur|releas|rescu|escape|wounded|clan_join|clan_leave|changed_clan|changed_kingdom|kingdom_join|kingdom_leave|kingdom_created|ruling_clan|ruler|succession|fief|settlement_owner|parentage|affair|lover|betray)'
-AND EXISTS(SELECT 1 FROM world_history_entities p WHERE p.event_id=e.event_id AND (p.entity_id=$owner
-OR (e.event_type ~* '(death|killed|executed|birth|prisoner|captur|rescu)' AND p.entity_id IN (SELECT jsonb_array_elements_text($family::jsonb))))
-AND p.entity_type IN ('hero','character') AND p.role<>'' AND p.role NOT IN ('observer','witness','spectator','informed'))
-AND EXISTS(SELECT 1 FROM world_history_knowledge_rules k WHERE k.event_id=e.event_id AND k.available_day<=$day
-AND ((k.audience_type='entity' AND k.audience_id=$owner) OR k.audience_type='global'
-OR (k.audience_type='kingdom' AND k.audience_id=$kingdom))) ORDER BY e.world_day,e.sequence;",
-                TestDict("timeline", access.TimelineId, "day", access.WorldDay, "owner", owner, "kingdom", access.KingdomId, "family", Json.Serialize(family)));
+            var rows = CharactersStore.SelectWorldHistoryEvents(connection, TestDict("timeline", access.TimelineId, "day", access.WorldDay, "owner", owner, "kingdom", access.KingdomId, "family", Json.Serialize(family)));
             foreach (var row in rows)
             {
                 string id = ReadString(row, "event_id", ""), summary = ReadString(row, "summary", "");
                 if (id.Length == 0 || summary.Length == 0) continue;
                 if (!DateTimeOffset.TryParse(ReadString(row, "created_utc", ""), CultureInfo.InvariantCulture,
                         DateTimeStyles.AssumeUniversal, out var created) || created.ToUnixTimeSeconds() > access.AsOfTimestamp) continue;
-                result.Add(TestDict("schema", CharacterLifeStateSchema, "id", "life_native_" + PromptHash(owner + "|" + id),
+                result.Add(TestDict("schema", CharacterLifeStateSchema, "id", "life_native_" + DialogueService.PromptHash(owner + "|" + id),
                     "stateKey", "native:" + id, "ownerId", owner, "peerId", "", "timelineId", access.TimelineId,
-                    "sourceId", id, "sourceHash", MemorySourceHash(new[] { row }), "sourceKind", "native_confirmed",
+                    "sourceId", id, "sourceHash", DialogueService.MemorySourceHash(new[] { row }), "sourceKind", "native_confirmed",
                     "revision", 1, "worldDay", ReadDouble(row, "world_day", 0), "kind", ReadString(row, "event_type", ""),
                     "status", "completed_life_event", "subject", summary, "knownBy", new[] { owner },
                     "executionConfirmed", true, "authority", "completed_native_event", "personalMeaning", "not_inferred"));
@@ -175,14 +152,14 @@ OR (k.audience_type='kingdom' AND k.audience_id=$kingdom))) ORDER BY e.world_day
         private static string BuildCharacterLifeStatePrompt(ReignDbConnection connection, string owner, string peer,
             Dictionary<string, object> payload, List<string> sourceIds)
         {
-            var access = BuildKnowledgeAccessContext(owner, peer, "", payload);
+            var access = DialogueService.BuildKnowledgeAccessContext(owner, peer, "", payload);
             bool official = ReadBool(payload, "officialMemoryFirewall", false);
             var transitions = official ? new List<Dictionary<string, object>>() : ReadCharacterDecisionTransitions(connection, owner, access);
             transitions.AddRange(ReadCharacterNativeLifeTransitions(connection, owner, access,
                 ReadDictionary(payload, "hero") ?? ReadDictionary(payload, "profile") ?? ReadDictionary(payload, "speaker")));
             var current = CurrentCharacterLifeState(transitions);
             var query = ReadFirstString(payload, "playerText", "text", "message");
-            var terms = MemoryQueryTerms(query);
+            var terms = DialogueService.MemoryQueryTerms(query);
             var selected = current.Where(t => ReadString(t, "sourceKind", "") == "accepted_decision")
                 .Concat(current.Where(t => ReadString(t, "sourceKind", "") == "native_confirmed")
                     .OrderByDescending(t => terms.Count(term => ReadString(t, "subject", "").Contains(term, StringComparison.OrdinalIgnoreCase)))
@@ -208,48 +185,48 @@ OR (k.audience_type='kingdom' AND k.audience_id=$kingdom))) ORDER BY e.world_day
             {
                 string id = ReadString(row, "sourceId", "");
                 sourceIds.Add(id);
-                text.AppendLine(RenderContinuityRecord(id, "dynamic_character_life_state", owner, "", ReadDouble(row, "worldDay", 0),
+                text.AppendLine(DialogueService.RenderContinuityRecord(id, "dynamic_character_life_state", owner, "", ReadDouble(row, "worldDay", 0),
                     120, true, FormatCharacterLifeTransition(row, false)));
             }
             return text.ToString();
         }
 
-        private static string TryBuildCharacterLifeStatePrompt(string campaign, string owner, string peer,
+        internal static string TryBuildCharacterLifeStatePrompt(string campaign, string owner, string peer,
             Dictionary<string, object> payload, List<string> sourceIds)
         {
             try
             {
-                using var connection = OpenCampaignConnection(campaign);
+                using var connection = ReignDatabase.OpenCampaignConnection(campaign);
                 return BuildCharacterLifeStatePrompt(connection, owner, peer, payload, sourceIds);
             }
             catch (Exception ex)
             {
                 payload["characterLifeState"] = TestDict("schema", CharacterLifeStateSchema, "status", "unavailable", "remoteCalls", 0);
-                LogOperational("character.life_read_unavailable", TestDict("ownerId", owner, "errorType", ex.GetType().Name));
+                OperationsService.LogOperational("character.life_read_unavailable", TestDict("ownerId", owner, "errorType", ex.GetType().Name));
                 return "";
             }
         }
 
-        private static void RefreshCharacterLifeProjection(string campaign, string owner, KnowledgeAccessContext access)
+        internal static void RefreshCharacterLifeProjection(string campaign, string owner, DialogueService.KnowledgeAccessContext access)
         {
             try
             {
-                using var connection = OpenCampaignConnection(campaign);
+                using var connection = ReignDatabase.OpenCampaignConnection(campaign);
                 using var transaction = connection.BeginTransaction();
                 AcquirePostgreSqlTransactionMutationLock(connection);
                 var transitions = ReadCharacterDecisionTransitions(connection, owner, access);
                 transitions.AddRange(ReadCharacterNativeLifeTransitions(connection, owner, access));
                 var current = new HashSet<string>(CurrentCharacterLifeState(transitions).Select(r => ReadString(r, "id", "")));
-                ExecuteSql(connection, "UPDATE dynamic_characteristics SET status='source_unavailable' WHERE owner_id=$owner AND category='life_transition';", TestDict("owner", owner));
+                var observedIds = transitions.Select(r => ReadString(r, "id", "")).Distinct(StringComparer.Ordinal).ToArray();
+                CharactersStore.UpdateDynamicCharacteristics(connection, TestDict("owner", owner, "observed", Json.Serialize(observedIds)));
                 foreach (var row in transitions)
                 {
                     StoreCharacterLifeProjection(connection, row);
-                    ExecuteSql(connection, "UPDATE dynamic_characteristics SET status=$status WHERE characteristic_id=$id;",
-                        TestDict("id", ReadString(row, "id", ""), "status", current.Contains(ReadString(row, "id", "")) ? "active" : "superseded"));
+                    CharactersStore.UpdateDynamicCharacteristics2(connection, TestDict("id", ReadString(row, "id", ""), "status", current.Contains(ReadString(row, "id", "")) ? "active" : "superseded"));
                 }
                 transaction.Commit();
             }
-            catch (Exception ex) { LogOperational("character.life_projection_deferred", TestDict("ownerId", owner, "errorType", ex.GetType().Name)); }
+            catch (Exception ex) { OperationsService.LogOperational("character.life_projection_deferred", TestDict("ownerId", owner, "errorType", ex.GetType().Name)); }
         }
     }
 }

@@ -6,9 +6,9 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class GovernmentService
     {
-        private static Dictionary<string, object> GovernmentSpeakerStatement(
+        internal static Dictionary<string, object> GovernmentSpeakerStatement(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -20,7 +20,7 @@ namespace ReignBetaServer
                 ?? new Dictionary<string, object>();
             List<Dictionary<string, object>> resolutions = ReadDictionaryList(payload, "resolutions")
                 .Take(3).ToList();
-            string speakerId = CharacterIdFrom(speaker);
+            string speakerId = CampaignFileService.CharacterIdFrom(speaker);
             string partyId = ReadString(party, "partyId", "");
             if (string.IsNullOrWhiteSpace(speakerId) || string.IsNullOrWhiteSpace(partyId))
                 return new Dictionary<string, object>
@@ -40,17 +40,17 @@ namespace ReignBetaServer
             var boundedParty = new Dictionary<string, object>
             {
                 ["partyId"] = partyId,
-                ["name"] = LimitText(ReadString(party, "name", "Party"), 120),
+                ["name"] = DialogueService.LimitText(ReadString(party, "name", "Party"), 120),
                 ["planks"] = ReadStringList(party, "planks").Take(4).ToList(),
                 ["seatCount"] = Math.Max(0, ReadInt(party, "seatCount", 0))
             };
             List<object> boundedResolutions = resolutions.Select(row => (object)new Dictionary<string, object>
             {
-                ["title"] = LimitText(ReadString(row, "title", "measurable relief"), 180),
-                ["evidenceTag"] = LimitText(ReadString(row, "evidenceTag", "public concern"), 100),
-                ["firstRoute"] = LimitText(ReadString(row, "firstRoute", ""), 240),
-                ["secondRoute"] = LimitText(ReadString(row, "secondRoute", ""), 240),
-                ["targetName"] = LimitText(ReadString(row, "targetName", ""), 120)
+                ["title"] = DialogueService.LimitText(ReadString(row, "title", "measurable relief"), 180),
+                ["evidenceTag"] = DialogueService.LimitText(ReadString(row, "evidenceTag", "public concern"), 100),
+                ["firstRoute"] = DialogueService.LimitText(ReadString(row, "firstRoute", ""), 240),
+                ["secondRoute"] = DialogueService.LimitText(ReadString(row, "secondRoute", ""), 240),
+                ["targetName"] = DialogueService.LimitText(ReadString(row, "targetName", ""), 120)
             }).ToList();
 
             var prompt = new StringBuilder();
@@ -64,7 +64,7 @@ namespace ReignBetaServer
             prompt.AppendLine("Speaker: " + Json.Serialize(new Dictionary<string, object>
             {
                 ["heroStringId"] = speakerId,
-                ["name"] = LimitText(ReadString(speaker, "name", speakerId), 120),
+                ["name"] = DialogueService.LimitText(ReadString(speaker, "name", speakerId), 120),
                 ["traits"] = ReadDictionary(speaker, "traits") ?? new Dictionary<string, object>(),
                 ["cultureId"] = ReadString(speaker, "cultureId", "")
             }));
@@ -75,15 +75,15 @@ namespace ReignBetaServer
                 ["requestType"] = "government_party_speaker_statement",
                 ["politicalAuthors"] = new[] { speaker },
                 ["campaignId"] = ReadString(payload, "campaignId", "default"),
-                ["correlationId"] = EnsureCorrelationId(payload),
-                ["messages"] = BuildSimplePromptEnvelope(
+                ["correlationId"] = OperationsService.EnsureCorrelationId(payload),
+                ["messages"] = DialogueService.BuildSimplePromptEnvelope(
                     "government_party_speaker_statement",
                     partyId,
                     "Return one bounded party-speaker statement as valid JSON.",
                     prompt.ToString()).Messages,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
             };
-            Dictionary<string, object> llm = ChatWithLlm(request);
+            Dictionary<string, object> llm = LlmProviderService.ChatWithLlm(request);
             if (!ReadBool(llm, "ok", false))
                 return new Dictionary<string, object>
                 {
@@ -95,7 +95,7 @@ namespace ReignBetaServer
                 };
             Dictionary<string, object> parsed = TryParseJsonObject(ReadString(llm, "content", ""))
                 ?? new Dictionary<string, object>();
-            string reply = LimitText(SanitizeVisibleReply(FirstNonEmpty(
+            string reply = DialogueService.LimitText(ConversationResponseService.SanitizeVisibleReply(FirstNonEmpty(
                 ReadString(parsed, "reply", ""), ReadString(llm, "content", ""))), 1600);
             return new Dictionary<string, object>
             {

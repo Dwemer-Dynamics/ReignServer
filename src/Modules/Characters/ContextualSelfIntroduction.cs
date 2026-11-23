@@ -5,13 +5,13 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private const int ContextualIntroductionTextLimit = 4000;
 
         // A private result passed only by the prompt adapter. Payload fields and
         // model-authored identity writes cannot opt themselves into verification.
-        private sealed class ContextualSelfIntroductionDecision
+        internal sealed class ContextualSelfIntroductionDecision
         {
             internal string Name;
             internal string EvidenceQuote;
@@ -82,7 +82,7 @@ namespace ReignBetaServer
             if (candidates.Count == 0) return null;
 
             string subjectId = IdentityHeroId(subject);
-            var others = MergedInteractionParticipantProfiles(encounter)
+            var others = DialogueService.MergedInteractionParticipantProfiles(encounter)
                 .Concat(new[] { ReadDictionary(encounter, "observer") })
                 .Where(person => person != null && !IdentityHeroId(person)
                     .Equals(subjectId, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -96,16 +96,16 @@ namespace ReignBetaServer
                     && ContextualIntroductionSpokenText(ReadFirstString(row, "text", "content", "message")) == spoken))
                 .TakeLast(4).Select(row => new Dictionary<string, object>
                 {
-                    ["role"] = LimitText(ReadString(row, "role", ""), 32),
+                    ["role"] = DialogueService.LimitText(ReadString(row, "role", ""), 32),
                     ["isCurrentObserver"] = ReadFirstString(row, "speakerHeroStringId", "heroStringId", "npcId")
                         .Equals(ReadString(encounter, "observerHeroStringId", ""), StringComparison.OrdinalIgnoreCase),
-                    ["text"] = LimitText(ReadFirstString(row, "text", "content", "message"), 1000)
+                    ["text"] = DialogueService.LimitText(ReadFirstString(row, "text", "content", "message"), 1000)
                 }).ToList();
             var request = new Dictionary<string, object>
             {
                 ["requestType"] = "identity_self_introduction",
                 ["campaignId"] = ReadString(encounter, "campaignId", "default"),
-                ["correlationId"] = EnsureCorrelationId(encounter) + "-identity-introduction",
+                ["correlationId"] = OperationsService.EnsureCorrelationId(encounter) + "-identity-introduction",
                 ["heroStringId"] = ReadString(encounter, "observerHeroStringId", ""),
                 ["eventId"] = ReadString(encounter, "encounterId", ""),
                 ["promptCacheEligible"] = false,
@@ -148,14 +148,14 @@ namespace ReignBetaServer
             {
                 // Production provider access is impossible in the isolated Lab.
                 // Tests must explicitly supply a bounded in-memory responder.
-                if (responder == null && (!string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)
+                if (responder == null && (!string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)
                     || Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") == "1"))
                     outcome = "offline_provider_disabled";
                 else
                 {
-                    ThrowIfCampaignRequestReplaced();
-                    var response = responder == null ? ChatWithLlm(request) : responder(request);
-                    ThrowIfCampaignRequestReplaced();
+                    PersistenceService.ThrowIfCampaignRequestReplaced();
+                    var response = responder == null ? LlmProviderService.ChatWithLlm(request) : responder(request);
+                    PersistenceService.ThrowIfCampaignRequestReplaced();
                     string content = ReadString(response, "content", "");
                     var parsed = ReadBool(response, "ok", false) && content.Length <= 6000
                         ? TryParseJsonObject(content) : null;
@@ -175,13 +175,13 @@ namespace ReignBetaServer
                     outcome = supported ? "accepted" : parsed == null ? "invalid_response" : "not_supported";
                 }
             }
-            catch (Exception ex) when (!(ex is OperationCanceledException) && !(ex is CampaignRequestReplacedException))
+            catch (Exception ex) when (!(ex is OperationCanceledException) && !(ex is PersistenceService.CampaignRequestReplacedException))
             {
                 // A failed interpretation leaves the pre-existing identity intact.
                 // Provider details already belong to the normal provider audit.
                 outcome = "resolver_failed";
             }
-            WriteAudit(ReadString(encounter, "campaignId", "default"), EnsureCorrelationId(encounter),
+            OperationsService.WriteAudit(ReadString(encounter, "campaignId", "default"), OperationsService.EnsureCorrelationId(encounter),
                 "server", ReadString(encounter, "mode", "dialogue"), "identity.self_introduction_resolution",
                 ReadString(encounter, "observerHeroStringId", ""), "", ReadString(encounter, "encounterId", ""),
                 outcome, timer.ElapsedMilliseconds, "Bounded contextual self-introduction interpretation.", new Dictionary<string, object>
@@ -189,7 +189,7 @@ namespace ReignBetaServer
                     ["accepted"] = decision != null,
                     ["method"] = "current_spoken_name_context",
                     ["resolverCorrelationId"] = ReadString(request, "correlationId", ""),
-                    ["currentTextHash"] = PromptHash(spoken),
+                    ["currentTextHash"] = DialogueService.PromptHash(spoken),
                     ["candidateCount"] = candidates.Count,
                     ["contextLineCount"] = context.Count,
                     ["currentTextChars"] = spoken.Length,

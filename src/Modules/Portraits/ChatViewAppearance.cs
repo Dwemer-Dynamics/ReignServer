@@ -6,7 +6,7 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
         private const string ChatViewReferenceContract = "chat-visible-portrait-v2";
         private const string ChatViewAppearanceLock = "PORTRAIT APPEARANCE AUTHORITY: The attached portrait for each mapped character is the authority for that person's entire visible appearance. Preserve the same face, APPARENT AGE, facial hair, hairstyle, hair color, physique, skin, clothing cut, layers, colors, armor, jewelry and footwear as shown. Do not make anyone younger or older, rejuvenate, age, beautify, restyle or redress them. Numeric game ages, titles, family roles and native equipment are not visual instructions and must never replace the portrait appearance. Re-pose the same people in the same outfits for the action; only pose, expression, lighting and environment change. This rule takes priority over conflicting appearance wording in a style template or scene description.";
@@ -21,13 +21,13 @@ namespace ReignBetaServer
         // Character Editor's active-variant order is deliberately not reused.
         private static string ResolveChatViewPortraitPath(string campaign, string hero)
         {
-            string cacheRoot = CampaignPortraitCacheDirectory(campaign);
+            string cacheRoot = PersistenceService.CampaignPortraitCacheDirectory(campaign);
             var campaignFolders = ChatViewHeroFolders(cacheRoot, hero);
-            string sharedRoot = CharacterEditorPortraitCacheRoot();
+            string sharedRoot = CharactersService.CharacterEditorPortraitCacheRoot();
             bool sharedReadable = !string.IsNullOrWhiteSpace(sharedRoot) && Directory.Exists(Path.Combine(sharedRoot, "_shared"));
             var sharedFolders = sharedReadable ? ChatViewHeroFolders(Path.Combine(sharedRoot, "_shared"), hero) : Array.Empty<string>();
             return SelectChatViewPortraitPath(campaignFolders, sharedFolders,
-                CharacterFile(campaign, hero, "portraits"),
+                CampaignFileService.CharacterFile(campaign, hero, "portraits"),
                 hero.Equals("main_hero", StringComparison.OrdinalIgnoreCase)
                     || hero.Equals("player_hero", StringComparison.OrdinalIgnoreCase), sharedReadable);
         }
@@ -74,8 +74,8 @@ namespace ReignBetaServer
         private static Dictionary<string, object> ChatViewReferenceReceipt(string campaign, string hero, string path, byte[] bytes)
         {
             string folder = Path.GetDirectoryName(path);
-            string origin = path.StartsWith(CampaignPortraitCacheDirectory(campaign) + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-                ? "campaign" : folder == CharacterFile(campaign, hero, "portraits") ? "character" : "shared";
+            string origin = path.StartsWith(PersistenceService.CampaignPortraitCacheDirectory(campaign) + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                ? "campaign" : folder == CampaignFileService.CharacterFile(campaign, hero, "portraits") ? "character" : "shared";
             return TestDict("characterId", hero, "contract", ChatViewReferenceContract, "origin", origin,
                 "folder", Path.GetFileName(folder), "fileName", Path.GetFileName(path), "sha256", Sha256Hex(bytes));
         }
@@ -110,12 +110,12 @@ namespace ReignBetaServer
                 + ChatViewCoverageOutputContract + "\n" : "") + ChatViewIdentityLock;
         }
 
-        private static void MigrateChatViewPromptDefaults() => MigrateChatViewPromptDefaults(PromptsDir);
+        private static void MigrateChatViewPromptDefaults() => MigrateChatViewPromptDefaults(Program.PromptsDir);
 
         // Only exact shipped legacy defaults are migrated. User-authored styles survive.
         internal static void MigrateChatViewPromptDefaults(string directory)
         {
-            lock (FileLock)
+            lock (Program.FileLock)
             {
                 foreach (string name in new[] { ChatViewSelectionPromptName, ChatViewPhotoPromptName })
                 {

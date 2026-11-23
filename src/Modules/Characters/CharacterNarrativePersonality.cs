@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private static readonly string[] NarrativePersonalityRuleTraits = {
             "compassion", "honor", "familyMotivation", "knowledgeMotivation", "fameMotivation",
@@ -23,7 +23,7 @@ namespace ReignBetaServer
 
         private static void AttachNarrativeFactRules(List<Dictionary<string, object>> concepts)
         {
-            var document = ReadJsonObject(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+            var document = CampaignFileService.ReadJsonObject(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
                 "profiles", "narrative", "fact-compatibility.json"));
             if (ReadString(document, "schema", "") != "reign-narrative-fact-compatibility-v1")
                 throw new InvalidDataException("Narrative fact compatibility policy is missing or unsupported.");
@@ -70,7 +70,7 @@ namespace ReignBetaServer
         private static void AttachNarrativePersonalityRules(List<Dictionary<string, object>> concepts,
             string fileName, string schema, string[] categories)
         {
-            var document = ReadJsonObject(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+            var document = CampaignFileService.ReadJsonObject(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
                 "profiles", "narrative", fileName));
             if (ReadString(document, "schema", "") != schema)
                 throw new InvalidDataException("Narrative personality compatibility policy is missing or unsupported: " + fileName);

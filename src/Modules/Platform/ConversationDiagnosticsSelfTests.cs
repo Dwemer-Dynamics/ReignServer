@@ -7,9 +7,9 @@ using System.Threading.Tasks;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class ConversationResponseService
     {
-        private static List<Dictionary<string, object>> RunConversationDiagnosticsSelfTests()
+        internal static List<Dictionary<string, object>> RunConversationDiagnosticsSelfTests()
         {
             var results = new List<Dictionary<string, object>>();
             Action<string, bool, object> check = (id, pass, data) => results.Add(TestDict("caseId", "diagnostic_" + id,
@@ -18,7 +18,7 @@ namespace ReignBetaServer
             var previousTrace = DiagnosticTrace.Value;
             var previousRequest = DiagnosticRequest.Value;
             var previousStep = DiagnosticStep.Value;
-            string root = Path.Combine(VerificationDir, "conversation-diagnostics", Guid.NewGuid().ToString("N"));
+            string root = Path.Combine(VerificationService.VerificationDir, "conversation-diagnostics", Guid.NewGuid().ToString("N"));
             DiagnosticRootOverride.Value = root;
             string campaign = "diagnostic_test_" + Guid.NewGuid().ToString("N");
             try
@@ -33,7 +33,7 @@ namespace ReignBetaServer
                 ConversationDiagnosticTrace full;
                 string secret = "fixture-" + "credential-value";
                 string original = "{\"reasoning\":\"Consider her position.\"}";
-                string cleaned = SanitizeReasoningContent(original);
+                string cleaned = DialogueService.SanitizeReasoningContent(original);
                 using (var requestScope = new ConversationDiagnosticRequest("/social-event/respond", TestDict("heroName", "Corein", "playerText", "I have won several tournaments.", "conversationSessionId", "fixture-evening", "timelineId", "fixture-timeline")))
                 {
                     full = EnsureDiagnosticTrace(campaign, "fixture-response", "social_event", "corein");
@@ -48,7 +48,7 @@ namespace ReignBetaServer
                     }
                     check("reasoning_only_becomes_empty", TryParseJsonObject(cleaned)?.Count == 0 && DiagnosticStructuredIssues(cleaned, "social_event", TestDict()).Any(x => x.Contains("empty JSON")), null);
                     check("literal_empty_rejected", DiagnosticStructuredIssues("{}", "social_event", TestDict()).Any(x => x.Contains("empty JSON")), null);
-                    var missing = AgencyTestReply(null); missing.Remove("proposalDecisions");
+                    var missing = DialogueService.AgencyTestReply(null); missing.Remove("proposalDecisions");
                     using (var repair = new ConversationDiagnosticStep(full, "repair", "Repair the answer format", TestDict("received", cleaned)))
                     {
                         DiagnosticValidation("Check answer structure", false, DiagnosticStructuredIssues(cleaned, "social_event", TestDict()), cleaned);
@@ -62,9 +62,9 @@ namespace ReignBetaServer
                     }
                     int repairCalls = 0;
                     var llm = TestDict("ok", true, "content", Json.Serialize(missing));
-                    var repaired = WithDiagnosticTransformation("Check negotiation metadata", llm, () => EnforceConversationAgencyResponse(llm,
-                        TestDict("requestType", "social_event"), TestDict("conversationAgency", AgencyTestContext()), TestDict(), campaign, "fixture-response", "social_event", "corein",
-                        input => { repairCalls++; using var call = BeginDiagnosticLlm(input); var result = TestDict("ok", true, "content", Json.Serialize(AgencyTestReply(null))); call.End("completed", "Injected repair.", result); return result; }, false));
+                    var repaired = WithDiagnosticTransformation("Check negotiation metadata", llm, () => DialogueService.EnforceConversationAgencyResponse(llm,
+                        TestDict("requestType", "social_event"), TestDict("conversationAgency", DialogueService.AgencyTestContext()), TestDict(), campaign, "fixture-response", "social_event", "corein",
+                        input => { repairCalls++; using var call = BeginDiagnosticLlm(input); var result = TestDict("ok", true, "content", Json.Serialize(DialogueService.AgencyTestReply(null))); call.End("completed", "Injected repair.", result); return result; }, false));
                     check("agency_reason_and_revalidation", repairCalls == 1 && ReadBool(ReadDictionary(repaired, "conversationAgency"), "accepted", false), null);
                     // Toggling off affects the next response, not this in-flight capture.
                     ConversationDiagnosticsCaptureApi(TestDict("enabled", false));
@@ -94,7 +94,7 @@ namespace ReignBetaServer
                         content.Append(part); offset = ReadInt(page, "nextOffset", 0); paged |= ReadBool(page, "hasMore", false);
                     } while (ReadBool(page, "hasMore", false));
                     string retained = content.ToString(); var metadata = ReadDictionary(page, "metadata");
-                    hashMatches &= PromptContentHash(retained) == ReadString(metadata, "sha256", ""); secretsAbsent &= !retained.Contains(secret);
+                    hashMatches &= DialogueService.PromptContentHash(retained) == ReadString(metadata, "sha256", ""); secretsAbsent &= !retained.Contains(secret);
                     texts[id] = TestDict("content", retained, "metadata", metadata);
                 }
                 check("credential_exclusion", secretsAbsent, null);

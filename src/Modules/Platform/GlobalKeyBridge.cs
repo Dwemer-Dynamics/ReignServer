@@ -17,14 +17,14 @@ namespace ReignBetaServer
     // slot's server-controlled provider and origin is used automatically (never persisted, never guessed between several);
     // (4) otherwise no key. A bound or automatic global key that cannot be resolved refuses the request; it never falls
     // back to sending without a key.
-    internal static partial class Program
+    internal static partial class SettingsService
     {
         private const string GlobalKeysConfigPath = "/etc/reignserver/global-keys.json";
         private const string GlobalKeysSocketDir = "/mnt/wsl/dwemerdistro-keys";
         private const string NanoGptOrigin = "https://nano-gpt.com:443";
         private const string AtlasOrigin = "https://api.atlascloud.ai:443";
         private const string OpenRouterOrigin = "https://openrouter.ai:443";
-        private const string GlobalKeyUnavailableError = "The selected Global API key is unavailable. No provider request was sent; start DwemerDistro or choose another key in API Settings.";
+        internal const string GlobalKeyUnavailableError = "The selected Global API key is unavailable. No provider request was sent; start DwemerDistro or choose another key in API Settings.";
         private const int GlobalKeyRequestLimit = 16 * 1024, GlobalKeyReplyLimit = 256 * 1024;
         private static readonly SemaphoreSlim GlobalKeyWriteGate = new SemaphoreSlim(1, 1);
         // Test seams: an in-process fake transport, a per-thread allowance kept for legacy fixtures (local key writes are now
@@ -38,9 +38,9 @@ namespace ReignBetaServer
         // round-trip. Every caller resolves and checks sequentially on one thread.
         [ThreadStatic] private static string AutoGlobalKeyFailedSlot;
         private const string BoundShadowCleanupMarker = "reignOnlyKeyOverrides";
-        private static readonly string[] GlobalKeySlots = { "apiKey", "openRouterApiKey", "ollamaCloudApiKey", "nanoGptApiKey", "portraitNanoGptApiKey", "portraitAtlasApiKey" };
+        internal static readonly string[] GlobalKeySlots = { "apiKey", "openRouterApiKey", "ollamaCloudApiKey", "nanoGptApiKey", "portraitNanoGptApiKey", "portraitAtlasApiKey" };
 
-        private static string NormalizedOrigin(string url)
+        internal static string NormalizedOrigin(string url)
         {
             if (!Uri.TryCreate((url ?? "").Trim(), UriKind.Absolute, out Uri uri) || (uri.Scheme != "https" && uri.Scheme != "http")
                 || !string.IsNullOrEmpty(uri.UserInfo) || string.IsNullOrEmpty(uri.Host)) return null;
@@ -62,7 +62,7 @@ namespace ReignBetaServer
             switch (slot)
             {
                 case "openRouterApiKey": return ("openrouter", OpenRouterOrigin);
-                case "ollamaCloudApiKey": return ("custom_openai", NormalizedOrigin(OllamaCloudChatUrl));
+                case "ollamaCloudApiKey": return ("custom_openai", NormalizedOrigin(LlmProviderService.OllamaCloudChatUrl));
                 case "nanoGptApiKey": case "portraitNanoGptApiKey": return ("nano_gpt", NanoGptOrigin);
                 case "portraitAtlasApiKey": return ("atlascloud", AtlasOrigin);
                 case "apiKey":
@@ -76,20 +76,20 @@ namespace ReignBetaServer
             }
         }
 
-        private static bool HasGlobalKeyBindingEntry(Dictionary<string, object> settings, string slot)
+        internal static bool HasGlobalKeyBindingEntry(Dictionary<string, object> settings, string slot)
         {
             var bindings = ReadDictionary(settings, "globalKeyBindings");
             return bindings != null && bindings.ContainsKey(slot);
         }
 
         // Pure, one-time reference carry. No store/socket/catalog access and no secret resolution.
-        private static void MigrateLegacyOllamaGlobalBinding(Dictionary<string, object> settings)
+        internal static void MigrateLegacyOllamaGlobalBinding(Dictionary<string, object> settings)
         {
             const string marker = "ollamaCloudFromApiKey";
             var migrations = ReadDictionary(settings, "globalKeyMigrations");
             if (ReadBool(migrations, marker, false)) return;
             var source = GlobalKeyBinding(settings, "apiKey");
-            string canonical = NormalizedOrigin(OllamaCloudChatUrl);
+            string canonical = NormalizedOrigin(LlmProviderService.OllamaCloudChatUrl);
             if (NormalizedOrigin(ReadString(settings, "apiUrl", "")) == canonical
                 && source != null && ReadString(source, "provider", "") == "custom_openai"
                 && ReadString(source, "origin", "") == canonical
@@ -115,7 +115,7 @@ namespace ReignBetaServer
             return filtered;
         }
 
-        private static Dictionary<string, object> GlobalKeyBinding(Dictionary<string, object> settings, string slot)
+        internal static Dictionary<string, object> GlobalKeyBinding(Dictionary<string, object> settings, string slot)
         {
             var binding = ReadDictionary(ReadDictionary(settings, "globalKeyBindings"), slot);
             return binding != null && Guid.TryParse(ReadString(binding, "keyId", ""), out _) ? binding : null;
@@ -126,7 +126,7 @@ namespace ReignBetaServer
         // Presence check (no secret is resolved). A Reign-only key or binding counts directly; otherwise, unless the caller
         // needs a store-independent answer (cache fingerprints), an automatic global candidate counts too, read from the
         // shared status cache (at most one bounded status call per TTL for the whole process).
-        private static bool ProviderKeyConfigured(Dictionary<string, object> settings, string slot, bool includeAutomatic = true)
+        internal static bool ProviderKeyConfigured(Dictionary<string, object> settings, string slot, bool includeAutomatic = true)
         {
             if (HasGlobalKeyBindingEntry(settings, slot) || !string.IsNullOrWhiteSpace(ReadString(settings, slot, ""))) return true;
             if (!includeAutomatic || !AutoGlobalKeySelectionAllowed(slot)) return false;
@@ -174,11 +174,11 @@ namespace ReignBetaServer
             settings["globalKeyMigrations"] = migrations;
         }
 
-        private static string LlmApiKeySlot(Dictionary<string, object> settings)
+        internal static string LlmApiKeySlot(Dictionary<string, object> settings)
         {
-            string provider = NormalizeLlmProvider(ReadString(settings, "llmProvider", ""));
-            return provider == OpenRouterProvider ? "openRouterApiKey" : provider == OllamaCloudProvider ? "ollamaCloudApiKey"
-                : provider == NanoGptProvider ? "nanoGptApiKey" : "apiKey";
+            string provider = LlmProviderService.NormalizeLlmProvider(ReadString(settings, "llmProvider", ""));
+            return provider == LlmProviderService.OpenRouterProvider ? "openRouterApiKey" : provider == LlmProviderService.OllamaCloudProvider ? "ollamaCloudApiKey"
+                : provider == LlmProviderService.NanoGptProvider ? "nanoGptApiKey" : "apiKey";
         }
 
         // Chat slots whose unbound local key is confined to the slot's own origin, exactly like a binding: the saved custom
@@ -186,7 +186,7 @@ namespace ReignBetaServer
         private static readonly HashSet<string> OriginBoundLocalKeySlots = new HashSet<string>(StringComparer.Ordinal)
             { "apiKey", "openRouterApiKey", "ollamaCloudApiKey", "nanoGptApiKey" };
 
-        private static bool LocalKeyDestinationAllowed(Dictionary<string, object> settings, string slot, string[] destinations)
+        internal static bool LocalKeyDestinationAllowed(Dictionary<string, object> settings, string slot, string[] destinations)
         {
             if (!OriginBoundLocalKeySlots.Contains(slot)) return true;
             string expected = GlobalKeyTarget(settings, slot).Origin;
@@ -204,7 +204,7 @@ namespace ReignBetaServer
         // 4. Otherwise "".
         // Callers must check ProviderKeyUnavailable before dispatch: "" from a bound or automatic global key is a refusal,
         // never "no auth".
-        private static string ProviderSecret(Dictionary<string, object> settings, string slot, params string[] destinations)
+        internal static string ProviderSecret(Dictionary<string, object> settings, string slot, params string[] destinations)
         {
             AutoGlobalKeyFailedSlot = null;
             destinations = destinations ?? Array.Empty<string>();
@@ -212,7 +212,7 @@ namespace ReignBetaServer
             if (!string.IsNullOrWhiteSpace(local))
             {
                 if (LocalKeyDestinationAllowed(settings, slot, destinations)) return local;
-                LogOperational("provider_key.withheld", new Dictionary<string, object> { ["slot"] = slot, ["outcome"] = "origin_mismatch" });
+                OperationsService.LogOperational("provider_key.withheld", new Dictionary<string, object> { ["slot"] = slot, ["outcome"] = "origin_mismatch" });
                 return "";
             }
             if (HasGlobalKeyBindingEntry(settings, slot)) return BoundProviderSecret(settings, slot, destinations);
@@ -234,7 +234,7 @@ namespace ReignBetaServer
             if (ReadBool(reply, "ok", false) && reply.TryGetValue("secret", out object secret) && secret is string value && !string.IsNullOrWhiteSpace(value))
                 return value;
             AutoGlobalKeyFailedSlot = slot;
-            LogOperational("global_keys.auto_resolve", new Dictionary<string, object> { ["slot"] = slot, ["outcome"] = ReadString(reply, "outcome", "unavailable") });
+            OperationsService.LogOperational("global_keys.auto_resolve", new Dictionary<string, object> { ["slot"] = slot, ["outcome"] = ReadString(reply, "outcome", "unavailable") });
             return "";
         }
 
@@ -251,19 +251,19 @@ namespace ReignBetaServer
             string origin = ReadString(binding, "origin", "");
             if (destinations.Length == 0 || destinations.Any(url => NormalizedOrigin(url) != origin))
             {
-                LogOperational("global_keys.resolve", new Dictionary<string, object> { ["slot"] = slot, ["outcome"] = "origin_mismatch" });
+                OperationsService.LogOperational("global_keys.resolve", new Dictionary<string, object> { ["slot"] = slot, ["outcome"] = "origin_mismatch" });
                 return "";
             }
             var reply = GlobalKeyCall("resolve", new Dictionary<string, object> { ["key_id"] = ReadString(binding, "keyId", ""),
                 ["provider"] = ReadString(binding, "provider", ""), ["origin"] = origin });
             if (ReadBool(reply, "ok", false) && reply.TryGetValue("secret", out object secret) && secret is string value && !string.IsNullOrWhiteSpace(value))
                 return value;
-            LogOperational("global_keys.resolve", new Dictionary<string, object> { ["slot"] = slot, ["outcome"] = ReadString(reply, "outcome", "unavailable") });
+            OperationsService.LogOperational("global_keys.resolve", new Dictionary<string, object> { ["slot"] = slot, ["outcome"] = ReadString(reply, "outcome", "unavailable") });
             return "";
         }
 
         // Must directly follow the ProviderSecret call for the same slot on the same thread.
-        private static bool ProviderKeyUnavailable(Dictionary<string, object> settings, string slot, string resolved)
+        internal static bool ProviderKeyUnavailable(Dictionary<string, object> settings, string slot, string resolved)
         {
             if (!string.IsNullOrEmpty(resolved)) return false;
             return HasGlobalKeyBindingEntry(settings, slot) || AutoGlobalKeyFailedSlot == slot;
@@ -273,12 +273,23 @@ namespace ReignBetaServer
         private static extern int NativeLstat(string path, byte[] buffer);
 
         // Linux x86_64 glibc struct stat: st_mode at 24, st_uid at 28. Other platforms report nothing (fail closed).
-        private static bool LinuxLstat(string path, out uint mode, out uint uid)
+        private static bool LinuxLstat(string path, out uint mode, out uint uid) =>
+            LinuxLstat(path, out mode, out uid, out _, out _);
+
+        private static bool LinuxLstat(string path, out uint mode, out uint uid, out ulong links, out int error)
         {
             mode = uid = 0;
+            links = 0;
+            error = 0;
             if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.X64) return false;
             var buffer = new byte[256];
-            if (NativeLstat(path, buffer) != 0) return false;
+            if (NativeLstat(path, buffer) != 0)
+            {
+                error = Marshal.GetLastPInvokeError();
+                return false;
+            }
+
+            links = BitConverter.ToUInt64(buffer, 16);
             mode = BitConverter.ToUInt32(buffer, 24);
             uid = BitConverter.ToUInt32(buffer, 28);
             return true;
@@ -298,7 +309,7 @@ namespace ReignBetaServer
         private const uint GlobalKeysConfigForbiddenBits = 0x1F;
         private const int GlobalKeysConfigLimit = 4096;
 
-        private static Dictionary<string, object> GlobalKeyFail(string outcome) =>
+        internal static Dictionary<string, object> GlobalKeyFail(string outcome) =>
             new Dictionary<string, object> { ["ok"] = false, ["outcome"] = outcome };
 
         private static bool GlobalKeyWriteOp(string op) => op == "edit" || op == "create";
@@ -451,7 +462,7 @@ namespace ReignBetaServer
 
         // Masked status for API Settings. Every installation may save a Reign-only key for any slot (localKeyWorkflow is
         // always true); enrolled or bound slots also show the shared-store controls and each slot's current source.
-        private static Dictionary<string, object> GlobalKeysStatus(string onlySlot = null)
+        internal static Dictionary<string, object> GlobalKeysStatus(string onlySlot = null)
         {
             var settings = LoadSettings();
             var status = GlobalKeyCall("status", new Dictionary<string, object>());
@@ -469,7 +480,7 @@ namespace ReignBetaServer
         // Explicit per-slot save: create a new global key, rotate the bound key (same UUID, revision CAS) or bind an
         // existing key. Serialized, checked against the caller's binding snapshot, and only a confirmed global result with
         // matching metadata changes the local reference; a later local conflict reports saved_not_bound and never retries.
-        private static Dictionary<string, object> SaveGlobalKey(Dictionary<string, object> payload,
+        internal static Dictionary<string, object> SaveGlobalKey(Dictionary<string, object> payload,
             Func<string, Dictionary<string, object>, string, string, bool, bool> bind = null, Func<Dictionary<string, object>> settingsSource = null)
         {
             string slot = ReadString(payload, "slot", ""), mode = ReadString(payload, "mode", "");
@@ -534,7 +545,7 @@ namespace ReignBetaServer
                 secret = null;
                 InvalidateGlobalKeyStatusCache();
                 string outcome = ReadString(reply, "outcome", "unavailable");
-                LogOperational("global_keys.save", new Dictionary<string, object> { ["slot"] = slot, ["mode"] = mode, ["outcome"] = outcome });
+                OperationsService.LogOperational("global_keys.save", new Dictionary<string, object> { ["slot"] = slot, ["mode"] = mode, ["outcome"] = outcome });
                 if (!ReadBool(reply, "ok", false) || !Guid.TryParse(keyId, out _))
                     return GlobalKeyFail(ReadBool(reply, "ok", false) ? "unknown" : outcome);
                 if (!(bind ?? SetGlobalKeyBinding)(slot, new Dictionary<string, object> { ["keyId"] = keyId, ["provider"] = target.Provider, ["origin"] = target.Origin },
@@ -570,23 +581,23 @@ namespace ReignBetaServer
                         || (expectedOrigin != null && GlobalKeyTarget(settings, slot, null).Origin != expectedOrigin)) return false;
                     ApplyGlobalKeyBinding(settings, slot, binding, clearReignOnlyKey);
                     settings["settingsRevision"] = DateTime.UtcNow.ToString("o");
-                    Directory.CreateDirectory(DataDir);
-                    WriteJsonObject(SettingsPath, settings);
+                    Directory.CreateDirectory(Program.DataDir);
+                    CampaignFileService.WriteJsonObject(Program.SettingsPath, settings);
                     PersistInstalledSettingsSecrets(settings, true);
                 }
                 InvalidateGlobalKeyStatusCache();
-                InvalidateCodexThreads("provider_or_codex_settings_changed");
+                LlmProviderService.InvalidateCodexThreads("provider_or_codex_settings_changed");
                 return true;
             }
             catch (Exception ex)
             {
-                LogOperational("global_keys.bind_failed", new Dictionary<string, object> { ["slot"] = slot, ["error"] = ex.GetType().Name });
+                OperationsService.LogOperational("global_keys.bind_failed", new Dictionary<string, object> { ["slot"] = slot, ["error"] = ex.GetType().Name });
                 return false;
             }
         }
 
         // Removes the reference only; the global key stays in DwemerDistro for other products.
-        private static Dictionary<string, object> UnbindGlobalKey(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> UnbindGlobalKey(Dictionary<string, object> payload)
         {
             string slot = ReadString(payload, "slot", "");
             if (!GlobalKeySlots.Contains(slot)) return GlobalKeyFail("invalid");
@@ -608,11 +619,11 @@ namespace ReignBetaServer
         private static string LocalProviderKeyWriteRefusal(Dictionary<string, object> incoming, Dictionary<string, object> settings = null,
             bool? enrolledForFixture = null) => null;
 
-        private static readonly HashSet<string> GlobalKeyApacheHosts = new HashSet<string>(StringComparer.Ordinal) { "127.0.0.1:8089", "localhost:8089", "[::1]:8089" };
+        internal static readonly HashSet<string> GlobalKeyApacheHosts = new HashSet<string>(StringComparer.Ordinal) { "127.0.0.1:8089", "localhost:8089", "[::1]:8089" };
         private static readonly HashSet<string> GlobalKeyDirectHosts = new HashSet<string>(StringComparer.Ordinal) { "127.0.0.1:5101", "localhost:5101", "[::1]:5101" };
 
         // reign-control.py's local-peer model: loopback plus the exact WSL default gateway (Windows localhost through NAT).
-        private static bool GlobalKeyLocalPeer(string address)
+        internal static bool GlobalKeyLocalPeer(string address)
         {
             if (!IPAddress.TryParse(address ?? "", out IPAddress ip)) return false;
             if (IPAddress.IsLoopback(ip)) return true;
@@ -632,7 +643,7 @@ namespace ReignBetaServer
         // Key mutations need the custom header (no cross-site preflight passes), an exact same-origin Origin, and a local
         // caller. Through Apache, the peer and host come from headers Apache always overwrites (X-Reign-Peer/X-Reign-Host),
         // so a browser cannot forge them; X-Forwarded-* are never trusted. Direct callers must be on loopback.
-        private static bool GlobalKeyRequestAllowed(HttpRequest request, Func<string, bool> localPeer = null)
+        internal static bool GlobalKeyRequestAllowed(Program.HttpRequest request, Func<string, bool> localPeer = null)
         {
             localPeer = localPeer ?? GlobalKeyLocalPeer;
             if (request.KeysHeader != "1" || !IPAddress.TryParse(request.RemoteAddress ?? "", out IPAddress direct) || !IPAddress.IsLoopback(direct)) return false;

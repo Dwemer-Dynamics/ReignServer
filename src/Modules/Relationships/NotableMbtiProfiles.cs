@@ -10,11 +10,11 @@ using System.Threading.Tasks;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RelationshipsService
     {
-        private const int NotableMbtiTemplateVersion = 1;
+        internal const int NotableMbtiTemplateVersion = 1;
 
-        private sealed class MbtiDefinition
+        internal sealed class MbtiDefinition
         {
             public string Type;
             public string Title;
@@ -37,7 +37,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static readonly Dictionary<string, MbtiDefinition> MbtiDefinitions =
+        internal static readonly Dictionary<string, MbtiDefinition> MbtiDefinitions =
             new Dictionary<string, MbtiDefinition>(StringComparer.OrdinalIgnoreCase)
             {
                 ["INTJ"] = MbtiDefinitionOf("INTJ", "Strategic Independent", "They are private, self-directed, and focused on long-term outcomes. They prefer deliberate plans, question inefficient customs, and may become impatient when disorder, sentiment, or weaker reasoning obstructs their goals."),
@@ -97,27 +97,20 @@ namespace ReignBetaServer
             return new MbtiTraitVector(e, n, t, j);
         }
 
-        private static void EnsureNotableMbtiSchema(ReignDbConnection connection)
+        internal static void EnsureNotableMbtiSchema(ReignDbConnection connection)
         {
             if (IsRelationshipMaintenanceTableReady(connection, "notable_mbti_profiles")
                 && IsRelationshipMaintenanceTableReady(connection, "character_editor_heads")
                 && IsRelationshipMaintenanceTableReady(connection, "character_editor_revisions")
                 && IsRelationshipMaintenanceTableReady(connection, "character_editor_native_commands")
                 && IsRelationshipMaintenanceTableReady(connection, "character_editor_reconciliation")) return;
-            EnsureCharacterEditorSchema(connection);
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS notable_mbti_profiles (
-hero_id TEXT PRIMARY KEY,mbti_type TEXT NOT NULL,title TEXT NOT NULL,description TEXT NOT NULL,
-foundation_json TEXT NOT NULL,percentages_json TEXT NOT NULL,native_traits_json TEXT NOT NULL,
-source TEXT NOT NULL DEFAULT 'notable_mbti_template',template_version INTEGER NOT NULL,
-first_observed_day REAL NOT NULL,native_sync_status TEXT NOT NULL DEFAULT 'pending',
-native_action_id TEXT NOT NULL DEFAULT '',native_action_created_day REAL NOT NULL DEFAULT -1,
-last_native_observed_json TEXT NOT NULL DEFAULT '{}',last_native_observed_day REAL NOT NULL DEFAULT -1,
-updated_ts INTEGER NOT NULL);" );
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_notable_mbti_type ON notable_mbti_profiles(mbti_type);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_notable_mbti_sync ON notable_mbti_profiles(native_sync_status);");
+            CharactersService.EnsureCharacterEditorSchema(connection);
+            RelationshipsSchema.CreateNotableMbtiProfiles(connection);
+            RelationshipsSchema.CreateIndexNotableMbtiType(connection);
+            RelationshipsSchema.CreateIndexNotableMbtiSync(connection);
         }
 
-        private static Dictionary<string, object> EnsureNotableMbtiProfile(
+        internal static Dictionary<string, object> EnsureNotableMbtiProfile(
             ReignDbConnection connection,
             string campaignId,
             double worldDay,
@@ -131,10 +124,7 @@ updated_ts INTEGER NOT NULL);" );
             if (string.IsNullOrWhiteSpace(heroId)) return new Dictionary<string, object>();
             if (!schemaReady) EnsureNotableMbtiSchema(connection);
 
-            Dictionary<string, object> row = QuerySql(connection,
-                "SELECT * FROM notable_mbti_profiles WHERE hero_id=$id LIMIT 1;",
-                new Dictionary<string, object> { ["id"] = heroId },
-                transaction).FirstOrDefault();
+            Dictionary<string, object> row = RelationshipsStore.SelectNotableMbtiProfiles4(connection, new Dictionary<string, object> { ["id"] = heroId },                transaction).FirstOrDefault();
             bool created = row == null;
             if (row == null)
             {
@@ -147,39 +137,30 @@ updated_ts INTEGER NOT NULL);" );
                 Dictionary<string, object> percentages = ReadDictionary(traits, "traitPercentages") ?? new Dictionary<string, object>();
                 Dictionary<string, object> native = ReadDictionary(traits, "mbtiNativeTraits") ?? new Dictionary<string, object>();
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                ExecuteSql(connection, @"INSERT OR IGNORE INTO notable_mbti_profiles(
-hero_id,mbti_type,title,description,foundation_json,percentages_json,native_traits_json,source,template_version,
-first_observed_day,native_sync_status,updated_ts)
-VALUES($id,$type,$title,$description,$foundation,$percentages,$native,'notable_mbti_template',$version,$day,'pending',$ts);",
-                    new Dictionary<string, object>
+                RelationshipsStore.InsertOrIgnoreNotableMbtiProfiles(connection, new Dictionary<string, object>
                     {
                         ["id"] = heroId, ["type"] = type, ["title"] = definition.Title,
                         ["description"] = definition.Description, ["foundation"] = Json.Serialize(foundation),
                         ["percentages"] = Json.Serialize(percentages), ["native"] = Json.Serialize(native),
                         ["version"] = NotableMbtiTemplateVersion, ["day"] = worldDay, ["ts"] = ts
-                    },
-                    transaction);
-                row = QuerySql(connection, "SELECT * FROM notable_mbti_profiles WHERE hero_id=$id LIMIT 1;",
-                    new Dictionary<string, object> { ["id"] = heroId },
-                    transaction).FirstOrDefault();
+                    },                    transaction);
+                row = RelationshipsStore.SelectNotableMbtiProfiles4(connection, new Dictionary<string, object> { ["id"] = heroId },                    transaction).FirstOrDefault();
             }
 
             Dictionary<string, object> profile = NotableMbtiRowToProfile(row);
             if (materialize && (created
-                || !File.Exists(CharacterFile(campaignId, heroId, "profile.json"))
-                || !File.Exists(CharacterFile(campaignId, heroId, "traits.json"))
-                || !File.Exists(CharacterFile(campaignId, heroId, "constructed.json"))))
+                || !File.Exists(CampaignFileService.CharacterFile(campaignId, heroId, "profile.json"))
+                || !File.Exists(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"))
+                || !File.Exists(CampaignFileService.CharacterFile(campaignId, heroId, "constructed.json"))))
             {
                 MaterializeNotableMbtiProfile(campaignId, hero, profile);
             }
             ObserveAndQueueNotableNativeTraits(connection, campaignId, worldDay, hero, profile, transaction);
-            row = QuerySql(connection, "SELECT * FROM notable_mbti_profiles WHERE hero_id=$id LIMIT 1;",
-                new Dictionary<string, object> { ["id"] = heroId },
-                transaction).FirstOrDefault();
+            row = RelationshipsStore.SelectNotableMbtiProfiles4(connection, new Dictionary<string, object> { ["id"] = heroId },                transaction).FirstOrDefault();
             return NotableMbtiRowToProfile(row);
         }
 
-        private static Dictionary<string, object> NotableMbtiInitializeApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> NotableMbtiInitializeApi(Dictionary<string, object> payload)
         {
             string campaignId = ReadString(payload, "campaignId", "default");
             double worldDay = ReadDouble(payload, "worldDay", 0d);
@@ -196,7 +177,7 @@ VALUES($id,$type,$title,$description,$foundation,$percentages,$native,'notable_m
             Stopwatch totalTimer = Stopwatch.StartNew();
             long databaseMs;
             long materializationMs;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureNotableMbtiSchema(connection);
                 Stopwatch databaseTimer = Stopwatch.StartNew();
@@ -231,26 +212,19 @@ VALUES($id,$type,$title,$description,$foundation,$percentages,$native,'notable_m
                     HashSet<string> livingIds = new HashSet<string>(
                         heroes.Select(x => ReadFirstString(x, "heroStringId", "heroId", "id")),
                         StringComparer.OrdinalIgnoreCase);
-                    foreach (Dictionary<string, object> stale in QuerySql(connection, @"
-SELECT hero_id,native_action_id FROM notable_mbti_profiles
-WHERE native_sync_status='failed';", null, transaction))
+                    foreach (Dictionary<string, object> stale in RelationshipsStore.SelectNotableMbtiProfiles5(connection, null,transaction))
                     {
                         string staleHeroId = ReadString(stale, "hero_id", "");
                         if (string.IsNullOrWhiteSpace(staleHeroId) || livingIds.Contains(staleHeroId))
                             continue;
                         string staleActionId = ReadString(stale, "native_action_id", "");
                         long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                        ExecuteSql(connection, @"UPDATE notable_mbti_profiles
-SET native_sync_status='obsolete',updated_ts=$ts WHERE hero_id=$hero;",
-                            new Dictionary<string, object>
+                        RelationshipsStore.UpdateNotableMbtiProfiles(connection, new Dictionary<string, object>
                             {
                                 ["ts"] = ts, ["hero"] = staleHeroId
-                            },
-                            transaction);
+                            },                            transaction);
                         if (!string.IsNullOrWhiteSpace(staleActionId))
-                            ExecuteSql(connection, @"UPDATE character_editor_native_commands
-SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;",
-                                new Dictionary<string, object>
+                            RelationshipsStore.UpdateCharacterEditorNativeCommands(connection, new Dictionary<string, object>
                                 {
                                     ["ts"] = ts, ["id"] = staleActionId,
                                     ["result"] = Json.Serialize(new Dictionary<string, object>
@@ -259,8 +233,7 @@ SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;
                                         ["source"] = "campaign_start_notable_roster",
                                         ["reason"] = "hero_no_longer_living"
                                     })
-                                },
-                                transaction);
+                                },                                transaction);
                         obsoleteAssignments++;
                     }
                     transaction.Commit();
@@ -288,11 +261,11 @@ SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;
                 });
             List<Dictionary<string, object>> indexProfiles =
                 materializedProfiles.ToList();
-            UpdateCharacterIndexBatch(campaignId, indexProfiles);
+            CampaignFileService.UpdateCharacterIndexBatch(campaignId, indexProfiles);
             materializationTimer.Stop();
             materializationMs = materializationTimer.ElapsedMilliseconds;
             totalTimer.Stop();
-            LogOperational("notable_mbti.initialize.performance", new Dictionary<string, object>
+            OperationsService.LogOperational("notable_mbti.initialize.performance", new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,
                 ["requestedCount"] = heroes.Count,
@@ -317,7 +290,7 @@ SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;
             };
         }
 
-        private static Dictionary<string, object> NotableMbtiConfirmBatchApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> NotableMbtiConfirmBatchApi(Dictionary<string, object> payload)
         {
             string campaignId = ReadString(payload, "campaignId", "default");
             double worldDay = ReadDouble(payload, "worldDay", 0d);
@@ -325,7 +298,7 @@ SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;
             int confirmed = 0;
             List<Dictionary<string, object>> failures = new List<Dictionary<string, object>>();
             Stopwatch timer = Stopwatch.StartNew();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureNotableMbtiSchema(connection);
                 using (ReignDbTransaction transaction = connection.BeginTransaction())
@@ -333,10 +306,7 @@ SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;
                     foreach (Dictionary<string, object> observation in observations)
                     {
                         string heroId = ReadFirstString(observation, "heroStringId", "heroId", "id");
-                        Dictionary<string, object> row = QuerySql(connection,
-                            "SELECT * FROM notable_mbti_profiles WHERE hero_id=$id LIMIT 1;",
-                            new Dictionary<string, object> { ["id"] = heroId },
-                            transaction).FirstOrDefault();
+                        Dictionary<string, object> row = RelationshipsStore.SelectNotableMbtiProfiles4(connection, new Dictionary<string, object> { ["id"] = heroId },                            transaction).FirstOrDefault();
                         if (row == null)
                         {
                             failures.Add(new Dictionary<string, object> { ["heroId"] = heroId, ["error"] = "assignment_not_found" });
@@ -346,7 +316,7 @@ SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;
                             TryParseJsonObject(ReadString(row, "native_traits_json", "{}")) ?? new Dictionary<string, object>();
                         Dictionary<string, object> observed =
                             ReadDictionary(observation, "traits") ?? new Dictionary<string, object>();
-                        string observationStatus = NormalizeLookup(
+                        string observationStatus = ActionPipelineService.NormalizeLookup(
                             ReadString(observation, "status", "observed")).Replace(' ', '_');
                         bool obsolete = observationStatus == "obsolete";
                         bool hasCompleteObservation = expected.Count == 5
@@ -360,9 +330,7 @@ SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;
                         {
                             if (!string.IsNullOrWhiteSpace(actionId))
                             {
-                                ExecuteSql(connection, @"UPDATE character_editor_native_commands
-SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;",
-                                    new Dictionary<string, object>
+                                RelationshipsStore.UpdateCharacterEditorNativeCommands(connection, new Dictionary<string, object>
                                     {
                                         ["ts"] = ts, ["id"] = actionId,
                                         ["result"] = Json.Serialize(new Dictionary<string, object>
@@ -371,17 +339,12 @@ SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;
                                             ["source"] = "campaign_start_notable_batch",
                                             ["reason"] = "hero_no_longer_alive"
                                         })
-                                    },
-                                    transaction);
+                                    },                                    transaction);
                             }
-                            ExecuteSql(connection, @"UPDATE notable_mbti_profiles
-SET native_sync_status='obsolete',last_native_observed_day=$day,updated_ts=$ts
-WHERE hero_id=$hero;",
-                                new Dictionary<string, object>
+                            RelationshipsStore.UpdateNotableMbtiProfiles2(connection, new Dictionary<string, object>
                                 {
                                     ["day"] = worldDay, ["ts"] = ts, ["hero"] = heroId
-                                },
-                                transaction);
+                                },                                transaction);
                             confirmed++;
                             continue;
                         }
@@ -392,33 +355,25 @@ WHERE hero_id=$hero;",
                                 ["heroId"] = heroId,
                                 ["error"] = "native_trait_observation_incomplete"
                             });
-                            ExecuteSql(connection, @"UPDATE notable_mbti_profiles
-SET native_sync_status='awaiting_confirmation',updated_ts=$ts WHERE hero_id=$hero;",
-                                new Dictionary<string, object>
+                            RelationshipsStore.UpdateNotableMbtiProfiles3(connection, new Dictionary<string, object>
                                 {
                                     ["ts"] = ts, ["hero"] = heroId
-                                },
-                                transaction);
+                                },                                transaction);
                             continue;
                         }
                         if (!matches)
                         {
                             failures.Add(new Dictionary<string, object> { ["heroId"] = heroId, ["error"] = "native_trait_mismatch" });
-                            ExecuteSql(connection, @"UPDATE notable_mbti_profiles SET native_sync_status='contradicted',
-last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts WHERE hero_id=$hero;",
-                                new Dictionary<string, object>
+                            RelationshipsStore.UpdateNotableMbtiProfiles4(connection, new Dictionary<string, object>
                                 {
                                     ["observed"] = Json.Serialize(observed), ["day"] = worldDay,
                                     ["ts"] = ts, ["hero"] = heroId
-                                },
-                                transaction);
+                                },                                transaction);
                             continue;
                         }
                         if (!string.IsNullOrWhiteSpace(actionId))
                         {
-                            ExecuteSql(connection, @"UPDATE character_editor_native_commands
-SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;",
-                                new Dictionary<string, object>
+                            RelationshipsStore.UpdateCharacterEditorNativeCommands(connection, new Dictionary<string, object>
                                 {
                                     ["ts"] = ts, ["id"] = actionId,
                                     ["result"] = Json.Serialize(new Dictionary<string, object>
@@ -426,24 +381,20 @@ SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;
                                         ["status"] = "completed", ["source"] = "campaign_start_notable_batch",
                                         ["applied"] = new ArrayList { "traits" }
                                     })
-                                },
-                                transaction);
+                                },                                transaction);
                         }
-                        ExecuteSql(connection, @"UPDATE notable_mbti_profiles SET native_sync_status='synchronized',
-last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts WHERE hero_id=$hero;",
-                            new Dictionary<string, object>
+                        RelationshipsStore.UpdateNotableMbtiProfiles5(connection, new Dictionary<string, object>
                             {
                                 ["observed"] = Json.Serialize(observed), ["day"] = worldDay,
                                 ["ts"] = ts, ["hero"] = heroId
-                            },
-                            transaction);
+                            },                            transaction);
                         confirmed++;
                     }
                     transaction.Commit();
                 }
             }
             timer.Stop();
-            LogOperational("notable_mbti.confirm.performance", new Dictionary<string, object>
+            OperationsService.LogOperational("notable_mbti.confirm.performance", new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,
                 ["observationCount"] = observations.Count,
@@ -496,7 +447,7 @@ last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts
             };
         }
 
-        private static Dictionary<string, object> BuildNotableMbtiTraitDocument(
+        internal static Dictionary<string, object> BuildNotableMbtiTraitDocument(
             string campaignId,
             string heroId,
             string heroName,
@@ -511,7 +462,7 @@ last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts
             int j = type[3] == 'J' ? 1 : -1;
             Dictionary<string, object> percentages = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             Dictionary<string, object> foundation = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-            foreach (string trait in CoreTraitKeys)
+            foreach (string trait in CharactersService.CoreTraitKeys)
             {
                 MbtiTraitVector vector = MbtiTraitVectors[trait];
                 int weighted = vector.E * e + vector.N * n + vector.T * t + vector.J * j;
@@ -530,16 +481,16 @@ last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts
 
             Dictionary<string, object> nativeTraits = new Dictionary<string, object>
             {
-                ["valor"] = ClampTrait(ReadInt(foundation, "courage", 0)),
-                ["generosity"] = ClampTrait(ReadInt(foundation, "generosity", 0)),
-                ["honor"] = ClampTrait(ReadInt(foundation, "honesty", 0)),
-                ["mercy"] = ClampTrait(ReadInt(foundation, "mercy", 0)),
-                ["calculating"] = ClampTrait((ReadInt(foundation, "pragmatism", 0)
+                ["valor"] = CharactersService.ClampTrait(ReadInt(foundation, "courage", 0)),
+                ["generosity"] = CharactersService.ClampTrait(ReadInt(foundation, "generosity", 0)),
+                ["honor"] = CharactersService.ClampTrait(ReadInt(foundation, "honesty", 0)),
+                ["mercy"] = CharactersService.ClampTrait(ReadInt(foundation, "mercy", 0)),
+                ["calculating"] = CharactersService.ClampTrait((ReadInt(foundation, "pragmatism", 0)
                     + ReadInt(foundation, "discipline", 0)) / 2)
             };
             Dictionary<string, object> document = new Dictionary<string, object>
             {
-                ["version"] = CoreTraitDocumentVersion,
+                ["version"] = CharactersService.CoreTraitDocumentVersion,
                 ["model"] = "reign_notable_mbti_template_v1",
                 ["scale"] = "integer -2..2",
                 ["scaleMeaning"] = new Dictionary<string, object>
@@ -551,7 +502,7 @@ last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts
                 ["foundationTraits"] = foundation,
                 ["hiddenReignTraits"] = new Dictionary<string, object>(foundation, StringComparer.OrdinalIgnoreCase),
                 ["visibleBannerlordTraits"] = new Dictionary<string, object>(nativeTraits, StringComparer.OrdinalIgnoreCase),
-                ["foundationTraitModel"] = FoundationTraitModelDefinition(false),
+                ["foundationTraitModel"] = CharactersService.FoundationTraitModelDefinition(false),
                 ["traitPercentages"] = percentages,
                 ["traitPercentageModifierSnapshot"] = new Dictionary<string, object>(foundation, StringComparer.OrdinalIgnoreCase),
                 ["mbtiProfile"] = new Dictionary<string, object>
@@ -566,11 +517,11 @@ last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts
                     ["nativeSync"] = "Valor, Generosity, Honor, Mercy, and Calculating are synchronized to this MBTI-seeded profile.",
                     ["editorRule"] = "Explicit Character Editor changes are retained and are not overwritten by passive regeneration."
                 },
-                ["definitions"] = TraitDefinitions(),
+                ["definitions"] = CharactersService.TraitDefinitions(),
                 ["attractiveness"] = new Dictionary<string, object> { ["version"] = 1, ["score"] = 0, ["source"] = "notable_mbti_baseline" }
             };
-            EnsureTraitPercentageData(document, heroId);
-            RebuildPersonalityPortrait(document, heroName, definition.Description, "notable_mbti_template");
+            CharactersService.EnsureTraitPercentageData(document, heroId);
+            CharactersService.RebuildPersonalityPortrait(document, heroName, definition.Description, "notable_mbti_template");
             Dictionary<string, object> portrait = ReadDictionary(document, "personalityPortrait") ?? new Dictionary<string, object>();
             portrait["mbtiType"] = type;
             portrait["mbtiTitle"] = definition.Title;
@@ -608,10 +559,10 @@ last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts
         {
             string heroId = ReadFirstString(hero, "heroStringId", "heroId", "id");
             if (string.IsNullOrWhiteSpace(heroId)) return new Dictionary<string, object>();
-            string directory = CharacterDirectory(campaignId, heroId);
+            string directory = CampaignFileService.CharacterDirectory(campaignId, heroId);
             Directory.CreateDirectory(directory);
             string profilePath = Path.Combine(directory, "profile.json");
-            Dictionary<string, object> existingProfile = ReadJsonObject(profilePath);
+            Dictionary<string, object> existingProfile = CampaignFileService.ReadJsonObject(profilePath);
             bool created = existingProfile.Count == 0;
             Dictionary<string, object> profile = new Dictionary<string, object>(existingProfile, StringComparer.OrdinalIgnoreCase);
             foreach (KeyValuePair<string, object> pair in hero) profile[pair.Key] = pair.Value;
@@ -619,36 +570,36 @@ last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts
             profile["heroStringId"] = heroId;
             profile["updatedUtc"] = DateTime.UtcNow.ToString("o");
             if (created) profile["createdUtc"] = DateTime.UtcNow.ToString("o");
-            WriteJsonObject(profilePath, profile);
-            if (created && updateIndex) UpdateCharacterIndex(campaignId, profile);
+            CampaignFileService.WriteJsonObject(profilePath, profile);
+            if (created && updateIndex) CampaignFileService.UpdateCharacterIndex(campaignId, profile);
 
-            string traitsPath = CharacterFile(campaignId, heroId, "traits.json");
-            Dictionary<string, object> existing = ReadJsonObject(traitsPath);
+            string traitsPath = CampaignFileService.CharacterFile(campaignId, heroId, "traits.json");
+            Dictionary<string, object> existing = CampaignFileService.ReadJsonObject(traitsPath);
             Dictionary<string, object> existingMbti = ReadDictionary(existing, "mbtiProfile") ?? new Dictionary<string, object>();
-            bool editorOwned = CharacterHasEditorCorrections(campaignId, heroId);
+            bool editorOwned = CharactersService.CharacterHasEditorCorrections(campaignId, heroId);
             if (!editorOwned && (!ReadString(existingMbti, "source", "").Equals("notable_mbti_template", StringComparison.OrdinalIgnoreCase)
                 || ReadInt(existingMbti, "templateVersion", 0) != NotableMbtiTemplateVersion))
             {
                 Dictionary<string, object> traits = BuildNotableMbtiTraitDocument(
                     campaignId, heroId, ReadString(hero, "name", heroId), ReadString(mbtiProfile, "type", "INTJ"));
-                WriteJsonObject(traitsPath, traits);
+                CampaignFileService.WriteJsonObject(traitsPath, traits);
             }
             else if (!editorOwned && RepairNotableMbtiTraitDocument(existing, mbtiProfile, hero, heroId))
             {
                 existing["updatedUtc"] = DateTime.UtcNow.ToString("o");
-                WriteJsonObject(traitsPath, existing);
+                CampaignFileService.WriteJsonObject(traitsPath, existing);
             }
-            Dictionary<string, object> constructed = ReadJsonObject(CharacterFile(campaignId, heroId, "constructed.json"));
-            if (!IsUsableCharacterStatus(ReadString(constructed, "status", "")) || ReadBool(constructed, "llmUsed", false) == false)
+            Dictionary<string, object> constructed = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "constructed.json"));
+            if (!CharactersService.IsUsableCharacterStatus(ReadString(constructed, "status", "")) || ReadBool(constructed, "llmUsed", false) == false)
             {
                 constructed["ok"] = true;
                 constructed["status"] = "first_contact_pending";
                 constructed["source"] = "notable_mbti_template";
                 constructed["requiresFirstContactConstruction"] = true;
                 constructed["usableForNonInteractiveSystems"] = true;
-                constructed["schemaVersion"] = CharacterSchemaVersion;
+                constructed["schemaVersion"] = Program.CharacterSchemaVersion;
                 constructed["updatedUtc"] = DateTime.UtcNow.ToString("o");
-                WriteJsonObject(CharacterFile(campaignId, heroId, "constructed.json"), constructed);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "constructed.json"), constructed);
             }
             return profile;
         }
@@ -663,19 +614,19 @@ last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts
             bool changed = false;
             if (!traits.ContainsKey("visibleBannerlordTraits"))
             {
-                Dictionary<string, object> native = DeepCloneProfileDictionary(ReadDictionary(traits, "mbtiNativeTraits"));
-                if (native.Count == 0) native = DeepCloneProfileDictionary(ReadDictionary(mbtiProfile, "nativeTraits"));
-                if (native.Count == 0) native = DeepCloneProfileDictionary(ReadDictionary(hero, "traits"));
+                Dictionary<string, object> native = CharactersService.DeepCloneProfileDictionary(ReadDictionary(traits, "mbtiNativeTraits"));
+                if (native.Count == 0) native = CharactersService.DeepCloneProfileDictionary(ReadDictionary(mbtiProfile, "nativeTraits"));
+                if (native.Count == 0) native = CharactersService.DeepCloneProfileDictionary(ReadDictionary(hero, "traits"));
                 traits["visibleBannerlordTraits"] = native;
                 changed = true;
             }
-            if (!FoundationTraitModelCurrent(traits))
+            if (!CharactersService.FoundationTraitModelCurrent(traits))
             {
-                traits["foundationTraitModel"] = FoundationTraitModelDefinition(false);
+                traits["foundationTraitModel"] = CharactersService.FoundationTraitModelDefinition(false);
                 changed = true;
             }
-            changed = EnsureTraitPercentageData(traits, heroId) || changed;
-            changed = EnsurePersonalityPortraitData(traits, ReadString(hero, "name", heroId), false) || changed;
+            changed = CharactersService.EnsureTraitPercentageData(traits, heroId) || changed;
+            changed = CharactersService.EnsurePersonalityPortraitData(traits, ReadString(hero, "name", heroId), false) || changed;
             return changed;
         }
 
@@ -688,16 +639,13 @@ last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts
             ReignDbTransaction transaction = null)
         {
             string heroId = ReadFirstString(hero, "heroStringId", "heroId", "id");
-            if (CharacterHasEditorCorrections(campaignId, heroId))
+            if (CharactersService.CharacterHasEditorCorrections(campaignId, heroId))
             {
-                ExecuteSql(connection, @"UPDATE notable_mbti_profiles SET native_sync_status='manual_override',
-last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts WHERE hero_id=$hero;",
-                    new Dictionary<string, object>
+                RelationshipsStore.UpdateNotableMbtiProfiles6(connection, new Dictionary<string, object>
                     {
                         ["observed"] = Json.Serialize(ReadDictionary(hero, "traits") ?? new Dictionary<string, object>()),
                         ["day"] = worldDay, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["hero"] = heroId
-                    },
-                    transaction);
+                    },                    transaction);
                 return;
             }
             Dictionary<string, object> expected = ReadDictionary(profile, "nativeTraits") ?? new Dictionary<string, object>();
@@ -709,10 +657,7 @@ last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts
                     == Convert.ToInt32(pair.Value, CultureInfo.InvariantCulture));
             string actionId = "notable_mbti_native_" + heroId + "_v" + NotableMbtiTemplateVersion.ToString(CultureInfo.InvariantCulture);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Dictionary<string, object> command = QuerySql(connection,
-                "SELECT * FROM character_editor_native_commands WHERE command_id=$id LIMIT 1;",
-                new Dictionary<string, object> { ["id"] = actionId },
-                transaction).FirstOrDefault();
+            Dictionary<string, object> command = RelationshipsStore.SelectCharacterEditorNativeCommands(connection, new Dictionary<string, object> { ["id"] = actionId },                transaction).FirstOrDefault();
             string commandStatus = ReadString(command, "status", "");
             string priorStatus = ReadString(profile, "nativeSyncStatus", "pending");
             string status;
@@ -751,50 +696,38 @@ last_native_observed_json=$observed,last_native_observed_day=$day,updated_ts=$ts
                         : "pending";
                 if (command == null)
                 {
-                    ExecuteSql(connection, @"INSERT OR IGNORE INTO character_editor_native_commands(
-command_id,revision_id,hero_id,status,changes_json,inverse_json,dangerous,confirmation,created_ts)
-VALUES($id,$revision,$hero,'pending',$changes,$inverse,0,'automatic_notable_mbti_sync',$ts);",
-                        new Dictionary<string, object>
+                    RelationshipsStore.InsertOrIgnoreCharacterEditorNativeCommands(connection, new Dictionary<string, object>
                         {
                             ["id"] = actionId, ["revision"] = "notable_mbti_v" + NotableMbtiTemplateVersion.ToString(CultureInfo.InvariantCulture),
                             ["hero"] = heroId, ["changes"] = Json.Serialize(new Dictionary<string, object> { ["traits"] = expected }),
                             ["inverse"] = Json.Serialize(new Dictionary<string, object> { ["traits"] = observed }), ["ts"] = ts
-                        },
-                        transaction);
+                        },                        transaction);
                 }
             }
             bool hasNativeAction = command != null || !matches;
-            ExecuteSql(connection, @"UPDATE notable_mbti_profiles SET native_sync_status=$status,native_action_id=$action,
-native_action_created_day=CASE WHEN $hasAction=1 AND native_action_created_day<0 THEN $day ELSE native_action_created_day END,
-last_native_observed_json=CASE WHEN $hasObservation=1 THEN $observed ELSE last_native_observed_json END,
-last_native_observed_day=CASE WHEN $hasObservation=1 THEN $day ELSE last_native_observed_day END,
-updated_ts=$ts WHERE hero_id=$hero;",
-                new Dictionary<string, object>
+            RelationshipsStore.UpdateNotableMbtiProfiles7(connection, new Dictionary<string, object>
                 {
                     ["status"] = status, ["action"] = hasNativeAction ? actionId : "", ["hasAction"] = hasNativeAction ? 1 : 0, ["day"] = worldDay,
                     ["hasObservation"] = hasCompleteObservation ? 1 : 0,
                     ["observed"] = Json.Serialize(observed), ["ts"] = ts, ["hero"] = heroId
-                },
-                transaction);
+                },                transaction);
         }
 
-        private static Dictionary<string, object> ResolveCharacterMbtiProfile(
+        internal static Dictionary<string, object> ResolveCharacterMbtiProfile(
             string campaignId,
             string heroId,
             Dictionary<string, object> profile,
             Dictionary<string, object> traitDocument)
         {
             profile = profile ?? new Dictionary<string, object>();
-            traitDocument = traitDocument ?? ReadJsonObject(CharacterFile(campaignId, heroId, "traits.json"));
+            traitDocument = traitDocument ?? CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"));
             Dictionary<string, object> embedded = ReadDictionary(traitDocument, "mbtiProfile") ?? new Dictionary<string, object>();
             if (ReadBool(profile, "isNotable", false))
             {
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
                     EnsureNotableMbtiSchema(connection);
-                    Dictionary<string, object> row = QuerySql(connection,
-                        "SELECT * FROM notable_mbti_profiles WHERE hero_id=$id LIMIT 1;",
-                        new Dictionary<string, object> { ["id"] = heroId }).FirstOrDefault();
+                    Dictionary<string, object> row = RelationshipsStore.SelectNotableMbtiProfiles4(connection, new Dictionary<string, object> { ["id"] = heroId }).FirstOrDefault();
                     if (row != null) return NotableMbtiRowToProfile(row);
                 }
             }
@@ -809,7 +742,7 @@ updated_ts=$ts WHERE hero_id=$hero;",
                 profileEmbedded = embedded;
             type = ReadString(profileEmbedded, "type", ReadString(embedded, "type", "XXXX"));
             if (!MbtiDefinitions.ContainsKey(type)
-                && (CoreTraitKeys.All(foundation.ContainsKey) || CoreTraitKeys.All(percentages.ContainsKey)))
+                && (CharactersService.CoreTraitKeys.All(foundation.ContainsKey) || CharactersService.CoreTraitKeys.All(percentages.ContainsKey)))
             {
                 profileEmbedded = DeriveMbtiAxes(traitDocument);
                 profileEmbedded["source"] = "derived_from_personality_traits";
@@ -826,7 +759,7 @@ updated_ts=$ts WHERE hero_id=$hero;",
             };
         }
 
-        private static string BuildCharacterMbtiPromptBlock(
+        internal static string BuildCharacterMbtiPromptBlock(
             string campaignId,
             string heroId,
             Dictionary<string, object> profile,
@@ -840,7 +773,7 @@ updated_ts=$ts WHERE hero_id=$hero;",
                 + ReadString(mbti, "description", "");
         }
 
-        private static List<Dictionary<string, object>> RunNotableMbtiSelfTests()
+        internal static List<Dictionary<string, object>> RunNotableMbtiSelfTests()
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
             Action<string, bool, string> add = (id, passed, summary) => rows.Add(new Dictionary<string, object>
@@ -850,7 +783,7 @@ updated_ts=$ts WHERE hero_id=$hero;",
             bool catalog = MbtiDefinitions.Count == 16 && MbtiTypes.All(MbtiDefinitions.ContainsKey)
                 && MbtiDefinitions.Values.All(x => !string.IsNullOrWhiteSpace(x.Title) && x.Description.Length >= 100);
             add("catalog", catalog, "All 16 MBTI types have one shared UI and prompt description.");
-            var dynamicTraits = BuildTraitDocument(new Dictionary<string, object> { ["heroStringId"] = "dynamic_nord", ["name"] = "Aenessa", ["isLord"] = true, ["cultureId"] = "nord" });
+            var dynamicTraits = CharactersService.BuildTraitDocument(new Dictionary<string, object> { ["heroStringId"] = "dynamic_nord", ["name"] = "Aenessa", ["isLord"] = true, ["cultureId"] = "nord" });
             var dynamicMbti = ResolveCharacterMbtiProfile("mbti_selftest", "dynamic_nord", new Dictionary<string, object>(), dynamicTraits);
             add("dynamic_traits_derive_mbti", ReadString(dynamicMbti, "type", "") == ReadString(DeriveMbtiAxes(dynamicTraits), "type", "")
                 && ReadString(dynamicMbti, "source", "") == "derived_from_personality_traits",
@@ -868,11 +801,11 @@ updated_ts=$ts WHERE hero_id=$hero;",
             foreach (string type in MbtiTypes)
             {
                 Dictionary<string, object> traits = BuildNotableMbtiTraitDocument("mbti_selftest", "hero_" + type, type, type);
-                complete &= (ReadDictionary(traits, "foundationTraits") ?? new Dictionary<string, object>()).Count == CoreTraitKeys.Length
-                    && (ReadDictionary(traits, "traitPercentages") ?? new Dictionary<string, object>()).Count == CoreTraitKeys.Length
+                complete &= (ReadDictionary(traits, "foundationTraits") ?? new Dictionary<string, object>()).Count == CharactersService.CoreTraitKeys.Length
+                    && (ReadDictionary(traits, "traitPercentages") ?? new Dictionary<string, object>()).Count == CharactersService.CoreTraitKeys.Length
                     && (ReadDictionary(traits, "mbtiNativeTraits") ?? new Dictionary<string, object>()).Count == 5
                     && (ReadDictionary(traits, "visibleBannerlordTraits") ?? new Dictionary<string, object>()).Count == 5
-                    && TraitDocumentReady(traits);
+                    && CharactersService.TraitDocumentReady(traits);
                 derives &= ReadString(DeriveMbtiAxes(traits), "type", "") == type;
             }
             add("complete_templates", complete, "Every type produces a validator-ready 43-trait document and five visible native Bannerlord trait targets.");
@@ -890,7 +823,7 @@ updated_ts=$ts WHERE hero_id=$hero;",
                 new Dictionary<string, object> { ["type"] = "INTJ", ["nativeTraits"] = ReadDictionary(legacy, "mbtiNativeTraits") },
                 new Dictionary<string, object> { ["name"] = "Legacy Hero" },
                 "legacy_hero");
-            add("legacy_trait_migration", legacyRepaired && TraitDocumentReady(legacy),
+            add("legacy_trait_migration", legacyRepaired && CharactersService.TraitDocumentReady(legacy),
                 "Legacy notable MBTI documents gain visible native traits and the active foundation model before interaction.");
 
             int[] counts = new int[MbtiTypes.Length];
@@ -911,7 +844,7 @@ updated_ts=$ts WHERE hero_id=$hero;",
             string persistenceCampaign = "__notable_persistence_"
                 + Guid.NewGuid().ToString("N").Substring(0, 12);
             using (ReignDbConnection connection =
-                OpenCampaignConnection(persistenceCampaign))
+                ReignDatabase.OpenCampaignConnection(persistenceCampaign))
             {
                 Dictionary<string, object> notable = new Dictionary<string, object>
                 {
@@ -923,8 +856,8 @@ updated_ts=$ts WHERE hero_id=$hero;",
                 };
                 Dictionary<string, object> first = EnsureNotableMbtiProfile(connection, persistenceCampaign, 1d, notable, false);
                 Dictionary<string, object> second = EnsureNotableMbtiProfile(connection, persistenceCampaign, 2d, notable, false);
-                int profiles = ReadInt(QuerySql(connection, "SELECT COUNT(*) AS total FROM notable_mbti_profiles;", null).FirstOrDefault(), "total", 0);
-                int commands = ReadInt(QuerySql(connection, "SELECT COUNT(*) AS total FROM character_editor_native_commands;", null).FirstOrDefault(), "total", 0);
+                int profiles = ReadInt(RelationshipsStore.CountNotableMbtiProfiles2(connection, null).FirstOrDefault(), "total", 0);
+                int commands = ReadInt(RelationshipsStore.CountCharacterEditorNativeCommands(connection, null).FirstOrDefault(), "total", 0);
                 bool stableAssignment = ReadString(first, "type", "") == ReadString(second, "type", "")
                     && Math.Abs(ReadDouble(second, "assignedDay", -1d) - 1d) < 0.001d;
                 add("persistent_idempotent_assignment", stableAssignment && profiles == 1 && commands <= 1,
@@ -932,8 +865,7 @@ updated_ts=$ts WHERE hero_id=$hero;",
 
                 string actionId = ReadString(second, "nativeActionId", "");
                 if (!string.IsNullOrWhiteSpace(actionId))
-                    ExecuteSql(connection, "UPDATE character_editor_native_commands SET status='completed' WHERE command_id=$id;",
-                        new Dictionary<string, object> { ["id"] = actionId });
+                    RelationshipsStore.UpdateCharacterEditorNativeCommands2(connection, new Dictionary<string, object> { ["id"] = actionId });
                 Dictionary<string, object> contradicted = EnsureNotableMbtiProfile(connection, persistenceCampaign, 3d, notable, false);
                 add("native_contradiction", string.IsNullOrWhiteSpace(actionId)
                         || ReadString(contradicted, "nativeSyncStatus", "") == "contradicted",
@@ -949,12 +881,8 @@ updated_ts=$ts WHERE hero_id=$hero;",
                     EnsureNotableMbtiProfile(connection, persistenceCampaign, 3d, compactNotable, false);
                 string compactActionId = ReadString(compactFirst, "nativeActionId", "");
                 if (!string.IsNullOrWhiteSpace(compactActionId))
-                    ExecuteSql(connection,
-                        "UPDATE character_editor_native_commands SET status='completed' WHERE command_id=$id;",
-                        new Dictionary<string, object> { ["id"] = compactActionId });
-                ExecuteSql(connection,
-                    "UPDATE notable_mbti_profiles SET native_sync_status='synchronized' WHERE hero_id=$hero;",
-                    new Dictionary<string, object> { ["hero"] = "compact_notable_test" });
+                    RelationshipsStore.UpdateCharacterEditorNativeCommands2(connection, new Dictionary<string, object> { ["id"] = compactActionId });
+                RelationshipsStore.UpdateNotableMbtiProfiles8(connection, new Dictionary<string, object> { ["hero"] = "compact_notable_test" });
                 Dictionary<string, object> compactRepeated =
                     EnsureNotableMbtiProfile(connection, persistenceCampaign, 4d, compactNotable, false);
                 add("missing_native_observation_is_not_contradiction",
@@ -967,7 +895,7 @@ updated_ts=$ts WHERE hero_id=$hero;",
             try
             {
                 using (ReignDbConnection connection =
-                    OpenCampaignConnection(materializeCampaign))
+                    ReignDatabase.OpenCampaignConnection(materializeCampaign))
                 {
                     Dictionary<string, object> notable = new Dictionary<string, object>
                     {
@@ -981,20 +909,20 @@ updated_ts=$ts WHERE hero_id=$hero;",
                     };
                     Dictionary<string, object> assigned =
                         EnsureNotableMbtiProfile(connection, materializeCampaign, 1d, notable, true);
-                    Dictionary<string, object> storedProfile = ReadJsonObject(
-                        CharacterFile(materializeCampaign, "notable_materialize_test", "profile.json"));
-                    Dictionary<string, object> storedTraits = ReadJsonObject(
-                        CharacterFile(materializeCampaign, "notable_materialize_test", "traits.json"));
+                    Dictionary<string, object> storedProfile = CampaignFileService.ReadJsonObject(
+                        CampaignFileService.CharacterFile(materializeCampaign, "notable_materialize_test", "profile.json"));
+                    Dictionary<string, object> storedTraits = CampaignFileService.ReadJsonObject(
+                        CampaignFileService.CharacterFile(materializeCampaign, "notable_materialize_test", "traits.json"));
                     add("passive_materialization_no_recursion",
                         ReadString(assigned, "type", "XXXX") != "XXXX"
                             && ReadString(storedProfile, "heroStringId", "") == "notable_materialize_test"
-                            && (ReadDictionary(storedTraits, "foundationTraits") ?? new Dictionary<string, object>()).Count == CoreTraitKeys.Length,
+                            && (ReadDictionary(storedTraits, "foundationTraits") ?? new Dictionary<string, object>()).Count == CharactersService.CoreTraitKeys.Length,
                         "Passive notable observation materializes the minimal profile and all traits without recursively rebuilding the character.");
                 }
             }
             finally
             {
-                string generatedDirectory = CampaignDirectory(materializeCampaign);
+                string generatedDirectory = CampaignFileService.CampaignDirectory(materializeCampaign);
                 ReignPostgreSqlStorage.ClearAllPools();
                 try { ReignPostgreSqlStorage.DropCampaign(materializeCampaign); }
                 catch { }
@@ -1049,7 +977,7 @@ updated_ts=$ts WHERE hero_id=$hero;",
                         ["isNotable"] = true, ["isAlive"] = true, ["traits"] = ReadDictionary(x, "traits")
                     }).ToList()
                 });
-                using (ReignDbConnection connection = OpenCampaignConnection(batchCampaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(batchCampaign))
                 {
                     Dictionary<string, object> departed = new Dictionary<string, object>
                     {
@@ -1066,12 +994,8 @@ updated_ts=$ts WHERE hero_id=$hero;",
                     Dictionary<string, object> departedProfile =
                         EnsureNotableMbtiProfile(connection, batchCampaign, 1d, departed, false);
                     string departedAction = ReadString(departedProfile, "nativeActionId", "");
-                    ExecuteSql(connection,
-                        "UPDATE character_editor_native_commands SET status='failed' WHERE command_id=$id;",
-                        new Dictionary<string, object> { ["id"] = departedAction });
-                    ExecuteSql(connection,
-                        "UPDATE notable_mbti_profiles SET native_sync_status='failed' WHERE hero_id=$hero;",
-                        new Dictionary<string, object> { ["hero"] = "batch_departed_notable" });
+                    RelationshipsStore.UpdateCharacterEditorNativeCommands3(connection, new Dictionary<string, object> { ["id"] = departedAction });
+                    RelationshipsStore.UpdateNotableMbtiProfiles9(connection, new Dictionary<string, object> { ["hero"] = "batch_departed_notable" });
                 }
                 Dictionary<string, object> reconciled = NotableMbtiInitializeApi(
                     new Dictionary<string, object>
@@ -1081,14 +1005,11 @@ updated_ts=$ts WHERE hero_id=$hero;",
                     });
                 int profiles, commands;
                 string departedStatus;
-                using (ReignDbConnection connection = OpenCampaignConnection(batchCampaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(batchCampaign))
                 {
-                    profiles = ReadInt(QuerySql(connection,
-                        "SELECT COUNT(*) AS total FROM notable_mbti_profiles;").FirstOrDefault(), "total", 0);
-                    commands = ReadInt(QuerySql(connection,
-                        "SELECT COUNT(*) AS total FROM character_editor_native_commands;").FirstOrDefault(), "total", 0);
-                    departedStatus = ReadString(QuerySql(connection,
-                        "SELECT native_sync_status FROM notable_mbti_profiles WHERE hero_id='batch_departed_notable' LIMIT 1;")
+                    profiles = ReadInt(RelationshipsStore.CountNotableMbtiProfiles2(connection).FirstOrDefault(), "total", 0);
+                    commands = ReadInt(RelationshipsStore.CountCharacterEditorNativeCommands(connection).FirstOrDefault(), "total", 0);
+                    departedStatus = ReadString(RelationshipsStore.SelectNotableMbtiProfiles6(connection)
                         .FirstOrDefault(), "native_sync_status", "");
                 }
                 add("campaign_start_batch",
@@ -1102,7 +1023,7 @@ updated_ts=$ts WHERE hero_id=$hero;",
             }
             finally
             {
-                string generatedDirectory = CampaignDirectory(batchCampaign);
+                string generatedDirectory = CampaignFileService.CampaignDirectory(batchCampaign);
                 ReignPostgreSqlStorage.ClearAllPools();
                 if (Directory.Exists(generatedDirectory)) Directory.Delete(generatedDirectory, true);
             }
@@ -1149,8 +1070,8 @@ updated_ts=$ts WHERE hero_id=$hero;",
                             }).ToList()
                     });
                 bulkTimer.Stop();
-                int indexed = ReadJsonArray(
-                    Path.Combine(CampaignDirectory(bulkCampaign), "characters", "index.json")).Count;
+                int indexed = CampaignFileService.ReadJsonArray(
+                    Path.Combine(CampaignFileService.CampaignDirectory(bulkCampaign), "characters", "index.json")).Count;
                 add("bulk_initialization_performance",
                     ReadBool(bulkInitialized, "ok", false)
                     && bulkAssignments.Count == bulkCount
@@ -1165,7 +1086,7 @@ updated_ts=$ts WHERE hero_id=$hero;",
             }
             finally
             {
-                string generatedDirectory = CampaignDirectory(bulkCampaign);
+                string generatedDirectory = CampaignFileService.CampaignDirectory(bulkCampaign);
                 ReignPostgreSqlStorage.ClearAllPools();
                 if (Directory.Exists(generatedDirectory)) Directory.Delete(generatedDirectory, true);
             }

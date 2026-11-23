@@ -1,21 +1,18 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
+using Npgsql;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RelationshipsService
     {
-        private static void EnsureCorrespondenceDeliverySchema(ReignDbConnection connection)
+        internal static void EnsureCorrespondenceDeliverySchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS correspondence_delivery_jobs (
-letter_id TEXT PRIMARY KEY,player_id TEXT NOT NULL,timeline_id TEXT NOT NULL,restore_generation TEXT NOT NULL,
-source_hash TEXT NOT NULL,status TEXT NOT NULL,attempt_count INTEGER NOT NULL DEFAULT 0,
-lease_token TEXT NOT NULL DEFAULT '',lease_until BIGINT NOT NULL DEFAULT 0,next_attempt_ts BIGINT NOT NULL DEFAULT 0,
-reply_json TEXT NOT NULL DEFAULT '',result_json TEXT NOT NULL DEFAULT '{}',acknowledged INTEGER NOT NULL DEFAULT 0,
-last_error TEXT NOT NULL DEFAULT '',created_ts BIGINT NOT NULL,updated_ts BIGINT NOT NULL);
-CREATE INDEX IF NOT EXISTS idx_correspondence_delivery_work ON correspondence_delivery_jobs(status,next_attempt_ts,lease_until);");
+            RelationshipsSchema.CreateCorrespondenceDeliveryJobs(connection);
         }
 
         private static bool IsDeterministicMarriageLetter(string source) => source == "reign_marriage_offer"
@@ -26,88 +23,181 @@ CREATE INDEX IF NOT EXISTS idx_correspondence_delivery_work ON correspondence_de
             "queuedReplies", new List<Dictionary<string, object>>(), "nativeRelationChanges", new List<Dictionary<string, object>>(),
             "queuedActions", new List<Dictionary<string, object>>());
 
-        // This phase has no provider path. Commit every due arrival before any
-        // optional reply generation, so one slow writer cannot delay other mail.
-        private static void DeliverDueCorrespondence(string campaign, string player, double day, string timeline)
+        private const long CorrespondenceArrivalRetrySeconds = 30;
+
+        private sealed class CorrespondenceHistoryMismatchException : InvalidOperationException
         {
-            var arrived = new List<Dictionary<string, object>>();
-            using (var connection = OpenCampaignConnection(campaign))
-            using (var transaction = connection.BeginTransaction())
+            internal CorrespondenceHistoryMismatchException(string reason) : base(reason) { }
+        }
+
+        // This phase only runs local SQL. A failed letter rolls back to its own
+        // savepoint so later due mail can commit before reply generation.
+        private static void DeliverDueCorrespondence(string campaign, string player, double day, string timeline,
+            Action beforeCommit = null)
+        {
+            var failures = new List<Dictionary<string, object>>();
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
-                var due = QuerySql(connection, @"SELECT * FROM letters WHERE status='in_transit' AND delivery_day<=$day
-ORDER BY delivery_day,letter_id LIMIT 100 FOR UPDATE SKIP LOCKED;", TestDict("day", day));
-                string generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
+                // Favor expiry can queue public-standing invalidations. Prepare
+                // that independent component before holding letter row locks.
+                EnsureWorldRelationshipSchema(connection);
+                using var retries = new ReignDatabase.SqlStatementRetrySuppression(connection);
+                using var transaction = connection.BeginTransaction();
                 long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                var due = RelationshipsStore.SelectLetters6(connection, TestDict("day", day, "now", now), transaction);
+                string generation = ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "");
+                const string savepoint = "courier_arrival";
                 foreach (var letter in due)
                 {
                     if (!CorrespondenceDispatchOnTimeline(connection, letter, timeline)) continue;
                     string id = ReadString(letter, "letter_id", "");
-                    bool toPlayer = ReadString(letter, "recipient_id", "") == player;
-                    bool marriage = IsDeterministicMarriageLetter(ReadString(letter, "source", ""));
-                    string status = toPlayer ? "delivered" : "read";
-                    ExecuteSql(connection, @"UPDATE letters SET status=$status,delivered_day=$day,read_day=$read,
-delivery_timeline_id=$timeline,updated_ts=$ts WHERE letter_id=$id AND status='in_transit';",
-                        TestDict("id", id, "status", status, "day", day, "read", toPlayer ? 0d : day, "timeline", timeline, "ts", now));
-                    letter["status"] = status; letter["delivered_day"] = day;
-                    letter["read_day"] = toPlayer ? 0d : day; letter["delivery_timeline_id"] = timeline;
-                    arrived.Add(letter);
-                    var result = EmptyCorrespondenceDeliveryResult();
-                    if (toPlayer || marriage) result["deliveredLetters"] = new[] { letter };
-                    ExecuteSql(connection, @"INSERT INTO correspondence_delivery_jobs
-(letter_id,player_id,timeline_id,restore_generation,source_hash,status,result_json,created_ts,updated_ts)
-VALUES($id,$player,$timeline,$generation,$hash,$status,$result,$now,$now) ON CONFLICT(letter_id) DO NOTHING;",
-                        TestDict("id", id, "player", player, "timeline", timeline, "generation", generation,
-                            "hash", LetterContentHash(letter), "status", toPlayer || marriage ? "completed" : "pending",
-                            "result", Json.Serialize(result), "now", now));
+                    transaction.Save(savepoint);
+                    try
+                    {
+                        RecordCorrespondenceArrival(connection, transaction, campaign, player, timeline, generation, letter, day, now);
+                    }
+                    catch (PersistenceService.CampaignRequestReplacedException) { throw; }
+                    catch (Exception ex) when (ex is InvalidOperationException || ex is ArgumentException || ex is JsonException || ex is PostgresException)
+                    {
+                        transaction.Rollback(savepoint);
+                        RelationshipsStore.DeferCorrespondenceArrival(connection, TestDict("id", id, "retry",
+                            DateTimeOffset.UtcNow.ToUnixTimeSeconds() + CorrespondenceArrivalRetrySeconds), transaction);
+                        failures.Add(TestDict("campaignId", campaign, "letterId", id, "error", ex.GetType().Name));
+                    }
+                    transaction.Release(savepoint);
                 }
+                beforeCommit?.Invoke();
                 transaction.Commit();
             }
-            // History/favor work is local and follows the committed arrival.
-            // No provider is invoked by this publication phase.
-            foreach (var letter in arrived)
+            foreach (var failure in failures)
+                OperationsService.LogOperational("correspondence.arrival_deferred", failure);
+        }
+
+        private static void RecordCorrespondenceArrival(ReignDbConnection connection, ReignDbTransaction transaction,
+            string campaign, string player, string timeline, string generation, Dictionary<string, object> letter, double day, long now)
+        {
+            string id = ReadString(letter, "letter_id", "");
+            bool toPlayer = ReadString(letter, "recipient_id", "") == player;
+            bool immediatelyComplete = toPlayer || IsDeterministicMarriageLetter(ReadString(letter, "source", ""));
+            string status = toPlayer ? "delivered" : "read";
+            RelationshipsStore.UpdateLetters(connection, TestDict("id", id, "status", status, "day", day, "read", toPlayer ? 0d : day, "timeline", timeline, "ts", now), transaction);
+            letter["status"] = status; letter["delivered_day"] = day;
+            letter["read_day"] = toPlayer ? 0d : day; letter["delivery_timeline_id"] = timeline;
+
+            ReputationService.RecordCompletedFavorCorrespondence(connection, campaign, timeline, letter, day);
+            string npcId = DeliveredLetterHistoryNpc(player, letter);
+            string history = "";
+            if (!string.IsNullOrWhiteSpace(npcId))
             {
-                using (var connection = OpenCampaignConnection(campaign))
-                    RecordCompletedFavorCorrespondence(connection, campaign, timeline, letter, day);
-                AppendDeliveredLetterHistory(campaign, player, letter, day);
+                DialogueService.StoreCorrespondenceTurn(connection, campaign, npcId, player, letter, day, now);
+                RecordDeliveredLetterDisclosures(connection, letter, day, schemaPrepared: true);
+                history = Json.Serialize(DeliveredLetterHistoryLine(player, letter, day, now));
             }
+            var result = EmptyCorrespondenceDeliveryResult();
+            if (immediatelyComplete) result["deliveredLetters"] = new[] { letter };
+            RelationshipsStore.InsertOrIgnoreCorrespondenceDeliveryJobs(connection, TestDict("id", id, "player", player, "timeline", timeline, "generation", generation,
+                "hash", DialogueService.LetterContentHash(letter), "status", immediatelyComplete ? "completed" : "pending",
+                "result", Json.Serialize(result), "now", now, "history", history), transaction);
+        }
+
+        private static void ReconcileCorrespondenceArrivalHistory(string campaign, string player, string timeline)
+        {
+            // History publication and acknowledgement are independent of inbox
+            // acknowledgement and reply generation, including after a restore.
+            using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+            string generation = ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "");
+            var scope = TestDict("player", player, "timeline", timeline, "generation", generation,
+                "now", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            foreach (var receipt in RelationshipsStore.SelectPendingCorrespondenceArrivalHistory(connection, scope))
+            {
+                string letterId = ReadString(receipt, "letter_id", "");
+                string historyJson = ReadString(receipt, "arrival_history_json", "");
+                string sourceHash = ReadString(receipt, "source_hash", "");
+                var expected = TestDict("id", letterId, "player", player, "timeline", timeline, "generation", generation,
+                    "hash", sourceHash, "history", historyJson);
+                try
+                {
+                    var history = TryParseJsonObject(historyJson);
+                    var letter = RelationshipsStore.SelectLetters7(connection, TestDict("id", letterId)).SingleOrDefault();
+                    string status = ReadString(letter, "status", "");
+                    if (letter == null || (status != "delivered" && status != "read")
+                        || DialogueService.LetterContentHash(letter) != sourceHash
+                        || ReadString(history, "letterId", "") != letterId
+                        || ReadString(history, "channel", "") != "correspondence"
+                        || ReadString(history, "senderId", "") != ReadString(letter, "sender_id", "")
+                        || ReadString(history, "recipientId", "") != ReadString(letter, "recipient_id", ""))
+                        throw new CorrespondenceHistoryMismatchException("source_mismatch");
+                    string npcId = DeliveredLetterHistoryNpc(player, letter);
+                    if (string.IsNullOrWhiteSpace(npcId))
+                        throw new CorrespondenceHistoryMismatchException("missing_recipient");
+                    PublishCorrespondenceArrivalHistory(campaign, npcId, letterId, history);
+                    RelationshipsStore.CompleteCorrespondenceArrivalHistory(connection, expected);
+                }
+                catch (PersistenceService.CampaignRequestReplacedException) { throw; }
+                catch (CorrespondenceHistoryMismatchException ex)
+                {
+                    expected["terminal"] = ex.Message;
+                    expected["retry"] = 0L;
+                    RelationshipsStore.DeferCorrespondenceArrivalHistory(connection, expected);
+                    OperationsService.LogOperational("correspondence.arrival_history_blocked", TestDict("campaignId", campaign,
+                        "letterId", letterId, "reason", ex.Message));
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    expected["terminal"] = "";
+                    expected["retry"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() + CorrespondenceArrivalRetrySeconds;
+                    RelationshipsStore.DeferCorrespondenceArrivalHistory(connection, expected);
+                    OperationsService.LogOperational("correspondence.arrival_history_deferred", TestDict("campaignId", campaign,
+                        "letterId", letterId, "error", ex.GetType().Name));
+                }
+            }
+        }
+
+        private static void PublishCorrespondenceArrivalHistory(string campaign, string npcId, string letterId,
+            Dictionary<string, object> line)
+        {
+            string path = CampaignFileService.CharacterFile(campaign, npcId, "history", "dialogue.jsonl");
+            CampaignFileService.AppendDurableJsonLineIfAbsent(path, line, existing =>
+            {
+                if (ReadString(existing, "channel", "") != "correspondence" || ReadString(existing, "letterId", "") != letterId)
+                    return false;
+                if (CanonicalJson(existing) != CanonicalJson(line))
+                    throw new CorrespondenceHistoryMismatchException("existing_history_conflict");
+                return true;
+            });
         }
 
         private static bool CorrespondenceDispatchOnTimeline(ReignDbConnection connection, Dictionary<string, object> letter, string timeline)
         {
-            if (LetterSourceTimeline(letter) == timeline) return true;
-            var restored = RestoredLetterContext(connection, timeline);
+            if (DialogueService.LetterSourceTimeline(letter) == timeline) return true;
+            var restored = DialogueService.RestoredLetterContext(connection, timeline);
             if (restored == null) return false;
-            var member = QuerySql(connection, @"SELECT content_hash FROM memory_restored_letters
-WHERE letter_id=$id AND restore_generation=$generation;", TestDict("id", ReadString(letter, "letter_id", ""),
+            var member = RelationshipsStore.SelectMemoryRestoredLetters(connection, TestDict("id", ReadString(letter, "letter_id", ""),
                 "generation", ReadString(restored, "restore_generation", ""))).SingleOrDefault();
-            return member != null && ReadString(member, "content_hash", "") == LetterContentHash(letter);
+            return member != null && ReadString(member, "content_hash", "") == DialogueService.LetterContentHash(letter);
         }
 
         private static bool CorrespondenceDeliveryFence(ReignDbConnection connection, Dictionary<string, object> job, string token)
         {
-            var current = QuerySql(connection, "SELECT * FROM correspondence_delivery_jobs WHERE letter_id=$id;",
-                TestDict("id", ReadString(job, "letter_id", ""))).SingleOrDefault();
-            var source = QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;",
-                TestDict("id", ReadString(job, "letter_id", ""))).SingleOrDefault();
+            var current = RelationshipsStore.SelectCorrespondenceDeliveryJobs(connection, TestDict("id", ReadString(job, "letter_id", ""))).SingleOrDefault();
+            var source = RelationshipsStore.SelectLetters7(connection, TestDict("id", ReadString(job, "letter_id", ""))).SingleOrDefault();
             return current != null && ReadString(current, "status", "") == "running"
-                && source != null && LetterContentHash(source) == ReadString(job, "source_hash", "")
+                && source != null && DialogueService.LetterContentHash(source) == ReadString(job, "source_hash", "")
                 && ReadString(current, "lease_token", "") == token
                 && ReadLong(current, "lease_until", 0) > DateTimeOffset.UtcNow.ToUnixTimeSeconds()
-                && ReadString(current, "restore_generation", "") == ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "")
+                && ReadString(current, "restore_generation", "") == ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "")
                 && ReadString(current, "restore_generation", "") == ReadString(job, "restore_generation", "")
-                && ReadString(current, "timeline_id", "") == ActiveWorldHistoryTimeline(connection);
+                && ReadString(current, "timeline_id", "") == WorldSimulationService.ActiveWorldHistoryTimeline(connection);
         }
 
         private static void RenewCorrespondenceDeliveryLease(string campaign, string id, string token, string generation)
         {
             try
             {
-                using (var connection = OpenCampaignConnection(campaign))
-                    ExecuteSql(connection, @"UPDATE correspondence_delivery_jobs SET lease_until=$until
-WHERE letter_id=$id AND status='running' AND lease_token=$token AND restore_generation=$generation;",
-                        TestDict("id", id, "token", token, "generation", generation, "until", DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 120));
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                    RelationshipsStore.UpdateCorrespondenceDeliveryJobs(connection, TestDict("id", id, "token", token, "generation", generation, "until", DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 120));
             }
-            catch (Exception ex) { LogOperational("correspondence.lease_renew_failed", TestDict("letterId", id, "error", LimitText(ex.Message, 300))); }
+            catch (Exception ex) { OperationsService.LogOperational("correspondence.lease_renew_failed", TestDict("letterId", id, "error", DialogueService.LimitText(ex.Message, 300))); }
         }
 
         private static void ProcessPendingCorrespondence(string campaign, string player, double day, string timeline,
@@ -117,23 +207,13 @@ WHERE letter_id=$id AND status='running' AND lease_token=$token AND restore_gene
             string token = Guid.NewGuid().ToString("N");
             Dictionary<string, object> job, letter;
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
-                string generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
-                ExecuteSql(connection, @"UPDATE correspondence_delivery_jobs SET status='incomplete',lease_token='',lease_until=0,
-last_error='Reply attempt limit reached after interrupted work.',updated_ts=$now
-WHERE player_id=$player AND timeline_id=$timeline AND restore_generation=$generation
-AND attempt_count>=2 AND (status IN ('pending','failed') OR (status='running' AND lease_until<=$now));",
-                    TestDict("player", player, "timeline", timeline, "generation", generation, "now", now));
-                job = QuerySql(connection, @"UPDATE correspondence_delivery_jobs SET status='running',
-attempt_count=attempt_count+1,lease_token=$token,lease_until=$until,updated_ts=$now
-WHERE letter_id=(SELECT letter_id FROM correspondence_delivery_jobs WHERE player_id=$player AND timeline_id=$timeline
-AND restore_generation=$generation AND attempt_count<2 AND next_attempt_ts<=$now
-AND (status IN ('pending','failed') OR (status='running' AND lease_until<=$now))
-ORDER BY created_ts,letter_id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *;",
-                    TestDict("player", player, "timeline", timeline, "generation", generation, "now", now, "token", token, "until", now + 120)).SingleOrDefault();
+                string generation = ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "");
+                RelationshipsStore.UpdateCorrespondenceDeliveryJobs2(connection, TestDict("player", player, "timeline", timeline, "generation", generation, "now", now));
+                job = RelationshipsStore.UpdateCorrespondenceDeliveryJobs3(connection, TestDict("player", player, "timeline", timeline, "generation", generation, "now", now, "token", token, "until", now + 120)).SingleOrDefault();
                 if (job == null) return;
-                letter = QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", ReadString(job, "letter_id", ""))).SingleOrDefault();
+                letter = RelationshipsStore.SelectLetters7(connection, TestDict("id", ReadString(job, "letter_id", ""))).SingleOrDefault();
             }
             string id = ReadString(job, "letter_id", "");
             using (var heartbeat = new Timer(_ => RenewCorrespondenceDeliveryLease(campaign, id, token,
@@ -141,7 +221,7 @@ ORDER BY created_ts,letter_id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *;",
             {
                 try
                 {
-                    if (letter == null || ReadString(job, "source_hash", "") != LetterContentHash(letter))
+                    if (letter == null || ReadString(job, "source_hash", "") != DialogueService.LetterContentHash(letter))
                         throw new InvalidOperationException("Delivered letter source changed.");
                     var reply = TryParseJsonObject(ReadString(job, "reply_json", ""));
                     if (reply == null)
@@ -152,14 +232,13 @@ ORDER BY created_ts,letter_id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *;",
                         if (reply == null || ReadString(reply, "error", "").Length > 0
                             || ReadBool(reply, "shouldReply", false) && string.IsNullOrWhiteSpace(ReadString(reply, "body", "")))
                             throw new InvalidOperationException("Letter composition failed; bounded retry pending.");
-                        using (var connection = OpenCampaignConnection(campaign))
+                        using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                         {
                             if (!CorrespondenceDeliveryFence(connection, job, token)) return;
-                            ExecuteSql(connection, "UPDATE correspondence_delivery_jobs SET reply_json=$reply WHERE letter_id=$id AND lease_token=$token;",
-                                TestDict("reply", Json.Serialize(reply), "id", id, "token", token));
+                            RelationshipsStore.UpdateCorrespondenceDeliveryJobs4(connection, TestDict("reply", Json.Serialize(reply), "id", id, "token", token));
                         }
                     }
-                    using (var connection = OpenCampaignConnection(campaign))
+                    using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
                     {
                         if (!CorrespondenceDeliveryFence(connection, job, token)) return;
                         var payload = TestDict("campaignId", campaign, "playerId", player, "worldDay", day, "timelineId", timeline);
@@ -168,21 +247,17 @@ ORDER BY created_ts,letter_id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *;",
                         // invents a different reply to an already accepted letter.
                         var result = accept != null ? accept(letter, reply) : AcceptDeliveredCorrespondence(campaign, payload, letter, reply);
                         if (!CorrespondenceDeliveryFence(connection, job, token)) return;
-                        ExecuteSql(connection, @"UPDATE correspondence_delivery_jobs SET status='completed',result_json=$result,
-last_error='',lease_token='',lease_until=0,updated_ts=$now WHERE letter_id=$id AND lease_token=$token;",
-                            TestDict("id", id, "token", token, "result", Json.Serialize(result), "now", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+                        RelationshipsStore.UpdateCorrespondenceDeliveryJobs5(connection, TestDict("id", id, "token", token, "result", Json.Serialize(result), "now", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
                     }
                 }
                 catch (Exception ex)
                 {
-                    using (var connection = OpenCampaignConnection(campaign))
-                        ExecuteSql(connection, @"UPDATE correspondence_delivery_jobs SET status=$status,last_error=$error,
-lease_token='',lease_until=0,next_attempt_ts=$next,updated_ts=$now WHERE letter_id=$id AND lease_token=$token;",
-                            TestDict("id", id, "token", token, "status", ReadInt(job, "attempt_count", 0) >= 2 ? "incomplete" : "failed",
-                                "error", LimitText(ex.Message, 500), "next", DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 30,
+                    using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                        RelationshipsStore.UpdateCorrespondenceDeliveryJobs6(connection, TestDict("id", id, "token", token, "status", ReadInt(job, "attempt_count", 0) >= 2 ? "incomplete" : "failed",
+                                "error", DialogueService.LimitText(ex.Message, 500), "next", DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 30,
                                 "now", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
-                    LogOperational("correspondence.reply_incomplete", TestDict("campaignId", campaign, "letterId", id,
-                        "attempt", ReadInt(job, "attempt_count", 0), "error", LimitText(ex.Message, 500)));
+                    OperationsService.LogOperational("correspondence.reply_incomplete", TestDict("campaignId", campaign, "letterId", id,
+                        "attempt", ReadInt(job, "attempt_count", 0), "error", DialogueService.LimitText(ex.Message, 500)));
                 }
             }
         }
@@ -190,35 +265,30 @@ lease_token='',lease_until=0,next_attempt_ts=$next,updated_ts=$now WHERE letter_
         private static Dictionary<string, object> ReadCorrespondenceDeliveryResults(string campaign, string player, string timeline, List<string> acknowledgments)
         {
             var result = EmptyCorrespondenceDeliveryResult();
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
-                string generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
+                string generation = ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "");
                 var args = TestDict("player", player, "timeline", timeline, "generation", generation);
                 foreach (string id in (acknowledgments ?? new List<string>()).Distinct().Take(100))
                 {
                     args["id"] = id;
-                    ExecuteSql(connection, @"UPDATE correspondence_delivery_jobs SET acknowledged=1 WHERE letter_id=$id
-AND player_id=$player AND timeline_id=$timeline AND restore_generation=$generation AND status='completed';", args);
+                    RelationshipsStore.UpdateCorrespondenceDeliveryJobs7(connection, args);
                 }
-                var rows = QuerySql(connection, @"SELECT * FROM correspondence_delivery_jobs WHERE player_id=$player AND timeline_id=$timeline
-AND restore_generation=$generation AND status='completed' AND acknowledged=0 ORDER BY created_ts,letter_id LIMIT 100;", args);
+                var rows = RelationshipsStore.SelectCorrespondenceDeliveryJobs2(connection, args);
                 foreach (string field in new[] { "deliveredLetters", "queuedReplies", "nativeRelationChanges", "queuedActions", "structuredActionDeliveries" })
                     result[field] = rows.SelectMany(r => ReadDictionaryList(TryParseJsonObject(ReadString(r, "result_json", "{}")), field)).ToList();
                 result["deliveryReceiptIds"] = rows.Select(r => ReadString(r, "letter_id", "")).ToList();
                 result["timelineId"] = timeline;
-                result["pendingReplyCount"] = ReadInt(QuerySql(connection, @"SELECT COUNT(*) count FROM correspondence_delivery_jobs
-WHERE player_id=$player AND timeline_id=$timeline AND restore_generation=$generation AND status IN ('pending','running','failed');", args).Single(), "count", 0);
+                result["pendingReplyCount"] = ReadInt(RelationshipsStore.CountCorrespondenceDeliveryJobs(connection, args).Single(), "count", 0);
             }
             return result;
         }
 
         // Called only from the verified snapshot restore path. Ordinary source
         // reads and matching participant names cannot rebind an old branch.
-        private static void RebindRestoredCorrespondenceJobs(ReignDbConnection connection, string timeline, string generation)
+        internal static void RebindRestoredCorrespondenceJobs(ReignDbConnection connection, string timeline, string generation)
         {
-            ExecuteSql(connection, @"UPDATE correspondence_delivery_jobs SET timeline_id=$timeline,restore_generation=$generation,
-status=CASE WHEN status='running' AND attempt_count>=2 THEN 'incomplete' WHEN status='running' THEN 'pending' ELSE status END,lease_token='',lease_until=0;",
-                TestDict("timeline", timeline, "generation", generation));
+            RelationshipsStore.UpdateCorrespondenceDeliveryJobs8(connection, TestDict("timeline", timeline, "generation", generation));
         }
     }
 }

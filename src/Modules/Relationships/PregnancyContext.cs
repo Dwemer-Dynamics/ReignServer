@@ -6,41 +6,29 @@ using Reign.Core.Contracts.Family;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RelationshipsService
     {
         private static void EnsurePregnancyContextSchema(ReignDbConnection c)
         {
-            ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS conception_contexts (
-timeline_id TEXT NOT NULL,pregnancy_id TEXT NOT NULL,facts_json TEXT NOT NULL,world_day DOUBLE PRECISION NOT NULL,
-PRIMARY KEY(timeline_id,pregnancy_id));
-CREATE TABLE IF NOT EXISTS conception_knowledge (
-timeline_id TEXT NOT NULL,pregnancy_id TEXT NOT NULL,observer_id TEXT NOT NULL,
-knowledge_json TEXT NOT NULL,source_id TEXT NOT NULL,source_hash TEXT NOT NULL,world_day DOUBLE PRECISION NOT NULL,
-PRIMARY KEY(timeline_id,pregnancy_id,observer_id));");
+            RelationshipsSchema.CreateConceptionContexts(c);
         }
         private static PregnancyFacts PregnancyFactsFrom(Dictionary<string, object> value) =>
             Json.Deserialize<PregnancyFacts>(Json.Serialize(value)) ?? new PregnancyFacts();
-        private static void BindRecoveredPregnancyKnowledge(ReignDbConnection c, string requested, string recovered,
+        internal static void BindRecoveredPregnancyKnowledge(ReignDbConnection c, string requested, string recovered,
             long sequence, string head)
         {
             // The restore context exists only after restoring the exact Save Sync snapshot.
             // Never inherit discoveries solely because two timelines have related names.
-            var restored = RestoredLetterContext(c, recovered);
+            var restored = DialogueService.RestoredLetterContext(c, recovered);
             if (restored == null || ReadLong(restored, "head_sequence", -1) != sequence
                 || ReadString(restored, "head_event_id", "") != head || requested == recovered) return;
             EnsurePregnancyContextSchema(c);
             var args = TestDict("old", requested, "new", recovered, "day", ReadDouble(restored, "world_day", -1));
-            ExecuteSql(c, @"INSERT INTO conception_contexts(timeline_id,pregnancy_id,facts_json,world_day)
-SELECT $new,pregnancy_id,facts_json,world_day FROM conception_contexts WHERE timeline_id=$old AND world_day<=$day
-ON CONFLICT(timeline_id,pregnancy_id) DO NOTHING;
-INSERT INTO conception_knowledge(timeline_id,pregnancy_id,observer_id,knowledge_json,source_id,source_hash,world_day)
-SELECT $new,pregnancy_id,observer_id,knowledge_json,source_id,source_hash,world_day FROM conception_knowledge
-WHERE timeline_id=$old AND world_day<=$day ON CONFLICT(timeline_id,pregnancy_id,observer_id) DO NOTHING;", args);
+            RelationshipsStore.InsertOrIgnoreConceptionContexts(c, args);
         }
         private static PregnancyKnowledge ReadPregnancyKnowledge(ReignDbConnection c, string timeline, string id, string observer, double asOfDay = double.MaxValue)
         {
-            var row = QuerySql(c, "SELECT knowledge_json FROM conception_knowledge WHERE timeline_id=$timeline AND pregnancy_id=$id AND observer_id=$observer AND world_day<=$day;",
-                TestDict("timeline", timeline, "id", id, "observer", observer, "day", asOfDay)).FirstOrDefault();
+            var row = RelationshipsStore.SelectConceptionKnowledge(c, TestDict("timeline", timeline, "id", id, "observer", observer, "day", asOfDay)).FirstOrDefault();
             return row == null ? new PregnancyKnowledge() : Json.Deserialize<PregnancyKnowledge>(ReadString(row, "knowledge_json", "{}")) ?? new PregnancyKnowledge();
         }
         private static void GrantPregnancyKnowledge(ReignDbConnection c, string timeline, PregnancyFacts facts, string observer,
@@ -52,13 +40,10 @@ WHERE timeline_id=$old AND world_day<=$day ON CONFLICT(timeline_id,pregnancy_id,
             known.Illicit |= illicit && facts.Illicit;
             known.Paternity |= father && facts.BiologicalFatherId.Length > 0;
             known.EvidenceId = sourceId;
-            ExecuteSql(c, @"INSERT INTO conception_knowledge(timeline_id,pregnancy_id,observer_id,knowledge_json,source_id,source_hash,world_day)
-VALUES($timeline,$id,$observer,$json,$source,$hash,$day) ON CONFLICT(timeline_id,pregnancy_id,observer_id) DO UPDATE SET
-knowledge_json=$json,source_id=$source,source_hash=$hash,world_day=$day;",
-                TestDict("timeline", timeline, "id", facts.PregnancyId, "observer", observer,
+            RelationshipsStore.UpsertConceptionKnowledge(c, TestDict("timeline", timeline, "id", facts.PregnancyId, "observer", observer,
                     "json", Json.Serialize(known), "source", sourceId, "hash", sourceHash, "day", day));
         }
-        private static Dictionary<string, object> FamilyPregnancySyncApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> FamilyPregnancySyncApi(Dictionary<string, object> payload)
         {
             string campaign = ReadString(payload, "campaignId", ""), timeline = ReadString(payload, "timelineId", "");
             var snapshots = ReadDictionaryList(payload, "pregnancies");
@@ -66,11 +51,11 @@ knowledge_json=$json,source_id=$source,source_hash=$hash,world_day=$day;",
             if (campaign.Length == 0 || timeline.Length == 0 || snapshots.Count > 256 || !double.IsFinite(day) || day < 0)
                 return TestDict("ok", false, "error", "A bounded native pregnancy snapshot and campaign timeline are required.");
             lock (CampaignRelationshipWriteLock(campaign))
-            using (var c = OpenCampaignConnection(campaign))
+            using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsurePregnancyContextSchema(c);
-                EnsureWorldHistorySchema(c);
-                if (ActiveWorldHistoryTimeline(c) != timeline) return TestDict("ok", false, "error", "Pregnancy snapshot belongs to another timeline.");
+                WorldSimulationService.EnsureWorldHistorySchema(c);
+                if (WorldSimulationService.ActiveWorldHistoryTimeline(c) != timeline) return TestDict("ok", false, "error", "Pregnancy snapshot belongs to another timeline.");
                 var facts = snapshots.Select(PregnancyFactsFrom).ToList();
                 if (facts.Any(f => f.PregnancyId.Length == 0 || f.PregnancyId.Length > 256 || f.MotherId.Length == 0
                     || f.MotherId.Length > 256 || f.WorldDay != day || !f.Active)
@@ -79,34 +64,29 @@ knowledge_json=$json,source_id=$source,source_hash=$hash,world_day=$day;",
                 var observers = ReadStringList(payload, "observers").Where(id => id.Length > 0 && id.Length <= 256).Distinct().Take(65).ToList();
                 var present = ReadBool(payload, "physicalConversation", false) ? ReadStringList(payload, "presentMotherIds") : new List<string>();
                 using var transaction = c.BeginTransaction();
-                ExecuteSql(c, @"DELETE FROM world_history_knowledge_rules WHERE acquisition_mode='realm_news'
-AND event_id IN (SELECT event_id FROM world_history_events WHERE event_type='child_conceived' AND timeline_id=$timeline);",
-                    TestDict("timeline", timeline));
-                foreach (var old in QuerySql(c, "SELECT pregnancy_id,facts_json FROM conception_contexts WHERE timeline_id=$timeline;", TestDict("timeline", timeline)))
+                RelationshipsStore.DeleteWorldHistoryKnowledgeRules(c, TestDict("timeline", timeline));
+                foreach (var old in RelationshipsStore.SelectConceptionContexts(c, TestDict("timeline", timeline)))
                 {
                     if (facts.Any(f => f.PregnancyId == ReadString(old, "pregnancy_id", ""))) continue;
                     var ended = Json.Deserialize<PregnancyFacts>(ReadString(old, "facts_json", "{}"));
                     if (ended == null || !ended.Active) continue;
                     ended.Active = false;
-                    ExecuteSql(c, "UPDATE conception_contexts SET facts_json=$json,world_day=$day WHERE timeline_id=$timeline AND pregnancy_id=$id;",
-                        TestDict("json", Json.Serialize(ended), "day", day, "timeline", timeline, "id", ended.PregnancyId));
+                    RelationshipsStore.UpdateConceptionContexts(c, TestDict("json", Json.Serialize(ended), "day", day, "timeline", timeline, "id", ended.PregnancyId));
                 }
                 var rows = new List<Dictionary<string, object>>();
                 var views = new Dictionary<string, object>();
                 foreach (var f in facts)
                 {
-                    ExecuteSql(c, @"INSERT INTO conception_contexts(timeline_id,pregnancy_id,facts_json,world_day)
-VALUES($timeline,$id,$json,$day) ON CONFLICT(timeline_id,pregnancy_id) DO UPDATE SET facts_json=$json,world_day=$day;",
-                        TestDict("timeline", timeline, "id", f.PregnancyId, "json", Json.Serialize(f), "day", day));
+                    RelationshipsStore.UpsertConceptionContexts(c, TestDict("timeline", timeline, "id", f.PregnancyId, "json", Json.Serialize(f), "day", day));
                     GrantPregnancyKnowledge(c, timeline, f, f.MotherId, f.Illicit, f.BiologicalFatherId.Length > 0,
-                        "native_pregnancy:" + f.PregnancyId, PromptHash(Json.Serialize(f)), day);
+                        "native_pregnancy:" + f.PregnancyId, DialogueService.PromptHash(Json.Serialize(f)), day);
                     foreach (string observer in observers)
                     {
                         if (f.MotherExposed || present.Contains(f.MotherId) && PregnancyContextPolicy.Visible(f))
                             GrantPregnancyKnowledge(c, timeline, f, observer,
                                 f.MotherExposed || f.MarriageAtConceptionKnown && f.SpouseAtConceptionId.Length == 0,
                                 f.FatherExposed, f.MotherExposed ? "pregnancy_exposure:" + f.PregnancyId : "native_visible_pregnancy:" + f.PregnancyId,
-                                PromptHash(Json.Serialize(f)), day);
+                                DialogueService.PromptHash(Json.Serialize(f)), day);
                     }
                     rows.Add(TestDict("pregnancyId", f.PregnancyId, "knowledge", observers.Concat(new[] { f.MotherId }).Distinct()
                         .ToDictionary(id => id, id => (object)ReadPregnancyKnowledge(c, timeline, f.PregnancyId, id))));
@@ -120,7 +100,7 @@ VALUES($timeline,$id,$json,$day) ON CONFLICT(timeline_id,pregnancy_id) DO UPDATE
                 return TestDict("ok", true, "timelineId", timeline, "knowledge", rows, "observerViews", views);
             }
         }
-        private static string BuildPregnancyPrompt(Dictionary<string, object> profile)
+        internal static string BuildPregnancyPrompt(Dictionary<string, object> profile)
         {
             string projected = ReadString(profile, "pregnancyPrompt", "");
             if (projected.Length > 0) return projected + "\n" + PregnancyDisclosureContract;
@@ -135,12 +115,12 @@ VALUES($timeline,$id,$json,$day) ON CONFLICT(timeline_id,pregnancy_id) DO UPDATE
             + "Quote the exact affirmative spoken words. Omit this collection for silence, denial, speculation, concealed thoughts or a false paternity claim. Each fact and its audience are separate. "
             + "Disclosing paternity requires naming the biological father or explicitly acknowledging the listener as father. Private speaker context is never another speaker's knowledge.";
 
-        private static string BuildCurrentPregnancyPrompt(string campaign, string timeline, string observer, double day,
+        internal static string BuildCurrentPregnancyPrompt(string campaign, string timeline, string observer, double day,
             Dictionary<string, object> profile)
         {
-            using var c = OpenCampaignConnection(campaign);
-            if (!TableExists(c, "conception_contexts")) return BuildPregnancyPrompt(profile);
-            var records = QuerySql(c, "SELECT facts_json FROM conception_contexts WHERE timeline_id=$timeline AND world_day<=$day;", TestDict("timeline", timeline, "day", day));
+            using var c = ReignDatabase.OpenCampaignConnection(campaign);
+            if (!WorldSimulationService.TableExists(c, "conception_contexts")) return BuildPregnancyPrompt(profile);
+            var records = RelationshipsStore.SelectConceptionContexts2(c, TestDict("timeline", timeline, "day", day));
             if (records.Count == 0) return BuildPregnancyPrompt(profile);
             var parts = new List<string>();
             foreach (var row in records)
@@ -157,35 +137,35 @@ VALUES($timeline,$id,$json,$day) ON CONFLICT(timeline_id,pregnancy_id) DO UPDATE
         private static void ApplyConfirmedPregnancyExposure(ReignDbConnection c, string campaign, string timeline, PregnancyFacts f, double day)
         {
             if (!f.MotherExposed || !f.Illicit) return;
-            EnsureSocialReputationSchema(c);
+            ReputationService.EnsureSocialReputationSchema(c);
             foreach (var parent in new[] { TestDict("id", f.MotherId, "value", -50), TestDict("id", f.FatherExposed ? f.BiologicalFatherId : "", "value", -5) })
             {
                 string subject = ReadString(parent, "id", "");
                 if (subject.Length == 0) continue;
                 string eventId = f.PregnancyId + ":exposed:" + (subject == f.MotherId ? "mother" : "father");
-                if (QuerySql(c, "SELECT lifecycle_id FROM reputation_lifecycle_events WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND source_event_id=$event LIMIT 1;",
-                    TestDict("campaign", campaign, "timeline", timeline, "subject", subject, "event", eventId)).Count > 0) continue;
+                if (RelationshipsStore.SelectReputationLifecycleEvents(c, TestDict("campaign", campaign, "timeline", timeline, "subject", subject, "event", eventId)).Count > 0) continue;
                 var evidence = TestDict("pregnancyId", f.PregnancyId, "motherId", f.MotherId, "illicit", true,
                     "fatherNamed", f.FatherExposed, "biologicalFatherId", f.FatherExposed ? f.BiologicalFatherId : "");
-                ApplyCourtDynamicSocialOutcome(c, campaign, timeline, subject,
+                ReputationService.ApplyCourtDynamicSocialOutcome(c, campaign, timeline, subject,
                     TestDict("dynamicReputationTagId", "the_unchaste", "dynamicActive", true, "dynamicValue", ReadInt(parent, "value", -5),
                         "directReputationProducer", "pregnancy_exposure", "dynamicEvidence", evidence,
                         "dynamicDescription", subject == f.MotherId ? "Her publicly exposed illicit pregnancy is a severe court scandal." : "He is the publicly identified biological father of an illicit pregnancy."),
                     eventId, day, out _);
-                ReconcileSocialRelationshipsForSubjects(c, campaign, timeline, new[] { subject }, day);
+                ReputationService.ReconcileSocialRelationshipsForSubjects(c, campaign, timeline, new[] { subject }, day);
             }
         }
 
-        private static void AcceptPregnancyDisclosures(ReignDbConnection c, string timeline, string speaker,
-            string reply, Dictionary<string, object> parsed, IEnumerable<string> audience, string sourceId, double day)
+        internal static void AcceptPregnancyDisclosures(ReignDbConnection c, string timeline, string speaker,
+            string reply, Dictionary<string, object> parsed, IEnumerable<string> audience, string sourceId, double day,
+            bool schemaPrepared = false)
         {
             var disclosures = ReadDictionaryList(parsed, "pregnancyDisclosures");
             if (disclosures.Count == 0) return;
-            EnsurePregnancyContextSchema(c);
+            if (!schemaPrepared) EnsurePregnancyContextSchema(c);
             foreach (var disclosure in disclosures.Take(6))
             {
                 string id = ReadString(disclosure, "pregnancyId", ""), kind = ReadString(disclosure, "kind", ""), quote = ReadString(disclosure, "evidenceQuote", "");
-                var row = QuerySql(c, "SELECT facts_json FROM conception_contexts WHERE timeline_id=$timeline AND pregnancy_id=$id;", TestDict("timeline", timeline, "id", id)).FirstOrDefault();
+                var row = RelationshipsStore.SelectConceptionContexts3(c, TestDict("timeline", timeline, "id", id)).FirstOrDefault();
                 var f = row == null ? null : Json.Deserialize<PregnancyFacts>(ReadString(row, "facts_json", "{}"));
                 if (f == null || !f.Active || quote.Length < 5 || quote.Length > 2000 || !reply.Contains(quote, StringComparison.Ordinal)
                     || quote.Contains('*') || quote.Contains('?') || Regex.IsMatch(quote, @"\b(never|might|maybe|perhaps|if|rumou?r|suspect|guess|suppose|could|would)\b", RegexOptions.IgnoreCase)
@@ -212,7 +192,7 @@ VALUES($timeline,$id,$json,$day) ON CONFLICT(timeline_id,pregnancy_id) DO UPDATE
                 if (!pregnancy && !illicit && !father) continue;
                 foreach (string observer in audience.Distinct())
                     GrantPregnancyKnowledge(c, timeline, f, observer, illicit || father && f.Illicit, father,
-                        sourceId, PromptHash(quote), day);
+                        sourceId, DialogueService.PromptHash(quote), day);
             }
         }
     }

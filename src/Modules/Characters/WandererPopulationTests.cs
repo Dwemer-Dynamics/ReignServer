@@ -5,9 +5,9 @@ using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
-        private static List<Dictionary<string, object>> RunWandererPopulationTests()
+        internal static List<Dictionary<string, object>> RunWandererPopulationTests()
         {
             var results = new List<Dictionary<string, object>>();
             void Require(bool value, string reason) { if (!value) throw new InvalidOperationException(reason); }
@@ -155,10 +155,10 @@ namespace ReignBetaServer
             });
             Check("durable_contact_history_scope", () => {
                 string campaign = "verify_wanderer_" + Guid.NewGuid().ToString("N").Substring(0, 8);
-                using (var c = OpenCampaignConnection(campaign)) EnsureCategorizedMemorySchema(c);
+                using (var c = ReignDatabase.OpenCampaignConnection(campaign)) DialogueService.EnsureCategorizedMemorySchema(c);
                 var request = new Dictionary<string, object> { ["eventId"] = "wanderer_event", ["sceneTurnId"] = "wanderer_turn", ["timelineId"] = "main",
                     ["worldDay"] = 42d, ["activeHeroIds"] = new List<string> { "speaker", "bystander" }, ["attendees"] = new List<Dictionary<string, object>>() };
-                StoreSocialEventConversationExchange(campaign, request, "speaker", "player", "Player", "Traveler", "Tell me about your travels.", "I have worked along the coast.", "wanderer-test", "wanderer_event", 300);
+                DialogueService.StoreSocialEventConversationExchange(campaign, request, "speaker", "player", "Player", "Traveler", "Tell me about your travels.", "I have worked along the coast.", "wanderer-test", "wanderer_event", 300);
                 Dictionary<string, object> Read(string hero, string timeline = "main", string player = "player") => WandererContactHistory(new Dictionary<string, object> {
                     ["campaignId"] = campaign, ["timelineId"] = timeline, ["heroStringId"] = hero, ["playerHeroStringId"] = player });
                 Require(ReadBool(Read("speaker"), "hasContact", false), "Actual speaker lost durable contact.");

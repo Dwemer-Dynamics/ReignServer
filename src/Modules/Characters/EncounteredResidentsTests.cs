@@ -5,9 +5,9 @@ using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
-        private static List<Dictionary<string, object>> RunEncounteredResidentTests()
+        internal static List<Dictionary<string, object>> RunEncounteredResidentTests()
         {
             var results = new List<Dictionary<string, object>>();
             void Check(string id, Func<object> run)
@@ -133,16 +133,16 @@ namespace ReignBetaServer
                 var payload = new Dictionary<string, object> { ["campaignId"] = "resident-test", ["heroStringId"] = "person",
                     ["promptPurpose"] = "portrait", ["gender"] = "female", ["ageYears"] = 30, ["cultureId"] = "empire",
                     ["physicalConfidence"] = new Dictionary<string, object> { ["score"] = 100 }, ["nativeCharacterSnapshot"] = snapshot };
-                Require(PreserveResidentClothing(payload) && !UsesAdultPortraitClothingEdit(payload), "Initial outfit must bypass the second pass at maximum confidence.");
-                string prompt = BuildPortraitPrompt(payload, "change clothes", true);
+                Require(PortraitsService.PreserveResidentClothing(payload) && !PortraitsService.UsesAdultPortraitClothingEdit(payload), "Initial outfit must bypass the second pass at maximum confidence.");
+                string prompt = PortraitsService.BuildPortraitPrompt(payload, "change clothes", true);
                 Require(prompt.Contains("Retain exactly the clothes") && prompt.Contains("Retain any encountered armor")
                     && !prompt.Contains("Their clan is tier") && !prompt.Contains("No extreme close-up") && !prompt.Contains("change clothes"), "Ordinary identity, exclusion or caller clothing layers leaked.");
                 snapshot["heroStringId"] = "wrong";
-                Require(!PreserveResidentClothing(payload), "A mismatched snapshot may not set the clothing policy.");
+                Require(!PortraitsService.PreserveResidentClothing(payload), "A mismatched snapshot may not set the clothing policy.");
                 snapshot["heroStringId"] = "person"; resident["initialPortraitCompleted"] = true;
-                Require(PreserveResidentClothing(payload) && !UsesAdultPortraitClothingEdit(payload), "Regeneration must still preserve the resident's current equipment.");
+                Require(PortraitsService.PreserveResidentClothing(payload) && !PortraitsService.UsesAdultPortraitClothingEdit(payload), "Regeneration must still preserve the resident's current equipment.");
                 resident["initialPortraitCompleted"] = false; payload["promptPurpose"] = "castle_scene";
-                Require(!PreserveResidentClothing(payload), "Scenery must not enter the portrait exception.");
+                Require(!PortraitsService.PreserveResidentClothing(payload), "Scenery must not enter the portrait exception.");
                 return true;
             });
             Check("commoner_prompt_roles_and_persistent_personality", () => {
@@ -153,20 +153,20 @@ namespace ReignBetaServer
                 var traits = new Dictionary<string, object> { ["basePersonalitySummary"] = "Patient with children, fiercely proud of her work, wary of promises." };
                 var characteristics = new Dictionary<string, object> { ["traits"] = traits,
                     ["voice"] = new Dictionary<string, object> { ["speechStyle"] = "Dry wit and short, precise answers." } };
-                string template = NormalizePromptSegment(LoadPromptTemplate("commoner_prompt.txt"));
-                Require(PromptFileNames.Contains("commoner_prompt.txt") && PromptMetadataByName().ContainsKey("commoner_prompt.txt")
-                    && DefaultPromptTemplates()["commoner_prompt.txt"].Length > 1000, "Commoner prompt is missing from editable inventory or embedded defaults.");
-                string first = BuildStableCharacterPrompt("commoner-fixture", "Sabina Doria", profile, characteristics);
+                string template = DialogueService.NormalizePromptSegment(PromptService.LoadPromptTemplate("commoner_prompt.txt"));
+                Require(Program.PromptFileNames.Contains("commoner_prompt.txt") && PromptService.PromptMetadataByName().ContainsKey("commoner_prompt.txt")
+                    && PromptService.DefaultPromptTemplates()["commoner_prompt.txt"].Length > 1000, "Commoner prompt is missing from editable inventory or embedded defaults.");
+                string first = DialogueService.BuildStableCharacterPrompt("commoner-fixture", "Sabina Doria", profile, characteristics);
                 Require(first.Contains(template) && first.Contains("Tavern work") && first.Contains("Patient with children")
                     && first.Contains("Dry wit"), "Role prompting replaced personality or missed native tavern occupation.");
-                string legacy = BuildCharacterFoundationText("verify_commoner", "commoner-fixture", "Sabina Doria", profile, characteristics, new Dictionary<string, object>());
-                string construction = BuildCharacterConstructionPrompt("verify_commoner", "commoner-fixture", profile, traits);
-                Require(legacy.Contains(template) && construction.Contains(template) && NormalizePromptSegment(construction).Contains(NormalizePromptSegment(LoadPromptTemplate("world_tone.txt"))), "Legacy or first-contact construction omitted commoner/world layers.");
+                string legacy = DialogueService.BuildCharacterFoundationText("verify_commoner", "commoner-fixture", "Sabina Doria", profile, characteristics, new Dictionary<string, object>());
+                string construction = CharactersService.BuildCharacterConstructionPrompt("verify_commoner", "commoner-fixture", profile, traits);
+                Require(legacy.Contains(template) && construction.Contains(template) && DialogueService.NormalizePromptSegment(construction).Contains(DialogueService.NormalizePromptSegment(PromptService.LoadPromptTemplate("world_tone.txt"))), "Legacy or first-contact construction omitted commoner/world layers.");
                 resident["recruited"] = true;
-                string recruited = BuildStableCharacterPrompt("commoner-fixture", "Sabina Doria", profile, characteristics);
+                string recruited = DialogueService.BuildStableCharacterPrompt("commoner-fixture", "Sabina Doria", profile, characteristics);
                 Require(recruited.Contains("not a current shift") && recruited.Contains("Patient with children")
                     && recruited.Contains("Tavern work") && recruited.Contains("Zeonica") && recruited.Contains("TavernWench")
-                    && PromptHash(first) != PromptHash(recruited), "Recruitment did not invalidate the cached role or preserve personality.");
+                    && DialogueService.PromptHash(first) != DialogueService.PromptHash(recruited), "Recruitment did not invalidate the cached role or preserve personality.");
                 resident["recruited"] = false; resident["occupation"] = "Guard"; resident["military"] = true;
                 Require(BuildCommonerPromptBlock(profile).Contains("cannot grant their own release"), "Duty constraints are absent.");
                 resident["releasedFromDuty"] = true;
@@ -234,7 +234,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> RomanticPosture(Dictionary<string, object> subject)
                 {
                     var empty = new Dictionary<string, object>();
-                    return CalculateRomanticPosture("verify_commoner", "resident", "visitor", subject, empty, empty, empty, empty,
+                    return DialogueService.CalculateRomanticPosture("verify_commoner", "resident", "visitor", subject, empty, empty, empty, empty,
                         new Dictionary<string, object> { ["skipCooldownQuery"] = true }, "dialogue", "Tell me about your family.");
                 }
                 var activeHousehold = ReadDictionary(native, "commonerHousehold");
@@ -266,11 +266,11 @@ namespace ReignBetaServer
                     ["encounteredResident"] = new Dictionary<string, object> { ["schema"] = "reign-encountered-resident-v1", ["residentId"] = "family-map" } };
                 var visitor = new Dictionary<string, object> { ["heroStringId"] = "visitor", ["name"] = "Godric Voss" };
                 var payload = new Dictionary<string, object> { ["hero"] = speaker, ["heroStringId"] = "resident", ["participantProfiles"] = new[] { speaker, visitor } };
-                Require(FindNativeKinshipContradictions(new Dictionary<string, object> { ["reply"] = "My husband Orestes Varen and my daughter Livia live at home." }, payload, "resident").Count == 0,
+                Require(DialogueService.FindNativeKinshipContradictions(new Dictionary<string, object> { ["reply"] = "My husband Orestes Varen and my daughter Livia live at home." }, payload, "resident").Count == 0,
                     "Native kinship repair erased unmodeled relatives.");
-                Require(FindNativeKinshipContradictions(new Dictionary<string, object> { ["reply"] = "Godric Voss is my husband." }, payload, "resident").Count > 0,
+                Require(DialogueService.FindNativeKinshipContradictions(new Dictionary<string, object> { ["reply"] = "Godric Voss is my husband." }, payload, "resident").Count > 0,
                     "Household exception allowed invented kinship with a native participant.");
-                string map = BuildInteractionRoleAttribution(payload, "resident", "Sabina Doria", "Visitor");
+                string map = DialogueService.BuildInteractionRoleAttribution(payload, "resident", "Sabina Doria", "Visitor");
                 Require(map.Contains("never erases that household") && map.Contains("private household is not automatically known"), "Family map conflicts with household or leaks private knowledge.");
                 return true;
             });
@@ -281,23 +281,23 @@ namespace ReignBetaServer
                 var characteristics = new Dictionary<string, object> { ["traits"] = new Dictionary<string, object> {
                     ["basePersonalitySummary"] = "Distinctive practical outlook and dry humor." } };
                 var empty = new Dictionary<string, object>(); var rows = new List<Dictionary<string, object>>();
-                string template = NormalizePromptSegment(LoadPromptTemplate("commoner_prompt.txt"));
-                var envelopes = new List<PromptEnvelope>();
-                envelopes.Add(BuildDialoguePromptEnvelope("verify_commoner", "commoner-fixture", "Sabina Doria", "Visitor", "Visitor",
+                string template = DialogueService.NormalizePromptSegment(PromptService.LoadPromptTemplate("commoner_prompt.txt"));
+                var envelopes = new List<DialogueService.PromptEnvelope>();
+                envelopes.Add(DialogueService.BuildDialoguePromptEnvelope("verify_commoner", "commoner-fixture", "Sabina Doria", "Visitor", "Visitor",
                     "How is your work?", "An ordinary conversation.", profile, characteristics, empty, empty, empty, rows, rows, rows, rows, empty, empty));
                 foreach (string mode in new[] { "settlement_home", "party_chat", "social_event" })
                 {
                     var payload = new Dictionary<string, object> { ["mode"] = mode };
-                    envelopes.Add(BuildEventPromptEnvelope("verify_commoner", "commoner-event", "commoner-fixture", "Sabina Doria", "Visitor", "Visitor",
+                    envelopes.Add(DialogueService.BuildEventPromptEnvelope("verify_commoner", "commoner-event", "commoner-fixture", "Sabina Doria", "Visitor", "Visitor",
                         "Tell me more.", "An ordinary conversation.", payload, profile, characteristics, empty, empty, empty, rows, rows, rows, rows, empty));
                 }
-                envelopes.Add(BuildCorrespondencePromptEnvelope("verify_commoner", "commoner-fixture", "Sabina Doria", "visitor", "Visitor", 1,
+                envelopes.Add(DialogueService.BuildCorrespondencePromptEnvelope("verify_commoner", "commoner-fixture", "Sabina Doria", "visitor", "Visitor", 1,
                     "How are you?", profile, characteristics, empty, ""));
                 foreach (var envelope in envelopes)
                 {
                     string text = string.Join("\n", envelope.Messages.Select(m => ReadString(m, "content", "")));
                     Require(text.Contains(template) && text.Contains("Distinctive practical outlook") && text.Contains("WORLD TONE")
-                        && NormalizePromptSegment(text).Contains(NormalizePromptSegment(BuildCommonerHouseholdPrompt(profile))),
+                        && DialogueService.NormalizePromptSegment(text).Contains(DialogueService.NormalizePromptSegment(BuildCommonerHouseholdPrompt(profile))),
                         "A production conversation envelope omitted commoner, household, personality or world layers.");
                 }
                 return new { providerCalls = 0, conversationEnvelopes = envelopes.Count };

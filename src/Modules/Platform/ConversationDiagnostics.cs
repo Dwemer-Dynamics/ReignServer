@@ -13,7 +13,7 @@ using System.Threading;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class ConversationResponseService
     {
         // A separate opt-in evidence store. Never pass its payloads through the normal
         // audit/reasoning sanitizer or include them in campaign snapshots/support logs.
@@ -21,16 +21,16 @@ namespace ReignBetaServer
         private static readonly string DiagnosticProcessId = Guid.NewGuid().ToString("N");
         private static readonly AsyncLocal<string> DiagnosticRootOverride = new AsyncLocal<string>();
         private static readonly AsyncLocal<ConversationDiagnosticRequest> DiagnosticRequest = new AsyncLocal<ConversationDiagnosticRequest>();
-        private static readonly AsyncLocal<ConversationDiagnosticTrace> DiagnosticTrace = new AsyncLocal<ConversationDiagnosticTrace>();
-        private static readonly AsyncLocal<ConversationDiagnosticStep> DiagnosticStep = new AsyncLocal<ConversationDiagnosticStep>();
+        internal static readonly AsyncLocal<ConversationDiagnosticTrace> DiagnosticTrace = new AsyncLocal<ConversationDiagnosticTrace>();
+        internal static readonly AsyncLocal<ConversationDiagnosticStep> DiagnosticStep = new AsyncLocal<ConversationDiagnosticStep>();
         private static readonly ConcurrentDictionary<string, ConversationDiagnosticTrace> ActiveDiagnosticTraces = new ConcurrentDictionary<string, ConversationDiagnosticTrace>();
         private static readonly object DiagnosticSettingsLock = new object();
         private static readonly object DiagnosticExportLock = new object();
         private static string DiagnosticLastError = "";
-        private static readonly ConcurrentDictionary<string, ConversationDiagnosticStep> DiagnosticCodexThreads = new ConcurrentDictionary<string, ConversationDiagnosticStep>();
-        private static string DiagnosticRoot => DiagnosticRootOverride.Value ?? Path.Combine(DataDir, "diagnostics", "conversations");
+        internal static readonly ConcurrentDictionary<string, ConversationDiagnosticStep> DiagnosticCodexThreads = new ConcurrentDictionary<string, ConversationDiagnosticStep>();
+        private static string DiagnosticRoot => DiagnosticRootOverride.Value ?? Path.Combine(Program.DataDir, "diagnostics", "conversations");
 
-        private static string DiagnosticRedact(string text, IEnumerable<string> credentials = null)
+        internal static string DiagnosticRedact(string text, IEnumerable<string> credentials = null)
         {
             string clean = text ?? "";
             foreach (string credential in credentials ?? Array.Empty<string>())
@@ -74,7 +74,7 @@ namespace ReignBetaServer
             catch (Exception ex) { DiagnosticFailure(ex); return false; }
         }
 
-        private sealed class ConversationDiagnosticRequest : IDisposable
+        internal sealed class ConversationDiagnosticRequest : IDisposable
         {
             internal readonly Dictionary<string, ConversationDiagnosticTrace> Traces = new Dictionary<string, ConversationDiagnosticTrace>(StringComparer.Ordinal);
             internal readonly Dictionary<string, object> Input;
@@ -110,7 +110,7 @@ namespace ReignBetaServer
             }
         }
 
-        private sealed class ConversationDiagnosticTrace
+        internal sealed class ConversationDiagnosticTrace
         {
             internal readonly string Id = Guid.NewGuid().ToString("N");
             internal readonly string Root;
@@ -169,7 +169,7 @@ namespace ReignBetaServer
                 using (var writer = new StreamWriter(gzip, new UTF8Encoding(false))) writer.Write(text);
                 DiagnosticWriteJson(System.IO.Path.Combine(directory, id + ".json"), new Dictionary<string, object> {
                     ["characters"] = text.Length, ["originalCharacters"] = original.Length,
-                    ["sha256"] = PromptContentHash(text), ["credentialRedacted"] = text != original,
+                    ["sha256"] = DialogueService.PromptContentHash(text), ["credentialRedacted"] = text != original,
                     ["hashScope"] = "retained credential-redacted UTF-8 text", ["complete"] = true
                 });
                 return id;
@@ -252,7 +252,7 @@ namespace ReignBetaServer
             return DiagnosticTrace.Value != null && !DiagnosticTrace.Value.Closed ? DiagnosticTrace.Value : null;
         }
 
-        private sealed class ConversationDiagnosticStep : IDisposable
+        internal sealed class ConversationDiagnosticStep : IDisposable
         {
             internal readonly ConversationDiagnosticTrace Trace;
             internal readonly string Id = Guid.NewGuid().ToString("N");
@@ -290,7 +290,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static ConversationDiagnosticStep BeginDiagnosticLlm(Dictionary<string, object> request, string credential = "")
+        internal static ConversationDiagnosticStep BeginDiagnosticLlm(Dictionary<string, object> request, string credential = "")
         {
             try
             {
@@ -315,7 +315,7 @@ namespace ReignBetaServer
             catch (Exception ex) { DiagnosticFailure(ex); return new ConversationDiagnosticStep(null, "llm_call", "Model call"); }
         }
 
-        private static ConversationDiagnosticStep BeginDiagnosticAttempt(string provider, string requestJson, string apiKey = "")
+        internal static ConversationDiagnosticStep BeginDiagnosticAttempt(string provider, string requestJson, string apiKey = "")
         {
             var trace = DiagnosticTrace.Value;
             if (trace != null)
@@ -329,7 +329,7 @@ namespace ReignBetaServer
             return new ConversationDiagnosticStep(trace, "provider_attempt", "Provider attempt", new Dictionary<string, object> { ["provider"] = DiagnosticRedact(provider), ["requestBody"] = requestJson });
         }
 
-        private static ConversationDiagnosticStep BeginDiagnosticCodexRpc(string method, Dictionary<string, object> parameters)
+        internal static ConversationDiagnosticStep BeginDiagnosticCodexRpc(string method, Dictionary<string, object> parameters)
         {
             if (DiagnosticTrace.Value == null || !(method.StartsWith("turn/") || method.StartsWith("thread/"))) return null;
             var body = new Dictionary<string, object> { ["method"] = method, ["params"] = parameters };
@@ -345,7 +345,7 @@ namespace ReignBetaServer
             return step;
         }
 
-        private static void ObserveDiagnosticCodexFrame(string original, Dictionary<string, object> message)
+        internal static void ObserveDiagnosticCodexFrame(string original, Dictionary<string, object> message)
         {
             try
             {
@@ -353,7 +353,7 @@ namespace ReignBetaServer
                 long id = ReadLong(message, "id", 0);
                 if (id > 0)
                 {
-                    lock (CodexStateLock) { if (CodexPending.TryGetValue(id, out var waiter)) owner = waiter.Diagnostic; }
+                    lock (LlmProviderService.CodexStateLock) { if (LlmProviderService.CodexPending.TryGetValue(id, out var waiter)) owner = waiter.Diagnostic; }
                 }
                 else
                 {
@@ -363,7 +363,7 @@ namespace ReignBetaServer
                     if (thread.Length == 0)
                     {
                         string turnId = FirstNonEmpty(ReadString(parameters, "turnId", ""), ReadString(turn, "id", ""));
-                        lock (CodexStateLock) { if (CodexOwnedTurnThreads.TryGetValue(turnId, out var known)) thread = known; }
+                        lock (LlmProviderService.CodexStateLock) { if (LlmProviderService.CodexOwnedTurnThreads.TryGetValue(turnId, out var known)) thread = known; }
                     }
                     DiagnosticCodexThreads.TryGetValue(thread, out owner);
                 }
@@ -379,7 +379,7 @@ namespace ReignBetaServer
             catch (Exception ex) { DiagnosticFailure(ex); }
         }
 
-        private static void DiagnosticValidation(string title, bool accepted, IEnumerable<string> issues, object before = null, object after = null)
+        internal static void DiagnosticValidation(string title, bool accepted, IEnumerable<string> issues, object before = null, object after = null)
         {
             var trace = DiagnosticTrace.Value;
             if (trace == null) return;
@@ -388,15 +388,15 @@ namespace ReignBetaServer
                 new Dictionary<string, object> { ["issues"] = reasons, ["received"] = before, ["result"] = after }, DiagnosticStep.Value?.Id ?? "");
         }
 
-        private static List<string> DiagnosticStructuredIssues(string content, string mode, Dictionary<string, object> request)
+        internal static List<string> DiagnosticStructuredIssues(string content, string mode, Dictionary<string, object> request)
         {
             var issues = new List<string>();
             var parsed = TryParseJsonObject(content);
             if (parsed == null) { issues.Add("The response is not a parseable JSON object."); return issues; }
             if (parsed.Count == 0) { issues.Add("The response is an empty JSON object ({}). It has no dialogue or required decision fields."); return issues; }
-            if (!StructuredActionResponseHasDecision(content, request))
+            if (!DialogueService.StructuredActionResponseHasDecision(content, request))
                 issues.Add("Missing or invalid required structuredActionDecision; a generic dialogue shape does not authorize actions.");
-            if (IsConversationStructuredMode(NormalizeLookup(mode).Replace(' ', '_')))
+            if (IsConversationStructuredMode(ActionPipelineService.NormalizeLookup(mode).Replace(' ', '_')))
             {
                 if (!ConversationVisibleReplyPassesRequestQualityGate(content, request, mode))
                     issues.Add(ConversationStructuredObjectHasUsableVisibleReply(parsed) ? "The visible reply only repeats a quoted fragment of the player's message." : "No usable visible reply was supplied.");
@@ -411,7 +411,7 @@ namespace ReignBetaServer
             return issues;
         }
 
-        private static Dictionary<string, object> WithDiagnosticTransformation(string title, Dictionary<string, object> input, Func<Dictionary<string, object>> action)
+        internal static Dictionary<string, object> WithDiagnosticTransformation(string title, Dictionary<string, object> input, Func<Dictionary<string, object>> action)
         {
             using var step = new ConversationDiagnosticStep(DiagnosticTrace.Value, "validation", title, new Dictionary<string, object> { ["received"] = ReadString(input, "content", "") });
             string before = ReadString(input, "content", "");
@@ -431,7 +431,7 @@ namespace ReignBetaServer
             catch (Exception ex) { step.End("failed", ex.Message); throw; }
         }
 
-        private static void ObserveDiagnosticAudit(string campaign, string correlation, string mode, string phase, string hero, string status, long duration, string summary, Dictionary<string, object> data)
+        internal static void ObserveDiagnosticAudit(string campaign, string correlation, string mode, string phase, string hero, string status, long duration, string summary, Dictionary<string, object> data)
         {
             try
             {

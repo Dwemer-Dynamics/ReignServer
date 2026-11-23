@@ -8,9 +8,9 @@ using ReignPortraits;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
-        private static List<Dictionary<string, object>> RunOutfitChangeContractTests()
+        internal static List<Dictionary<string, object>> RunOutfitChangeContractTests()
         {
             var rows = new List<Dictionary<string, object>>();
             void Check(string name, Func<bool> run)
@@ -88,7 +88,7 @@ namespace ReignBetaServer
                 AcceptOutfitPreview(op, new PortraitImageCallResult { Ok = true, ImageBytes = new byte[] { 7 } }, bytes => bytes);
                 return op.Status == "ready" && op.After.SequenceEqual(new byte[] { 7 });
             });
-            Check("prompt_catalog", () => DefaultPromptTemplates().ContainsKey(OutfitPromptName) && PromptMetadataByName().ContainsKey(OutfitPromptName));
+            Check("prompt_catalog", () => PromptService.DefaultPromptTemplates().ContainsKey(OutfitPromptName) && PromptService.PromptMetadataByName().ContainsKey(OutfitPromptName));
             var identity = new Dictionary<string, object> { ["campaignId"] = "outfit_contract", ["timelineId"] = "main", ["heroStringId"] = "npc", ["playerHeroId"] = "player", ["operationId"] = Guid.NewGuid().ToString("N") };
             Check("cancel_before_begin_prevents_provider", () => {
                 OutfitChangeApi(identity, "cancel");
@@ -130,9 +130,9 @@ namespace ReignBetaServer
                 try
                 {
                     CommitOutfitInDirectory(op, root);
-                    var profile = ReadJsonObject(profilePath);
-                    var outfit = ReadJsonObject(Path.Combine(root, "portraits", "outfit.json"));
-                    var formal = ReadJsonObject(Path.Combine(root, "portraits", "formal_outfit.json"));
+                    var profile = CampaignFileService.ReadJsonObject(profilePath);
+                    var outfit = CampaignFileService.ReadJsonObject(Path.Combine(root, "portraits", "outfit.json"));
+                    var formal = CampaignFileService.ReadJsonObject(Path.Combine(root, "portraits", "formal_outfit.json"));
                     var nativeRefresh = new Dictionary<string, object> { ["name"] = "Retained identity" };
                     ApplyConfirmedOutfit(outfit, nativeRefresh);
                     bool staleRejected = false;

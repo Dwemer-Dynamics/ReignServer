@@ -7,34 +7,88 @@ using Reign.Shared;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class VerificationService
     {
         private static List<Dictionary<string, object>> PersistArchitectureSceneFixture(string campaignId, List<Dictionary<string, object>> turns)
         {
             const string session = "unknown_identity_scene_summary";
-            using var connection = OpenCampaignConnection(campaignId);
+            using var connection = ReignDatabase.OpenCampaignConnection(campaignId);
             int ordinal = 0;
             foreach (var turn in turns)
-                InsertConversationTurn(connection, ReadString(turn, "turn_id", ""), session, ReadString(turn, "event_id", ""), ++ordinal,
+                DialogueService.InsertConversationTurn(connection, ReadString(turn, "turn_id", ""), session, ReadString(turn, "event_id", ""), ++ordinal,
                     ReadString(turn, "exchange_id", ""), ReadString(turn, "role", ""), ReadString(turn, "speaker_id", ""), ReadString(turn, "speaker_name", ""),
                     ReadString(turn, "text", ""), "in_person", 0d, ReadLong(turn, "ts", 0), "town_test", new List<string> { "npc_a", "main_hero" },
                     TryParseJsonObject(ReadString(turn, "payload_json", "{}")));
             // Compaction now verifies exact persisted source rows, including default
             // columns. A fabricated partial dictionary cannot establish provenance.
-            return QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$session ORDER BY turn_order;", TestDict("session", session));
+            return PlatformSelfTestStore.SelectConversationTurns(connection, TestDict("session", session));
+        }
+
+        private static void RunRecentDialogueMemoryReadTests(Action<string, bool, string, object> add)
+        {
+            string path = Path.GetTempFileName();
+            List<Dictionary<string, object>> Baseline(int limit) => Program.ReadJsonLinesFromPath(path)
+                .Where(CampaignFileService.DurableDialogueMemoryRowIsUsable)
+                .OrderByDescending(row => ReadLong(row, "ts", 0)).Take(limit).Reverse().ToList();
+
+            string Failure(Action read)
+            {
+                try { read(); return ""; }
+                catch (System.Text.Json.JsonException) { return "json"; }
+                catch (ArgumentException) { return "classification"; }
+            }
+
+            try
+            {
+                var rows = new[]
+                {
+                    TestDict("id", "early-largest", "ts", long.MaxValue),
+                    TestDict("id", "a", "ts", "17"),
+                    TestDict("id", "b", "ts", 17),
+                    TestDict("id", "excluded", "ts", 25, "source", "dialogue_llm", "text", "0"),
+                    TestDict("id", "c", "ts", 17),
+                    null,
+                    TestDict("id", "old", "ts", "invalid")
+                };
+                File.WriteAllLines(path, rows.Select(Json.Serialize));
+                var selected = Program.ReadRecentDialogueMemoryRows(path, 3);
+                add("recent_dialogue_memory_stable_cutoff",
+                    selected.Select(row => ReadString(row, "id", "")).SequenceEqual(new[] { "b", "a", "early-largest" })
+                    && new[] { -1, 0, 1, 3, 100 }.All(limit =>
+                        Json.Serialize(Program.ReadRecentDialogueMemoryRows(path, limit)) == Json.Serialize(Baseline(limit))),
+                    "Bounded selection preserves the timestamp and physical tie rules, including unusable and legacy rows.", null);
+
+                File.WriteAllText(path, "{\"source\":\"\\uFFFE\",\"ts\":999}");
+                add("recent_dialogue_memory_classification_failure",
+                    Failure(() => Program.ReadRecentDialogueMemoryRows(path, 1)) == Failure(() => Baseline(1))
+                    && Program.ReadRecentDialogueMemoryRows(path, 0).Count == 0,
+                    "A classification failure is preserved after a complete read, while a zero limit skips classification.", null);
+
+                File.AppendAllText(path, "\n{malformed");
+                add("recent_dialogue_memory_strict_eof_failure",
+                    new[] { 0, 1 }.All(limit => Failure(() => Baseline(limit)) == "json"
+                        && Failure(() => Program.ReadRecentDialogueMemoryRows(path, limit)) == "json"),
+                    "Strict parsing reaches EOF and a malformed row takes precedence over an earlier classification failure.", null);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
         }
 
         private static List<Dictionary<string, object>> RunInteractionArchitectureSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
-            results.AddRange(RunConversationDiagnosticsSelfTests());
-            results.AddRange(RunConversationResponseParsingSelfTests());
-            results.AddRange(RunGroupConversationTurnOrderSelfTests());
-            results.AddRange(RunGroupConversationFloorSelfTests());
-            results.AddRange(RunPromptEditorPersistenceTests());
-            results.AddRange(RunReignXpOptionsSelfTests());
+            results.AddRange(ConversationResponseService.RunConversationDiagnosticsSelfTests());
+            results.AddRange(ConversationResponseService.RunConversationResponseParsingSelfTests());
+            results.AddRange(DialogueService.RunGroupConversationTurnOrderSelfTests());
+            results.AddRange(DialogueService.RunGroupConversationFloorSelfTests());
+            results.AddRange(PromptService.RunPromptEditorPersistenceTests());
+            results.AddRange(SettingsService.RunReignXpOptionsSelfTests());
+            results.AddRange(RunRouteTableContractSelfTests());
             Action<string, bool, string, object> add = (id, passed, summary, data) => results.Add(new Dictionary<string, object>
             { ["caseId"] = id, ["suite"] = "interaction_architecture", ["passed"] = passed, ["summary"] = summary, ["data"] = data });
+            RunRecentDialogueMemoryReadTests(add);
             var providerChoice = new Dictionary<string, object> {
                 ["message"] = new Dictionary<string, object> { ["content"] = "{\"reply\":\"Hello.\"}" },
                 ["finish_reason"] = "stop"
@@ -43,17 +97,17 @@ namespace ReignBetaServer
             {
                 var providerResponse = new Dictionary<string, object> { ["choices"] = choices };
                 add("provider_choices_" + choices.GetType().Name,
-                    ReadString(TryParseJsonObject(ExtractAssistantContent(providerResponse)), "reply", "") == "Hello."
-                    && ExtractFinishReason(providerResponse) == "stop",
+                    ReadString(TryParseJsonObject(LlmProviderService.ExtractAssistantContent(providerResponse)), "reply", "") == "Hello."
+                    && LlmProviderService.ExtractFinishReason(providerResponse) == "stop",
                     "Both JSON array representations preserve provider text and completion status.", null);
             }
             var roundTripResponse = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(
                 new Dictionary<string, object> { ["choices"] = new object[] { providerChoice } }));
             add("provider_choices_serializer_roundtrip",
-                ExtractAssistantContent(roundTripResponse) == "{\"reply\":\"Hello.\"}"
-                && ExtractFinishReason(roundTripResponse) == "stop",
+                LlmProviderService.ExtractAssistantContent(roundTripResponse) == "{\"reply\":\"Hello.\"}"
+                && LlmProviderService.ExtractFinishReason(roundTripResponse) == "stop",
                 "The active platform serializer preserves a complete provider response.", null);
-            string controlCenter = ControlCenterHtml();
+            string controlCenter = Program.ControlCenterHtml();
             string mainNavigation = System.Text.RegularExpressions.Regex.Match(controlCenter,
                 @"<nav id='mainNavigation'[\s\S]*?</nav>").Value;
             string diagnosticNavigation = System.Text.RegularExpressions.Regex.Match(controlCenter,
@@ -98,14 +152,14 @@ namespace ReignBetaServer
                 && controlCenter.Contains("server and web-proxy logs")
                 && controlCenter.Contains("fetch('/api/support-bundle'"),
                 "The header button precedes Reload and requires an issue description before a local ZIP download.", null);
-            string redactionProbe = RedactSupportText("apiKey=example-secret-123456 Bearer abcdefghijklmnop https://alice:secret@host/path");
+            string redactionProbe = OperationsService.RedactSupportText("apiKey=example-secret-123456 Bearer abcdefghijklmnop https://alice:secret@host/path");
             add("support_bundle_redaction_contract",
                 !redactionProbe.Contains("example-secret") && !redactionProbe.Contains("abcdefghijklmnop")
                 && !redactionProbe.Contains("alice:secret") && redactionProbe.Contains("[REDACTED]"),
                 "Secrets in log fields, bearer headers and URL credentials are removed.", null);
             add("support_bundle_screenshot_contract",
-                SupportImageSignature(new byte[] { 137, 80, 78, 71, 0, 0, 0, 0, 0, 0, 0, 0 }, "image/png")
-                && !SupportImageSignature(new byte[] { 137, 80, 78, 71, 0, 0, 0, 0, 0, 0, 0, 0 }, "image/jpeg"),
+                OperationsService.SupportImageSignature(new byte[] { 137, 80, 78, 71, 0, 0, 0, 0, 0, 0, 0, 0 }, "image/png")
+                && !OperationsService.SupportImageSignature(new byte[] { 137, 80, 78, 71, 0, 0, 0, 0, 0, 0, 0, 0 }, "image/jpeg"),
                 "Optional screenshots require an allowlisted type and matching image signature.", null);
             Dictionary<string, object> screenshotRoundTrip = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(
                 new Dictionary<string, object> { ["screenshots"] = new object[] {
@@ -117,7 +171,7 @@ namespace ReignBetaServer
                 long screenshotBytes = 0;
                 using (System.IO.Compression.ZipArchive screenshotZip = new System.IO.Compression.ZipArchive(
                     screenshotOutput, System.IO.Compression.ZipArchiveMode.Create, true))
-                    AddSupportScreenshots(screenshotZip, screenshotRoundTrip, screenshotManifest, ref screenshotBytes);
+                    OperationsService.AddSupportScreenshots(screenshotZip, screenshotRoundTrip, screenshotManifest, ref screenshotBytes);
                 using (System.IO.Compression.ZipArchive screenshotZip = new System.IO.Compression.ZipArchive(
                     new MemoryStream(screenshotOutput.ToArray()), System.IO.Compression.ZipArchiveMode.Read))
                     add("support_bundle_screenshot_roundtrip",
@@ -134,7 +188,7 @@ namespace ReignBetaServer
                 long supportBytes = 0;
                 using (System.IO.Compression.ZipArchive supportZip = new System.IO.Compression.ZipArchive(
                     supportOutput, System.IO.Compression.ZipArchiveMode.Create, true))
-                    AddSupportFile(supportZip, supportFixture, "server/fixture.log", supportManifest, ref supportBytes);
+                    OperationsService.AddSupportFile(supportZip, supportFixture, "server/fixture.log", supportManifest, ref supportBytes);
                 using (System.IO.Compression.ZipArchive supportZip = new System.IO.Compression.ZipArchive(
                     new MemoryStream(supportOutput.ToArray()), System.IO.Compression.ZipArchiveMode.Read))
                 using (StreamReader supportReader = new StreamReader(supportZip.GetEntry("server/fixture.log").Open()))
@@ -147,17 +201,17 @@ namespace ReignBetaServer
                         "The isolated ZIP contains redacted text and a checksum manifest record.", null);
                 }
             }
-            string explicitCurrentFlirtation = ExplicitCurrentPlayerFlirtationQuote(
+            string explicitCurrentFlirtation = ReputationService.ExplicitCurrentPlayerFlirtationQuote(
                 "I am flirting with you right now because I am attracted to you, and I want to know whether you welcome my interest.");
             add("social_signal_server_derived_explicit_current",
                 explicitCurrentFlirtation == "I am flirting with you right now"
-                && SocialSignalSemanticsAreCompleted("flirtation", explicitCurrentFlirtation, false),
+                && ReputationService.SocialSignalSemanticsAreCompleted("flirtation", explicitCurrentFlirtation, false),
                 "An unmistakable present-tense player flirtation has an exact server-derived evidence quote even when a provider omits its optional proposal.",
                 explicitCurrentFlirtation);
             add("social_signal_server_derived_hypothetical_suppressed",
-                string.IsNullOrWhiteSpace(ExplicitCurrentPlayerFlirtationQuote(
+                string.IsNullOrWhiteSpace(ReputationService.ExplicitCurrentPlayerFlirtationQuote(
                     "If I said I am flirting with you right now, would you welcome it?"))
-                && string.IsNullOrWhiteSpace(ExplicitCurrentPlayerFlirtationQuote(
+                && string.IsNullOrWhiteSpace(ReputationService.ExplicitCurrentPlayerFlirtationQuote(
                     "I am not flirting with you right now.")),
                 "Hypothetical, quoted, and negated flirtation language cannot create a server-derived current signal.",
                 null);
@@ -207,11 +261,11 @@ namespace ReignBetaServer
                     new Dictionary<string, object> { ["speaker_name"] = "NPC B", ["text"] = "The road east is unsafe." },
                     new Dictionary<string, object> { ["speaker_name"] = "NPC C", ["text"] = "I disagree; the southern bridge is worse." }
                 };
-                string groupPrompt = BuildSharedGroupConversationPrompt(campaignId, groupPayload, "npc_a", lines, "What do all of you think?");
-                UpdateSharedGroupConversationState(campaignId, groupPayload, "npc_a", "NPC A", "NPC B is right about the eastern road. NPC C, why is the bridge worse?", "group_test", 100);
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                string groupPrompt = DialogueService.BuildSharedGroupConversationPrompt(campaignId, groupPayload, "npc_a", lines, "What do all of you think?");
+                DialogueService.UpdateSharedGroupConversationState(campaignId, groupPayload, "npc_a", "NPC A", "NPC B is right about the eastern road. NPC C, why is the bridge worse?", "group_test", 100);
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    Dictionary<string, object> state = QuerySql(connection, "SELECT * FROM group_conversation_state WHERE session_id='group_test';").FirstOrDefault();
+                    Dictionary<string, object> state = PlatformSelfTestStore.SelectGroupConversationState(connection).FirstOrDefault();
                     add("shared_group_state", groupPrompt.Contains("npc_b") && groupPrompt.Contains("npc_c")
                         && groupPrompt.Contains("COMPACT DERIVED STATE")
                         && groupPrompt.Contains("acknowledge it instead of claiming omission", StringComparison.Ordinal)
@@ -225,9 +279,9 @@ namespace ReignBetaServer
                         new Dictionary<string, object> { ["sourceTurnId"] = "turn_a", ["exchangeId"] = "exchange_1", ["speaker"] = "Player", ["text"] = "First line." },
                         new Dictionary<string, object> { ["sourceTurnId"] = "turn_b", ["exchangeId"] = "exchange_1", ["speaker"] = "NPC A", ["text"] = "Second line." }
                     };
-                    List<Dictionary<string, object>> canonicalTranscript = CanonicalizePromptTranscript(duplicateTranscript, 30);
+                    List<Dictionary<string, object>> canonicalTranscript = DialogueService.CanonicalizePromptTranscript(duplicateTranscript, 30);
                     add("canonical_transcript_deduplicates_turn_ids", canonicalTranscript.Count == 2
-                        && canonicalTranscript.Select(PromptTranscriptIdentity).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 2,
+                        && canonicalTranscript.Select(DialogueService.PromptTranscriptIdentity).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 2,
                         "Prompt assembly renders each stable conversation turn once.", canonicalTranscript);
 
                     List<Dictionary<string, object>> eventHistoryFixture = new List<Dictionary<string, object>>();
@@ -245,21 +299,20 @@ namespace ReignBetaServer
                             };
                             string playerWords = "HISTORY_" + beat + "_player";
                             string npcWords = "HISTORY_" + beat + "_" + speakerId;
-                            var accepted = StoreSocialEventConversationExchange(campaignId, eventPayload, speakerId, "player",
+                            var accepted = DialogueService.StoreSocialEventConversationExchange(campaignId, eventPayload, speakerId, "player",
                                 "player", speakerId, playerWords, npcWords, "history_" + beat + "_" + speakerId,
                                 "history_roundtrip", 100);
-                            var acceptedRetry = StoreSocialEventConversationExchange(campaignId, eventPayload, speakerId, "player",
+                            var acceptedRetry = DialogueService.StoreSocialEventConversationExchange(campaignId, eventPayload, speakerId, "player",
                                 "player", speakerId, playerWords, npcWords, "history_" + beat + "_" + speakerId,
                                 "history_roundtrip", 100);
                             retryReturnsSameSourceIds &= ReadStringList(accepted, "turnIds").SequenceEqual(ReadStringList(acceptedRetry, "turnIds"));
-                            var playerRow = speakerId == "npc_a" ? EventTranscriptLine("player", "player", playerWords, eventPayload) : null;
-                            var npcRow = EventTranscriptLine("npc", speakerId, npcWords, eventPayload);
-                            AttachAcceptedTranscriptSourceIds(playerRow, npcRow, accepted);
+                            var playerRow = speakerId == "npc_a" ? DialogueService.EventTranscriptLine("player", "player", playerWords, eventPayload) : null;
+                            var npcRow = DialogueService.EventTranscriptLine("npc", speakerId, npcWords, eventPayload);
+                            DialogueService.AttachAcceptedTranscriptSourceIds(playerRow, npcRow, accepted);
                             foreach (var eventLine in new[] { playerRow, npcRow }.Where(row => row != null))
                             {
                                 eventLine["ts"] = 100L; // A real group beat can finish within one second.
-                                var persisted = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;",
-                                    TestDict("id", ReadString(eventLine, "sourceTurnId", ""))).SingleOrDefault();
+                                var persisted = PlatformSelfTestStore.SelectConversationTurns2(connection, TestDict("id", ReadString(eventLine, "sourceTurnId", ""))).SingleOrDefault();
                                 sourceIdsMatchAcceptedRows &= persisted != null
                                     && ReadString(persisted, "role", "") == ReadString(eventLine, "role", "")
                                     && ReadString(persisted, "speaker_id", "") == ReadString(eventLine, "speakerHeroStringId", "")
@@ -276,15 +329,15 @@ namespace ReignBetaServer
                     var duplicateNpcLine = new Dictionary<string, object>(eventHistoryFixture[1]);
                     duplicateNpcLine["id"] = "a-retry-can-have-a-new-file-row-id";
                     duplicateNpcLine["turnId"] = ReadString(duplicateNpcLine, "turnId", "").ToUpperInvariant();
-                    string eventHistoryPath = SocialEventTranscriptFile(campaignId, "history_roundtrip");
-                    foreach (var eventLine in eventHistoryFixture) AppendJsonLineToPath(eventHistoryPath, eventLine);
-                    AppendJsonLineToPath(eventHistoryPath, duplicateNpcLine);
-                    var recoveredEventHistory = BuildSocialEventPromptTranscript(ReadJsonLinesFromPath(eventHistoryPath), 30);
+                    string eventHistoryPath = DialogueService.SocialEventTranscriptFile(campaignId, "history_roundtrip");
+                    foreach (var eventLine in eventHistoryFixture) CampaignFileService.AppendJsonLineToPath(eventHistoryPath, eventLine);
+                    CampaignFileService.AppendJsonLineToPath(eventHistoryPath, duplicateNpcLine);
+                    var recoveredEventHistory = DialogueService.BuildSocialEventPromptTranscript(Program.ReadJsonLinesFromPath(eventHistoryPath), 30);
                     string[] expectedHistory = eventHistoryFixture.Select(row => ReadString(row, "text", "")).ToArray();
                     add("social_event_history_keeps_each_speaker_and_deduplicates_retries",
                         recoveredEventHistory.Select(row => ReadString(row, "text", "")).SequenceEqual(expectedHistory),
                         "Persisted player and two NPC contributions survive both shared event turn IDs; replaying one NPC row adds no duplicate.", recoveredEventHistory);
-                    var boundedEventHistory = BuildSocialEventPromptTranscript(ReadJsonLinesFromPath(eventHistoryPath), 2);
+                    var boundedEventHistory = DialogueService.BuildSocialEventPromptTranscript(Program.ReadJsonLinesFromPath(eventHistoryPath), 2);
                     add("social_event_history_same_second_order_and_complete_boundary",
                         boundedEventHistory.Select(row => ReadString(row, "text", "")).SequenceEqual(expectedHistory.Skip(3)),
                         "Same-second lines retain append order and the window includes the whole latest player/NPC exchange.", boundedEventHistory);
@@ -293,8 +346,8 @@ namespace ReignBetaServer
                     legacyRetry.Remove("sourceTurnId");
                     var legacyRows = eventHistoryFixture.Concat(new[] { legacyRetry }).ToList();
                     add("social_event_unbound_new_storage_id_is_preserved",
-                        BuildSocialEventPromptTranscript(legacyRows, 30).Count == 7
-                        && BuildSocialEventPromptTranscript(legacyRows, 2).Select(row => ReadString(row, "text", ""))
+                        DialogueService.BuildSocialEventPromptTranscript(legacyRows, 30).Count == 7
+                        && DialogueService.BuildSocialEventPromptTranscript(legacyRows, 2).Select(row => ReadString(row, "text", ""))
                             .SequenceEqual(expectedHistory.Skip(3).Concat(new[] { ReadString(legacyRetry, "text", "") })),
                         "An unbound row with another storage ID is not erased by equal words or a shared beat; its whole boundary remains visible.", null);
                     var repeatedUnboundWords = new[] { TestDict("turnId", "beat", "role", "npc", "speakerHeroStringId", "npc_a", "text", "Yes."),
@@ -303,9 +356,9 @@ namespace ReignBetaServer
                     var changedAcceptedWords = new[] { new Dictionary<string, object>(distinctAcceptedWords[0]),
                         new Dictionary<string, object>(distinctAcceptedWords[0]) { ["text"] = "No." } };
                     add("transcript_identity_preserves_unknown_distinct_and_changed_statements",
-                        CanonicalizePromptTranscript(repeatedUnboundWords, 30).Count == 2
-                        && CanonicalizePromptTranscript(distinctAcceptedWords, 30).Count == 2
-                        && CanonicalizePromptTranscript(changedAcceptedWords, 30).Count == 2,
+                        DialogueService.CanonicalizePromptTranscript(repeatedUnboundWords, 30).Count == 2
+                        && DialogueService.CanonicalizePromptTranscript(distinctAcceptedWords, 30).Count == 2
+                        && DialogueService.CanonicalizePromptTranscript(changedAcceptedWords, 30).Count == 2,
                         "Unknown repeated words, distinct accepted IDs and different complete bodies remain separate statements.", null);
                     bool invalidAcceptancePreserved = true;
                     foreach (var invalid in new[] { TestDict("ok", false, "turnIds", new[] { "p", "n" }),
@@ -314,12 +367,12 @@ namespace ReignBetaServer
                     {
                         invalid["sessionId"] = "invalid_acceptance_session";
                         invalid["exchangeId"] = "invalid_acceptance_exchange";
-                        var row = EventTranscriptLine("npc", "npc_a", "Keep this unbound.", TestDict());
-                        AttachAcceptedTranscriptSourceIds(null, row, invalid);
+                        var row = DialogueService.EventTranscriptLine("npc", "npc_a", "Keep this unbound.", TestDict());
+                        DialogueService.AttachAcceptedTranscriptSourceIds(null, row, invalid);
                         invalidAcceptancePreserved &= !row.ContainsKey("sourceTurnId") && ReadString(row, "id", "").Length > 0;
                     }
-                    var quietPlayerRow = EventTranscriptLine("player", "player", "A player line without an NPC reply.", TestDict());
-                    AttachAcceptedTranscriptSourceIds(quietPlayerRow, null, TestDict("ok", true, "sessionId", "quiet_session", "exchangeId", "quiet_exchange", "turnIds", new[] { "accepted_player", "unused_npc" }));
+                    var quietPlayerRow = DialogueService.EventTranscriptLine("player", "player", "A player line without an NPC reply.", TestDict());
+                    DialogueService.AttachAcceptedTranscriptSourceIds(quietPlayerRow, null, TestDict("ok", true, "sessionId", "quiet_session", "exchangeId", "quiet_exchange", "turnIds", new[] { "accepted_player", "unused_npc" }));
                     add("transcript_identity_requires_successful_complete_acceptance", invalidAcceptancePreserved
                         && ReadString(quietPlayerRow, "sourceTurnId", "") == "accepted_player",
                         "Failed/incomplete acceptance supplies no source authority, while a missing NPC line does not discard the accepted player line.", null);
@@ -335,7 +388,7 @@ namespace ReignBetaServer
                         {
                             ["sessionId"] = "unrelated_private_session", ["text"] = "PRIVATE_HISTORY_MUST_NOT_LEAK"
                         });
-                        var history = BuildPartyChatPromptTranscript(new Dictionary<string, object>
+                        var history = DialogueService.BuildPartyChatPromptTranscript(new Dictionary<string, object>
                         {
                             ["mode"] = "party_chat", ["castleChatMode"] = sceneKind,
                             ["conversationSessionId"] = "history_" + sceneKind,
@@ -352,23 +405,23 @@ namespace ReignBetaServer
                         ["conversationSessionId"] = "castle_recovery_session",
                         ["limit"] = 2
                     };
-                    string partyHistoryPath = PartyChatSessionTranscriptFile(campaignId, partyHistoryPayload);
-                    AppendJsonLineToPath(partyHistoryPath, new Dictionary<string, object>
+                    string partyHistoryPath = DialogueService.PartyChatSessionTranscriptFile(campaignId, partyHistoryPayload);
+                    CampaignFileService.AppendJsonLineToPath(partyHistoryPath, new Dictionary<string, object>
                     {
                         ["role"] = "player", ["speaker"] = "Player", ["text"] = "First recovery line.",
                         ["sessionId"] = "castle_recovery_session", ["exchangeId"] = "castle_recovery_session_turn_1"
                     });
-                    AppendJsonLineToPath(partyHistoryPath, new Dictionary<string, object>
+                    CampaignFileService.AppendJsonLineToPath(partyHistoryPath, new Dictionary<string, object>
                     {
                         ["role"] = "npc", ["speaker"] = "NPC A", ["text"] = "Second recovery line.",
                         ["sessionId"] = "castle_recovery_session", ["exchangeId"] = "castle_recovery_session_turn_1"
                     });
-                    AppendJsonLineToPath(partyHistoryPath, new Dictionary<string, object>
+                    CampaignFileService.AppendJsonLineToPath(partyHistoryPath, new Dictionary<string, object>
                     {
                         ["role"] = "npc", ["speaker"] = "NPC B", ["text"] = "Newest recovery line.",
                         ["sessionId"] = "castle_recovery_session", ["exchangeId"] = "castle_recovery_session_turn_1"
                     });
-                    Dictionary<string, object> partyHistory = PartyChatHistory(partyHistoryPayload);
+                    Dictionary<string, object> partyHistory = DialogueService.PartyChatHistory(partyHistoryPayload);
                     List<Dictionary<string, object>> recoveredPartyLines = ReadDictionaryList(partyHistory, "lines");
                     add("party_chat_history_recovers_latest_durable_lines",
                         ReadBool(partyHistory, "ok", false)
@@ -391,12 +444,12 @@ namespace ReignBetaServer
                         ["turnId"] = "direct_address_turn",
                         ["playerText"] = "Pacarios, this gift is for you. Aevysara and Mostiros are witnesses."
                     };
-                    List<string> directAddressOrder = BuildSocialEventResponseOrder(directAddressPayload, addressedProfiles);
+                    List<string> directAddressOrder = WorldSimulationService.BuildSocialEventResponseOrder(directAddressPayload, addressedProfiles);
                     Dictionary<string, object> nextTurnPayload = new Dictionary<string, object>(directAddressPayload)
                     {
                         ["turnId"] = "direct_address_turn_next"
                     };
-                    List<string> nextTurnOrder = BuildSocialEventResponseOrder(nextTurnPayload, addressedProfiles);
+                    List<string> nextTurnOrder = WorldSimulationService.BuildSocialEventResponseOrder(nextTurnPayload, addressedProfiles);
                     add("group_direct_addressee_speaks_first", directAddressOrder.FirstOrDefault() == "npc_recipient"
                         && nextTurnOrder.FirstOrDefault() == "npc_recipient"
                         && new HashSet<string>(directAddressOrder, StringComparer.OrdinalIgnoreCase).SetEquals(
@@ -409,9 +462,9 @@ namespace ReignBetaServer
                         ["playerHeroStringId"] = "main_hero",
                         ["conversationSceneState"] = new Dictionary<string, object> { ["participants"] = addressedProfiles }
                     };
-                    string roleBlock = BuildInteractionRoleAttribution(rolePayload, "npc_witness", "Mostiros the Slicer", "the armed stranger");
+                    string roleBlock = DialogueService.BuildInteractionRoleAttribution(rolePayload, "npc_witness", "Mostiros the Slicer", "the armed stranger");
                     List<Dictionary<string, object>> rejectedRoleWrites = new List<Dictionary<string, object>>();
-                    List<Dictionary<string, object>> safeRoleWrites = FilterConversationRoleMisattributions(
+                    List<Dictionary<string, object>> safeRoleWrites = ActionPipelineService.FilterConversationRoleMisattributions(
                         new List<Dictionary<string, object>>
                         {
                             new Dictionary<string, object> { ["text"] = "Pacarios (player) gave a silver cup to Pacarios the Turner." },
@@ -427,21 +480,21 @@ namespace ReignBetaServer
                         "Party prompts carry an observer-safe role map, withhold unidentified participant names, and reject private writes that relabel a directly addressed NPC as the player.",
                         new Dictionary<string, object> { ["roleBlock"] = roleBlock, ["safe"] = safeRoleWrites, ["rejected"] = rejectedRoleWrites });
                     add("legacy_player_npc_name_collision_quarantine",
-                        IsLegacyPlayerNpcRoleCollision(
+                        DialogueService.IsLegacyPlayerNpcRoleCollision(
                             new Dictionary<string, object> { ["summary"] = "Menor accepted a cup from the stranger claiming to be Menor." },
                             "Menor the Brewer", "Rhovarion")
-                        && IsLegacyPlayerNpcRoleCollision(
+                        && DialogueService.IsLegacyPlayerNpcRoleCollision(
                             new Dictionary<string, object> { ["summary"] = "The stranger calling himself Menor discussed a clay disk with Purios." },
                             new[] { "Purios the Viper", "Menor the Brewer", "Mystesa the Carpenter" }, "Rhovarion")
-                        && IsLegacyPlayerNpcRoleCollision(
+                        && DialogueService.IsLegacyPlayerNpcRoleCollision(
                             new Dictionary<string, object> { ["claim"] = "The player was calling himself Menor during the cup exchange." },
                             "Menor the Brewer", "Rhovarion")
-                        && !IsLegacyPlayerNpcRoleCollision(
+                        && !DialogueService.IsLegacyPlayerNpcRoleCollision(
                             new Dictionary<string, object> { ["summary"] = "Menor accepted a cup from the stranger named Rhovarion." },
                             "Menor the Brewer", "Rhovarion"),
                         "Legacy memories that assign the current NPC's own name to the player are quarantined without suppressing correctly attributed player identities.", null);
 
-                    Dictionary<string, object> disputedIdentity = BuildIdentityView(
+                    Dictionary<string, object> disputedIdentity = CharactersService.BuildIdentityView(
                         new Dictionary<string, object>
                         {
                             ["identity_state"] = "disputed",
@@ -450,8 +503,8 @@ namespace ReignBetaServer
                             ["confidence"] = 0.6d
                         },
                         new Dictionary<string, object> { ["canonicalName"] = "Rhovarion", ["mode"] = "dialogue" });
-                    string disputedIdentityBlock = BuildIdentityPromptBlock(disputedIdentity);
-                    string sanitizedIdentity = SanitizePromptForIdentity(
+                    string disputedIdentityBlock = CharactersService.BuildIdentityPromptBlock(disputedIdentity);
+                    string sanitizedIdentity = CharactersService.SanitizePromptForIdentity(
                         "Usable name or label: the stranger claiming to be Rhovarion\nClaimed name: Rhovarion (not independently verified)\nThe Stranger Claiming To Be Rhovarion gave Menor a cup.\nRhovarion's Party",
                         "", "Rhovarion", disputedIdentity);
                     Dictionary<string, object> unknownIdentity = new Dictionary<string, object>
@@ -461,7 +514,7 @@ namespace ReignBetaServer
                         ["safeLabel"] = "the armed stranger",
                         ["claimedName"] = ""
                     };
-                    string sanitizedUnknownIdentity = SanitizePromptForIdentity(
+                    string sanitizedUnknownIdentity = CharactersService.SanitizePromptForIdentity(
                         "Rhovarion entered the hall with Rhovarion's Party.", "", "Rhovarion", unknownIdentity);
                     add("identity_sanitizer_does_not_recursively_wrap_claimed_label",
                         sanitizedIdentity.Contains("Usable name or label: the stranger claiming to be Rhovarion", StringComparison.Ordinal)
@@ -505,7 +558,7 @@ namespace ReignBetaServer
                             }
                         }
                     };
-                    string kinshipBlock = BuildInteractionRoleAttribution(kinshipPayload, "npc_b", "Othenes", "Rhovarion");
+                    string kinshipBlock = DialogueService.BuildInteractionRoleAttribution(kinshipPayload, "npc_b", "Othenes", "Rhovarion");
                     add("group_kinship_uses_native_links_only",
                         !kinshipBlock.Contains("Aevysara", StringComparison.Ordinal)
                         && !kinshipBlock.Contains("actual_father_a", StringComparison.Ordinal)
@@ -522,11 +575,11 @@ namespace ReignBetaServer
                         ["promptWarningCharacterLimit"] = 500000,
                         ["promptHardCharacterLimit"] = 1000
                     };
-                    NormalizeArchitectureSettings(promptBudgetSettings);
+                    SettingsService.NormalizeArchitectureSettings(promptBudgetSettings);
                     add("prompt_budget_settings_are_ordered", ReadInt(promptBudgetSettings, "promptWarningCharacterLimit", 0) == 500000
                         && ReadInt(promptBudgetSettings, "promptHardCharacterLimit", 0) == 550000,
                         "Prompt safety normalization preserves the warning threshold and keeps the hard ceiling above it.", promptBudgetSettings);
-                    Dictionary<string, object> settingsVaultResult = RunSettingsSecretVaultSelfTest();
+                    Dictionary<string, object> settingsVaultResult = SettingsService.RunSettingsSecretVaultSelfTest();
                     add("settings_secret_vault_survives_runtime_replacement",
                         ReadBool(settingsVaultResult, "passed", false),
                         "The complete server configuration round-trips through a current-user encrypted vault outside the replaceable application directory, while explicit credential clearing remains cleared.",
@@ -534,30 +587,30 @@ namespace ReignBetaServer
                     List<string> longSummaryRecords = Enumerable.Range(1, 12)
                         .Select(index => "record_" + index + " " + new string((char)('a' + (index % 20)), 1800))
                         .ToList();
-                    string balancedSummarySource = BuildBalancedSummarySource(longSummaryRecords, 10000);
+                    string balancedSummarySource = DialogueService.BuildBalancedSummarySource(longSummaryRecords, 10000);
                     var retainedSummaryRecords = balancedSummarySource.Split(new[] { "\n---\n" }, StringSplitOptions.RemoveEmptyEntries);
                     add("memory_summary_balanced_source_coverage",
                         balancedSummarySource.Length <= 10000 && retainedSummaryRecords.Length > 0
                         && retainedSummaryRecords.All(longSummaryRecords.Contains)
                         && retainedSummaryRecords.Select(record => longSummaryRecords.IndexOf(record)).SequenceEqual(retainedSummaryRecords.Select(record => longSummaryRecords.IndexOf(record)).OrderBy(x => x))
-                        && BuildBalancedSummarySource(longSummaryRecords, 30000) == string.Join("\n---\n", longSummaryRecords),
+                        && DialogueService.BuildBalancedSummarySource(longSummaryRecords, 30000) == string.Join("\n---\n", longSummaryRecords),
                         "Budgeted summary input retains whole chronological records; sufficient capacity preserves every record without clipping source evidence.",
                         new Dictionary<string, object> { ["sourceChars"] = balancedSummarySource.Length, ["recordCount"] = longSummaryRecords.Count });
-                    add("structured_event_first_attempt_budget", StructuredEventResponseMaxTokens(new Dictionary<string, object> { ["maxTokens"] = 900 }) == 16000,
+                    add("structured_event_first_attempt_budget", DialogueService.StructuredEventResponseMaxTokens(new Dictionary<string, object> { ["maxTokens"] = 900 }) == 16000,
                         "Structured party and social-event JSON receives enough first-attempt output space for the visible reply and all private classifications without a full prompt resend.", null);
-                    add("structured_dialogue_first_attempt_budget", StructuredDialogueResponseMaxTokens(new Dictionary<string, object> { ["maxTokens"] = 900 }) == 16000,
+                    add("structured_dialogue_first_attempt_budget", DialogueService.StructuredDialogueResponseMaxTokens(new Dictionary<string, object> { ["maxTokens"] = 900 }) == 16000,
                         "Structured individual-dialogue JSON receives enough first-attempt output space for the visible reply and all private classifications without a full prompt resend.", null);
                     add("empty_structured_response_retry_omits_redundant_character_context",
-                        !FormatRetryNeedsCharacterContext("{}")
-                        && !FormatRetryNeedsCharacterContext("  ")
-                        && FormatRetryNeedsCharacterContext("{\"reply\":\"A partial reply\"}"),
+                        !ConversationResponseService.FormatRetryNeedsCharacterContext("{}")
+                        && !ConversationResponseService.FormatRetryNeedsCharacterContext("  ")
+                        && ConversationResponseService.FormatRetryNeedsCharacterContext("{\"reply\":\"A partial reply\"}"),
                         "A retry after an empty provider response reuses the original character messages without appending a second large character context block.", null);
 
                     string volatileMarker =
                         "volatile_native_state_"
                         + Guid.NewGuid().ToString("N");
                     Dictionary<string, object> volatileResult =
-                        IngestEvent(
+                        DialogueService.IngestEvent(
                             new Dictionary<string, object>
                             {
                                 ["campaignId"] = campaignId,
@@ -581,17 +634,17 @@ namespace ReignBetaServer
                             volatileResult,
                             "memoryStore")
                         ?? new Dictionary<string, object>();
-                    string currentNativePath = CampaignFile(
+                    string currentNativePath = CampaignFileService.CampaignFile(
                         campaignId,
                         "world",
                         "current_native_world_state.json");
                     string durableWorldMemoryPath =
-                        CampaignFile(
+                        CampaignFileService.CampaignFile(
                             campaignId,
                             "world",
                             "memories.jsonl");
                     string durableCharacterMemoryPath =
-                        CharacterFile(
+                        CampaignFileService.CharacterFile(
                             campaignId,
                             "npc_a",
                             "memory",
@@ -642,26 +695,25 @@ namespace ReignBetaServer
                         ["campaignId"] = campaignId, ["factKey"] = "bridge_condition", ["subjectId"] = "bridge_east", ["predicate"] = "condition",
                         ["claim"] = "The eastern bridge is intact.", ["believer"] = "npc_a", ["known_by"] = new List<string> { "npc_a" }, ["confidence"] = 0.8d
                     };
-                    string firstId = UpsertTemporalAssertion(connection, campaignId, "evt_1", "belief_1", "belief", first, 100);
+                    string firstId = DialogueService.UpsertTemporalAssertion(connection, campaignId, "evt_1", "belief_1", "belief", first, 100);
                     Dictionary<string, object> second = new Dictionary<string, object>(first) { ["claim"] = "The eastern bridge has collapsed.", ["confidence"] = 0.95d };
-                    string secondId = UpsertTemporalAssertion(connection, campaignId, "evt_2", "belief_2", "belief", second, 200);
-                    List<Dictionary<string, object>> versions = QuerySql(connection, "SELECT * FROM temporal_knowledge_assertions WHERE fact_key=(SELECT fact_key FROM temporal_knowledge_assertions WHERE assertion_id=$id) ORDER BY observed_ts;", new Dictionary<string, object> { ["id"] = secondId });
+                    string secondId = DialogueService.UpsertTemporalAssertion(connection, campaignId, "evt_2", "belief_2", "belief", second, 200);
+                    List<Dictionary<string, object>> versions = PlatformSelfTestStore.SelectTemporalKnowledgeAssertions(connection, new Dictionary<string, object> { ["id"] = secondId });
                     add("temporal_belief_versions", versions.Count == 2 && ReadLong(versions[0], "valid_to_ts", 0) == 200
                         && ReadString(versions[1], "supersedes_assertion_id", "") == firstId,
                         "A changed proposition closes the former validity interval and links the new belief to the superseded version.", versions);
 
                     // Simulate Save Sync restoring an older database after the path
                     // was cached as migrated by this process.
-                    ExecuteSql(connection, "DROP TABLE group_conversation_contributions;");
-                    ExecuteSql(connection, "DROP TABLE group_conversation_state;");
-                    ExecuteSql(connection, "UPDATE schema_meta SET value='2' WHERE key='version';");
+                    PlatformSelfTestSchema.DropGroupConversationContributions(connection);
+                    PlatformSelfTestSchema.DropGroupConversationState(connection);
+                    PlatformSelfTestStore.UpdateSchemaMeta(connection);
                 }
 
-                using (ReignDbConnection restored = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection restored = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    int restoredTables = ReadInt(QuerySql(restored, @"SELECT COUNT(*) AS count FROM sqlite_master
-WHERE type='table' AND name IN ('group_conversation_state','group_conversation_contributions');").FirstOrDefault(), "count", 0);
-                    add("save_sync_schema_remigration", restoredTables == 2 && IsMemorySchemaCurrent(restored),
+                    int restoredTables = ReadInt(PlatformSelfTestStore.CountSqliteMaster(restored).FirstOrDefault(), "count", 0);
+                    add("save_sync_schema_remigration", restoredTables == 2 && ReignDatabase.IsMemorySchemaCurrent(restored),
                         "A Save Sync database replacement invalidates the path cache and reruns current migrations.", restoredTables);
                 }
 
@@ -678,7 +730,7 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                         new Dictionary<string, object> { ["operation"] = "send", ["mode"] = "party_chat", ["text"] = "Hello." }
                     }
                 };
-                List<Dictionary<string, object>> scenarioCommands = NormalizeLiveTestScenarioCommands(scenarioRun, scenarioPayload);
+                List<Dictionary<string, object>> scenarioCommands = WorldSimulationService.NormalizeLiveTestScenarioCommands(scenarioRun, scenarioPayload);
                 add("scenario_command_batch", scenarioCommands.Count == 2
                     && ReadString(scenarioCommands[0], "operation", "") == "open"
                     && ReadString(scenarioCommands[1], "operation", "") == "send",
@@ -691,8 +743,8 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                     ["fixtureRunId"] = "isolated_accord_contracts", ["timeoutSeconds"] = 1800
                 };
                 string accordRunBefore = Json.Serialize(accordRun), accordInputBefore = Json.Serialize(accordInput);
-                var accordCommand = NormalizeLiveTestCommand(accordRun, accordInput);
-                var accordSteps = NormalizeLiveTestScenarioCommands(accordRun, new Dictionary<string, object>
+                var accordCommand = WorldSimulationService.NormalizeLiveTestCommand(accordRun, accordInput);
+                var accordSteps = WorldSimulationService.NormalizeLiveTestScenarioCommands(accordRun, new Dictionary<string, object>
                 { ["steps"] = new List<Dictionary<string, object>> { accordInput } });
                 add("clan_accord_contract_command_reachable", accordCommand != null && accordSteps.Count == 1
                     && ReadString(accordSteps[0], "operation", "") == "clan_accords_test"
@@ -704,25 +756,25 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                     "The fixed native math contract survives real scenario normalization without mutating run/input identity.", accordCommand);
                 bool accordRejected = true;
                 foreach (string badProfile in new[] { "apply", "contracts ", "", "create_accord" })
-                    accordRejected &= NormalizeLiveTestCommand(accordRun,
+                    accordRejected &= WorldSimulationService.NormalizeLiveTestCommand(accordRun,
                         new Dictionary<string, object>(accordInput) { ["profile"] = badProfile }) == null;
-                accordRejected &= NormalizeLiveTestCommand(accordRun,
+                accordRejected &= WorldSimulationService.NormalizeLiveTestCommand(accordRun,
                     new Dictionary<string, object>(accordInput) { ["mode"] = "party_chat" }) == null;
-                accordRejected &= NormalizeLiveTestCommand(accordRun,
+                accordRejected &= WorldSimulationService.NormalizeLiveTestCommand(accordRun,
                     new Dictionary<string, object>(accordInput) { ["fixtureRunId"] = new string('x', 129) }) == null;
-                accordRejected &= NormalizeLiveTestCommand(accordRun,
+                accordRejected &= WorldSimulationService.NormalizeLiveTestCommand(accordRun,
                     new Dictionary<string, object>(accordInput) { ["schemaVersion"] = 3 }) == null;
                 var defaultAccordInput = new Dictionary<string, object>(accordInput);
                 defaultAccordInput.Remove("profile");
-                var defaultAccordCommand = NormalizeLiveTestCommand(accordRun, defaultAccordInput);
+                var defaultAccordCommand = WorldSimulationService.NormalizeLiveTestCommand(accordRun, defaultAccordInput);
                 add("clan_accord_contract_command_bounds", accordRejected && defaultAccordCommand != null
                     && ReadString(defaultAccordCommand, "profile", "") == "contracts",
                     "Only the bounded non-mutating profile is accepted; unsupported profiles, modes, identity size and schema refuse.", null);
 
-                string boundedTurnPath = SocialEventTurnCacheFile(campaignId,
+                string boundedTurnPath = WorldSimulationService.SocialEventTurnCacheFile(campaignId,
                     "reign_live_test_event_" + new string('e', 64),
                     "live-live-run-command-" + new string('t', 64));
-                string boundedRelativePath = boundedTurnPath.Substring(CampaignDirectory(campaignId).Length).TrimStart(Path.DirectorySeparatorChar);
+                string boundedRelativePath = boundedTurnPath.Substring(CampaignFileService.CampaignDirectory(campaignId).Length).TrimStart(Path.DirectorySeparatorChar);
                 add("social_turn_bounded_path", boundedRelativePath.Length < 80
                     && Path.GetFileName(boundedTurnPath).StartsWith("turn_", StringComparison.Ordinal),
                     "Generated event and correlation ids use a flat, bounded hashed cache path independent of identifier length.", boundedRelativePath);
@@ -782,7 +834,7 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                             }
                     };
                 Dictionary<string, object> compactSocialReply =
-                    CompactSocialEventParticipantResponse(
+                    WorldSimulationService.CompactSocialEventParticipantResponse(
                         "npc_b", fullSocialReply);
                 add("social_turn_private_evidence_parity",
                     ReadDictionary(
@@ -849,7 +901,7 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                             }
                     };
                 string inferredSocialTarget =
-                    NormalizeSocialEventReactionTarget(
+                    WorldSimulationService.NormalizeSocialEventReactionTarget(
                         new Dictionary<string, object>
                         {
                             ["reply"] =
@@ -860,7 +912,7 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                         attributedGroupPayload,
                         "npc_b");
                 string inferredSocialTargetFromUniqueFirstName =
-                    NormalizeSocialEventReactionTarget(
+                    WorldSimulationService.NormalizeSocialEventReactionTarget(
                         new Dictionary<string, object>
                         {
                             ["reply"] =
@@ -911,7 +963,7 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                         },
                         "npc_hazesa");
                 bool orderedFirstNameAwareness =
-                    LiveTestRepliesShowGroupAwareness(
+                    WorldSimulationService.LiveTestRepliesShowGroupAwareness(
                         new List<Dictionary<string, object>>
                         {
                             new Dictionary<string, object>
@@ -934,7 +986,7 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                             }
                         });
                 string compactEventPrompt =
-                    BuildEventJsonForPrompt(
+                    DialogueService.BuildEventJsonForPrompt(
                         new Dictionary<string, object>(
                             attributedGroupPayload)
                         {
@@ -975,28 +1027,26 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                     ["activeHeroIds"] = new List<string> { "npc_a", "npc_b" },
                     ["attendees"] = new List<Dictionary<string, object>>()
                 };
-                StoreSocialEventConversationExchange(campaignId, socialRequest, "npc_a", "player", "Player", "NPC A",
+                DialogueService.StoreSocialEventConversationExchange(campaignId, socialRequest, "npc_a", "player", "Player", "NPC A",
                     "At the east gate I put a violet ribbon beneath the map and shared an oatcake.",
                     "I remember the violet ribbon and oatcake.", "social_source_a", "social_memory_event", 300);
-                StoreSocialEventConversationExchange(campaignId, socialRequest, "npc_b", "player", "Player", "NPC B",
+                DialogueService.StoreSocialEventConversationExchange(campaignId, socialRequest, "npc_b", "player", "Player", "NPC B",
                     "At the east gate I put a violet ribbon beneath the map and shared an oatcake.",
                     "NPC A is right about both details.", "social_source_b", "social_memory_event", 301);
-                var currentSessionHistory = CanonicalizePromptTranscript(
-                    ReadCurrentSessionDialogueLines(campaignId, "social_event_social_memory_event", 30), 30);
+                var currentSessionHistory = DialogueService.CanonicalizePromptTranscript(
+                    DialogueService.ReadCurrentSessionDialogueLines(campaignId, "social_event_social_memory_event", 30), 30);
                 add("individual_history_reader_keeps_shared_exchange_speakers",
                     currentSessionHistory.Count == 3
                     && currentSessionHistory.Count(row => ReadString(row, "role", "") == "npc") == 2,
                     "The individual/official conversation database reader preserves one player line and both NPC lines from a shared exchange.", currentSessionHistory);
                 Dictionary<string, object> exactSocialHistory;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    ExecuteSql(connection, "UPDATE conversation_sessions SET status='closed',end_ts=302 WHERE session_id='social_event_social_memory_event';");
-                    exactSocialHistory = SearchExactConversationHistory(connection, "npc_b", "Reconstruct our prior group discussion.",
+                    PlatformSelfTestStore.UpdateConversationSessions(connection);
+                    exactSocialHistory = DialogueService.SearchExactConversationHistory(connection, "npc_b", "Reconstruct our prior group discussion.",
                         new Dictionary<string, object> { ["primaryLane"] = "exact_history", ["needsExactTranscript"] = true }, 10000, null, "", 30);
-                    int playerTurns = ReadInt(QuerySql(connection, @"SELECT COUNT(*) AS count FROM conversation_turns
-WHERE session_id='social_event_social_memory_event' AND role='player';").FirstOrDefault(), "count", 0);
-                    int npcTurns = ReadInt(QuerySql(connection, @"SELECT COUNT(*) AS count FROM conversation_turns
-WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDefault(), "count", 0);
+                    int playerTurns = ReadInt(PlatformSelfTestStore.CountConversationTurns(connection).FirstOrDefault(), "count", 0);
+                    int npcTurns = ReadInt(PlatformSelfTestStore.CountConversationTurns2(connection).FirstOrDefault(), "count", 0);
                     string exactText = ReadString(exactSocialHistory, "text", "");
                     add("social_event_canonical_group_history", playerTurns == 1 && npcTurns == 2
                         && exactText.Contains("violet ribbon") && exactText.Contains("oatcake") && exactText.Contains("NPC A") && exactText.Contains("NPC B")
@@ -1008,7 +1058,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                 {
                     ["eventId"] = "social_recall_event", ["sceneTurnId"] = "social_recall_turn_1"
                 };
-                string deicticMemoryPacket = BuildMemoryPacketText(
+                string deicticMemoryPacket = DialogueService.BuildMemoryPacketText(
                     "npc_a", "player",
                     new List<Dictionary<string, object>>
                     {
@@ -1035,7 +1085,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     && deicticMemoryPacket.Contains("All three present heard the claim here.", StringComparison.Ordinal),
                     "Consolidated memories retain their source participant set and explicitly prevent historical deictic words from being remapped onto a new group.", deicticMemoryPacket);
 
-                KnowledgeAccessContext unknownIdentityKnowledge = BuildKnowledgeAccessContext(
+                DialogueService.KnowledgeAccessContext unknownIdentityKnowledge = DialogueService.BuildKnowledgeAccessContext(
                     "npc_a", "main_hero", "town_test", new Dictionary<string, object>
                     {
                         ["mainHeroStringId"] = "main_hero",
@@ -1061,8 +1111,8 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     ["participants_json"] = Json.Serialize(new List<string> { "npc_a", "main_hero" })
                 };
                 Dictionary<string, object> sanitizedPreference =
-                    SanitizeUnknownIdentityMemoryRow(safePreferenceMemory, unknownIdentityKnowledge);
-                KnowledgeAccessContext knownIdentityKnowledge = BuildKnowledgeAccessContext(
+                    DialogueService.SanitizeUnknownIdentityMemoryRow(safePreferenceMemory, unknownIdentityKnowledge);
+                DialogueService.KnowledgeAccessContext knownIdentityKnowledge = DialogueService.BuildKnowledgeAccessContext(
                     "npc_a", "main_hero", "town_test", new Dictionary<string, object>
                     {
                         ["mainHeroStringId"] = "main_hero",
@@ -1072,27 +1122,27 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["identityView"] = new Dictionary<string, object> { ["knowsIdentity"] = true }
                     });
                 add("unknown_identity_memory_boundary",
-                    !UnknownIdentityMemoryEvidenceAllowed(unsafeClanMemory, unknownIdentityKnowledge,
+                    !DialogueService.UnknownIdentityMemoryEvidenceAllowed(unsafeClanMemory, unknownIdentityKnowledge,
                         ReadString(unsafeClanMemory, "summary", ""))
-                    && UnknownIdentityMemoryEvidenceAllowed(safePreferenceMemory, unknownIdentityKnowledge,
+                    && DialogueService.UnknownIdentityMemoryEvidenceAllowed(safePreferenceMemory, unknownIdentityKnowledge,
                         ReadString(safePreferenceMemory, "summary", ""))
-                    && UnknownIdentityMemoryEvidenceAllowed(unsafeClanMemory, knownIdentityKnowledge,
+                    && DialogueService.UnknownIdentityMemoryEvidenceAllowed(unsafeClanMemory, knownIdentityKnowledge,
                         ReadString(unsafeClanMemory, "summary", ""))
                     && !ReadString(sanitizedPreference, "participants_json", "").Contains("main_hero", StringComparison.OrdinalIgnoreCase)
                     && ReadString(sanitizedPreference, "summary", "").Contains("blue ribbons", StringComparison.OrdinalIgnoreCase),
                     "Unknown observers retain harmless encounter continuity while canonical identity, clan, fief, wealth, and political-state records are withheld before ranking.",
                     new Dictionary<string, object>
                     {
-                        ["unsafeAllowed"] = UnknownIdentityMemoryEvidenceAllowed(unsafeClanMemory, unknownIdentityKnowledge,
+                        ["unsafeAllowed"] = DialogueService.UnknownIdentityMemoryEvidenceAllowed(unsafeClanMemory, unknownIdentityKnowledge,
                             ReadString(unsafeClanMemory, "summary", "")),
                         ["safe"] = sanitizedPreference
                     });
-                string protectedNpcHistoryLine = RenderExactHistoryTurn(new Dictionary<string, object>
+                string protectedNpcHistoryLine = DialogueService.RenderExactHistoryTurn(new Dictionary<string, object>
                 {
                     ["role"] = "npc", ["speaker_name"] = "NPC A", ["world_day"] = 42d,
                     ["text"] = "You are a clan leader with no fiefs and little gold."
                 }, unknownIdentityKnowledge);
-                string protectedPlayerHistoryLine = RenderExactHistoryTurn(new Dictionary<string, object>
+                string protectedPlayerHistoryLine = DialogueService.RenderExactHistoryTurn(new Dictionary<string, object>
                 {
                     ["role"] = "player", ["speaker_name"] = "Canonical Player", ["world_day"] = 42d,
                     ["text"] = "I prefer blue ribbons and claim that I own no fiefs."
@@ -1110,7 +1160,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["npcLine"] = protectedNpcHistoryLine,
                         ["playerLine"] = protectedPlayerHistoryLine
                     });
-                Dictionary<string, object> unknownSceneSummary = CreateConversationSceneSummary(
+                Dictionary<string, object> unknownSceneSummary = DialogueService.CreateConversationSceneSummary(
                     campaignId,
                     new Dictionary<string, object>
                     {
@@ -1181,13 +1231,13 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         "playerIdentityKnown", true),
                     "Scene summaries preserve the same unknown-identity boundary as the live prompt, preventing storage and rolling arcs from laundering unavailable player status.",
                     unknownSceneSummary);
-                StoreSocialEventConversationExchange(campaignId, recallRequest, "npc_b", "player", "Player", "NPC B",
+                DialogueService.StoreSocialEventConversationExchange(campaignId, recallRequest, "npc_b", "player", "Player", "NPC B",
                     "Reconstruct our prior group discussion without guessing.",
                     "It happened at a roadside camp with dried meat.", "social_recall_source", "social_recall_event", 400);
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    ExecuteSql(connection, "UPDATE conversation_sessions SET status='closed',end_ts=402 WHERE session_id='social_event_social_recall_event';");
-                    Dictionary<string, object> protectedHistory = SearchExactConversationHistory(connection, "npc_b",
+                    PlatformSelfTestStore.UpdateConversationSessions2(connection);
+                    Dictionary<string, object> protectedHistory = DialogueService.SearchExactConversationHistory(connection, "npc_b",
                         "Reconstruct our prior group discussion without guessing.",
                         new Dictionary<string, object> { ["primaryLane"] = "exact_history", ["needsExactTranscript"] = true }, 14000, null, "", 30);
                     string protectedText = ReadString(protectedHistory, "text", "");
@@ -1201,20 +1251,19 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                 {
                     ["eventId"] = "social_recall_audit_event", ["sceneTurnId"] = "social_recall_audit_turn_1"
                 };
-                StoreSocialEventConversationExchange(campaignId, recallAuditRequest, "npc_b", "player", "Player", "NPC B",
+                DialogueService.StoreSocialEventConversationExchange(campaignId, recallAuditRequest, "npc_b", "player", "Player", "NPC B",
                     "Recall the immediately preceding group conversation without inventing details.",
                     "The violet ribbon was under the map.", "social_recall_audit_source", "social_recall_audit_event", 500);
-                Dictionary<string, object> recallAuditFinish = ConversationFinishApi(new Dictionary<string, object>
+                Dictionary<string, object> recallAuditFinish = DialogueService.ConversationFinishApi(new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId, ["sessionId"] = "social_event_social_recall_audit_event",
                     ["worldDay"] = 42d, ["ts"] = 502L
                 });
                 string recallAuditSummaryId = ReadString(recallAuditFinish, "sceneSummaryId", "");
                 Dictionary<string, object> recallAuditSummary;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    recallAuditSummary = QuerySql(connection, "SELECT * FROM summaries WHERE summary_id=$id LIMIT 1;",
-                        new Dictionary<string, object> { ["id"] = recallAuditSummaryId }).FirstOrDefault() ?? new Dictionary<string, object>();
+                    recallAuditSummary = PlatformSelfTestStore.SelectSummaries(connection, new Dictionary<string, object> { ["id"] = recallAuditSummaryId }).FirstOrDefault() ?? new Dictionary<string, object>();
                 }
                 add("recall_scene_is_audit_only", ReadBool(recallAuditFinish, "recallOnlySession", false)
                     && ReadString(recallAuditSummary, "status", "") == "audit_only"
@@ -1222,7 +1271,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     && ReadDictionaryList(recallAuditFinish, "participantConsolidations").Count == 0,
                     "Recall reconstructions retain source-linked audit summaries but cannot become retrievable memories, embeddings, arcs, or consolidation inputs.",
                     new Dictionary<string, object> { ["finish"] = recallAuditFinish, ["summary"] = recallAuditSummary });
-                Dictionary<string, object> recallTurnStore = StoreTurnMemoryLayers(
+                Dictionary<string, object> recallTurnStore = DialogueService.StoreTurnMemoryLayers(
                     campaignId,
                     "recall_projection_event",
                     "party_chat_turn",
@@ -1247,13 +1296,9 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     new List<string> { "npc_a", "npc_b", "player" },
                     retrievalEligible: false);
                 Dictionary<string, object> recallProjectionCounts;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    recallProjectionCounts = QuerySql(connection, @"SELECT
-(SELECT COUNT(*) FROM events WHERE event_id='recall_projection_event') AS events,
-(SELECT COUNT(*) FROM memories WHERE event_id='recall_projection_event') AS memories,
-(SELECT COUNT(*) FROM beliefs WHERE event_id='recall_projection_event') AS beliefs,
-(SELECT COUNT(*) FROM event_fts WHERE event_id='recall_projection_event') AS event_fts;").FirstOrDefault()
+                    recallProjectionCounts = PlatformSelfTestStore.SelectEvents(connection).FirstOrDefault()
                         ?? new Dictionary<string, object>();
                 }
                 add("recall_turn_skips_retrieval_projection",
@@ -1266,14 +1311,14 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     && ReadInt(recallProjectionCounts, "event_fts", -1) == 0,
                     "A recall answer remains in canonical conversation/audit storage but cannot project itself into events, structured memory, FTS, or vectors.",
                     new Dictionary<string, object> { ["store"] = recallTurnStore, ["counts"] = recallProjectionCounts });
-                Dictionary<string, object> lowSalienceStore = StoreTurnMemoryLayers(
+                Dictionary<string, object> lowSalienceStore = DialogueService.StoreTurnMemoryLayers(
                     campaignId, "low_salience_turn_event", "dialogue_turn", "npc_a", "player", "town_test",
                     "Good afternoon.", "Good afternoon to you as well.",
                     new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
                     new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
                     new List<Dictionary<string, object>>(),
                     "conversation:low_salience", 504L);
-                Dictionary<string, object> durableTurnStore = StoreTurnMemoryLayers(
+                Dictionary<string, object> durableTurnStore = DialogueService.StoreTurnMemoryLayers(
                     campaignId, "durable_turn_event", "dialogue_turn", "npc_a", "player", "town_test",
                     "I keep a blue bead in my left glove.", "I will remember the blue bead in your left glove.",
                     new List<Dictionary<string, object>>
@@ -1288,26 +1333,9 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
                     "conversation:durable", 505L);
                 Dictionary<string, object> conversationProjectionCounts;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    conversationProjectionCounts = QuerySql(connection, @"SELECT
-(SELECT COUNT(*) FROM events WHERE event_id='low_salience_turn_event') AS low_events,
-(SELECT COUNT(*) FROM memories WHERE event_id='low_salience_turn_event') AS low_memories,
-(SELECT COUNT(*) FROM event_fts WHERE event_id='low_salience_turn_event') AS low_event_fts,
-(SELECT COUNT(*) FROM events WHERE event_id='durable_turn_event') AS durable_events,
-(SELECT COUNT(*) FROM memories WHERE event_id='durable_turn_event') AS durable_memories,
-(SELECT COUNT(*) FROM memory_fts WHERE memory_id IN (SELECT memory_id FROM memories WHERE event_id='durable_turn_event')) AS durable_memory_fts,
-(SELECT COUNT(*) FROM memories WHERE event_id='durable_turn_event' AND payload_json::jsonb->>'observerScope'='author_interpretation'
- AND known_by_json::jsonb='[""npc_a""]'::jsonb) AS author_memories,
-(SELECT COUNT(*) FROM memories WHERE event_id='durable_turn_event' AND payload_json::jsonb->>'observerScope'='observable_source_spans'
- AND known_by_json::jsonb @> '[""npc_a"",""player""]'::jsonb) AS observable_memories,
-(SELECT COUNT(*) FROM event_fts WHERE event_id='durable_turn_event') AS durable_event_fts,
-(SELECT COUNT(*) FROM events WHERE event_id IN ('low_salience_turn_event','durable_turn_event') AND embedding_status='skipped') AS skipped_event_embeddings,
-(SELECT COUNT(*) FROM embedding_jobs WHERE source_type='event' AND source_id IN ('low_salience_turn_event','durable_turn_event')) AS raw_event_embedding_jobs,
-(SELECT COUNT(*) FROM conversation_turns WHERE status='active') AS active_original_turns,
-(SELECT COUNT(*) FROM conversation_turns t WHERE t.status='active' AND EXISTS
- (SELECT 1 FROM embedding_jobs j WHERE j.source_type='conversation_turn' AND j.source_id=t.turn_id)) AS indexed_active_originals,
-(SELECT COUNT(*) FROM embedding_jobs WHERE source_type='memory' AND source_id IN (SELECT memory_id FROM memories WHERE event_id='durable_turn_event')) AS durable_memory_embedding_jobs;").FirstOrDefault()
+                    conversationProjectionCounts = PlatformSelfTestStore.SelectEvents2(connection).FirstOrDefault()
                         ?? new Dictionary<string, object>();
                 }
                 add("conversation_turns_only_project_explicit_durable_memory",
@@ -1336,67 +1364,67 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     && ReadInt(conversationProjectionCounts, "durable_memory_embedding_jobs", -1) == 2,
                     "Every active original turn enters semantic discovery without vectorizing duplicate source events; explicit author and audience-safe memories each enter once. Canonical originals remain authoritative.",
                     conversationProjectionCounts);
-                Dictionary<string, object> broadRecallRoute = BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
+                Dictionary<string, object> broadRecallRoute = DialogueService.BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
                     "Reconstruct our prior group discussion without guessing.", new Dictionary<string, object>());
-                add("broad_recent_recall_detection", LooksLikeMostRecentConversationRecall("Reconstruct our prior group discussion without guessing.")
+                add("broad_recent_recall_detection", DialogueService.LooksLikeMostRecentConversationRecall("Reconstruct our prior group discussion without guessing.")
                     && ReadBool(broadRecallRoute, "needsExactTranscript", false)
                     && ReadStringList(broadRecallRoute, "selectedLanes").Contains("exact_history", StringComparer.OrdinalIgnoreCase),
                     "Natural requests for an earlier group discussion force the authoritative recent raw-turn window.", broadRecallRoute);
-                Dictionary<string, object> exactRestatementRoute = BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
+                Dictionary<string, object> exactRestatementRoute = DialogueService.BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
                     "Paraphrase the blue-token fact without losing its exact name, color, or storage place.", new Dictionary<string, object>());
                 add("exact_fact_restatement_detection",
-                    LooksLikeExactFactRestatement("Paraphrase the blue-token fact without losing its exact name, color, or storage place.")
-                    && LooksLikeExactFactRestatement("You once heard me describe a keepsake: what was its exact name, color, and location?")
+                    DialogueService.LooksLikeExactFactRestatement("Paraphrase the blue-token fact without losing its exact name, color, or storage place.")
+                    && DialogueService.LooksLikeExactFactRestatement("You once heard me describe a keepsake: what was its exact name, color, and location?")
                     && ReadBool(exactRestatementRoute, "needsExactTranscript", false)
                     && ReadString(exactRestatementRoute, "primaryLane", "") == "exact_history"
-                    && IsPureConversationRecallRequest("Paraphrase the blue-token fact without losing its exact name, color, or storage place."),
+                    && DialogueService.IsPureConversationRecallRequest("Paraphrase the blue-token fact without losing its exact name, color, or storage place."),
                     "Natural requests to preserve exact facts route to targeted source history and remain recall-only even without explicit remember/recall keywords.",
                     exactRestatementRoute);
                 const string multiSceneRecallText = "Reconstruct our two closed conversations without guessing. At the group supper, what did each speaker say? In the later private exchange, what identity distinction did you make?";
-                Dictionary<string, object> multiSceneRecallRoute = BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
+                Dictionary<string, object> multiSceneRecallRoute = DialogueService.BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
                     multiSceneRecallText, new Dictionary<string, object>());
-                List<Dictionary<string, object>> multiSceneContextPulls = DeterministicContextPullSelection("dialogue",
-                    multiSceneRecallText, "", ContextPullIds.ToList());
+                List<Dictionary<string, object>> multiSceneContextPulls = DialogueService.DeterministicContextPullSelection("dialogue",
+                    multiSceneRecallText, "", Program.ContextPullIds.ToList());
                 add("multi_scene_closed_conversation_recall_detection",
-                    LooksLikeMostRecentConversationRecall(multiSceneRecallText)
+                    DialogueService.LooksLikeMostRecentConversationRecall(multiSceneRecallText)
                     && ReadBool(multiSceneRecallRoute, "needsExactTranscript", false)
                     && ReadStringList(multiSceneRecallRoute, "selectedLanes").Contains("exact_history", StringComparer.OrdinalIgnoreCase)
                     && multiSceneContextPulls.Any(row => ReadString(row, "id", "") == "relevant_memory"),
                     "Explicit reconstruction of multiple closed conversations selects relevant memory and the source-bearing exact-history window.",
                     new Dictionary<string, object> { ["route"] = multiSceneRecallRoute, ["contextPulls"] = multiSceneContextPulls });
-                Dictionary<string, object> precedingRecallRoute = BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
+                Dictionary<string, object> precedingRecallRoute = DialogueService.BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
                     "Recall the immediately preceding group conversation without inventing details.", new Dictionary<string, object>());
-                add("preceding_group_recall_detection", LooksLikeMostRecentConversationRecall("Recall the immediately preceding group conversation without inventing details.")
+                add("preceding_group_recall_detection", DialogueService.LooksLikeMostRecentConversationRecall("Recall the immediately preceding group conversation without inventing details.")
                     && ReadBool(precedingRecallRoute, "needsExactTranscript", false)
                     && ReadStringList(precedingRecallRoute, "selectedLanes").Contains("exact_history", StringComparer.OrdinalIgnoreCase),
                     "Natural preceding-group wording also forces the authoritative recent raw-turn window.", precedingRecallRoute);
-                Dictionary<string, object> precedingObservationRoute = BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
+                Dictionary<string, object> precedingObservationRoute = DialogueService.BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
                     "Begin by recalling the preceding low-salience observation, then recover one much older detail.", new Dictionary<string, object>());
-                add("preceding_observation_recall_detection", LooksLikeMostRecentConversationRecall("Begin by recalling the preceding low-salience observation, then recover one much older detail.")
+                add("preceding_observation_recall_detection", DialogueService.LooksLikeMostRecentConversationRecall("Begin by recalling the preceding low-salience observation, then recover one much older detail.")
                     && ReadBool(precedingObservationRoute, "needsExactTranscript", false)
                     && ReadStringList(precedingObservationRoute, "selectedLanes").Contains("exact_history", StringComparer.OrdinalIgnoreCase),
                     "Natural recall wording around a preceding observation also forces authoritative raw history.", precedingObservationRoute);
                 const string noCommitmentScene = "Purios counted seven open conversations on a clay disk. Menor compared the marks with counting planks, while Mystesa discussed maintaining connections.";
-                Dictionary<string, object> noCommitmentRoute = BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
+                Dictionary<string, object> noCommitmentRoute = DialogueService.BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
                     noCommitmentScene, new Dictionary<string, object>());
                 add("scene_lane_uses_word_boundaries_and_interpersonal_fallback",
                     ReadDouble(ReadDictionary(noCommitmentRoute, "scores"), "commitments_and_plots", -1d) == 0d
-                    && SelectConversationSceneMemoryLane(noCommitmentRoute) == "interpersonal_history",
+                    && DialogueService.SelectConversationSceneMemoryLane(noCommitmentRoute) == "interpersonal_history",
                     "The cue 'plan' cannot match the word 'planks', and an ordinary closed conversation without a stronger lane cue is stored as interpersonal history.",
                     noCommitmentRoute);
                 const string mixedRecallDisclosure = "Recall our prior group conversation without guessing. A new low-salience detail for later is that I set a cedar pin with two shallow grooves beside an empty clay cup.";
                 add("mixed_recall_preserves_new_player_source",
-                    LooksLikeMostRecentConversationRecall(mixedRecallDisclosure)
-                    && !IsPureConversationRecallRequest(mixedRecallDisclosure)
-                    && IsPureConversationRecallRequest("Recall our prior group conversation without guessing.")
-                    && IsPureConversationRecallRequest("Reconstruct the new low-salience detail from the most recent supper scene without guessing."),
+                    DialogueService.LooksLikeMostRecentConversationRecall(mixedRecallDisclosure)
+                    && !DialogueService.IsPureConversationRecallRequest(mixedRecallDisclosure)
+                    && DialogueService.IsPureConversationRecallRequest("Recall our prior group conversation without guessing.")
+                    && DialogueService.IsPureConversationRecallRequest("Reconstruct the new low-salience detail from the most recent supper scene without guessing."),
                     "A mixed recall-and-disclosure turn still receives exact history but is not quarantined as a recall-only source.",
                     new Dictionary<string, object>
                     {
-                        ["mixedRoutesHistory"] = LooksLikeMostRecentConversationRecall(mixedRecallDisclosure),
-                        ["mixedIsRecallOnly"] = IsPureConversationRecallRequest(mixedRecallDisclosure),
-                        ["pureIsRecallOnly"] = IsPureConversationRecallRequest("Recall our prior group conversation without guessing."),
-                        ["priorNewDetailIsRecallOnly"] = IsPureConversationRecallRequest("Reconstruct the new low-salience detail from the most recent supper scene without guessing.")
+                        ["mixedRoutesHistory"] = DialogueService.LooksLikeMostRecentConversationRecall(mixedRecallDisclosure),
+                        ["mixedIsRecallOnly"] = DialogueService.IsPureConversationRecallRequest(mixedRecallDisclosure),
+                        ["pureIsRecallOnly"] = DialogueService.IsPureConversationRecallRequest("Recall our prior group conversation without guessing."),
+                        ["priorNewDetailIsRecallOnly"] = DialogueService.IsPureConversationRecallRequest("Reconstruct the new low-salience detail from the most recent supper scene without guessing.")
                     });
                 const string askedToRememberRecall = "Earlier I asked you to remember a blue glass token. What was its exact name, color, and where did I say I keep it?";
                 Dictionary<string, object> exactRecallParsed = new Dictionary<string, object>
@@ -1426,10 +1454,10 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     new Dictionary<string, object> { ["role"] = "user", ["content"] = askedToRememberRecall }
                 };
                 List<Dictionary<string, object>> exactRecallRepairs;
-                string exactRecallReply = RepairVisibleExactRecallIdentifiers(
+                string exactRecallReply = DialogueService.RepairVisibleExactRecallIdentifiers(
                     askedToRememberRecall, "Selca. Blue. Under a cedar box.", exactRecallParsed, exactRecallMessages, out exactRecallRepairs);
                 List<Dictionary<string, object>> ungroundedRecallRepairs;
-                string ungroundedRecallReply = RepairVisibleExactRecallIdentifiers(
+                string ungroundedRecallReply = DialogueService.RepairVisibleExactRecallIdentifiers(
                     askedToRememberRecall, "Selca. Blue. Under a cedar box.", exactRecallParsed,
                     new List<Dictionary<string, object>>
                     {
@@ -1437,7 +1465,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     },
                     out ungroundedRecallRepairs);
                 List<Dictionary<string, object>> privateOmissionRepairs;
-                string privateOmissionReply = RepairVisibleExactRecallIdentifiers(
+                string privateOmissionReply = DialogueService.RepairVisibleExactRecallIdentifiers(
                     askedToRememberRecall,
                     "It was blue and kept beneath the cedar box, but the exact name escapes me.",
                     new Dictionary<string, object>
@@ -1453,7 +1481,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     exactRecallMessages,
                     out privateOmissionRepairs);
                 List<Dictionary<string, object>> ambiguousRecallRepairs;
-                string ambiguousRecallReply = RepairVisibleExactRecallIdentifiers(
+                string ambiguousRecallReply = DialogueService.RepairVisibleExactRecallIdentifiers(
                     askedToRememberRecall,
                     "It was blue and beneath the cedar box, but I cannot safely give the exact name.",
                     new Dictionary<string, object>(),
@@ -1468,12 +1496,12 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     },
                     out ambiguousRecallRepairs);
                 add("asked_to_remember_recall_quarantine_and_visible_precision",
-                    LooksLikeMostRecentConversationRecall(askedToRememberRecall)
-                    && IsPureConversationRecallRequest(askedToRememberRecall)
+                    DialogueService.LooksLikeMostRecentConversationRecall(askedToRememberRecall)
+                    && DialogueService.IsPureConversationRecallRequest(askedToRememberRecall)
                     && exactRecallReply.Contains("Selca-49", StringComparison.Ordinal)
                     && exactRecallRepairs.Count == 1
-                    && privateOmissionReply.Contains("Selca-49", StringComparison.Ordinal)
-                    && privateOmissionRepairs.Count == 1
+                    && privateOmissionReply == "It was blue and kept beneath the cedar box, but the exact name escapes me."
+                    && privateOmissionRepairs.Count == 0
                     && ambiguousRecallReply.IndexOf("Selca-49", StringComparison.Ordinal) < 0
                     && ambiguousRecallReply.IndexOf("Velra-52", StringComparison.Ordinal) < 0
                     && ambiguousRecallRepairs.Count == 0
@@ -1491,10 +1519,10 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["ungroundedReply"] = ungroundedRecallReply,
                         ["ungroundedRepairs"] = ungroundedRecallRepairs
                     });
-                Dictionary<string, string> promptDefaults = DefaultPromptTemplates();
-                string dialogueUserPrompt = BuildDialogueGlobalPrefix(false, false, new List<Dictionary<string, object>>());
+                Dictionary<string, string> promptDefaults = PromptService.DefaultPromptTemplates();
+                string dialogueUserPrompt = DialogueService.BuildDialogueGlobalPrefix(false, false, new List<Dictionary<string, object>>());
                 string dialogueRecallPrompt = promptDefaults["dialogue_live_turn_template.txt"];
-                string eventUserPrompt = BuildDialogueGlobalPrefix(true, false, new List<Dictionary<string, object>>());
+                string eventUserPrompt = DialogueService.BuildDialogueGlobalPrefix(true, false, new List<Dictionary<string, object>>());
                 string eventRecallPrompt = promptDefaults["event_live_turn_template.txt"];
                 Dictionary<string, object> recallGroundingChecks = new Dictionary<string, object>
                 {
@@ -1513,7 +1541,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     recallGroundingChecks.Values.All(value => value is bool passed && passed),
                     "Every production dialogue surface forbids false autobiographical recall while requiring a newly disclosed low-impact anecdote to become stable soft canon.",
                     recallGroundingChecks);
-                string factBoundaryPrompt = BuildDialogueGlobalPrefix(false, false, new List<Dictionary<string, object>>());
+                string factBoundaryPrompt = DialogueService.BuildDialogueGlobalPrefix(false, false, new List<Dictionary<string, object>>());
                 add("current_world_fact_boundary_prompt_contract",
                     factBoundaryPrompt.Contains("Plausibility is not evidence", StringComparison.Ordinal)
                     && factBoundaryPrompt.Contains("Never invent current weather", StringComparison.Ordinal)
@@ -1524,68 +1552,45 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     "The production prompt forbids atmospheric prose from fabricating unsupported current weather, economy, security, garrison, or nearby-world facts.",
                     factBoundaryPrompt);
                 add("qualification_prompt_latency_uses_p95",
-                    PercentileNearestRank(Enumerable.Range(1, 100).Select(value => (long)value).ToList(), 0.95d) == 95
-                    && CurrentConversationBuildVersion().Contains("+mvid.", StringComparison.Ordinal),
+                    DialogueService.PercentileNearestRank(Enumerable.Range(1, 100).Select(value => (long)value).ToList(), 0.95d) == 95
+                    && DialogueService.CurrentConversationBuildVersion().Contains("+mvid.", StringComparison.Ordinal),
                     "Qualification enforces the stated aggregate p95 prompt-construction gate and identifies the exact deployed build by module version id.",
                     new Dictionary<string, object>
                     {
-                        ["p95"] = PercentileNearestRank(Enumerable.Range(1, 100).Select(value => (long)value).ToList(), 0.95d),
-                        ["buildVersion"] = CurrentConversationBuildVersion()
+                        ["p95"] = DialogueService.PercentileNearestRank(Enumerable.Range(1, 100).Select(value => (long)value).ToList(), 0.95d),
+                        ["buildVersion"] = DialogueService.CurrentConversationBuildVersion()
                     });
                 string qualificationSourceRoot = FindVerificationSourceRoot();
-                string economyBehaviorPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
+                string qualificationClientRoot = string.IsNullOrWhiteSpace(qualificationSourceRoot)
                     ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignEconomyCampaignBehavior.cs", "src");
-                string economyModelsPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignEconomyModels.cs", "src");
-                string economySubModulePath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "SubModule.cs", "src/Modules/Platform");
-                string economyTelemetryPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignWorldTestClient.cs", "src");
-                string economyBehaviorText = File.Exists(economyBehaviorPath) ? File.ReadAllText(economyBehaviorPath) : "";
-                string economyModelsText = File.Exists(economyModelsPath) ? File.ReadAllText(economyModelsPath) : "";
-                string economySubModuleText = File.Exists(economySubModulePath) ? File.ReadAllText(economySubModulePath) : "";
-                string economyTelemetryText = File.Exists(economyTelemetryPath) ? File.ReadAllText(economyTelemetryPath) : "";
-                string kingdomEventBehaviorPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignKingdomEventsCampaignBehavior.cs", "src");
-                string kingdomEventRecordPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignKingdomEventRecord.cs", "src");
-                string kingdomEventSavePath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignBetaSaveDefiner.cs", "src");
-                string kingdomEventSettingsPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignBetaSettings.cs", "src");
-                string kingdomEventBehaviorText = File.Exists(kingdomEventBehaviorPath) ? File.ReadAllText(kingdomEventBehaviorPath) : "";
-                string kingdomEventRecordText = File.Exists(kingdomEventRecordPath) ? File.ReadAllText(kingdomEventRecordPath) : "";
-                string kingdomEventSaveText = File.Exists(kingdomEventSavePath) ? File.ReadAllText(kingdomEventSavePath) : "";
-                string kingdomEventSettingsText = File.Exists(kingdomEventSettingsPath) ? File.ReadAllText(kingdomEventSettingsPath) : "";
-                string kingdomNewsQueuePath = string.IsNullOrWhiteSpace(qualificationSourceRoot) ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignNewsCampaignBehavior.cs", "src/Modules/WorldSimulation/News");
-                string kingdomNewsNoticesPath = string.IsNullOrWhiteSpace(qualificationSourceRoot) ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignNewsNativeNotices.cs", "src/Modules/WorldSimulation/News");
-                string kingdomNewsScreenPath = string.IsNullOrWhiteSpace(qualificationSourceRoot) ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignDiplomacyAnnouncementScreenManager.cs", "src/Modules/Diplomacy/UI");
-                string kingdomNewsQueueText = File.Exists(kingdomNewsQueuePath) ? File.ReadAllText(kingdomNewsQueuePath) : "";
-                string kingdomNewsNoticesText = File.Exists(kingdomNewsNoticesPath) ? File.ReadAllText(kingdomNewsNoticesPath) : "";
-                string kingdomNewsScreenText = File.Exists(kingdomNewsScreenPath) ? File.ReadAllText(kingdomNewsScreenPath) : "";
-                string actionResultPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignActionResult.cs", "src");
-                string diplomacyExecutorPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignDiplomacyExecutor.cs", "src");
-                string actionBehaviorPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignAICampaignBehavior.cs", "src");
-                string relationshipCampaignPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignRelationshipCampaignBehavior.cs", "src");
+                    : Path.Combine(qualificationSourceRoot, "ReignBeta");
+                string economyBehaviorPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignEconomyCampaignBehavior.cs");
+                string economyModelsPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignEconomyModels.cs");
+                string economyTelemetryPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignWorldTestClient.cs");
+                string economyBehaviorText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string economyModelsText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string economySubModuleText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string economyTelemetryText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string kingdomEventBehaviorPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignKingdomEventsCampaignBehavior.cs");
+                string kingdomEventRecordPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignKingdomEventRecord.cs");
+                string kingdomEventSavePath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignBetaSaveDefiner.cs");
+                string kingdomEventSettingsPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignBetaSettings.cs");
+                string kingdomEventBehaviorText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string kingdomEventBehaviorTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(qualificationClientRoot, "ReignKingdomEventsCampaignBehavior");
+                string kingdomEventRecordText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string kingdomEventSaveText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string kingdomEventSettingsText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string kingdomNewsQueuePath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignNewsCampaignBehavior.cs");
+                string kingdomNewsNoticesPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignNewsNativeNotices.cs");
+                string kingdomNewsScreenPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignDiplomacyAnnouncementScreenManager.cs");
+                string kingdomNewsQueueText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string kingdomNewsNoticesText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string kingdomNewsScreenText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string kingdomNewsScreenTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(qualificationClientRoot, "ReignDiplomacyAnnouncementScreenManager");
+                string actionResultPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignActionResult.cs");
+                string diplomacyExecutorPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignDiplomacyExecutor.cs");
+                string actionBehaviorPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignAICampaignBehavior.cs");
+                string relationshipCampaignPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignRelationshipCampaignBehavior.cs");
                 string liveTestServerPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
                     ? ""
                     : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignServer"), "LiveInteractionTest.cs", "src");
@@ -1595,16 +1600,16 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         Path.Combine(qualificationSourceRoot, "ReignServer"),
                         "PassiveWorldControl.cs",
                         "ReignLiveTest/Features/WorldSimulation");
-                string passiveWorldHostPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignLiveInteractionPassiveWorldHost.cs", "src");
-                string actionResultText = File.Exists(actionResultPath) ? File.ReadAllText(actionResultPath) : "";
-                string diplomacyExecutorText = File.Exists(diplomacyExecutorPath) ? File.ReadAllText(diplomacyExecutorPath) : "";
-                string actionBehaviorText = File.Exists(actionBehaviorPath) ? File.ReadAllText(actionBehaviorPath) : "";
-                string relationshipCampaignText = File.Exists(relationshipCampaignPath) ? File.ReadAllText(relationshipCampaignPath) : "";
-                string liveTestServerText = File.Exists(liveTestServerPath) ? File.ReadAllText(liveTestServerPath) : "";
+                string passiveWorldHostPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignLiveInteractionPassiveWorldHost.cs");
+                string actionResultText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string diplomacyExecutorText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string actionBehaviorText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string relationshipCampaignText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string liveTestServerText = File.Exists(liveTestServerPath)
+                    ? VerificationSourceLocator.ReadServerSplitSourceText(Path.Combine(qualificationSourceRoot, "ReignServer"), "LiveInteractionTest.cs", "src")
+                    : "";
                 string passiveWorldControllerText = File.Exists(passiveWorldControllerPath) ? File.ReadAllText(passiveWorldControllerPath) : "";
-                string passiveWorldHostText = File.Exists(passiveWorldHostPath) ? File.ReadAllText(passiveWorldHostPath) : "";
+                string passiveWorldHostText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
                 add("kingdom_catastrophe_and_prosperity_contract",
                     kingdomEventBehaviorText.Contains("IsDailyTrigger(campaignId, day)", StringComparison.Ordinal)
                     && kingdomEventBehaviorText.Contains("IsBeneficial(campaignId, day)", StringComparison.Ordinal)
@@ -1628,8 +1633,8 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     && kingdomEventSaveText.Contains("typeof(ReignKingdomEventRecord), 44", StringComparison.Ordinal)
                     && kingdomEventSettingsText.Contains("Enable Kingdom Catastrophes and Boons", StringComparison.Ordinal)
                     && kingdomEventSettingsText.Contains("Force Kingdom Catastrophe or Boon", StringComparison.Ordinal)
-                    && !kingdomEventBehaviorText.Contains("desertion", StringComparison.OrdinalIgnoreCase)
-                    && !kingdomEventBehaviorText.Contains("recruitment_surge", StringComparison.OrdinalIgnoreCase),
+                    && !kingdomEventBehaviorTextScoped.Contains("desertion", StringComparison.OrdinalIgnoreCase)
+                    && !kingdomEventBehaviorTextScoped.Contains("recruitment_surge", StringComparison.OrdinalIgnoreCase),
                     "The client contract wires every approved kingdom-wide effect, saved roll ordering, treaty/civil-war guards, living NPC succession, player exclusion, history/notification integration, and a separate force-event control without troop or desertion mechanics.",
                     new Dictionary<string, object>
                     {
@@ -1639,8 +1644,8 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["settingsPath"] = kingdomEventSettingsPath
                     });
                 add("kingdom_event_announcement_queue_contract",
-                    kingdomEventBehaviorText.Contains("ReignNewsCampaignBehavior.Instance?.KingdomEvent(record, kingdom, secondary, oldRuler, heir)", StringComparison.Ordinal)
-                    && !kingdomEventBehaviorText.Contains("PendingAnnouncementEventIds", StringComparison.Ordinal)
+                    (kingdomEventBehaviorText.Contains("ReignNewsCampaignBehavior.Instance?.KingdomEvent(record, kingdom, secondary, oldRuler, heir)", StringComparison.Ordinal) || kingdomEventBehaviorText.Contains("ReignServices.News?.KingdomEvent(record, kingdom, secondary, oldRuler, heir)", StringComparison.Ordinal))
+                    && !kingdomEventBehaviorTextScoped.Contains("PendingAnnouncementEventIds", StringComparison.Ordinal)
                     && kingdomNewsNoticesText.Contains("Category = ReignNewsCategories.WorldEvents", StringComparison.Ordinal)
                     && kingdomNewsNoticesText.Contains("Publish(news)", StringComparison.Ordinal)
                     && kingdomNewsQueueText.Contains("var news = _state.Pending[0]", StringComparison.Ordinal)
@@ -1656,7 +1661,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     && kingdomNewsScreenText.Contains("if (!IsOpen || _layer == null || _vm == null)", StringComparison.Ordinal)
                     && kingdomNewsScreenText.Contains("_activeEventId != eventId", StringComparison.Ordinal)
                     && kingdomNewsScreenText.Contains("UnregisterActiveStateDisableRequest()", StringComparison.Ordinal)
-                    && !kingdomNewsScreenText.Contains("InformationManager.HideInquiry()", StringComparison.Ordinal),
+                    && !kingdomNewsScreenTextScoped.Contains("InformationManager.HideInquiry()", StringComparison.Ordinal),
                     "Kingdom events use the shared Herald queue: one owned announcement at a time, exact head acknowledgement, epoch-safe callbacks, foreign inquiry exclusion and guarded harness/focus cleanup without dismissing another inquiry.",
                     new Dictionary<string, object> { ["behaviorPath"] = kingdomEventBehaviorPath,
                         ["queuePath"] = kingdomNewsQueuePath, ["noticesPath"] = kingdomNewsNoticesPath,
@@ -1743,9 +1748,9 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     "Native adapters use the tested continuous policy, preserve old save counters, and conserve actual same-realm aid stocks. Deterministic numeric and isolated native hook probes run in MCP tests; campaign balance remains separate.",
                     new Dictionary<string, object> { ["behaviorPath"] = economyBehaviorPath, ["modelsPath"] = economyModelsPath, ["telemetryPath"] = economyTelemetryPath });
                 add("war_economy_relief_float_drift_tolerance",
-                    ReliefFoodIsConserved(46846.6367d, 37907.082d, 8939.383d)
-                    && !ReliefFoodIsConserved(46846.6367d, 37906.5d, 8939.383d)
-                    && !ReliefFoodIsConserved(-1d, 0d, 0d),
+                    WorldSimulationService.ReliefFoodIsConserved(46846.6367d, 37907.082d, 8939.383d)
+                    && !WorldSimulationService.ReliefFoodIsConserved(46846.6367d, 37906.5d, 8939.383d)
+                    && !WorldSimulationService.ReliefFoodIsConserved(-1d, 0d, 0d),
                     "Long-run single-precision relief totals allow only ten parts per million of cumulative summation drift while genuine missing or negative food still fails conservation.",
                     new Dictionary<string, object>
                     {
@@ -1764,15 +1769,15 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         "unsupported", 0, "fixtureTainted", false, "nativeAcceptance", "passed")
                 };
                 var coveragePayload = new Dictionary<string, object> { ["warEconomy"] = coverageSample };
-                var freshCoverage = BuildWorldTestWarEconomy(coveragePayload, 10d);
-                var staleCoverage = BuildWorldTestWarEconomy(coveragePayload, 12d);
+                var freshCoverage = WorldSimulationService.BuildWorldTestWarEconomy(coveragePayload, 10d);
+                var staleCoverage = WorldSimulationService.BuildWorldTestWarEconomy(coveragePayload, 12d);
                 coverageSample["schemaVersion"] = 1;
-                var legacyCoverage = BuildWorldTestWarEconomy(coveragePayload, 10d);
+                var legacyCoverage = WorldSimulationService.BuildWorldTestWarEconomy(coveragePayload, 10d);
                 var missingRaidFoodSample = new Dictionary<string, object>(coverageSample) { ["schemaVersion"] = 2 };
                 missingRaidFoodSample.Remove("raidFood");
-                var missingRaidFoodCoverage = BuildWorldTestWarEconomy(TestDict("warEconomy", missingRaidFoodSample), 10d);
+                var missingRaidFoodCoverage = WorldSimulationService.BuildWorldTestWarEconomy(TestDict("warEconomy", missingRaidFoodSample), 10d);
                 var zeroRaidFoodVersionSample = new Dictionary<string, object>(missingRaidFoodSample) { ["raidFoodEvidenceVersion"] = 0, ["raidFood"] = coverageSample["raidFood"] };
-                var zeroRaidFoodVersionCoverage = BuildWorldTestWarEconomy(TestDict("warEconomy", zeroRaidFoodVersionSample), 10d);
+                var zeroRaidFoodVersionCoverage = WorldSimulationService.BuildWorldTestWarEconomy(TestDict("warEconomy", zeroRaidFoodVersionSample), 10d);
                 add("war_economy_current_coverage_requires_fresh_schema",
                     ReadBool(freshCoverage, "behavioralCoverageComplete", false)
                     && ReadString(freshCoverage, "status", "") == "healthy"
@@ -1793,7 +1798,10 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         "QualificationRunner.cs",
                         "ReignLiveTest/Features/Dialogue");
                 string qualificationRunnerText = File.Exists(qualificationRunnerPath)
-                    ? File.ReadAllText(qualificationRunnerPath)
+                    ? VerificationSourceLocator.ReadServerSplitSourceText(
+                        Path.Combine(qualificationSourceRoot, "ReignServer"),
+                        "QualificationRunner.cs",
+                        "ReignLiveTest/Features/Dialogue")
                     : "";
                 add("qualification_same_build_guarded_target_contract",
                     qualificationRunnerText.Contains("[\"effects\"] = \"guarded\"", StringComparison.Ordinal)
@@ -1849,7 +1857,10 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         "Program.cs",
                         "ReignLiveTest");
                 string liveTestControllerText = File.Exists(liveTestControllerPath)
-                    ? File.ReadAllText(liveTestControllerPath)
+                    ? VerificationSourceLocator.ReadServerSplitSourceText(
+                        Path.Combine(qualificationSourceRoot, "ReignServer"),
+                        "Program.cs",
+                        "ReignLiveTest")
                     : "";
                 string finalGauntletLongHorizonPath =
                     string.IsNullOrWhiteSpace(qualificationSourceRoot)
@@ -1862,17 +1873,8 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     File.Exists(finalGauntletLongHorizonPath)
                         ? File.ReadAllText(finalGauntletLongHorizonPath)
                         : "";
-                string gauntletFixtureHostPath =
-                    string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                        ? ""
-                        : VerificationSourceLocator.ResolveUnique(
-                            Path.Combine(qualificationSourceRoot, "ReignBeta"),
-                            "ReignLiveInteractionGauntletFixtures.cs",
-                            "src/Modules");
-                string gauntletFixtureHostText =
-                    File.Exists(gauntletFixtureHostPath)
-                        ? File.ReadAllText(gauntletFixtureHostPath)
-                        : "";
+                string gauntletFixtureHostPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignLiveInteractionGauntletFixtures.cs");
+                string gauntletFixtureHostText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
                 string finalGauntletRunnerPath =
                     string.IsNullOrWhiteSpace(qualificationSourceRoot)
                         ? ""
@@ -1931,33 +1933,27 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     && liveTestControllerText.Contains("return 900;", StringComparison.Ordinal),
                     "One-off close and scene-boundary commands retain a 15-minute accuracy-preserving liveness boundary instead of the ordinary-turn timeout.",
                     liveTestControllerPath);
-                string serverClientPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignServerClient.cs", "src");
-                string serverClientText = File.Exists(serverClientPath)
-                    ? File.ReadAllText(serverClientPath)
-                    : "";
-                string compactServerClientText = string.Concat(serverClientText.Where(c => !char.IsWhiteSpace(c)));
+                string serverClientPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignServerClient.cs");
+                string serverClientText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string httpTransportPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignHttpTransport.cs");
+                string httpTransportText = VerificationSourceLocator.SourceDeclaresType(serverClientText, "ReignHttpTransport")
+                    ? VerificationSourceLocator.ReadClientTypeSourceText(qualificationClientRoot, "ReignHttpTransport")
+                    : string.Empty;
+                string compactHttpTransportText = string.Concat(httpTransportText.Where(c => !char.IsWhiteSpace(c)));
                 add("live_test_control_plane_bypasses_shared_endpoint_breaker",
-                    compactServerClientText.Contains("boolliveTestRoute=route.StartsWith(\"/tests/live/\"", StringComparison.Ordinal)
-                    && compactServerClientText.Contains("if(!liveTestRoute&&!ReignServerEndpoint.TryBeginRequest(outstringunavailable,outprobeClaim))", StringComparison.Ordinal)
-                    && compactServerClientText.Contains("HttpClientrouteClient=liveTestRoute?LiveTestClient:", StringComparison.Ordinal)
-                    && compactServerClientText.Contains("if(!liveTestRoute)ReignServerEndpoint.ReportTransportFailure(probeClaim);", StringComparison.Ordinal),
-                    "Loopback heartbeat, polling, acknowledgement, and lifecycle routes use their short-timeout client without inheriting unrelated passive-system endpoint backoff.",
-                    serverClientPath);
-                string liveTestClientPath =
-                    string.IsNullOrWhiteSpace(
-                        qualificationSourceRoot)
-                        ? ""
-                        : VerificationSourceLocator.ResolveUnique(
-                            Path.Combine(qualificationSourceRoot, "ReignBeta"),
-                            "ReignLiveTestClient.cs",
-                            "src/Modules");
-                string liveTestClientText =
-                    File.Exists(liveTestClientPath)
-                        ? File.ReadAllText(
-                            liveTestClientPath)
-                        : "";
+                    compactHttpTransportText.Contains("boolliveTestRoute=route.StartsWith(\"/tests/live/\"", StringComparison.Ordinal)
+                    && compactHttpTransportText.Contains("if(!liveTestRoute&&!ReignServerEndpoint.TryBeginRequest(outstringunavailable,outprobeClaim))", StringComparison.Ordinal)
+                    && compactHttpTransportText.Contains("HttpClientrouteClient=requestClient??(liveTestRoute?LiveTestClient:", StringComparison.Ordinal)
+                    && compactHttpTransportText.Contains("LiveTestClient=CreateLocalServerHttpClient(4,5);", StringComparison.Ordinal)
+                    && compactHttpTransportText.Contains("if(!liveTestRoute)ReignServerEndpoint.ReportTransportFailure(probeClaim);", StringComparison.Ordinal),
+                    "Loopback heartbeat, polling, acknowledgement, and lifecycle routes use their short-timeout client by default and bypass unrelated passive-system endpoint backoff.",
+                    httpTransportPath);
+                string liveTestClientPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignLiveTestClient.cs");
+                string liveTestClientText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string liveTestClientTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(qualificationClientRoot, "ReignServerClient");
+                // The live-test heartbeat may live in its own client type; scope the stale-mode-list guard to both.
+                if (VerificationSourceLocator.SourceDeclaresType(liveTestClientText, "ReignLiveTestServerClient"))
+                    liveTestClientTextScoped += "\n" + VerificationSourceLocator.ReadClientTypeSourceText(qualificationClientRoot, "ReignLiveTestServerClient");
                 add("native_identity_authority_context_is_always_on",
                     serverClientText.Contains(
                         "BuildNativePoliticalContext(",
@@ -1985,51 +1981,14 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["liveTestClient"] =
                             liveTestClientPath
                     });
-                string liveTestHostPath =
-                    string.IsNullOrWhiteSpace(
-                        qualificationSourceRoot)
-                        ? ""
-                        : VerificationSourceLocator.ResolveUnique(
-                            Path.Combine(qualificationSourceRoot, "ReignBeta"),
-                            "ReignLiveInteractionTestHost.cs",
-                            "src/Modules");
-                string liveTestHostText =
-                    File.Exists(liveTestHostPath)
-                        ? File.ReadAllText(liveTestHostPath)
-                        : "";
-                string correspondenceVmPath =
-                    string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                        ? ""
-                        : VerificationSourceLocator.ResolveUnique(
-                            Path.Combine(qualificationSourceRoot, "ReignBeta"),
-                            "ReignCorrespondenceScreenVM.cs",
-                            "src/Modules/Dialogue");
-                string correspondenceVmText =
-                    File.Exists(correspondenceVmPath)
-                        ? File.ReadAllText(correspondenceVmPath)
-                        : "";
-                string correspondenceHostPath =
-                    string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                        ? ""
-                        : VerificationSourceLocator.ResolveUnique(
-                            Path.Combine(qualificationSourceRoot, "ReignBeta"),
-                            "ReignLiveInteractionCorrespondenceHost.cs",
-                            "src/Modules/Dialogue");
-                string correspondenceHostText =
-                    File.Exists(correspondenceHostPath)
-                        ? File.ReadAllText(correspondenceHostPath)
-                        : "";
-                string courtHostPath =
-                    string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                        ? ""
-                        : VerificationSourceLocator.ResolveUnique(
-                            Path.Combine(qualificationSourceRoot, "ReignBeta"),
-                            "ReignLiveInteractionCourtHost.cs",
-                            "src/Modules/Court");
-                string courtHostText =
-                    File.Exists(courtHostPath)
-                        ? File.ReadAllText(courtHostPath)
-                        : "";
+                string liveTestHostPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignLiveInteractionTestHost.cs");
+                string liveTestHostText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string correspondenceVmPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignCorrespondenceScreenVM.cs");
+                string correspondenceVmText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string correspondenceHostPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignLiveInteractionCorrespondenceHost.cs");
+                string correspondenceHostText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string courtHostPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignLiveInteractionCourtHost.cs");
+                string courtHostText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
                 add("live_bridge_enabled_mode_capability_contract",
                     liveTestHostText.Contains(
                         "GetSupportedModes()",
@@ -2043,7 +2002,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     && liveTestClientText.Contains(
                         "ReignLiveInteractionTestHost.GetSupportedModes()",
                         StringComparison.Ordinal)
-                    && !liveTestClientText.Contains(
+                    && !liveTestClientTextScoped.Contains(
                         "new JArray(\"individual_chat\", \"party_chat\", \"social_event\", \"wilderness_event\", \"social_balance\")",
                         StringComparison.Ordinal),
                     "The game heartbeat advertises correspondence and court only through fresh production availability checks instead of a stale hard-coded mode list.",
@@ -2239,7 +2198,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     ? ""
                     : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignServer"), "LiveInteractionTest.cs", "src");
                 string liveInteractionSourceText = File.Exists(liveInteractionSourcePath)
-                    ? File.ReadAllText(liveInteractionSourcePath)
+                    ? VerificationSourceLocator.ReadServerSplitSourceText(Path.Combine(qualificationSourceRoot, "ReignServer"), "LiveInteractionTest.cs", "src")
                     : "";
                 add("qualification_lie_relationship_focus",
                     qualificationRunnerText.Contains("lieRelationshipOnly", StringComparison.Ordinal)
@@ -2266,12 +2225,12 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ? File.ReadAllText(qualificationFixturesPath)
                         : "";
                 int targetSearchStart = liveInteractionSourceText.IndexOf(
-                    "private static Dictionary<string, object> LiveTestTargetSearchApi",
+                    "internal static Dictionary<string, object> LiveTestTargetSearchApi",
                     StringComparison.Ordinal);
                 int targetSearchEnd = targetSearchStart < 0
                     ? -1
                     : liveInteractionSourceText.IndexOf(
-                        "private static Dictionary<string, object> LiveTestRunStartApi",
+                        "internal static Dictionary<string, object> LiveTestRunStartApi",
                         targetSearchStart,
                         StringComparison.Ordinal);
                 string targetSearchBody = targetSearchStart >= 0 && targetSearchEnd > targetSearchStart
@@ -2341,7 +2300,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         "[\"profileCacheHit\"] = true",
                         StringComparison.Ordinal)
                     && qualificationFixturesText.Contains(
-                        "traits = BuildTraitDocument(runtimeProfile);",
+                        "traits = CharactersService.BuildTraitDocument(runtimeProfile);",
                         StringComparison.Ordinal)
                     && qualificationFixturesText.Contains(
                         "if (verifyIdentity)",
@@ -2420,7 +2379,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["timing"] = new Dictionary<string, object> { ["promptBuildMs"] = 80, ["promptChars"] = 12000, ["totalMs"] = 1200 }
                     }
                 };
-                Dictionary<string, object> evaluation = EvaluateReplayCorpusCase(replay);
+                Dictionary<string, object> evaluation = DialogueService.EvaluateReplayCorpusCase(replay);
                 add("replay_evaluator", ReadBool(evaluation, "passed", false), "Replay cases evaluate grounding, group awareness, prohibited knowledge, and latency without a provider call.", evaluation);
                 Dictionary<string, object> oversizedReplay = new Dictionary<string, object>(replay)
                 {
@@ -2430,7 +2389,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["timing"] = new Dictionary<string, object> { ["promptBuildMs"] = 80, ["promptChars"] = 15001, ["totalMs"] = 1200 }
                     }
                 };
-                Dictionary<string, object> oversizedEvaluation = EvaluateReplayCorpusCase(oversizedReplay);
+                Dictionary<string, object> oversizedEvaluation = DialogueService.EvaluateReplayCorpusCase(oversizedReplay);
                 add("replay_evaluator_prompt_character_budget",
                     !ReadBool(oversizedEvaluation, "passed", true)
                     && ReadStringList(oversizedEvaluation, "failures")
@@ -2447,7 +2406,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         }
                     }
                 };
-                Dictionary<string, object> missingContextEvaluation = EvaluateReplayCorpusCase(missingContextReplay);
+                Dictionary<string, object> missingContextEvaluation = DialogueService.EvaluateReplayCorpusCase(missingContextReplay);
                 add("replay_evaluator_required_context_pull",
                     !ReadBool(missingContextEvaluation, "passed", true)
                     && ReadStringList(missingContextEvaluation, "failures")
@@ -2476,7 +2435,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["reply"] = "The aversion is simple: when people tell me they are fair before they have acted, I stop listening to what they say and watch what they take."
                     }
                 };
-                Dictionary<string, object> dynamicRecallEvaluation = EvaluateReplayCorpusCase(dynamicRecallReplay);
+                Dictionary<string, object> dynamicRecallEvaluation = DialogueService.EvaluateReplayCorpusCase(dynamicRecallReplay);
                 Dictionary<string, object> missingDynamicRecallReplay = new Dictionary<string, object>(dynamicRecallReplay)
                 {
                     ["responseEvidence"] = new Dictionary<string, object>
@@ -2484,7 +2443,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["reply"] = "The roads near the settlement are busy today."
                     }
                 };
-                Dictionary<string, object> missingDynamicRecallEvaluation = EvaluateReplayCorpusCase(missingDynamicRecallReplay);
+                Dictionary<string, object> missingDynamicRecallEvaluation = DialogueService.EvaluateReplayCorpusCase(missingDynamicRecallReplay);
                 add("replay_evaluator_dynamic_characteristic_recall",
                     ReadBool(dynamicRecallEvaluation, "passed", false)
                     && !ReadBool(missingDynamicRecallEvaluation, "passed", true)
@@ -2496,7 +2455,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["grounded"] = dynamicRecallEvaluation,
                         ["unrelated"] = missingDynamicRecallEvaluation
                     });
-                string boundedReplayPath = ReplayCorpusCasePath(campaignId, "replay_" + new string('r', 220));
+                string boundedReplayPath = DialogueService.ReplayCorpusCasePath(campaignId, "replay_" + new string('r', 220));
                 add("replay_corpus_bounded_path", Path.GetFileName(boundedReplayPath).Length < 40,
                     "Automatic replay filenames remain below legacy Windows path limits even with long correlation ids.", boundedReplayPath);
 
@@ -2511,23 +2470,23 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                 ManualResetEvent historyIngestEntered = new ManualResetEvent(false);
                 System.Threading.Tasks.Task firstReader = System.Threading.Tasks.Task.Run(() =>
                 {
-                    CampaignRequestAccess access = EnterCampaignRequestAccess("/relationships/ambient/native_sync/receipts");
+                    Program.CampaignRequestAccess access = Program.EnterCampaignRequestAccess("/relationships/ambient/native_sync/receipts");
                     try
                     {
                         firstReaderEntered.Set();
                         releaseFirstReader.WaitOne(3000);
                     }
-                    finally { ExitCampaignRequestAccess(access); }
+                    finally { Program.ExitCampaignRequestAccess(access); }
                 });
                 firstReaderEntered.WaitOne(1000);
                 System.Threading.Tasks.Task historyIngest = System.Threading.Tasks.Task.Run(() =>
                 {
-                    CampaignRequestAccess access = EnterCampaignRequestAccess("/world-history/ingest-batch");
+                    Program.CampaignRequestAccess access = Program.EnterCampaignRequestAccess("/world-history/ingest-batch");
                     try
                     {
                         historyIngestEntered.Set();
                     }
-                    finally { ExitCampaignRequestAccess(access); }
+                    finally { Program.ExitCampaignRequestAccess(access); }
                 });
                 bool historyIngestDidNotWaitForIndependentReader =
                     historyIngestEntered.WaitOne(1000);
@@ -2549,7 +2508,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     bool campaignReaderWaitedForReplacement = false;
                     System.Threading.Tasks.Task infrastructureRequest = null;
                     System.Threading.Tasks.Task campaignRequest = null;
-                    CampaignDataGate.EnterWriteLock();
+                    Program.CampaignDataGate.EnterWriteLock();
                     try
                     {
                         infrastructureRequest = System.Threading.Tasks.Task.Factory.StartNew(() =>
@@ -2558,9 +2517,9 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                             foreach (string path in new[] { "/health", "/", "/index.html",
                                 "/assets/reign-icon.webp", "/assets/ReignLogo.png" })
                             {
-                                CampaignRequestAccess access = EnterCampaignRequestAccess(path);
-                                try { infrastructureUngated &= access == CampaignRequestAccess.None; }
-                                finally { ExitCampaignRequestAccess(access); }
+                                Program.CampaignRequestAccess access = Program.EnterCampaignRequestAccess(path);
+                                try { infrastructureUngated &= access == Program.CampaignRequestAccess.None; }
+                                finally { Program.ExitCampaignRequestAccess(access); }
                             }
                             infrastructureCompleted.Set();
                         }, CancellationToken.None, System.Threading.Tasks.TaskCreationOptions.LongRunning,
@@ -2568,16 +2527,16 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         campaignRequest = System.Threading.Tasks.Task.Factory.StartNew(() =>
                         {
                             campaignReaderStarted.Set();
-                            CampaignRequestAccess access = EnterCampaignRequestAccess("/tests/live/game/heartbeat");
+                            Program.CampaignRequestAccess access = Program.EnterCampaignRequestAccess("/tests/live/game/heartbeat");
                             try { campaignReaderEntered.Set(); }
-                            finally { ExitCampaignRequestAccess(access); }
+                            finally { Program.ExitCampaignRequestAccess(access); }
                         }, CancellationToken.None, System.Threading.Tasks.TaskCreationOptions.LongRunning,
                             System.Threading.Tasks.TaskScheduler.Default);
                         infrastructureRespondedDuringReplacement = infrastructureCompleted.Wait(1000);
                         campaignReaderWaitedForReplacement = campaignReaderStarted.Wait(1000)
                             && !campaignReaderEntered.Wait(100);
                     }
-                    finally { CampaignDataGate.ExitWriteLock(); }
+                    finally { Program.CampaignDataGate.ExitWriteLock(); }
                     bool accessTasksFinished = System.Threading.Tasks.Task.WaitAll(
                         new[] { infrastructureRequest, campaignRequest }, 3000);
                     add("service_health_and_static_ui_remain_available_during_campaign_replacement",
@@ -2588,21 +2547,21 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         "Native campaign requests wait until Save Sync releases the write lock, then continue normally.", null);
                 }
 
-                CampaignRequestAccess liveHeartbeatAccess =
-                    EnterCampaignRequestAccess("/tests/live/game/heartbeat");
+                Program.CampaignRequestAccess liveHeartbeatAccess =
+                    Program.EnterCampaignRequestAccess("/tests/live/game/heartbeat");
                 bool liveHeartbeatUsesCampaignReadGate =
-                    liveHeartbeatAccess == CampaignRequestAccess.Read;
-                ExitCampaignRequestAccess(liveHeartbeatAccess);
+                    liveHeartbeatAccess == Program.CampaignRequestAccess.Read;
+                Program.ExitCampaignRequestAccess(liveHeartbeatAccess);
                 add("live_test_heartbeat_uses_campaign_read_gate",
                     liveHeartbeatUsesCampaignReadGate,
                     "Live-test campaign files cannot be recreated while Save Sync holds the campaign write gate.",
                     liveHeartbeatAccess.ToString());
 
-                CampaignRequestAccess synchronousVerificationAccess =
-                    EnterCampaignRequestAccess("/tests/run-suite");
+                Program.CampaignRequestAccess synchronousVerificationAccess =
+                    Program.EnterCampaignRequestAccess("/tests/run-suite");
                 bool synchronousVerificationRemainsUngated =
-                    synchronousVerificationAccess == CampaignRequestAccess.None;
-                ExitCampaignRequestAccess(synchronousVerificationAccess);
+                    synchronousVerificationAccess == Program.CampaignRequestAccess.None;
+                Program.ExitCampaignRequestAccess(synchronousVerificationAccess);
                 add("synchronous_verification_remains_outside_campaign_gate",
                     synchronousVerificationRemainsUngated,
                     "Synchronous verification routes remain outside the campaign gate so suites that exercise Save Sync cannot deadlock themselves.",
@@ -2610,22 +2569,18 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
 
                 string scopedResumeRoot = Path.Combine(Path.GetTempPath(),
                     "reign_social_resume_scope_" + Guid.NewGuid().ToString("N"));
-                string priorScopedResumeRoot = CampaignsRootOverride.Value;
+                string priorScopedResumeRoot = Program.CampaignsRootOverride.Value;
                 string oldResumeCampaign = campaignId + "_old_resume";
                 string newResumeCampaign = campaignId + "_new_resume";
                 string oldResumeEventId = campaignId + "_old_social_event";
                 try
                 {
-                    CampaignsRootOverride.Value = scopedResumeRoot;
-                    using (ReignDbConnection connection = OpenCampaignConnection(oldResumeCampaign))
+                    Program.CampaignsRootOverride.Value = scopedResumeRoot;
+                    using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(oldResumeCampaign))
                     {
-                        EnsureWorldHistorySchema(connection);
-                        EnsureSocialReputationSchema(connection);
-                        ExecuteSql(connection, @"INSERT INTO world_history_events(
-event_id,campaign_id,timeline_id,sequence,world_day,event_type,summary,payload_json,created_utc)
-VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
-'{""subjectId"":""old_subject"",""archetypeId"":""battle_proven""}',$created);",
-                            new Dictionary<string, object>
+                        WorldSimulationService.EnsureWorldHistorySchema(connection);
+                        ReputationService.EnsureSocialReputationSchema(connection);
+                        PlatformSelfTestStore.InsertWorldHistoryEvents(connection, new Dictionary<string, object>
                             {
                                 ["event_id"] = oldResumeEventId,
                                 ["campaign"] = oldResumeCampaign,
@@ -2633,7 +2588,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                             });
                     }
                     bool unrelatedScheduled =
-                        ResumePendingSocialWorldHistoryOutcomes(newResumeCampaign, "main");
+                        ReputationService.ResumePendingSocialWorldHistoryOutcomes(newResumeCampaign, "main");
                     add("social_world_history_resume_is_campaign_scoped",
                         !unrelatedScheduled,
                         "Opening a new campaign never scans or schedules pending derived social work from historical campaigns.",
@@ -2641,43 +2596,43 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                 }
                 finally
                 {
-                    InvalidateCampaignSchemaCaches(oldResumeCampaign);
-                    InvalidateCampaignSchemaCaches(newResumeCampaign);
+                    ReignDatabase.InvalidateCampaignSchemaCaches(oldResumeCampaign);
+                    ReignDatabase.InvalidateCampaignSchemaCaches(newResumeCampaign);
                     ReignPostgreSqlStorage.DropCampaign(oldResumeCampaign);
                     ReignPostgreSqlStorage.DropCampaign(newResumeCampaign);
-                    CampaignsRootOverride.Value = priorScopedResumeRoot;
-                    TryDeleteDirectory(scopedResumeRoot);
+                    Program.CampaignsRootOverride.Value = priorScopedResumeRoot;
+                    PersistenceService.TryDeleteDirectory(scopedResumeRoot);
                 }
 
                 Dictionary<string, object> localSettings = new Dictionary<string, object>();
-                List<Dictionary<string, object>> selected = DeterministicContextPullSelection("dialogue", "What villages and bandits are nearby?", "", ContextPullIds.ToList());
+                List<Dictionary<string, object>> selected = DialogueService.DeterministicContextPullSelection("dialogue", "What villages and bandits are nearby?", "", Program.ContextPullIds.ToList());
                 add("foreground_context_router", selected.Any(x => ReadString(x, "id", "") == "nearby_settlements")
                     && selected.Any(x => ReadString(x, "id", "") == "nearby_bandit_parties"),
                     "Context helpers are selected locally on the foreground path without a second LLM request.", selected);
                 const string naturalNearbySettlementPrompt =
                     "What settlements are nearby, and which road would you consider most sensible? Do not invent distances you were not given.";
-                List<Dictionary<string, object>> naturalNearbySettlementSelected = PruneContextPullSelection(
+                List<Dictionary<string, object>> naturalNearbySettlementSelected = DialogueService.PruneContextPullSelection(
                     naturalNearbySettlementPrompt,
-                    DeterministicContextPullSelection("dialogue", naturalNearbySettlementPrompt, "", ContextPullIds.ToList()));
+                    DialogueService.DeterministicContextPullSelection("dialogue", naturalNearbySettlementPrompt, "", Program.ContextPullIds.ToList()));
                 add("context_router_nearby_settlement_natural_word_order",
                     naturalNearbySettlementSelected.Any(x => ReadString(x, "id", "") == "nearby_settlements"),
                     "Natural 'settlements are nearby' wording deterministically includes the native nearby-settlement bundle and survives pruning.",
                     naturalNearbySettlementSelected);
                 const string characteristicInfluencePrompt =
                     "Earlier you established a quiet personal detail of your own. Explain one small way that exact detail influences your behavior.";
-                List<Dictionary<string, object>> characteristicInfluenceSelected = PruneContextPullSelection(
+                List<Dictionary<string, object>> characteristicInfluenceSelected = DialogueService.PruneContextPullSelection(
                     characteristicInfluencePrompt,
-                    DeterministicContextPullSelection("dialogue", characteristicInfluencePrompt, "", ContextPullIds.ToList()));
+                    DialogueService.DeterministicContextPullSelection("dialogue", characteristicInfluencePrompt, "", Program.ContextPullIds.ToList()));
                 add("context_router_behavioral_influence_is_not_clan_influence",
                     !characteristicInfluenceSelected.Any(x => ReadString(x, "id", "") == "clan_wealth_and_influence"),
                     "The verb 'influences' in a personal-behavior question cannot trigger the clan wealth and political influence helper.",
                     characteristicInfluenceSelected);
-                List<Dictionary<string, object>> recallSelected = DeterministicContextPullSelection("party_chat",
-                    "Address each other while recalling what the baker wrapped.", "", ContextPullIds.ToList());
+                List<Dictionary<string, object>> recallSelected = DialogueService.DeterministicContextPullSelection("party_chat",
+                    "Address each other while recalling what the baker wrapped.", "", Program.ContextPullIds.ToList());
                 add("context_router_word_boundary", !recallSelected.Any(x => ReadString(x, "id", "") == "check_player_appearance_status"),
                     "The word 'address' cannot accidentally trigger the player-appearance helper through its 'dress' substring.", recallSelected);
-                List<Dictionary<string, object>> historySelected = DeterministicContextPullSelection("party_chat",
-                    "What happened to Suruq's Party, and whose party was responsible according to canonical campaign history?", "", ContextPullIds.ToList());
+                List<Dictionary<string, object>> historySelected = DialogueService.DeterministicContextPullSelection("party_chat",
+                    "What happened to Suruq's Party, and whose party was responsible according to canonical campaign history?", "", Program.ContextPullIds.ToList());
                 add("context_router_world_history_lookup", historySelected.Any(x => ReadString(x, "id", "") == "verify_world_history")
                     && !historySelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer")
                     && !historySelected.Any(x => ReadString(x, "id", "") == "kingdom_diplomacy_status")
@@ -2685,21 +2640,21 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     "General campaign-history questions select canonical history without incidental trade, personal-memory, or current-diplomacy pulls.", historySelected);
                 const string establishedRegionalHistoryPrompt =
                     "What established history about the Southern Empire or Danustica would matter to someone making plans here? Separate verified context from your interpretation.";
-                List<Dictionary<string, object>> establishedRegionalHistorySelected = PruneContextPullSelection(
+                List<Dictionary<string, object>> establishedRegionalHistorySelected = DialogueService.PruneContextPullSelection(
                     establishedRegionalHistoryPrompt,
-                    DeterministicContextPullSelection(
+                    DialogueService.DeterministicContextPullSelection(
                         "dialogue",
                         establishedRegionalHistoryPrompt,
                         "Current settlement: Danustica (`town_ES1`)",
-                        ContextPullIds.ToList()));
+                        Program.ContextPullIds.ToList()));
                 add("context_router_established_regional_history",
                     establishedRegionalHistorySelected.Any(x => ReadString(x, "id", "") == "verify_world_history"),
                     "Natural established-history wording about an empire or settlement selects canonical world-history evidence and survives pruning.",
                     establishedRegionalHistorySelected);
                 const string currentDanusticaHistoryPrompt = "Using current native facts and canonical campaign history, who currently owns and governs Danustica, is it under siege, which lord parties are nearby, and who most recently captured it?";
-                List<Dictionary<string, object>> currentDanusticaHistorySelected = PruneContextPullSelection(currentDanusticaHistoryPrompt,
-                    DeterministicContextPullSelection("dialogue", currentDanusticaHistoryPrompt,
-                        "Current settlement: Danustica (`town_ES1`)", ContextPullIds.ToList()));
+                List<Dictionary<string, object>> currentDanusticaHistorySelected = DialogueService.PruneContextPullSelection(currentDanusticaHistoryPrompt,
+                    DialogueService.DeterministicContextPullSelection("dialogue", currentDanusticaHistoryPrompt,
+                        "Current settlement: Danustica (`town_ES1`)", Program.ContextPullIds.ToList()));
                 add("context_router_current_settlement_label_and_world_history_split",
                     currentDanusticaHistorySelected.Any(x => ReadString(x, "id", "") == "current_settlement_facts")
                     && currentDanusticaHistorySelected.Any(x => ReadString(x, "id", "") == "nearby_lord_parties")
@@ -2708,23 +2663,23 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     "A scene labeled Current settlement resolves named local facts while canonical campaign history remains distinct from personal memory.",
                     currentDanusticaHistorySelected);
                 const string generalCurrentDanusticaPrompt = "What can you responsibly tell me about Danustica right now, and which current local facts can you not verify?";
-                List<Dictionary<string, object>> generalCurrentDanusticaSelected = DeterministicContextPullSelection(
+                List<Dictionary<string, object>> generalCurrentDanusticaSelected = DialogueService.DeterministicContextPullSelection(
                     "dialogue", generalCurrentDanusticaPrompt,
-                    "Current settlement: Danustica (`town_ES1`)", ContextPullIds.ToList());
+                    "Current settlement: Danustica (`town_ES1`)", Program.ContextPullIds.ToList());
                 add("context_router_general_named_current_settlement_question",
                     generalCurrentDanusticaSelected.Any(x => ReadString(x, "id", "") == "current_settlement_facts"),
                     "A general current-facts question naming the active settlement receives the authoritative native settlement bundle rather than inviting plausible invention.",
                     generalCurrentDanusticaSelected);
-                List<Dictionary<string, object>> hyphenatedHistorySelected = DeterministicContextPullSelection("party_chat",
-                    "Canonical-history probe: what happened to Suruq's Party?", "", ContextPullIds.ToList());
+                List<Dictionary<string, object>> hyphenatedHistorySelected = DialogueService.DeterministicContextPullSelection("party_chat",
+                    "Canonical-history probe: what happened to Suruq's Party?", "", Program.ContextPullIds.ToList());
                 add("context_router_hyphenated_world_history", hyphenatedHistorySelected.Any(x => ReadString(x, "id", "") == "verify_world_history"),
                     "Hyphenated canonical-history wording still selects authoritative history evidence.", hyphenatedHistorySelected);
-                List<Dictionary<string, object>> nearbyOrderSelected = DeterministicContextPullSelection("party_chat",
-                    "Name nearby parties, nearby forces, or nearby troops supplied by current native context.", "", ContextPullIds.ToList());
+                List<Dictionary<string, object>> nearbyOrderSelected = DialogueService.DeterministicContextPullSelection("party_chat",
+                    "Name nearby parties, nearby forces, or nearby troops supplied by current native context.", "", Program.ContextPullIds.ToList());
                 add("context_router_nearby_word_order", nearbyOrderSelected.Any(x => ReadString(x, "id", "") == "nearby_lord_parties"),
                     "Natural nearby-first wording selects the nearby-party native helper.", nearbyOrderSelected);
-                List<Dictionary<string, object>> nearbyClauseSelected = DeterministicContextPullSelection("party_chat",
-                    "What named lord parties or armies are near Danustica, and which nearby settlements matter most?", "", ContextPullIds.ToList());
+                List<Dictionary<string, object>> nearbyClauseSelected = DialogueService.DeterministicContextPullSelection("party_chat",
+                    "What named lord parties or armies are near Danustica, and which nearby settlements matter most?", "", Program.ContextPullIds.ToList());
                 add("context_router_nearby_relational_clause", nearbyClauseSelected.Any(x => ReadString(x, "id", "") == "nearby_lord_parties"),
                     "A natural 'forces are near PLACE' clause selects the nearby-party native helper.", nearbyClauseSelected);
                 List<Dictionary<string, object>> nearbySpatialPull = new List<Dictionary<string, object>>
@@ -2745,7 +2700,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                         }
                     }
                 };
-                string nearbySpatialPrompt = BuildContextPullText("Which lord parties are nearby?", "Current settlement: Danustica",
+                string nearbySpatialPrompt = DialogueService.BuildContextPullText("Which lord parties are nearby?", "Current settlement: Danustica",
                     new Dictionary<string, object>(), new Dictionary<string, object>(), new Dictionary<string, object>(),
                     new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(), nearbySpatialPull, nearbySpatialBundle, false);
                 add("native_spatial_context_does_not_invent_time_or_bearing",
@@ -2785,7 +2740,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                         }
                     }
                 };
-                string playerAppearancePrompt = BuildContextPullText("What can you infer by looking at me?", "",
+                string playerAppearancePrompt = DialogueService.BuildContextPullText("What can you infer by looking at me?", "",
                     new Dictionary<string, object>(), new Dictionary<string, object>(), new Dictionary<string, object>(),
                     new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
                     playerAppearancePull, playerAppearanceBundle, false);
@@ -2801,8 +2756,8 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     "Player appearance helpers retain observable clothing and apparent status while excluding canonical identity, exact money, clan standing, inventory value, and other private native state from the model prompt.",
                     playerAppearancePrompt);
                 const string clanDeferencePrompt = "How much public deference, private candor, or guarded distance should someone of my known standing receive from you? Show the answer through your conduct rather than reciting clan-tier rules.";
-                List<Dictionary<string, object>> clanDeferenceSelected = DeterministicContextPullSelection(
-                    "dialogue", clanDeferencePrompt, "", ContextPullIds.ToList());
+                List<Dictionary<string, object>> clanDeferenceSelected = DialogueService.DeterministicContextPullSelection(
+                    "dialogue", clanDeferencePrompt, "", Program.ContextPullIds.ToList());
                 add("context_router_public_deference_is_not_trade_appraisal",
                     clanDeferenceSelected.Any(x => ReadString(x, "id", "") == "clan_wealth_and_influence")
                     && !clanDeferenceSelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer"),
@@ -2847,7 +2802,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                 {
                     ["identityState"] = "encountered_unknown", ["knowsIdentity"] = false
                 };
-                string privateClanPrompt = BuildContextPullText(clanDeferencePrompt, "",
+                string privateClanPrompt = DialogueService.BuildContextPullText(clanDeferencePrompt, "",
                     new Dictionary<string, object>(), new Dictionary<string, object>(), new Dictionary<string, object>(),
                     new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
                     clanDeferenceSelected, privateClanBundle, false, unverifiedPlayerIdentity);
@@ -2863,154 +2818,154 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     "Unknown observers retain their own clan evidence and the player's visible presentation while exact player identity, clan, money, tier, and fiefs are withheld from the actual model prompt.",
                     privateClanPrompt);
                 const string immediateAnswerRecall = "Without checking new reports, recall your immediately preceding answer: which party had wounded troops and what raw distance did you give for the closest party?";
-                List<Dictionary<string, object>> immediateAnswerRecallPulls = PruneContextPullSelection(immediateAnswerRecall,
-                    DeterministicContextPullSelection("dialogue", immediateAnswerRecall, "Current settlement: Danustica", ContextPullIds.ToList()));
+                List<Dictionary<string, object>> immediateAnswerRecallPulls = DialogueService.PruneContextPullSelection(immediateAnswerRecall,
+                    DialogueService.DeterministicContextPullSelection("dialogue", immediateAnswerRecall, "Current settlement: Danustica", Program.ContextPullIds.ToList()));
                 add("pure_answer_recall_cannot_refresh_live_native_context",
-                    LooksLikeMostRecentConversationRecall(immediateAnswerRecall)
-                    && IsPureConversationRecallRequest(immediateAnswerRecall)
+                    DialogueService.LooksLikeMostRecentConversationRecall(immediateAnswerRecall)
+                    && DialogueService.IsPureConversationRecallRequest(immediateAnswerRecall)
                     && immediateAnswerRecallPulls.Any(x => ReadString(x, "id", "") == "relevant_memory")
                     && !immediateAnswerRecallPulls.Any(x => ReadString(x, "id", "") == "nearby_lord_parties")
                     && !immediateAnswerRecallPulls.Any(x => ReadString(x, "id", "") == "current_settlement_facts")
                     && !immediateAnswerRecallPulls.Any(x => ReadString(x, "id", "") == "verify_world_history"),
                     "A pure probe of the NPC's immediately preceding answer uses transcript/memory evidence and cannot silently refresh native world facts.", immediateAnswerRecallPulls);
                 const string spymasterMissionRecall = "Aeroc, remind me what came of the two stories we planted about Ranaon, and whether your effort to clean up my reputation worked.";
-                List<Dictionary<string, object>> spymasterMissionRecallPulls = PruneContextPullSelection(spymasterMissionRecall,
-                    DeterministicContextPullSelection("dialogue", spymasterMissionRecall, "Current settlement: Zeonica", ContextPullIds.ToList()));
+                List<Dictionary<string, object>> spymasterMissionRecallPulls = DialogueService.PruneContextPullSelection(spymasterMissionRecall,
+                    DialogueService.DeterministicContextPullSelection("dialogue", spymasterMissionRecall, "Current settlement: Zeonica", Program.ContextPullIds.ToList()));
                 add("natural_remind_me_selects_relevant_memory",
                     spymasterMissionRecallPulls.Any(x => ReadString(x, "id", "") == "relevant_memory"),
                     "Natural 'remind me' phrasing retrieves the NPC's private mission memory without requiring test-shaped recall language.",
                     spymasterMissionRecallPulls);
-                List<Dictionary<string, object>> artisanSelected = DeterministicContextPullSelection("party_chat",
-                    "How would this news matter to ordinary artisans?", "", ContextPullIds.ToList());
+                List<Dictionary<string, object>> artisanSelected = DialogueService.DeterministicContextPullSelection("party_chat",
+                    "How would this news matter to ordinary artisans?", "", Program.ContextPullIds.ToList());
                 add("context_router_artisan_boundary", !artisanSelected.Any(x => ReadString(x, "id", "") == "kingdom_diplomacy_status"),
                     "The word 'artisans' cannot activate current diplomacy through its embedded 'war' letters.", artisanSelected);
-                List<Dictionary<string, object>> conversationalValueSelected = DeterministicContextPullSelection("party_chat",
-                    "Ascyron, I'm newly arrived in Danustica and curious what each of you values most about this city. If someone before you says something worth responding to, address their point as well.", "", ContextPullIds.ToList());
+                List<Dictionary<string, object>> conversationalValueSelected = DialogueService.DeterministicContextPullSelection("party_chat",
+                    "Ascyron, I'm newly arrived in Danustica and curious what each of you values most about this city. If someone before you says something worth responding to, address their point as well.", "", Program.ContextPullIds.ToList());
                 add("context_router_conversational_value_boundary",
                     conversationalValueSelected.Any(x => ReadString(x, "id", "") == "current_settlement_facts")
                     && !conversationalValueSelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer")
                     && !conversationalValueSelected.Any(x => ReadString(x, "id", "") == "relevant_memory"),
                     "Conversational value and speaker-order wording select current settlement facts without inventing trade appraisal or memory retrieval intent.", conversationalValueSelected);
                 const string personalTradePrompt = "Let us trade something small and personal rather than useful information. I find the smell of lamp oil calming. Tell me one ordinary sound, smell, texture, or arrangement that makes you feel settled.";
-                List<Dictionary<string, object>> personalTradeSelected = PruneContextPullSelection(personalTradePrompt,
-                    DeterministicContextPullSelection("party_chat", personalTradePrompt, "", ContextPullIds.ToList()));
+                List<Dictionary<string, object>> personalTradeSelected = DialogueService.PruneContextPullSelection(personalTradePrompt,
+                    DialogueService.DeterministicContextPullSelection("party_chat", personalTradePrompt, "", Program.ContextPullIds.ToList()));
                 add("context_router_personal_story_trade_is_not_inventory",
                     !personalTradeSelected.Any(x => ReadString(x, "id", "") == "check_inventory_appearance")
                     && !personalTradeSelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer")
                     && !personalTradeSelected.Any(x => ReadString(x, "id", "") == "clan_wealth_and_influence"),
                     "Trading personal stories or details is conversational reciprocity, not a material inventory, appraisal, or clan-wealth request.", personalTradeSelected);
-                List<Dictionary<string, object>> eventConcernSelected = DeterministicContextPullSelection("social_event",
+                List<Dictionary<string, object>> eventConcernSelected = DialogueService.DeterministicContextPullSelection("social_event",
                     "Identify the occasion and phase this gathering actually supplies, then tell me one concern about Danustica.",
-                    "Location: Danustica\nEvent: Villa Supper\nPhase: Arrival and Seating", ContextPullIds.ToList());
+                    "Location: Danustica\nEvent: Villa Supper\nPhase: Arrival and Seating", Program.ContextPullIds.ToList());
                 add("context_router_event_supply_and_named_location_boundary",
                     eventConcernSelected.Any(x => ReadString(x, "id", "") == "current_settlement_facts")
                     && !eventConcernSelected.Any(x => ReadString(x, "id", "") == "check_inventory_appearance")
                     && !eventConcernSelected.Any(x => ReadString(x, "id", "") == "relevant_memory"),
                     "Using 'supplies' as a verb does not request inventory, while a concern about the named current settlement receives live local facts.", eventConcernSelected);
                 const string currentOwnerGovernorPrompt = "My name is Rhovarion. According to current native settlement facts, which kingdom and clan own Danustica, who is its current governor, and is it under siege?";
-                List<Dictionary<string, object>> currentOwnerGovernorSelected = PruneContextPullSelection(currentOwnerGovernorPrompt,
-                    DeterministicContextPullSelection("dialogue", currentOwnerGovernorPrompt, "Location: Danustica", ContextPullIds.ToList()));
+                List<Dictionary<string, object>> currentOwnerGovernorSelected = DialogueService.PruneContextPullSelection(currentOwnerGovernorPrompt,
+                    DialogueService.DeterministicContextPullSelection("dialogue", currentOwnerGovernorPrompt, "Location: Danustica", Program.ContextPullIds.ToList()));
                 add("context_router_local_owner_governor_is_not_broad_diplomacy",
                     currentOwnerGovernorSelected.Any(x => ReadString(x, "id", "") == "current_settlement_facts")
                     && !currentOwnerGovernorSelected.Any(x => ReadString(x, "id", "") == "kingdom_diplomacy_status")
                     && !currentOwnerGovernorSelected.Any(x => ReadString(x, "id", "") == "clan_wealth_and_influence"),
                     "A current owner, governor, and siege-status question uses the authoritative settlement bundle without unrelated kingdom-war or clan-wealth payloads.", currentOwnerGovernorSelected);
-                List<Dictionary<string, object>> keepsakeSelected = DeterministicContextPullSelection("party_chat",
-                    "I keep a blue glass bead inside my left glove. It is only a small keepsake, not a gift or trade offer.", "", ContextPullIds.ToList());
+                List<Dictionary<string, object>> keepsakeSelected = DialogueService.DeterministicContextPullSelection("party_chat",
+                    "I keep a blue glass bead inside my left glove. It is only a small keepsake, not a gift or trade offer.", "", Program.ContextPullIds.ToList());
                 add("context_router_negation_and_glove_boundary",
                     !keepsakeSelected.Any(x => ReadString(x, "id", "") == "check_inventory_appearance")
                     && !keepsakeSelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer")
                     && !keepsakeSelected.Any(x => ReadString(x, "id", "") == "relationship_history"),
                     "An explicitly non-commercial keepsake does not pull inventory or appraisal context, and 'glove' cannot activate relationship history through its embedded 'love'.", keepsakeSelected);
                 const string negatedClayDiscussion = "Purios, I found a plain clay disk with seven shallow notches. It is not valuable and I am not offering it as a gift or trade. Menor and Mystesa, say where your own trades lead you to agree or disagree.";
-                List<Dictionary<string, object>> negatedClaySelected = PruneContextPullSelection(negatedClayDiscussion,
-                    DeterministicContextPullSelection("party_chat", negatedClayDiscussion, "Current settlement: Danustica", ContextPullIds.ToList()));
+                List<Dictionary<string, object>> negatedClaySelected = DialogueService.PruneContextPullSelection(negatedClayDiscussion,
+                    DialogueService.DeterministicContextPullSelection("party_chat", negatedClayDiscussion, "Current settlement: Danustica", Program.ContextPullIds.ToList()));
                 add("context_router_negated_exchange_and_occupational_trade",
                     !negatedClaySelected.Any(x => ReadString(x, "id", "") == "check_inventory_appearance")
                     && !negatedClaySelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer"),
                     "A negated gift/trade and occupational use of 'your trades' cannot fetch current inventory or appraisal evidence.", negatedClaySelected);
                 const string naturalNegatedAppraisal = "Menor and Mystesa, respond to Purios's runner tally from your own trades. Do not treat the disk as a gift or sale.";
-                List<Dictionary<string, object>> naturalNegatedSelected = PruneContextPullSelection(naturalNegatedAppraisal,
-                    DeterministicContextPullSelection("party_chat", naturalNegatedAppraisal, "Current settlement: Danustica", ContextPullIds.ToList()));
+                List<Dictionary<string, object>> naturalNegatedSelected = DialogueService.PruneContextPullSelection(naturalNegatedAppraisal,
+                    DialogueService.DeterministicContextPullSelection("party_chat", naturalNegatedAppraisal, "Current settlement: Danustica", Program.ContextPullIds.ToList()));
                 add("context_router_natural_do_not_treat_negation",
                     !naturalNegatedSelected.Any(x => ReadString(x, "id", "") == "check_inventory_appearance")
                     && !naturalNegatedSelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer"),
                     "Natural 'do not treat this as a gift or sale' wording cannot be reinterpreted as a gift-appraisal request.", naturalNegatedSelected);
-                List<Dictionary<string, object>> materialGiftSelected = DeterministicContextPullSelection("party_chat",
-                    "Pacarios, I give you this finely worked silver cup as a personal gift, with no favor expected.", "", ContextPullIds.ToList());
+                List<Dictionary<string, object>> materialGiftSelected = DialogueService.DeterministicContextPullSelection("party_chat",
+                    "Pacarios, I give you this finely worked silver cup as a personal gift, with no favor expected.", "", Program.ContextPullIds.ToList());
                 add("context_router_material_gift_verification",
                     materialGiftSelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer")
                     && !materialGiftSelected.Any(x => ReadString(x, "id", "") == "check_inventory_appearance"),
                     "A concrete material gift uses the appraisal bundle containing both player and recipient inventories instead of inspecting only the speaking NPC.", materialGiftSelected);
-                List<Dictionary<string, object>> historicalSilverAccusationSelected = DeterministicContextPullSelection("party_chat",
-                    "What exact evidence supports your accusation that I hand out silver and lie? If you did not witness it, identify the historical source or retract it.", "", ContextPullIds.ToList());
+                List<Dictionary<string, object>> historicalSilverAccusationSelected = DialogueService.DeterministicContextPullSelection("party_chat",
+                    "What exact evidence supports your accusation that I hand out silver and lie? If you did not witness it, identify the historical source or retract it.", "", Program.ContextPullIds.ToList());
                 add("context_router_historical_gift_discussion_not_appraisal",
                     !historicalSilverAccusationSelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer"),
                     "Discussing evidence for an alleged past silver transfer does not masquerade as a present gift or trade offer.", historicalSilverAccusationSelected);
                 const string recordsCupRecall = "From your own records, who gave you the silver cup, who received it, and what exactly do you know about the giver identity?";
-                List<Dictionary<string, object>> recordsCupRecallSelected = PruneContextPullSelection(recordsCupRecall,
-                    DeterministicContextPullSelection("dialogue", recordsCupRecall, "", ContextPullIds.ToList()));
+                List<Dictionary<string, object>> recordsCupRecallSelected = DialogueService.PruneContextPullSelection(recordsCupRecall,
+                    DialogueService.DeterministicContextPullSelection("dialogue", recordsCupRecall, "", Program.ContextPullIds.ToList()));
                 add("context_router_records_based_gift_recall",
                     recordsCupRecallSelected.Any(x => ReadString(x, "id", "") == "relevant_memory")
                     && !recordsCupRecallSelected.Any(x => ReadString(x, "id", "") == "check_inventory_appearance")
                     && !recordsCupRecallSelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer")
-                    && IsPureConversationRecallRequest(recordsCupRecall),
+                    && DialogueService.IsPureConversationRecallRequest(recordsCupRecall),
                     "A records-based question about a completed historical gift selects memory, not current inventory/appraisal, and remains an audit-only recall probe.",
                     recordsCupRecallSelected);
                 const string nameAndBoxFollowup = "Before we continue, my name is Rhovarion. Honoratus, answer Menor's prior point that the box is nothing to you until I give you a reason. Keep the cup attributed to my earlier claim.";
-                List<Dictionary<string, object>> nameAndBoxSelected = DeterministicContextPullSelection("party_chat",
-                    nameAndBoxFollowup, "", ContextPullIds.ToList());
+                List<Dictionary<string, object>> nameAndBoxSelected = DialogueService.DeterministicContextPullSelection("party_chat",
+                    nameAndBoxFollowup, "", Program.ContextPullIds.ToList());
                 add("context_router_distant_give_and_item_not_trade",
                     !nameAndBoxSelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer"),
                     "A non-commercial 'give you a reason' clause cannot combine with a later mentioned cup to create a false trade-appraisal pull.", nameAndBoxSelected);
-                List<Dictionary<string, object>> indirectRecallSelected = DeterministicContextPullSelection("party_chat",
-                    "Earlier I told this group why I keep something hidden in one piece of clothing. Without guessing, tell me what the object was and where I kept it.", "", ContextPullIds.ToList());
+                List<Dictionary<string, object>> indirectRecallSelected = DialogueService.DeterministicContextPullSelection("party_chat",
+                    "Earlier I told this group why I keep something hidden in one piece of clothing. Without guessing, tell me what the object was and where I kept it.", "", Program.ContextPullIds.ToList());
                 add("context_router_indirect_recall_priority",
                     indirectRecallSelected.Any(x => ReadString(x, "id", "") == "relevant_memory")
                     && !indirectRecallSelected.Any(x => ReadString(x, "id", "") == "check_player_appearance_status")
                     && !indirectRecallSelected.Any(x => ReadString(x, "id", "") == "check_inventory_appearance"),
                     "An indirect request for an earlier disclosed object prioritizes memory evidence instead of treating historical clothing language as a live appearance query.", indirectRecallSelected);
-                List<Dictionary<string, object>> sceneReconstructionSelected = DeterministicContextPullSelection("party_chat",
-                    "Reconstruct the third question from our immediately preceding group conversation. If a stored summary conflicts with the raw conversation, trust the raw conversation.", "", ContextPullIds.ToList());
+                List<Dictionary<string, object>> sceneReconstructionSelected = DialogueService.DeterministicContextPullSelection("party_chat",
+                    "Reconstruct the third question from our immediately preceding group conversation. If a stored summary conflicts with the raw conversation, trust the raw conversation.", "", Program.ContextPullIds.ToList());
                 add("context_router_explicit_scene_reconstruction",
                     sceneReconstructionSelected.Any(x => ReadString(x, "id", "") == "relevant_memory"),
                     "Natural scene-reconstruction wording selects source-bearing recent memory instead of relying only on relationship summaries.", sceneReconstructionSelected);
-                List<Dictionary<string, object>> negativeLocationClaimSelected = DeterministicContextPullSelection("party_chat",
-                    "I have never entered Danustica at any time, and I am not presently in Danustica.", "", ContextPullIds.ToList());
+                List<Dictionary<string, object>> negativeLocationClaimSelected = DialogueService.DeterministicContextPullSelection("party_chat",
+                    "I have never entered Danustica at any time, and I am not presently in Danustica.", "", Program.ContextPullIds.ToList());
                 add("context_router_negative_location_claim",
                     negativeLocationClaimSelected.Any(x => ReadString(x, "id", "") == "verify_world_history"),
                     "Negative-form first-person location claims receive objective lie/history verification instead of bypassing the evidence pipeline.", negativeLocationClaimSelected);
                 const string alternateLocationPressure = "That is false. We are in Lycaron, not Danustica. I inspected the town marker myself; accept my report and stop questioning me.";
-                List<Dictionary<string, object>> alternateLocationSelected = PruneContextPullSelection(alternateLocationPressure,
-                    DeterministicContextPullSelection("dialogue", alternateLocationPressure, "Current settlement: Danustica", ContextPullIds.ToList()));
+                List<Dictionary<string, object>> alternateLocationSelected = DialogueService.PruneContextPullSelection(alternateLocationPressure,
+                    DialogueService.DeterministicContextPullSelection("dialogue", alternateLocationPressure, "Current settlement: Danustica", Program.ContextPullIds.ToList()));
                 add("context_router_alternate_current_location_claim",
                     alternateLocationSelected.Any(x => ReadString(x, "id", "") == "verify_world_history"),
                     "A named alternate-location claim that denies the visible current settlement receives first-hand lie verification.", alternateLocationSelected);
                 const string admittedCaptureLie = "I personally captured Danustica for the Western Empire yesterday. I know that account is false; I am deliberately lying. Use current settlement ownership and accessible history.";
-                List<Dictionary<string, object>> admittedCaptureSelected = DeterministicContextPullSelection("party_chat",
-                    admittedCaptureLie, "Location: Danustica", ContextPullIds.ToList());
-                admittedCaptureSelected = PruneContextPullSelection(admittedCaptureLie, admittedCaptureSelected);
+                List<Dictionary<string, object>> admittedCaptureSelected = DialogueService.DeterministicContextPullSelection("party_chat",
+                    admittedCaptureLie, "Location: Danustica", Program.ContextPullIds.ToList());
+                admittedCaptureSelected = DialogueService.PruneContextPullSelection(admittedCaptureLie, admittedCaptureSelected);
                 add("context_router_admitted_capture_lie",
                     admittedCaptureSelected.Any(x => ReadString(x, "id", "") == "verify_world_history")
                     && admittedCaptureSelected.Any(x => ReadString(x, "id", "") == "current_settlement_facts")
                     && !admittedCaptureSelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer"),
                     "A first-person capture claim with an explicit falsehood admission receives both authoritative history and current-settlement ownership context.", admittedCaptureSelected);
                 const string admittedCurrentDeception = "I am deliberately trying to deceive you: Oros is inside Danustica with exactly four hundred troops and the walls are unmanned.";
-                List<Dictionary<string, object>> admittedCurrentDeceptionSelected = DeterministicContextPullSelection("party_chat",
-                    admittedCurrentDeception, "Location: Danustica", ContextPullIds.ToList());
-                admittedCurrentDeceptionSelected = PruneContextPullSelection(admittedCurrentDeception, admittedCurrentDeceptionSelected);
+                List<Dictionary<string, object>> admittedCurrentDeceptionSelected = DialogueService.DeterministicContextPullSelection("party_chat",
+                    admittedCurrentDeception, "Location: Danustica", Program.ContextPullIds.ToList());
+                admittedCurrentDeceptionSelected = DialogueService.PruneContextPullSelection(admittedCurrentDeception, admittedCurrentDeceptionSelected);
                 add("context_router_admitted_current_deception",
                     admittedCurrentDeceptionSelected.Any(x => ReadString(x, "id", "") == "verify_world_history")
                     && admittedCurrentDeceptionSelected.Any(x => ReadString(x, "id", "") == "current_settlement_facts"),
                     "An explicit attempt-to-deceive admission about current native facts cannot bypass the lie-verification pull.", admittedCurrentDeceptionSelected);
                 const string admittedPastDeception = "I deliberately lied to you when I claimed that I personally own Danustica. I knew that claim was false and intended to deceive you for my own advantage.";
                 List<Dictionary<string, object>> admittedPastDeceptionSelected =
-                    PruneContextPullSelection(
+                    DialogueService.PruneContextPullSelection(
                         admittedPastDeception,
-                        DeterministicContextPullSelection(
+                        DialogueService.DeterministicContextPullSelection(
                             "dialogue", admittedPastDeception,
                             "Location: Danustica",
-                            ContextPullIds.ToList()));
+                            Program.ContextPullIds.ToList()));
                 add("context_router_admitted_past_deception",
                     admittedPastDeceptionSelected.Any(x =>
                         ReadString(x, "id", "")
@@ -3019,9 +2974,9 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     admittedPastDeceptionSelected);
                 Dictionary<string, object> replyOnly = new Dictionary<string, object> { ["reply"] = "Three lies in one breath." };
                 List<string> completedFields;
-                Dictionary<string, object> schemaCompleted = CompleteConversationStructuredResponse(replyOnly, "party_chat", out completedFields);
+                Dictionary<string, object> schemaCompleted = ConversationResponseService.CompleteConversationStructuredResponse(replyOnly, "party_chat", out completedFields);
                 add("structured_reply_only_completion",
-                    StructuredResponseIsComplete(Json.Serialize(schemaCompleted), "party_chat")
+                    ConversationResponseService.StructuredResponseIsComplete(Json.Serialize(schemaCompleted), "party_chat")
                     && ReadDictionary(schemaCompleted, "actionGate") != null
                     && schemaCompleted.ContainsKey("relationshipAssessments")
                     && completedFields.Contains("actionGate"),
@@ -3034,7 +2989,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     };
                 List<string> castleEchoFields;
                 Dictionary<string, object> castleEchoCompleted =
-                    CompleteConversationStructuredResponse(
+                    ConversationResponseService.CompleteConversationStructuredResponse(
                         new Dictionary<string, object>
                         {
                             ["reply"] = "'If it's justified.'"
@@ -3049,7 +3004,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     };
                 List<string> secondCastleEchoFields;
                 Dictionary<string, object> secondCastleEchoCompleted =
-                    CompleteConversationStructuredResponse(
+                    ConversationResponseService.CompleteConversationStructuredResponse(
                         new Dictionary<string, object>
                         {
                             ["reply"] =
@@ -3059,7 +3014,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                         out secondCastleEchoFields);
                 List<string> castleSubstantiveFields;
                 Dictionary<string, object> castleSubstantiveCompleted =
-                    CompleteConversationStructuredResponse(
+                    ConversationResponseService.CompleteConversationStructuredResponse(
                         new Dictionary<string, object>
                         {
                             ["reply"] =
@@ -3068,22 +3023,22 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                         "castle_chat",
                         out castleSubstantiveFields);
                 add("castle_chat_quoted_prompt_echo_requires_retry",
-                    IsConversationStructuredMode("castle_chat")
-                    && StructuredResponseIsComplete(
+                    ConversationResponseService.IsConversationStructuredMode("castle_chat")
+                    && ConversationResponseService.StructuredResponseIsComplete(
                         Json.Serialize(castleEchoCompleted),
                         "castle_chat")
-                    && StructuredResponseIsComplete(
+                    && ConversationResponseService.StructuredResponseIsComplete(
                         Json.Serialize(secondCastleEchoCompleted),
                         "castle_chat")
-                    && !ConversationVisibleReplyPassesRequestQualityGate(
+                    && !ConversationResponseService.ConversationVisibleReplyPassesRequestQualityGate(
                         Json.Serialize(castleEchoCompleted),
                         castleEchoRequest,
                         "castle_chat")
-                    && !ConversationVisibleReplyPassesRequestQualityGate(
+                    && !ConversationResponseService.ConversationVisibleReplyPassesRequestQualityGate(
                         Json.Serialize(secondCastleEchoCompleted),
                         secondCastleEchoRequest,
                         "castle_chat")
-                    && ConversationVisibleReplyPassesRequestQualityGate(
+                    && ConversationResponseService.ConversationVisibleReplyPassesRequestQualityGate(
                         Json.Serialize(castleSubstantiveCompleted),
                         castleEchoRequest,
                         "castle_chat"),
@@ -3109,11 +3064,11 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     ["campaignOrder"] = new Dictionary<string, object> { ["decision"] = "none" }
                 };
                 add("correspondence_structured_response_requires_complete_written_contract",
-                    StructuredResponseIsComplete(Json.Serialize(completeCorrespondence), "correspondence")
-                    && !StructuredResponseIsComplete(
+                    ConversationResponseService.StructuredResponseIsComplete(Json.Serialize(completeCorrespondence), "correspondence")
+                    && !ConversationResponseService.StructuredResponseIsComplete(
                         "{\"shouldReply\":true,\"body\":\"I accept your sealed terms",
                         "correspondence")
-                    && !StructuredResponseIsComplete(
+                    && !ConversationResponseService.StructuredResponseIsComplete(
                         Json.Serialize(new Dictionary<string, object>
                         {
                             ["shouldReply"] = true,
@@ -3141,11 +3096,11 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     ["dynamicCharacteristicWrites"] = new List<object> { 0, 0, 0 }
                 };
                 List<string> malformedCompletedFields;
-                Dictionary<string, object> sanitizedCollections = CompleteConversationStructuredResponse(
+                Dictionary<string, object> sanitizedCollections = ConversationResponseService.CompleteConversationStructuredResponse(
                     malformedCollections, "dialogue", out malformedCompletedFields);
                 add("malformed_numeric_structured_collections_are_sanitized",
-                    !StructuredResponseIsComplete(Json.Serialize(malformedCollections), "dialogue")
-                    && StructuredResponseIsComplete(Json.Serialize(sanitizedCollections), "dialogue")
+                    !ConversationResponseService.StructuredResponseIsComplete(Json.Serialize(malformedCollections), "dialogue")
+                    && ConversationResponseService.StructuredResponseIsComplete(Json.Serialize(sanitizedCollections), "dialogue")
                     && ReadDictionaryList(sanitizedCollections, "memoryWrites").Count == 0
                     && ReadDictionaryList(sanitizedCollections, "dynamicCharacteristicWrites").Count == 0
                     && ReadDictionaryList(sanitizedCollections, "relationshipAssessments").Count == 0
@@ -3153,18 +3108,18 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     && malformedCompletedFields.Contains("dynamicCharacteristicWrites"),
                     "Numeric or mixed collection entries are schema corruption: deterministic completion removes them instead of creating bogus memories or suppressing grounded companion writes.",
                     sanitizedCollections);
-                List<Dictionary<string, object>> scalarMemories = NormalizeMemoryWrites(
+                List<Dictionary<string, object>> scalarMemories = ActionPipelineService.NormalizeMemoryWrites(
                     new List<object> { 0, 0, "0" }, "schema_test", "npc_schema", 1);
                 add("scalar_memory_entries_never_persist",
                     scalarMemories.Count == 0,
                     "Primitive array entries cannot be converted into durable dialogue memories.",
                     scalarMemories);
                 add("legacy_scalar_memory_rows_are_not_retrievable",
-                    !DurableDialogueMemoryRowIsUsable(new Dictionary<string, object>
+                    !CampaignFileService.DurableDialogueMemoryRowIsUsable(new Dictionary<string, object>
                     {
                         ["source"] = "dialogue_llm", ["text"] = "0"
                     })
-                    && DurableDialogueMemoryRowIsUsable(new Dictionary<string, object>
+                    && CampaignFileService.DurableDialogueMemoryRowIsUsable(new Dictionary<string, object>
                     {
                         ["source"] = "dialogue_llm", ["text"] = "The chipped die remains in a locked drawer."
                     }),
@@ -3181,7 +3136,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     ["decisionBrief"] = new Dictionary<string, object> { ["decision"] = "Warn the player." },
                     ["actionGate"] = new Dictionary<string, object> { ["needed"] = false }
                 };
-                bool shiftedReplyRepaired = TryRepairShiftedConversationReplyKeys(
+                bool shiftedReplyRepaired = ConversationResponseService.TryRepairShiftedConversationReplyKeys(
                     shiftedReplyKeys, out Dictionary<string, object> repairedShiftedReply);
                 add("structured_shifted_reply_key_repair",
                     shiftedReplyRepaired
@@ -3197,8 +3152,8 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     ["tags"] = new List<string> { "dialogue", "town" }
                 };
                 add("nested_memory_object_not_visible_reply",
-                    !ConversationStructuredObjectHasUsableVisibleReply(nestedMemoryObject)
-                    && !StructuredResponseIsComplete(Json.Serialize(nestedMemoryObject), "dialogue"),
+                    !ConversationResponseService.ConversationStructuredObjectHasUsableVisibleReply(nestedMemoryObject)
+                    && !ConversationResponseService.StructuredResponseIsComplete(Json.Serialize(nestedMemoryObject), "dialogue"),
                     "A truncated response ending on a nested memory-write object cannot be promoted into visible NPC dialogue.",
                     nestedMemoryObject);
                 Dictionary<string, object> missingPartyReply = new Dictionary<string, object>
@@ -3213,9 +3168,9 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     ["actionGate"] = new Dictionary<string, object> { ["needed"] = false }
                 };
                 add("party_chat_missing_visible_reply_requires_repair",
-                    !StructuredResponseIsComplete(
+                    !ConversationResponseService.StructuredResponseIsComplete(
                         Json.Serialize(missingPartyReply), "party_chat")
-                    && !StructuredResponseIsComplete(
+                    && !ConversationResponseService.StructuredResponseIsComplete(
                         Json.Serialize(missingPartyReply), "social_event"),
                     "Party and social-event mode normalization cannot let a participation token masquerade as a visible reply when the provider omitted reply.",
                     missingPartyReply);
@@ -3232,34 +3187,219 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                         ["participation"] = "quiet"
                     };
                 add("participation_control_token_not_visible_dialogue",
-                    !ConversationStructuredObjectHasUsableVisibleReply(
+                    !ConversationResponseService.ConversationStructuredObjectHasUsableVisibleReply(
                         controlTokenReply)
-                    && !StructuredResponseIsComplete(
+                    && !ConversationResponseService.StructuredResponseIsComplete(
                         Json.Serialize(controlTokenReply), "party_chat")
-                    && StructuredResponseIsComplete(
+                    && ConversationResponseService.StructuredResponseIsComplete(
                         Json.Serialize(validQuietReply), "party_chat"),
                     "Participation enums cannot be accepted as NPC prose, while an intentionally quiet participant remains a complete structured response.",
                     controlTokenReply);
-                string quotedReply = SanitizeVisibleReply("\"Rhovarion, then.\" He inclines his head.");
+                string quotedReply = ConversationResponseService.SanitizeVisibleReply("\"Rhovarion, then.\" He inclines his head.");
                 add("visible_reply_leading_quote_preserved",
                     quotedReply.StartsWith("\"Rhovarion, then.\"", StringComparison.Ordinal),
                     "Legitimate leading dialogue quotes remain balanced when narration follows the spoken sentence.", quotedReply);
-                string provenanceSummary = EnsureConversationSummaryProvenance("Menor said he watched the gate.", 500);
+                string provenanceSummary = DialogueService.EnsureConversationSummaryProvenance("Menor said he watched the gate.", 500);
                 add("conversation_summary_provenance_label",
                     provenanceSummary.StartsWith("Conversation record (reported speech; not independent proof of world facts):", StringComparison.Ordinal),
                     "Conversation-derived summaries carry an explicit evidence-class warning before semantic indexing and later retrieval.", provenanceSummary);
                 add("action_status_reports_are_monotonic",
-                    ShouldAcceptActionStatusTransition("enqueued", "completed")
-                    && ShouldAcceptActionStatusTransition("completed", "completed")
-                    && !ShouldAcceptActionStatusTransition("completed", "enqueued")
-                    && !ShouldAcceptActionStatusTransition("failed", "executing")
-                    && !ShouldAcceptActionStatusTransition("executing", "queued"),
+                    ActionPipelineService.ShouldAcceptActionStatusTransition("enqueued", "completed")
+                    && ActionPipelineService.ShouldAcceptActionStatusTransition("completed", "completed")
+                    && !ActionPipelineService.ShouldAcceptActionStatusTransition("completed", "enqueued")
+                    && !ActionPipelineService.ShouldAcceptActionStatusTransition("failed", "executing")
+                    && !ActionPipelineService.ShouldAcceptActionStatusTransition("executing", "queued"),
                     "Terminal action receipts are authoritative and late asynchronous queue/progress reports cannot move either the action queue or diplomacy event ledger backward.",
                     new Dictionary<string, object>
                     {
-                        ["completedThenEnqueuedAccepted"] = ShouldAcceptActionStatusTransition("completed", "enqueued"),
-                        ["failedThenExecutingAccepted"] = ShouldAcceptActionStatusTransition("failed", "executing")
+                        ["completedThenEnqueuedAccepted"] = ActionPipelineService.ShouldAcceptActionStatusTransition("completed", "enqueued"),
+                        ["failedThenExecutingAccepted"] = ActionPipelineService.ShouldAcceptActionStatusTransition("failed", "executing")
                     });
+                {
+                    const string lost = "ordinary_lost_poll";
+                    const string sibling = "ordinary_healthy_sibling";
+                    const string undelivered = "ordinary_undelivered_expiry";
+                    long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                    long expired = now - 6 * 60 * 60 - 1;
+                    Dictionary<string, object> Queued(string id, long ts) => TestDict(
+                        "id", id, "campaignId", campaignId, "status", "queued", "ts", ts,
+                        "record", TestDict("actionId", id, "command", "sign_trade_agreement"));
+                    var legacy = Queued(lost, now);
+                    ReadDictionary(legacy, "record").Remove("actionId");
+                    ActionPipelineService.WriteActionQueueUnlocked(campaignId,
+                        new List<Dictionary<string, object>> { legacy });
+                    var poll = TestDict("campaignId", campaignId, "limit", 1);
+                    var first = ActionPipelineService.NextActions(poll, null);
+                    // Treat the first response as lost. Inspect its identity only in the
+                    // fixture, without sending any native acknowledgement or effect report.
+                    var second = ActionPipelineService.NextActions(poll, null);
+                    var dispatched = ActionPipelineService.ReadActionQueueUnlocked(campaignId).Single();
+                    add("ordinary_lost_poll_keeps_one_unacknowledged_identity",
+                        ReadString(ReadDictionaryList(first, "actions").Single(), "serverActionId", "") == lost
+                        && ReadInt(second, "count", -1) == 0
+                        && ReadString(dispatched, "status", "") == "delivered"
+                        && ReadLong(dispatched, "deliveredTs", 0) > 0
+                        && !ReadDictionary(dispatched, "record").ContainsKey("serverActionId")
+                        && !dispatched.ContainsKey("report"),
+                        "Discarding a prepared response leaves one retained dispatch attempt without enqueue or effect evidence.", null);
+
+                    ActionPipelineService.ReportAction(TestDict("campaignId", campaignId, "actionId", lost, "status", "queued"));
+                    var repeatedFresh = ActionPipelineService.NextActions(poll, null);
+                    dispatched = ActionPipelineService.ReadActionQueueUnlocked(campaignId).Single();
+                    add("ordinary_dispatch_marker_blocks_same_rank_report_reoffer",
+                        ReadString(dispatched, "status", "") == "queued"
+                        && ReadLong(dispatched, "deliveredTs", 0) > 0
+                        && ReadInt(repeatedFresh, "count", -1) == 0,
+                        "A same-rank legacy report can change the result status but cannot reopen a recorded one-shot dispatch.", null);
+
+                    dispatched["ts"] = expired;
+                    ActionPipelineService.WriteActionQueueUnlocked(campaignId,
+                        new List<Dictionary<string, object>> { Queued(sibling, now), dispatched, Queued(undelivered, expired) });
+                    var afterWindow = ActionPipelineService.NextActions(poll, null);
+                    var afterPoll = ActionPipelineService.ReadActionQueueUnlocked(campaignId);
+                    var unconfirmed = afterPoll.Single(row => ReadString(row, "id", "") == lost);
+                    var expiredRow = afterPoll.Single(row => ReadString(row, "id", "") == undelivered);
+                    var repeated = ActionPipelineService.NextActions(poll, null);
+                    var stillUnconfirmed = ActionPipelineService.ReadActionQueueUnlocked(campaignId)
+                        .Single(row => ReadString(row, "id", "") == lost);
+                    add("ordinary_delivery_window_preserves_healthy_siblings_and_evidence",
+                        ReadString(ReadDictionaryList(afterWindow, "actions").Single(), "actionId", "") == sibling
+                        && ReadString(expiredRow, "status", "") == "expired"
+                        && ReadLong(unconfirmed, "deliveryUnconfirmedTs", 0) > 0
+                        && ReadLong(stillUnconfirmed, "deliveryUnconfirmedTs", 0) == ReadLong(unconfirmed, "deliveryUnconfirmedTs", 0)
+                        && ReadInt(repeated, "count", -1) == 0,
+                        "A new poll expires untouched work and can serve newer work while retaining an attempted identity for reconciliation.", null);
+
+                    ActionPipelineService.ReportAction(TestDict("campaignId", campaignId, "actionId", lost, "status", "enqueued"));
+                    var enqueued = ActionPipelineService.ReadActionQueueUnlocked(campaignId)
+                        .Single(row => ReadString(row, "id", "") == lost);
+                    ActionPipelineService.ReportAction(TestDict("campaignId", campaignId, "actionId", lost, "status", "completed"));
+                    var delayed = ActionPipelineService.ReportAction(TestDict("campaignId", campaignId, "actionId", lost, "status", "enqueued"));
+                    add("ordinary_dispatch_expiry_does_not_preempt_late_action_reports",
+                        ReadString(enqueued, "status", "") == "enqueued"
+                        && !ActionPipelineService.IsTerminalActionReportStatus(ReadString(enqueued, "status", ""))
+                        && ReadString(delayed, "status", "") == "completed"
+                        && ReadBool(delayed, "ignoredStatusRegression", false),
+                        "Enqueue and terminal reports remain distinct after an unconfirmed dispatch.", null);
+
+                    const string undatedId = "ordinary_undated_legacy";
+                    const string oldCorrelationId = "legacy-1700000000000-undated";
+                    var undated = Queued(undatedId, now);
+                    undated.Remove("ts");
+                    undated["correlationId"] = oldCorrelationId;
+                    ReadDictionary(undated, "record")["correlationId"] = oldCorrelationId;
+                    ActionPipelineService.WriteActionQueueUnlocked(campaignId,
+                        new List<Dictionary<string, object>> { undated });
+                    var undatedPoll = ActionPipelineService.NextActions(poll, null);
+                    var undatedDispatched = ActionPipelineService.ReadActionQueueUnlocked(campaignId)
+                        .Single(row => ReadString(row, "id", "") == undatedId);
+                    long undatedDispatchTs = ReadLong(undatedDispatched, "deliveredTs", 0);
+                    var undatedPayload = ReadDictionaryList(undatedPoll, "actions").SingleOrDefault();
+                    add("ordinary_undated_legacy_row_remains_eligible",
+                        ReadString(undatedPayload, "actionId", "") == undatedId
+                        && ReadString(undatedPayload, "correlationId", "") == oldCorrelationId
+                        && ReadString(undatedDispatched, "status", "") == "delivered"
+                        && undatedDispatchTs > 0
+                        && !undatedDispatched.ContainsKey("ts") && !undatedDispatched.ContainsKey("expiredTs")
+                        && !undatedDispatched.ContainsKey("report"),
+                        "An undated legacy action remains eligible without inferring a queue age from its correlation ID.", null);
+
+                    ActionPipelineService.ReportAction(TestDict("campaignId", campaignId, "actionId", undatedId, "status", "queued"));
+                    var undatedQueue = ActionPipelineService.ReadActionQueueUnlocked(campaignId);
+                    const string datedSiblingId = "ordinary_undated_healthy_sibling";
+                    undatedQueue.Add(Queued(datedSiblingId, now));
+                    ActionPipelineService.WriteActionQueueUnlocked(campaignId, undatedQueue);
+                    var afterUndatedDispatch = ActionPipelineService.NextActions(poll, null);
+                    var undatedRetained = ActionPipelineService.ReadActionQueueUnlocked(campaignId)
+                        .Single(row => ReadString(row, "id", "") == undatedId);
+                    var remainingPoll = ActionPipelineService.NextActions(poll, null);
+                    add("ordinary_undated_dispatch_stays_outside_redelivery",
+                        ReadString(ReadDictionaryList(afterUndatedDispatch, "actions").SingleOrDefault(), "actionId", "") == datedSiblingId
+                        && ReadInt(remainingPoll, "count", -1) == 0
+                        && ReadString(undatedRetained, "status", "") == "queued"
+                        && undatedDispatchTs > 0 && ReadLong(undatedRetained, "deliveredTs", 0) == undatedDispatchTs
+                        && !undatedRetained.ContainsKey("ts") && !undatedRetained.ContainsKey("deliveryUnconfirmedTs"),
+                        "A prior undated dispatch stays single-shot after a delayed queued report and does not consume the healthy sibling's slot.", null);
+
+                    const string statusOnlyId = "ordinary_legacy_status_only";
+                    const string statusOnlySiblingId = "ordinary_legacy_status_only_sibling";
+                    var statusOnly = Queued(statusOnlyId, now);
+                    statusOnly.Remove("ts");
+                    statusOnly["status"] = "delivered";
+                    ActionPipelineService.WriteActionQueueUnlocked(campaignId, new List<Dictionary<string, object>>
+                    {
+                        statusOnly, Queued(statusOnlySiblingId, now)
+                    });
+                    Dictionary<string, object> ReportLegacyStatus(string status) => ActionPipelineService.ReportAction(
+                        TestDict("campaignId", campaignId, "actionId", statusOnlyId, "status", status));
+                    var lateQueued = ReportLegacyStatus("queued");
+                    var statusOnlyPoll = ActionPipelineService.NextActions(poll, null);
+                    var retainedStatusOnly = ActionPipelineService.ReadActionQueueUnlocked(campaignId)
+                        .Single(row => ReadString(row, "id", "") == statusOnlyId);
+                    var lateEnqueued = ReportLegacyStatus("enqueued");
+                    var lateCompleted = ReportLegacyStatus("completed");
+                    var olderProposed = ReportLegacyStatus("proposed");
+                    var afterLegacyTerminal = ActionPipelineService.NextActions(poll, null);
+                    var settledStatusOnly = ActionPipelineService.ReadActionQueueUnlocked(campaignId)
+                        .Single(row => ReadString(row, "id", "") == statusOnlyId);
+                    add("ordinary_legacy_delivered_status_survives_late_reports",
+                        ReadString(lateQueued, "status", "") == "queued"
+                        && ReadString(ReadDictionaryList(statusOnlyPoll, "actions").SingleOrDefault(), "actionId", "") == statusOnlySiblingId
+                        && ReadString(retainedStatusOnly, "status", "") == "queued"
+                        && ReadBool(retainedStatusOnly, "ordinaryLegacyDispatchObserved", false)
+                        && !retainedStatusOnly.ContainsKey("ts") && !retainedStatusOnly.ContainsKey("deliveredTs")
+                        && !retainedStatusOnly.ContainsKey("deliveryUnconfirmedTs")
+                        && ReadString(lateEnqueued, "status", "") == "enqueued"
+                        && ReadString(lateCompleted, "status", "") == "completed"
+                        && ReadString(olderProposed, "status", "") == "completed"
+                        && ReadBool(olderProposed, "ignoredStatusRegression", false)
+                        && ReadBool(settledStatusOnly, "ordinaryLegacyDispatchObserved", false)
+                        && ReadInt(afterLegacyTerminal, "count", -1) == 0,
+                        "A delayed queued report preserves status-only legacy dispatch evidence without assigning a time, and a late native terminal report stays authoritative.", null);
+
+                    const string aliasSiblingId = "ordinary_alias_healthy_sibling";
+                    const string wrongActionAliasId = "ordinary_wrong_action_alias";
+                    const string wrongServerAliasId = "ordinary_wrong_server_alias";
+                    const string aliaslessNestedId = "ordinary_aliasless_nested";
+                    const string aliaslessFlatId = "ordinary_aliasless_flat";
+                    var wrongActionAlias = Queued(wrongActionAliasId, now - 5);
+                    ReadDictionary(wrongActionAlias, "record")["actionId"] = aliasSiblingId;
+                    var wrongServerAlias = Queued(wrongServerAliasId, now - 4);
+                    ReadDictionary(wrongServerAlias, "record")["serverActionId"] = aliasSiblingId;
+                    var nonStringId = Queued("placeholder", now - 3);
+                    nonStringId["id"] = 42;
+                    ReadDictionary(nonStringId, "record").Remove("actionId");
+                    var aliasSibling = Queued(aliasSiblingId, now - 2);
+                    ReadDictionary(aliasSibling, "record")["serverActionId"] = aliasSiblingId;
+                    var aliaslessNested = Queued(aliaslessNestedId, now - 1);
+                    ReadDictionary(aliaslessNested, "record").Remove("actionId");
+                    var aliaslessFlat = Queued(aliaslessFlatId, now);
+                    aliaslessFlat.Remove("record");
+                    aliaslessFlat["command"] = "sign_trade_agreement";
+                    ActionPipelineService.WriteActionQueueUnlocked(campaignId, new List<Dictionary<string, object>>
+                    {
+                        wrongActionAlias, wrongServerAlias, nonStringId, aliasSibling, aliaslessNested, aliaslessFlat
+                    });
+                    var firstAliasPoll = ReadDictionaryList(ActionPipelineService.NextActions(poll, null), "actions").SingleOrDefault();
+                    var nestedFallback = ReadDictionaryList(ActionPipelineService.NextActions(poll, null), "actions").SingleOrDefault();
+                    var flatFallback = ReadDictionaryList(ActionPipelineService.NextActions(poll, null), "actions").SingleOrDefault();
+                    var aliasQueue = ActionPipelineService.ReadActionQueueUnlocked(campaignId);
+                    var rejectedAliases = aliasQueue.Where(row => new[] { wrongActionAliasId, wrongServerAliasId, "42" }
+                        .Contains(ReadString(row, "id", ""))).ToList();
+                    add("ordinary_poll_rejects_conflicting_identities_before_dispatch",
+                        ReadString(firstAliasPoll, "actionId", "") == aliasSiblingId
+                        && ReadString(firstAliasPoll, "serverActionId", "") == aliasSiblingId
+                        && ReadString(nestedFallback, "serverActionId", "") == aliaslessNestedId
+                        && ReadString(flatFallback, "serverActionId", "") == aliaslessFlatId
+                        && ReadString(flatFallback, "command", "") == "sign_trade_agreement"
+                        && !ReadDictionary(aliasQueue.Single(row => ReadString(row, "id", "") == aliaslessNestedId), "record")
+                            .ContainsKey("serverActionId")
+                        && !aliasQueue.Single(row => ReadString(row, "id", "") == aliaslessFlatId).ContainsKey("serverActionId")
+                        && rejectedAliases.Count == 3
+                        && rejectedAliases.All(row => ReadString(row, "status", "") == "queued" && !row.ContainsKey("deliveredTs"))
+                        && ReadInt(ActionPipelineService.NextActions(poll, null), "count", -1) == 0,
+                        "Invalid identities stay undispatched without using a poll slot; valid legacy envelopes receive the exact stored ID in their response only.", null);
+                }
                 Dictionary<string, object> governmentRefusalRecord =
                     new Dictionary<string, object>
                     {
@@ -3278,16 +3418,16 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                         }
                     };
                 add("npc_government_refusal_is_resolved_rejection",
-                    NormalizeActionReportStatus(governmentRefusalRecord,
+                    ActionPipelineService.NormalizeActionReportStatus(governmentRefusalRecord,
                         governmentRefusalReport("government_pressure_prevailed"),
                         "failed") == "rejected"
-                    && NormalizeActionReportStatus(governmentRefusalRecord,
+                    && ActionPipelineService.NormalizeActionReportStatus(governmentRefusalRecord,
                         governmentRefusalReport("government_level_five_block"),
                         "failed") == "rejected"
-                     && NormalizeActionReportStatus(governmentRefusalRecord,
+                     && ActionPipelineService.NormalizeActionReportStatus(governmentRefusalRecord,
                          governmentRefusalReport("execution_failed"),
                          "failed") == "failed"
-                     && NormalizeActionReportStatus(governmentRefusalRecord,
+                     && ActionPipelineService.NormalizeActionReportStatus(governmentRefusalRecord,
                          new Dictionary<string, object>
                          {
                              ["source"] = "world_diplomacy_director",
@@ -3301,11 +3441,11 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     "A lawful NPC-government veto resolves an autonomous diplomacy action as rejected, while ordinary execution failures remain failed.",
                     null);
                 add("world_test_resolved_rejection_is_not_terminal_failure",
-                    !IsTerminalFailureStatus("rejected")
-                    && IsTerminalFailureStatus("failed")
-                    && IsTerminalFailureStatus("blocked")
-                    && IsTerminalFailureStatus("expired")
-                    && IsTerminalFailureStatus("validation_failed"),
+                    !WorldSimulationService.IsTerminalFailureStatus("rejected")
+                    && WorldSimulationService.IsTerminalFailureStatus("failed")
+                    && WorldSimulationService.IsTerminalFailureStatus("blocked")
+                    && WorldSimulationService.IsTerminalFailureStatus("expired")
+                    && WorldSimulationService.IsTerminalFailureStatus("validation_failed"),
                     "World Test treats a resolved action rejection, including a lawful NPC-government veto, as an observed outcome rather than a pipeline failure while retaining every actual terminal failure state.",
                     null);
                 var recordedRefusal = governmentRefusalReport("government_authorization_refused");
@@ -3328,18 +3468,18 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     ["record"] = governmentRefusalRecord, ["report"] = legacyRefusal
                 };
                 add("government_refusal_correction_requires_recorded_rejection",
-                    IsLegacyGovernmentRefusalCorrection(legacyRefusalRow, governmentRefusalRecord, recordedRefusal, "rejected")
-                    && !IsLegacyGovernmentRefusalCorrection(legacyRefusalRow, governmentRefusalRecord,
+                    ActionPipelineService.IsLegacyGovernmentRefusalCorrection(legacyRefusalRow, governmentRefusalRecord, recordedRefusal, "rejected")
+                    && !ActionPipelineService.IsLegacyGovernmentRefusalCorrection(legacyRefusalRow, governmentRefusalRecord,
                         governmentRefusalReport("government_authorization_refused"), "rejected"),
                     "A legacy refusal can be corrected only with a completed recorded reject decision, not an unproven result code.", null);
                 ReadDictionary(legacyRefusal, "result")["resultCode"] = "execution_failed";
                 add("government_refusal_correction_preserves_real_failures",
-                    !IsLegacyGovernmentRefusalCorrection(legacyRefusalRow, governmentRefusalRecord, recordedRefusal, "rejected")
-                    && !ShouldAcceptActionStatusTransition("failed", "rejected"),
+                    !ActionPipelineService.IsLegacyGovernmentRefusalCorrection(legacyRefusalRow, governmentRefusalRecord, recordedRefusal, "rejected")
+                    && !ActionPipelineService.ShouldAcceptActionStatusTransition("failed", "rejected"),
                     "Ordinary terminal failures remain immutable; the narrow government-refusal repair is not a generic status override.", null);
                 ReadDictionary(legacyRefusal, "result")["resultCode"] = "government_refused";
-                WriteActionQueueUnlocked(campaignId, new List<Dictionary<string, object>> { legacyRefusalRow });
-                WriteDiplomaticEventQueue(campaignId, new List<Dictionary<string, object>>
+                ActionPipelineService.WriteActionQueueUnlocked(campaignId, new List<Dictionary<string, object>> { legacyRefusalRow });
+                DiplomacyService.WriteDiplomaticEventQueue(campaignId, new List<Dictionary<string, object>>
                 {
                     new Dictionary<string, object>
                     {
@@ -3350,17 +3490,17 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                 });
                 recordedRefusal["campaignId"] = campaignId;
                 recordedRefusal["serverActionId"] = "legacy_government_refusal_action";
-                var correctedRefusal = ReportAction(recordedRefusal);
-                var duplicateRefusal = ReportAction(recordedRefusal);
-                var correctedEvent = ReadDiplomaticEventQueue(campaignId).Single();
+                var correctedRefusal = ActionPipelineService.ReportAction(recordedRefusal);
+                var duplicateRefusal = ActionPipelineService.ReportAction(recordedRefusal);
+                var correctedEvent = DiplomacyService.ReadDiplomaticEventQueue(campaignId).Single();
                 add("government_refusal_repairs_action_and_announcement_once",
                     ReadBool(correctedRefusal, "ok", false) && ReadBool(duplicateRefusal, "ok", false)
-                    && ReadString(ReadActionQueueUnlocked(campaignId).Single(), "status", "") == "rejected"
+                    && ReadString(ActionPipelineService.ReadActionQueueUnlocked(campaignId).Single(), "status", "") == "rejected"
                     && ReadString(correctedEvent, "executionStatus", "") == "rejected"
                     && !ReadBool(correctedEvent, "accepted", true) && ReadBool(correctedEvent, "announcementReady", false),
                     "The production report route corrects the exact legacy action and its announcement, retains a truthful refusal, and tolerates a replay without creating another event.", null);
                 string repairActionId = "late_action_status_test";
-                WriteActionQueueUnlocked(campaignId, new List<Dictionary<string, object>>
+                ActionPipelineService.WriteActionQueueUnlocked(campaignId, new List<Dictionary<string, object>>
                 {
                     new Dictionary<string, object>
                     {
@@ -3381,7 +3521,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                         ["command"] = "give_gold"
                     }
                 });
-                WriteDiplomaticEventQueue(campaignId, new List<Dictionary<string, object>>
+                DiplomacyService.WriteDiplomaticEventQueue(campaignId, new List<Dictionary<string, object>>
                 {
                     new Dictionary<string, object>
                     {
@@ -3391,7 +3531,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                         ["consequenceRecorded"] = true
                     }
                 });
-                AppendJsonLineToPath(CampaignFile(campaignId, "actions", "actions.jsonl"),
+                CampaignFileService.AppendJsonLineToPath(CampaignFileService.CampaignFile(campaignId, "actions", "actions.jsonl"),
                     new Dictionary<string, object>
                     {
                         ["id"] = repairActionId, ["status"] = "completed", ["ts"] = 10L,
@@ -3400,7 +3540,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                             ["status"] = "completed", ["message"] = "Treaty applied."
                         }
                     });
-                AppendJsonLineToPath(CampaignFile(campaignId, "actions", "actions.jsonl"),
+                CampaignFileService.AppendJsonLineToPath(CampaignFileService.CampaignFile(campaignId, "actions", "actions.jsonl"),
                     new Dictionary<string, object>
                     {
                         ["id"] = repairActionId, ["status"] = "enqueued", ["ts"] = 11L,
@@ -3410,9 +3550,9 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                         }
                     });
                 List<Dictionary<string, object>> repairedQueue;
-                lock (FileLock) repairedQueue = ReadActionQueueUnlocked(campaignId);
+                lock (Program.FileLock) repairedQueue = ActionPipelineService.ReadActionQueueUnlocked(campaignId);
                 Dictionary<string, object> repairedEvent =
-                    ReadDiplomaticEventQueue(campaignId).FirstOrDefault()
+                    DiplomacyService.ReadDiplomaticEventQueue(campaignId).FirstOrDefault()
                     ?? new Dictionary<string, object>();
                 add("action_status_audit_repairs_prior_regressions",
                     ReadString(repairedQueue.FirstOrDefault(), "status", "") == "completed"
@@ -3423,21 +3563,24 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                         ["queueStatus"] = ReadString(repairedQueue.FirstOrDefault(), "status", ""),
                         ["eventStatus"] = ReadString(repairedEvent, "executionStatus", "")
                     });
-                var repairedCache = ReadActionQueueFromPath(CampaignFile(campaignId, "actions", "action-queue.json"));
+                var repairedCache = ActionPipelineService.ReadActionQueueFromPath(CampaignFileService.CampaignFile(campaignId, "actions", "action-queue.json"));
                 add("action_status_audit_repair_persists_without_resurrecting_handover",
                     repairedCache.Any(row => ReadString(row, "id", "") == repairActionId
                         && ReadString(row, "status", "") == "completed")
-                    && !repairedCache.Any(row => DurableConversationAction(ReadString(row, "id", "")))
+                    && !repairedCache.Any(row => DialogueService.DurableConversationAction(ReadString(row, "id", "")))
                     && !repairedQueue.Any(row => ReadString(row, "id", "") == "pa_rolled_back_reconciliation_fixture"),
                     "Ordinary action recovery persists its terminal queue status and excludes stale player handover cache rows absent from PostgreSQL.", repairedCache);
-                add("provider_middleware_status", ReadBool(ProviderMiddlewareStatus(), "ok", false), "Provider middleware exposes circuit, concurrency, idempotency, and latency state.", ProviderMiddlewareStatus());
+                add("provider_middleware_status", ReadBool(LlmProviderService.ProviderMiddlewareStatus(), "ok", false), "Provider middleware exposes circuit, concurrency, idempotency, and latency state.", LlmProviderService.ProviderMiddlewareStatus());
+                add("provider_concurrency_change_updates_active_queue",
+                    LlmProviderService.VerifyProviderConcurrencyChange(),
+                    "Changing the provider limit drains existing calls when reduced and wakes a queued request when raised.", null);
                 add("provider_transient_connection_closed_variants",
-                    IsTransientLlmFailure("The underlying connection was closed: The connection was closed unexpectedly.")
-                    && IsTransientLlmFailure("The connection was closed by the upstream provider.")
-                    && !IsTransientLlmFailure("The provider rejected an invalid model name."),
+                    LlmProviderService.IsTransientLlmFailure("The underlying connection was closed: The connection was closed unexpectedly.")
+                    && LlmProviderService.IsTransientLlmFailure("The connection was closed by the upstream provider.")
+                    && !LlmProviderService.IsTransientLlmFailure("The provider rejected an invalid model name."),
                     "Unexpected upstream connection closure is retryable, while permanent request validation remains non-transient.",
                     new Dictionary<string, object> { ["providerRequestTimeoutMs"] = 120000 });
-                add("telemetry_status", ReadBool(ReignTelemetryStatus(), "ok", false), "OpenTelemetry tracing is initialized with a local NDJSON fallback.", ReignTelemetryStatus());
+                add("telemetry_status", ReadBool(OperationsService.ReignTelemetryStatus(), "ok", false), "OpenTelemetry tracing is initialized with a local NDJSON fallback.", OperationsService.ReignTelemetryStatus());
             }
             catch (Exception ex)
             {
@@ -3446,21 +3589,21 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
             finally
             {
                 ReignPostgreSqlStorage.ClearAllPools();
-                TryDeleteDirectory(Path.Combine(CampaignsRoot(), SafePathSegment(campaignId, "campaign")));
+                PersistenceService.TryDeleteDirectory(Path.Combine(CampaignFileService.CampaignsRoot(), CampaignFileService.SafePathSegment(campaignId, "campaign")));
             }
-            foreach (Dictionary<string, object> continuityTest in RunRoleplayContinuitySelfTests())
+            foreach (Dictionary<string, object> continuityTest in DialogueService.RunRoleplayContinuitySelfTests())
             {
                 add("roleplay_" + ReadString(continuityTest, "id", "contract"),
                     ReadBool(continuityTest, "passed", false),
                     ReadString(continuityTest, "summary", "Role-play continuity contract."),
                     continuityTest);
             }
-            foreach (Dictionary<string, object> liveTest in RunLiveInteractionTestSelfTests())
+            foreach (Dictionary<string, object> liveTest in WorldSimulationService.RunLiveInteractionTestSelfTests())
             {
                 add("bridge_" + ReadString(liveTest, "id", "contract"),
                     ReadBool(liveTest, "passed", false), ReadString(liveTest, "summary", "Live bridge contract."), liveTest);
             }
-            foreach (Dictionary<string, object> codexTest in RunCodexAppServerProviderSelfTests())
+            foreach (Dictionary<string, object> codexTest in LlmProviderService.RunCodexAppServerProviderSelfTests())
             {
                 add("codex_" + ReadString(codexTest, "id", "contract"),
                     ReadBool(codexTest, "passed", false), ReadString(codexTest, "summary", "Codex app-server provider contract."), codexTest);
@@ -3478,7 +3621,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
             var queuedReleaseGate = new System.Threading.Tasks.TaskCompletionSource<bool>();
             int hold = 1;
             // Capacity 4, reserve 1: interactive limit 4, normal 3, maintenance 2.
-            BoundedPriorityScheduler scheduler = new BoundedPriorityScheduler("Reign priority scheduler self-test", 4, 1,
+            OperationsService.BoundedPriorityScheduler scheduler = new OperationsService.BoundedPriorityScheduler("Reign priority scheduler self-test", 4, 1,
                 level => Volatile.Read(ref hold) == 1, false);
             PriorityWorkAdmission Add(string name, int level, out System.Threading.Tasks.Task task) =>
                 scheduler.TryEnqueue(name, level, () => order.Enqueue(name), reason => releases.Enqueue(name + ":" + reason), out task);
@@ -3546,7 +3689,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     ["fenceShared"] = fenceShared, ["fenceOpen"] = fenceOpen, ["lateRefused"] = lateRefused,
                     ["activeReal"] = activeReal, ["fenceHeldByRelease"] = fenceHeldByRelease, ["fenceSettled"] = fenceSettled,
                     ["releases"] = releases.ToList(), ["noLateCallback"] = noLateCallback,
-                    ["stoppedStatus"] = stopped, ["sharedStatus"] = PriorityBackgroundStatus()
+                    ["stoppedStatus"] = stopped, ["sharedStatus"] = OperationsService.PriorityBackgroundStatus()
                 };
                 return admissions && headroom && deferredQueued && faultReported && fifo && activeEntered && queuedAccepted
                     && releaseHeld && fenceShared && fenceOpen && lateRefused && activeReal && fenceHeldByRelease && fenceSettled
@@ -3566,4 +3709,44 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
             }
         }
     }
+
+    internal static partial class LlmProviderService
+    {
+        internal static bool VerifyProviderConcurrencyChange()
+        {
+            var state = new ProviderState(2);
+            if (!AcquireProviderSlot(state, true, 0) || !AcquireProviderSlot(state, true, 0))
+                return false;
+
+            state.SetConcurrencyLimit(1);
+            bool blockedWithTwo = !AcquireProviderSlot(state, true, 0);
+            ReleaseProviderSlot(state);
+            bool blockedWithOne = !AcquireProviderSlot(state, true, 0);
+            ReleaseProviderSlot(state);
+            if (!blockedWithTwo || !blockedWithOne || !AcquireProviderSlot(state, true, 0))
+                return false;
+
+            bool admitted = false;
+            var waiter = new Thread(() =>
+            {
+                admitted = AcquireProviderSlot(state, true, 4000);
+                if (admitted) ReleaseProviderSlot(state);
+            }) { IsBackground = true };
+            waiter.Start();
+            try
+            {
+                bool queued = SpinWait.SpinUntil(() =>
+                {
+                    lock (state.Gate) return state.WaitingInteractive == 1;
+                }, 2000);
+                state.SetConcurrencyLimit(2);
+                return waiter.Join(5000) && queued && admitted;
+            }
+            finally
+            {
+                ReleaseProviderSlot(state);
+            }
+        }
+    }
+
 }
