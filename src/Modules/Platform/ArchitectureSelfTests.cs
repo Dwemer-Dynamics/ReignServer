@@ -24,6 +24,58 @@ namespace ReignBetaServer
             return PlatformSelfTestStore.SelectConversationTurns(connection, TestDict("session", session));
         }
 
+        private static void RunRecentDialogueMemoryReadTests(Action<string, bool, string, object> add)
+        {
+            string path = Path.GetTempFileName();
+            List<Dictionary<string, object>> Baseline(int limit) => Program.ReadJsonLinesFromPath(path)
+                .Where(CampaignFileService.DurableDialogueMemoryRowIsUsable)
+                .OrderByDescending(row => ReadLong(row, "ts", 0)).Take(limit).Reverse().ToList();
+
+            string Failure(Action read)
+            {
+                try { read(); return ""; }
+                catch (System.Text.Json.JsonException) { return "json"; }
+                catch (ArgumentException) { return "classification"; }
+            }
+
+            try
+            {
+                var rows = new[]
+                {
+                    TestDict("id", "early-largest", "ts", long.MaxValue),
+                    TestDict("id", "a", "ts", "17"),
+                    TestDict("id", "b", "ts", 17),
+                    TestDict("id", "excluded", "ts", 25, "source", "dialogue_llm", "text", "0"),
+                    TestDict("id", "c", "ts", 17),
+                    null,
+                    TestDict("id", "old", "ts", "invalid")
+                };
+                File.WriteAllLines(path, rows.Select(Json.Serialize));
+                var selected = Program.ReadRecentDialogueMemoryRows(path, 3);
+                add("recent_dialogue_memory_stable_cutoff",
+                    selected.Select(row => ReadString(row, "id", "")).SequenceEqual(new[] { "b", "a", "early-largest" })
+                    && new[] { -1, 0, 1, 3, 100 }.All(limit =>
+                        Json.Serialize(Program.ReadRecentDialogueMemoryRows(path, limit)) == Json.Serialize(Baseline(limit))),
+                    "Bounded selection preserves the timestamp and physical tie rules, including unusable and legacy rows.", null);
+
+                File.WriteAllText(path, "{\"source\":\"\\uFFFE\",\"ts\":999}");
+                add("recent_dialogue_memory_classification_failure",
+                    Failure(() => Program.ReadRecentDialogueMemoryRows(path, 1)) == Failure(() => Baseline(1))
+                    && Program.ReadRecentDialogueMemoryRows(path, 0).Count == 0,
+                    "A classification failure is preserved after a complete read, while a zero limit skips classification.", null);
+
+                File.AppendAllText(path, "\n{malformed");
+                add("recent_dialogue_memory_strict_eof_failure",
+                    new[] { 0, 1 }.All(limit => Failure(() => Baseline(limit)) == "json"
+                        && Failure(() => Program.ReadRecentDialogueMemoryRows(path, limit)) == "json"),
+                    "Strict parsing reaches EOF and a malformed row takes precedence over an earlier classification failure.", null);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
         private static List<Dictionary<string, object>> RunInteractionArchitectureSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
@@ -36,6 +88,7 @@ namespace ReignBetaServer
             results.AddRange(RunRouteTableContractSelfTests());
             Action<string, bool, string, object> add = (id, passed, summary, data) => results.Add(new Dictionary<string, object>
             { ["caseId"] = id, ["suite"] = "interaction_architecture", ["passed"] = passed, ["summary"] = summary, ["data"] = data });
+            RunRecentDialogueMemoryReadTests(add);
             var providerChoice = new Dictionary<string, object> {
                 ["message"] = new Dictionary<string, object> { ["content"] = "{\"reply\":\"Hello.\"}" },
                 ["finish_reason"] = "stop"

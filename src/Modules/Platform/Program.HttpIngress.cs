@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Globalization;
@@ -487,12 +488,56 @@ namespace ReignBetaServer
             }
 
             lock (FileLock)
+                return ReadJsonLineRowsLocked(path).ToList();
+        }
+
+        // Consume the returned sequence while holding FileLock.
+        private static IEnumerable<Dictionary<string, object>> ReadJsonLineRowsLocked(string path)
+        {
+            var lines = File.ReadLines(path, Encoding.UTF8).Where(line => !string.IsNullOrWhiteSpace(line));
+            if (CampaignFileService.IsDialogueHistoryPath(path))
+                return lines.Select(CampaignFileService.ParseDialogueHistoryLine).Where(line => line != null);
+            return lines.Select(line => Json.Deserialize<Dictionary<string, object>>(line));
+        }
+
+        internal static List<Dictionary<string, object>> ReadRecentDialogueMemoryRows(string path, int limit)
+        {
+            if (!File.Exists(path))
+                return new List<Dictionary<string, object>>();
+
+            var selected = new PriorityQueue<Dictionary<string, object>, (long Timestamp, long ReverseOrdinal)>();
+            long ordinal = 0;
+            ExceptionDispatchInfo classificationFailure = null;
+            lock (FileLock)
             {
-                var lines = File.ReadLines(path, Encoding.UTF8).Where(line => !string.IsNullOrWhiteSpace(line));
-                if (CampaignFileService.IsDialogueHistoryPath(path))
-                    return lines.Select(CampaignFileService.ParseDialogueHistoryLine).Where(line => line != null).ToList();
-                return lines.Select(line => Json.Deserialize<Dictionary<string, object>>(line)).ToList();
+                foreach (var row in ReadJsonLineRowsLocked(path))
+                {
+                    long reverseOrdinal = -ordinal++;
+                    if (limit <= 0 || classificationFailure != null) continue;
+
+                    bool usable;
+                    try { usable = CampaignFileService.DurableDialogueMemoryRowIsUsable(row); }
+                    catch (ArgumentException ex)
+                    {
+                        // The old list reader finishes strict parsing before classification.
+                        // A later parse failure must take precedence over invalid source normalization.
+                        classificationFailure = ExceptionDispatchInfo.Capture(ex);
+                        continue;
+                    }
+                    if (!usable) continue;
+
+                    // Keep earlier physical rows at a timestamp tie. Dequeue reproduces
+                    // the previous descending stable selection followed by Reverse().
+                    var priority = (ReadLong(row, "ts", 0), reverseOrdinal);
+                    if (selected.Count < limit) selected.Enqueue(row, priority);
+                    else selected.EnqueueDequeue(row, priority);
+                }
             }
+            classificationFailure?.Throw();
+
+            var result = new List<Dictionary<string, object>>(selected.Count);
+            while (selected.TryDequeue(out var row, out _)) result.Add(row);
+            return result;
         }
 
         private static Dictionary<string, string> ParseQuery(string rawTarget)

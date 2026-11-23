@@ -41,7 +41,7 @@ INSERT INTO world_history_knowledge_rules(rule_id,event_id,audience_type,audienc
 
         internal static List<Dictionary<string, object>> SelectDynamicCharacteristics(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
-            return ReignDatabase.QuerySql(connection, "SELECT * FROM dynamic_characteristics WHERE owner_id='npc' AND category='life_transition';", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, "SELECT *, xmin::text AS projection_row_version FROM dynamic_characteristics WHERE owner_id='npc' AND category='life_transition';", parameters, transaction);
         }
 
         internal static List<Dictionary<string, object>> SelectDynamicCharacteristics2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)

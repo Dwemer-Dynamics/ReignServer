@@ -303,12 +303,9 @@ namespace ReignBetaServer
             Dictionary<string, object> state = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "state.json"));
             Dictionary<string, object> relationships = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "memory", "relationships.json"));
             Dictionary<string, object> summary = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "memory", "summary.json"));
-            List<Dictionary<string, object>> memories = Program.ReadJsonLinesFromPath(CampaignFileService.CharacterFile(campaignId, heroId, "memory", "memories.jsonl"))
-                .Where(CampaignFileService.DurableDialogueMemoryRowIsUsable)
-                .OrderByDescending(x => ReadLong(x, "ts", 0))
-                .Take(ReadInt(settings, "maxContextMemories", 12))
-                .Reverse()
-                .ToList();
+            List<Dictionary<string, object>> memories = Program.ReadRecentDialogueMemoryRows(
+                CampaignFileService.CharacterFile(campaignId, heroId, "memory", "memories.jsonl"),
+                ReadInt(settings, "maxContextMemories", 12));
             List<Dictionary<string, object>> selectedContextPulls = NormalizeSelectedContextPulls(ReadDictionaryList(payload, "selectedContextPulls"), Program.ContextPullIds.ToList());
             List<Dictionary<string, object>> contextBundles = ReadDictionaryList(payload, "contextBundles");
             List<Dictionary<string, object>> compactActionCatalog = DialogueService.UsesStructuredActions(payload) ? new List<Dictionary<string, object>>() : ActionPipelineService.CompactActionCatalog(ActionPipelineService.ActionCatalog());

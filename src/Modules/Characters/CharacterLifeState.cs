@@ -217,7 +217,8 @@ namespace ReignBetaServer
                 var transitions = ReadCharacterDecisionTransitions(connection, owner, access);
                 transitions.AddRange(ReadCharacterNativeLifeTransitions(connection, owner, access));
                 var current = new HashSet<string>(CurrentCharacterLifeState(transitions).Select(r => ReadString(r, "id", "")));
-                CharactersStore.UpdateDynamicCharacteristics(connection, TestDict("owner", owner));
+                var observedIds = transitions.Select(r => ReadString(r, "id", "")).Distinct(StringComparer.Ordinal).ToArray();
+                CharactersStore.UpdateDynamicCharacteristics(connection, TestDict("owner", owner, "observed", Json.Serialize(observedIds)));
                 foreach (var row in transitions)
                 {
                     StoreCharacterLifeProjection(connection, row);
