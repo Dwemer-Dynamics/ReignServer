@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
         private const string ChatViewCoverageContract = "chat-scene-clothing-coverage-v1";
         private const int ChatViewCoverageEvidenceLimit = 256;
@@ -22,19 +22,18 @@ namespace ReignBetaServer
             if (replies.Count == 0) return new List<Dictionary<string, object>>();
             var parameters = TestDict("session", session);
             var slots = replies.Select((r, i) => { parameters["e" + i] = ReadString(r, "turnId", ""); return "$e" + i; }).ToArray();
-            var rows = QuerySql(connection, "SELECT entry_id,source_hash,payload_json FROM chat_view_wardrobe_evidence WHERE session_id=$session AND entry_id IN ("
-                + string.Join(",", slots) + ");", parameters);
+            var rows = PortraitsStore.SelectChatViewWardrobeEvidence(connection, string.Join(",", slots),parameters);
             var hints = new Dictionary<string, Dictionary<string, object>>(StringComparer.Ordinal);
             var historicalIds = new HashSet<string>(earlier.Select(t => ReadString(t, "turnId", "")), StringComparer.Ordinal);
             foreach (var row in rows)
             {
                 var reply = sources[ReadString(row, "entry_id", "")];
-                if (PromptHash(ReadString(reply, "text", "")) != ReadString(row, "source_hash", ""))
+                if (DialogueService.PromptHash(ReadString(reply, "text", "")) != ReadString(row, "source_hash", ""))
                     throw new InvalidDataException("Clothing coverage evidence no longer matches its accepted reply.");
                 foreach (var item in ReadDictionaryList(TryParseJsonObject(ReadString(row, "payload_json", "{}")), "evidence"))
                 {
                     if (!sources.TryGetValue(ReadString(item, "turnId", ""), out var source)) continue;
-                    if (PromptHash(ReadString(source, "text", "")) != ReadString(item, "sourceHash", ""))
+                    if (DialogueService.PromptHash(ReadString(source, "text", "")) != ReadString(item, "sourceHash", ""))
                         throw new InvalidDataException("Clothing coverage evidence no longer matches its original words.");
                     var proof = ChatViewQuoteSpan(TestDict("quote", ReadString(item, "quote", ""),
                         "start", ReadInt(item, "start", -1), "length", ReadInt(item, "length", -1)), source);
@@ -109,7 +108,7 @@ namespace ReignBetaServer
             foreach (var hint in hints)
             {
                 var source = sources.SingleOrDefault(t => ReadString(t, "turnId", "") == ReadString(hint, "turnId", ""));
-                if (source == null || ReadString(hint, "evidenceId", "").Length == 0 || ReadString(hint, "sourceHash", "") != PromptHash(ReadString(source, "text", "")))
+                if (source == null || ReadString(hint, "evidenceId", "").Length == 0 || ReadString(hint, "sourceHash", "") != DialogueService.PromptHash(ReadString(source, "text", "")))
                     throw new InvalidDataException("Clothing coverage evidence lost its frozen source.");
                 ChatViewQuoteSpan(TestDict("quote", ReadString(hint, "quote", ""), "start", ReadInt(hint, "start", -1), "length", ReadInt(hint, "length", -1)), source);
             }

@@ -6,7 +6,9 @@ In **LLM Backend → Chat provider**, choose **Ollama Cloud**, enter an API key 
 
 The Ollama key and all eleven request-type model selections are saved independently of other providers. Blank or masked key submissions preserve the saved key; **Clear Ollama Cloud Key** removes only that credential. It uses the existing secret vault and UI masking. The same provider can be selected for banter and Fast Approach. This is text support; image profiles retain their existing providers.
 
-Ollama Cloud currently does not support structured outputs, so Reign omits `response_format` and retains its existing JSON instructions, parsing and response validation. Thinking uses the documented `reasoning_effort`; supported levels and the ability to disable thinking vary by model (GPT-OSS cannot disable it). See [Ollama compatibility](https://docs.ollama.com/api/openai-compatibility) and [cloud capabilities](https://docs.ollama.com/cloud). Offline contracts do not establish live model quality, quota or account acceptance.
+Reign omits `response_format` on Ollama Cloud requests. For conversations, a final instruction after the current turn asks the model to follow the full JSON schema. If the model encloses its answer in the exact speech delimiters supplied by Reign, the NPC's words can still appear in the transcript. These words cannot authorize terms, consent or game actions. A Court matter stays open at its current phase and revision for a later decision. Player-initiated handovers and ordinary participation experience follow their existing rules. Untagged prose or ambiguous output leaves the message available for retry.
+
+Thinking uses `reasoning_effort`. Supported levels vary by model, and GPT-OSS requires thinking. A model can still return an unusable answer with thinking Off. Live quality, quota and account acceptance depend on the selected cloud model and account. [Ollama compatibility](https://docs.ollama.com/api/openai-compatibility) and [cloud capabilities](https://docs.ollama.com/cloud).
 
 ## Saving and power controls
 

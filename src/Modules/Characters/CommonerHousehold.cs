@@ -8,7 +8,7 @@ using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private const string CommonerHouseholdSchema = "reign-commoner-household-v1";
 
@@ -46,7 +46,7 @@ namespace ReignBetaServer
                 .OrderBy(_ => random.Next()).Take(count).OrderByDescending(x => x).ToArray();
             var children = ages.Select(childAge => {
                 bool female = random.Next(2) == 0;
-                string childName = FirstName(NextName(female)) + " " + ReadString(profile, "name", "").Split(' ').Last();
+                string childName = WorldSimulationService.FirstName(NextName(female)) + " " + ReadString(profile, "name", "").Split(' ').Last();
                 return new Dictionary<string, object> { ["name"] = childName.Trim(), ["isFemale"] = female,
                     ["ageAtFirstContact"] = childAge };
             }).ToList();
@@ -56,7 +56,7 @@ namespace ReignBetaServer
                 ["homeSettlementName"] = ReadString(ReadDictionary(profile, "encounteredResident"), "homeSettlementName", "") };
         }
 
-        private static void PreserveCommonerHousehold(Dictionary<string, object> profile, Dictionary<string, object> existing)
+        internal static void PreserveCommonerHousehold(Dictionary<string, object> profile, Dictionary<string, object> existing)
         {
             if (!IsEncounteredResidentProfile(profile)) return;
             string residentId = ReadString(ReadDictionary(profile, "encounteredResident"), "residentId", "");
@@ -87,7 +87,7 @@ namespace ReignBetaServer
             return value;
         }
 
-        private static string CommonerNarrativeMaritalStatus(Dictionary<string, object> profile)
+        internal static string CommonerNarrativeMaritalStatus(Dictionary<string, object> profile)
         {
             if (!IsEncounteredResidentProfile(profile)) return "";
             var household = ReadDictionary(profile, "commonerHousehold");

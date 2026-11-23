@@ -1,0 +1,1294 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
+
+namespace ReignBetaServer
+{
+    internal static partial class DialogueService
+    {
+        internal const string LieFormulaVersion = "reign_historical_lie_v1";
+
+        internal static void EnsureWorldHistoryLieDetectionSchema(ReignDbConnection connection)
+        {
+            DialogueSchema.CreateWorldHistoryLieChecks(connection);
+            DialogueSchema.CreateWorldHistoryClaimBeliefs(connection);
+            DialogueSchema.CreateIndexWhLieParticipants(connection);
+            DialogueSchema.CreateIndexWhBeliefOwnerState(connection);
+            DialogueStore.UpsertSchemaMeta6(connection);
+        }
+
+        private const string GroupHistoryListenerSuffix = "_player_to_listener";
+
+        private static Dictionary<string, object> GroupHistorySource(Dictionary<string, object> row) =>
+            row == null ? null : TestDict("turnId", ReadString(row, "turn_id", ""),
+                "sessionId", ReadString(row, "session_id", ""), "speakerId", ReadString(row, "speaker_id", ""),
+                "worldDay", ReadDouble(row, "world_day", 0d),
+                "textHash", ConversationExactTextHash(ReadString(row, "text", "")),
+                "audienceHash", ConversationExactTextHash(ReadString(row, "participants_json", "")));
+
+        private static Dictionary<string, object> GroupHistorySkills(Dictionary<string, object> skills) =>
+            TryReadLieSkill(skills, "roguery", out double roguery) && TryReadLieSkill(skills, "charm", out double charm)
+            && double.IsFinite(roguery) && double.IsFinite(charm)
+                ? TestDict("roguery", roguery, "charm", charm) : null;
+
+        private static Dictionary<string, object> GroupHistoryListenerContexts(AcceptedConversationUnit unit,
+            Dictionary<string, object> publicTurn, Dictionary<string, object> privateTurn)
+        {
+            var audience = new[] { publicTurn, privateTurn }.SelectMany(row =>
+                TextListFromJson(ReadString(row, "participants_json", "[]"))).ToHashSet(StringComparer.Ordinal);
+            var contexts = new Dictionary<string, object>(StringComparer.Ordinal);
+            var profiles = ReadDictionaryList(ReadDictionary(unit.Payload, "groupHistoryContext"), "listeners");
+            if (profiles.Count == 0) profiles = ReadDictionaryList(unit.Payload, "attendees");
+            foreach (var profile in profiles)
+            {
+                string id = CampaignFileService.CharacterIdFrom(profile);
+                if (id.Length == 0 || id == unit.Player || !audience.Contains(id)) continue;
+                var risk = ReadDictionary(profile, "sceneRisk");
+                contexts.TryAdd(id, TestDict("kingdomId", ReadString(profile, "kingdomId", ""),
+                    "skills", GroupHistorySkills(ReadDictionary(profile, "skills")),
+                    "sceneRisk", TestDict("targetIsPrisoner", ReadBool(risk, "targetIsPrisoner", ReadBool(profile, "isPrisoner", false)),
+                        "powerDisadvantage", ClampDouble(ReadDouble(risk, "powerDisadvantage", 1d), 0d, 2d))));
+            }
+            return contexts;
+        }
+
+        private static bool CanObserveGroupHistorySource(Dictionary<string, object> row, Dictionary<string, object> source,
+            string claimant, string target, string timeline, bool privateTurn) =>
+            row != null && source != null && claimant != target
+            && ReadString(row, "role", "") == "player" && ReadString(row, "status", "") == "active"
+            && ReadString(row, "speaker_id", "") == claimant
+            && ReadString(row, "turn_id", "") == ReadString(source, "turnId", "")
+            && ReadString(row, "session_id", "") == ReadString(source, "sessionId", "")
+            && claimant == ReadString(source, "speakerId", "")
+            && ReadDouble(row, "world_day", 0d) == ReadDouble(source, "worldDay", -1d)
+            && (privateTurn ? ReadString(row, "channel", "") == "private_whisper"
+                : ReadString(row, "channel", "") is "party_chat" or "social_event" or "wilderness_event")
+            && ContinuityTimeline(TryParseJsonObject(ReadString(row, "payload_json", "{}"))) == timeline
+            && ConversationExactTextHash(ReadString(row, "text", "")) == ReadString(source, "textHash", "")
+            && ConversationExactTextHash(ReadString(row, "participants_json", "")) == ReadString(source, "audienceHash", "")
+            && TextListFromJson(ReadString(row, "participants_json", "[]")).Contains(target, StringComparer.Ordinal);
+
+        private static Dictionary<string, object> GroupHistoryNotObserved() =>
+            TestDict("ok", true, "recorded", false, "outcome", "not_adjudicable", "reason", "accepted_group_source_required");
+
+        private static Dictionary<string, object> ObserveAcceptedGroupHistoryClaim(Dictionary<string, object> payload, string mode)
+        {
+            string unitId = ReadString(payload, "acceptedUnitId", "");
+            string campaign = ReadString(payload, "campaignId", "");
+            string timeline = ReadString(payload, "timelineId", "");
+            string claimant = ReadString(payload, "claimantId", "");
+            string target = ReadString(payload, "targetId", "");
+            if (new[] { unitId, campaign, timeline, claimant, target }.Any(string.IsNullOrWhiteSpace)
+                || !ReignPostgreSqlStorage.CampaignExists(campaign))
+                return GroupHistoryNotObserved();
+            using var timelineScope = WorldSimulationService.EnterWorldHistoryTimelineScope(campaign);
+            lock (RelationshipsService.CampaignRelationshipWriteLock(campaign))
+            {
+                using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                if (!(new[] { "conversation_accepted_units", "conversation_turns", "memory_precision_state" })
+                    .All(table => WorldSimulationService.TableExists(connection, table)))
+                    return GroupHistoryNotObserved();
+                var unit = DialogueStore.SelectConversationAcceptedUnits2(connection, TestDict("unit", unitId)).SingleOrDefault();
+                if (unit == null || ReadString(unit, "restore_generation", "")
+                    != ReadString(DialogueStore.SelectMemoryPrecisionState(connection).SingleOrDefault(), "restore_generation", "missing"))
+                    return GroupHistoryNotObserved();
+                var receipt = TryParseJsonObject(ReadString(unit, "receipt_json", "{}"));
+                var observation = ReadDictionary(receipt, "groupHistoryObservation");
+                string activeTimeline = WorldSimulationService.TableExists(connection, "world_history_timelines")
+                    ? WorldSimulationService.ActiveWorldHistoryTimeline(connection) : "main";
+                if (activeTimeline != timeline || ReadString(observation, "timelineId", "") != timeline
+                    || ReadString(observation, "mode", "") + GroupHistoryListenerSuffix != mode)
+                    return GroupHistoryNotObserved();
+                foreach (string kind in new[] { "privateTurn", "publicTurn" })
+                {
+                    var source = ReadDictionary(observation, kind);
+                    string turnId = ReadString(source, "turnId", "");
+                    if (string.IsNullOrWhiteSpace(turnId) || !ReadStringList(receipt, "sourceIds").Contains(turnId, StringComparer.Ordinal))
+                        continue;
+                    var row = DialogueStore.SelectConversationTurns6(connection, TestDict("id", turnId)).SingleOrDefault();
+                    if (!CanObserveGroupHistorySource(row, source, claimant, target, timeline, kind == "privateTurn"))
+                        continue;
+                    string claim = ReadString(row, "text", "");
+                    if (string.IsNullOrWhiteSpace(claim))
+                        return GroupHistoryNotObserved();
+                    // Evaluate the saved spoken projection with its original sentence
+                    // boundaries. A later request cannot supply live scene evidence.
+                    var context = ReadDictionary(ReadDictionary(observation, "listeners"), target);
+                    return EvaluateWorldHistoryLieCheck(TestDict("campaignId", campaign, "timelineId", timeline,
+                        "claimantId", claimant, "targetId", target, "claim", claim,
+                        "worldDay", ReadDouble(row, "world_day", 0d), "targetKingdomId", ReadString(context, "kingdomId", ""),
+                        "claimantSkills", ReadDictionary(observation, "claimantSkills"), "targetSkills", ReadDictionary(context, "skills"),
+                        "sceneRisk", ReadDictionary(context, "sceneRisk") ?? TestDict("powerDisadvantage", 1d)));
+                }
+            }
+            return GroupHistoryNotObserved();
+        }
+
+        internal static Dictionary<string, object> WorldHistoryLieCheckApi(Dictionary<string, object> payload)
+        {
+            payload ??= new Dictionary<string, object>();
+            string mode = ReadString(payload, "mode", "").Trim().ToLowerInvariant();
+            if (mode.EndsWith(GroupHistoryListenerSuffix, StringComparison.Ordinal))
+                return ObserveAcceptedGroupHistoryClaim(payload, mode);
+            if (mode is "party_chat" or "social_event" or "castle_chat" or "wilderness_event" or "family_chambers")
+            {
+                // Older clients can still look up history. Group assertions need an
+                // accepted source; the pre-reply text has no audience proof.
+                string text = ReadFirstString(payload, "claim", "claimText", "playerText", "text", "message");
+                if (!ReadBool(payload, "lookupOnly", false)
+                    && (WorldSimulationService.ExtractAssertedWorldHistorySpans(text).Count != 0 || !IsWorldHistoryLookupRequest(text)))
+                    return GroupHistoryNotObserved();
+            }
+            return EvaluateWorldHistoryLieCheck(payload);
+        }
+
+        private static Dictionary<string, object> EvaluateWorldHistoryLieCheck(Dictionary<string, object> payload)
+        {
+            string campaignId = ReadString(payload, "campaignId", "default");
+            string claimantId = ReadFirstString(payload, "claimantId", "playerId", "mainHeroStringId");
+            string targetId = ReadFirstString(payload, "targetId", "speakerId", "npcId", "heroStringId");
+            string targetKingdomId = ReadFirstString(payload, "targetKingdomId", "speakerKingdomId", "npcKingdomId");
+            string claim = ReadFirstString(payload, "claim", "claimText", "playerText", "text", "message");
+            double worldDay = ReadDouble(payload, "worldDay", ReadDouble(payload, "currentWorldDay", 0d));
+            var spans = WorldSimulationService.ExtractAssertedWorldHistorySpans(claim);
+            bool lookupOnly = ReadBool(payload, "lookupOnly", false) || (spans.Count == 0 && IsWorldHistoryLookupRequest(claim));
+            if (string.IsNullOrWhiteSpace(claim) || string.IsNullOrWhiteSpace(targetId) || (!lookupOnly && string.IsNullOrWhiteSpace(claimantId)))
+            {
+                return new Dictionary<string, object> { ["ok"] = false, ["error"] = lookupOnly ? "claim and targetId are required." : "claim, claimantId, and targetId are required." };
+            }
+            if (!lookupOnly && IsPlayerLieDetectionTarget(campaignId, targetId))
+            {
+                return new Dictionary<string, object>
+                {
+                    ["ok"] = true,
+                    ["outcome"] = "not_evaluated_player",
+                    ["recorded"] = false,
+                    ["reason"] = "Lie detection models NPC beliefs only; Reign never performs lie detection for the player character."
+                };
+            }
+
+            Dictionary<string, object> verifyPayload = new Dictionary<string, object>(payload, StringComparer.OrdinalIgnoreCase)
+            {
+                ["speakerId"] = targetId,
+                ["speakerKingdomId"] = targetKingdomId,
+                ["lookupOnly"] = lookupOnly
+            };
+            if (lookupOnly) verifyPayload["claimantId"] = string.Empty;
+            Dictionary<string, object> verification = lookupOnly
+                ? null
+                : VerifySelfAdmittedFalsehood(payload, claim, claimantId, targetId, spans);
+            if (verification == null && !lookupOnly)
+            {
+                verification = VerifyNativeCurrentLocationClaim(payload, claim, claimantId, targetId);
+            }
+            if (verification == null && !lookupOnly)
+            {
+                if (spans.Count != 1)
+                    return new Dictionary<string, object> { ["ok"] = true, ["recorded"] = false,
+                        ["outcome"] = "not_adjudicable", ["reason"] = spans.Count == 0 ? "no_asserted_claimant_deed" : "multiple_claims_require_separate_evidence",
+                        ["promptPacket"] = new Dictionary<string, object> { ["speakerVerdict"] = "unknown",
+                            ["behaviorRule"] = "No source-bound historical falsehood was established. Do not infer a lie or an accepted fact from this check." } };
+                // Persist the actual assertion, never the surrounding mixed monologue.
+                claim = ReadString(spans[0], "quote", "");
+                verifyPayload["claim"] = claim;
+                verifyPayload["claimSourceEvidence"] = spans[0];
+            }
+            if (verification == null) verification = WorldSimulationService.WorldHistoryVerifyApi(verifyPayload);
+            if (!ReadBool(verification, "ok", false)) return verification;
+
+            // Older game-module builds route every history helper request through the lie-check
+            // endpoint. Treat question-shaped requests as factual lookups so a running campaign can
+            // consume the same speaker-safe evidence without recording a fictional lie episode.
+            if (lookupOnly)
+            {
+                Dictionary<string, object> speakerKnowledge = ReadDictionary(verification, "speakerKnowledge") ?? new Dictionary<string, object>();
+                List<string> knownEventIds = ReadStringList(speakerKnowledge, "eventIds");
+                Dictionary<string, object> promptPacket = new Dictionary<string, object>
+                {
+                    ["claimCheckId"] = ReadString(verification, "checkId", ""),
+                    ["claimFamily"] = ReadString(verification, "claimFamily", "historical_lookup"),
+                    ["purpose"] = "historical_lookup",
+                    ["speakerVerdict"] = knownEventIds.Count > 0 ? "evidence_available" : "unknown",
+                    ["knownEvidenceEventIds"] = knownEventIds,
+                    ["knownEvents"] = ReadDictionaryList(speakerKnowledge, "events"),
+                    ["privacyRule"] = "Use only this speaker-visible historical evidence. Do not invent omitted facts.",
+                    ["behaviorRule"] = knownEventIds.Count > 0
+                        ? "Answer the historical question from the supplied event summaries and entity roles. State uncertainty where the evidence is incomplete."
+                        : "The character lacks reliable visible evidence for this historical question and should say so without inventing details."
+                };
+                return new Dictionary<string, object>
+                {
+                    ["ok"] = true,
+                    ["lieCheckId"] = string.Empty,
+                    ["claimCheckId"] = ReadString(verification, "checkId", ""),
+                    ["campaignId"] = campaignId,
+                    ["timelineId"] = ReadString(verification, "timelineId", ReadString(payload, "timelineId", "main")),
+                    ["claimantId"] = string.Empty,
+                    ["targetId"] = targetId,
+                    ["objectiveVerdict"] = ReadString(verification, "objectiveVerdict", "insufficient_evidence"),
+                    ["knowledgeBasis"] = knownEventIds.Count > 0 ? "speaker_visible_history" : "none",
+                    ["outcome"] = "historical_lookup",
+                    ["knownEventIds"] = knownEventIds,
+                    ["promptPacket"] = promptPacket,
+                    ["verification"] = verification,
+                    ["cached"] = false
+                };
+            }
+
+            string timelineId = ReadString(verification, "timelineId", ReadString(payload, "timelineId", "main"));
+            string objectiveVerdict = ReadString(verification, "objectiveVerdict", "insufficient_evidence");
+            List<string> evidenceIds = ReadStringList(verification, "evidenceEventIds").Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+            List<string> mismatched = ReadStringList(verification, "mismatchedComponents");
+            List<string> matched = ReadStringList(verification, "matchedComponents");
+            string normalizedClaim = ActionPipelineService.NormalizeLookup(claim);
+
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+            {
+                WorldSimulationService.EnsureWorldHistorySchema(connection);
+                EnsureWorldHistoryLieDetectionSchema(connection);
+                Dictionary<string, object> knowledge = ReadDictionary(verification, "speakerKnowledge") ?? new Dictionary<string, object>();
+                string knowledgeBasis = ReadString(knowledge, "basis", "none");
+                List<string> knownIds = ReadStringList(knowledge, "eventIds");
+                string speakerVerdict = ReadString(verification, "speakerVerdict", "unknown");
+                // Pre-component episodes can contain a stored truthful packet for a different proof.
+                string episodeKey = Sha256Hex(Json.Serialize(new object[] { "scoped_claim_v1", campaignId, timelineId, claimantId,
+                    targetId, normalizedClaim, evidenceIds, objectiveVerdict, knownIds.OrderBy(id => id, StringComparer.OrdinalIgnoreCase).ToList(), knowledgeBasis, speakerVerdict }));
+                Dictionary<string, object> existing = DialogueStore.SelectWorldHistoryLieChecks(connection, new Dictionary<string, object> { ["key"] = episodeKey }).FirstOrDefault();
+                if (existing != null) return BuildLieCheckResponse(existing, verification, true);
+
+                Dictionary<string, object> claimantSkills = ResolveLieSkills(payload, "claimantSkills", campaignId, claimantId);
+                Dictionary<string, object> targetSkills = ResolveLieSkills(payload, "targetSkills", campaignId, targetId);
+                bool claimantSkillsReady = ReadBool(claimantSkills, "available", false);
+                bool targetSkillsReady = ReadBool(targetSkills, "available", false);
+                double? chance = null;
+                double? roll = null;
+                string outcome;
+                if (objectiveVerdict != "contradicted" || (speakerVerdict != "contradicted" && knowledgeBasis != "none"))
+                {
+                    outcome = objectiveVerdict == "verified" && speakerVerdict == "verified" ? "truthful" : "not_adjudicable";
+                }
+                else if (string.Equals(knowledgeBasis, "firsthand", StringComparison.OrdinalIgnoreCase))
+                {
+                    outcome = "detected_firsthand";
+                }
+                else if (string.Equals(knowledgeBasis, "secondhand", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!claimantSkillsReady || !targetSkillsReady)
+                    {
+                        outcome = "insufficient_skill_data";
+                    }
+                    else
+                    {
+                        chance = HistoricalLieSuccessChance(ReadDouble(claimantSkills, "average", 0d), ReadDouble(targetSkills, "average", 0d));
+                        roll = StableLieRoll(episodeKey);
+                        outcome = roll.Value < chance.Value ? "deception_succeeded" : "detected_secondhand";
+                    }
+                }
+                else
+                {
+                    outcome = "not_detected_no_knowledge";
+                }
+
+                bool detected = outcome == "detected_firsthand" || outcome == "detected_secondhand";
+                Dictionary<string, object> reaction = detected ? SelectLieReaction(connection, campaignId, claimantId, targetId, payload) : new Dictionary<string, object>();
+                string reactionStrategy = ReadString(reaction, "strategy", "");
+                bool exploitOpening = ReadBool(reaction, "exploitOpening", false);
+                string lieCheckId = "whl_" + Guid.NewGuid().ToString("N");
+                Dictionary<string, object> promptPacket = BuildLiePromptPacket(verification, outcome, knowledgeBasis, knownIds, reactionStrategy, exploitOpening);
+                long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+                DialogueStore.InsertWorldHistoryLieChecks(connection, new Dictionary<string, object>
+                    {
+                        ["id"] = lieCheckId, ["episode"] = episodeKey, ["claimCheck"] = ReadString(verification, "checkId", ""),
+                        ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = worldDay, ["claimant"] = claimantId, ["target"] = targetId,
+                        ["claim"] = claim, ["normalized"] = normalizedClaim, ["verdict"] = objectiveVerdict, ["basis"] = knowledgeBasis,
+                        ["cr"] = DbNullable(claimantSkills, "roguery"), ["cc"] = DbNullable(claimantSkills, "charm"), ["ca"] = DbNullable(claimantSkills, "average"),
+                        ["tr"] = DbNullable(targetSkills, "roguery"), ["tc"] = DbNullable(targetSkills, "charm"), ["ta"] = DbNullable(targetSkills, "average"),
+                        ["formula"] = LieFormulaVersion, ["chance"] = chance.HasValue ? (object)chance.Value : DBNull.Value,
+                        ["roll"] = roll.HasValue ? (object)roll.Value : DBNull.Value, ["outcome"] = outcome, ["reaction"] = reactionStrategy,
+                        ["exploit"] = exploitOpening ? 1 : 0, ["evidence"] = Json.Serialize(evidenceIds), ["known"] = Json.Serialize(knownIds),
+                        ["matched"] = Json.Serialize(matched), ["mismatched"] = Json.Serialize(mismatched), ["packet"] = Json.Serialize(promptPacket), ["ts"] = ts
+                    });
+
+                PersistLieConsequence(connection, lieCheckId, campaignId, timelineId, claimantId, targetId, claim, normalizedClaim,
+                    objectiveVerdict, outcome, reactionStrategy, exploitOpening, evidenceIds, worldDay, ts);
+                Dictionary<string, object> stored = DialogueStore.SelectWorldHistoryLieChecks2(connection, new Dictionary<string, object> { ["id"] = lieCheckId }).FirstOrDefault();
+                return BuildLieCheckResponse(stored, verification, false);
+            }
+        }
+
+        private static bool IsPlayerLieDetectionTarget(string campaignId, string targetId)
+        {
+            if (string.IsNullOrWhiteSpace(targetId)) return false;
+            if (targetId.Equals("main_hero", StringComparison.OrdinalIgnoreCase)) return true;
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+            {
+                EnsureCategorizedMemorySchema(connection);
+                return DialogueStore.SelectConversationSessions14(connection, new Dictionary<string, object>{{"campaign",campaignId},{"target",targetId}}).Any();
+            }
+        }
+
+        private static void RunPlayerLieDetectionRemovalMigration(ReignDbConnection connection)
+        {
+            EnsureWorldHistoryLieDetectionSchema(connection);
+            Dictionary<string, object> applied = DialogueStore.SelectSchemaMeta5(connection).FirstOrDefault();
+            if (string.Equals(ReadString(applied, "value", ""), "complete", StringComparison.OrdinalIgnoreCase)) return;
+
+            HashSet<string> playerIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "main_hero" };
+            foreach (Dictionary<string, object> row in DialogueStore.SelectConversationSessions15(connection))
+            {
+                string playerId = ReadString(row, "player_id", "");
+                if (!string.IsNullOrWhiteSpace(playerId)) playerIds.Add(playerId);
+            }
+            List<string> lieCheckIds = DialogueStore.SelectWorldHistoryLieChecks3(connection)
+                .Where(row => playerIds.Contains(ReadString(row, "target_id", "")))
+                .Select(row => ReadString(row, "lie_check_id", ""))
+                .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            foreach (string lieCheckId in lieCheckIds)
+            {
+                Dictionary<string, object> parameters = new Dictionary<string, object> { ["id"] = lieCheckId };
+                DialogueStore.DeleteMemoryFts2(connection, new Dictionary<string, object>{{"id",lieCheckId},{"memory","memory_"+lieCheckId},{"discovery","memory_discovery_"+lieCheckId}});
+                DialogueStore.DeleteMemories(connection, new Dictionary<string, object>{{"id",lieCheckId},{"memory","memory_"+lieCheckId},{"discovery","memory_discovery_"+lieCheckId}});
+                DialogueStore.DeleteBeliefs(connection, parameters);
+                DialogueStore.DeleteWorldHistoryClaimBeliefs(connection, parameters);
+                DialogueStore.DeleteWorldHistoryLieChecks(connection, parameters);
+            }
+            DialogueStore.UpsertSchemaMeta7(connection);
+        }
+
+        private static Dictionary<string, object> VerifySelfAdmittedFalsehood(
+            Dictionary<string, object> payload, string claim, string claimantId, string targetId, List<Dictionary<string, object>> spans)
+        {
+            // A separate admission about another subject cannot disprove this historical deed.
+            if (spans.Count > 0)
+            {
+                int end = ReadInt(spans[0], "start", 0) + ReadInt(spans[0], "length", 0);
+                if (spans.Count != 1 || !IsCompleteHistoryRetraction(claim.Substring(end))) return null;
+            }
+            else if (WorldSimulationService.MentionsFirstPersonDeed(claim))
+            {
+                // A deed mentioned inside a report or quotation was never asserted by this claimant.
+                return null;
+            }
+            string spoken = claim;
+            foreach (Match aside in WorldSimulationService.HistoryQuotationAndNarration(claim).AsEnumerable().Reverse())
+                spoken = spoken.Remove(aside.Index, aside.Length).Insert(aside.Index, " ");
+            string q = ActionPipelineService.NormalizeLookup(spoken);
+            if (string.IsNullOrWhiteSpace(q)
+                || DialogueService.ContainsAny(q, "if i said", "if i were", "suppose i", "hypothetically", "as an example"))
+            {
+                return null;
+            }
+
+            bool directAdmission = spans.Count == 1 || HasDirectSpokenAdmission(spoken)
+                || Regex.IsMatch(spoken.Trim(), @"\Awhat I (?:just )?said is false[.!]?\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            if (!directAdmission) return null;
+
+            string evidenceId = "native_self_admitted_falsehood_" + PromptHash(claimantId + "|" + targetId + "|" + q).Substring(0, 20).ToLowerInvariant();
+            Dictionary<string, object> nativeEvent = new Dictionary<string, object>
+            {
+                ["event_id"] = evidenceId,
+                ["event_type"] = "direct_self_admitted_falsehood",
+                ["summary"] = claimantId + " directly told " + targetId + " that the account was false and that they were deliberately lying.",
+                ["source"] = "current_conversation_direct_admission"
+            };
+            return new Dictionary<string, object>
+            {
+                ["ok"] = true,
+                ["checkId"] = "whc_admission_" + PromptHash(claim + "|" + evidenceId).Substring(0, 20).ToLowerInvariant(),
+                ["campaignId"] = ReadString(payload, "campaignId", "default"),
+                ["timelineId"] = ReadString(payload, "timelineId", "main"),
+                ["claim"] = claim,
+                ["claimantId"] = claimantId,
+                ["speakerId"] = targetId,
+                ["purpose"] = "self_claim",
+                ["claimFamily"] = "self_admitted_falsehood",
+                ["lookupOnly"] = false,
+                ["objectiveVerdict"] = "contradicted",
+                ["speakerVerdict"] = "contradicted",
+                ["deceptiveIntent"] = true,
+                ["directAdmission"] = true,
+                ["explanation"] = "The claimant directly admitted in this conversation that the account was false and deliberately presented as a lie.",
+                ["evidenceEventIds"] = new List<string> { evidenceId },
+                ["speakerEvidenceEventIds"] = new List<string> { evidenceId },
+                ["matchedComponents"] = new List<string>(),
+                ["mismatchedComponents"] = new List<string> { "direct self-admission of falsehood and deceptive intent" },
+                ["speakerKnowledge"] = new Dictionary<string, object>
+                {
+                    ["basis"] = "firsthand",
+                    ["eventIds"] = new List<string> { evidenceId },
+                    ["firsthandEventIds"] = new List<string> { evidenceId },
+                    ["secondhandEventIds"] = new List<string>(),
+                    ["acquisitionModes"] = new List<string> { "direct_conversation_admission" },
+                    ["events"] = new List<Dictionary<string, object>> { nativeEvent }
+                },
+                ["nativeContextEvidence"] = true,
+                ["candidateCount"] = 1,
+                ["candidateEventIds"] = new List<string> { evidenceId },
+                ["durationMs"] = 0,
+                ["cached"] = false
+            };
+        }
+
+        private static readonly Regex StandaloneHistoryAdmission = new Regex(
+            @"\A(?<cue>(?<speaker>I|we)\s+(?:admit\s+(?:that\s+)?\k<speaker>\s+)?"
+            + @"(?:(?:am|are|was|were)\s+)?(?:(?:openly|deliberately|knowingly|intentionally)\s+)?"
+            + @"(?:(?:trying|attempting|intending|intended|meant)\s+to\s+)?(?:lie|lied|lying|deceive|deceived|deceiving|mislead|misled|misleading)"
+            + @"(?:\s+(?:to\s+)?(?:you|him|her|them|everyone|the\s+(?:court|king|queen|lord|lady)))?)"
+            + @"(?:\s+about\s+(?:it|this|that|(?:the\s+)?(?:[\p{L}\d]+\s+)?(?:prisoners?|captives?)"
+            + @"(?:\s+(?:he|she|they)\s+(?:rescued|freed|released))?)|\s+to\s+test\s+whether\s+you\s+(?:accept|believe)\s+(?:it|me|us))?\z",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        private const string HistoryProperName = @"(?-i:\p{Lu}[\p{L}'’-]*(?:\s+\p{Lu}[\p{L}'’-]*){0,3})";
+        private static readonly Regex AnnouncedPartyPosition = new Regex(@"\A" + HistoryProperName + @"\s+is\s+(?:inside|at|in)\s+" + HistoryProperName
+            + @"(?:\s+with\s+(?:exactly\s+)?(?:[0-9]{1,8}|(?:(?:" + DialogueNumericWords + @"|and)[ -]+){0,5}(?:" + DialogueNumericWords
+            + @"))\s+(?:troops|men|soldiers))?\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        internal static bool IsCompleteHistoryRetraction(string tail)
+        {
+            Match retraction = Regex.Match(tail,
+                @"\A\s*[.!;]+\s*(?:what I (?:just )?said is false|I know (?:this|that) (?:account|claim) is false|I admit (?:that )?I lied)"
+                + @"\s*(?<punctuation>[.!?;]*)(?<rest>[\s\S]*)\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            if (!retraction.Success || retraction.Groups["punctuation"].Value.Contains('?')) return false;
+            string rest = retraction.Groups["rest"].Value.Trim();
+            return rest.Length == 0 || retraction.Groups["punctuation"].Length > 0 && HasDirectSpokenAdmission(rest);
+        }
+
+        private static bool HasDirectSpokenAdmission(string spoken)
+        {
+            if (spoken.Contains('?') || WorldSimulationService.HasReportedHistoryTag(spoken)) return false;
+            string words = spoken.Trim().TrimEnd('.', '!').TrimEnd();
+            // The direct intent announcement and the following position claim must each stand on their own.
+            int colon = words.IndexOf(':');
+            if (colon >= 0)
+            {
+                if (!AnnouncedPartyPosition.IsMatch(words.Substring(colon + 1).Trim())) return false;
+                words = words.Substring(0, colon).TrimEnd();
+                if (!Regex.IsMatch(words, @"\b(?:lie\s+to|deceive|mislead)\s+you\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)) return false;
+            }
+            Match admission = StandaloneHistoryAdmission.Match(words);
+            return admission.Success && ContainsExplicitDeceptionAdmission(ActionPipelineService.NormalizeLookup(admission.Groups["cue"].Value));
+        }
+
+        private static Dictionary<string, object> VerifyNativeCurrentLocationClaim(
+            Dictionary<string, object> payload, string claim, string claimantId, string targetId)
+        {
+            Dictionary<string, object> native = ReadDictionary(payload, "nativeContext");
+            if (native == null || !ReadBool(native, "sameCurrentSettlement", false)) return null;
+            string claimantSettlementId = ReadString(native, "claimantCurrentSettlementId", "");
+            string targetSettlementId = ReadString(native, "targetCurrentSettlementId", "");
+            string settlementName = FirstNonEmpty(ReadString(native, "claimantCurrentSettlementName", ""), ReadString(native, "targetCurrentSettlementName", ""));
+            if (string.IsNullOrWhiteSpace(claimantSettlementId)
+                || !claimantSettlementId.Equals(targetSettlementId, StringComparison.OrdinalIgnoreCase)
+                || string.IsNullOrWhiteSpace(settlementName)) return null;
+
+            if (!ContradictsNativeCurrentSettlement(claim, settlementName)) return null;
+            bool deceptiveIntent = ContainsConversationDeceptiveIntentEvidence(claim);
+
+            string evidenceId = "native_current_settlement_" + PromptHash(claimantId + "|" + targetId + "|" + claimantSettlementId).Substring(0, 20).ToLowerInvariant();
+            Dictionary<string, object> nativeEvent = new Dictionary<string, object>
+            {
+                ["event_id"] = evidenceId,
+                ["event_type"] = "native_current_settlement_presence",
+                ["summary"] = claimantId + " and " + targetId + " are presently together in " + settlementName + ".",
+                ["location_id"] = claimantSettlementId,
+                ["location_name"] = settlementName,
+                ["source"] = "bannerlord_native_live_context"
+            };
+            return new Dictionary<string, object>
+            {
+                ["ok"] = true,
+                ["checkId"] = "whc_native_" + PromptHash(claim + "|" + evidenceId).Substring(0, 20).ToLowerInvariant(),
+                ["campaignId"] = ReadString(payload, "campaignId", "default"),
+                ["timelineId"] = ReadString(payload, "timelineId", "main"),
+                ["claim"] = claim,
+                ["claimantId"] = claimantId,
+                ["speakerId"] = targetId,
+                ["purpose"] = "self_claim",
+                ["claimFamily"] = "current_location",
+                ["lookupOnly"] = false,
+                ["objectiveVerdict"] = "contradicted",
+                ["speakerVerdict"] = "contradicted",
+                ["deceptiveIntent"] = deceptiveIntent,
+                ["directAdmission"] = false,
+                ["explanation"] = "The claimant and observer are presently together in " + settlementName + "; this directly contradicts the location denial.",
+                ["evidenceEventIds"] = new List<string> { evidenceId },
+                ["speakerEvidenceEventIds"] = new List<string> { evidenceId },
+                ["matchedComponents"] = new List<string>(),
+                ["mismatchedComponents"] = new List<string> { "present location" },
+                ["speakerKnowledge"] = new Dictionary<string, object>
+                {
+                    ["basis"] = "firsthand",
+                    ["eventIds"] = new List<string> { evidenceId },
+                    ["firsthandEventIds"] = new List<string> { evidenceId },
+                    ["secondhandEventIds"] = new List<string>(),
+                    ["acquisitionModes"] = new List<string> { "direct_current_observation" },
+                    ["events"] = new List<Dictionary<string, object>> { nativeEvent }
+                },
+                ["nativeContextEvidence"] = true,
+                ["candidateCount"] = 1,
+                ["candidateEventIds"] = new List<string> { evidenceId },
+                ["durationMs"] = 0,
+                ["cached"] = false
+            };
+        }
+
+        internal static bool ContradictsNativeCurrentSettlement(string claim, string settlementName)
+        {
+            if (string.IsNullOrWhiteSpace(claim) || string.IsNullOrWhiteSpace(settlementName)) return false;
+            string place = Regex.Escape(settlementName.Trim());
+            const string subject = @"(?:I\s+am|we\s+are|I['’]m|we['’]re)";
+            string denial = subject + @"\s+(?:not\s+(?:(?:presently|currently)\s+)?|(?:presently|currently)\s+not\s+)(?:in|at)\s+" + place;
+            string alternative = subject + @"\s+(?:(?:presently|currently)\s+)?(?:in|at)\s+[\p{L}][\p{L}'’ -]*?,\s*(?:not|rather\s+than)\s+(?:(?:in|at)\s+)?" + place;
+            string preface = @"(?:(?:I|we)\s+have\s+never\s+entered\s+" + place + @"(?:\s+at\s+any\s+time)?,\s+and\s+)?";
+            var nonAssertions = WorldSimulationService.HistoryQuotationAndNarration(claim);
+            foreach (Match sentence in Regex.Matches(claim, @"[^.!?;\r\n]+(?:[.!?;]+|$)"))
+            {
+                if (sentence.Value.Contains('?')) continue;
+                int start = sentence.Index + sentence.Value.Length - sentence.Value.TrimStart().Length;
+                if (nonAssertions.Any(span => start >= span.Index && start < span.Index + span.Length)) continue;
+                string text = sentence.Value.Trim().TrimEnd('.', '!', ';');
+                if (Regex.IsMatch(text, @"\A(?:" + preface + denial + "|" + alternative + @")\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                    return true;
+            }
+            return false;
+        }
+
+        internal static bool ContainsConversationDeceptiveIntentEvidence(string claim)
+        {
+            string q = ActionPipelineService.NormalizeLookup(claim);
+            if (string.IsNullOrWhiteSpace(q)) return false;
+            return DialogueService.ContainsExplicitDeceptionAdmission(q) || DialogueService.ContainsAny(q,
+                "i personally verified", "i verified it myself", "i inspected", "i saw it myself", "i witnessed it myself",
+                "i know for a fact", "we know for a fact", "accept my report", "accept what i say", "accept my account",
+                "stop questioning me", "do not question me", "dont question me", "don't question me",
+                "believe me without question", "trust me without question", "you should believe me", "you must believe me");
+        }
+
+        internal static Dictionary<string, object> WorldHistoryLieChecksApi(Dictionary<string, string> query)
+        {
+            query = query ?? new Dictionary<string, string>();
+            string campaignId = query.ContainsKey("campaignId") ? query["campaignId"] : SettingsService.LatestCampaignId();
+            string claimantId = query.ContainsKey("claimantId") ? query["claimantId"] : string.Empty;
+            string targetId = query.ContainsKey("targetId") ? query["targetId"] : string.Empty;
+            int limit = Math.Max(1, Math.Min(250, WorldSimulationService.ParseIntInvariant(query.ContainsKey("limit") ? query["limit"] : "", 50)));
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+            {
+                EnsureWorldHistoryLieDetectionSchema(connection);
+                List<Dictionary<string, object>> rows = DialogueStore.SelectWorldHistoryLieChecks4(connection, new Dictionary<string, object> { ["claimant"] = claimantId, ["target"] = targetId, ["limit"] = limit });
+                foreach (Dictionary<string, object> row in rows)
+                {
+                    row["evidenceEventIds"] = DialogueService.TextListFromJson(ReadString(row, "evidence_event_ids_json", "[]"));
+                    row["knownEventIds"] = DialogueService.TextListFromJson(ReadString(row, "known_event_ids_json", "[]"));
+                    row["promptPacket"] = TryParseJsonObject(ReadString(row, "prompt_packet_json", "{}")) ?? new Dictionary<string, object>();
+                    row.Remove("prompt_packet_json");
+                }
+                return new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaignId, ["count"] = rows.Count, ["lieChecks"] = rows };
+            }
+        }
+
+        private static object DbNullable(Dictionary<string, object> values, string key)
+        {
+            return ReadBool(values, "available", false) ? (object)ReadDouble(values, key, 0d) : DBNull.Value;
+        }
+
+        private static Dictionary<string, object> ResolveLieSkills(Dictionary<string, object> payload, string payloadKey, string campaignId, string heroId)
+        {
+            Dictionary<string, object> supplied = ReadDictionary(payload, payloadKey) ?? new Dictionary<string, object>();
+            if (!TryReadLieSkill(supplied, "roguery", out double roguery) || !TryReadLieSkill(supplied, "charm", out double charm))
+            {
+                Dictionary<string, object> profile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "profile.json"));
+                supplied = ReadDictionary(profile, "skills") ?? ReadDictionary(ReadDictionary(profile, "sourceFacts"), "skills") ?? new Dictionary<string, object>();
+                if (!TryReadLieSkill(supplied, "roguery", out roguery) || !TryReadLieSkill(supplied, "charm", out charm))
+                {
+                    return new Dictionary<string, object> { ["available"] = false, ["source"] = "missing" };
+                }
+                return new Dictionary<string, object> { ["available"] = true, ["source"] = "synchronized_profile", ["roguery"] = roguery, ["charm"] = charm, ["average"] = (roguery + charm) / 2d };
+            }
+            return new Dictionary<string, object> { ["available"] = true, ["source"] = "live_native", ["roguery"] = roguery, ["charm"] = charm, ["average"] = (roguery + charm) / 2d };
+        }
+
+        private static bool TryReadLieSkill(Dictionary<string, object> skills, string key, out double value)
+        {
+            value = 0d;
+            if (skills == null) return false;
+            KeyValuePair<string, object> pair = skills.FirstOrDefault(x => string.Equals(x.Key, key, StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrWhiteSpace(pair.Key) || pair.Value == null) return false;
+            try { value = Convert.ToDouble(pair.Value, CultureInfo.InvariantCulture); return true; }
+            catch { return false; }
+        }
+
+        internal static Dictionary<string, object> DetermineWorldHistoryKnowledge(ReignDbConnection connection, List<string> eventIds, string targetId, string kingdomId, double worldDay)
+        {
+            List<string> firsthand = new List<string>();
+            List<string> secondhand = new List<string>();
+            List<string> modes = new List<string>();
+            foreach (string eventId in eventIds ?? new List<string>())
+            {
+                Dictionary<string, object> evt = DialogueStore.SelectWorldHistoryEvents2(connection, new Dictionary<string, object> { ["id"] = eventId }).FirstOrDefault();
+                string eventType = ReadString(evt, "event_type", "");
+                List<Dictionary<string, object>> rules = DialogueStore.SelectWorldHistoryKnowledgeRules2(connection, new Dictionary<string, object> { ["event"] = eventId, ["day"] = worldDay, ["target"] = targetId ?? "", ["kingdom"] = kingdomId ?? "" });
+                bool direct = rules.Any(x => string.Equals(ReadString(x, "audience_type", ""), "entity", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(ReadString(x, "acquisition_mode", ""), "participant", StringComparison.OrdinalIgnoreCase))
+                    && WorldSimulationService.QueryWorldHistoryEntities(connection, eventId).Any(x => string.Equals(ReadString(x, "entity_id", ""), targetId, StringComparison.OrdinalIgnoreCase)
+                        && IsFirsthandWorldHistoryRole(eventType, ReadString(x, "role", "")));
+                List<Dictionary<string, object>> validSecondhandRules = rules.Where(x => !(string.Equals(ReadString(x, "audience_type", ""), "entity", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(ReadString(x, "acquisition_mode", ""), "participant", StringComparison.OrdinalIgnoreCase))).ToList();
+                if (direct) firsthand.Add(eventId);
+                else if (validSecondhandRules.Count > 0) secondhand.Add(eventId);
+                modes.AddRange((direct ? rules : validSecondhandRules).Select(x => ReadString(x, "acquisition_mode", "")).Where(x => !string.IsNullOrWhiteSpace(x)));
+            }
+            string basis = firsthand.Count > 0 ? "firsthand" : secondhand.Count > 0 ? "secondhand" : "none";
+            List<string> visible = firsthand.Concat(secondhand).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            return new Dictionary<string, object> { ["basis"] = basis, ["eventIds"] = visible, ["firsthandEventIds"] = firsthand, ["secondhandEventIds"] = secondhand, ["acquisitionModes"] = modes.Distinct(StringComparer.OrdinalIgnoreCase).ToList() };
+        }
+
+        internal static Dictionary<string, object> BuildWorldHistoryKnowledgeSummary(ReignDbConnection connection, List<string> eventIds, string targetId, string kingdomId, double worldDay)
+        {
+            Dictionary<string, object> knowledge = DetermineWorldHistoryKnowledge(connection, eventIds, targetId, kingdomId, worldDay);
+            List<string> visibleIds = ReadStringList(knowledge, "eventIds");
+            List<Dictionary<string, object>> events = new List<Dictionary<string, object>>();
+            foreach (string eventId in visibleIds.Take(8))
+            {
+                Dictionary<string, object> row = DialogueStore.SelectWorldHistoryEvents3(connection, new Dictionary<string, object> { ["id"] = eventId }).FirstOrDefault();
+                if (row == null) continue;
+                row["entities"] = WorldSimulationService.QueryWorldHistoryEntities(connection, eventId).Take(12).Select(entity => new Dictionary<string, object>
+                {
+                    ["entityId"] = ReadString(entity, "entity_id", ""),
+                    ["name"] = ReadString(entity, "name_snapshot", ""),
+                    ["role"] = ReadString(entity, "role", ""),
+                    ["side"] = ReadString(entity, "side", "")
+                }).ToList();
+                events.Add(row);
+            }
+            knowledge["events"] = events;
+            return knowledge;
+        }
+
+        internal static bool IsFirsthandWorldHistoryRole(string eventType, string role)
+        {
+            string normalized = ActionPipelineService.NormalizeLookup(role);
+            if (string.IsNullOrWhiteSpace(normalized) || DialogueService.ContainsAny(normalized, "mentioned", "affiliate", "kingdom member", "kingdom affiliation", "clan member", "clan affiliation", "settlement", "item", "troop", "casualty")) return false;
+            return DialogueService.ContainsAny(normalized,
+                "participant", "leader", "commander", "attacker", "defender", "winner", "loser", "raider", "besieger", "conqueror",
+                "rescuer", "rescued", "beneficiary", "captor", "prisoner", "victim", "target", "actor", "decision maker", "signatory",
+                "bride", "groom", "spouse", "mother", "father", "child", "tournament competitor", "governor", "owner hero", "recipient", "payer", "payee");
+        }
+
+        private static double StableLieRoll(string episodeKey)
+        {
+            using (SHA256 sha = SHA256.Create())
+            {
+                byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(episodeKey + "|roll"));
+                ulong raw = BitConverter.ToUInt64(hash, 0);
+                return raw / (double)ulong.MaxValue * 100d;
+            }
+        }
+
+        private static double HistoricalLieSuccessChance(double claimantAverage, double targetAverage)
+        {
+            return DialogueService.ClampDouble(50d + 0.2d * (claimantAverage - targetAverage), 10d, 80d);
+        }
+
+        private static Dictionary<string, object> SelectLieReaction(ReignDbConnection connection, string campaignId, string claimantId, string targetId, Dictionary<string, object> payload)
+        {
+            Dictionary<string, object> traitDocument = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, targetId, "traits.json"));
+            Dictionary<string, object> traits = ReadDictionary(traitDocument, "foundationTraits") ?? ReadDictionary(traitDocument, "hiddenReignTraits") ?? traitDocument;
+            int tact = CharactersService.TraitInt(traits, "tact"), pragmatism = CharactersService.TraitInt(traits, "pragmatism"), patience = CharactersService.TraitInt(traits, "patience");
+            int ambition = CharactersService.TraitInt(traits, "ambition"), power = CharactersService.TraitInt(traits, "powerMotivation"), vengeance = CharactersService.TraitInt(traits, "vengefulness");
+            int honesty = CharactersService.TraitInt(traits, "honesty"), assertiveness = CharactersService.TraitInt(traits, "assertiveness"), pride = CharactersService.TraitInt(traits, "pride");
+            int fearfulness = CharactersService.TraitInt(traits, "fearfulness"), curiosity = CharactersService.TraitInt(traits, "curiosity");
+            Dictionary<string, object> risk = ReadDictionary(payload, "sceneRisk") ?? new Dictionary<string, object>();
+            double powerDisadvantage = ReadDouble(risk, "powerDisadvantage", 0d);
+            bool unsafeToConfront = powerDisadvantage >= 1d || ReadBool(risk, "targetIsPrisoner", false);
+            int manipulation = tact + pragmatism + patience + ambition + power;
+            string strategy = ((unsafeToConfront && tact >= 0) || (manipulation >= 4 && tact >= 0)) ? "feign_belief"
+                : (!unsafeToConfront && honesty + assertiveness + pride - Math.Max(0, fearfulness) >= 2) ? "confront"
+                : (curiosity + tact + patience >= 1) ? "probe"
+                : "quietly_record";
+            bool exploit = strategy == "feign_belief" && ambition + pragmatism + power + vengeance >= 2;
+            return new Dictionary<string, object> { ["strategy"] = strategy, ["exploitOpening"] = exploit, ["unsafeToConfront"] = unsafeToConfront, ["powerDisadvantage"] = powerDisadvantage };
+        }
+
+        private static Dictionary<string, object> BuildLiePromptPacket(Dictionary<string, object> verification, string outcome, string basis,
+            List<string> knownIds, string reaction, bool exploit)
+        {
+            Dictionary<string, object> packet = new Dictionary<string, object>
+            {
+                ["claimCheckId"] = ReadString(verification, "checkId", ""), ["claimFamily"] = ReadString(verification, "claimFamily", ""),
+                ["purpose"] = ReadString(verification, "purpose", ""), ["detectionOutcome"] = outcome, ["knowledgeBasis"] = basis,
+                ["privacyRule"] = "Use only this target-safe packet. Never infer or reveal objective history that is omitted here."
+            };
+            if (knownIds.Count > 0 && !ReadBool(verification, "nativeContextEvidence", false))
+                packet["assessedClaim"] = ReadString(verification, "claim", "");
+            if (knownIds.Count > 0 && (outcome is "truthful" or "not_adjudicable" or "detected_firsthand" or "detected_secondhand")
+                && verification.TryGetValue("speakerPrisonerCountEvidence", out object countEvidence))
+                packet["prisonerCountEvidence"] = countEvidence;
+            if (outcome == "detected_firsthand" || outcome == "detected_secondhand")
+            {
+                packet["speakerVerdict"] = "contradicted";
+                packet["deceptiveIntent"] = ReadBool(verification, "deceptiveIntent", false);
+                packet["directAdmission"] = ReadBool(verification, "directAdmission", false);
+                packet["knownEvidenceEventIds"] = knownIds;
+                packet["mismatchedComponents"] = ReadStringList(verification, verification.ContainsKey("speakerMismatchedComponents") ? "speakerMismatchedComponents" : "mismatchedComponents");
+                packet["factualExplanation"] = ReadFirstString(verification, "speakerExplanation", "explanation");
+                packet["reactionStrategy"] = reaction;
+                packet["exploitOpening"] = exploit;
+                packet["behaviorRule"] = reaction == "feign_belief"
+                    ? "The character recognized the falsehood but must convincingly pretend to believe it. Do not reveal detection."
+                    : reaction == "probe" ? "The character recognized the falsehood and should invite more detail without immediately revealing all evidence."
+                    : reaction == "quietly_record" ? "The character recognized the falsehood but should not expose that knowledge now."
+                    : "The character recognized the falsehood and may challenge it openly using only known evidence.";
+            }
+            else if (outcome == "truthful" && !string.Equals(basis, "none", StringComparison.OrdinalIgnoreCase))
+            {
+                packet["speakerVerdict"] = "verified";
+                packet["knownEvidenceEventIds"] = knownIds;
+                packet["knownEvents"] = ReadDictionaryList(ReadDictionary(verification, "speakerKnowledge"), "events");
+                packet["behaviorRule"] = "The character's eligible evidence supports the claim.";
+            }
+            else
+            {
+                packet["speakerVerdict"] = "unknown";
+                if (ReadString(verification, "speakerVerdict", "") == "partially_verified" && knownIds.Count > 0)
+                {
+                    packet["supportedComponents"] = ReadStringList(verification, "speakerMatchedComponents");
+                    packet["unverifiedComponents"] = ReadStringList(verification, "speakerUnverifiedComponents");
+                    packet["knownEvidenceEventIds"] = knownIds;
+                    packet["behaviorRule"] = "Use only the listed supported facts. The rest of the claim remains uncertain.";
+                    return packet;
+                }
+                packet["behaviorRule"] = outcome == "deception_succeeded"
+                    ? "The character cannot establish the claim as false and finds it plausible despite uncertain secondhand reports. Do not accuse the claimant."
+                    : "The character lacks a reliable basis to call this false. Do not accuse the claimant from missing or hidden evidence.";
+            }
+            return packet;
+        }
+
+        private static void PersistLieConsequence(ReignDbConnection connection, string lieCheckId, string campaignId, string timelineId,
+            string claimantId, string targetId, string claim, string normalizedClaim, string objectiveVerdict, string outcome, string reaction,
+            bool exploit, List<string> evidenceIds, double worldDay, long ts)
+        {
+            bool detected = outcome == "detected_firsthand" || outcome == "detected_secondhand";
+            bool accepted = outcome == "deception_succeeded" || outcome == "not_detected_no_knowledge";
+            if (detected)
+            {
+                string summary = claimantId + " made a historical claim that conflicted with evidence " + targetId + " knew.";
+                DialogueService.InsertMemoryRow(connection, "memory_" + lieCheckId, lieCheckId, targetId, "detected_falsehood", ts, worldDay, "", summary,
+                    new List<string> { claimantId, targetId }, new List<string> { targetId }, Json.Serialize(new List<string> { claimantId, targetId }),
+                    new List<string> { targetId }, new List<string>(), reaction == "confront" ? new List<string>() : new List<string> { claimantId },
+                    "private", 0.8d, 0.6d, 1d, new List<string> { "historical_claim", "detected_falsehood", reaction }, "active",
+                    "world_history_lie_check", Json.Serialize(new Dictionary<string, object> { ["lieCheckId"] = lieCheckId, ["claim"] = claim, ["reaction"] = reaction, ["exploitOpening"] = exploit, ["objectiveVerdict"] = objectiveVerdict }), "", "not_indexed");
+            }
+            else if (accepted)
+            {
+                Dictionary<string, object> traitDocument = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, targetId, "traits.json"));
+                Dictionary<string, object> traits = ReadDictionary(traitDocument, "foundationTraits") ?? ReadDictionary(traitDocument, "hiddenReignTraits") ?? traitDocument;
+                double confidence = DialogueService.ClampDouble(0.6d + 0.1d * CharactersService.TraitInt(traits, "socialTrust"), 0.35d, 0.8d);
+                string beliefId = "whb_" + Guid.NewGuid().ToString("N");
+                DialogueStore.InsertWorldHistoryClaimBeliefs(connection, new Dictionary<string, object> { ["id"] = beliefId, ["lie"] = lieCheckId, ["campaign"] = campaignId, ["timeline"] = timelineId,
+                        ["believer"] = targetId, ["claimant"] = claimantId, ["claim"] = claim, ["normalized"] = normalizedClaim,
+                        ["confidence"] = confidence, ["evidence"] = Json.Serialize(evidenceIds), ["day"] = worldDay, ["ts"] = ts });
+                DialogueService.InsertBelief(connection, lieCheckId, new Dictionary<string, object> { ["believerId"] = targetId, ["claim"] = claim,
+                    ["confidence"] = confidence, ["knownBy"] = new List<string> { targetId }, ["aboutEntities"] = new List<string> { claimantId },
+                    ["visibility"] = "private", ["state"] = "accepted_unverified", ["lieCheckId"] = lieCheckId }, ts, "world_history_lie_check");
+            }
+        }
+
+        internal static List<string> ReconcileWorldHistoryClaimBeliefs(ReignDbConnection connection, string believerId, List<Dictionary<string, object>> visibleEvents, double worldDay)
+        {
+            EnsureWorldHistoryLieDetectionSchema(connection);
+            if (string.IsNullOrWhiteSpace(believerId) || visibleEvents.Count == 0) return new List<string>();
+            List<Dictionary<string, object>> rows = DialogueStore.SelectWorldHistoryClaimBeliefs(connection, new Dictionary<string, object> { ["believer"] = believerId });
+            List<string> reconciled = new List<string>();
+            long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            foreach (Dictionary<string, object> row in rows)
+            {
+                List<string> linked = DialogueService.TextListFromJson(ReadString(row, "evidence_event_ids_json", "[]"));
+                var evidence = visibleEvents.Where(e => linked.Contains(ReadString(e, "event_id", ""), StringComparer.OrdinalIgnoreCase)).ToList();
+                if (evidence.Count == 0) continue;
+                string assertion = ReadString(row, "raw_claim", "");
+                string family = ReadString(WorldSimulationService.ClassifyWorldHistoryClaim(assertion), "claimFamily", "");
+                var proof = WorldSimulationService.AdjudicateWorldHistoryClaim(assertion, family, ReadString(row, "claimant_id", ""), evidence, 0, -1);
+                if (ReadString(proof, "verdict", "") != "contradicted") continue;
+                List<string> discovered = ReadStringList(proof, "evidenceEventIds");
+                string beliefId = ReadString(row, "belief_id", "");
+                string lieCheckId = ReadString(row, "lie_check_id", "");
+                DialogueStore.UpdateWorldHistoryClaimBeliefs(connection, new Dictionary<string, object> { ["day"] = worldDay, ["events"] = Json.Serialize(discovered), ["ts"] = ts, ["id"] = beliefId });
+                DialogueStore.UpdateBeliefs(connection, new Dictionary<string, object>
+                {
+                    ["lie"] = lieCheckId, ["payload"] = Json.Serialize(new Dictionary<string, object> { ["state"] = "disproven", ["beliefId"] = beliefId, ["discoveredEventIds"] = discovered })
+                });
+                string claimantId = ReadString(row, "claimant_id", "");
+                string summary = believerId + " later learned that a historical claim from " + claimantId + " conflicted with reliable evidence.";
+                DialogueService.InsertMemoryRow(connection, "memory_discovery_" + beliefId, lieCheckId, believerId, "discovered_falsehood", ts, worldDay, "", summary,
+                    new List<string> { claimantId, believerId }, new List<string> { believerId }, Json.Serialize(new List<string> { claimantId, believerId }),
+                    new List<string> { believerId }, new List<string>(), new List<string> { claimantId }, "private", 0.85d, 0.65d, 1d,
+                    new List<string> { "historical_claim", "disproven_belief", "later_discovery" }, "active", "world_history_lie_reconciliation",
+                    Json.Serialize(new Dictionary<string, object> { ["beliefId"] = beliefId, ["lieCheckId"] = lieCheckId, ["discoveredEventIds"] = discovered }), "", "not_indexed");
+                reconciled.Add(beliefId);
+            }
+            return reconciled;
+        }
+
+        private static Dictionary<string, object> BuildLieCheckResponse(Dictionary<string, object> row, Dictionary<string, object> verification, bool cached)
+        {
+            row = row ?? new Dictionary<string, object>();
+            Dictionary<string, object> packet = TryParseJsonObject(ReadString(row, "prompt_packet_json", "{}")) ?? new Dictionary<string, object>();
+            return new Dictionary<string, object>
+            {
+                ["ok"] = true, ["lieCheckId"] = ReadString(row, "lie_check_id", ""), ["claimCheckId"] = ReadString(row, "claim_check_id", ""),
+                ["campaignId"] = ReadString(row, "campaign_id", ""), ["timelineId"] = ReadString(row, "timeline_id", ""),
+                ["claimantId"] = ReadString(row, "claimant_id", ""), ["targetId"] = ReadString(row, "target_id", ""),
+                ["objectiveVerdict"] = ReadString(row, "objective_verdict", ""), ["knowledgeBasis"] = ReadString(row, "knowledge_basis", "none"),
+                ["formulaVersion"] = ReadString(row, "formula_version", LieFormulaVersion), ["successChance"] = ReadNullableDouble(row, "success_chance"),
+                ["roll"] = ReadNullableDouble(row, "roll_value"), ["outcome"] = ReadString(row, "outcome", "not_adjudicable"),
+                ["reactionStrategy"] = ReadString(row, "reaction_strategy", ""), ["exploitOpening"] = ReadInt(row, "exploit_opening", 0) != 0,
+                ["evidenceEventIds"] = DialogueService.TextListFromJson(ReadString(row, "evidence_event_ids_json", "[]")),
+                ["knownEventIds"] = DialogueService.TextListFromJson(ReadString(row, "known_event_ids_json", "[]")), ["promptPacket"] = packet,
+                ["verification"] = verification, ["cached"] = cached
+            };
+        }
+
+        private static object ReadNullableDouble(Dictionary<string, object> row, string key)
+        {
+            if (row == null || !row.ContainsKey(key) || row[key] == null || row[key] == DBNull.Value) return null;
+            return ReadDouble(row, key, 0d);
+        }
+
+        private static void CheckAcceptedGroupHistoricalObservation(string campaign, string timeline, Action<string, bool, string> add)
+        {
+            const string speaker = "d29_primary", listener = "d29_listener", mode = "party_chat";
+            const string publicClaim = "I was at a battle at Test Field.";
+            const string privateClaim = "I led the battle at Test Field.";
+            const string turn = "d29_group_beat";
+            string generation;
+            using (var setup = ReignDatabase.OpenCampaignConnection(campaign))
+                generation = ReadString(ReadMemoryPrecisionState(setup), "restore_generation", "");
+
+            Dictionary<string, object> Publish(string eventId, string original, double day = 102d)
+            {
+                var skills = TestDict("roguery", 100d, "charm", 100d);
+                var request = TestDict("campaignId", campaign, "timelineId", timeline, "mode", mode,
+                    "conversationSessionId", "d29_group", "sceneTurnId", eventId, "worldDay", day,
+                    "playerText", original, "playerHeroStringId", "main_hero",
+                    "groupHistoryContext", TestDict("claimantSkills", skills, "listeners", new[] {
+                        TestDict("heroStringId", listener, "kingdomId", "kingdom_a", "skills", skills,
+                            "sceneRisk", TestDict("powerDisadvantage", 2d))
+                    }),
+                    "participants", new[] { speaker, listener, "main_hero" }, "activeHeroIds", new[] { speaker, listener },
+                    "attendees", new List<Dictionary<string, object>> {
+                        TestDict("heroStringId", speaker, "name", "Ada"),
+                        TestDict("heroStringId", listener, "name", "Bert")
+                    });
+                ApplyPlayerInputAudienceToPayload(request, speaker, allowInterpretation: false);
+                string addressed = ReadString(request, "playerText", "");
+                string published = ReadString(request, "publicPlayerText", addressed);
+                var unit = new AcceptedConversationUnit
+                {
+                    Campaign = campaign, Payload = request, EventId = eventId, EventType = "party_chat_turn",
+                    Hero = speaker, Player = "main_hero", HeroName = "Ada", PlayerName = "Player", Location = "town",
+                    PlayerText = addressed, Reply = "", Timestamp = 1L, Generation = generation,
+                    GroupConversation = true, PrivateWhisper = ReadBool(request, "privatePlayerInputForSpeaker", false),
+                    CollectGroupHistoryObservation = true, CommitEffects = false, Parsed = TestDict("participation", "quiet")
+                };
+                return PublishAcceptedConversationUnit(unit, accept => StorePartyConversationExchange(campaign, request,
+                    speaker, "main_hero", "Player", "Ada", published, "", eventId, 1L, accept));
+            }
+
+            var exchange = Publish(turn, publicClaim + " *I speak quietly only for Ada.* " + privateClaim);
+            var receipt = ReadDictionary(exchange, "acceptedUnit");
+            var observation = ReadDictionary(receipt, "groupHistoryObservation");
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+            {
+                string Text(string kind)
+                {
+                    string id = ReadString(ReadDictionary(observation, kind), "turnId", "");
+                    return ReadString(DialogueStore.SelectConversationTurns6(connection, TestDict("id", id)).SingleOrDefault(), "text", "");
+                }
+                string publicText = Text("publicTurn");
+                add("group_quiet_address_projection", publicText.Contains(publicClaim, StringComparison.Ordinal)
+                    && !publicText.Contains(privateClaim, StringComparison.Ordinal)
+                    && Text("privateTurn").Contains(privateClaim, StringComparison.Ordinal),
+                    "The accepted public source excludes the quiet address, and the saved whisper contains it.");
+                DialogueStore.InsertConversationAcceptedUnits(connection, TestDict("unit", turn + "_stale", "hash", turn,
+                    "generation", "d29_old_generation", "receipt", Json.Serialize(receipt), "ts", 1L));
+            }
+            var laterNativeContext = TestDict("sameCurrentSettlement", true,
+                "claimantCurrentSettlementId", "other_town", "claimantCurrentSettlementName", "Other Town",
+                "targetCurrentSettlementId", "other_town");
+            Dictionary<string, object> Check(string target, string acceptedId, string requestedTimeline, string route) =>
+                WorldHistoryLieCheckApi(TestDict("campaignId", campaign, "timelineId", requestedTimeline ?? timeline, "worldDay", 700d,
+                    "claimantId", "main_hero", "targetId", target, "acceptedUnitId", acceptedId,
+                    "targetKingdomId", "kingdom_b", "mode", route, "claim", privateClaim, "nativeContext", laterNativeContext,
+                    "targetSkills", TestDict("roguery", 200d, "charm", 200d), "sceneRisk", TestDict("powerDisadvantage", 0d)));
+            string Observe(string target, string acceptedId, string requestedTimeline = null, string route = mode)
+            {
+                var result = Check(target, acceptedId, requestedTimeline, route);
+                string id = ReadString(result, "lieCheckId", "");
+                if (id.Length == 0) return ReadString(result, "reason", "");
+                using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                return ReadString(DialogueStore.SelectWorldHistoryLieChecks2(connection, TestDict("id", id)).Single(), "raw_claim", "");
+            }
+            const string denied = "accepted_group_source_required";
+            add("group_historical_listener_uses_accepted_public_words", ReadBool(exchange, "ok", false)
+                && Observe(listener, turn, route: mode + GroupHistoryListenerSuffix).TrimEnd('.') == publicClaim.TrimEnd('.'),
+                "An accepted listener's verdict uses saved public words and ignores the caller's private claim text.");
+            add("group_historical_listener_private_source", Observe(speaker, turn, route: mode + GroupHistoryListenerSuffix) == "multiple_claims_require_separate_evidence",
+                "Only the directly addressed speaker reaches the private source, and its mixed claims are not adjudicated as one.");
+            add("group_historical_listener_unknown_target", Observe("d29_absent", turn, route: mode + GroupHistoryListenerSuffix) == denied,
+                "An unlisted hero cannot adjudicate either accepted source.");
+            add("group_historical_listener_requires_current_scope",
+                Observe(listener, turn + "_stale", route: mode + GroupHistoryListenerSuffix) == denied
+                && Observe(listener, turn, timeline + "_different", mode + GroupHistoryListenerSuffix) == denied
+                && Observe(listener, "", route: mode + GroupHistoryListenerSuffix) == denied
+                && Observe(listener, turn) == denied, "Old generations, wrong timelines and unbound legacy group calls create no listener episode.");
+            var reported = Publish(turn + "_reported", "She said *I pause* I led a battle at Test Field.");
+            add("group_reported_speech_preserves_clause", ReadBool(reported, "ok", false)
+                && Observe(listener, turn + "_reported", route: mode + GroupHistoryListenerSuffix) == "no_asserted_claimant_deed",
+                "An inline aside does not convert a report of someone else's deed into the player's assertion.");
+            const string locationDenial = "I am not in Other Town.";
+            var moved = Publish(turn + "_moved", locationDenial);
+            bool nativeWouldAdjudicate = VerifyNativeCurrentLocationClaim(
+                TestDict("campaignId", campaign, "timelineId", timeline, "nativeContext", laterNativeContext),
+                locationDenial, "main_hero", listener) != null;
+            add("group_observation_ignores_later_location", ReadBool(moved, "ok", false) && nativeWouldAdjudicate
+                && Observe(listener, turn + "_moved", route: mode + GroupHistoryListenerSuffix) == "no_asserted_claimant_deed",
+                "A location captured after acceptance cannot adjudicate an earlier statement.");
+            var news = Publish(turn + "_news", "I rescued exactly two prisoners in my entire career.", 104d);
+            var newsResult = Check(listener, turn + "_news", timeline, mode + GroupHistoryListenerSuffix);
+            add("group_observation_respects_accepted_realm_and_skills", ReadBool(news, "ok", false)
+                && ReadString(newsResult, "knowledgeBasis", "") == "secondhand"
+                && ReadDouble(newsResult, "successChance", -1d) == 50d,
+                "The saved listener realm and equal skills govern the known contradiction, even after a differently scoped request.");
+        }
+
+        internal static List<Dictionary<string, object>> RunLieDetectionAssertions(string campaignId, string timelineId)
+        {
+            List<Dictionary<string, object>> assertions = new List<Dictionary<string, object>>();
+            Action<string, bool, string> add = (name, passed, detail) => assertions.Add(new Dictionary<string, object>
+            {
+                ["name"] = "lie_" + name, ["passed"] = passed, ["detail"] = detail
+            });
+            Dictionary<string, object> equalSkills = new Dictionary<string, object> { ["roguery"] = 100d, ["charm"] = 100d };
+            Dictionary<string, object> strongSkills = new Dictionary<string, object> { ["roguery"] = 200d, ["charm"] = 200d };
+            Dictionary<string, object> weakSkills = new Dictionary<string, object> { ["roguery"] = 0d, ["charm"] = 0d };
+
+            add("equal_chance", Math.Abs(HistoricalLieSuccessChance(100d, 100d) - 50d) < 0.001d, "Equal averages produce 50%.");
+            add("hundred_point_advantage", Math.Abs(HistoricalLieSuccessChance(200d, 100d) - 70d) < 0.001d, "A 100-point advantage produces 70%.");
+            add("upper_cap", Math.Abs(HistoricalLieSuccessChance(1000d, 0d) - 80d) < 0.001d, "Success is capped at 80%.");
+            add("lower_cap", Math.Abs(HistoricalLieSuccessChance(0d, 1000d) - 10d) < 0.001d, "Success has a 10% floor.");
+
+            CheckAcceptedGroupHistoricalObservation(campaignId, timelineId, add);
+
+            foreach (string ordinary in new[] { "I smiled and nodded.", "I settled the matter.", "I led a toast to our friendship.",
+                "If I led the battle, I would be proud.", "I will command the army tomorrow.", "She said, \"I led the battle at Test Field.\"",
+                "Lord A led the battle at Test Field.", "*I led the army in an imagined scene.*", "I paid attention to your answer.", "I met your expectations." })
+            {
+                var harmless = WorldHistoryLieCheckApi(new Dictionary<string, object> { ["campaignId"] = campaignId,
+                    ["timelineId"] = timelineId, ["claim"] = ordinary, ["claimantId"] = "main_hero", ["targetId"] = "lord_a", ["worldDay"] = 101d });
+                add("source_gate_" + PromptHash(ordinary).Substring(0, 8), ReadString(harmless, "outcome", "") == "not_adjudicable"
+                    && !ReadBool(harmless, "recorded", true), "Ordinary, hypothetical, quoted or other-actor wording creates no historical lie/belief: " + ordinary);
+            }
+            var splitSource = WorldSimulationService.ExtractAssertedWorldHistorySpans("*I smiled.* I led the battle at Test Field. I am proud of my friends.");
+            add("claim_span_excludes_surrounding_monologue", splitSource.Count == 1
+                && ReadString(splitSource[0], "quote", "") == "I led the battle at Test Field"
+                && ReadInt(splitSource[0], "start", 0) == 12, "Only the asserted actor/action/event span is eligible for lasting claim storage.");
+            add("substring_is_not_leadership", ReadString(WorldSimulationService.ClassifyWorldHistoryClaim("I smiled and settled beside her."), "claimFamily", "") != "leadership", "led inside other words is not a claim.");
+            add("toast_is_not_military_command", ReadString(WorldSimulationService.ClassifyWorldHistoryClaim("I led a toast."), "claimFamily", "") != "leadership", "Whole word led still requires a military object.");
+            add("entered_town_is_completed_travel", WorldSimulationService.ExtractAssertedWorldHistorySpans("I entered the town on day one.").Count == 1,
+                "An asserted completed arrival remains eligible for historical verification and retention checks.");
+
+            Dictionary<string, object> genericLookup = WorldHistoryLieCheckApi(new Dictionary<string, object>
+            {
+                ["campaignId"] = campaignId, ["timelineId"] = timelineId,
+                ["claim"] = "According to recorded history, what happened at Test Field and who was responsible?",
+                ["claimantId"] = "main_hero", ["targetId"] = "lord_a", ["targetKingdomId"] = "kingdom_a", ["worldDay"] = 104d
+            });
+            Dictionary<string, object> lookupPacket = ReadDictionary(genericLookup, "promptPacket") ?? new Dictionary<string, object>();
+            add("generic_question_compatibility", ReadString(genericLookup, "outcome", "") == "historical_lookup"
+                && string.IsNullOrWhiteSpace(ReadString(genericLookup, "lieCheckId", ""))
+                && ReadDictionaryList(lookupPacket, "knownEvents").Any(x => ReadString(x, "event_id", "") == "battle_test"),
+                "Question-shaped requests through the legacy lie-check endpoint return speaker-safe history without persisting a lie episode.");
+
+            Dictionary<string, object> firsthand = WorldHistoryLieCheckApi(new Dictionary<string, object>
+            {
+                ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["claim"] = "I rescued exactly two prisoners in my entire career.",
+                ["claimantId"] = "main_hero", ["targetId"] = "lord_a", ["targetKingdomId"] = "kingdom_a", ["worldDay"] = 101d
+            });
+            add("firsthand_auto_detection", ReadString(firsthand, "outcome", "") == "detected_firsthand" && ReadNullableDouble(firsthand, "successChance") == null,
+                "A witness to three distinct rescues can refute a career total of two without a roll.");
+
+            Dictionary<string, object> nativeLocation = WorldHistoryLieCheckApi(new Dictionary<string, object>
+            {
+                ["campaignId"] = campaignId, ["timelineId"] = timelineId,
+                ["claim"] = "I have never entered Danustica, and I am not presently in Danustica.",
+                ["claimantId"] = "main_hero", ["targetId"] = "native_witness", ["worldDay"] = 101d,
+                ["nativeContext"] = new Dictionary<string, object>
+                {
+                    ["claimantCurrentSettlementId"] = "town_ES1", ["claimantCurrentSettlementName"] = "Danustica",
+                    ["targetCurrentSettlementId"] = "town_ES1", ["targetCurrentSettlementName"] = "Danustica",
+                    ["sameCurrentSettlement"] = true
+                }
+            });
+            Dictionary<string, object> nativePacket = ReadDictionary(nativeLocation, "promptPacket") ?? new Dictionary<string, object>();
+            add("native_current_location_firsthand_detection",
+                ReadString(nativeLocation, "objectiveVerdict", "") == "contradicted"
+                && ReadString(nativeLocation, "knowledgeBasis", "") == "firsthand"
+                && ReadString(nativeLocation, "outcome", "") == "detected_firsthand"
+                && ReadString(nativePacket, "factualExplanation", "").Contains("presently together in Danustica"),
+                "A target who is physically co-present receives a first-hand verified contradiction for a current-settlement denial, without relying on delayed realm news.");
+
+            Dictionary<string, object> alternateNativeLocation = WorldHistoryLieCheckApi(new Dictionary<string, object>
+            {
+                ["campaignId"] = campaignId, ["timelineId"] = timelineId,
+                ["claim"] = "We are in Lycaron, not Danustica. I inspected the marker myself; accept my report and stop questioning me.",
+                ["claimantId"] = "main_hero", ["targetId"] = "alternate_native_witness", ["worldDay"] = 101d,
+                ["nativeContext"] = new Dictionary<string, object>
+                {
+                    ["claimantCurrentSettlementId"] = "town_ES1", ["claimantCurrentSettlementName"] = "Danustica",
+                    ["targetCurrentSettlementId"] = "town_ES1", ["targetCurrentSettlementName"] = "Danustica",
+                    ["sameCurrentSettlement"] = true
+                }
+            });
+            Dictionary<string, object> alternateNativePacket = ReadDictionary(alternateNativeLocation, "promptPacket") ?? new Dictionary<string, object>();
+            add("alternate_native_location_with_deceptive_pressure",
+                ReadString(alternateNativeLocation, "objectiveVerdict", "") == "contradicted"
+                && ReadString(alternateNativeLocation, "outcome", "") == "detected_firsthand"
+                && ReadBool(alternateNativePacket, "deceptiveIntent", false),
+                "A coercively asserted alternate location is caught from co-present native evidence and carries explicit deceptive-intent evidence.");
+
+            Dictionary<string, object> admittedLie = WorldHistoryLieCheckApi(new Dictionary<string, object>
+            {
+                ["campaignId"] = campaignId, ["timelineId"] = timelineId,
+                ["claim"] = "I personally captured Danustica for the Western Empire yesterday. I know that account is false; I am deliberately lying to test whether you accept it.",
+                ["claimantId"] = "main_hero", ["targetId"] = "admission_witness", ["worldDay"] = 101d
+            });
+            Dictionary<string, object> admittedPacket = ReadDictionary(admittedLie, "promptPacket") ?? new Dictionary<string, object>();
+            add("direct_falsehood_admission_firsthand_detection",
+                ReadString(admittedLie, "objectiveVerdict", "") == "contradicted"
+                && ReadString(admittedLie, "knowledgeBasis", "") == "firsthand"
+                && ReadString(admittedLie, "outcome", "") == "detected_firsthand"
+                && ReadBool(admittedPacket, "deceptiveIntent", false)
+                && ReadBool(admittedPacket, "directAdmission", false),
+                "A speaker who directly hears the claimant admit that the account is false and deliberately deceptive receives an evidence-backed caught-lie result without relying on delayed history indexing.");
+
+            Dictionary<string, object> admittedDeceptionAttempt = WorldHistoryLieCheckApi(new Dictionary<string, object>
+            {
+                ["campaignId"] = campaignId, ["timelineId"] = timelineId,
+                ["claim"] = "I am deliberately trying to deceive you: Oros is inside Danustica with four hundred troops.",
+                ["claimantId"] = "main_hero", ["targetId"] = "deception_attempt_witness", ["worldDay"] = 101d
+            });
+            add("direct_deception_attempt_firsthand_detection",
+                ReadString(admittedDeceptionAttempt, "objectiveVerdict", "") == "contradicted"
+                && ReadString(admittedDeceptionAttempt, "knowledgeBasis", "") == "firsthand"
+                && ReadString(admittedDeceptionAttempt, "outcome", "") == "detected_firsthand",
+                "Natural wording that explicitly admits an attempt to deceive routes to the same evidence-backed caught-lie result.");
+
+            Dictionary<string, object> beforeNewsPayload = new Dictionary<string, object>
+            {
+                ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["claim"] = "I rescued exactly two prisoners in my entire career.",
+                ["claimantId"] = "main_hero", ["targetId"] = "observer_a", ["targetKingdomId"] = "kingdom_a", ["worldDay"] = 101d,
+                ["claimantSkills"] = equalSkills, ["targetSkills"] = equalSkills
+            };
+            Dictionary<string, object> beforeNews = WorldHistoryLieCheckApi(beforeNewsPayload);
+            add("news_not_early", ReadString(beforeNews, "outcome", "") == "not_detected_no_knowledge", "Ordinary realm news is unavailable before day three.");
+            Dictionary<string, object> safePacket = ReadDictionary(beforeNews, "promptPacket") ?? new Dictionary<string, object>();
+            add("failed_detection_prompt_safety", !safePacket.ContainsKey("objectiveVerdict") && !safePacket.ContainsKey("evidenceEventIds")
+                && ReadString(safePacket, "speakerVerdict", "") == "unknown", "A target-safe failed-detection packet omits objective truth and hidden evidence.");
+
+            Dictionary<string, object> afterNewsPayload = new Dictionary<string, object>(beforeNewsPayload, StringComparer.OrdinalIgnoreCase) { ["worldDay"] = 104d };
+            Dictionary<string, object> afterNews = WorldHistoryLieCheckApi(afterNewsPayload);
+            add("secondhand_contest", ReadString(afterNews, "knowledgeBasis", "") == "secondhand"
+                && Math.Abs(Convert.ToDouble(afterNews["successChance"], CultureInfo.InvariantCulture) - 50d) < 0.001d, "Eligible regional news triggers the opposed contest.");
+            Dictionary<string, object> repeated = WorldHistoryLieCheckApi(afterNewsPayload);
+            add("stable_episode", ReadString(afterNews, "lieCheckId", "") == ReadString(repeated, "lieCheckId", "") && ReadBool(repeated, "cached", false),
+                "The same claim episode reuses its persisted result.");
+
+            Dictionary<string, object> outsider = WorldHistoryLieCheckApi(new Dictionary<string, object>
+            {
+                ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["claim"] = "I rescued exactly two prisoners in my entire career.",
+                ["claimantId"] = "main_hero", ["targetId"] = "observer_b", ["targetKingdomId"] = "kingdom_b", ["worldDay"] = 104d,
+                ["claimantSkills"] = strongSkills, ["targetSkills"] = weakSkills
+            });
+            add("regional_boundary", ReadString(outsider, "outcome", "") == "not_detected_no_knowledge", "An uninvolved kingdom does not receive ordinary realm news.");
+
+            Dictionary<string, object> missingSkills = WorldHistoryLieCheckApi(new Dictionary<string, object>
+            {
+                ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["claim"] = "I rescued exactly two prisoners in my entire career.",
+                ["claimantId"] = "main_hero", ["targetId"] = "observer_missing_skills", ["targetKingdomId"] = "kingdom_a", ["worldDay"] = 104d
+            });
+            add("missing_skills_safe", ReadString(missingSkills, "outcome", "") == "insufficient_skill_data", "Missing native skills cannot produce an accusation.");
+
+            Dictionary<string, object> truthful = WorldHistoryLieCheckApi(new Dictionary<string, object>
+            {
+                ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["claim"] = "I was at a battle at Test Field.",
+                ["claimantId"] = "main_hero", ["targetId"] = "lord_a", ["targetKingdomId"] = "kingdom_a", ["worldDay"] = 101d,
+                ["claimantSkills"] = weakSkills, ["targetSkills"] = strongSkills
+            });
+            add("truth_never_rolls", ReadString(truthful, "outcome", "") == "truthful" && ReadNullableDouble(truthful, "roll") == null, "Verified truth never enters the deception contest.");
+
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+            {
+                EnsureWorldHistoryLieDetectionSchema(connection);
+                var belief = DialogueStore.SelectWorldHistoryClaimBeliefForLieCheck(connection, TestDict("id", ReadString(beforeNews, "lieCheckId", ""))).SingleOrDefault();
+                var reconciledIds = ReadStringList(ReadDictionary(afterNews, "verification"), "reconciledBeliefIds");
+                add("later_reconciliation", belief != null && ReadString(belief, "state", "") == "disproven" && ReadDouble(belief, "disproven_day", -1d) == 104d
+                    && reconciledIds.Contains(ReadString(belief, "belief_id", ""))
+                    && TextListFromJson(ReadString(belief, "discovered_event_ids_json", "[]")).Contains("rescue_test"),
+                    "Day-104 regional news reconciles the day-101 lie-check episode with the recorded rescue as counterproof.");
+
+                string characterDir = Path.GetDirectoryName(CampaignFileService.CharacterFile(campaignId, "reaction_feign", "traits.json"));
+                Directory.CreateDirectory(characterDir);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, "reaction_feign", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>
+                {
+                    ["tact"] = 2, ["pragmatism"] = 2, ["patience"] = 1, ["ambition"] = 2, ["powerMotivation"] = 2, ["vengefulness"] = 1
+                }});
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, "reaction_confront", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>
+                {
+                    ["honesty"] = 2, ["assertiveness"] = 2, ["pride"] = 2, ["fearfulness"] = -1
+                }});
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, "reaction_probe", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>
+                {
+                    ["curiosity"] = 2, ["tact"] = 1, ["patience"] = 1
+                }});
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, "reaction_quiet", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>() });
+                Dictionary<string, object> safeRisk = new Dictionary<string, object> { ["sceneRisk"] = new Dictionary<string, object> { ["powerDisadvantage"] = 0d } };
+                Dictionary<string, object> unsafeRisk = new Dictionary<string, object> { ["sceneRisk"] = new Dictionary<string, object> { ["powerDisadvantage"] = 2d } };
+                Dictionary<string, object> feign = SelectLieReaction(connection, campaignId, "main_hero", "reaction_feign", unsafeRisk);
+                Dictionary<string, object> confront = SelectLieReaction(connection, campaignId, "main_hero", "reaction_confront", safeRisk);
+                Dictionary<string, object> probe = SelectLieReaction(connection, campaignId, "main_hero", "reaction_probe", safeRisk);
+                Dictionary<string, object> quiet = SelectLieReaction(connection, campaignId, "main_hero", "reaction_quiet", safeRisk);
+                add("reaction_feign", ReadString(feign, "strategy", "") == "feign_belief" && ReadBool(feign, "exploitOpening", false), "Unsafe pragmatic characters can feign belief for leverage.");
+                add("reaction_confront", ReadString(confront, "strategy", "") == "confront", "Safe assertive honest characters confront.");
+                add("reaction_probe", ReadString(probe, "strategy", "") == "probe", "Curious tactful characters probe.");
+                add("reaction_quiet", ReadString(quiet, "strategy", "") == "quietly_record", "Guarded neutral characters quietly remember.");
+            }
+            AddPrisonerClaimAssertions(campaignId, timelineId, add);
+            return assertions;
+        }
+
+        private static void AddPrisonerClaimAssertions(string campaignId, string timelineId, Action<string, bool, string> add)
+        {
+            void Check(string id, string claim, int day, string listener, string objective, string outcome, string prompt,
+                string kingdom = "", string expectedBasis = "", string assessedClaim = "")
+            {
+                var response = WorldHistoryLieCheckApi(TestDict("campaignId", campaignId, "timelineId", timelineId, "worldDay", day,
+                    "claimantId", "main_hero", "targetId", listener, "targetKingdomId", kingdom, "claim", claim));
+                var packet = ReadDictionary(response, "promptPacket");
+                string actual = ReadString(response, "objectiveVerdict", "") + "/" + ReadString(response, "outcome", "") + "/" + ReadString(packet, "speakerVerdict", "");
+                string rendered = BuildContextPullText(claim, "", null, null, null, null, null, null,
+                    new List<Dictionary<string, object>> { TestDict("id", "verify_world_history", "ok", true, "data", packet) }, false);
+                string expectedVerdict = Json.Serialize(TestDict("speakerVerdict", prompt)).Trim('{', '}');
+                add(id, actual == objective + "/" + outcome + "/" + prompt
+                    && rendered.Contains(expectedVerdict) && !rendered.Contains("objectiveVerdict")
+                    && (expectedBasis.Length == 0 || ReadString(packet, "knowledgeBasis", "") == expectedBasis)
+                    && (assessedClaim.Length == 0 || ReadString(packet, "assessedClaim", "") == assessedClaim && rendered.Contains(assessedClaim))
+                    && (outcome != "not_adjudicable" || ReadNullableDouble(response, "roll") == null)
+                    && (id != "five_claim_three_recorded" || ReadStringList(packet, "supportedComponents").Contains("direct rescue")
+                        && ReadInt(ReadDictionary(packet, "prisonerCountEvidence"), "observedMinimum", -1) == 3
+                        && ReadString(ReadDictionary(packet, "prisonerCountEvidence"), "quantifier", "") == "unspecified"
+                        && ReadStringList(packet, "unverifiedComponents").Contains("prisoner count")), claim + " => " + actual);
+            }
+            const string partial = "partially_verified", unknown = "unknown", uncertain = "not_adjudicable";
+            Check("five_claim_three_recorded", "I rescued five prisoners.", 101, "lord_a", partial, uncertain, unknown);
+            Check("three_known_minimum", "I rescued at least 3 prisoners in one battle at Sargot on day 101.", 101, "lord_a", "verified", "truthful", "verified");
+            Check("verified_scope_in_prompt", "I rescued at least three prisoners, but she rescued five prisoners.", 101, "lord_a",
+                "verified", "truthful", "verified", assessedClaim: "I rescued at least three prisoners");
+            Check("incomplete_census", "I rescued exactly three prisoners in one battle.", 101, "lord_a", partial, uncertain, unknown);
+            Check("unresolved_identity", "I rescued Rhagaea and her son.", 101, "lord_a", partial, uncertain, unknown);
+            Check("rank_unproved", "I rescued several captured lords.", 101, "lord_a", partial, uncertain, unknown);
+            Check("other_place", "I rescued at least 3 prisoners at Lageta.", 101, "lord_a", partial, uncertain, unknown);
+            Check("leading_date", "Yesterday, I rescued several prisoners.", 101, "lord_a", partial, uncertain, unknown);
+            Check("third_party_rescue", "She said, \"I rescued five prisoners.\"", 101, "lord_a", "", uncertain, unknown);
+            Check("quoted_rescue_after_period", "She said, “I remember. I rescued at least three prisoners.”", 101, "lord_a", "", uncertain, unknown);
+            Check("quoted_admission", "She said, “I rescued five prisoners. I deliberately lied.”", 101, "lord_a", "", uncertain, unknown);
+            Check("reported_rescue_denied", "He said I rescued five prisoners. That account is false.", 101, "lord_a", "", uncertain, unknown);
+            Check("reported_rescue_and_admission", "He said I rescued five prisoners and that I deliberately lied.", 101, "lord_a", "", uncertain, unknown);
+            Check("reported_admission_other_rescuer", "He said I deliberately lied about the five prisoners she rescued.", 101, "lord_a", "", uncertain, unknown);
+            Check("relayed_admission_other_rescuer", "I heard him say I deliberately lied about the five prisoners she rescued.", 101, "lord_a", "", uncertain, unknown);
+            Check("postfixed_admission_other_rescuer", "I deliberately lied about the five prisoners she rescued, or so he said.", 101, "lord_a", "", uncertain, unknown);
+            Check("admission_by_another_speaker", "This is an admitted deception by her about the prisoners she rescued.", 101, "lord_a", "", uncertain, unknown);
+            Check("relayed_colon_announcement", "I am deliberately trying to deceive you: his words, not mine, about the five prisoners she rescued.", 101, "lord_a", "", uncertain, unknown);
+            Check("direct_colon_announcement", "I am deliberately trying to deceive you: Oros is inside Danustica with four hundred troops.", 101, "lord_a",
+                "contradicted", "detected_firsthand", "contradicted", expectedBasis: "firsthand");
+            Check("direct_admission_other_rescuer", "I deliberately lied about the five prisoners she rescued.", 101, "lord_a",
+                "contradicted", "detected_firsthand", "contradicted", expectedBasis: "firsthand");
+            Check("direct_admit_that_i_lied", "I admit that I lied about the prisoners she rescued.", 101, "lord_a",
+                "contradicted", "detected_firsthand", "contradicted", expectedBasis: "firsthand");
+            Check("direct_retraction_after_semicolon", "I rescued five prisoners; what I just said is false.", 101, "lord_a",
+                "contradicted", "detected_firsthand", "contradicted", expectedBasis: "firsthand");
+            Check("questioned_retraction_bang_first", "I rescued five prisoners. What I just said is false!?", 101, "lord_a", partial, uncertain, unknown);
+            Check("questioned_retraction_question_first", "I rescued five prisoners. What I just said is false?!", 101, "lord_a", partial, uncertain, unknown);
+            Check("reported_retraction_tail", "I rescued five prisoners; what I just said is false; but he said that, not me!", 101, "lord_a", "", uncertain, unknown);
+            Check("disowned_admission_sentence", "I deliberately lied about the prisoners she rescued. Those were his words, not mine.", 101, "lord_a", "", uncertain, unknown);
+            Check("emphatic_question_career_cap", "I rescued exactly two prisoners in my entire career?!", 101, "lord_a", "", uncertain, unknown);
+            Check("postfixed_reported_career_cap", "I rescued exactly two prisoners in my entire career; or so he said!", 101, "lord_a", "", uncertain, unknown);
+            Check("conjoined_reported_career_cap", "I rescued exactly two prisoners in my entire career, but he said that, not me!", 101, "lord_a", "", uncertain, unknown);
+            Check("emphatic_statement_career_cap", "I rescued exactly two prisoners in my entire career!", 101, "lord_a",
+                "contradicted", "detected_firsthand", "contradicted", expectedBasis: "firsthand");
+            Check("unrelated_admission", "I rescued five prisoners. I deliberately lied about the horses.", 101, "lord_a", partial, uncertain, unknown);
+            Check("relative_clause_rescuer", "I killed the man who rescued my son.", 101, "lord_a", "insufficient_evidence", uncertain, unknown);
+            Check("other_battle", "I led the battle at Different Field.", 101, "lord_a", partial, uncertain, unknown);
+            Check("unbound_specific_battle", "I won the battle at Test Field.", 101, "lord_a", partial, uncertain, unknown);
+            Check("roster_only_fighter", "I fought at the battle at Test Field.", 101, "lord_a", partial, uncertain, unknown);
+
+            Dictionary<string, object> Battle(int day, string claimantRole, params string[] prisoners)
+            {
+                var entities = new List<Dictionary<string, object>> {
+                    TestDict("entityType", "hero", "entityId", "main_hero", "role", claimantRole),
+                    TestDict("entityType", "hero", "entityId", "lord_a", "role", "participant")
+                };
+                entities.AddRange(prisoners.Select(id => TestDict("entityType", "hero", "entityId", id, "role", "rescued_prisoner beneficiary")));
+                return TestDict("eventId", "rescue_scope_" + day, "sequence", day, "worldDay", day, "eventType", "battle_completed",
+                    "phase", "completed", "source", "bannerlord_native", "isComplete", true, "entities", entities);
+            }
+            WorldSimulationService.WorldHistoryIngestBatchApi(TestDict("campaignId", campaignId, "timelineId", timelineId, "events", new[] {
+                Battle(102, "assisting_rescuer rescuing_side_participant", "other_a", "other_b"),
+                Battle(103, "direct_rescuer", "lord_3", "lord_4", "lord_5"),
+                Battle(104, "direct_rescuer", "lord_6"),
+                Battle(105, "direct_rescuer", "lord_1", "lord_2", "lord_3", "lord_4", "lord_5"),
+                TestDict("eventId", "release_choice", "sequence", 106, "worldDay", 106, "eventType", "hero_prisoner_released", "phase", "completed",
+                    "source", "bannerlord_native", "payload", TestDict("endCaptivityDetail", "ReleasedByChoice"), "entities", new[] {
+                        TestDict("entityType", "hero", "entityId", "main_hero", "role", "releaser former_captor"),
+                        TestDict("entityType", "hero", "entityId", "lord_a", "role", "released_prisoner beneficiary")
+                    }),
+                TestDict("eventId", "marriage_scope", "sequence", 107, "worldDay", 107, "eventType", "heroes_married", "phase", "completed",
+                    "source", "bannerlord_native", "entities", new[] {
+                        TestDict("entityType", "hero", "entityId", "main_hero", "role", "spouse participant"),
+                        TestDict("entityType", "hero", "entityId", "lord_a", "role", "spouse participant")
+                    })
+            }));
+            const string minimumFive = "I rescued at least five prisoners in my career.";
+            const string exactFive = "I rescued exactly five prisoners in my entire career.";
+            Check("assistance_excluded", minimumFive, 102, "lord_a", partial, uncertain, unknown);
+            Check("distinct_career_minimum", minimumFive, 103, "lord_a", "verified", "truthful", "verified");
+            Check("career_minimum_partial_observer", minimumFive, 103, "lord_1", "verified", uncertain, unknown);
+            Check("career_minimum_unknown_observer", minimumFive, 103, "stranger", "verified", uncertain, unknown);
+            Check("single_battle_no_pool", "I rescued at least five prisoners in one battle.", 103, "lord_a", partial, uncertain, unknown);
+            Check("career_exact_five_observed", exactFive, 103, "lord_a", partial, uncertain, unknown);
+            Check("career_exact_six_observed", exactFive, 104, "lord_a", "contradicted", "detected_firsthand", "contradicted");
+            Check("career_plain_five_six_observed", "I rescued five prisoners in my career.", 104, "lord_a", partial, uncertain, unknown);
+            Check("career_plain_numeral_six_observed", "I have rescued 5 prisoners in my career.", 104, "lord_a", partial, uncertain, unknown);
+            Check("career_claim_partial_witness", exactFive, 104, "lord_1", "contradicted", uncertain, unknown);
+            Check("career_verified_mixed_witness", minimumFive, 104, "lord_4", "verified", "truthful", "verified", "kingdom_a", "secondhand");
+            Check("career_contradicted_mixed_witness", "I rescued exactly three prisoners in my career.", 104, "lord_6",
+                "contradicted", "insufficient_skill_data", unknown, "kingdom_a", "secondhand");
+            Check("unbound_exact_six_observed", "I rescued exactly five prisoners in one battle.", 104, "lord_a", partial, uncertain, unknown);
+            Check("single_battle_five_observed", "I rescued at least five prisoners in one battle.", 105, "lord_a", "verified", "truthful", "verified");
+            Check("single_battle_six_unproved", "I rescued at least six prisoners in one battle.", 105, "lord_a", partial, uncertain, unknown);
+            Check("release_facilitator_unknown", "I released a prisoner.", 106, "lord_a", partial, uncertain, unknown);
+            Check("spouse_role_does_not_identify_partner", "I married Rhagaea last winter.", 107, "lord_a", partial, uncertain, unknown);
+            add("past_location_unproved", !ContradictsNativeCurrentSettlement("I never entered Danustica before yesterday.", "Danustica")
+                && !ContradictsNativeCurrentSettlement("I was not in Danustica last winter.", "Danustica")
+                && !ContradictsNativeCurrentSettlement("I am in Danustica, not injured.", "Danustica")
+                && !ContradictsNativeCurrentSettlement("She said, 'Ask around. I am not in Danustica.'", "Danustica"),
+                "Present co-location establishes only a present contradiction.");
+        }
+    }
+}

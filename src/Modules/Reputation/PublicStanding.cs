@@ -4,30 +4,26 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class ReputationService
     {
         private const int PostgreSqlPublicStandingSchemaRevision = 2;
 
-        private static void EnsurePublicStandingSchema(ReignDbConnection connection)
+        internal static void EnsurePublicStandingSchema(ReignDbConnection connection)
         {
             const string marker =
                 "postgresql_public_standing_schema_revision";
-            if (IsPostgreSqlComponentSchemaReady(connection, marker,
+            if (ReignDatabase.IsPostgreSqlComponentSchemaReady(connection, marker,
                 PostgreSqlPublicStandingSchemaRevision))
                 return;
             EnsurePublicStandingSchemaCore(connection);
             if (ReignPostgreSqlDialect.IsPostgreSql(connection))
             {
-                ExecuteSql(connection, @"
-INSERT INTO schema_meta(key,value)
-VALUES('postgresql_public_standing_schema_revision',$revision)
-ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
-                    new Dictionary<string, object>
+                ReputationStore.UpsertSchemaMeta5(connection, new Dictionary<string, object>
                     {
                         ["revision"] =
                             PostgreSqlPublicStandingSchemaRevision.ToString()
                     });
-                MarkPostgreSqlComponentSchemaReady(connection, marker,
+                ReignDatabase.MarkPostgreSqlComponentSchemaReady(connection, marker,
                     PostgreSqlPublicStandingSchemaRevision);
             }
         }
@@ -35,33 +31,20 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
         private static void EnsurePublicStandingSchemaCore(
             ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS character_public_standing (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,subject_id TEXT NOT NULL,
-standing_value INTEGER NOT NULL DEFAULT 0,sources_json TEXT NOT NULL DEFAULT '[]',
-revision INTEGER NOT NULL DEFAULT 1,last_changed_day REAL NOT NULL DEFAULT 0,
-updated_ts INTEGER NOT NULL,
-PRIMARY KEY(campaign_id,timeline_id,subject_id));");
-            ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_character_public_standing_subject
-ON character_public_standing(campaign_id,timeline_id,subject_id);");
-            EnsureDatabaseColumn(connection, "character_public_standing", "calculation_status",
-                "TEXT NOT NULL DEFAULT 'ready'");
-            EnsureDatabaseColumn(connection, "character_public_standing", "last_error",
-                "TEXT NOT NULL DEFAULT ''");
-            EnsureDatabaseColumn(connection, "character_public_standing",
-                "calculated_revision", "INTEGER NOT NULL DEFAULT 1");
+            ReputationSchema.CreateCharacterPublicStanding(connection);
+            ReputationSchema.CreateIndexCharacterPublicStandingSubject(connection);
+            ReputationSchema.EnsureColumnCharacterPublicStandingCalculationStatus(connection);
+            ReputationSchema.EnsureColumnCharacterPublicStandingLastError(connection);
+            ReputationSchema.EnsureColumnCharacterPublicStandingCalculatedRevision(connection);
         }
 
-        private static int EnsurePublicStandingForRoster(ReignDbConnection connection,
+        internal static int EnsurePublicStandingForRoster(ReignDbConnection connection,
             string campaignId, string timelineId, double worldDay,
             bool recomputeTaggedSubjects = true)
         {
             EnsurePublicStandingSchema(connection);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ExecuteSql(connection, @"INSERT OR IGNORE INTO character_public_standing(
-campaign_id,timeline_id,subject_id,standing_value,sources_json,revision,last_changed_day,updated_ts)
-SELECT $campaign,$timeline,hero_id,0,'[]',1,$day,$ts
-FROM identity_roster WHERE hero_id<>'';",
-                new Dictionary<string, object>
+            ReputationStore.InsertOrIgnoreCharacterPublicStanding(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId,
                     ["timeline"] = timelineId,
@@ -71,16 +54,7 @@ FROM identity_roster WHERE hero_id<>'';",
 
             if (recomputeTaggedSubjects)
             {
-                List<string> taggedSubjects = QuerySql(connection, @"
-SELECT DISTINCT rst.subject_id
-FROM rumor_subject_tags rst
-JOIN rumor_occurrences ro ON ro.occurrence_id=rst.occurrence_id
-WHERE ro.campaign_id=$campaign AND ro.timeline_id=$timeline
-UNION
-SELECT DISTINCT subject_id
-FROM character_reputations
-WHERE campaign_id=$campaign AND timeline_id=$timeline; ",
-                new Dictionary<string, object>
+                List<string> taggedSubjects = ReputationStore.SelectRumorSubjectTags2(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId,
                     ["timeline"] = timelineId
@@ -92,17 +66,14 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline; ",
                 RecomputePublicStandingForSubjects(connection, campaignId, timelineId,
                     taggedSubjects, worldDay);
             }
-            return ReadInt(QuerySql(connection, @"
-SELECT COUNT(*) AS count FROM character_public_standing
-WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                new Dictionary<string, object>
+            return ReadInt(ReputationStore.CountCharacterPublicStanding(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId,
                     ["timeline"] = timelineId
                 }).FirstOrDefault(), "count", 0);
         }
 
-        private static void RecomputePublicStandingForSubjects(ReignDbConnection connection,
+        internal static void RecomputePublicStandingForSubjects(ReignDbConnection connection,
             string campaignId, string timelineId, IEnumerable<string> subjectIds, double worldDay)
         {
             EnsurePublicStandingSchema(connection);
@@ -115,18 +86,12 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
             }
         }
 
-        private static Dictionary<string, object> ReadPublicStandingTrait(
+        internal static Dictionary<string, object> ReadPublicStandingTrait(
             ReignDbConnection connection, string campaignId, string timelineId,
             string subjectId, double worldDay)
         {
             EnsurePublicStandingSchema(connection);
-            Dictionary<string, object> row = QuerySql(connection, @"
-SELECT subject_id,standing_value,sources_json,revision,calculated_revision,last_changed_day,
-calculation_status,last_error
-FROM character_public_standing
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject
-LIMIT 1;",
-                new Dictionary<string, object>
+            Dictionary<string, object> row = ReputationStore.SelectCharacterPublicStanding(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId,
                     ["timeline"] = timelineId,
@@ -160,7 +125,7 @@ LIMIT 1;",
             };
         }
 
-        private static List<Dictionary<string, object>> ParsePublicStandingSources(
+        internal static List<Dictionary<string, object>> ParsePublicStandingSources(
             string json)
         {
             try
@@ -181,32 +146,12 @@ LIMIT 1;",
             if (string.IsNullOrWhiteSpace(subjectId))
                 return;
 
-            Dictionary<string, object> roster = QuerySql(connection, @"
-SELECT current_charm FROM identity_roster WHERE hero_id=$subject LIMIT 1;",
-                new Dictionary<string, object> { ["subject"] = subjectId }).FirstOrDefault();
+            Dictionary<string, object> roster = ReputationStore.SelectIdentityRoster4(connection, new Dictionary<string, object> { ["subject"] = subjectId }).FirstOrDefault();
             int charm = ReadInt(roster, "current_charm", 0);
             double mitigation = SocialCharmMitigation(charm);
             List<Dictionary<string, object>> sources = new List<Dictionary<string, object>>();
 
-            foreach (Dictionary<string, object> rumor in QuerySql(connection, @"
-SELECT rst.tag_id,rst.description,rst.rumor_value,rst.snapshot_json,
-ro.occurrence_id,ro.archetype_id,ro.world_day,ro.expires_day,
-ro.catalog_revision,ro.provenance_summary
-FROM rumor_subject_tags rst
-JOIN rumor_occurrences ro ON ro.occurrence_id=rst.occurrence_id
-WHERE ro.campaign_id=$campaign AND ro.timeline_id=$timeline
-AND rst.subject_id=$subject AND rst.status='active'
-AND ro.status='active' AND ro.expires_day>$day
-AND ro.world_day=(
-    SELECT MAX(ro2.world_day)
-    FROM rumor_subject_tags rst2
-    JOIN rumor_occurrences ro2 ON ro2.occurrence_id=rst2.occurrence_id
-    WHERE rst2.subject_id=rst.subject_id AND rst2.tag_id=rst.tag_id
-    AND rst2.status='active' AND ro2.campaign_id=ro.campaign_id
-    AND ro2.timeline_id=ro.timeline_id AND ro2.status='active'
-    AND ro2.expires_day>$day)
-ORDER BY rst.tag_id,ro.world_day,ro.occurrence_id;",
-                new Dictionary<string, object>
+            foreach (Dictionary<string, object> rumor in ReputationStore.SelectRumorSubjectTags3(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId,
                     ["timeline"] = timelineId,
@@ -236,14 +181,7 @@ ORDER BY rst.tag_id,ro.world_day,ro.occurrence_id;",
                 sources.Add(source);
             }
 
-            foreach (Dictionary<string, object> reputation in QuerySql(connection, @"
-SELECT tag_id,description,reputation_value,snapshot_json,source_occurrence_id,
-archetype_id,acquired_day,catalog_revision
-FROM character_reputations
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND subject_id=$subject AND status='active'
-ORDER BY tag_id,acquired_day,source_occurrence_id;",
-                new Dictionary<string, object>
+            foreach (Dictionary<string, object> reputation in ReputationStore.SelectCharacterReputations9(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId,
                     ["timeline"] = timelineId,
@@ -281,14 +219,9 @@ ORDER BY tag_id,acquired_day,source_occurrence_id;",
                 .ThenBy(source => ReadString(source, "sourceId", ""))
                 .ToList();
             string sourcesJson = Json.Serialize(sources);
-            int standingValue = RoundAwayFromZero(sources.Sum(source =>
+            int standingValue = RelationshipsService.RoundAwayFromZero(sources.Sum(source =>
                 ReadDouble(source, "effectiveContribution", 0d)));
-            Dictionary<string, object> existing = QuerySql(connection, @"
-SELECT standing_value,sources_json,revision,last_changed_day
-FROM character_public_standing
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject
-LIMIT 1;",
-                new Dictionary<string, object>
+            Dictionary<string, object> existing = ReputationStore.SelectCharacterPublicStanding2(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId,
                     ["timeline"] = timelineId,
@@ -305,14 +238,7 @@ LIMIT 1;",
 
             int revision = existing == null ? 1 : ReadInt(existing, "revision", 1) + 1;
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ExecuteSql(connection, @"INSERT INTO character_public_standing(
-campaign_id,timeline_id,subject_id,standing_value,sources_json,revision,calculated_revision,last_changed_day,updated_ts)
-VALUES($campaign,$timeline,$subject,$value,$sources,$revision,$revision,$day,$ts)
-ON CONFLICT(campaign_id,timeline_id,subject_id) DO UPDATE SET
-standing_value=$value,sources_json=$sources,revision=$revision,
-calculated_revision=$revision,
-last_changed_day=$day,updated_ts=$ts;",
-                new Dictionary<string, object>
+            ReputationStore.UpsertCharacterPublicStanding(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId,
                     ["timeline"] = timelineId,
@@ -324,7 +250,7 @@ last_changed_day=$day,updated_ts=$ts;",
                     ["ts"] = ts
                 });
             if (valueChanged)
-                QueuePublicStandingInvalidation(connection, campaignId, timelineId,
+                RelationshipsService.QueuePublicStandingInvalidation(connection, campaignId, timelineId,
                     subjectId, revision, worldDay);
         }
 
@@ -387,7 +313,7 @@ last_changed_day=$day,updated_ts=$ts;",
             representative["effectiveContribution"] = raw * (1d - charmMitigation);
         }
 
-        private static bool IsRulerFavoringStandingSource(Dictionary<string, object> source)
+        internal static bool IsRulerFavoringStandingSource(Dictionary<string, object> source)
         {
             return ReadString(source, "baseTagId", ReadString(source, "tagId", ""))
                 .Equals("ruler_favoring", StringComparison.OrdinalIgnoreCase);

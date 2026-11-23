@@ -7,7 +7,7 @@ using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private static readonly AsyncLocal<TavernHouseActionContext> TavernActionScope = new();
         internal static bool TavernActionScopeEnabled => TavernActionScope.Value != null;
@@ -21,11 +21,11 @@ namespace ReignBetaServer
             => new TavernHouseActionContext { CampaignId = ReadString(state, "campaignId", ""), TimelineId = ReadString(state, "timelineId", ""),
                 TownId = ReadString(state, "townId", ""), SessionId = ReadString(state, "conversationSessionId", ""),
                 PlayerId = ReadString(state, "playerHeroStringId", ""), MadamId = ReadString(state, "madamId", ""),
-                Roster = ReadDictionaryList(state, "roster").Select(p => new TavernHouseActionPerson { HeroId = CharacterIdFrom(p),
+                Roster = ReadDictionaryList(state, "roster").Select(p => new TavernHouseActionPerson { HeroId = CampaignFileService.CharacterIdFrom(p),
                     Name = ReadString(p, "name", ""), Adult = ReadDouble(p, "age", 0) >= 18 && !ReadBool(p, "isChild", false),
                     Available = TavernHouseAdultAvailable(p) }).ToList() };
 
-        private static void ValidateTavernActionDecision(ActionAgreement offered, ActionDecision decision, string player, string npc, string conversation, double day)
+        internal static void ValidateTavernActionDecision(ActionAgreement offered, ActionDecision decision, string player, string npc, string conversation, double day)
         {
             if (TavernHouseVisitAction.Contains(offered) && TavernActionScope.Value == null)
                 throw new InvalidOperationException("A Tavern House proposal cannot be carried into another conversation.");
@@ -37,7 +37,7 @@ namespace ReignBetaServer
             if (errors.Count > 0) throw new InvalidOperationException(string.Join(" ", errors));
         }
 
-        private static string TavernVisitActionPrompt()
+        internal static string TavernVisitActionPrompt()
         {
             var scope = TavernActionScope.Value;
             if (scope == null) return "";
@@ -51,7 +51,7 @@ namespace ReignBetaServer
                 + "CURRENT TAVERN FACTS: " + Json.Serialize(TestDict("campaignId", scope.CampaignId, "timelineId", scope.TimelineId,
                     "townId", scope.TownId, "sessionId", scope.SessionId, "rosterHash", scope.RosterHash, "playerId", scope.PlayerId,
                     "madamId", scope.MadamId, "roster", scope.Roster)) + "\n"
-                + "TAVERN-ONLY REGISTERED ACTION: " + StructuredActionCatalogPrompt(true) + "\n";
+                + "TAVERN-ONLY REGISTERED ACTION: " + DialogueService.StructuredActionCatalogPrompt(true) + "\n";
         }
         private static Dictionary<string, object> TavernVisitQuoteData(TavernHouseVisitQuote quote)
             => TestDict("agreementId", quote.AgreementId, "quoteRevision", quote.QuoteRevision, "townId", quote.TownId,
@@ -62,7 +62,7 @@ namespace ReignBetaServer
         // action validation. No extra model call and no native effects occur here.
         private static void PrepareTavernVisitAction(Dictionary<string, object> state, Dictionary<string, object> chat, Dictionary<string, object> response)
         {
-            if (!UsesStructuredActions(chat)) return;
+            if (!DialogueService.UsesStructuredActions(chat)) return;
             var envelope = ReadDictionary(Json.Deserialize<Dictionary<string, object>>(Json.Serialize(response)), "structuredActionDecision");
             if (!ReadBool(envelope, "valid", false)) return;
             var native = ReadDictionary(chat, "structuredActionContext");

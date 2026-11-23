@@ -10,7 +10,7 @@ namespace ReignBetaServer
     {
         private const int InitializationReadinessSealVersion = 3;
 
-        private static Dictionary<string, object> InitializationReadinessStatusApi(
+        internal static Dictionary<string, object> InitializationReadinessStatusApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -21,84 +21,47 @@ namespace ReignBetaServer
                     InitializationReadinessSealVersion, "campaignId is required.");
             if (ReadBool(payload, "resumeWorkers", true))
             {
-                ResumePendingSocialWorldHistoryOutcomes(campaignId, timelineId);
-                SignalContinuousRelationshipWorker();
+                ReputationService.ResumePendingSocialWorldHistoryOutcomes(campaignId, timelineId);
+                RelationshipsService.SignalContinuousRelationshipWorker();
             }
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                EnsureWorldHistorySchema(connection);
-                EnsureSocialReputationSchema(connection);
-                EnsureSocialSubjectWorkSchema(connection);
-                EnsureWorldRelationshipSchema(connection);
-                EnsureMbtiRelationshipSchema(connection);
-                int pending = ReadInt(QuerySql(connection, @"
-SELECT COUNT(*) AS count FROM world_history_events e
-WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
-AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
- WHERE r.event_id=e.event_id AND (r.completed<>0 OR r.attempt_count>=3));",
-                    new Dictionary<string, object> { ["timeline"] = timelineId })
+                WorldSimulationService.EnsureWorldHistorySchema(connection);
+                ReputationService.EnsureSocialReputationSchema(connection);
+                ReputationService.EnsureSocialSubjectWorkSchema(connection);
+                RelationshipsService.EnsureWorldRelationshipSchema(connection);
+                RelationshipsService.EnsureMbtiRelationshipSchema(connection);
+                int pending = ReadInt(PlatformStore.CountWorldHistoryEvents(connection, new Dictionary<string, object> { ["timeline"] = timelineId })
                     .FirstOrDefault(), "count", 0);
-                int completed = ReadInt(QuerySql(connection, @"
-SELECT COUNT(*) AS count FROM social_outcome_receipts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND completed=1;",
-                    new Dictionary<string, object>
+                int completed = ReadInt(PlatformStore.CountSocialOutcomeReceipts(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId
                     }).FirstOrDefault(), "count", 0);
-                int failed = ReadInt(QuerySql(connection, @"
-SELECT COUNT(*) AS count FROM social_outcome_receipts
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND (completed=-1 OR attempt_count>=3);",
-                    new Dictionary<string, object>
+                int failed = ReadInt(PlatformStore.CountSocialOutcomeReceipts2(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId
                     }).FirstOrDefault(), "count", 0);
-                Dictionary<string, object> lanes = QuerySql(connection, @"
-SELECT COUNT(*) AS total,
-SUM(CASE WHEN status='processing' THEN 1 ELSE 0 END) AS processing,
-SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending,
-SUM(CASE WHEN status='processing' AND claim_expires_ts<$ts THEN 1 ELSE 0 END) AS expired
-FROM social_subject_work_queue
-WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                    new Dictionary<string, object>
+                Dictionary<string, object> lanes = PlatformStore.CountSocialSubjectWorkQueue(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId
                         , ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                     }).FirstOrDefault() ?? new Dictionary<string, object>();
-                int standingInvalidations = ReadInt(QuerySql(connection, @"
-SELECT COUNT(*) AS count FROM public_standing_invalidations
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND status IN ('pending','processing');",
-                    new Dictionary<string, object>
+                int standingInvalidations = ReadInt(PlatformStore.CountPublicStandingInvalidations(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId
                     }).FirstOrDefault(), "count", 0);
-                int standingFailures = ReadInt(QuerySql(connection, @"
-SELECT COUNT(*) AS count FROM character_public_standing
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND calculation_status='error';",
-                    new Dictionary<string, object>
+                int standingFailures = ReadInt(PlatformStore.CountCharacterPublicStanding(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId
                     }).FirstOrDefault(), "count", 0);
-                int nativeTargets = ReadInt(QuerySql(connection, @"
-SELECT COUNT(*) AS count FROM relationship_native_targets
-WHERE status IN ('pending','claimed','failed');").FirstOrDefault(),
+                int nativeTargets = ReadInt(PlatformStore.CountRelationshipNativeTargets(connection).FirstOrDefault(),
                     "count", 0);
-                int nativeFailures = ReadInt(QuerySql(connection, @"
-SELECT COUNT(*) AS count FROM relationship_native_targets
-WHERE status='failed';").FirstOrDefault(), "count", 0);
-                int rumors = ReadInt(QuerySql(connection, @"
-SELECT COUNT(*) AS count FROM rumor_occurrences
-WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                    new Dictionary<string, object>
+                int nativeFailures = ReadInt(PlatformStore.CountRelationshipNativeTargets2(connection).FirstOrDefault(), "count", 0);
+                int rumors = ReadInt(PlatformStore.CountRumorOccurrences(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId
                     }).FirstOrDefault(), "count", 0);
-                int reputations = ReadInt(QuerySql(connection, @"
-SELECT COUNT(*) AS count FROM character_reputations
-WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                    new Dictionary<string, object>
+                int reputations = ReadInt(PlatformStore.CountCharacterReputations(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId
                     }).FirstOrDefault(), "count", 0);
@@ -107,9 +70,9 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                     && ReadInt(lanes, "pending", 0) == 0
                     && standingInvalidations == 0 && standingFailures == 0
                     && nativeTargets == 0 && nativeFailures == 0;
-                long lastBatchMs = Interlocked.Read(ref SocialOutcomeLastBatchMs);
+                long lastBatchMs = Interlocked.Read(ref ReputationService.SocialOutcomeLastBatchMs);
                 long lastBatchCompleted = Interlocked.Read(
-                    ref SocialOutcomeLastBatchCompleted);
+                    ref ReputationService.SocialOutcomeLastBatchCompleted);
                 double outcomesPerSecond = lastBatchMs > 0
                     ? lastBatchCompleted * 1000d / lastBatchMs : 0d;
                 return new Dictionary<string, object>
@@ -122,29 +85,29 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                     ["pendingSubjectLanes"] = ReadInt(lanes, "pending", 0),
                     ["activeSubjectLanes"] = ReadInt(lanes, "processing", 0),
                     ["expiredSubjectClaims"] = ReadInt(lanes, "expired", 0),
-                    ["activeWorkers"] = Volatile.Read(ref SocialOutcomeActiveWorkers),
-                    ["configuredWorkers"] = SocialOutcomeConfiguredWorkers,
-                    ["completedTotal"] = Interlocked.Read(ref SocialOutcomeCompletedTotal),
-                    ["lastBatchMs"] = Interlocked.Read(ref SocialOutcomeLastBatchMs),
+                    ["activeWorkers"] = Volatile.Read(ref ReputationService.SocialOutcomeActiveWorkers),
+                    ["configuredWorkers"] = ReputationService.SocialOutcomeConfiguredWorkers,
+                    ["completedTotal"] = Interlocked.Read(ref ReputationService.SocialOutcomeCompletedTotal),
+                    ["lastBatchMs"] = Interlocked.Read(ref ReputationService.SocialOutcomeLastBatchMs),
                     ["lastBatchCompleted"] = lastBatchCompleted,
                     ["outcomesPerSecond"] = outcomesPerSecond,
                     ["estimatedSecondsRemaining"] = outcomesPerSecond > 0d
                         ? Math.Ceiling(pending / outcomesPerSecond) : 0d,
                     ["lastTransactionMs"] = Interlocked.Read(
-                        ref SocialOutcomeLastTransactionMs),
+                        ref ReputationService.SocialOutcomeLastTransactionMs),
                     ["lastTransactionPerEventMs"] = Interlocked.Read(
-                        ref SocialOutcomeLastTransactionPerEventMs),
+                        ref ReputationService.SocialOutcomeLastTransactionPerEventMs),
                     ["transactionConflicts"] = Interlocked.Read(
-                        ref SocialOutcomeTransactionConflicts),
+                        ref ReputationService.SocialOutcomeTransactionConflicts),
                     ["transactionAttempts"] = Interlocked.Read(
-                        ref SocialOutcomeTransactionAttempts),
+                        ref ReputationService.SocialOutcomeTransactionAttempts),
                     ["transactionConflictRate"] =
-                        Interlocked.Read(ref SocialOutcomeTransactionAttempts) > 0
-                            ? Interlocked.Read(ref SocialOutcomeTransactionConflicts)
+                        Interlocked.Read(ref ReputationService.SocialOutcomeTransactionAttempts) > 0
+                            ? Interlocked.Read(ref ReputationService.SocialOutcomeTransactionConflicts)
                                 / (double)Interlocked.Read(
-                                    ref SocialOutcomeTransactionAttempts)
+                                    ref ReputationService.SocialOutcomeTransactionAttempts)
                             : 0d,
-                    ["lastWorkerError"] = SocialOutcomeLastError,
+                    ["lastWorkerError"] = ReputationService.SocialOutcomeLastError,
                     ["standingInvalidations"] = standingInvalidations,
                     ["standingFailures"] = standingFailures,
                     ["nativeTargets"] = nativeTargets,
@@ -164,31 +127,23 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
             if (string.IsNullOrWhiteSpace(campaignId))
                 return InitializationReadinessFailure(campaignId, timelineId,
                     InitializationReadinessSealVersion, "campaignId is required.");
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                EnsureSocialReputationSchema(connection);
-                EnsureSocialSubjectWorkSchema(connection);
-                ExecuteSql(connection, @"UPDATE social_outcome_receipts
-SET completed=0,attempt_count=0,last_error='',updated_ts=$ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND (completed=-1 OR attempt_count>=3);",
-                    new Dictionary<string, object>
+                ReputationService.EnsureSocialReputationSchema(connection);
+                ReputationService.EnsureSocialSubjectWorkSchema(connection);
+                PlatformStore.UpdateSocialOutcomeReceipts(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                     });
-                ExecuteSql(connection, @"UPDATE social_subject_work_queue
-SET status='pending',claim_owner='',claim_expires_ts=0,last_error='',updated_ts=$ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND status<>'completed';",
-                    new Dictionary<string, object>
+                PlatformStore.UpdateSocialSubjectWorkQueue(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                     });
             }
-            ResumePendingSocialWorldHistoryOutcomes(campaignId, timelineId);
-            SignalContinuousRelationshipWorker();
+            ReputationService.ResumePendingSocialWorldHistoryOutcomes(campaignId, timelineId);
+            RelationshipsService.SignalContinuousRelationshipWorker();
             return new Dictionary<string, object>
             {
                 ["ok"] = true, ["campaignId"] = campaignId,
@@ -226,19 +181,14 @@ AND status<>'completed';",
                     "The client readiness seal version is not supported.");
             }
 
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                EnsureWorldHistorySchema(connection);
-                EnsureMbtiRelationshipSchema(connection);
+                WorldSimulationService.EnsureWorldHistorySchema(connection);
+                RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                 EnsureInitializationReadinessSchema(connection);
 
-                Dictionary<string, object> timeline = QuerySql(
-                    connection,
-                    @"SELECT campaign_id,timeline_id,head_sequence
-FROM world_history_timelines
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-LIMIT 1;",
-                    new Dictionary<string, object>
+                Dictionary<string, object> timeline = PlatformStore.SelectWorldHistoryTimelines(
+                    connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId,
                         ["timeline"] = timelineId
@@ -256,10 +206,8 @@ LIMIT 1;",
                     return failure;
                 }
 
-                int pendingNativeTargets = ReadInt(QuerySql(
-                    connection,
-                    "SELECT COUNT(*) AS count FROM relationship_native_targets;",
-                    null).FirstOrDefault(), "count", 0);
+                int pendingNativeTargets = ReadInt(PlatformStore.CountRelationshipNativeTargets3(
+                    connection, null).FirstOrDefault(), "count", 0);
                 Dictionary<string, object> socialStatus =
                     InitializationReadinessStatusApi(payload);
                 if (!ReadBool(socialStatus, "ready", false))
@@ -276,13 +224,8 @@ LIMIT 1;",
                 bool relationshipPlanComplete = true;
                 if (!string.IsNullOrWhiteSpace(relationshipPlanId))
                 {
-                    Dictionary<string, object> plan = QuerySql(
-                        connection,
-                        @"SELECT target_count,client_failed,client_remaining
-FROM relationship_native_sync_batches
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND plan_id=$plan
-LIMIT 1;",
-                        new Dictionary<string, object>
+                    Dictionary<string, object> plan = PlatformStore.SelectRelationshipNativeSyncBatches(
+                        connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId,
                             ["timeline"] = timelineId,
@@ -315,14 +258,7 @@ LIMIT 1;",
                     return failure;
                 }
 
-                ExecuteSql(connection, @"INSERT INTO initialization_readiness_seals(
-campaign_id,timeline_id,seal_version,generation_id,history_sequence,
-relationship_plan_id,acknowledged_utc)
-VALUES($campaign,$timeline,$version,$generation,$sequence,$plan,$utc)
-ON CONFLICT(campaign_id,timeline_id,seal_version) DO UPDATE SET
-generation_id=$generation,history_sequence=MAX(initialization_readiness_seals.history_sequence,$sequence),
-relationship_plan_id=$plan,acknowledged_utc=$utc;",
-                    new Dictionary<string, object>
+                PlatformStore.UpsertInitializationReadinessSeals(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId,
                         ["timeline"] = timelineId,
@@ -338,16 +274,12 @@ relationship_plan_id=$plan,acknowledged_utc=$utc;",
                 // behind this seal. This prevents the day-one worker from
                 // competing with native projection receipts and creating a
                 // second generation of targets inside the loading gate.
-                ExecuteSql(connection, @"UPDATE relationship_daily_inputs
-SET status='pending',last_error=''
-WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND status='initialization_pending';",
-                    new Dictionary<string, object>
+                PlatformStore.UpdateRelationshipDailyInputs(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId,
                         ["timeline"] = timelineId
                     });
-                SignalContinuousRelationshipWorker();
+                RelationshipsService.SignalContinuousRelationshipWorker();
 
                 return new Dictionary<string, object>
                 {
@@ -365,11 +297,7 @@ AND status='initialization_pending';",
 
         private static void EnsureInitializationReadinessSchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS initialization_readiness_seals (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,seal_version INTEGER NOT NULL,
-generation_id TEXT NOT NULL,history_sequence INTEGER NOT NULL DEFAULT 0,
-relationship_plan_id TEXT NOT NULL DEFAULT '',acknowledged_utc TEXT NOT NULL,
-PRIMARY KEY(campaign_id,timeline_id,seal_version));");
+            PlatformSchema.CreateInitializationReadinessSeals(connection);
         }
 
         private static Dictionary<string, object> InitializationReadinessFailure(
@@ -391,14 +319,14 @@ PRIMARY KEY(campaign_id,timeline_id,seal_version));");
             };
         }
 
-        private static Dictionary<string, object> RunInitializationReadinessSelfTests()
+        internal static Dictionary<string, object> RunInitializationReadinessSelfTests()
         {
             string campaignId = "initialization_"
                 + Guid.NewGuid().ToString("N").Substring(0, 12);
             string timelineId = "main_initialization";
             try
             {
-                Dictionary<string, object> opened = WorldHistoryOpenTimelineApi(new Dictionary<string, object>
+                Dictionary<string, object> opened = WorldSimulationService.WorldHistoryOpenTimelineApi(new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["timelineId"] = timelineId,
@@ -429,29 +357,17 @@ PRIMARY KEY(campaign_id,timeline_id,seal_version));");
                 const string completedPlanId =
                     "native_sync_initialization_regression";
                 using (ReignDbConnection connection =
-                    OpenCampaignConnection(campaignId))
+                    ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    EnsureMbtiRelationshipSchema(connection);
-                    ExecuteSql(connection, @"INSERT INTO relationship_native_sync_batches(
-plan_id,campaign_id,timeline_id,world_day,target_count,issued_ts,
-client_applied,client_remaining,client_failed)
-VALUES($plan,$campaign,$timeline,1,1,1,1,0,0);",
-                        new Dictionary<string, object>
+                    RelationshipsService.EnsureMbtiRelationshipSchema(connection);
+                    PlatformStore.InsertRelationshipNativeSyncBatches(connection, new Dictionary<string, object>
                         {
                             ["plan"] = completedPlanId,
                             ["campaign"] = campaignId,
                             ["timeline"] = timelineId
                         });
-                    ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
-pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,status,
-world_day,last_sync_day,attempt_count,claimed_ts,last_error,updated_ts)
-VALUES('later-a|later-b','later-a','later-b',3,0,'pending',
-1,-1000,0,0,'',1);");
-                    ExecuteSql(connection, @"INSERT INTO relationship_daily_inputs(
-campaign_id,timeline_id,day_key,world_day,status,presence_groups_json,
-hero_changes_json,group_count,received_ts)
-VALUES($campaign,$timeline,1,1,'initialization_pending','[]','[]',0,1);",
-                        new Dictionary<string, object>
+                    PlatformStore.InsertRelationshipNativeTargets(connection);
+                    PlatformStore.InsertRelationshipDailyInputs(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId,
                             ["timeline"] = timelineId
@@ -471,18 +387,14 @@ VALUES($campaign,$timeline,1,1,'initialization_pending','[]','[]',0,1);",
                         });
                 string heldDailyInputStatus;
                 using (ReignDbConnection connection =
-                    OpenCampaignConnection(campaignId))
+                    ReignDatabase.OpenCampaignConnection(campaignId))
                 {
-                    heldDailyInputStatus = ReadString(QuerySql(connection,
-                        @"SELECT status FROM relationship_daily_inputs
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=1;",
-                        new Dictionary<string, object>
+                    heldDailyInputStatus = ReadString(PlatformStore.SelectRelationshipDailyInputs(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId,
                             ["timeline"] = timelineId
                         }).FirstOrDefault(), "status", "");
-                    ExecuteSql(connection,
-                        "DELETE FROM relationship_native_targets WHERE pair_key='later-a|later-b';");
+                    PlatformStore.DeleteRelationshipNativeTargets(connection);
                 }
                 Dictionary<string, object> acceptedAfterQuiescence =
                     InitializationReadinessSealApi(
@@ -496,11 +408,8 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=1;",
                             ["expectedHistorySequence"] = 3L
                         });
                 string releasedDailyInputStatus;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-                    releasedDailyInputStatus = ReadString(QuerySql(connection,
-                        @"SELECT status FROM relationship_daily_inputs
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=1;",
-                        new Dictionary<string, object>
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+                    releasedDailyInputStatus = ReadString(PlatformStore.SelectRelationshipDailyInputs(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = campaignId,
                             ["timeline"] = timelineId
@@ -555,7 +464,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=1;",
             }
             finally
             {
-                try { Directory.Delete(CampaignDirectory(campaignId), true); }
+                try { Directory.Delete(CampaignFileService.CampaignDirectory(campaignId), true); }
                 catch { }
             }
         }

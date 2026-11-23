@@ -4,9 +4,9 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CourtService
     {
-        private const int CourtCharacterModelVersion = 1;
+        internal const int CourtCharacterModelVersion = 1;
         private const string CourtCharacterModelId = "reign_court_character_v1";
 
         private sealed class CourtCharacterDefinition
@@ -174,7 +174,7 @@ namespace ReignBetaServer
                 ["version"] = CourtCharacterModelVersion,
                 ["id"] = CourtCharacterModelId,
                 ["source"] = "fixed sex-specific Honor-Boldness matrix",
-                ["scoreBands"] = TraitPercentageBands(),
+                ["scoreBands"] = CharactersService.TraitPercentageBands(),
                 ["fixedCellRule"] = "Honor selects one column and Boldness selects one row. Scene conditions never shift either coordinate.",
                 ["adultRule"] = "Every adult NPC receives one cell; children are unavailable.",
                 ["opportunityRule"] = "Known public identity and visible presentation may strengthen relevant tactics but never change the cell.",
@@ -182,7 +182,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> BuildCourtCharacterData(
+        internal static Dictionary<string, object> BuildCourtCharacterData(
             Dictionary<string, object> traits, Dictionary<string, object> profile)
         {
             traits = traits ?? new Dictionary<string, object>();
@@ -241,7 +241,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static bool EnsureCourtCharacterData(
+        internal static bool EnsureCourtCharacterData(
             Dictionary<string, object> traits, Dictionary<string, object> profile, string heroId)
         {
             if (traits == null || traits.Count == 0) return false;
@@ -259,11 +259,11 @@ namespace ReignBetaServer
         private static double CourtCharacterGainStrength(Dictionary<string, object> opportunity)
         {
             opportunity = opportunity ?? new Dictionary<string, object>();
-            double relative = ClampDouble((ReadDouble(opportunity, "relativeBenefit", 50d) - 50d) / 50d, 0d, 1d);
-            double bestAxis = ClampDouble(
+            double relative = DialogueService.ClampDouble((ReadDouble(opportunity, "relativeBenefit", 50d) - 50d) / 50d, 0d, 1d);
+            double bestAxis = DialogueService.ClampDouble(
                 ReadDouble(opportunity, "bestOpportunityGain", 0d), 0d, 1d);
             double tier = ReadBool(opportunity, "targetClanTierKnown", false)
-                ? ClampDouble(Math.Max(0d, ReadInt(opportunity, "clanTierDelta", 0)) / 2d, 0d, 1d)
+                ? DialogueService.ClampDouble(Math.Max(0d, ReadInt(opportunity, "clanTierDelta", 0)) / 2d, 0d, 1d)
                 : 0d;
             return Math.Max(bestAxis, Math.Max(relative, tier));
         }
@@ -280,7 +280,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> CourtCharacterDecisionSnapshot(
+        internal static Dictionary<string, object> CourtCharacterDecisionSnapshot(
             Dictionary<string, object> characteristics, Dictionary<string, object> opportunity)
         {
             Dictionary<string, object> traits = ReadDictionary(characteristics, "traits") ?? new Dictionary<string, object>();
@@ -325,7 +325,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> LoadCourtCharacterScheme(
+        internal static Dictionary<string, object> LoadCourtCharacterScheme(
             string campaignId, string subjectId, string targetId, double worldDay)
         {
 #if REIGN_EXCLUDE_COURT
@@ -333,12 +333,10 @@ namespace ReignBetaServer
 #else
             if (string.IsNullOrWhiteSpace(campaignId) || string.IsNullOrWhiteSpace(subjectId)
                 || string.IsNullOrWhiteSpace(targetId)) return new Dictionary<string, object>();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureCourtSchema(connection);
-                Dictionary<string, object> row = QuerySql(connection,
-                    "SELECT * FROM court_plots WHERE campaign_id=$campaign AND timeline_id='main' AND director_id=$subject AND target_id=$target AND status='active' ORDER BY updated_ts DESC LIMIT 1;",
-                    new Dictionary<string, object> { ["campaign"] = campaignId, ["subject"] = subjectId, ["target"] = targetId }).FirstOrDefault();
+                Dictionary<string, object> row = CourtStore.SelectCourtPlots(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["subject"] = subjectId, ["target"] = targetId }).FirstOrDefault();
                 if (row == null) return new Dictionary<string, object>();
                 Dictionary<string, object> payload = TryParseJsonObject(ReadString(row, "payload_json", ""))
                     ?? new Dictionary<string, object>();
@@ -346,9 +344,7 @@ namespace ReignBetaServer
                 string stage = ReadString(payload, "stage", "adopted");
                 if (tactic == "pregnancy_leverage" && stage != "leverage_available")
                 {
-                    Dictionary<string, object> conception = QuerySql(connection,
-                        "SELECT conception_id,status,conception_day FROM conceptions WHERE mother_id=$mother AND biological_father_id=$father AND conception_day>=$adopted AND status NOT IN ('failed','cancelled') ORDER BY conception_day DESC LIMIT 1;",
-                        new Dictionary<string, object>
+                    Dictionary<string, object> conception = CourtStore.SelectConceptions(connection, new Dictionary<string, object>
                         {
                             ["mother"] = subjectId, ["father"] = targetId,
                             ["adopted"] = ReadDouble(row, "created_day", 0d)
@@ -359,9 +355,7 @@ namespace ReignBetaServer
                         payload["stage"] = stage;
                         payload["verifiedConceptionId"] = ReadString(conception, "conception_id", "");
                         payload["verifiedConceptionStatus"] = ReadString(conception, "status", "");
-                        ExecuteSql(connection,
-                            "UPDATE court_plots SET payload_json=$payload,progress=0.75,updated_ts=$ts WHERE plot_id=$id;",
-                            new Dictionary<string, object>
+                        CourtStore.UpdateCourtPlots(connection, new Dictionary<string, object>
                             {
                                 ["payload"] = Json.Serialize(payload),
                                 ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
@@ -382,7 +376,7 @@ namespace ReignBetaServer
 #endif
         }
 
-        private static Dictionary<string, object> PersistCourtCharacterSchemeFromOutcome(
+        internal static Dictionary<string, object> PersistCourtCharacterSchemeFromOutcome(
             string campaignId, Dictionary<string, object> context, Dictionary<string, object> payload,
             string visibleReply, Dictionary<string, object> decisionBrief, string decisionId,
             bool actedRomantically, bool calculated)
@@ -422,12 +416,10 @@ namespace ReignBetaServer
             Dictionary<string, object> opportunity = ReadDictionary(context, "opportunity") ?? new Dictionary<string, object>();
             Dictionary<string, object> axes = ReadDictionary(opportunity, "axes") ?? new Dictionary<string, object>();
             string intendedGain = axes.OrderByDescending(x => ReadDouble(axes, x.Key, 0d)).Select(x => x.Key).FirstOrDefault() ?? "advantage";
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureCourtSchema(connection);
-                List<Dictionary<string, object>> existingRows = QuerySql(connection,
-                    "SELECT * FROM court_plots WHERE campaign_id=$campaign AND timeline_id='main' AND director_id=$subject AND target_id=$target AND status='active' ORDER BY updated_ts DESC;",
-                    new Dictionary<string, object> { ["campaign"] = campaignId, ["subject"] = subjectId, ["target"] = targetId });
+                List<Dictionary<string, object>> existingRows = CourtStore.SelectCourtPlots2(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["subject"] = subjectId, ["target"] = targetId });
                 Dictionary<string, object> existing = existingRows.FirstOrDefault(row =>
                 {
                     Dictionary<string, object> priorPayload = TryParseJsonObject(ReadString(row, "payload_json", ""))
@@ -452,11 +444,7 @@ namespace ReignBetaServer
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 if (existing == null)
                 {
-                    ExecuteSql(connection, @"INSERT INTO court_plots(
-plot_id,campaign_id,timeline_id,plot_type,director_id,target_id,participants_json,known_by_json,hidden_from_json,status,
-created_day,due_day,progress,terms_hash,secret_knowledge_id,revision,payload_json,created_ts,updated_ts)
-VALUES($id,$campaign,'main','scheme',$subject,$target,$participants,$known,$hidden,'active',$day,-1,0,'','',1,$payload,$ts,$ts);",
-                        new Dictionary<string, object>
+                    CourtStore.InsertCourtPlots(connection, new Dictionary<string, object>
                         {
                             ["id"] = plotId, ["campaign"] = campaignId, ["subject"] = subjectId, ["target"] = targetId,
                             ["participants"] = Json.Serialize(new[] { subjectId, targetId }),
@@ -467,9 +455,7 @@ VALUES($id,$campaign,'main','scheme',$subject,$target,$participants,$known,$hidd
                 }
                 else
                 {
-                    ExecuteSql(connection,
-                        "UPDATE court_plots SET payload_json=$payload,revision=revision+1,updated_ts=$ts WHERE plot_id=$id;",
-                        new Dictionary<string, object> { ["payload"] = Json.Serialize(plotPayload), ["ts"] = ts, ["id"] = plotId });
+                    CourtStore.UpdateCourtPlots2(connection, new Dictionary<string, object> { ["payload"] = Json.Serialize(plotPayload), ["ts"] = ts, ["id"] = plotId });
                 }
                 return new Dictionary<string, object>
                 {
@@ -480,7 +466,7 @@ VALUES($id,$campaign,'main','scheme',$subject,$target,$participants,$known,$hidd
 #endif
         }
 
-        private static double CourtCharacterEventWeight(
+        internal static double CourtCharacterEventWeight(
             Dictionary<string, object> postureA, Dictionary<string, object> postureB, params string[] tacticIds)
         {
             foreach (Dictionary<string, object> posture in new[] { postureA, postureB })
@@ -496,7 +482,7 @@ VALUES($id,$campaign,'main','scheme',$subject,$target,$participants,$known,$hidd
             return 1d;
         }
 
-        private static List<Dictionary<string, object>> RunCourtCharacterSelfTests()
+        internal static List<Dictionary<string, object>> RunCourtCharacterSelfTests()
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
             Action<string, bool, string, object> add = (id, pass, summary, data) => rows.Add(new Dictionary<string, object>

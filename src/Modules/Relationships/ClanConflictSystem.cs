@@ -2,10 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using Reign.Core.Contracts.Relationships;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RelationshipsService
     {
         private const int ClanConflictIncidentChance = 8;
         private const int ClanConflictAdditionalLordsChance = 80;
@@ -37,55 +38,23 @@ namespace ReignBetaServer
         private static readonly List<ClanConflictArchetype> ClanConflictCatalog =
             BuildClanConflictCatalog();
 
-        private static void EnsureClanConflictSchema(ReignDbConnection connection)
+        internal static void EnsureClanConflictSchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS clan_conflict_day_sweeps (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,day_key INTEGER NOT NULL,world_day REAL NOT NULL,
-eligible_kingdoms INTEGER NOT NULL,processed_kingdoms INTEGER NOT NULL,status TEXT NOT NULL,
-eligible_kingdom_ids_json TEXT NOT NULL DEFAULT '[]',
-created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
-PRIMARY KEY(campaign_id,timeline_id,day_key));");
-            EnsureDatabaseColumn(connection, "clan_conflict_day_sweeps",
-                "eligible_kingdom_ids_json", "TEXT NOT NULL DEFAULT '[]'");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS clan_conflict_daily_rolls (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,day_key INTEGER NOT NULL,world_day REAL NOT NULL,
-kingdom_id TEXT NOT NULL,kingdom_name TEXT NOT NULL DEFAULT '',ruler_id TEXT NOT NULL DEFAULT '',
-chance INTEGER NOT NULL,roll INTEGER NOT NULL,passed INTEGER NOT NULL,status TEXT NOT NULL,
-incident_id TEXT NOT NULL DEFAULT '',eligible_clan_count INTEGER NOT NULL DEFAULT 0,
-created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
-PRIMARY KEY(campaign_id,timeline_id,day_key,kingdom_id));");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS clan_conflict_incidents (
-incident_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,day_key INTEGER NOT NULL,
-world_day REAL NOT NULL,kingdom_id TEXT NOT NULL,kingdom_name TEXT NOT NULL,ruler_id TEXT NOT NULL,ruler_name TEXT NOT NULL,
-clan_a_id TEXT NOT NULL,clan_a_name TEXT NOT NULL,clan_b_id TEXT NOT NULL,clan_b_name TEXT NOT NULL,
-leader_a_id TEXT NOT NULL,leader_b_id TEXT NOT NULL,involved_a_json TEXT NOT NULL,involved_b_json TEXT NOT NULL,
-involved_a_names_json TEXT NOT NULL DEFAULT '[]',involved_b_names_json TEXT NOT NULL DEFAULT '[]',
-archetype_id TEXT NOT NULL,category TEXT NOT NULL,headline TEXT NOT NULL,narrative TEXT NOT NULL,
-trait_votes_json TEXT NOT NULL,average_relation_a REAL NOT NULL,average_relation_b REAL NOT NULL,
-winning_side TEXT NOT NULL,charm_skill INTEGER NOT NULL,charm_chance_bp INTEGER NOT NULL,charm_roll INTEGER NOT NULL,
-mediation_succeeded INTEGER NOT NULL,relationship_effect_count INTEGER NOT NULL DEFAULT 0,
-notice_status TEXT NOT NULL DEFAULT 'pending',status TEXT NOT NULL DEFAULT 'effects_pending',
-last_error TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
-UNIQUE(campaign_id,timeline_id,day_key,kingdom_id));");
-            EnsureDatabaseColumn(connection, "clan_conflict_incidents",
-                "involved_a_names_json", "TEXT NOT NULL DEFAULT '[]'");
-            EnsureDatabaseColumn(connection, "clan_conflict_incidents",
-                "involved_b_names_json", "TEXT NOT NULL DEFAULT '[]'");
-            ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_clan_conflict_incidents_timeline
-ON clan_conflict_incidents(campaign_id,timeline_id,world_day DESC);");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS clan_conflict_relationship_effects (
-effect_id TEXT PRIMARY KEY,incident_id TEXT NOT NULL,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,
-world_day REAL NOT NULL,effect_kind TEXT NOT NULL,observer_id TEXT NOT NULL,target_id TEXT NOT NULL,amount INTEGER NOT NULL,
-before_affinity INTEGER NOT NULL DEFAULT 0,after_affinity INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'pending',
-last_error TEXT NOT NULL DEFAULT '',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);");
-            ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_clan_conflict_effects_pending
-ON clan_conflict_relationship_effects(campaign_id,timeline_id,status,world_day);");
+            RelationshipsSchema.CreateClanConflictDaySweeps(connection);
+            RelationshipsSchema.EnsureColumnClanConflictDaySweepsEligibleKingdomIdsJson(connection);
+            RelationshipsSchema.CreateClanConflictDailyRolls(connection);
+            RelationshipsSchema.CreateClanConflictIncidents(connection);
+            RelationshipsSchema.EnsureColumnClanConflictIncidentsInvolvedANamesJson(connection);
+            RelationshipsSchema.EnsureColumnClanConflictIncidentsInvolvedBNamesJson(connection);
+            RelationshipsSchema.CreateIndexClanConflictIncidentsTimeline(connection);
+            RelationshipsSchema.CreateClanConflictRelationshipEffects(connection);
+            RelationshipsSchema.CreateIndexClanConflictEffectsPending(connection);
         }
 
-        private static Dictionary<string, object> EvaluatePoliticalIncidentsCombined(
+        internal static Dictionary<string, object> EvaluatePoliticalIncidentsCombined(
             Dictionary<string, object> payload)
         {
-            Dictionary<string, object> pressure = EvaluatePoliticalPressure(payload);
+            Dictionary<string, object> pressure = DiplomacyService.EvaluatePoliticalPressure(payload);
             Dictionary<string, object> conflicts = EvaluateClanConflicts(payload);
             Dictionary<string, object> result = new Dictionary<string, object>(pressure,
                 StringComparer.OrdinalIgnoreCase);
@@ -105,7 +74,7 @@ ON clan_conflict_relationship_effects(campaign_id,timeline_id,status,world_day);
             string campaignId = ReadString(payload, "campaignId", "default");
             string timelineId = ReadString(payload, "timelineId", "main");
             double worldDay = ReadDouble(payload, "worldDay", 0d);
-            Dictionary<string, object> startupGrace = BuildAutonomousWorldStartupGrace(payload);
+            Dictionary<string, object> startupGrace = DiplomacyService.BuildAutonomousWorldStartupGrace(payload);
             if (ReadBool(startupGrace, "locked", false))
             {
                 return new Dictionary<string, object>
@@ -117,13 +86,10 @@ ON clan_conflict_relationship_effects(campaign_id,timeline_id,status,world_day);
 
             int currentDay = (int)Math.Floor(worldDay + 0.000001d);
             int lastProcessedDay;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                lastProcessedDay = ReadInt(QuerySql(connection, @"
-SELECT MAX(day_key) AS latest_day FROM clan_conflict_day_sweeps
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='completed';",
-                    new Dictionary<string, object>
+                lastProcessedDay = ReadInt(RelationshipsStore.SelectClanConflictDaySweeps2(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId
                     }).FirstOrDefault(), "latest_day", int.MinValue);
@@ -136,7 +102,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='completed';",
                 results.Add(ProcessClanConflictDay(campaignId, timelineId,
                     day + fraction, payload));
             ResumePendingClanConflictEffects(campaignId, timelineId);
-            InvalidateWorldTestOverviewCache(campaignId, timelineId);
+            WorldSimulationService.InvalidateWorldTestOverviewCache(campaignId, timelineId);
             return new Dictionary<string, object>
             {
                 ["ok"] = true,
@@ -172,17 +138,10 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='completed';",
                 .ToList();
             List<Dictionary<string, object>> clans = ReadDictionaryList(world, "clans");
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                ExecuteSql(connection, @"INSERT INTO clan_conflict_day_sweeps(
-campaign_id,timeline_id,day_key,world_day,eligible_kingdoms,processed_kingdoms,
-eligible_kingdom_ids_json,status,created_ts,updated_ts)
-VALUES($campaign,$timeline,$day,$worldDay,$eligible,0,$eligibleIds,'processing',$ts,$ts)
-ON CONFLICT(campaign_id,timeline_id,day_key) DO UPDATE SET
-world_day=$worldDay,eligible_kingdoms=$eligible,eligible_kingdom_ids_json=$eligibleIds,
-status='processing',updated_ts=$ts;",
-                    new Dictionary<string, object>
+                RelationshipsStore.UpsertClanConflictDaySweeps(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["day"] = day, ["worldDay"] = worldDay,
@@ -200,13 +159,10 @@ status='processing',updated_ts=$ts;",
                     campaignId, timelineId, day, worldDay, kingdom, clans);
                 if (!string.IsNullOrWhiteSpace(ReadString(result, "incidentId", ""))) incidents++;
             }
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                ExecuteSql(connection, @"UPDATE clan_conflict_day_sweeps SET
-processed_kingdoms=$processed,status='completed',updated_ts=$ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
-                    new Dictionary<string, object>
+                RelationshipsStore.UpdateClanConflictDaySweeps(connection, new Dictionary<string, object>
                     {
                         ["processed"] = kingdoms.Count,
                         ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
@@ -227,12 +183,10 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
         {
             string kingdomId = ReadString(kingdom, "kingdomId", "");
             Dictionary<string, object> existing;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                existing = QuerySql(connection, @"SELECT * FROM clan_conflict_daily_rolls
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND kingdom_id=$kingdom LIMIT 1;",
-                    new Dictionary<string, object>
+                existing = RelationshipsStore.SelectClanConflictDailyRolls3(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["day"] = day, ["kingdom"] = kingdomId
@@ -274,21 +228,16 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND kingd
                     ["kingdomId"] = kingdomId, ["incidentId"] = incidentId
                 };
             }
-            int roll = StableRulerD100(campaignId, timelineId, day,
+            int roll = DiplomacyService.StableRulerD100(campaignId, timelineId, day,
                 "clan-conflict:daily:" + kingdomId);
             bool passed = roll <= ClanConflictIncidentChance;
             string status = !passed ? "roll_failed"
                 : eligibleClans.Count < 2 ? "no_eligible_pair" : "processing";
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                ExecuteSql(connection, @"INSERT INTO clan_conflict_daily_rolls(
-campaign_id,timeline_id,day_key,world_day,kingdom_id,kingdom_name,ruler_id,chance,roll,passed,status,
-incident_id,eligible_clan_count,created_ts,updated_ts)
-VALUES($campaign,$timeline,$day,$worldDay,$kingdom,$kingdomName,$ruler,$chance,$roll,$passed,$status,'',$eligible,$ts,$ts)
-ON CONFLICT(campaign_id,timeline_id,day_key,kingdom_id) DO NOTHING;",
-                    new Dictionary<string, object>
+                RelationshipsStore.InsertOrIgnoreClanConflictDailyRolls(connection, new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["day"] = day, ["worldDay"] = worldDay,
@@ -322,12 +271,9 @@ ON CONFLICT(campaign_id,timeline_id,day_key,kingdom_id) DO NOTHING;",
         private static void RecordClanConflictIncidentForRoll(string campaignId,
             string timelineId, int day, string kingdomId, string incidentId)
         {
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                ExecuteSql(connection, @"UPDATE clan_conflict_daily_rolls SET
-status='incident_created',incident_id=$incident,updated_ts=$ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND kingdom_id=$kingdom;",
-                    new Dictionary<string, object>
+                RelationshipsStore.UpdateClanConflictDailyRolls(connection, new Dictionary<string, object>
                     {
                         ["incident"] = incidentId, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
@@ -351,14 +297,14 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND kingd
                 "pair:" + kingdomId, pairs.Count);
             Dictionary<string, object> clanA = pairs[pairIndex].Item1;
             Dictionary<string, object> clanB = pairs[pairIndex].Item2;
-            if (StableRulerD100(campaignId, timelineId, day,
+            if (DiplomacyService.StableRulerD100(campaignId, timelineId, day,
                 "side-swap:" + kingdomId) <= 50)
             {
                 Dictionary<string, object> swap = clanA; clanA = clanB; clanB = swap;
             }
             string incidentId = "clan-conflict:" + timelineId + ":" + day.ToString(
                 CultureInfo.InvariantCulture) + ":" + kingdomId;
-            bool addLords = StableRulerD100(campaignId, timelineId, day,
+            bool addLords = DiplomacyService.StableRulerD100(campaignId, timelineId, day,
                 incidentId + ":additional-lords") <= ClanConflictAdditionalLordsChance;
             List<string> involvedA = SelectClanConflictParticipants(campaignId,
                 timelineId, day, incidentId, clanA, "a", addLords);
@@ -372,7 +318,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND kingd
             string rulerId = ReadString(kingdom, "leaderHeroId", "");
             double averageA;
             double averageB;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureMbtiRelationshipSchema(connection);
                 averageA = ClanConflictAverageAffinity(connection, rulerId, involvedA);
@@ -400,22 +346,10 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND kingd
                 campaignId, timelineId, day, incidentId, rulerId,
                 involvedA, involvedB, winningSide, mediated);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                ExecuteSql(connection, @"INSERT INTO clan_conflict_incidents(
-incident_id,campaign_id,timeline_id,day_key,world_day,kingdom_id,kingdom_name,ruler_id,ruler_name,
-clan_a_id,clan_a_name,clan_b_id,clan_b_name,leader_a_id,leader_b_id,involved_a_json,involved_b_json,
-involved_a_names_json,involved_b_names_json,archetype_id,category,headline,narrative,
-trait_votes_json,average_relation_a,average_relation_b,winning_side,
-charm_skill,charm_chance_bp,charm_roll,mediation_succeeded,relationship_effect_count,notice_status,status,
-last_error,payload_json,created_ts,updated_ts)
-VALUES($id,$campaign,$timeline,$day,$worldDay,$kingdom,$kingdomName,$ruler,$rulerName,
-$clanA,$clanAName,$clanB,$clanBName,$leaderA,$leaderB,$involvedA,$involvedB,
-$involvedNamesA,$involvedNamesB,$archetype,$category,$headline,$narrative,$votes,$averageA,$averageB,
-$winner,$charm,$chance,$roll,$mediated,$effectCount,'pending','effects_pending','',
-$payload,$ts,$ts) ON CONFLICT(incident_id) DO NOTHING;",
-                    new Dictionary<string, object>
+                RelationshipsStore.InsertOrIgnoreClanConflictIncidents(connection, new Dictionary<string, object>
                     {
                         ["id"] = incidentId, ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["day"] = day, ["worldDay"] = worldDay, ["kingdom"] = kingdomId,
@@ -443,10 +377,7 @@ $payload,$ts,$ts) ON CONFLICT(incident_id) DO NOTHING;",
                     });
                 foreach (ClanConflictEffectSpec effect in effects)
                 {
-                    ExecuteSql(connection, @"INSERT INTO clan_conflict_relationship_effects(
-effect_id,incident_id,campaign_id,timeline_id,world_day,effect_kind,observer_id,target_id,amount,status,created_ts,updated_ts)
-VALUES($effect,$incident,$campaign,$timeline,$day,$kind,$observer,$target,$amount,'pending',$ts,$ts)
-ON CONFLICT(effect_id) DO NOTHING;", new Dictionary<string, object>
+                    RelationshipsStore.InsertOrIgnoreClanConflictRelationshipEffects(connection, new Dictionary<string, object>
                     {
                         ["effect"] = effect.EffectId, ["incident"] = incidentId,
                         ["campaign"] = campaignId, ["timeline"] = timelineId,
@@ -511,7 +442,7 @@ ON CONFLICT(effect_id) DO NOTHING;", new Dictionary<string, object>
             Dictionary<string, object> kingdom, ClanConflictArchetype archetype,
             double averageA, double averageB)
         {
-            Dictionary<string, object> virtues = LoadDirectorTraits(campaignId, kingdom);
+            Dictionary<string, object> virtues = DiplomacyService.LoadDirectorTraits(campaignId, kingdom);
             List<Tuple<string, string, string>> routes = new List<Tuple<string, string, string>>
             {
                 Tuple.Create(archetype.TraitA, archetype.TraitAHighSide, "The first case-specific virtue."),
@@ -529,7 +460,7 @@ ON CONFLICT(effect_id) DO NOTHING;", new Dictionary<string, object>
                 int baseScore = Clamp((int)Math.Round(ReadDouble(virtues, trait, 50d),
                     MidpointRounding.AwayFromZero), 0, 100);
                 int threshold = Clamp(baseScore + modifier, 0, 100);
-                int roll = StableRulerD100(campaignId, timelineId, day,
+                int roll = DiplomacyService.StableRulerD100(campaignId, timelineId, day,
                     incidentId + ":vote:" + trait);
                 string vote = roll <= threshold ? highSide : highSide == "a" ? "b" : "a";
                 votes.Add(new Dictionary<string, object>
@@ -624,13 +555,10 @@ ON CONFLICT(effect_id) DO NOTHING;", new Dictionary<string, object>
             string timelineId)
         {
             List<string> incidentIds;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                incidentIds = QuerySql(connection, @"SELECT DISTINCT incident_id
-FROM clan_conflict_relationship_effects
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND status IN ('pending','applying')
-ORDER BY incident_id;", new Dictionary<string, object>
+                incidentIds = RelationshipsStore.SelectClanConflictRelationshipEffects3(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = timelineId
                 }).Select(x => ReadString(x, "incident_id", ""))
@@ -645,18 +573,15 @@ ORDER BY incident_id;", new Dictionary<string, object>
         {
             Dictionary<string, object> incident;
             List<Dictionary<string, object>> effects;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                incident = QuerySql(connection, @"SELECT * FROM clan_conflict_incidents
-WHERE incident_id=$incident LIMIT 1;", new Dictionary<string, object>
+                incident = RelationshipsStore.SelectClanConflictIncidents3(connection, new Dictionary<string, object>
                 {
                     ["incident"] = incidentId
                 }).FirstOrDefault();
                 if (incident == null) return;
-                effects = QuerySql(connection, @"SELECT * FROM clan_conflict_relationship_effects
-WHERE incident_id=$incident AND status IN ('pending','applying') ORDER BY effect_id;",
-                    new Dictionary<string, object> { ["incident"] = incidentId });
+                effects = RelationshipsStore.SelectClanConflictRelationshipEffects4(connection, new Dictionary<string, object> { ["incident"] = incidentId });
             }
             string kingdomId = ReadString(incident, "kingdom_id", "");
             double worldDay = ReadDouble(incident, "world_day", 0d);
@@ -670,17 +595,16 @@ WHERE incident_id=$incident AND status IN ('pending','applying') ORDER BY effect
                 int after = 0;
                 try
                 {
-                    using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                    using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                     {
                         EnsureClanConflictSchema(connection);
                         before = ReadClanConflictAffinity(connection, observer, target);
-                        ExecuteSql(connection, "UPDATE clan_conflict_relationship_effects SET status='applying',updated_ts=$ts WHERE effect_id=$effect AND status='pending';",
-                            new Dictionary<string, object>
+                        RelationshipsStore.UpdateClanConflictRelationshipEffects(connection, new Dictionary<string, object>
                             {
                                 ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["effect"] = effectId
                             });
                     }
-                    ApplyRulerDiplomaticIncident(campaignId, timelineId, worldDay,
+                    DiplomacyService.ApplyRulerDiplomaticIncident(campaignId, timelineId, worldDay,
                         "clan_conflict_" + ReadString(effect, "effect_kind", "relationship"),
                         effectId, incidentId, observer, target, kingdomId, kingdomId,
                         amount, "", 0, false, incidentId,
@@ -691,12 +615,10 @@ WHERE incident_id=$incident AND status IN ('pending','applying') ORDER BY effect
                             ["effectKind"] = ReadString(effect, "effect_kind", ""),
                             ["amount"] = amount
                         });
-                    using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                    using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                     {
                         after = ReadClanConflictAffinity(connection, observer, target);
-                        ExecuteSql(connection, @"UPDATE clan_conflict_relationship_effects SET
-status='applied',before_affinity=$before,after_affinity=$after,last_error='',updated_ts=$ts WHERE effect_id=$effect;",
-                            new Dictionary<string, object>
+                        RelationshipsStore.UpdateClanConflictRelationshipEffects2(connection, new Dictionary<string, object>
                             {
                                 ["before"] = before, ["after"] = after,
                                 ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["effect"] = effectId
@@ -705,11 +627,9 @@ status='applied',before_affinity=$before,after_affinity=$after,last_error='',upd
                 }
                 catch (Exception ex)
                 {
-                    using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                    using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
                     {
-                        ExecuteSql(connection, @"UPDATE clan_conflict_relationship_effects SET
-status='failed',last_error=$error,updated_ts=$ts WHERE effect_id=$effect;",
-                            new Dictionary<string, object>
+                        RelationshipsStore.UpdateClanConflictRelationshipEffects3(connection, new Dictionary<string, object>
                             {
                                 ["error"] = ex.Message, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                                 ["effect"] = effectId
@@ -717,22 +637,15 @@ status='failed',last_error=$error,updated_ts=$ts WHERE effect_id=$effect;",
                     }
                 }
             }
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                Dictionary<string, object> counts = QuerySql(connection, @"SELECT
-SUM(CASE WHEN status='applied' THEN 1 ELSE 0 END) AS applied,
-SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,
-SUM(CASE WHEN status IN ('pending','applying') THEN 1 ELSE 0 END) AS pending
-FROM clan_conflict_relationship_effects WHERE incident_id=$incident;",
-                    new Dictionary<string, object> { ["incident"] = incidentId }).FirstOrDefault()
+                Dictionary<string, object> counts = RelationshipsStore.SelectClanConflictRelationshipEffects5(connection, new Dictionary<string, object> { ["incident"] = incidentId }).FirstOrDefault()
                     ?? new Dictionary<string, object>();
                 int failed = ReadInt(counts, "failed", 0);
                 int pending = ReadInt(counts, "pending", 0);
                 string status = failed > 0 ? "failed" : pending > 0 ? "effects_pending" : "completed";
                 string notice = status == "completed" ? "ready" : "pending";
-                ExecuteSql(connection, @"UPDATE clan_conflict_incidents SET
-status=$status,notice_status=$notice,last_error=CASE WHEN $failed>0 THEN 'One or more relationship effects failed.' ELSE '' END,
-updated_ts=$ts WHERE incident_id=$incident;", new Dictionary<string, object>
+                RelationshipsStore.UpdateClanConflictIncidents(connection, new Dictionary<string, object>
                 {
                     ["status"] = status, ["notice"] = notice, ["failed"] = failed,
                     ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["incident"] = incidentId
@@ -751,9 +664,7 @@ updated_ts=$ts WHERE incident_id=$incident;", new Dictionary<string, object>
             string observerId, string targetId)
         {
             string pairKey = AmbientPairKey(observerId, targetId);
-            Dictionary<string, object> row = QuerySql(connection, @"SELECT
-hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a FROM relationship_pair_chemistry
-WHERE pair_key=$pair LIMIT 1;", new Dictionary<string, object>
+            Dictionary<string, object> row = RelationshipsStore.SelectRelationshipPairChemistry7(connection, new Dictionary<string, object>
             {
                 ["pair"] = pairKey
             }).FirstOrDefault();
@@ -764,428 +675,60 @@ WHERE pair_key=$pair LIMIT 1;", new Dictionary<string, object>
                 : ReadInt(row, "affinity_b_to_a", 0);
         }
 
-        private static Dictionary<string, object> NextClanConflictNotices(
+        internal static Dictionary<string, object> NextClanConflictNotices(
             Dictionary<string, string> query)
         {
-            query = query ?? new Dictionary<string, string>();
-            string campaignId = query.TryGetValue("campaignId", out string campaign)
-                ? campaign : "default";
-            string timelineId = query.TryGetValue("timelineId", out string timeline)
-                ? timeline : "main";
-            int limit = Math.Max(1, Math.Min(20, query.TryGetValue("limit", out string rawLimit)
-                && int.TryParse(rawLimit, out int parsedLimit) ? parsedLimit : 5));
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            ClanConflictNoticesRequest request = ClanConflictNoticesRequest.FromQuery(query);
+            string campaignId = request.CampaignId;
+            string timelineId = request.TimelineId;
+            int limit = request.Limit;
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                List<Dictionary<string, object>> notices = QuerySql(connection, @"SELECT *
-FROM clan_conflict_incidents WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND notice_status IN ('ready','fetched') ORDER BY world_day,incident_id LIMIT "
-                    + limit.ToString(CultureInfo.InvariantCulture) + ";",
-                    new Dictionary<string, object>
+                List<Dictionary<string, object>> notices = RelationshipsStore.SelectClanConflictIncidents4(connection, limit.ToString(CultureInfo.InvariantCulture),                    new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId
                     });
                 foreach (Dictionary<string, object> notice in notices)
                 {
                     notice["news_description"] = ClanConflictCatalog.FirstOrDefault(a => a.Id == ReadString(notice, "archetype_id", ""))?.Description ?? "";
-                    ExecuteSql(connection, @"UPDATE clan_conflict_incidents SET
-notice_status='fetched',updated_ts=$ts WHERE incident_id=$incident;",
-                        new Dictionary<string, object>
+                    RelationshipsStore.UpdateClanConflictIncidents2(connection, new Dictionary<string, object>
                         {
                             ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                             ["incident"] = ReadString(notice, "incident_id", "")
                         });
                 }
-                return new Dictionary<string, object>
-                {
-                    ["ok"] = true, ["count"] = notices.Count,
-                    ["notices"] = notices.Cast<object>().ToList()
-                };
+                return new ClanConflictNoticesResponse(notices).ToDictionary();
             }
         }
 
-        private static Dictionary<string, object> AcknowledgeClanConflictNotice(
+        internal static Dictionary<string, object> AcknowledgeClanConflictNotice(
             Dictionary<string, object> payload)
         {
-            payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", "default");
-            string timelineId = ReadString(payload, "timelineId", "main");
-            string incidentId = ReadString(payload, "incidentId", "");
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            ClanConflictAcknowledgeRequest request = ClanConflictAcknowledgeRequest.FromDictionary(payload);
+            string campaignId = request.CampaignId;
+            string timelineId = request.TimelineId;
+            string incidentId = request.IncidentId;
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                int found = ReadInt(QuerySql(connection, @"SELECT COUNT(*) AS count
-FROM clan_conflict_incidents WHERE incident_id=$incident AND campaign_id=$campaign AND timeline_id=$timeline;",
-                    new Dictionary<string, object>
+                int found = ReadInt(RelationshipsStore.CountClanConflictIncidents3(connection, new Dictionary<string, object>
                     {
                         ["incident"] = incidentId, ["campaign"] = campaignId,
                         ["timeline"] = timelineId
                     }).FirstOrDefault(), "count", 0);
-                if (found == 0) return new Dictionary<string, object>
-                {
-                    ["ok"] = false, ["error"] = "Clan conflict incident was not found."
-                };
-                ExecuteSql(connection, @"UPDATE clan_conflict_incidents SET
-notice_status='acknowledged',updated_ts=$ts WHERE incident_id=$incident;",
-                    new Dictionary<string, object>
+                if (found == 0) return ClanConflictAcknowledgeResponse.NotFound().ToDictionary();
+                RelationshipsStore.UpdateClanConflictIncidents3(connection, new Dictionary<string, object>
                     {
                         ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                         ["incident"] = incidentId
                     });
             }
-            InvalidateWorldTestOverviewCache(campaignId, timelineId);
-            return new Dictionary<string, object>
-            {
-                ["ok"] = true, ["incidentId"] = incidentId
-            };
+            WorldSimulationService.InvalidateWorldTestOverviewCache(campaignId, timelineId);
+            return ClanConflictAcknowledgeResponse.Acknowledged(incidentId).ToDictionary();
         }
 
-        private static Dictionary<string, object> BuildWorldTestClanConflicts(
-            ReignDbConnection connection, string campaignId, string timelineId,
-            double latestDay)
-        {
-            EnsureClanConflictSchema(connection);
-            Dictionary<string, object> sweeps = QuerySql(connection, @"SELECT
-COUNT(*) AS total,SUM(eligible_kingdoms) AS expected,SUM(processed_kingdoms) AS processed,
-SUM(CASE WHEN status<>'completed' THEN 1 ELSE 0 END) AS incomplete,MAX(world_day) AS latest
-FROM clan_conflict_day_sweeps WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                new Dictionary<string, object>
-                {
-                    ["campaign"] = campaignId, ["timeline"] = timelineId
-                }).FirstOrDefault() ?? new Dictionary<string, object>();
-            Dictionary<string, object> rolls = QuerySql(connection, @"SELECT
-COUNT(*) AS total,SUM(CASE WHEN passed=1 THEN 1 ELSE 0 END) AS passed,
-SUM(CASE WHEN status='roll_failed' THEN 1 ELSE 0 END) AS failed,
-SUM(CASE WHEN status='no_eligible_pair' THEN 1 ELSE 0 END) AS no_pair,
-MAX(world_day) AS latest FROM clan_conflict_daily_rolls
-WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                new Dictionary<string, object>
-                {
-                    ["campaign"] = campaignId, ["timeline"] = timelineId
-                }).FirstOrDefault() ?? new Dictionary<string, object>();
-            Dictionary<string, object> incidents = QuerySql(connection, @"SELECT
-COUNT(*) AS total,SUM(CASE WHEN mediation_succeeded=1 THEN 1 ELSE 0 END) AS mediated,
-SUM(CASE WHEN mediation_succeeded=0 THEN 1 ELSE 0 END) AS feuds,
-SUM(CASE WHEN notice_status='acknowledged' THEN 1 ELSE 0 END) AS acknowledged,
-SUM(CASE WHEN notice_status IN ('ready','fetched') THEN 1 ELSE 0 END) AS pending_notices,
-SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,MAX(world_day) AS latest
-FROM clan_conflict_incidents WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                new Dictionary<string, object>
-                {
-                    ["campaign"] = campaignId, ["timeline"] = timelineId
-                }).FirstOrDefault() ?? new Dictionary<string, object>();
-            Dictionary<string, object> effects = QuerySql(connection, @"SELECT
-COUNT(*) AS total,SUM(CASE WHEN status='applied' THEN 1 ELSE 0 END) AS applied,
-SUM(CASE WHEN status IN ('pending','applying') THEN 1 ELSE 0 END) AS pending,
-SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed
-FROM clan_conflict_relationship_effects WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                new Dictionary<string, object>
-                {
-                    ["campaign"] = campaignId, ["timeline"] = timelineId
-                }).FirstOrDefault() ?? new Dictionary<string, object>();
-            List<Dictionary<string, object>> sweepDetails = QuerySql(connection, @"SELECT
-day_key,eligible_kingdom_ids_json FROM clan_conflict_day_sweeps
-WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY day_key;",
-                new Dictionary<string, object>
-                {
-                    ["campaign"] = campaignId, ["timeline"] = timelineId
-                });
-            List<Dictionary<string, object>> rollDetails = QuerySql(connection, @"SELECT
-kingdom_id,MAX(kingdom_name) AS kingdom_name,COUNT(*) AS observed,
-SUM(CASE WHEN passed=1 THEN 1 ELSE 0 END) AS passed,
-SUM(CASE WHEN incident_id<>'' THEN 1 ELSE 0 END) AS incidents,
-MIN(day_key) AS first_day,MAX(day_key) AS latest_day
-FROM clan_conflict_daily_rolls WHERE campaign_id=$campaign AND timeline_id=$timeline
-GROUP BY kingdom_id ORDER BY kingdom_id;", new Dictionary<string, object>
-                {
-                    ["campaign"] = campaignId, ["timeline"] = timelineId
-                });
-            Dictionary<string, int> expectedByKingdom = new Dictionary<string, int>(
-                StringComparer.OrdinalIgnoreCase);
-            foreach (Dictionary<string, object> sweep in sweepDetails)
-            foreach (string kingdomId in ReadJsonStringList(ReadString(sweep,
-                "eligible_kingdom_ids_json", "[]")))
-                expectedByKingdom[kingdomId] = expectedByKingdom.TryGetValue(kingdomId,
-                    out int count) ? count + 1 : 1;
-            Dictionary<string, Dictionary<string, object>> rollsByKingdom = rollDetails
-                .ToDictionary(x => ReadString(x, "kingdom_id", ""), x => x,
-                    StringComparer.OrdinalIgnoreCase);
-            List<Dictionary<string, object>> perKingdom = expectedByKingdom.Keys
-                .Union(rollsByKingdom.Keys, StringComparer.OrdinalIgnoreCase)
-                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-                .Select(kingdomId =>
-                {
-                    rollsByKingdom.TryGetValue(kingdomId, out Dictionary<string, object> row);
-                    row = row ?? new Dictionary<string, object>();
-                    int kingdomExpected = expectedByKingdom.TryGetValue(kingdomId,
-                        out int value) ? value : 0;
-                    int observed = ReadInt(row, "observed", 0);
-                    return new Dictionary<string, object>
-                    {
-                        ["kingdomId"] = kingdomId,
-                        ["kingdomName"] = ReadString(row, "kingdom_name", ""),
-                        ["expectedRolls"] = kingdomExpected,
-                        ["observedRolls"] = observed,
-                        ["missingRolls"] = Math.Max(0, kingdomExpected - observed),
-                        ["coveragePercent"] = kingdomExpected == 0 ? 100d
-                            : Math.Round(observed * 100d / kingdomExpected, 2),
-                        ["passedRolls"] = ReadInt(row, "passed", 0),
-                        ["incidents"] = ReadInt(row, "incidents", 0),
-                        ["firstDay"] = ReadInt(row, "first_day", -1),
-                        ["latestDay"] = ReadInt(row, "latest_day", -1)
-                    };
-                }).ToList();
-            List<Dictionary<string, object>> incidentDetails = QuerySql(connection, @"SELECT *
-FROM clan_conflict_incidents WHERE campaign_id=$campaign AND timeline_id=$timeline
-ORDER BY world_day DESC,incident_id;", new Dictionary<string, object>
-                {
-                    ["campaign"] = campaignId, ["timeline"] = timelineId
-                });
-            List<Dictionary<string, object>> voteDetails = incidentDetails
-                .SelectMany(x => ReadDictionaryList(TryParseJsonObject("{\"votes\":"
-                    + ReadString(x, "trait_votes_json", "[]") + "}"), "votes"))
-                .ToList();
-            List<Dictionary<string, object>> voteTraits = voteDetails
-                .GroupBy(x => ReadString(x, "trait", ""), StringComparer.OrdinalIgnoreCase)
-                .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
-                .Select(group => new Dictionary<string, object>
-                {
-                    ["trait"] = group.Key, ["votes"] = group.Count(),
-                    ["sideA"] = group.Count(x => ReadString(x, "vote", "") == "a"),
-                    ["sideB"] = group.Count(x => ReadString(x, "vote", "") == "b"),
-                    ["minimumRelationModifier"] = group.Min(x => ReadInt(x, "relationModifier", 0)),
-                    ["maximumRelationModifier"] = group.Max(x => ReadInt(x, "relationModifier", 0)),
-                    ["averageRelationModifier"] = Math.Round(group.Average(x =>
-                        ReadDouble(x, "relationModifier", 0d)), 2)
-                }).ToList();
-            List<Dictionary<string, object>> participantDetails = incidentDetails.Select(x =>
-            {
-                List<string> sideA = ReadJsonStringList(ReadString(x, "involved_a_json", "[]"));
-                List<string> sideB = ReadJsonStringList(ReadString(x, "involved_b_json", "[]"));
-                return new Dictionary<string, object>
-                {
-                    ["incidentId"] = ReadString(x, "incident_id", ""),
-                    ["sideA"] = sideA.Count, ["sideB"] = sideB.Count,
-                    ["total"] = sideA.Count + sideB.Count,
-                    ["additionalLords"] = Math.Max(0, sideA.Count - 1)
-                        + Math.Max(0, sideB.Count - 1)
-                };
-            }).ToList();
-            List<Dictionary<string, object>> recentIncidents = incidentDetails.Take(25)
-                .Select(x => new Dictionary<string, object>
-                {
-                    ["incidentId"] = ReadString(x, "incident_id", ""),
-                    ["worldDay"] = ReadDouble(x, "world_day", 0d),
-                    ["kingdomId"] = ReadString(x, "kingdom_id", ""),
-                    ["kingdomName"] = ReadString(x, "kingdom_name", ""),
-                    ["rulerId"] = ReadString(x, "ruler_id", ""),
-                    ["rulerName"] = ReadString(x, "ruler_name", ""),
-                    ["clanAId"] = ReadString(x, "clan_a_id", ""),
-                    ["clanAName"] = ReadString(x, "clan_a_name", ""),
-                    ["clanBId"] = ReadString(x, "clan_b_id", ""),
-                    ["clanBName"] = ReadString(x, "clan_b_name", ""),
-                    ["participantsA"] = ReadJsonStringList(ReadString(x,
-                        "involved_a_names_json", "[]")).Cast<object>().ToList(),
-                    ["participantsB"] = ReadJsonStringList(ReadString(x,
-                        "involved_b_names_json", "[]")).Cast<object>().ToList(),
-                    ["category"] = ReadString(x, "category", ""),
-                    ["headline"] = ReadString(x, "headline", ""),
-                    ["votes"] = ReadDictionaryList(TryParseJsonObject("{\"votes\":"
-                        + ReadString(x, "trait_votes_json", "[]") + "}"), "votes")
-                        .Cast<object>().ToList(),
-                    ["winningSide"] = ReadString(x, "winning_side", ""),
-                    ["charmSkill"] = ReadInt(x, "charm_skill", 0),
-                    ["charmChanceBasisPoints"] = ReadInt(x, "charm_chance_bp", 0),
-                    ["charmRoll"] = ReadInt(x, "charm_roll", 0),
-                    ["mediationSucceeded"] = ReadBool(x, "mediation_succeeded", false),
-                    ["effectCount"] = ReadInt(x, "relationship_effect_count", 0),
-                    ["noticeStatus"] = ReadString(x, "notice_status", ""),
-                    ["status"] = ReadString(x, "status", ""),
-                    ["lastError"] = ReadString(x, "last_error", "")
-                }).ToList();
-            List<Dictionary<string, object>> effectKinds = QuerySql(connection, @"SELECT
-effect_kind,COUNT(*) AS count,SUM(amount) AS net,MIN(amount) AS minimum,MAX(amount) AS maximum,
-SUM(CASE WHEN status='applied' THEN 1 ELSE 0 END) AS applied,
-SUM(CASE WHEN status IN ('pending','applying') THEN 1 ELSE 0 END) AS pending,
-SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed
-FROM clan_conflict_relationship_effects WHERE campaign_id=$campaign AND timeline_id=$timeline
-GROUP BY effect_kind ORDER BY effect_kind;", new Dictionary<string, object>
-                {
-                    ["campaign"] = campaignId, ["timeline"] = timelineId
-                });
-            int duplicateEffects = ReadInt(QuerySql(connection, @"SELECT COUNT(*) AS count FROM (
-SELECT incident_id,effect_kind,observer_id,target_id,COUNT(*) AS copies
-FROM clan_conflict_relationship_effects WHERE campaign_id=$campaign AND timeline_id=$timeline
-GROUP BY incident_id,effect_kind,observer_id,target_id HAVING COUNT(*)>1) AS duplicate_rows;",
-                new Dictionary<string, object>
-                {
-                    ["campaign"] = campaignId, ["timeline"] = timelineId
-                }).FirstOrDefault(), "count", 0);
-            int simultaneousDays = incidentDetails.GroupBy(x => ReadInt(x, "day_key", -1))
-                .Count(x => x.Count() > 1);
-            int maximumSimultaneous = incidentDetails.GroupBy(x => ReadInt(x, "day_key", -1))
-                .Select(x => x.Count()).DefaultIfEmpty(0).Max();
-            List<string> anomalies = new List<string>();
-            int expected = ReadInt(sweeps, "expected", 0);
-            int processed = ReadInt(sweeps, "processed", 0);
-            int totalRolls = ReadInt(rolls, "total", 0);
-            var rollIdentityRows = QuerySql(connection, @"SELECT day_key,kingdom_id FROM clan_conflict_daily_rolls
-WHERE campaign_id=$campaign AND timeline_id=$timeline;", new Dictionary<string, object>
-                { ["campaign"] = campaignId, ["timeline"] = timelineId });
-            var rollCoverage = ClanConflictRollCoverage(sweepDetails, rollIdentityRows);
-            int missingRolls = ReadInt(rollCoverage, "missing", 0);
-            int unexpectedRolls = ReadInt(rollCoverage, "unexpected", 0);
-            int duplicateRolls = ReadInt(rollCoverage, "duplicates", 0);
-            if (missingRolls > 0) anomalies.Add(missingRolls + " per-kingdom clan-conflict rolls are missing.");
-            if (unexpectedRolls > 0) anomalies.Add(unexpectedRolls + " clan-conflict rolls have no matching eligible kingdom/day.");
-            if (duplicateRolls > 0) anomalies.Add(duplicateRolls + " duplicate clan-conflict kingdom/day rolls exist.");
-            if (expected != processed) anomalies.Add("Clan-conflict sweep expected and processed counts disagree.");
-            int badChance = ReadInt(QuerySql(connection, @"SELECT COUNT(*) AS count
-FROM clan_conflict_daily_rolls WHERE campaign_id=$campaign AND timeline_id=$timeline AND chance<>8;",
-                new Dictionary<string, object>
-                {
-                    ["campaign"] = campaignId, ["timeline"] = timelineId
-                }).FirstOrDefault(), "count", 0);
-            if (badChance > 0) anomalies.Add(badChance + " rolls do not use the configured 8% chance.");
-            int incomplete = ReadInt(sweeps, "incomplete", 0);
-            if (incomplete > 0) anomalies.Add(incomplete + " day sweeps are incomplete.");
-            int pendingEffects = ReadInt(effects, "pending", 0);
-            int failedEffects = ReadInt(effects, "failed", 0);
-            int failedIncidents = ReadInt(incidents, "failed", 0);
-            if (pendingEffects > 0) anomalies.Add(pendingEffects + " relationship effects are pending.");
-            if (failedEffects > 0) anomalies.Add(failedEffects + " relationship effects failed.");
-            if (failedIncidents > 0) anomalies.Add(failedIncidents + " clan-conflict incidents failed.");
-            if (duplicateEffects > 0) anomalies.Add(duplicateEffects
-                + " duplicate directed relationship effects exist.");
-            int ruleViolations = CountClanConflictRuleViolations(connection,
-                campaignId, timelineId);
-            if (ruleViolations > 0) anomalies.Add(ruleViolations + " clan-conflict records violate outcome rules.");
-            string status = anomalies.Count == 0 ? "healthy"
-                : failedEffects > 0 || failedIncidents > 0 || ruleViolations > 0
-                    ? "error" : "warning";
-            return new Dictionary<string, object>
-            {
-                ["name"] = "NPC Clan Conflicts",
-                ["status"] = status,
-                ["latestSuccessfulDay"] = Math.Max(ReadDouble(sweeps, "latest", -1d),
-                    ReadDouble(incidents, "latest", -1d)),
-                ["dailySweeps"] = ReadInt(sweeps, "total", 0),
-                ["expectedKingdomRolls"] = expected,
-                ["processedKingdomRolls"] = processed,
-                ["kingdomRolls"] = totalRolls,
-                ["kingdomRollsMissing"] = missingRolls,
-                ["kingdomRollsUnexpected"] = unexpectedRolls,
-                ["kingdomRollsDuplicate"] = duplicateRolls,
-                ["rollCoveragePercent"] = expected == 0 ? 100d
-                    : Math.Round(ReadInt(rollCoverage, "matched", 0) * 100d / expected, 2),
-                ["configuredChancePercent"] = ClanConflictIncidentChance,
-                ["passedRolls"] = ReadInt(rolls, "passed", 0),
-                ["failedRolls"] = ReadInt(rolls, "failed", 0),
-                ["noEligiblePairRolls"] = ReadInt(rolls, "no_pair", 0),
-                ["perKingdomRolls"] = perKingdom.Cast<object>().ToList(),
-                ["incidentCount"] = ReadInt(incidents, "total", 0),
-                ["simultaneousIncidentDays"] = simultaneousDays,
-                ["maximumSimultaneousIncidents"] = maximumSimultaneous,
-                ["mediationSuccesses"] = ReadInt(incidents, "mediated", 0),
-                ["failedMediations"] = ReadInt(incidents, "feuds", 0),
-                ["participants"] = new Dictionary<string, object>
-                {
-                    ["incidents"] = participantDetails.Count,
-                    ["total"] = participantDetails.Sum(x => ReadInt(x, "total", 0)),
-                    ["maximumPerIncident"] = participantDetails.Select(x =>
-                        ReadInt(x, "total", 0)).DefaultIfEmpty(0).Max(),
-                    ["additionalLords"] = participantDetails.Sum(x =>
-                        ReadInt(x, "additionalLords", 0)),
-                    ["incidentsWithAdditionalLords"] = participantDetails.Count(x =>
-                        ReadInt(x, "additionalLords", 0) > 0)
-                },
-                ["votes"] = new Dictionary<string, object>
-                {
-                    ["total"] = voteDetails.Count,
-                    ["sideA"] = voteDetails.Count(x => ReadString(x, "vote", "") == "a"),
-                    ["sideB"] = voteDetails.Count(x => ReadString(x, "vote", "") == "b"),
-                    ["traits"] = voteTraits.Cast<object>().ToList(),
-                    ["minimumRelationModifier"] = voteDetails.Select(x =>
-                        ReadInt(x, "relationModifier", 0)).DefaultIfEmpty(0).Min(),
-                    ["maximumRelationModifier"] = voteDetails.Select(x =>
-                        ReadInt(x, "relationModifier", 0)).DefaultIfEmpty(0).Max()
-                },
-                ["charmResults"] = new Dictionary<string, object>
-                {
-                    ["attempts"] = incidentDetails.Count,
-                    ["successes"] = ReadInt(incidents, "mediated", 0),
-                    ["failures"] = ReadInt(incidents, "feuds", 0),
-                    ["minimumSkill"] = incidentDetails.Select(x =>
-                        ReadInt(x, "charm_skill", 0)).DefaultIfEmpty(0).Min(),
-                    ["maximumSkill"] = incidentDetails.Select(x =>
-                        ReadInt(x, "charm_skill", 0)).DefaultIfEmpty(0).Max(),
-                    ["minimumChanceBasisPoints"] = incidentDetails.Select(x =>
-                        ReadInt(x, "charm_chance_bp", 0)).DefaultIfEmpty(0).Min(),
-                    ["maximumChanceBasisPoints"] = incidentDetails.Select(x =>
-                        ReadInt(x, "charm_chance_bp", 0)).DefaultIfEmpty(0).Max()
-                },
-                ["acknowledgedNotices"] = ReadInt(incidents, "acknowledged", 0),
-                ["pendingNotices"] = ReadInt(incidents, "pending_notices", 0),
-                ["incidentFailures"] = failedIncidents,
-                ["relationshipEffects"] = ReadInt(effects, "total", 0),
-                ["relationshipEffectsApplied"] = ReadInt(effects, "applied", 0),
-                ["relationshipEffectsPending"] = pendingEffects,
-                ["relationshipEffectsFailed"] = failedEffects,
-                ["relationshipEffectsByKind"] = effectKinds.Cast<object>().ToList(),
-                ["duplicateEffects"] = duplicateEffects,
-                ["ruleViolations"] = ruleViolations,
-                ["catalogSize"] = ClanConflictCatalog.Count,
-                ["recentIncidents"] = recentIncidents.Cast<object>().ToList(),
-                ["anomalies"] = anomalies.Cast<object>().ToList()
-            };
-        }
-
-        private static int CountClanConflictRuleViolations(ReignDbConnection connection,
-            string campaignId, string timelineId)
-        {
-            int violations = 0;
-            List<Dictionary<string, object>> incidents = QuerySql(connection, @"SELECT *
-FROM clan_conflict_incidents WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                new Dictionary<string, object>
-                {
-                    ["campaign"] = campaignId, ["timeline"] = timelineId
-                });
-            foreach (Dictionary<string, object> incident in incidents)
-            {
-                List<Dictionary<string, object>> votes = ReadDictionaryList(
-                    TryParseJsonObject("{\"votes\":" + ReadString(incident, "trait_votes_json", "[]") + "}"), "votes");
-                if (votes.Count != 3 || votes.Count(x => ReadString(x, "trait", "") == "judgment") != 1
-                    || votes.Any(x => Math.Abs(ReadInt(x, "relationModifier", 0)) > ClanConflictRelationBiasCap))
-                    violations++;
-                int expectedBp = ClanConflictCharmChanceBasisPoints(ReadInt(incident, "charm_skill", 0));
-                if (ReadInt(incident, "charm_chance_bp", 0) != expectedBp) violations++;
-                List<string> a = ReadJsonStringList(ReadString(incident, "involved_a_json", "[]"));
-                List<string> b = ReadJsonStringList(ReadString(incident, "involved_b_json", "[]"));
-                if (!a.Contains(ReadString(incident, "leader_a_id", ""), StringComparer.OrdinalIgnoreCase)
-                    || !b.Contains(ReadString(incident, "leader_b_id", ""), StringComparer.OrdinalIgnoreCase)
-                    || a.Count > 6 || b.Count > 6) violations++;
-            }
-            List<Dictionary<string, object>> effects = QuerySql(connection, @"SELECT e.*,i.mediation_succeeded
-FROM clan_conflict_relationship_effects e JOIN clan_conflict_incidents i ON i.incident_id=e.incident_id
-WHERE e.campaign_id=$campaign AND e.timeline_id=$timeline;",
-                new Dictionary<string, object>
-                {
-                    ["campaign"] = campaignId, ["timeline"] = timelineId
-                });
-            foreach (Dictionary<string, object> effect in effects)
-            {
-                string kind = ReadString(effect, "effect_kind", "");
-                int amount = ReadInt(effect, "amount", 0);
-                bool valid = kind == "mediation_mutual" ? amount >= 1 && amount <= 25
-                    : kind == "feud_mutual" ? amount <= -1 && amount >= -25
-                    : kind == "winner_to_ruler" ? amount >= 1 && amount <= 15
-                    : kind == "loser_to_ruler" && amount <= -1 && amount >= -15;
-                if (!valid) violations++;
-            }
-            return violations;
-        }
-
-        private static List<string> ReadJsonStringList(string json)
+        internal static List<string> ReadJsonStringList(string json)
         {
             Dictionary<string, object> wrapper = TryParseJsonObject("{\"items\":" + (json ?? "[]") + "}")
                 ?? new Dictionary<string, object>();
@@ -1196,7 +739,7 @@ WHERE e.campaign_id=$campaign AND e.timeline_id=$timeline;",
             int day, string subject, int count)
         {
             if (count <= 1) return 0;
-            uint value = (uint)StableDirectorSeed(campaignId + "|" + timelineId,
+            uint value = (uint)DiplomacyService.StableDirectorSeed(campaignId + "|" + timelineId,
                 day, subject ?? "");
             return (int)(value % (uint)count);
         }
@@ -1204,7 +747,7 @@ WHERE e.campaign_id=$campaign AND e.timeline_id=$timeline;",
         private static int StableClanConflictD10000(string campaignId,
             string timelineId, int day, string subject)
         {
-            uint value = (uint)StableDirectorSeed(campaignId + "|" + timelineId,
+            uint value = (uint)DiplomacyService.StableDirectorSeed(campaignId + "|" + timelineId,
                 day, subject ?? "");
             return 1 + (int)(value % 10000u);
         }
@@ -1281,154 +824,6 @@ WHERE e.campaign_id=$campaign AND e.timeline_id=$timeline;",
                 index++;
             }
             return result;
-        }
-
-        private static List<Dictionary<string, object>> RunClanConflictSelfTests()
-        {
-            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
-            Action<string, bool, string> add = (id, passed, summary) => rows.Add(
-                new Dictionary<string, object>
-                {
-                    ["ok"] = true, ["passed"] = passed,
-                    ["suite"] = "clan_conflicts", ["caseId"] = id,
-                    ["name"] = id, ["summary"] = summary, ["durationMs"] = 0
-                });
-            add("per_kingdom_chance_is_eight_percent",
-                ClanConflictIncidentChance == 8,
-                "Each eligible NPC kingdom independently rolls at the configured 8% daily chance.");
-            add("catalog_contains_128_pregenerated_cases",
-                ClanConflictCatalog.Count >= 128
-                && ClanConflictCatalog.All(x => x.TraitA != "judgment"
-                    && x.TraitB != "judgment"),
-                "The pregenerated catalog contains at least 128 cases and reserves Judgment as the mandatory third trait.");
-            add("relation_bias_is_one_fifth_capped_twenty",
-                ClanConflictRelationModifier(40, 0) == 8
-                && ClanConflictRelationModifier(100, -100) == 20
-                && ClanConflictRelationModifier(-100, 100) == -20,
-                "Every trait threshold receives one fifth of the ruler's relation advantage, capped at plus or minus 20.");
-            add("charm_curve_uses_exact_endpoints",
-                ClanConflictCharmChanceBasisPoints(0) == 500
-                && ClanConflictCharmChanceBasisPoints(50) == 500
-                && ClanConflictCharmChanceBasisPoints(125) == 1750
-                && ClanConflictCharmChanceBasisPoints(200) == 3000
-                && ClanConflictCharmChanceBasisPoints(300) == 3000,
-                "Charm 50 and 200 map exactly to 5% and 30%, with linear interpolation and hard caps.");
-            add("daily_catch_up_is_lossless",
-                ClanConflictCatchUpDayKeys(100, 103).SequenceEqual(new[] { 101, 102, 103 })
-                && ClanConflictCatchUpDayKeys(7, 7).SequenceEqual(new[] { 7 }),
-                "The per-kingdom producer processes every elapsed day idempotently.");
-            List<ClanConflictEffectSpec> success = BuildClanConflictEffects(
-                "campaign", "main", 10, "incident", "ruler",
-                new List<string> { "a1", "a2" }, new List<string> { "b1" }, "a", true);
-            List<ClanConflictEffectSpec> failure = BuildClanConflictEffects(
-                "campaign", "main", 10, "incident2", "ruler",
-                new List<string> { "a1", "a2" }, new List<string> { "b1" }, "a", false);
-            add("outcome_graph_matches_contract",
-                success.Count == 12
-                && success.All(x => x.Kind == "mediation_mutual" && x.Amount >= 1 && x.Amount <= 25)
-                && failure.Count == 7
-                && failure.Count(x => x.Kind == "feud_mutual") == 4
-                && failure.Count(x => x.Kind == "winner_to_ruler") == 2
-                && failure.Count(x => x.Kind == "loser_to_ruler") == 1
-                && !failure.Any(x => x.ObserverId == "ruler"),
-                "Mediation rewards the full mutual clique; failed mediation creates only the mutual cross-clan feud and directional lord-to-ruler effects.");
-            string persistenceCampaign = "__clan_conflict_contract_"
-                + Guid.NewGuid().ToString("N").Substring(0, 8);
-            try
-            {
-                const string persistenceTimeline = "main";
-                const string persistenceKingdom = "kingdom_contract";
-                int persistenceDay = Enumerable.Range(6, 512).First(day =>
-                    StableRulerD100(persistenceCampaign, persistenceTimeline, day,
-                        "clan-conflict:daily:" + persistenceKingdom)
-                    <= ClanConflictIncidentChance);
-                Dictionary<string, object> fixture = new Dictionary<string, object>
-                {
-                    ["kingdoms"] = new List<Dictionary<string, object>>
-                    {
-                        new Dictionary<string, object>
-                        {
-                            ["kingdomId"] = persistenceKingdom,
-                            ["name"] = "Contract Kingdom",
-                            ["leaderHeroId"] = "contract_ruler",
-                            ["leaderName"] = "Contract Ruler",
-                            ["rulingClanId"] = "contract_ruling_clan",
-                            ["isPlayerKingdom"] = false,
-                            ["isRebelRealm"] = false,
-                            ["rulerSkills"] = new Dictionary<string, object> { ["charm"] = 125 }
-                        }
-                    },
-                    ["clans"] = new List<Dictionary<string, object>>
-                    {
-                        ClanConflictSelfTestClan(persistenceKingdom, "contract_clan_a",
-                            "Contract Clan A", "contract_lord_a", "Contract Lord A"),
-                        ClanConflictSelfTestClan(persistenceKingdom, "contract_clan_b",
-                            "Contract Clan B", "contract_lord_b", "Contract Lord B")
-                    }
-                };
-                ProcessClanConflictDay(persistenceCampaign, persistenceTimeline,
-                    persistenceDay, fixture);
-                ProcessClanConflictDay(persistenceCampaign, persistenceTimeline,
-                    persistenceDay, fixture);
-                Dictionary<string, object> persistenceOverview;
-                int rollCount;
-                int incidentCount;
-                using (ReignDbConnection connection = OpenCampaignConnection(persistenceCampaign))
-                {
-                    rollCount = ReadInt(QuerySql(connection, @"SELECT COUNT(*) AS count
-FROM clan_conflict_daily_rolls WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                        new Dictionary<string, object>
-                        {
-                            ["campaign"] = persistenceCampaign,
-                            ["timeline"] = persistenceTimeline
-                        }).FirstOrDefault(), "count", 0);
-                    incidentCount = ReadInt(QuerySql(connection, @"SELECT COUNT(*) AS count
-FROM clan_conflict_incidents WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                        new Dictionary<string, object>
-                        {
-                            ["campaign"] = persistenceCampaign,
-                            ["timeline"] = persistenceTimeline
-                        }).FirstOrDefault(), "count", 0);
-                    persistenceOverview = BuildWorldTestClanConflicts(connection,
-                        persistenceCampaign, persistenceTimeline, persistenceDay);
-                }
-                add("persistence_and_resume_are_idempotent",
-                    rollCount == 1 && incidentCount == 1
-                    && ReadInt(persistenceOverview, "kingdomRollsMissing", -1) == 0
-                    && ReadInt(persistenceOverview, "duplicateEffects", -1) == 0
-                    && ReadInt(persistenceOverview, "relationshipEffectsPending", -1) == 0
-                    && ReadInt(persistenceOverview, "relationshipEffectsFailed", -1) == 0
-                    && ReadInt(persistenceOverview, "ruleViolations", -1) == 0,
-                    "A passed roll persists its complete incident and effect provenance exactly once, resumes safely, and reports lossless World Test coverage.");
-            }
-            catch (Exception ex)
-            {
-                add("persistence_and_resume_are_idempotent", false,
-                    "Clan-conflict persistence contract failed: " + ex.Message);
-            }
-            return rows;
-        }
-
-        private static Dictionary<string, object> ClanConflictSelfTestClan(
-            string kingdomId, string clanId, string clanName,
-            string leaderId, string leaderName)
-        {
-            return new Dictionary<string, object>
-            {
-                ["kingdomId"] = kingdomId, ["clanId"] = clanId,
-                ["name"] = clanName, ["leaderHeroId"] = leaderId,
-                ["leaderName"] = leaderName, ["leaderIsAlive"] = true,
-                ["leaderIsChild"] = false, ["isMercenary"] = false,
-                ["isRebelClan"] = false,
-                ["members"] = new List<Dictionary<string, object>>
-                {
-                    new Dictionary<string, object>
-                    {
-                        ["heroId"] = leaderId, ["name"] = leaderName,
-                        ["isAlive"] = true, ["isChild"] = false, ["isLord"] = true
-                    }
-                }
-            };
         }
     }
 }

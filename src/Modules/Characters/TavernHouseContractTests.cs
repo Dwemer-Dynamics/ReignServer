@@ -6,9 +6,9 @@ using AIPortraits;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
-        private static List<Dictionary<string, object>> RunTavernHouseContractTests()
+        internal static List<Dictionary<string, object>> RunTavernHouseContractTests()
         {
             var results = new List<Dictionary<string, object>>();
             void Check(string name, Action test)
@@ -105,9 +105,9 @@ namespace ReignBetaServer
             });
             Check("dialogue_membership_is_private_and_receipt_bound", () => {
                 var state = new Dictionary<string, object> { ["status"] = "negotiating", ["madamId"] = "madam", ["roster"] = roster };
-                Require(TavernHousePresentProfiles(state).Select(CharacterIdFrom).SequenceEqual(new[] { "madam" }), "Workers overheard the private negotiation.");
+                Require(TavernHousePresentProfiles(state).Select(CampaignFileService.CharacterIdFrom).SequenceEqual(new[] { "madam" }), "Workers overheard the private negotiation.");
                 state["status"] = "visiting"; state["receipt"] = new Dictionary<string, object> { ["participantHeroIds"] = new[] { "worker-b", "worker-a" } };
-                Require(TavernHousePresentProfiles(state).Select(CharacterIdFrom).SequenceEqual(new[] { "worker-b", "worker-a" }), "A worker was omitted or the unselected madam was present.");
+                Require(TavernHousePresentProfiles(state).Select(CampaignFileService.CharacterIdFrom).SequenceEqual(new[] { "worker-b", "worker-a" }), "A worker was omitted or the unselected madam was present.");
                 state["status"] = "closed"; Require(Rejects(() => TavernHousePresentProfiles(state)), "A closed visit remained usable.");
             });
             Check("initial_madam_greeting_uses_server_owned_opening_and_replay", () => {
@@ -185,13 +185,19 @@ namespace ReignBetaServer
                     var response = DispatchTavernHouseDialogue(state, "request", "hash", chat, provider, _ => null, () => SaveTavernHouseSession(path, state));
                     Require(providerCalls == 1 && ReadString(response, "reply", "") == "Welcome.", "Initial provider dispatch failed.");
                     // The generic exchange is committed, but the first completed venue write fails.
-                    var exchange = new Dictionary<string, object> { ["text"] = "Welcome.", ["payload_json"] = Json.Serialize(BuildConversationTurnStoragePayload(chat)) };
+                    var exchange = new Dictionary<string, object> { ["text"] = "Welcome.", ["payload_json"] = Json.Serialize(DialogueService.BuildConversationTurnStoragePayload(chat)) };
                     state.Remove("pendingDialogue");
                     try { Action failingCompletion = () => { throw new IOException("Completed venue checkpoint unavailable."); }; failingCompletion(); }
                     catch (IOException) { }
                     state = ReadTavernHouseSession(path);
                     response = DispatchTavernHouseDialogue(state, "request", "hash", chat, provider, pending => RecoverTavernHouseDialogueRow(state, pending, exchange), () => SaveTavernHouseSession(path, state));
                     Require(providerCalls == 1 && ReadString(response, "reply", "") == "Welcome." && ReadBool(response, "recoveredDialogue", false), "Recovery repeated the provider or changed the committed reply.");
+                    Require(!DialogueService.IsDelimitedSpeechOnlyResponse(response), "A legacy venue exchange acquired a new disposition.");
+                    exchange["accepted_output_contract"] = DialogueService.OllamaDelimitedSpeechContract;
+                    var recoveredSpeech = DispatchTavernHouseDialogue(state, "request", "hash", chat, provider,
+                        pending => RecoverTavernHouseDialogueRow(state, pending, exchange), () => SaveTavernHouseSession(path, state));
+                    Require(providerCalls == 1 && DialogueService.IsDelimitedSpeechOnlyResponse(recoveredSpeech)
+                        && ReadString(recoveredSpeech, "reply", "") == "Welcome.", "Venue recovery lost the speech-only receipt or repeated generation.");
                     Require(ReadDictionaryList(state, "transcript").Count == 0, "Recovery fabricated a player turn before the completed response is checkpointed.");
                     var unknown = DispatchTavernHouseDialogue(state, "request", "hash", chat, provider, _ => null, () => SaveTavernHouseSession(path, state));
                     Require(providerCalls == 1 && ReadString(unknown, "code", "") == "uncertain_dialogue", "An uncertain provider outcome was repeated.");
@@ -199,7 +205,7 @@ namespace ReignBetaServer
                     foreach (string key in new[] { "campaignId", "timelineId", "conversationSessionId", "sceneTurnId", "speakerHeroStringId" })
                     {
                         var other = new Dictionary<string, object>(chat); other[key] = "other";
-                        exchange["payload_json"] = Json.Serialize(BuildConversationTurnStoragePayload(other));
+                        exchange["payload_json"] = Json.Serialize(DialogueService.BuildConversationTurnStoragePayload(other));
                         Require(Rejects(() => RecoverTavernHouseDialogueRow(state, ReadDictionary(state, "pendingDialogue"), exchange)), "Recovery accepted another exchange identity: " + key);
                     }
                 }
@@ -255,62 +261,62 @@ namespace ReignBetaServer
             Check("reference_membership_player_and_selected_only", () => {
                 var state = new Dictionary<string, object> { ["player"] = Hero("player", "Player"), ["playerHeroStringId"] = "player", ["roster"] = roster,
                     ["receipt"] = new Dictionary<string, object> { ["participantHeroIds"] = new[] { "worker-b", "worker-a" } } };
-                var refs = TavernHouseSceneProfiles(state);
-                Require(refs.Select(CharacterIdFrom).SequenceEqual(new[] { "player", "worker-b", "worker-a" }), "Reference identities/order leaked the unselected madam or omitted the player.");
+                var refs = PortraitsService.TavernHouseSceneProfiles(state);
+                Require(refs.Select(CampaignFileService.CharacterIdFrom).SequenceEqual(new[] { "player", "worker-b", "worker-a" }), "Reference identities/order leaked the unselected madam or omitted the player.");
                 ReadDictionary(state, "receipt")["participantHeroIds"] = new[] { "worker-a", "missing" };
-                Require(Rejects(() => TavernHouseSceneProfiles(state)), "A missing reference identity was silently omitted.");
+                Require(Rejects(() => PortraitsService.TavernHouseSceneProfiles(state)), "A missing reference identity was silently omitted.");
             });
             Check("native_tavern_full_outfit_selector_is_identity_bound", () => {
-                var snapshot = new Dictionary<string, object> { ["schema"] = "reign-native-portrait-snapshot-v1", ["campaignId"] = "campaign", ["heroStringId"] = "worker-a", ["portraitSourceProfile"] = ResidentOutfitRenderContract };
+                var snapshot = new Dictionary<string, object> { ["schema"] = "reign-native-portrait-snapshot-v1", ["campaignId"] = "campaign", ["heroStringId"] = "worker-a", ["portraitSourceProfile"] = PortraitsService.ResidentOutfitRenderContract };
                 var payload = new Dictionary<string, object> { ["campaignId"] = "campaign", ["heroStringId"] = "worker-a", ["nativeCharacterSnapshot"] = snapshot };
-                Require(PreserveResidentClothing(payload), "Explicit tavern source selector failed to preserve the worn outfit.");
+                Require(PortraitsService.PreserveResidentClothing(payload), "Explicit tavern source selector failed to preserve the worn outfit.");
                 Require(!snapshot.ContainsKey("encounteredResident"), "The full-outfit selector requires fabricated resident metadata.");
-                Require(BuildResidentPortraitPrompt(payload).Contains("Retain exactly the clothes"), "Selected portrait prompt changes the native outfit.");
-                snapshot["portraitSourceProfile"] = "unknown"; Require(!PreserveResidentClothing(payload), "An unknown selector changed portrait behavior.");
-                snapshot["portraitSourceProfile"] = ResidentOutfitRenderContract; snapshot["heroStringId"] = "other";
-                Require(!PreserveResidentClothing(payload), "A different identity supplied the outfit selector.");
+                Require(PortraitsService.BuildResidentPortraitPrompt(payload).Contains("Retain exactly the clothes"), "Selected portrait prompt changes the native outfit.");
+                snapshot["portraitSourceProfile"] = "unknown"; Require(!PortraitsService.PreserveResidentClothing(payload), "An unknown selector changed portrait behavior.");
+                snapshot["portraitSourceProfile"] = PortraitsService.ResidentOutfitRenderContract; snapshot["heroStringId"] = "other";
+                Require(!PortraitsService.PreserveResidentClothing(payload), "A different identity supplied the outfit selector.");
                 snapshot["heroStringId"] = "worker-a"; snapshot["campaignId"] = "other";
-                Require(!PreserveResidentClothing(payload), "A different campaign supplied the outfit selector.");
+                Require(!PortraitsService.PreserveResidentClothing(payload), "A different campaign supplied the outfit selector.");
                 snapshot["campaignId"] = "campaign"; payload["promptPurpose"] = "tavern_house_scene";
-                Require(!PreserveResidentClothing(payload), "A scene request inherited single-character portrait framing.");
+                Require(!PortraitsService.PreserveResidentClothing(payload), "A scene request inherited single-character portrait framing.");
             });
             Check("tavern_clothing_prompt_routes_all_adult_staff_to_adult_portraits", () => {
                 var tavern = new Dictionary<string, object> { ["schema"] = 1, ["heroStringId"] = "worker-a",
                     ["castId"] = "reign_tavern_town_EW2_01", ["madam"] = false };
                 var snapshot = new Dictionary<string, object> { ["schema"] = "reign-native-portrait-snapshot-v1",
                     ["campaignId"] = "campaign", ["heroStringId"] = "worker-a", ["age"] = 25,
-                    ["portraitSourceProfile"] = ResidentOutfitRenderContract, ["tavernHouse"] = tavern };
+                    ["portraitSourceProfile"] = PortraitsService.ResidentOutfitRenderContract, ["tavernHouse"] = tavern };
                 var payload = new Dictionary<string, object> { ["campaignId"] = "campaign", ["heroStringId"] = "worker-a",
                     ["nativeCharacterSnapshot"] = snapshot, ["promptPurpose"] = "portrait", ["gender"] = "male",
                     ["ageYears"] = 25, ["physicalConfidence"] = new Dictionary<string, object> { ["score"] = 10 } };
-                Require(IsTavernHousePortrait(payload) && PreserveResidentClothing(payload)
-                    && UsesAdultPortraitClothingEdit(payload), "An adult male worker did not enter the Tavern clothing edit.");
-                string workerPrompt = BuildAdultPortraitClothingPrompt(payload);
+                Require(PortraitsService.IsTavernHousePortrait(payload) && PortraitsService.PreserveResidentClothing(payload)
+                    && PortraitsService.UsesAdultPortraitClothingEdit(payload), "An adult male worker did not enter the Tavern clothing edit.");
+                string workerPrompt = PortraitsService.BuildAdultPortraitClothingPrompt(payload);
                 Require(workerPrompt.Contains("TAVERN HOUSE worker") && workerPrompt.Contains("Change only the clothing")
                     && !workerPrompt.Contains("[TAVERN ROLE]") && !workerPrompt.Contains("Culturally appropriate"),
                     "The common clothing prompt was not expanded or replaced by a culture prompt.");
                 tavern["madam"] = true;
-                Require(BuildAdultPortraitClothingPrompt(payload).Contains("TAVERN HOUSE madam"), "The same prompt did not identify the madam.");
+                Require(PortraitsService.BuildAdultPortraitClothingPrompt(payload).Contains("TAVERN HOUSE madam"), "The same prompt did not identify the madam.");
                 var settings = new Dictionary<string, object> { ["adultPortraitProvider"] = "OpenRouter",
                     ["adultPortraitOpenRouterImageModel"] = "selected-adult-portrait-model", ["portraitProvider"] = "NanoGPT" };
-                var profile = ResolveImageGenerationProfile(settings, "adultPortrait");
+                var profile = PortraitsService.ResolveImageGenerationProfile(settings, "adultPortrait");
                 Require(profile.Name == "adultPortrait" && profile.Provider == "OpenRouter"
                     && profile.OpenRouterModel == "selected-adult-portrait-model", "Tavern clothing bypassed the configured adult portrait profile.");
                 snapshot["age"] = 17;
-                Require(!UsesAdultPortraitClothingEdit(payload), "A minor entered the Tavern clothing edit.");
+                Require(!PortraitsService.UsesAdultPortraitClothingEdit(payload), "A minor entered the Tavern clothing edit.");
                 snapshot["age"] = 25; tavern["heroStringId"] = "other";
-                Require(!UsesAdultPortraitClothingEdit(payload), "An unrelated Tavern identity entered the clothing edit.");
+                Require(!PortraitsService.UsesAdultPortraitClothingEdit(payload), "An unrelated Tavern identity entered the clothing edit.");
                 tavern["heroStringId"] = "worker-a"; payload["promptPurpose"] = "tavern_house_scene";
-                Require(!UsesAdultPortraitClothingEdit(payload), "A scene request entered the portrait clothing edit.");
+                Require(!PortraitsService.UsesAdultPortraitClothingEdit(payload), "A scene request entered the portrait clothing edit.");
             });
             Check("reference_sheet_preserves_every_cell", () => {
                 byte[] Solid(byte r, byte g, byte b) { var pixels = new byte[8 * 16 * 4]; for (int i = 0; i < pixels.Length; i += 4) { pixels[i] = r; pixels[i + 1] = g; pixels[i + 2] = b; pixels[i + 3] = 255; } return PngEncoder.EncodeRgba(pixels, 8, 16); }
                 byte[] red = Solid(255, 0, 0), blue = Solid(0, 0, 255);
-                byte[] rgba = PngReencode.DecodeToRgba(TavernHouseReferenceSheet(new List<byte[]> { red, blue }), out int w, out int h);
+                byte[] rgba = PngReencode.DecodeToRgba(PortraitsService.TavernHouseReferenceSheet(new List<byte[]> { red, blue }), out int w, out int h);
                 Require(w == 640 && h == 448, "Sheet geometry is incorrect.");
                 Require(rgba[(224 * w + 160) * 4] == 255 && rgba[(224 * w + 480) * 4 + 2] == 255, "Reference source order changed or a cell was empty.");
-                Require(Rejects(() => TavernHouseReferenceSheet(new List<byte[]> { red })), "Sheet omitted the player's companion.");
-                byte[] square = NormalizeTavernHouseSquare(red); PngReencode.DecodeToRgba(square, out w, out h);
+                Require(Rejects(() => PortraitsService.TavernHouseReferenceSheet(new List<byte[]> { red })), "Sheet omitted the player's companion.");
+                byte[] square = PortraitsService.NormalizeTavernHouseSquare(red); PngReencode.DecodeToRgba(square, out w, out h);
                 Require(w == 1024 && h == 1024, "Scene did not fit the registered square aperture.");
             });
             Check("editable_prompt_pack_and_fixed_boundary", () => {
@@ -318,11 +324,11 @@ namespace ReignBetaServer
                 Require(defaults["tavern_house_look_again_summary.txt"].Contains("complete attributed conversation"), "Summary default truncates or ignores full conversation.");
                 Require(defaults["tavern_house_look_again_image.txt"].Contains("{summary}") && defaults["tavern_house_arrival_image.txt"].Contains("{participants}"), "Image prompt lost summary/identity placeholders.");
                 Require(defaults["tavern_house_portrait_clothing.txt"].Contains("[TAVERN ROLE]"), "Tavern clothing prompt lost its role token.");
-                var meta = PromptMetadataByName()["tavern_house_portrait_clothing.txt"];
+                var meta = PromptService.PromptMetadataByName()["tavern_house_portrait_clothing.txt"];
                 Require(ReadBool(meta, "visible", false) && ReadString(meta, "category", "") == "image"
                     && ReadString(meta, "label", "") == "Tavern House: Portrait Clothing",
                     "Tavern clothing prompt is not visible in the WebUI image prompt library.");
-                Require(TavernHouseImageBoundary.Contains("Everyone remains clothed") && TavernHouseImageBoundary.Contains("include the player visibly") && TavernHouseImageBoundary.Contains("Never depict sexual acts"), "Runtime scene boundary or player identity is missing.");
+                Require(PortraitsService.TavernHouseImageBoundary.Contains("Everyone remains clothed") && PortraitsService.TavernHouseImageBoundary.Contains("include the player visibly") && PortraitsService.TavernHouseImageBoundary.Contains("Never depict sexual acts"), "Runtime scene boundary or player identity is missing.");
             });
             Check("look_again_uses_configured_adult_event_profile_with_safe_scene_contract", () => {
                 var state = new Dictionary<string, object> { ["campaignId"] = "campaign", ["timelineId"] = "timeline" };
@@ -330,14 +336,14 @@ namespace ReignBetaServer
                     ["sceneryProvider"] = "NanoGPT", ["sceneryNanoGptImageModel"] = "selected-normal-event-model" };
                 foreach (string kind in new[] { "arrival", "look_again" })
                 {
-                    var request = BuildTavernHouseImageRequest(state, kind, "scene-key", "A quiet clothed conversation.", new byte[] { 1, 2 });
-                    var profile = ResolveImageGenerationProfile(settings, ReadString(request, "promptPurpose", ""));
+                    var request = PortraitsService.BuildTavernHouseImageRequest(state, kind, "scene-key", "A quiet clothed conversation.", new byte[] { 1, 2 });
+                    var profile = PortraitsService.ResolveImageGenerationProfile(settings, ReadString(request, "promptPurpose", ""));
                     if (kind == "look_again") Require(profile.Name == "adultScenery" && profile.Provider == "OpenRouter" && profile.OpenRouterModel == "selected-adult-event-model", "Look Again bypassed the configured adult event provider or model.");
                     else Require(profile.Name == "scenery" && profile.Provider == "NanoGPT" && profile.NanoGptModel == "selected-normal-event-model", "Arrival bypassed the normal event provider or model.");
-                    Require(ReadString(request, "prompt", "").EndsWith(TavernHouseImageBoundary, StringComparison.Ordinal), "Changing image profiles removed the fixed non-explicit scene contract.");
+                    Require(ReadString(request, "prompt", "").EndsWith(PortraitsService.TavernHouseImageBoundary, StringComparison.Ordinal), "Changing image profiles removed the fixed non-explicit scene contract.");
                     Require(ReadString(request, "sceneInterface", "") == "tavern_house" && ReadString(request, "cacheKey", "") == "tavern_scene_scene-key" && ReadString(request, "outputSize", "") == "1024x1024", "Image routing lost the tavern interface, cache namespace, or scene aperture.");
                 }
-                Require(Rejects(() => BuildTavernHouseImageRequest(state, "unknown", "key", "", new byte[] { 1 })), "An unknown scene kind silently chose a provider profile.");
+                Require(Rejects(() => PortraitsService.BuildTavernHouseImageRequest(state, "unknown", "key", "", new byte[] { 1 })), "An unknown scene kind silently chose a provider profile.");
             });
             Dictionary<string, object> BookingState() => TestDict("campaignId", "campaign", "timelineId", "timeline", "townId", "town",
                 "conversationSessionId", "session", "playerHeroStringId", "player", "madamId", "madam", "status", "negotiating",
@@ -359,7 +365,7 @@ namespace ReignBetaServer
                     Kind = kind, ProposalId = kind == "none" ? "" : a.Id, Revision = kind == "none" ? 0 : a.Revision, TermsHash = kind == "none" ? "" : a.TermsHash() })));
             Check("visit_action_catalog_and_schema_hidden_outside_tavern", () => {
                 using var scope = new TavernActionScopeLease(null);
-                Require(!StructuredActionFixedPrompt().Contains(Reign.Core.Contracts.Actions.TavernHouseVisitAction.Id) && TavernVisitActionPrompt() == "", "Tavern action leaked into global prompt.");
+                Require(!DialogueService.StructuredActionFixedPrompt().Contains(Reign.Core.Contracts.Actions.TavernHouseVisitAction.Id) && TavernVisitActionPrompt() == "", "Tavern action leaked into global prompt.");
                 var templates = CodexConversationSchemas.TemplateNames(CodexConversationContractKind.Group).ToDictionary(name => name, name => "built-in fixture " + name);
                 var protocol = TestDict("structuredActionProtocolVersion", Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion);
                 var generic = CodexConversationSchemas.Select(CodexConversationContractKind.Group, templates, templates, protocol);
@@ -374,14 +380,14 @@ namespace ReignBetaServer
                 foreach (string scene in new[] { "individual", "party_chat", "castle", "correspondence", "tavern_house" })
                 {
                     var a = Booking(BookingState()); var chat = BookingChat(a); chat["sceneInterface"] = scene;
-                    CaptureStructuredActionDecision(chat, BookingDecision(a, "accept"));
+                    DialogueService.CaptureStructuredActionDecision(chat, BookingDecision(a, "accept"));
                     Require(!ReadBool(ReadDictionary(chat, "validatedStructuredActionDecision"), "valid", true), "Caller sceneInterface forged tavern scope: " + scene);
                 }
             });
             Check("visit_action_typed_accept_prepares_exact_receipt_without_payment", () => {
                 var state = BookingState(); var a = Booking(state); var chat = BookingChat(a);
                 using var scope = new TavernActionScopeLease(TavernVisitContext(state));
-                CaptureStructuredActionDecision(chat, BookingDecision(a, "accept"));
+                DialogueService.CaptureStructuredActionDecision(chat, BookingDecision(a, "accept"));
                 var response = TestDict("ok", true, "structuredActionDecision", ReadDictionary(chat, "validatedStructuredActionDecision"));
                 PrepareTavernVisitAction(state, chat, response);
                 var prepared = ReadDictionary(response, "preparedVisit");
@@ -402,19 +408,19 @@ namespace ReignBetaServer
                 using var scope = new TavernActionScopeLease(TavernVisitContext(state));
                 foreach (var response in new[] { TestDict("reply", "Paid and agreed."), TestDict("ok", false), TestDict("structuredActionDecision", TestDict("valid", false)) })
                     PrepareTavernVisitAction(state, chat, response);
-                CaptureStructuredActionDecision(chat, BookingDecision(a, "reject"));
+                DialogueService.CaptureStructuredActionDecision(chat, BookingDecision(a, "reject"));
                 PrepareTavernVisitAction(state, chat, TestDict("structuredActionDecision", ReadDictionary(chat, "validatedStructuredActionDecision")));
                 Require(ReadDictionaryList(state, "preparedVisits").Count == 0, "Speech or failed/rejected output prepared a visit.");
                 var changed = BookingState(); changed["roster"] = roster.Concat(new[] { Hero("new-worker", "New Worker") }).ToList();
                 using var updated = new TavernActionScopeLease(TavernVisitContext(changed));
-                CaptureStructuredActionDecision(chat, BookingDecision(a, "accept"));
+                DialogueService.CaptureStructuredActionDecision(chat, BookingDecision(a, "accept"));
                 Require(!ReadBool(ReadDictionary(chat, "validatedStructuredActionDecision"), "valid", true), "Old roster was accepted.");
             });
             Check("visit_action_npc_offer_requires_saved_fingerprint_and_both_consents", () => {
                 var state = BookingState(); var a = Booking(state); a.ProposerId = "madam"; a.PlayerAcceptedHash = "";
                 a.NpcAcceptedHash = a.TermsHash(); a.PlayerAcceptedHash = a.TermsHash();
                 var chat = BookingChat(a); using var scope = new TavernActionScopeLease(TavernVisitContext(state));
-                CaptureStructuredActionDecision(chat, BookingDecision(a, "none"));
+                DialogueService.CaptureStructuredActionDecision(chat, BookingDecision(a, "none"));
                 var response = TestDict("structuredActionDecision", ReadDictionary(chat, "validatedStructuredActionDecision"));
                 PrepareTavernVisitAction(state, chat, response); Require(!response.ContainsKey("preparedVisit"), "An unrecorded NPC offer was accepted.");
                 state["structuredVisitOffer"] = Reign.Core.Contracts.Actions.TavernHouseVisitAction.Fingerprint(a);
@@ -423,11 +429,11 @@ namespace ReignBetaServer
             Check("visit_action_consumes_offer_once_and_blocks_legacy_bypass", () => {
                 var state = BookingState(); var a = Booking(state); var chat = BookingChat(a);
                 using var scope = new TavernActionScopeLease(TavernVisitContext(state));
-                CaptureStructuredActionDecision(chat, BookingDecision(a, "accept"));
+                DialogueService.CaptureStructuredActionDecision(chat, BookingDecision(a, "accept"));
                 PrepareTavernVisitAction(state, chat, TestDict("structuredActionDecision", ReadDictionary(chat, "validatedStructuredActionDecision")));
                 Require(ReadDictionaryList(state, "preparedVisits").Count == 1 && !state.ContainsKey("structuredVisitOffer"), "Offer not consumed once.");
                 var second = Booking(state); second.Id = "second-booking"; second.PlayerAcceptedHash = second.TermsHash();
-                var secondChat = BookingChat(second); CaptureStructuredActionDecision(secondChat, BookingDecision(second, "accept"));
+                var secondChat = BookingChat(second); DialogueService.CaptureStructuredActionDecision(secondChat, BookingDecision(second, "accept"));
                 var response = TestDict("structuredActionDecision", ReadDictionary(secondChat, "validatedStructuredActionDecision"));
                 PrepareTavernVisitAction(state, secondChat, response);
                 Require(response.ContainsKey("preparedVisitError") && !response.ContainsKey("preparedVisit") && ReadDictionaryList(state, "preparedVisits").Count == 1, "A second identity reused one session's payment preparation.");
@@ -445,7 +451,7 @@ namespace ReignBetaServer
                     new Reign.Core.Contracts.Actions.ActionProposedTerm { ActionId = clause.ActionId, ActorId = clause.ActorId, RecipientId = clause.RecipientId,
                         Arguments = clause.Arguments.Select(kv => new Reign.Core.Contracts.Actions.ActionArgument { Key = kv.Key, Value = kv.Value }).ToList() } } };
                 var parsed = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(TestDict("reply", "Worker A for 120 denars.", "structuredActionDecision", proposal)));
-                using var scope = new TavernActionScopeLease(TavernVisitContext(state)); CaptureStructuredActionDecision(chat, parsed);
+                using var scope = new TavernActionScopeLease(TavernVisitContext(state)); DialogueService.CaptureStructuredActionDecision(chat, parsed);
                 var response = TestDict("structuredActionDecision", ReadDictionary(chat, "validatedStructuredActionDecision"));
                 PrepareTavernVisitAction(state, chat, response);
                 Require(ReadString(state, "structuredVisitOffer", "") == Reign.Core.Contracts.Actions.TavernHouseVisitAction.Fingerprint(a)
@@ -460,7 +466,7 @@ namespace ReignBetaServer
             });
 
             results.AddRange(RunTavernHouseRosterTests());
-            results.AddRange(RunPreparedTavernPortraitSourceTests());
+            results.AddRange(PortraitsService.RunPreparedTavernPortraitSourceTests());
             return results;
         }
     }

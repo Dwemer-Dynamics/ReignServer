@@ -7,29 +7,29 @@ using Reign.Core.Contracts.Actions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
-        private static List<Dictionary<string, object>> RunNpcLivesSelfTests()
+        internal static List<Dictionary<string, object>> RunNpcLivesSelfTests()
         {
-            if (string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)) throw new InvalidOperationException("NPC Lives checks require the isolated Verification Lab.");
+            if (string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)) throw new InvalidOperationException("NPC Lives checks require the isolated Verification Lab.");
             var results = new List<Dictionary<string, object>>();
             void Check(string id, bool passed, object data = null) => results.Add(TestDict("caseId", "npc_lives_" + id, "passed", passed, "summary", id, "data", data));
             string campaign = "npc_lives_test_" + Guid.NewGuid().ToString("N");
             try
             {
-                string fixture = Path.Combine(VerificationDir, "npc-lives-options-fixture.json");
-                WriteJsonObject(fixture, TestDict("markup", ReignXpOptionsHtml(), "script", ReignXpOptionsScript(),
-                    "diagnosticsMarkup", NpcLivesDiagnosticsHtml(), "diagnosticsScript", NpcStoryEditorScript(),
+                string fixture = Path.Combine(VerificationService.VerificationDir, "npc-lives-options-fixture.json");
+                CampaignFileService.WriteJsonObject(fixture, TestDict("markup", SettingsService.ReignXpOptionsHtml(), "script", SettingsService.ReignXpOptionsScript(),
+                    "diagnosticsMarkup", SettingsService.NpcLivesDiagnosticsHtml(), "diagnosticsScript", NpcStoryEditorScript(),
                     "definitions", NpcStoryCatalog.All));
                 Check("production_options_browser_fixture", File.Exists(fixture), fixture);
-                string simpleOptions = ReignXpOptionsHtml(), diagnostics = NpcLivesDiagnosticsHtml();
+                string simpleOptions = SettingsService.ReignXpOptionsHtml(), diagnostics = SettingsService.NpcLivesDiagnosticsHtml();
                 Check("story_editor_and_advanced_controls_live_in_diagnostics", !simpleOptions.Contains("npcStoryJson")
                     && !simpleOptions.Contains("npcLivesApproachProvider") && !simpleOptions.Contains("npcLivesResumeHours")
                     && simpleOptions.Contains("npcLivesSummonsTravelTimePercent") && simpleOptions.Contains("npcLivesChance20")
                     && diagnostics.Contains("npcStoryJson") && diagnostics.Contains("npcLivesResumeHours")
                     && diagnostics.Contains("npcLivesApproachProvider") && !diagnostics.Contains("npcLivesFrequencyPercent"));
-                using var c = OpenCampaignConnection(campaign);
-                EnsureAcceptedConversationUnitSchema(c); EnsureConversationAgencySchema(c);
+                using var c = ReignDatabase.OpenCampaignConnection(campaign);
+                DialogueService.EnsureAcceptedConversationUnitSchema(c); DialogueService.EnsureConversationAgencySchema(c);
                 string generation = NpcLivesGeneration(c);
                 var state = ReadNpcLives(c, campaign, "test");
                 var options = new NpcLivesOptions();
@@ -44,9 +44,9 @@ namespace ReignBetaServer
                     && !diagnostics.Contains("id='" + NpcLivesOptions.InitialApproachKey + "'")
                     && !initialApproachOff.Allows("approach") && initialApproachOff.Allows("major")
                     && initialApproachOff.Allows("announcement") && initialApproachOff.Allows("reaction")
-                    && ValidateNpcLivesOptions(TestDict(NpcLivesOptions.InitialApproachKey, false)).Length == 0
-                    && ValidateNpcLivesOptions(TestDict(NpcLivesOptions.InitialApproachKey, "false")).Length > 0
-                    && !ReadBool(NpcLivesOptionsForClient(TestDict(NpcLivesOptions.InitialApproachKey, false)), NpcLivesOptions.InitialApproachKey, true));
+                    && SettingsService.ValidateNpcLivesOptions(TestDict(NpcLivesOptions.InitialApproachKey, false)).Length == 0
+                    && SettingsService.ValidateNpcLivesOptions(TestDict(NpcLivesOptions.InitialApproachKey, "false")).Length > 0
+                    && !ReadBool(SettingsService.NpcLivesOptionsForClient(TestDict(NpcLivesOptions.InitialApproachKey, false)), NpcLivesOptions.InitialApproachKey, true));
                 Check("approach_has_no_short_timeout_control", !NpcLivesOptions.Numbers.Any(s => s.Key == "npcLivesApproachTimeoutMs")
                     && !simpleOptions.Contains("npcLivesApproachTimeoutMs") && !diagnostics.Contains("npcLivesApproachTimeoutMs"));
                 var fixtureState = new NpcLivesState { CampaignId = campaign, TimelineId = "test" };
@@ -79,14 +79,14 @@ namespace ReignBetaServer
                 {
                     var values = new Dictionary<string, string> { ["playerText"] = purposePlayerText, ["priorDialogueText"] = "",
                         ["contextPullText"] = "An old account incorrectly named a tavern outside Zeonica." };
-                    var budget = BuildBudgetedConversationLiveTurn("dialogue_live_turn_template.txt", "priorDialogueText", values,
+                    var budget = DialogueService.BuildBudgetedConversationLiveTurn("dialogue_live_turn_template.txt", "priorDialogueText", values,
                         "Llanoc Hen.", "Speak only for yourself.", "", "Rules.", "Profile.", targetOverride: 9000,
                         capacity: TestDict("inputAllowance", 32000, "outputFits", true));
-                    var envelope = CreatePromptEnvelope(eventMode ? "social_event" : "dialogue", "test", "Rules.", "Profile.", budget.Structure.WithoutMarkers(budget.LiveTurn));
+                    var envelope = DialogueService.CreatePromptEnvelope(eventMode ? "social_event" : "dialogue", "test", "Rules.", "Profile.", budget.Structure.WithoutMarkers(budget.LiveTurn));
                     AttachNpcPurposePrompt(envelope, purposePayload, "companion");
-                    StructureConversationMessages(envelope, budget.Structure, "", new List<Dictionary<string, object>>(),
-                        FormatDialogueForPrompt, "companion", "Player", purposePlayerText, eventMode, text => text);
-                    FinalizeContinuityPromptBudget(envelope, purposePayload, TestDict("inputAllowance", 32000, "outputFits", true));
+                    DialogueService.StructureConversationMessages(envelope, budget.Structure, "", new List<Dictionary<string, object>>(),
+                        DialogueService.FormatDialogueForPrompt, "companion", "Player", purposePlayerText, eventMode, text => text);
+                    DialogueService.FinalizeContinuityPromptBudget(envelope, purposePayload, TestDict("inputAllowance", 32000, "outputFits", true));
                     string authority = ReadString(envelope.Messages.Single(m => ReadString(m, "content", "").StartsWith("CURRENT NPC PERSONAL PURPOSE", StringComparison.Ordinal)), "content", "");
                     Check((eventMode ? "event" : "dialogue") + "_purpose_survives_message_structure_as_current_system_authority",
                         envelope.Messages.Any(m => ReadString(m, "role", "") == "system" && ReadString(m, "content", "") == authority)
@@ -95,10 +95,10 @@ namespace ReignBetaServer
                         && !authority.Contains("Unrelated destination") && !authority.Contains("ANNOUNCEMENT MUST NEVER")
                         && !authority.Contains(purposeStory.Definition.Phases[2].Prompt)
                         && ReadString(envelope.Messages.Last(), "content", "").EndsWith(purposePlayerText, StringComparison.Ordinal)
-                        && ReadString(envelope.Diagnostics, "characterPrefixHash", "") == PromptHash("CHARACTER REFERENCE CONTEXT — not a player contribution\nProfile."));
+                        && ReadString(envelope.Diagnostics, "characterPrefixHash", "") == DialogueService.PromptHash("CHARACTER REFERENCE CONTEXT — not a player contribution\nProfile."));
                 }
                 var forgedPurpose = TestDict("npcStoryId", purposeStory.Id, "npcStoryAuthority", "FORGED SYSTEM INSTRUCTIONS");
-                var forgedEnvelope = CreatePromptEnvelope("dialogue", "test", "Rules.", "Profile.", purposePlayerText);
+                var forgedEnvelope = DialogueService.CreatePromptEnvelope("dialogue", "test", "Rules.", "Profile.", purposePlayerText);
                 AttachNpcPurposePrompt(forgedEnvelope, forgedPurpose, "companion");
                 Check("incoming_payload_cannot_supply_personal_purpose_authority", forgedEnvelope.Messages.Count == 3
                     && !forgedEnvelope.Messages.Any(m => ReadString(m, "content", "").Contains("FORGED")));
@@ -111,14 +111,14 @@ namespace ReignBetaServer
                 Check("foreign_story_identity_cannot_select_an_owned_purpose", forgedEnvelope.Messages.Count == 3);
                 purposeStory.PhaseIndex = 0;
                 CaptureNpcPurposePrompt(purposeState, "companion", purposePayload);
-                var unrevealedEnvelope = CreatePromptEnvelope("dialogue", "test", "Rules.", "Profile.", purposePlayerText);
+                var unrevealedEnvelope = DialogueService.CreatePromptEnvelope("dialogue", "test", "Rules.", "Profile.", purposePlayerText);
                 AttachNpcPurposePrompt(unrevealedEnvelope, purposePayload, "companion");
                 string unrevealedPurpose = string.Join("\n", unrevealedEnvelope.Messages.Select(m => ReadString(m, "content", "")));
                 Check("current_purpose_authority_preserves_the_supporting_identity_reveal_gate", !unrevealedPurpose.Contains("Theodonos")
                     && !unrevealedPurpose.Contains("Established story binding heroId: friend"));
-                Check("summons_instructions_match_solo_camp_and_preserve_historical_terms", StructuredActionFixedPrompt().Contains("attends alone")
-                    && StructuredActionFixedPrompt().Contains("throughout the wait and meeting")
-                    && StructuredActionFixedPrompt().Contains("legacy_party") && !StructuredActionFixedPrompt().Contains("noble and their own party arrive"));
+                Check("summons_instructions_match_solo_camp_and_preserve_historical_terms", DialogueService.StructuredActionFixedPrompt().Contains("attends alone")
+                    && DialogueService.StructuredActionFixedPrompt().Contains("throughout the wait and meeting")
+                    && DialogueService.StructuredActionFixedPrompt().Contains("legacy_party") && !DialogueService.StructuredActionFixedPrompt().Contains("noble and their own party arrive"));
                 var duelState = new NpcLivesState { CampaignId = campaign, TimelineId = "test" };
                 var duelStory = new NpcStoryInstance { Id = "training", HeroId = "companion", Status = "active", PhaseIndex = 1,
                     Definition = NpcStoryCatalog.All.Single(d => d.Id == "major_training"), LocationId = "town" };
@@ -260,7 +260,7 @@ namespace ReignBetaServer
                         return !ApplyNpcLivesRelationshipOwnership(exchange, rows, "player") && rows.Count == 1;
                     });
                 Check("uncommitted_or_foreign_owner_cannot_suppress_relationships", forgedOwnerRejected);
-                EnsureCategorizedMemorySchema(c);
+                DialogueService.EnsureCategorizedMemorySchema(c);
                 var repeatDefinition = Json.Deserialize<NpcStoryDefinition>(Json.Serialize(NpcStoryCatalog.All.Single(d => d.Id == "brief_cooking_01")));
                 repeatDefinition.Phases[0].Objectives[0].RequiredProgress = 3;
                 string repeatObjective = repeatDefinition.Phases[0].Objectives[0].Id;
@@ -270,11 +270,10 @@ namespace ReignBetaServer
                     HeroId = "companion", LocationId = "town", Quote = "Add unsalted broth." });
                 var repeatState = new NpcLivesState { CampaignId = campaign, TimelineId = "test" };
                 repeatState.Stories.Add(repeatStory);
-                ExecuteSql(c, @"INSERT INTO conversation_turns(turn_id,session_id,turn_order,role,speaker_id,text,ts)
-VALUES('repeat_original','repeat_session',0,'player','player','Add unsalted broth. Then taste it.',1);");
+                CharactersSelfTestStore.InsertConversationTurns(c);
                 void SubmitRepeatProbe(string sourceId, string contributionText, string excerpt)
                 {
-                    var unit = new AcceptedConversationUnit { Campaign = campaign, Player = "player", Hero = "companion",
+                    var unit = new DialogueService.AcceptedConversationUnit { Campaign = campaign, Player = "player", Hero = "companion",
                         Payload = TestDict("locationId", "town", "worldDay", 10d),
                         Parsed = TestDict("npcStoryAssessments", new[] { TestDict("storyId", repeatStory.Id, "revision", 1,
                             "objectiveId", repeatObjective, "outcome", "progress", "evidenceQuote", excerpt) }) };
@@ -303,7 +302,7 @@ VALUES('repeat_original','repeat_session',0,'player','player','Add unsalted brot
                         SourceId = "arrival", HeroId = petStory.HeroId, Kind = "native", LocationId = "town" });
                     void SubmitPet(string id, string words, string result, string reply, string conclusion)
                     {
-                        var unit = new AcceptedConversationUnit { Campaign = campaign, Hero = petStory.HeroId, Player = "player", Reply = reply,
+                        var unit = new DialogueService.AcceptedConversationUnit { Campaign = campaign, Hero = petStory.HeroId, Player = "player", Reply = reply,
                             Payload = TestDict("locationId", "town", "npcStoryId", petStory.Id, "worldDay", 10d),
                             Parsed = TestDict("npcStoryAssessments", new[] { TestDict("storyId", petStory.Id, "revision", 1,
                                 "objectiveId", activity.Id, "outcome", result, "evidenceQuote", words, "resolutionQuote", conclusion) }) };
@@ -338,7 +337,7 @@ VALUES('repeat_original','repeat_session',0,'player','player','Add unsalted brot
                     void SubmitVerse(string sourceId, string words, string reply, string resolution, string result = "completed",
                         int revision = 1, string hero = "verse_npc", string speaker = "player", string location = "town", string assessedObjective = "")
                     {
-                        var unit = new AcceptedConversationUnit { Campaign = campaign, Hero = hero, Player = "player", Reply = reply,
+                        var unit = new DialogueService.AcceptedConversationUnit { Campaign = campaign, Hero = hero, Player = "player", Reply = reply,
                             Payload = TestDict("locationId", location, "npcStoryId", verse.Id, "worldDay", 10d),
                             Parsed = TestDict("npcStoryAssessments", new[] { TestDict("storyId", verse.Id, "revision", revision,
                                 "objectiveId", assessedObjective.Length == 0 ? objectiveId : assessedObjective, "outcome", result,
@@ -439,14 +438,14 @@ VALUES('repeat_original','repeat_session',0,'player','player','Add unsalted brot
                 NpcLivesAnnouncement(c, state, announcement, "player", options, 10);
                 var a = state.Announcements.Single();
                 Check("announcement_freezes_actual_roster_and_deduplicates", a.RecipientIds.SequenceEqual(new[] { "companion", "guest" })
-                    && QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id=$id AND status='active';", TestDict("id", announcementId)).Count == 1);
-                var originals = QuerySql(c, "SELECT text,participants_json FROM conversation_turns WHERE session_id=$id AND status='source_only';", TestDict("id", announcementId));
-                var published = QuerySql(c, "SELECT payload_json FROM conversation_turns WHERE turn_id=$id;", TestDict("id", announcementId + "_source")).Single();
+                    && CharactersSelfTestStore.SelectConversationTurns2(c, TestDict("id", announcementId)).Count == 1);
+                var originals = CharactersSelfTestStore.SelectConversationTurns3(c, TestDict("id", announcementId));
+                var published = CharactersSelfTestStore.SelectConversationTurns4(c, TestDict("id", announcementId + "_source")).Single();
                 Check("announcement_receipt_retains_exact_author_original_without_duplicate_visible_line", ReadBool(announcementReceipt, "persisted", false)
                     && originals.Count == 1 && ReadString(originals[0], "text", "") == a.Text
                     && ReadString(originals[0], "participants_json", "") == Json.Serialize(new[] { "player" })
                     && ReadString(TryParseJsonObject(ReadString(published, "payload_json", "{}")), "inputSourceId", "") == ReadString(announcementReceipt, "sourceId", "")
-                    && QuerySql(c, "SELECT input_id FROM conversation_input_receipts WHERE session_id=$id;", TestDict("id", announcementId)).Count == 1);
+                    && CharactersSelfTestStore.SelectConversationInputReceipts(c, TestDict("id", announcementId)).Count == 1);
                 bool changedRejected = false;
                 announcement["text"] = "Different words";
                 try { NpcLivesAnnouncement(c, state, announcement, "player", options, 10); } catch (InvalidOperationException) { changedRejected = true; }
@@ -465,30 +464,29 @@ VALUES('repeat_original','repeat_session',0,'player','player','Add unsalted brot
                 WriteNpcLives(c, state);
                 string protectedLife = NpcLivesPrompt(campaign, "companion", TestDict("playerId", "player", "timelineId", "test", "worldDay", 10d));
                 var lifePromptValues = new Dictionary<string, string> { ["playerText"] = "How are you?", ["priorDialogueText"] = "",
-                    ["contextPullText"] = protectedLife + "\n\n" + RenderContinuityRecord("optional_old", "reported_exchange", "companion", "old", 1, 10, false, new string('x', 12000)) };
-                var compactedLife = BuildBudgetedConversationLiveTurn("dialogue_live_turn_template.txt", "priorDialogueText", lifePromptValues,
+                    ["contextPullText"] = protectedLife + "\n\n" + DialogueService.RenderContinuityRecord("optional_old", "reported_exchange", "companion", "old", 1, 10, false, new string('x', 12000)) };
+                var compactedLife = DialogueService.BuildBudgetedConversationLiveTurn("dialogue_live_turn_template.txt", "priorDialogueText", lifePromptValues,
                     "A quiet street.", "Speak only for yourself.", "", "Rules.", "Profile.", targetOverride: 9000,
                     capacity: TestDict("inputAllowance", 32000, "outputFits", true));
-                var lifeEnvelope = CreatePromptEnvelope("dialogue", "test", "Rules.", "Profile.", compactedLife.LiveTurn);
+                var lifeEnvelope = DialogueService.CreatePromptEnvelope("dialogue", "test", "Rules.", "Profile.", compactedLife.LiveTurn);
                 string finalLifeMessages = string.Join("\n", lifeEnvelope.Messages.Select(m => ReadString(m, "content", "")));
                 Check("provider_prompt_compaction_retains_personal_facts_and_announcement_review", finalLifeMessages.Contains("Bramble")
                     && finalLifeMessages.Contains("announcementReview") && finalLifeMessages.Contains("eastern gate")
                     && !finalLifeMessages.Contains(new string('x', 12000)));
-                Check("personal_life_is_a_required_owner_only_prompt_record", ContinuityPromptRecords(protectedLife, false).Count == 1
-                    && ContinuityPromptRecords(protectedLife, false).Single().Required
+                Check("personal_life_is_a_required_owner_only_prompt_record", DialogueService.ContinuityPromptRecords(protectedLife, false).Count == 1
+                    && DialogueService.ContinuityPromptRecords(protectedLife, false).Single().Required
                     && NpcLivesPrompt(campaign, "town_notable", TestDict("playerId", "player", "timelineId", "test", "worldDay", 10d)).Length == 0);
                 var opening = NpcEncounter(state, "player", "companion", TestDict());
                 opening.BeginOpening("opening_fixture", 10, 1); opening.OpeningDay = 10; opening.OpeningGeneration = generation;
                 opening.SessionId = "opening_session"; opening.OpeningPayload = Json.Serialize(TestDict("playerId", "player", "heroName", "Mira",
                     "campaignId", campaign, "timelineId", "test", "worldDay", 10d, "locationId", "town"));
-                ExecuteSql(c, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
-VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",""companion""]','{""timelineId"":""test""}');", TestDict("campaign", campaign));
+                CharactersSelfTestStore.InsertConversationSessions2(c, TestDict("campaign", campaign));
                 CompleteNpcOpening(c, state, opening, TestDict(), TestDict(), generation);
                 string fallback = opening.OpeningText;
                 CompleteNpcOpening(c, state, opening, TestDict(), TestDict("reply", "A late conflicting reply", "activity", "arguing"), generation);
                 Check("failed_opening_does_not_invent_or_accept_fallback", opening.OpeningText.Length == 0
                     && !opening.OpeningPending && !opening.LastAcceptedDay.HasValue
-                    && QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id='opening_session';").Count == 0
+                    && CharactersSelfTestStore.SelectConversationTurns5(c).Count == 0
                     && !ReadBool(NpcOpeningStatus(opening, generation), "ok", true));
                 Check("failed_opening_does_not_claim_announcement_reaction", a.ReactionPending("companion"));
                 foreach (bool foreignSessionTimeline in new[] { true, false })
@@ -496,22 +494,20 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                     string fencedId = foreignSessionTimeline ? "foreign_timeline" : "changed_audience";
                     opening.BeginOpening(fencedId, 10, 1);
                     var fencedPayload = BuildNpcOpeningRequest(state, opening, TestDict(), "player", "companion", fencedId, 10);
-                    ExecuteSql(c, "UPDATE conversation_sessions SET payload_json=$payload,participants_json=$audience WHERE session_id='opening_session';",
-                        TestDict("payload", Json.Serialize(TestDict("timelineId", foreignSessionTimeline ? "foreign" : "test")),
+                    CharactersSelfTestStore.UpdateConversationSessions(c, TestDict("payload", Json.Serialize(TestDict("timelineId", foreignSessionTimeline ? "foreign" : "test")),
                             "audience", Json.Serialize(foreignSessionTimeline ? new[] { "player", "companion" } : new[] { "player", "companion", "unexpected_listener" })));
                     CompleteNpcOpening(c, state, opening, TestDict(),
                         SealNpcApproachDraft(fencedPayload, TestDict("reply", "An unpublished fenced opening.", "activity", "sorting herbs")), generation);
                     Check("publication_rejects_actual_session_" + fencedId, !opening.OpeningPending && !opening.LastAcceptedDay.HasValue
-                        && QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id='opening_session';").Count == 0);
+                        && CharactersSelfTestStore.SelectConversationTurns5(c).Count == 0);
                 }
-                ExecuteSql(c, "UPDATE conversation_sessions SET payload_json=$payload,participants_json=$audience WHERE session_id='opening_session';",
-                    TestDict("payload", Json.Serialize(TestDict("timelineId", "test")), "audience", Json.Serialize(new[] { "player", "companion" })));
+                CharactersSelfTestStore.UpdateConversationSessions(c, TestDict("payload", Json.Serialize(TestDict("timelineId", "test")), "audience", Json.Serialize(new[] { "player", "companion" })));
                 opening.BeginOpening("grounded_retry", 10, 1);
                 var retryPayload = BuildNpcOpeningRequest(state, opening, TestDict(), "player", "companion", "grounded_retry", 10);
                 var retryDraft = SealNpcApproachDraft(retryPayload, TestDict("reply", "A little company would be welcome.", "activity", "sorting herbs"));
                 CompleteNpcOpening(c, state, opening, TestDict(), retryDraft, generation);
                 Check("grounded_retry_publishes_once_without_player_speech", opening.OpeningText == "A little company would be welcome."
-                    && QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id='opening_session';").Count == 1);
+                    && CharactersSelfTestStore.SelectConversationTurns5(c).Count == 1);
                 Check("silent_resume_uses_elapsed_game_time", !opening.BeginOpening("too_soon", 10 + 59d / 1440, 1)
                     && opening.BeginOpening("due", 10 + 1d / 24, 1));
                 opening.OpeningDay = 10.5;
@@ -538,24 +534,24 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                             "associatedActionIds", new[] { "government.support_vote" }) })));
                 string settledOpeningBefore = Json.Serialize(settledOpeningSource);
                 var settledOpening = BuildNpcOpeningRequest(state, opening, settledOpeningSource, "player", "companion", "settled-opening", 10.5);
-                var settledFacts = VerifiedAgreementPaymentHistory(settledOpening, "companion", "player");
-                string settledOpeningPrompt = BuildConversationDecisionPrompt(TestDict("fulfilledPaymentHistory", settledFacts));
+                var settledFacts = DialogueService.VerifiedAgreementPaymentHistory(settledOpening, "companion", "player");
+                string settledOpeningPrompt = DialogueService.BuildConversationDecisionPrompt(TestDict("fulfilledPaymentHistory", settledFacts));
                 var settledOpeningResponseContract = TestDict();
-                AttachStructuredActionResponseContract(settledOpeningResponseContract, settledOpening);
+                DialogueService.AttachStructuredActionResponseContract(settledOpeningResponseContract, settledOpening);
                 Check("arrival_remembers_delivered_ballot_fee_without_new_bargain",
                     ReadDictionaryList(settledFacts, "rows").Count == 1
                     && settledOpeningPrompt.Contains("settled-ballot-fee") && settledOpeningPrompt.Contains("30000")
                     && settledOpeningPrompt.Contains("an earlier conditional offer cannot make a verified delivery still unpaid")
-                    && UsesStructuredActions(settledOpening)
-                    && StructuredActionPrompt(settledOpening).Contains("structuredActionDecision")
-                    && UsesStructuredActions(settledOpeningResponseContract)
+                    && DialogueService.UsesStructuredActions(settledOpening)
+                    && DialogueService.StructuredActionPrompt(settledOpening).Contains("structuredActionDecision")
+                    && DialogueService.UsesStructuredActions(settledOpeningResponseContract)
                     && NpcApproachInstructions(settledOpening).Contains("kind none")
                     && ReadDictionary(settledOpening, "structuredActionContext").Count == 3
                     && ReadString(settledOpening, "playerText", "missing") == ""
                     && Json.Serialize(settledOpeningSource) == settledOpeningBefore);
                 Check("arrival_payment_history_remains_private_to_the_actual_pair",
-                    VerifiedAgreementPaymentHistory(settledOpening, "other", "player").Count == 0
-                    && VerifiedAgreementPaymentHistory(settledOpening, "companion", "other").Count == 0);
+                    DialogueService.VerifiedAgreementPaymentHistory(settledOpening, "other", "player").Count == 0
+                    && DialogueService.VerifiedAgreementPaymentHistory(settledOpening, "companion", "other").Count == 0);
                 var completedVoteSource = TestDict("channel", "in_person", "nativePoliticalContext",
                     TestDict("authoritative", true, "observedWorldDay", 200d, "observerGovernment",
                         TestDict("available", true, "authoritative", true, "knowledgeHolderHeroId", "companion",
@@ -566,13 +562,13 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                                     "ballots", new[] { TestDict("memberHeroId", "companion", "optionId", "grant") }) })));
                 var completedVoteArrival = BuildNpcOpeningRequest(state, opening, completedVoteSource,
                     "player", "companion", "completed-vote-opening", 200d);
-                string completedVotePrompt = BuildGovernmentPrivateConversationPrompt(completedVoteArrival);
+                string completedVotePrompt = GovernmentService.BuildGovernmentPrivateConversationPrompt(completedVoteArrival);
                 Check("arrival_preserves_native_closed_vote_evidence_without_new_consent",
                     IsNpcLifeApproach(completedVoteArrival) && completedVotePrompt.Contains("completed-mandate")
                     && completedVotePrompt.Contains("\"closed\":true") && completedVotePrompt.Contains("\"ownRecordedBallot\"")
                     && completedVotePrompt.Contains("\"resolvedDay\":110")
                     && !completedVotePrompt.Contains("PRIVATE GOVERNMENT BUSINESS")
-                    && UsesStructuredActions(completedVoteArrival)
+                    && DialogueService.UsesStructuredActions(completedVoteArrival)
                     && NpcApproachInstructions(completedVoteArrival).Contains("An arrival does not review or accept an action")
                     && ReadString(completedVoteArrival, "playerText", "missing") == "");
                 var reviewState = new NpcLivesState { CampaignId = campaign, TimelineId = "test" };
@@ -589,11 +585,11 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                 WriteNpcLives(c, reviewState);
                 string protectedBatch = NpcLivesPrompt(campaign, "companion", TestDict("playerId", "player", "timelineId", "test", "worldDay", 10d));
                 var batchValues = new Dictionary<string, string> { ["playerText"] = "Tell me more.", ["priorDialogueText"] = "",
-                    ["contextPullText"] = protectedBatch + "\n\n" + RenderContinuityRecord("optional_batch", "reported_exchange", "companion", "old", 1, 10, false, new string('x', 12000)) };
-                var compactedBatch = BuildBudgetedConversationLiveTurn("dialogue_live_turn_template.txt", "priorDialogueText", batchValues,
+                    ["contextPullText"] = protectedBatch + "\n\n" + DialogueService.RenderContinuityRecord("optional_batch", "reported_exchange", "companion", "old", 1, 10, false, new string('x', 12000)) };
+                var compactedBatch = DialogueService.BuildBudgetedConversationLiveTurn("dialogue_live_turn_template.txt", "priorDialogueText", batchValues,
                     "A quiet street.", "Speak only for yourself.", "", "Rules.", "Profile.", targetOverride: 9000,
                     capacity: TestDict("inputAllowance", 32000, "outputFits", true));
-                string finalBatchMessages = string.Join("\n", CreatePromptEnvelope("dialogue", "test", "Rules.", "Profile.", compactedBatch.LiveTurn).Messages.Select(m => ReadString(m, "content", "")));
+                string finalBatchMessages = string.Join("\n", DialogueService.CreatePromptEnvelope("dialogue", "test", "Rules.", "Profile.", compactedBatch.LiveTurn).Messages.Select(m => ReadString(m, "content", "")));
                 Check("provider_compaction_keeps_entire_review_window_and_strict_active_story", Enumerable.Range(0, 15).All(i => finalBatchMessages.Contains("Pending subject " + i + "."))
                     && finalBatchMessages.Contains("npcStoryAssessments") && finalBatchMessages.Contains("no_comment")
                     && finalBatchMessages.Contains(authored.Phases[0].Prompt) && !finalBatchMessages.Contains("A private subject")
@@ -672,7 +668,7 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                     var poll = NpcLivesOpenApi("opening", TestDict("campaignId", campaign, "timelineId", "test", "playerId", "player",
                         "heroId", "companion", "operationId", opening.OpeningOperationId, "generation", generation, "worldDay", 10.5d));
                     Check("expired_legacy_deadline_keeps_live_provider_pending", ReadString(poll, "status", "") == "pending"
-                        && QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id='opening_session';").Count == 1);
+                        && CharactersSelfTestStore.SelectConversationTurns5(c).Count == 1);
                     var slowProvider = System.Diagnostics.Stopwatch.StartNew();
                     NpcOpeningTestProvider = (_, _) => { calls++; System.Threading.Thread.Sleep(3100); return TestDict("ok", true, "content",
                         Json.Serialize(TestDict("reply", "I am sorting herbs. A little company would be welcome.", "activity", "sorting herbs", "receptiveness", "receptive"))); };
@@ -688,13 +684,13 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                 state = ReadNpcLives(c, campaign, "test"); opening = state.Encounters.Single(e => e.Id == opening.Id);
                 Check("mocked_fast_provider_commits_once_and_resume_remains_silent", calls == 1 && opening.Activity == "sorting herbs"
                     && !opening.OpeningPending && !opening.BeginOpening("reopen", 10.5, 1)
-                    && QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id='opening_session';").Count == 2);
+                    && CharactersSelfTestStore.SelectConversationTurns5(c).Count == 2);
                 var disabledRequest = TestDict("campaignId", campaign, "timelineId", "test", "playerId", "player",
                     "heroId", "switch_npc", "worldDay", 12d);
-                int acceptedBefore = QuerySql(c, "SELECT turn_id FROM conversation_turns;").Count;
+                int acceptedBefore = CharactersSelfTestStore.SelectConversationTurns6(c).Count;
                 var disabledOpen = NpcLivesOpenApi("open", disabledRequest, initialApproachOff);
                 Check("disabled_initial_approach_starts_no_job_or_accepted_turn", ReadString(disabledOpen, "status", "") == "disabled"
-                    && QuerySql(c, "SELECT turn_id FROM conversation_turns;").Count == acceptedBefore
+                    && CharactersSelfTestStore.SelectConversationTurns6(c).Count == acceptedBefore
                     && !NpcOpeningJobs.ContainsKey(campaign + "|test|player:switch_npc")
                     && !ReadNpcLives(c, campaign, "test").Encounters.Any(e => e.HeroId == "switch_npc"));
                 var toggled = NpcEncounter(state, "player", "switch_npc", TestDict());
@@ -710,7 +706,7 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                 CompleteNpcOpening(c, state, toggled, TestDict(), TestDict("reply", "A late greeting."), generation);
                 Check("switch_off_poll_cancels_pending_draft_without_acceptance", ReadString(disabledPoll, "status", "") == "disabled"
                     && !toggled.OpeningPending && toggled.OpeningOperationId.Length == 0 && !toggled.LastAcceptedDay.HasValue
-                    && !NpcOpeningJobs.ContainsKey(toggledJob) && QuerySql(c, "SELECT turn_id FROM conversation_turns;").Count == acceptedBefore);
+                    && !NpcOpeningJobs.ContainsKey(toggledJob) && CharactersSelfTestStore.SelectConversationTurns6(c).Count == acceptedBefore);
                 toggled.BeginOpening("inflight_before_switch_off", 12, 1); toggled.OpeningGeneration = generation;
                 toggled.OpeningPayload = Json.Serialize(TestDict("playerId", "player"));
                 NpcOpeningJobs[toggledJob] = toggled.OpeningOperationId + "|" + generation;
@@ -718,7 +714,7 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                 var restoredToggle = ReadNpcLives(c, campaign, "test");
                 Check("switch_off_publication_does_not_consume_pending_reactions_or_clock", !toggled.OpeningPending
                     && !restoredToggle.Encounters.Single(e => e.HeroId == "switch_npc").LastAcceptedDay.HasValue
-                    && QuerySql(c, "SELECT turn_id FROM conversation_turns;").Count == acceptedBefore
+                    && CharactersSelfTestStore.SelectConversationTurns6(c).Count == acceptedBefore
                     && restoredToggle.Announcements.Single(n => n.Id == "unconsumed_at_switch_off").ReactionPending("switch_npc")
                     && !NpcOpeningJobs.ContainsKey(toggledJob)
                     && NpcLivesPromptBody(restoredToggle, "switch_npc", "player", TestDict("worldDay", 12d), initialApproachOff).Contains("We leave after breakfast."));
@@ -814,7 +810,7 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                         void Submit(string sourceId, string quote, string acceptedWords, int revision, string outcome = "progress", string speaker = "player")
                         {
                             const string conclusion = "I have reached my personal conclusion after our discussion.";
-                            var unit = new AcceptedConversationUnit { Campaign = campaign, Hero = sample.HeroId, Player = "player", Payload = payload, Reply = conclusion,
+                            var unit = new DialogueService.AcceptedConversationUnit { Campaign = campaign, Hero = sample.HeroId, Player = "player", Payload = payload, Reply = conclusion,
                                 Parsed = TestDict("npcStoryAssessments", new[] { TestDict("storyId", sample.Id, "revision", revision,
                                     "objectiveId", objective.Id, "outcome", outcome, "evidenceQuote", quote, "resolutionQuote", outcome == "completed" ? conclusion : "") }) };
                             AcceptNpcStoryAssessment(c, state, unit, new List<Dictionary<string, object>>
@@ -970,13 +966,13 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
             }
             catch (Exception ex)
             {
-                Check("fixture_completed", false, LimitText(ex.ToString(), 3000));
-                results.Last()["summary"] = "fixture_completed: " + LimitText(ex.Message, 600);
+                Check("fixture_completed", false, DialogueService.LimitText(ex.ToString(), 3000));
+                results.Last()["summary"] = "fixture_completed: " + DialogueService.LimitText(ex.Message, 600);
             }
             finally
             {
-                try { WriteJsonObject(Path.Combine(VerificationDir, "npc-lives-self-tests.json"), TestDict(
-                    "schema", "reign-npc-lives-offline-evidence-v1", "passed", results.All(CheckPassed), "checks", results)); }
+                try { CampaignFileService.WriteJsonObject(Path.Combine(VerificationService.VerificationDir, "npc-lives-self-tests.json"), TestDict(
+                    "schema", "reign-npc-lives-offline-evidence-v1", "passed", results.All(VerificationService.CheckPassed), "checks", results)); }
                 finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             }
             return results;
@@ -988,20 +984,20 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
             void Check(string id, bool passed) => results.Add(TestDict("caseId", "npc_lives_group_approach_" + id,
                 "passed", passed, "summary", id));
             const string timeline = "group_approach_branch";
-            using var c = OpenCampaignConnection(campaign);
+            using var c = ReignDatabase.OpenCampaignConnection(campaign);
             var options = new NpcLivesOptions();
             foreach (string context in new[] { "party", "home:town", "castle:hall" })
             {
                 string prefix = context.Replace(':', '_'), session = "group_session_" + prefix;
                 string[] npcs = { prefix + "_ira", prefix + "_rhagaea" };
                 var audience = npcs.Concat(new[] { "player" }).ToArray();
-                var start = ConversationStartApi(TestDict("campaignId", campaign, "timelineId", timeline,
+                var start = DialogueService.ConversationStartApi(TestDict("campaignId", campaign, "timelineId", timeline,
                     "sessionId", session, "npcId", npcs[0], "playerId", "player", "channel", "party_chat",
                     "worldDay", 10d, "participants", audience));
-                var saved = QuerySql(c, "SELECT * FROM conversation_sessions WHERE session_id=$id;", TestDict("id", session)).Single();
+                var saved = CharactersSelfTestStore.SelectConversationSessions(c, TestDict("id", session)).Single();
                 Check(prefix + "_session_retains_timeline_and_full_group", ReadBool(start, "ok", false)
                     && ReadString(TryParseJsonObject(ReadString(saved, "payload_json", "{}")), "timelineId", "") == timeline
-                    && TextListFromJson(ReadString(saved, "participants_json", "[]")).OrderBy(id => id)
+                    && DialogueService.TextListFromJson(ReadString(saved, "participants_json", "[]")).OrderBy(id => id)
                         .SequenceEqual(audience.OrderBy(id => id)));
                 foreach (string hero in npcs)
                 {
@@ -1019,18 +1015,16 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                         "activity", "waiting in the room", "receptiveness", "receptive"));
                     CompleteNpcOpening(c, state, encounter, p, draft, encounter.OpeningGeneration, options);
                     CompleteNpcOpening(c, state, encounter, p, draft, encounter.OpeningGeneration, options);
-                    var accepted = QuerySql(c, "SELECT * FROM conversation_turns WHERE session_id=$session AND speaker_id=$hero;",
-                        TestDict("session", session, "hero", hero));
+                    var accepted = CharactersSelfTestStore.SelectConversationTurns7(c, TestDict("session", session, "hero", hero));
                     Check(prefix + "_" + hero + "_publishes_once_to_whole_group", !encounter.OpeningPending
                         && encounter.LastAcceptedDay == 10 && accepted.Count == 1
-                        && TextListFromJson(ReadString(accepted.Single(), "participants_json", "[]")).OrderBy(id => id)
+                        && DialogueService.TextListFromJson(ReadString(accepted.Single(), "participants_json", "[]")).OrderBy(id => id)
                             .SequenceEqual(audience.OrderBy(id => id)));
                     var resume = NpcLivesOpenApi("open", p, options);
                     Check(prefix + "_" + hero + "_reopens_silently", ReadBool(resume, "ok", false)
                         && ReadString(resume, "status", "") == "resume");
                 }
-                Check(prefix + "_greetings_do_not_invent_player_speech", QuerySql(c,
-                    "SELECT turn_id FROM conversation_turns WHERE session_id=$id AND role='player';", TestDict("id", session)).Count == 0);
+                Check(prefix + "_greetings_do_not_invent_player_speech", CharactersSelfTestStore.SelectConversationTurns8(c, TestDict("id", session)).Count == 0);
                 foreach (string mismatch in new[] { "timeline", "player", "missing_listener", "extra_listener", "missing_timeline" })
                 {
                     var p = TestDict("campaignId", campaign, "timelineId", mismatch == "timeline" ? "other_branch" : timeline,
@@ -1039,15 +1033,14 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                         "npcLifeAudienceIds", mismatch == "missing_listener" ? new[] { "player", npcs[0] }
                             : mismatch == "extra_listener" ? audience.Concat(new[] { "unexpected_listener" }).ToArray() : audience);
                     if (mismatch == "missing_timeline")
-                        ExecuteSql(c, "UPDATE conversation_sessions SET payload_json='{}' WHERE session_id=$id;", TestDict("id", session));
+                        CharactersSelfTestStore.UpdateConversationSessions2(c, TestDict("id", session));
                     var rejected = NpcLivesOpenApi("open", p, options);
                     Check(prefix + "_rejects_" + mismatch + "_before_generation", !ReadBool(rejected, "ok", true)
                         && ReadString(rejected, "error", "").Contains("audience or timeline")
                         && !NpcOpeningJobs.Keys.Any(key => key.StartsWith(campaign + "|", StringComparison.Ordinal))
-                        && QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id=$id;", TestDict("id", session)).Count == 2);
+                        && CharactersSelfTestStore.SelectConversationTurns9(c, TestDict("id", session)).Count == 2);
                     if (mismatch == "missing_timeline")
-                        ExecuteSql(c, "UPDATE conversation_sessions SET payload_json=$payload WHERE session_id=$id;",
-                            TestDict("id", session, "payload", ReadString(saved, "payload_json", "{}")));
+                        CharactersSelfTestStore.UpdateConversationSessions3(c, TestDict("id", session, "payload", ReadString(saved, "payload_json", "{}")));
                 }
             }
             return results;
@@ -1065,7 +1058,7 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
             string before = Json.Serialize(state);
             const string priorPlayer = "Sometimes home isnt a place either, sometimes its the right people.";
             const string priorNpc = "If home is the right people, I'll stop asking the song where it lives. I'll just listen to it with you.";
-            string previousConversation = RenderContinuityRecord("previous_music_exchange", "reported_exchange", "corein", "test", 9, 121, true,
+            string previousConversation = DialogueService.RenderContinuityRecord("previous_music_exchange", "reported_exchange", "corein", "test", 9, 121, true,
                 "Earlier accepted conversation in Ostican. Player: " + priorPlayer + "\nCorein: " + priorNpc);
             foreach (bool eventMode in new[] { false, true })
             foreach (bool reviewingOffer in new[] { false, true })
@@ -1074,18 +1067,18 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                 var payload = TestDict("playerId", "player", "timelineId", "test", "conversationSessionId", "later_camp_session", "worldDay", 10d);
                 if (reviewingOffer) payload["npcStoryId"] = story.Id;
                 string body = NpcLivesPromptBody(state, "corein", "player", payload, new NpcLivesOptions());
-                string personalLife = RenderContinuityRecord("pending_music_context", "npc_personal_life", "corein", "test", 10, 140, true, body);
+                string personalLife = DialogueService.RenderContinuityRecord("pending_music_context", "npc_personal_life", "corein", "test", 10, 140, true, body);
                 var values = new Dictionary<string, string> { ["playerText"] = playerText, ["priorDialogueText"] = "",
                     ["contextPullText"] = previousConversation + "\n" + personalLife + "\n"
-                        + RenderContinuityRecord("optional_music_noise", "reported_exchange", "corein", "old", 1, 10, false, new string('x', 12000)) };
-                var budget = BuildBudgetedConversationLiveTurn("dialogue_live_turn_template.txt", "priorDialogueText", values,
+                        + DialogueService.RenderContinuityRecord("optional_music_noise", "reported_exchange", "corein", "old", 1, 10, false, new string('x', 12000)) };
+                var budget = DialogueService.BuildBudgetedConversationLiveTurn("dialogue_live_turn_template.txt", "priorDialogueText", values,
                     "A campfire in the wilderness.", "Speak only for yourself.", "", "Rules.", "Profile.", targetOverride: 9000,
                     capacity: TestDict("inputAllowance", 32000, "outputFits", true));
-                var envelope = CreatePromptEnvelope(eventMode ? "social_event" : "dialogue", "test", "Rules.", "Profile.", budget.Structure.WithoutMarkers(budget.LiveTurn));
+                var envelope = DialogueService.CreatePromptEnvelope(eventMode ? "social_event" : "dialogue", "test", "Rules.", "Profile.", budget.Structure.WithoutMarkers(budget.LiveTurn));
                 AttachNpcPurposePrompt(envelope, payload, "corein");
-                StructureConversationMessages(envelope, budget.Structure, "", new List<Dictionary<string, object>>(),
-                    FormatDialogueForPrompt, "corein", "Player", playerText, eventMode, text => text);
-                FinalizeContinuityPromptBudget(envelope, payload, TestDict("inputAllowance", 32000, "outputFits", true));
+                DialogueService.StructureConversationMessages(envelope, budget.Structure, "", new List<Dictionary<string, object>>(),
+                    DialogueService.FormatDialogueForPrompt, "corein", "Player", playerText, eventMode, text => text);
+                DialogueService.FinalizeContinuityPromptBudget(envelope, payload, TestDict("inputAllowance", 32000, "outputFits", true));
                 string messages = string.Join("\n", envelope.Messages.Select(m => ReadString(m, "content", "")));
                 bool pendingReference = messages.Contains("PENDING PERSONAL INVITATION [pending_music, revision 1]")
                     && messages.Contains("music_offer") && messages.Contains("Ostican")
@@ -1103,11 +1096,11 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
             }
             var foreignPayload = TestDict("npcStoryId", "foreign_story", "worldDay", 10d);
             string foreignPrompt = NpcLivesPromptBody(state, "corein", "player", foreignPayload, new NpcLivesOptions());
-            var foreignEnvelope = CreatePromptEnvelope("dialogue", "test", "Rules.", "Profile.", "Tell me more.");
+            var foreignEnvelope = DialogueService.CreatePromptEnvelope("dialogue", "test", "Rules.", "Profile.", "Tell me more.");
             AttachNpcPurposePrompt(foreignEnvelope, foreignPayload, "corein");
             Check("foreign_story_cannot_request_pending_activity_preview_or_authority", !foreignPrompt.Contains("Proposed activity reference")
                 && !foreignPrompt.Contains(story.Definition.Phases[0].Prompt) && foreignEnvelope.Messages.Count == 3);
-            var forgedAssessment = new AcceptedConversationUnit { Campaign = campaign, Hero = "corein", Player = "player",
+            var forgedAssessment = new DialogueService.AcceptedConversationUnit { Campaign = campaign, Hero = "corein", Player = "player",
                 Payload = TestDict("npcStoryId", story.Id, "locationId", story.LocationId, "worldDay", 10d),
                 Reply = "We have heard the song and shared what home means to us.",
                 Parsed = TestDict("npcStoryAssessments", new[] { TestDict("storyId", story.Id, "revision", story.Revision,
@@ -1121,7 +1114,7 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
             story.Status = "active";
             var activePayload = TestDict("npcStoryId", story.Id, "locationId", story.LocationId, "worldDay", 10d);
             string activeReference = NpcLivesPromptBody(state, "corein", "player", activePayload, new NpcLivesOptions());
-            var activeEnvelope = CreatePromptEnvelope("dialogue", "test", "Rules.", "Profile.", "Let us discuss the song.");
+            var activeEnvelope = DialogueService.CreatePromptEnvelope("dialogue", "test", "Rules.", "Profile.", "Let us discuss the song.");
             AttachNpcPurposePrompt(activeEnvelope, activePayload, "corein");
             Check("accepted_story_keeps_authored_activity_and_scoped_system_purpose", activeReference.Contains(story.Definition.Phases[0].Prompt)
                 && activeReference.Contains("npcStoryAssessments") && activeEnvelope.Messages.Any(m => ReadString(m, "role", "") == "system"

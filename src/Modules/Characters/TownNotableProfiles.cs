@@ -6,13 +6,13 @@ using System.Threading;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
-        private const string TownNotableProfileSource = "town_entry_prewarm";
-        [ThreadStatic] private static TownProfileWork CurrentTownProfileWork;
-        private static readonly TownProfileQueue TownProfiles = new TownProfileQueue();
+        internal const string TownNotableProfileSource = "town_entry_prewarm";
+        [ThreadStatic] internal static TownProfileWork CurrentTownProfileWork;
+        internal static readonly TownProfileQueue TownProfiles = new TownProfileQueue();
 
-        private sealed class TownProfileWork
+        internal sealed class TownProfileWork
         {
             internal string Key, Campaign, HeroId, SettingsHash;
             internal long Generation;
@@ -25,7 +25,7 @@ namespace ReignBetaServer
 
         // One bounded pool across visits/campaigns. No unbounded Task per hero and
         // no occupation of the single shared maintenance-scheduler thread.
-        private sealed class TownProfileQueue
+        internal sealed class TownProfileQueue
         {
             private readonly object gate = new object();
             private readonly Queue<TownProfileWork> waiting = new Queue<TownProfileWork>();
@@ -103,23 +103,23 @@ namespace ReignBetaServer
         private static string TownProfileKey(long generation, string campaign, string hero)
             => generation + "|" + campaign.ToLowerInvariant() + "|" + hero.ToLowerInvariant();
 
-        private static Dictionary<string, object> WithCharacterConstructionGate(string campaign, string hero, string source,
+        internal static Dictionary<string, object> WithCharacterConstructionGate(string campaign, string hero, string source,
             Func<Dictionary<string, object>> construct)
         {
             if (source != TownNotableProfileSource)
-                TownProfiles.Promote(TownProfileKey(Interlocked.Read(ref CampaignReplacementGeneration), campaign, hero));
-            using (EnterCampaignWorkLock(NarrativeConstructionLocks.GetOrAdd(campaign + "|" + hero, _ => new object())))
+                TownProfiles.Promote(TownProfileKey(Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration), campaign, hero));
+            using (PersistenceService.EnterCampaignWorkLock(NarrativeConstructionLocks.GetOrAdd(campaign + "|" + hero, _ => new object())))
                 return construct();
         }
 
         private static bool TownProfileGenerationCurrent(long generation)
-            => generation == Interlocked.Read(ref CampaignReplacementGeneration);
+            => generation == Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration);
 
-        private static Dictionary<string, object> PrewarmTownNotableProfiles(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> PrewarmTownNotableProfiles(Dictionary<string, object> payload)
         {
             string campaign = ReadString(payload, "campaignId", "");
             if (string.IsNullOrWhiteSpace(campaign)) return TestDict("ok", false, "error", "campaignId is required.");
-            long generation = Interlocked.Read(ref CampaignReplacementGeneration);
+            long generation = Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration);
             if (ReadString(payload, "operation", "enqueue") == "scope")
                 return TestDict("ok", true, "generation", generation);
             if (ReadString(payload, "operation", "enqueue") != "enqueue")
@@ -130,41 +130,41 @@ namespace ReignBetaServer
             var heroes = ReadDictionaryList(payload, "heroes");
             if (string.IsNullOrWhiteSpace(town) || ReadString(payload, "settlementType", "") != "town" || heroes.Count > 128)
                 return TestDict("ok", false, "error", "One town and at most 128 notable profiles are required.");
-            var settings = LoadSettings();
+            var settings = SettingsService.LoadSettings();
             if (!ReadBool(settings, "constructCharactersWithLlm", true))
                 return TestDict("ok", true, "result", "construction_disabled", "queued", 0);
             int concurrency = Math.Clamp(ReadInt(settings, "providerMaxConcurrency", 4), 1, 16);
-            string settingsHash = SettingsFingerprint(settings);
+            string settingsHash = SettingsService.SettingsFingerprint(settings);
             DateTime captured = DateTime.TryParse(ReadString(payload, "capturedUtc", ""), System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.RoundtripKind, out var capture) ? capture.ToUniversalTime() : DateTime.MinValue;
             if (captured > DateTime.UtcNow) captured = DateTime.UtcNow;
             var counts = new Dictionary<string, object>();
             foreach (var hero in heroes.Where(h => TownNotableCandidate(h, town))
-                .GroupBy(CharacterIdFrom, StringComparer.OrdinalIgnoreCase).Select(g => g.First()))
+                .GroupBy(CampaignFileService.CharacterIdFrom, StringComparer.OrdinalIgnoreCase).Select(g => g.First()))
             {
-                string heroId = CharacterIdFrom(hero);
+                string heroId = CampaignFileService.CharacterIdFrom(hero);
                 var work = new TownProfileWork { Campaign = campaign, HeroId = heroId, Generation = generation,
                     Key = TownProfileKey(generation, campaign, heroId), SettingsHash = settingsHash,
                     CapturedUtc = captured, Hero = DeepCloneProfileDictionary(hero) };
                 string result = TownProfiles.Enqueue(work, concurrency, RunTownProfileWork,
-                    ex => LogOperational("notable_prewarm.failed", TestDict("campaignId", campaign, "error", LimitText(ex.Message, 500))));
+                    ex => OperationsService.LogOperational("notable_prewarm.failed", TestDict("campaignId", campaign, "error", DialogueService.LimitText(ex.Message, 500))));
                 counts[result] = ReadInt(counts, result, 0) + 1;
             }
             var response = TestDict("ok", true, "schema", "reign-town-notable-prewarm-v1", "generation", generation,
                 "settlementId", town, "concurrency", concurrency, "counts", counts, "pending", TownProfiles.Count);
-            LogOperational("notable_prewarm.queued", response);
+            OperationsService.LogOperational("notable_prewarm.queued", response);
             return response;
         }
 
         private static bool TownNotableCandidate(Dictionary<string, object> hero, string town)
-            => !string.IsNullOrWhiteSpace(CharacterIdFrom(hero)) && ReadBool(hero, "isNotable", false)
+            => !string.IsNullOrWhiteSpace(CampaignFileService.CharacterIdFrom(hero)) && ReadBool(hero, "isNotable", false)
                 && ReadBool(hero, "isAlive", false)
                 && (ReadString(hero, "currentSettlementId", "") == town || ReadString(hero, "homeSettlementId", "") == town);
 
         private static bool RunTownProfileWork(TownProfileWork work)
             => RunTownProfileWorkCore(work, (campaign, heroId, hero) => ReadInt(hero, "narrativeVersion", 0) >= 5
-                ? EnsureCharacterConstructed(campaign, heroId, hero, TownNotableProfileSource)
-                : ConstructCharacterFiles(campaign, heroId, hero, true, true, TownNotableProfileSource));
+                ? CharactersService.EnsureCharacterConstructed(campaign, heroId, hero, TownNotableProfileSource)
+                : CharactersService.ConstructCharacterFiles(campaign, heroId, hero, true, true, TownNotableProfileSource));
 
         private static bool RunTownProfileWorkCore(TownProfileWork work,
             Func<string, string, Dictionary<string, object>, Dictionary<string, object>> construct)
@@ -172,16 +172,16 @@ namespace ReignBetaServer
             // The body stays synchronous on this worker. HTTP-equivalent leases
             // release around provider/hero-lock waits and fence every publication
             // after restore, import or deletion, including authoring checkpoints.
-            var access = EnterCampaignRequestAccess("/notables/profiles/prewarm");
+            var access = Program.EnterCampaignRequestAccess("/notables/profiles/prewarm");
             try
             {
-                if (!TownProfileGenerationCurrent(work.Generation) || ShutdownRequested) return true;
+                if (!TownProfileGenerationCurrent(work.Generation) || Program.ShutdownRequested) return true;
                 CurrentTownProfileWork = work;
-                using (EnterCampaignWorkLock(NarrativeConstructionLocks.GetOrAdd(work.Campaign + "|" + work.HeroId, _ => new object())))
+                using (PersistenceService.EnterCampaignWorkLock(NarrativeConstructionLocks.GetOrAdd(work.Campaign + "|" + work.HeroId, _ => new object())))
                 {
-                    ThrowIfCampaignRequestReplaced();
-                    var latest = ReadJsonObject(CharacterFile(work.Campaign, work.HeroId, "profile.json"));
-                    var hero = MergeProfileForConstruction(work.Campaign, work.HeroId, work.Hero);
+                    PersistenceService.ThrowIfCampaignRequestReplaced();
+                    var latest = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(work.Campaign, work.HeroId, "profile.json"));
+                    var hero = CharactersService.MergeProfileForConstruction(work.Campaign, work.HeroId, work.Hero);
                     if (DateTime.TryParse(ReadString(latest, "updatedUtc", ""), System.Globalization.CultureInfo.InvariantCulture,
                         System.Globalization.DateTimeStyles.RoundtripKind, out var updated) && updated.ToUniversalTime() > work.CapturedUtc)
                         foreach (var pair in latest) hero[pair.Key] = pair.Value;
@@ -191,7 +191,7 @@ namespace ReignBetaServer
                     lock (NarrativeStateLock)
                     {
                         if (CharacterHasEditorCorrections(work.Campaign, work.HeroId)) return true;
-                        UpsertCharacterProfile(work.Campaign, hero);
+                        CharactersService.UpsertCharacterProfile(work.Campaign, hero);
                     }
                     bool ok = RunSpeculativeTownProfile(work.Campaign, work.HeroId, () => construct(work.Campaign, work.HeroId, hero),
                         () => TownNotableProfileComplete(work.Campaign, work.HeroId, hero));
@@ -199,61 +199,61 @@ namespace ReignBetaServer
                         lock (NarrativeStateLock)
                         {
                             if (CharacterHasEditorCorrections(work.Campaign, work.HeroId)) return true;
-                            var enrichment = ReadJsonObject(CharacterFile(work.Campaign, work.HeroId, "enrichment.json"));
+                            var enrichment = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(work.Campaign, work.HeroId, "enrichment.json"));
                             enrichment["version"] = 2; enrichment["status"] = "completed_on_town_entry";
                             enrichment["source"] = TownNotableProfileSource; enrichment["campaignId"] = work.Campaign;
                             enrichment["heroStringId"] = work.HeroId; enrichment["completedUtc"] = DateTime.UtcNow.ToString("o");
-                            WriteJsonObject(CharacterFile(work.Campaign, work.HeroId, "enrichment.json"), enrichment);
+                            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(work.Campaign, work.HeroId, "enrichment.json"), enrichment);
                         }
-                    LogOperational("notable_prewarm.completed", TestDict("campaignId", work.Campaign, "heroStringId", work.HeroId, "ok", ok));
+                    OperationsService.LogOperational("notable_prewarm.completed", TestDict("campaignId", work.Campaign, "heroStringId", work.HeroId, "ok", ok));
                     return ok;
                 }
             }
-            catch (CampaignRequestReplacedException) { return true; }
+            catch (PersistenceService.CampaignRequestReplacedException) { return true; }
             catch (Exception ex)
             {
-                LogOperational("notable_prewarm.failed", TestDict("campaignId", work.Campaign,
-                    "heroStringId", work.HeroId, "error", LimitText(ex.Message, 500)));
+                OperationsService.LogOperational("notable_prewarm.failed", TestDict("campaignId", work.Campaign,
+                    "heroStringId", work.HeroId, "error", DialogueService.LimitText(ex.Message, 500)));
                 return false;
             }
-            finally { CurrentTownProfileWork = null; ExitCampaignRequestAccess(access); }
+            finally { CurrentTownProfileWork = null; Program.ExitCampaignRequestAccess(access); }
         }
 
         private static bool TownNotableProfileComplete(string campaign, string hero, Dictionary<string, object> profile)
         {
-            var status = ReadJsonObject(CharacterFile(campaign, hero, "constructed.json"));
-            return IsCharacterConstructionReady(status) && (ReadInt(profile, "narrativeVersion", 0) >= 5
-                ? NarrativeDocumentReady(ReadJsonObject(CharacterFile(campaign, hero, "narrative.json")))
+            var status = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "constructed.json"));
+            return CharactersService.IsCharacterConstructionReady(status) && (ReadInt(profile, "narrativeVersion", 0) >= 5
+                ? NarrativeDocumentReady(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "narrative.json")))
                 : ReadBool(status, "llmUsed", false));
         }
 
-        private static bool TownProfilePublicationAllowed(string campaign, string hero)
+        internal static bool TownProfilePublicationAllowed(string campaign, string hero)
             => !CharacterHasEditorCorrections(campaign, hero)
-                && ReadBool(ReadJsonObject(CharacterFile(campaign, hero, "profile.json")), "isAlive", true);
+                && ReadBool(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "profile.json")), "isAlive", true);
 
         private static bool RunSpeculativeTownProfile(string campaign, string hero, Func<Dictionary<string, object>> construct, Func<bool> complete = null)
         {
-            bool ownsLease = CurrentCampaignRequestLease == null;
-            var access = ownsLease ? EnterCampaignRequestAccess("/notables/profiles/prewarm") : CampaignRequestAccess.None;
-            var lease = CurrentCampaignRequestLease;
+            bool ownsLease = PersistenceService.CurrentCampaignRequestLease == null;
+            var access = ownsLease ? Program.EnterCampaignRequestAccess("/notables/profiles/prewarm") : Program.CampaignRequestAccess.None;
+            var lease = PersistenceService.CurrentCampaignRequestLease;
             try
             {
-                string path = CharacterFile(campaign, hero, "constructed.json");
+                string path = CampaignFileService.CharacterFile(campaign, hero, "constructed.json");
                 byte[] previous = File.Exists(path) ? File.ReadAllBytes(path) : null;
                 bool succeeded = false, replaced = false;
-                try { succeeded = IsCharacterConstructionReady(construct()) && (complete?.Invoke() ?? true); return succeeded; }
-                catch (CampaignRequestReplacedException) { replaced = true; throw; }
+                try { succeeded = CharactersService.IsCharacterConstructionReady(construct()) && (complete?.Invoke() ?? true); return succeeded; }
+                catch (PersistenceService.CampaignRequestReplacedException) { replaced = true; throw; }
                 finally
                 {
                     // The same read lease excludes restore during this rollback.
                     // Never infer validity from a null lease or mask replacement.
                     if (!succeeded && !replaced && lease != null && !lease.Invalid
-                        && TownProfileGenerationCurrent(lease.Generation) && CampaignDataGate.IsReadLockHeld)
+                        && TownProfileGenerationCurrent(lease.Generation) && Program.CampaignDataGate.IsReadLockHeld)
                         lock (NarrativeStateLock)
                         {
-                            ThrowIfCampaignRequestReplaced();
+                            PersistenceService.ThrowIfCampaignRequestReplaced();
                             if (!CharacterHasEditorCorrections(campaign, hero))
-                            lock (FileLock)
+                            lock (Program.FileLock)
                             {
                                 if (previous != null)
                                 {
@@ -268,7 +268,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                if (ownsLease) ExitCampaignRequestAccess(access);
+                if (ownsLease) Program.ExitCampaignRequestAccess(access);
             }
         }
     }

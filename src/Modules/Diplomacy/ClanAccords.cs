@@ -9,24 +9,16 @@ using Reign.Core.Contracts.ClanAccords;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DiplomacyService
     {
         // Native campaign state is authoritative. This campaign-local projection and its receipts
         // are restored together by Save Sync; it must never become an autonomous NPC treaty engine.
         private static void EnsureClanAccordsSchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS clan_accord_snapshots(
-timeline_id TEXT PRIMARY KEY, player_hero_id TEXT NOT NULL, snapshot_json TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS clan_accord_event_receipts(
-timeline_id TEXT NOT NULL,event_id TEXT NOT NULL,payload_json TEXT NOT NULL,
-effects_done INTEGER NOT NULL DEFAULT 0,memory_done INTEGER NOT NULL DEFAULT 0,
-PRIMARY KEY(timeline_id,event_id));
-CREATE TABLE IF NOT EXISTS clan_accord_relation_receipts(
-timeline_id TEXT NOT NULL,receipt_id TEXT NOT NULL,observer_id TEXT NOT NULL,target_id TEXT NOT NULL,
-delta INTEGER NOT NULL,PRIMARY KEY(timeline_id,receipt_id,observer_id,target_id));");
+            DiplomacySchema.CreateClanAccordSnapshots(connection);
         }
 
-        private static bool ValidClanAccordId(string value)
+        internal static bool ValidClanAccordId(string value)
         {
             return !string.IsNullOrWhiteSpace(value) && value.Length <= 240
                 && !value.Any(char.IsControl) && value == value.Trim();
@@ -122,18 +114,18 @@ delta INTEGER NOT NULL,PRIMARY KEY(timeline_id,receipt_id,observer_id,target_id)
             return "";
         }
 
-        private static Dictionary<string, object> ClanAccordsSyncApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> ClanAccordsSyncApi(Dictionary<string, object> payload)
         {
             string error = ValidateClanAccordsSync(payload);
             if (error.Length != 0) return ClanAccordError(error);
             string campaign = ReadString(payload, "campaignId", "");
             string timeline = ReadString(payload, "timelineId", "");
             var acknowledged = new List<string>();
-            lock (CampaignRelationshipWriteLock(campaign))
-            using (ReignDbConnection connection = OpenCampaignConnection(campaign))
+            lock (RelationshipsService.CampaignRelationshipWriteLock(campaign))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsureClanAccordsSchema(connection);
-                EnsureMbtiRelationshipSchema(connection);
+                RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                 var snapshot = new Dictionary<string, object>(payload);
                 snapshot.Remove("events");
                 foreach (Dictionary<string, object> evt in ReadDictionaryList(payload, "events"))
@@ -141,30 +133,26 @@ delta INTEGER NOT NULL,PRIMARY KEY(timeline_id,receipt_id,observer_id,target_id)
                     string id = ReadString(evt, "eventId", "");
                     string json = Json.Serialize(evt);
                     var args = new Dictionary<string, object> { ["timeline"] = timeline, ["event"] = id, ["json"] = json };
-                    Dictionary<string, object> receipt = QuerySql(connection,
-                        "SELECT * FROM clan_accord_event_receipts WHERE timeline_id=$timeline AND event_id=$event;", args).FirstOrDefault();
+                    Dictionary<string, object> receipt = DiplomacyStore.SelectClanAccordEventReceipts(connection, args).FirstOrDefault();
                     if (receipt != null && ReadString(receipt, "payload_json", "") != json) return ClanAccordError("event_id_conflict");
                     if (receipt == null || ReadInt(receipt, "effects_done", 0) == 0)
                     {
                         using (ReignDbTransaction transaction = connection.BeginTransaction())
                         {
-                            ExecuteSql(connection, @"INSERT INTO clan_accord_event_receipts(timeline_id,event_id,payload_json)
-VALUES($timeline,$event,$json) ON CONFLICT(timeline_id,event_id) DO NOTHING;", args);
+                            DiplomacyStore.InsertOrIgnoreClanAccordEventReceipts(connection, args);
                             ApplyClanAccordEventRelations(connection, campaign, timeline, evt);
-                            ExecuteSql(connection, "UPDATE clan_accord_event_receipts SET effects_done=1 WHERE timeline_id=$timeline AND event_id=$event;", args);
+                            DiplomacyStore.UpdateClanAccordEventReceipts(connection, args);
                             transaction.Commit();
                         }
                     }
                     if (receipt == null || ReadInt(receipt, "memory_done", 0) == 0)
                     {
                         EnsureClanAccordEventMemory(connection, campaign, timeline, evt);
-                        ExecuteSql(connection, "UPDATE clan_accord_event_receipts SET memory_done=1 WHERE timeline_id=$timeline AND event_id=$event;", args);
+                        DiplomacyStore.UpdateClanAccordEventReceipts2(connection, args);
                     }
                     acknowledged.Add(id);
                 }
-                ExecuteSql(connection, @"INSERT INTO clan_accord_snapshots(timeline_id,player_hero_id,snapshot_json)
-VALUES($timeline,$player,$json) ON CONFLICT(timeline_id) DO UPDATE SET player_hero_id=$player,snapshot_json=$json;",
-                    new Dictionary<string, object> { ["timeline"] = timeline, ["player"] = ReadString(payload, "playerHeroId", ""), ["json"] = Json.Serialize(snapshot) });
+                DiplomacyStore.UpsertClanAccordSnapshots(connection, new Dictionary<string, object> { ["timeline"] = timeline, ["player"] = ReadString(payload, "playerHeroId", ""), ["json"] = Json.Serialize(snapshot) });
                 return new Dictionary<string, object> { ["ok"] = true, ["acknowledgedEventIds"] = acknowledged, ["snapshot"] = snapshot };
             }
         }
@@ -184,17 +172,15 @@ VALUES($timeline,$player,$json) ON CONFLICT(timeline_id) DO UPDATE SET player_he
                 {
                     string observer = reverse ? player : member, target = reverse ? member : player;
                     var args = new Dictionary<string, object> { ["timeline"] = timeline, ["receipt"] = key, ["observer"] = observer, ["target"] = target };
-                    if (QuerySql(connection, @"SELECT delta FROM clan_accord_relation_receipts
-WHERE timeline_id=$timeline AND receipt_id=$receipt AND observer_id=$observer AND target_id=$target;", args).Count != 0) continue;
-                    if (kind == "season") ApplyAuthoritativeRelationshipDelta(connection, campaign, observer, target, 0,
+                    if (DiplomacyStore.SelectClanAccordRelationReceipts(connection, args).Count != 0) continue;
+                    if (kind == "season") RelationshipsService.ApplyAuthoritativeRelationshipDelta(connection, campaign, observer, target, 0,
                         ReadDouble(evt, "worldDay", 0), "clan_accord_season", timeline, ensurePair: true);
                     int delta = kind == "season" ? ClanAccordLedger.SeasonalGoodwill(ReadInt(
-                        ResolveEffectiveAttitude(connection, campaign, timeline, observer, target, "clan_accord"), "effectiveAttitude", 0)) : -10;
-                    ApplyAuthoritativeRelationshipDelta(connection, campaign, observer, target, delta,
+                        RelationshipsService.ResolveEffectiveAttitude(connection, campaign, timeline, observer, target, "clan_accord"), "effectiveAttitude", 0)) : -10;
+                    RelationshipsService.ApplyAuthoritativeRelationshipDelta(connection, campaign, observer, target, delta,
                         ReadDouble(evt, "worldDay", 0), "clan_accord_" + kind, timeline);
                     args["delta"] = delta;
-                    ExecuteSql(connection, @"INSERT INTO clan_accord_relation_receipts(timeline_id,receipt_id,observer_id,target_id,delta)
-VALUES($timeline,$receipt,$observer,$target,$delta);", args);
+                    DiplomacyStore.InsertClanAccordRelationReceipts(connection, args);
                 }
             }
         }
@@ -208,10 +194,8 @@ VALUES($timeline,$receipt,$observer,$target,$delta);", args);
                 ReadString(record, "EndActorId", "") }.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.Ordinal).ToList();
             // StoreWorldMemoryEvent replaces projections. Only retry it when projection was interrupted;
             // a delivered event is never deleted/regenerated just because its native ack was lost.
-            var existing = QuerySql(connection, "SELECT event_id FROM events WHERE event_id=$event;",
-                new Dictionary<string, object> { ["event"] = memoryEventId });
-            var owners = QuerySql(connection, "SELECT owner_id FROM memories WHERE event_id=$event;",
-                new Dictionary<string, object> { ["event"] = memoryEventId });
+            var existing = DiplomacyStore.SelectEvents(connection, new Dictionary<string, object> { ["event"] = memoryEventId });
+            var owners = DiplomacyStore.SelectMemories(connection, new Dictionary<string, object> { ["event"] = memoryEventId });
             if (existing.Count != 0 && participants.All(x => owners.Any(y => ReadString(y, "owner_id", "") == x)))
             {
                 // Participant memories are written before the remaining clan knowledge receipts.
@@ -220,7 +204,7 @@ VALUES($timeline,$receipt,$observer,$target,$delta);", args);
                 using (var transaction = connection.BeginTransaction())
                 {
                     foreach (string hero in known)
-                        UpsertKnowledgeReceipt(connection, memoryEventId, hero,
+                        DialogueService.UpsertKnowledgeReceipt(connection, memoryEventId, hero,
                             participants.Contains(hero, StringComparer.OrdinalIgnoreCase) ? "participant" : "known",
                             1d, 1d, ReadDouble(evt, "worldDay", 0), "clan_accord_native_commit", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
                     transaction.Commit();
@@ -238,7 +222,7 @@ VALUES($timeline,$receipt,$observer,$target,$delta);", args);
                     ? " The agreement was later cancelled by " + FirstNonEmpty(ReadString(record, "EndActorName", ""), ReadString(record, "EndActorId", "")) + "; its benefits ended. The original arrangers retain credit for securing it."
                     : " The agreement ended because of " + ReadString(evt, "endReason", "") + "; this was not a voluntary cancellation.";
             else summary += " The agreement is now in effect. Securing it was a beneficial service to their clans.";
-            StoreWorldMemoryEvent(new Dictionary<string, object> {
+            DialogueService.StoreWorldMemoryEvent(new Dictionary<string, object> {
                 ["campaignId"] = campaign, ["timelineId"] = timeline, ["eventId"] = memoryEventId,
                 ["eventType"] = "clan_accord_" + ReadString(evt, "kind", ""), ["worldDay"] = ReadDouble(evt, "worldDay", 0),
                 ["summary"] = summary, ["participants"] = participants,
@@ -267,20 +251,19 @@ VALUES($timeline,$receipt,$observer,$target,$delta);", args);
             }
         }
 
-        private static Dictionary<string, object> ClanAccordsSnapshot(string campaignId, string timelineId)
+        internal static Dictionary<string, object> ClanAccordsSnapshot(string campaignId, string timelineId)
         {
             if (!ValidClanAccordId(campaignId) || !ValidClanAccordId(timelineId)) return ClanAccordError("campaign_and_timeline_required");
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanAccordsSchema(connection);
-                var row = QuerySql(connection, "SELECT snapshot_json FROM clan_accord_snapshots WHERE timeline_id=$timeline;",
-                    new Dictionary<string, object> { ["timeline"] = timelineId }).FirstOrDefault();
+                var row = DiplomacyStore.SelectClanAccordSnapshots(connection, new Dictionary<string, object> { ["timeline"] = timelineId }).FirstOrDefault();
                 return row == null ? new Dictionary<string, object> { ["ok"] = true, ["available"] = false }
                     : Json.Deserialize<Dictionary<string, object>>(ReadString(row, "snapshot_json", "{}"));
             }
         }
 
-        private static string BuildClanAccordsPrompt(string campaignId, string timelineId, string npcId, string npcClanId)
+        internal static string BuildClanAccordsPrompt(string campaignId, string timelineId, string npcId, string npcClanId)
         {
             Dictionary<string, object> snapshot = ClanAccordsSnapshot(campaignId, timelineId);
             Dictionary<string, object> ledger = ReadDictionary(snapshot, "ledger");
@@ -307,7 +290,7 @@ VALUES($timeline,$receipt,$observer,$target,$delta);", args);
 
         // Invoke after universal action normalization and before queuing. The terms alone are never
         // evidence of consent: they are model output, so check both actual visible utterances too.
-        private static void BindAndValidateClanAccord(Dictionary<string, object> raw,
+        internal static void BindAndValidateClanAccord(Dictionary<string, object> raw,
             Dictionary<string, object> terms, Dictionary<string, object> payload, string resolution,
             string command, List<string> errors)
         {
@@ -328,14 +311,14 @@ VALUES($timeline,$receipt,$observer,$target,$delta);", args);
             string actual = resolution ?? "";
             // Use the complete actual turn, never a first-line extractor or planner-added intent.
             string playerText = ReadFirstString(payload, "playerText", "text", "message");
-            string npcReply = LatestResidentReply(actual);
+            string npcReply = CharactersService.LatestResidentReply(actual);
             string error = ValidateClanAccordDialogueAction(command, raw, terms, playerText, npcReply, speaker, player);
             if (error.Length != 0) errors.Add(error);
             if (command == "cancel_clan_accord" && !ReadDictionaryList(context, "records").Any(x =>
                 ReadString(x, "Id", "") == ReadString(terms, "accordId", "") && ReadBool(x, "IsActive", false)))
                 errors.Add("Cancellation must name an active accord with the speaking noble's clan.");
-            terms["verifiedConsentQuote"] = LimitText(npcReply, 1200);
-            terms["verifiedPlayerQuote"] = LimitText(playerText, 1200);
+            terms["verifiedConsentQuote"] = DialogueService.LimitText(npcReply, 1200);
+            terms["verifiedPlayerQuote"] = DialogueService.LimitText(playerText, 1200);
         }
 
         private static string ValidateClanAccordDialogueAction(string command, Dictionary<string, object> record,

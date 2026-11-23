@@ -8,98 +8,57 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RebellionService
     {
         private const int RebellionEvaluationIntervalDays = 7;
-        private const int RebellionWeeklyOutbreakPercent = 5;
-        private const int RebellionRelationshipThreshold = -35;
+        internal const int RebellionWeeklyOutbreakPercent = 5;
+        internal const int RebellionRelationshipThreshold = -35;
         private const int RebellionAcceptedCooldownDays = 63;
         private const int RebellionResolvedCooldownDays = 63;
         private const int NegotiationLifetimeDays = 14;
         private const int RebellionRecognitionMinimumWarDays = 14;
         private const int RebellionRecognitionAttemptIntervalDays = 30;
-        private const int RebellionRecognitionMaximumChancePercent = 30;
+        internal const int RebellionRecognitionMaximumChancePercent = 30;
         private const int RebellionRecognitionPeaceDays = 63;
         private const int RebellionSchemaRevision = 3;
         private const string RebellionSchemaMarker =
             "rebellion_schema_version";
 
-        private static void EnsureRebellionSchema(ReignDbConnection connection)
+        internal static void EnsureRebellionSchema(ReignDbConnection connection)
         {
-            if (IsPostgreSqlComponentSchemaReady(connection,
+            if (ReignDatabase.IsPostgreSqlComponentSchemaReady(connection,
                 RebellionSchemaMarker, RebellionSchemaRevision))
                 return;
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rebellion_movements (
-movement_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,parent_kingdom_id TEXT NOT NULL,
-rebel_kingdom_id TEXT NOT NULL DEFAULT '',leader_clan_id TEXT NOT NULL,leader_hero_id TEXT NOT NULL,ruler_hero_id TEXT NOT NULL,
-objective TEXT NOT NULL,stage TEXT NOT NULL,pressure REAL NOT NULL,relationship_pressure REAL NOT NULL,
-trait_pressure REAL NOT NULL,factual_pressure REAL NOT NULL,viability REAL NOT NULL,readiness REAL NOT NULL,
-demand_json TEXT NOT NULL DEFAULT '{}',correlation_id TEXT NOT NULL,created_day REAL NOT NULL,updated_day REAL NOT NULL,
-cooldown_until_day REAL NOT NULL DEFAULT 0,is_player_kingdom INTEGER NOT NULL DEFAULT 0,payload_json TEXT NOT NULL DEFAULT '{}');");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rebellion_memberships (
-movement_id TEXT NOT NULL,clan_id TEXT NOT NULL,leader_hero_id TEXT NOT NULL,side TEXT NOT NULL,support_score REAL NOT NULL,
-switch_count INTEGER NOT NULL DEFAULT 0,last_switch_day REAL NOT NULL DEFAULT 0,reason_json TEXT NOT NULL DEFAULT '{}',
-PRIMARY KEY(movement_id,clan_id));");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rebellion_transitions (
-transition_id TEXT PRIMARY KEY,movement_id TEXT NOT NULL,world_day REAL NOT NULL,from_stage TEXT NOT NULL,to_stage TEXT NOT NULL,
-kind TEXT NOT NULL,actor_id TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL);");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS negotiated_action_drafts (
-negotiation_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,broker_hero_id TEXT NOT NULL,
-first_kingdom_id TEXT NOT NULL,second_kingdom_id TEXT NOT NULL,first_ruler_id TEXT NOT NULL,second_ruler_id TEXT NOT NULL,
-command TEXT NOT NULL,political_result TEXT NOT NULL DEFAULT '',terms_json TEXT NOT NULL,terms_hash TEXT NOT NULL,
-status TEXT NOT NULL,created_day REAL NOT NULL,updated_day REAL NOT NULL,expires_day REAL NOT NULL,
-queued_action_id TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL DEFAULT '{}');");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS negotiated_action_approvals (
-negotiation_id TEXT NOT NULL,ruler_hero_id TEXT NOT NULL,kingdom_id TEXT NOT NULL,terms_hash TEXT NOT NULL,
-status TEXT NOT NULL,approved_day REAL NOT NULL,reason TEXT NOT NULL DEFAULT '',PRIMARY KEY(negotiation_id,ruler_hero_id));");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rebellion_backing_requests (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,movement_id TEXT NOT NULL,world_day REAL NOT NULL,
-rebel_kingdom_id TEXT NOT NULL,parent_kingdom_id TEXT NOT NULL,rebel_ruler_id TEXT NOT NULL,parent_ruler_id TEXT NOT NULL,
-asked_kingdom_id TEXT NOT NULL DEFAULT '',asked_ruler_id TEXT NOT NULL DEFAULT '',eligibility_attitude INTEGER NOT NULL DEFAULT 0,
-asked_to_rebel_attitude INTEGER NOT NULL DEFAULT 0,asked_to_parent_attitude INTEGER NOT NULL DEFAULT 0,
-rebel_roll INTEGER NOT NULL DEFAULT 0,parent_roll INTEGER NOT NULL DEFAULT 0,rebel_score INTEGER NOT NULL DEFAULT 0,parent_score INTEGER NOT NULL DEFAULT 0,
-support_power REAL NOT NULL DEFAULT 0,opposition_power REAL NOT NULL DEFAULT 0,military_chance INTEGER NOT NULL DEFAULT 0,military_roll INTEGER NOT NULL DEFAULT 0,
-support_coalition_json TEXT NOT NULL DEFAULT '[]',opposition_coalition_json TEXT NOT NULL DEFAULT '[]',status TEXT NOT NULL,
-reason TEXT NOT NULL DEFAULT '',action_id TEXT NOT NULL DEFAULT '',event_id TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,
-PRIMARY KEY(campaign_id,timeline_id,movement_id));");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_rebellion_backing_status ON rebellion_backing_requests(campaign_id,timeline_id,status,world_day);");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS rebellion_recognition_attempts (
-attempt_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,movement_id TEXT NOT NULL,
-attempt_index INTEGER NOT NULL,world_day REAL NOT NULL,rebel_kingdom_id TEXT NOT NULL,parent_kingdom_id TEXT NOT NULL,
-rebel_ruler_id TEXT NOT NULL,parent_ruler_id TEXT NOT NULL,status TEXT NOT NULL,eligible INTEGER NOT NULL,
-chance_percent INTEGER NOT NULL DEFAULT 0,roll INTEGER NOT NULL DEFAULT 0,relationship_attitude INTEGER NOT NULL DEFAULT 0,
-rebel_strength REAL NOT NULL DEFAULT 0,parent_strength REAL NOT NULL DEFAULT 0,rebel_fiefs INTEGER NOT NULL DEFAULT 0,
-parent_fiefs INTEGER NOT NULL DEFAULT 0,parent_other_wars INTEGER NOT NULL DEFAULT 0,parent_judgment INTEGER NOT NULL DEFAULT 50,
-parent_pragmatism INTEGER NOT NULL DEFAULT 50,parent_mercy INTEGER NOT NULL DEFAULT 50,parent_pride INTEGER NOT NULL DEFAULT 50,
-reason TEXT NOT NULL DEFAULT '',negotiation_id TEXT NOT NULL DEFAULT '',action_id TEXT NOT NULL DEFAULT '',
-payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,
-UNIQUE(campaign_id,timeline_id,movement_id,attempt_index));");
-            ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_rebellion_recognition_movement
-ON rebellion_recognition_attempts(campaign_id,timeline_id,movement_id,world_day DESC);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_rebellion_campaign_stage ON rebellion_movements(campaign_id,timeline_id,stage,updated_day);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_rebellion_parent ON rebellion_movements(campaign_id,parent_kingdom_id,stage);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_negotiation_campaign_status ON negotiated_action_drafts(campaign_id,status,expires_day);");
-            ExecuteSql(connection, @"INSERT INTO schema_meta(key,value)
-VALUES($key,$value)
-ON CONFLICT(key) DO UPDATE SET value=$value;",
-                new Dictionary<string, object>
+            RebellionSchema.CreateRebellionMovements(connection);
+            RebellionSchema.CreateRebellionMemberships(connection);
+            RebellionSchema.CreateRebellionTransitions(connection);
+            RebellionSchema.CreateNegotiatedActionDrafts(connection);
+            RebellionSchema.CreateNegotiatedActionApprovals(connection);
+            RebellionSchema.CreateRebellionBackingRequests(connection);
+            RebellionSchema.CreateIndexRebellionBackingStatus(connection);
+            RebellionSchema.CreateRebellionRecognitionAttempts(connection);
+            RebellionSchema.CreateIndexRebellionRecognitionMovement(connection);
+            RebellionSchema.CreateIndexRebellionCampaignStage(connection);
+            RebellionSchema.CreateIndexRebellionParent(connection);
+            RebellionSchema.CreateIndexNegotiationCampaignStatus(connection);
+            RebellionStore.UpsertSchemaMeta(connection, new Dictionary<string, object>
                 {
                     ["key"] = RebellionSchemaMarker,
                     ["value"] = RebellionSchemaRevision.ToString(
                         CultureInfo.InvariantCulture)
                 });
-            MarkPostgreSqlComponentSchemaReady(connection,
+            ReignDatabase.MarkPostgreSqlComponentSchemaReady(connection,
                 RebellionSchemaMarker, RebellionSchemaRevision);
         }
 
-        private static Dictionary<string, object> EvaluateRebellions(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> EvaluateRebellions(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
             string timelineId = ReadString(payload, "timelineId", "main");
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             Dictionary<string, object> startupGrace =
-                BuildAutonomousWorldStartupGrace(payload);
+                DiplomacyService.BuildAutonomousWorldStartupGrace(payload);
             if (ReadBool(startupGrace, "locked", false))
             {
                 return new Dictionary<string, object>
@@ -116,7 +75,7 @@ ON CONFLICT(key) DO UPDATE SET value=$value;",
             List<Dictionary<string, object>> savedMovements = ReadDictionaryList(payload, "movements");
             List<Dictionary<string, object>> updates = new List<Dictionary<string, object>>();
 
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureRebellionSchema(connection);
                 foreach (Dictionary<string, object> saved in savedMovements) MirrorSavedRebellionState(connection, campaignId, timelineId, worldDay, saved);
@@ -261,9 +220,7 @@ ON CONFLICT(key) DO UPDATE SET value=$value;",
         {
             string movementId = ReadString(movement, "movementId", "");
             if (string.IsNullOrWhiteSpace(movementId)) return null;
-            Dictionary<string, object> existing = QuerySql(connection, @"SELECT * FROM rebellion_backing_requests
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement LIMIT 1;",
-                new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["movement"] = movementId })
+            Dictionary<string, object> existing = RebellionStore.SelectRebellionBackingRequests2(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["movement"] = movementId })
                 .FirstOrDefault();
             if (existing != null) return existing;
             double civilWarDay = ReadDouble(movement, "civilWarStartedDay", worldDay);
@@ -289,7 +246,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement 
                     || ReadStringList(candidate, "enemies").Contains(rebelKingdomId, StringComparer.OrdinalIgnoreCase)) continue;
                 string rulerId = ReadString(candidate, "rulerHeroId", "");
                 if (string.IsNullOrWhiteSpace(rulerId)) continue;
-                int friendship = ReadInt(ResolveRulerDiplomaticAttitude(connection, campaignId, timelineId,
+                int friendship = ReadInt(RelationshipsService.ResolveRulerDiplomaticAttitude(connection, campaignId, timelineId,
                     rebelRulerId, rulerId, "rebellion_backing_eligibility"), "effectiveAttitude", 0);
                 if (friendship < 30) continue;
                 Dictionary<string, object> military = BuildBackingMilitaryEvidence(kingdoms,
@@ -306,7 +263,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement 
                     worldDay, rebelKingdomId, parentKingdomId, rebelRulerId, parentRulerId,
                     "no_eligible_backer", "No established NPC ruler met the +30 friendship threshold.");
                 InsertRebellionBackingRequest(connection, none);
-                RecordRulerActivity(connection, campaignId, timelineId, worldDay, rebelRulerId, parentRulerId,
+                DiplomacyService.RecordRulerActivity(connection, campaignId, timelineId, worldDay, rebelRulerId, parentRulerId,
                     "rebellion_backing", "", "no_eligible_backer", 0, 0, 0, 0, 0, "",
                     "rebellion-backing:" + movementId, ReadString(none, "reason", ""), none);
                 return none;
@@ -321,18 +278,18 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement 
             Dictionary<string, object> militaryEvidence = ReadDictionary(selected, "military");
             string askedKingdomId = ReadString(askedKingdom, "kingdomId", "");
             string askedRulerId = ReadString(askedKingdom, "rulerHeroId", "");
-            int askedToRebel = ReadInt(ResolveRulerDiplomaticAttitude(connection, campaignId, timelineId,
+            int askedToRebel = ReadInt(RelationshipsService.ResolveRulerDiplomaticAttitude(connection, campaignId, timelineId,
                 askedRulerId, rebelRulerId, "rebellion_backing_opposed_rebel"), "effectiveAttitude", 0);
-            int askedToParent = ReadInt(ResolveRulerDiplomaticAttitude(connection, campaignId, timelineId,
+            int askedToParent = ReadInt(RelationshipsService.ResolveRulerDiplomaticAttitude(connection, campaignId, timelineId,
                 askedRulerId, parentRulerId, "rebellion_backing_opposed_parent"), "effectiveAttitude", 0);
             int dayKey = (int)Math.Floor(worldDay);
-            int rebelRoll = StableRulerD100(campaignId, timelineId, dayKey, movementId + "|opposed|rebel");
-            int parentRoll = StableRulerD100(campaignId, timelineId, dayKey, movementId + "|opposed|parent");
+            int rebelRoll = DiplomacyService.StableRulerD100(campaignId, timelineId, dayKey, movementId + "|opposed|rebel");
+            int parentRoll = DiplomacyService.StableRulerD100(campaignId, timelineId, dayKey, movementId + "|opposed|parent");
             int rebelScore = rebelRoll + askedToRebel;
             int parentScore = parentRoll + askedToParent;
             bool relationshipPass = rebelScore > parentScore;
             int militaryChance = ReadInt(militaryEvidence, "chance", 5);
-            int militaryRoll = StableRulerD100(campaignId, timelineId, dayKey, movementId + "|military_safety");
+            int militaryRoll = DiplomacyService.StableRulerD100(campaignId, timelineId, dayKey, movementId + "|military_safety");
             bool militaryPass = militaryRoll <= militaryChance;
             bool accepted = relationshipPass && militaryPass;
             string reason = !relationshipPass ? "The opposed relationship score did not favor the rebel; ties refuse."
@@ -372,10 +329,10 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement 
             string correlation = "rebellion-backing:" + movementId;
             if (accepted)
             {
-                ApplyRulerDiplomaticIncident(campaignId, timelineId, worldDay, "rebellion_backing_accepted",
+                DiplomacyService.ApplyRulerDiplomaticIncident(campaignId, timelineId, worldDay, "rebellion_backing_accepted",
                     "backing:" + movementId + ":rebel", movementId, rebelRulerId, askedRulerId,
                     rebelKingdomId, askedKingdomId, 25, "", 0, true, correlation, row);
-                ApplyRulerDiplomaticIncident(campaignId, timelineId, worldDay, "rebellion_backing_accepted",
+                DiplomacyService.ApplyRulerDiplomaticIncident(campaignId, timelineId, worldDay, "rebellion_backing_accepted",
                     "backing:" + movementId + ":sponsor", movementId, askedRulerId, rebelRulerId,
                     askedKingdomId, rebelKingdomId, 10, "", 0, true, correlation, row);
                 Dictionary<string, object> terms = new Dictionary<string, object>
@@ -384,7 +341,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement 
                     ["parentKingdomId"] = parentKingdomId, ["supportCoalition"] = ReadStringList(militaryEvidence, "supportCoalition"),
                     ["oppositionCoalition"] = ReadStringList(militaryEvidence, "oppositionCoalition")
                 };
-                QueueAction(campaignId, new Dictionary<string, object>
+                ActionPipelineService.QueueAction(campaignId, new Dictionary<string, object>
                 {
                     ["serverActionId"] = actionId, ["actionId"] = actionId,
                     ["command"] = "back_rebellion", ["type"] = "DiplomacyBackRebellion", ["typeValue"] = 30,
@@ -397,7 +354,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement 
             }
             else
             {
-                ApplyRulerDiplomaticIncident(campaignId, timelineId, worldDay, "rebellion_backing_refused",
+                DiplomacyService.ApplyRulerDiplomaticIncident(campaignId, timelineId, worldDay, "rebellion_backing_refused",
                     "backing:" + movementId + ":refusal", movementId, rebelRulerId, askedRulerId,
                     rebelKingdomId, askedKingdomId, -25, "", 0, true, correlation, row);
             }
@@ -421,8 +378,8 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement 
                 ["executionStatus"] = accepted ? "pending" : "not_required",
                 ["announcementReady"] = !accepted, ["delivered"] = false, ["acknowledged"] = false
             };
-            QueueDiplomaticEvent(campaignId, diplomaticEvent);
-            RecordRulerDiplomacyEventActivity(campaignId, diplomaticEvent,
+            DiplomacyService.QueueDiplomaticEvent(campaignId, diplomaticEvent);
+            DiplomacyService.RecordRulerDiplomacyEventActivity(campaignId, diplomaticEvent,
                 "rebellion_backing", accepted ? "accepted" : "refused");
             return row;
         }
@@ -454,10 +411,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement 
                 "civilWarStartedDay", ReadDouble(movement, "createdDay", worldDay));
             if (worldDay - civilWarStartedDay
                 < RebellionRecognitionMinimumWarDays) return null;
-            Dictionary<string, object> latest = QuerySql(connection, @"SELECT *
-FROM rebellion_recognition_attempts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement
-ORDER BY attempt_index DESC LIMIT 1;", new Dictionary<string, object>
+            Dictionary<string, object> latest = RebellionStore.SelectRebellionRecognitionAttempts2(connection, new Dictionary<string, object>
             {
                 ["campaign"] = campaignId, ["timeline"] = timelineId,
                 ["movement"] = movementId
@@ -516,26 +470,26 @@ ORDER BY attempt_index DESC LIMIT 1;", new Dictionary<string, object>
                 .Count(id => !id.Equals(rebelKingdomId,
                     StringComparison.OrdinalIgnoreCase));
             int warPressurePoints = Math.Min(2, parentOtherWars);
-            int attitude = ReadInt(ResolveRulerDiplomaticAttitude(connection,
+            int attitude = ReadInt(RelationshipsService.ResolveRulerDiplomaticAttitude(connection,
                     campaignId, timelineId, parentRulerId, rebelRulerId,
                     "rebellion_independence_recognition"),
                 "effectiveAttitude", 0);
             int relationshipPoints = attitude >= 50 ? 2
                 : attitude >= 20 ? 1 : attitude <= -50 ? -2
                 : attitude <= -20 ? -1 : 0;
-            Dictionary<string, object> parentProfile = LoadDirectorHeroProfile(
+            Dictionary<string, object> parentProfile = RelationshipsService.LoadDirectorHeroProfile(
                 campaignId, parentRulerId, parentKingdom);
             Dictionary<string, object> parentTraitDocument = ReadDictionary(
                 parentProfile, "traits") ?? parentProfile;
-            EnsureTraitPercentageData(parentTraitDocument, parentRulerId);
+            CharactersService.EnsureTraitPercentageData(parentTraitDocument, parentRulerId);
             int parentJudgment = ReadInt(ReadDictionary(parentTraitDocument,
                 "courtVirtues") ?? new Dictionary<string, object>(),
                 "judgment", 50);
-            int parentPragmatism = PersonalityTraitPercentage(
+            int parentPragmatism = CharactersService.PersonalityTraitPercentage(
                 parentTraitDocument, "pragmatism");
-            int parentMercy = PersonalityTraitPercentage(parentTraitDocument,
+            int parentMercy = CharactersService.PersonalityTraitPercentage(parentTraitDocument,
                 "mercy");
-            int parentPride = PersonalityTraitPercentage(parentTraitDocument,
+            int parentPride = CharactersService.PersonalityTraitPercentage(parentTraitDocument,
                 "pride");
             int personalityPoints = (parentPragmatism >= 70 ? 2 : 0)
                 + (parentMercy >= 70 ? 1 : 0)
@@ -544,7 +498,7 @@ ORDER BY attempt_index DESC LIMIT 1;", new Dictionary<string, object>
             int chance = CalculateRebellionRecognitionChance(leveragePoints,
                 territoryPoints, warPressurePoints, relationshipPoints,
                 personalityPoints);
-            int roll = StableRulerD100(campaignId, timelineId,
+            int roll = DiplomacyService.StableRulerD100(campaignId, timelineId,
                 attemptIndex, movementId + "|recognize_independence");
             bool accepted = roll <= chance;
             string attemptId = "rebellion-recognition:"
@@ -592,13 +546,7 @@ ORDER BY attempt_index DESC LIMIT 1;", new Dictionary<string, object>
                         ["attemptId"] = attemptId,
                         ["evidence"] = evidence
                     };
-                ExecuteSql(connection, @"INSERT INTO negotiated_action_drafts(
-negotiation_id,campaign_id,timeline_id,broker_hero_id,first_kingdom_id,second_kingdom_id,
-first_ruler_id,second_ruler_id,command,political_result,terms_json,terms_hash,status,
-created_day,updated_day,expires_day,queued_action_id,payload_json)
-VALUES($id,$campaign,$timeline,$broker,$rebelKingdom,$parentKingdom,$rebelRuler,$parentRuler,
-'resolve_civil_war','recognized_independence',$terms,$hash,'awaiting_approval',$day,$day,$expires,'',$payload);",
-                    new Dictionary<string, object>
+                RebellionStore.InsertNegotiatedActionDrafts(connection, new Dictionary<string, object>
                     {
                         ["id"] = negotiationId, ["campaign"] = campaignId,
                         ["timeline"] = timelineId, ["broker"] = rebelRulerId,
@@ -617,10 +565,7 @@ VALUES($id,$campaign,$timeline,$broker,$rebelKingdom,$parentKingdom,$rebelRuler,
                         [rebelRulerId] = rebelKingdomId,
                         [parentRulerId] = parentKingdomId
                     })
-                    ExecuteSql(connection, @"INSERT INTO negotiated_action_approvals(
-negotiation_id,ruler_hero_id,kingdom_id,terms_hash,status,approved_day,reason)
-VALUES($id,$ruler,$kingdom,$hash,'approved',$day,$reason);",
-                        new Dictionary<string, object>
+                    RebellionStore.InsertNegotiatedActionApprovals(connection, new Dictionary<string, object>
                         {
                             ["id"] = negotiationId,
                             ["ruler"] = approval.Key,
@@ -631,16 +576,12 @@ VALUES($id,$ruler,$kingdom,$hash,'approved',$day,$reason);",
                                 ? "The rebel ruler formally proposed recognition."
                                 : "The challenged ruler passed the safeguarded recognition roll."
                         });
-                Dictionary<string, object> draft = QuerySql(connection,
-                    "SELECT * FROM negotiated_action_drafts WHERE negotiation_id=$id;",
-                    new Dictionary<string, object>
+                Dictionary<string, object> draft = RebellionStore.SelectNegotiatedActionDrafts4(connection, new Dictionary<string, object>
                     {
                         ["id"] = negotiationId
                     }).FirstOrDefault();
                 TryQueueApprovedNegotiation(connection, draft, worldDay);
-                Dictionary<string, object> queuedDraft = QuerySql(connection,
-                    "SELECT * FROM negotiated_action_drafts WHERE negotiation_id=$id;",
-                    new Dictionary<string, object>
+                Dictionary<string, object> queuedDraft = RebellionStore.SelectNegotiatedActionDrafts4(connection, new Dictionary<string, object>
                     {
                         ["id"] = negotiationId
                     }).FirstOrDefault();
@@ -674,15 +615,7 @@ VALUES($id,$ruler,$kingdom,$hash,'approved',$day,$reason);",
                 ["action_id"] = actionId,
                 ["payload_json"] = Json.Serialize(evidence)
             };
-            ExecuteSql(connection, @"INSERT INTO rebellion_recognition_attempts(
-attempt_id,campaign_id,timeline_id,movement_id,attempt_index,world_day,rebel_kingdom_id,
-parent_kingdom_id,rebel_ruler_id,parent_ruler_id,status,eligible,chance_percent,roll,
-relationship_attitude,rebel_strength,parent_strength,rebel_fiefs,parent_fiefs,parent_other_wars,
-parent_judgment,parent_pragmatism,parent_mercy,parent_pride,reason,negotiation_id,action_id,payload_json,created_ts)
-VALUES($attempt,$campaign,$timeline,$movement,$index,$day,$rebelKingdom,$parentKingdom,$rebelRuler,
-$parentRuler,$status,$eligible,$chance,$roll,$attitude,$rebelStrength,$parentStrength,$rebelFiefs,
-$parentFiefs,$otherWars,$judgment,$pragmatism,$mercy,$pride,$reason,$negotiation,$action,$payload,$ts);",
-                new Dictionary<string, object>
+            RebellionStore.InsertRebellionRecognitionAttempts(connection, new Dictionary<string, object>
                 {
                     ["attempt"] = attemptId, ["campaign"] = campaignId,
                     ["timeline"] = timelineId, ["movement"] = movementId,
@@ -708,7 +641,7 @@ $parentFiefs,$otherWars,$judgment,$pragmatism,$mercy,$pride,$reason,$negotiation
                     ["payload"] = Json.Serialize(evidence),
                     ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                 });
-            LogOperational("rebellion.recognition_attempt", row);
+            OperationsService.LogOperational("rebellion.recognition_attempt", row);
             return row;
         }
 
@@ -776,15 +709,7 @@ $parentFiefs,$otherWars,$judgment,$pragmatism,$mercy,$pride,$reason,$negotiation
         private static void InsertRebellionBackingRequest(ReignDbConnection connection,
             Dictionary<string, object> row)
         {
-            ExecuteSql(connection, @"INSERT INTO rebellion_backing_requests(
-campaign_id,timeline_id,movement_id,world_day,rebel_kingdom_id,parent_kingdom_id,rebel_ruler_id,parent_ruler_id,
-asked_kingdom_id,asked_ruler_id,eligibility_attitude,asked_to_rebel_attitude,asked_to_parent_attitude,
-rebel_roll,parent_roll,rebel_score,parent_score,support_power,opposition_power,military_chance,military_roll,
-support_coalition_json,opposition_coalition_json,status,reason,action_id,event_id,payload_json,created_ts)
-VALUES($campaign,$timeline,$movement,$day,$rebelKingdom,$parentKingdom,$rebelRuler,$parentRuler,
-$askedKingdom,$askedRuler,$eligibility,$askedRebel,$askedParent,$rebelRoll,$parentRoll,$rebelScore,$parentScore,
-$supportPower,$oppositionPower,$chance,$militaryRoll,$supportCoalition,$oppositionCoalition,$status,$reason,$action,$event,$payload,$ts);",
-                new Dictionary<string, object>
+            RebellionStore.InsertRebellionBackingRequests(connection, new Dictionary<string, object>
                 {
                     ["campaign"] = ReadString(row, "campaign_id", ""), ["timeline"] = ReadString(row, "timeline_id", ""),
                     ["movement"] = ReadString(row, "movement_id", ""), ["day"] = ReadDouble(row, "world_day", 0d),
@@ -808,14 +733,9 @@ $supportPower,$oppositionPower,$chance,$militaryRoll,$supportCoalition,$oppositi
         {
             string id = ReadString(saved, "movementId", "");
             if (string.IsNullOrWhiteSpace(id)) return;
-            Dictionary<string, object> old = QuerySql(connection, "SELECT stage FROM rebellion_movements WHERE movement_id=$id;", new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
+            Dictionary<string, object> old = RebellionStore.SelectRebellionMovements3(connection, new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
             string oldStage = ReadString(old, "stage", "none"), stage = ReadString(saved, "stage", "none");
-            ExecuteSql(connection, @"INSERT INTO rebellion_movements(movement_id,campaign_id,timeline_id,parent_kingdom_id,rebel_kingdom_id,leader_clan_id,leader_hero_id,ruler_hero_id,
-objective,stage,pressure,relationship_pressure,trait_pressure,factual_pressure,viability,readiness,demand_json,correlation_id,created_day,updated_day,cooldown_until_day,is_player_kingdom,payload_json)
-VALUES($id,$campaign,$timeline,$parent,$rebel,$clan,$hero,$ruler,$objective,$stage,$pressure,$relationship,$trait,$factual,$viability,$readiness,$demand,$correlation,$created,$updated,$cooldown,$player,$payload)
-ON CONFLICT(movement_id) DO UPDATE SET timeline_id=$timeline,rebel_kingdom_id=$rebel,leader_clan_id=$clan,leader_hero_id=$hero,stage=$stage,pressure=$pressure,
-relationship_pressure=$relationship,trait_pressure=$trait,factual_pressure=$factual,viability=$viability,readiness=$readiness,demand_json=$demand,updated_day=$updated,cooldown_until_day=$cooldown,payload_json=$payload;",
-                new Dictionary<string, object>
+            RebellionStore.UpsertRebellionMovements(connection, new Dictionary<string, object>
                 {
                     ["id"] = id, ["campaign"] = campaignId, ["timeline"] = timelineId, ["parent"] = ReadString(saved, "parentKingdomId", ""),
                     ["rebel"] = ReadString(saved, "rebelKingdomId", ""), ["clan"] = ReadString(saved, "leaderClanId", ""), ["hero"] = ReadString(saved, "leaderHeroId", ""),
@@ -827,8 +747,7 @@ relationship_pressure=$relationship,trait_pressure=$trait,factual_pressure=$fact
                     ["player"] = ReadBool(saved, "isPlayerKingdom", false) ? 1 : 0, ["payload"] = Json.Serialize(saved)
                 });
             if (old != null && !string.Equals(oldStage, stage, StringComparison.OrdinalIgnoreCase))
-                ExecuteSql(connection, @"INSERT INTO rebellion_transitions(transition_id,movement_id,world_day,from_stage,to_stage,kind,actor_id,payload_json,created_ts)
-VALUES($transition,$movement,$day,$from,$to,'game_state_mirror',$actor,$payload,$ts);", new Dictionary<string, object>
+                RebellionStore.InsertRebellionTransitions(connection, new Dictionary<string, object>
                 {
                     ["transition"] = Guid.NewGuid().ToString("N"), ["movement"] = id, ["day"] = worldDay, ["from"] = oldStage, ["to"] = stage,
                     ["actor"] = ReadString(saved, "leaderHeroId", ""), ["payload"] = Json.Serialize(saved), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
@@ -859,7 +778,7 @@ VALUES($transition,$movement,$day,$from,$to,'game_state_mirror',$actor,$payload,
         {
             string leaderId = ReadString(clan, "leaderHeroId", "");
             string rulerId = ReadString(ruler, "leaderHeroId", "");
-            Dictionary<string, object> politicalAttitude = ResolveEffectiveAttitude(
+            Dictionary<string, object> politicalAttitude = RelationshipsService.ResolveEffectiveAttitude(
                 connection, campaignId, timelineId, leaderId, rulerId,
                 "rebellion_candidate");
             int personalAffinity = ReadInt(politicalAttitude, "personalAffinity", 0);
@@ -868,9 +787,9 @@ VALUES($transition,$movement,$day,$from,$to,'game_state_mirror',$actor,$payload,
                 "effectiveAttitude", 0);
             double relationshipPressure = Clamp(0d, 100d, 50d - effectiveAttitude);
 
-            Dictionary<string, object> traits = ReadDictionary(ReadJsonObject(CharacterFile(campaignId, leaderId, "traits.json")), "foundationTraits")
+            Dictionary<string, object> traits = ReadDictionary(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, leaderId, "traits.json")), "foundationTraits")
                 ?? ReadDictionary(clan, "traits") ?? new Dictionary<string, object>();
-            Dictionary<string, object> pressureDoc = ReadJsonObject(CharacterFile(campaignId, leaderId, "pressure.json"));
+            Dictionary<string, object> pressureDoc = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, leaderId, "pressure.json"));
             double drive = 0.16d * Trait100(traits, "ambition") + 0.16d * Trait100(traits, "powerMotivation")
                 + 0.10d * Trait100(traits, "pride") + 0.10d * Trait100(traits, "assertiveness")
                 + 0.10d * Trait100(traits, "vengefulness") + 0.10d * Trait100(traits, "riskTolerance")
@@ -909,25 +828,21 @@ VALUES($transition,$movement,$day,$from,$to,'game_state_mirror',$actor,$payload,
             if (ReadBool(clan, "leaderIsPrisoner", ReadBool(clan, "isPrisoner", false))) score += 5d;
             try
             {
-                List<Dictionary<string, object>> facts = QuerySql(connection, @"SELECT DISTINCT e.event_type,e.world_day,e.payload_json
-FROM world_history_entities n JOIN world_history_events e ON e.event_id=n.event_id
-WHERE n.entity_id IN ($hero,$clan,$kingdom) AND e.world_day >= $from AND e.world_day <= $to;",
-                    new Dictionary<string, object> { ["hero"] = heroId, ["clan"] = clanId, ["kingdom"] = kingdomId, ["from"] = worldDay - 126d, ["to"] = worldDay });
+                List<Dictionary<string, object>> facts = RebellionStore.SelectWorldHistoryEntities(connection, new Dictionary<string, object> { ["hero"] = heroId, ["clan"] = clanId, ["kingdom"] = kingdomId, ["from"] = worldDay - 126d, ["to"] = worldDay });
                 foreach (Dictionary<string, object> fact in facts)
                 {
-                    string type = NormalizeLookup(ReadString(fact, "event_type", ""));
+                    string type = ActionPipelineService.NormalizeLookup(ReadString(fact, "event_type", ""));
                     double decay = Clamp(0d, 1d, 1d - (worldDay - ReadDouble(fact, "world_day", worldDay)) / 126d);
                     double modifier = 0d;
-                    if (ContainsAny(type, "execution", "hero killed", "family punishment")) modifier = 18d;
-                    else if (ContainsAny(type, "confisc", "settlement owner changed")) modifier = 12d;
-                    else if (ContainsAny(type, "exile", "clan exiled")) modifier = 16d;
-                    else if (ContainsAny(type, "support claimant")) modifier = 15d;
-                    else if (ContainsAny(type, "battle completed", "siege completed", "military disaster")) modifier = 6d;
-                    else if (ContainsAny(type, "reward", "fief granted", "reconciliation", "promise fulfilled")) modifier = -12d;
+                    if (DialogueService.ContainsAny(type, "execution", "hero killed", "family punishment")) modifier = 18d;
+                    else if (DialogueService.ContainsAny(type, "confisc", "settlement owner changed")) modifier = 12d;
+                    else if (DialogueService.ContainsAny(type, "exile", "clan exiled")) modifier = 16d;
+                    else if (DialogueService.ContainsAny(type, "support claimant")) modifier = 15d;
+                    else if (DialogueService.ContainsAny(type, "battle completed", "siege completed", "military disaster")) modifier = 6d;
+                    else if (DialogueService.ContainsAny(type, "reward", "fief granted", "reconciliation", "promise fulfilled")) modifier = -12d;
                     score += modifier * decay;
                 }
-                int claimantSupport = QuerySql(connection, "SELECT COUNT(*) count FROM events WHERE event_type='support_claimant' AND payload_json LIKE $clan;",
-                    new Dictionary<string, object> { ["clan"] = "%" + clanId + "%" }).Select(x => ReadInt(x, "count", 0)).FirstOrDefault();
+                int claimantSupport = RebellionStore.CountEvents(connection, new Dictionary<string, object> { ["clan"] = "%" + clanId + "%" }).Select(x => ReadInt(x, "count", 0)).FirstOrDefault();
                 if (claimantSupport > 0) score += 15d;
             }
             catch
@@ -994,7 +909,7 @@ WHERE n.entity_id IN ($hero,$clan,$kingdom) AND e.world_day >= $from AND e.world
             string defeatedId, int defections)
         {
             if (string.IsNullOrWhiteSpace(victorId) || string.IsNullOrWhiteSpace(defeatedId) || string.Equals(victorId, defeatedId, StringComparison.OrdinalIgnoreCase)) return "pardon";
-            Dictionary<string, object> traits = ReadDictionary(ReadJsonObject(CharacterFile(campaignId, victorId, "traits.json")), "foundationTraits") ?? new Dictionary<string, object>();
+            Dictionary<string, object> traits = ReadDictionary(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, victorId, "traits.json")), "foundationTraits") ?? new Dictionary<string, object>();
             double alignment = RelationshipAlignment(connection, campaignId,
                 timelineId, victorId, defeatedId, 0);
             double severity = 45d + 0.15d * Trait100(traits, "vengefulness") + 0.10d * Trait100(traits, "aggression")
@@ -1010,7 +925,7 @@ WHERE n.entity_id IN ($hero,$clan,$kingdom) AND e.world_day >= $from AND e.world
         private static string SelectRebellionObjective(ReignDbConnection connection, string campaignId, Dictionary<string, object> candidate, Dictionary<string, object> kingdom, Dictionary<string, object> scores)
         {
             string leaderId = ReadString(candidate, "leaderHeroId", "");
-            Dictionary<string, object> traits = ReadDictionary(ReadJsonObject(CharacterFile(campaignId, leaderId, "traits.json")), "foundationTraits")
+            Dictionary<string, object> traits = ReadDictionary(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, leaderId, "traits.json")), "foundationTraits")
                 ?? ReadDictionary(candidate, "traits") ?? new Dictionary<string, object>();
             double claimant = 20d * Math.Max(0, ReadInt(candidate, "tier", 0) - 3) + 0.10d * ReadDouble(candidate, "influence", 0d)
                 + 0.25d * Trait100(traits, "ambition") + 0.25d * Trait100(traits, "powerMotivation");
@@ -1042,7 +957,7 @@ WHERE n.entity_id IN ($hero,$clan,$kingdom) AND e.world_day >= $from AND e.world
             Dictionary<string, object> candidate, double rebelPower, double loyalistPower)
         {
             string rulerId = ReadString(ruler, "leaderHeroId", "");
-            Dictionary<string, object> traits = ReadDictionary(ReadJsonObject(CharacterFile(campaignId, rulerId, "traits.json")), "foundationTraits")
+            Dictionary<string, object> traits = ReadDictionary(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, rulerId, "traits.json")), "foundationTraits")
                 ?? ReadDictionary(ruler, "traits") ?? new Dictionary<string, object>();
             double ratio = Clamp(0d, 100d, 100d * rebelPower / Math.Max(1d, rebelPower + loyalistPower));
             return Clamp(0d, 100d, 25d + 0.30d * ratio + 0.20d * Trait100(traits, "pragmatism")
@@ -1053,15 +968,9 @@ WHERE n.entity_id IN ($hero,$clan,$kingdom) AND e.world_day >= $from AND e.world
             Dictionary<string, object> update)
         {
             string movementId = ReadString(update, "movementId", "");
-            Dictionary<string, object> old = QuerySql(connection, "SELECT stage FROM rebellion_movements WHERE movement_id=$id;",
-                new Dictionary<string, object> { ["id"] = movementId }).FirstOrDefault();
+            Dictionary<string, object> old = RebellionStore.SelectRebellionMovements3(connection, new Dictionary<string, object> { ["id"] = movementId }).FirstOrDefault();
             string oldStage = ReadString(old, "stage", "none");
-            ExecuteSql(connection, @"INSERT OR REPLACE INTO rebellion_movements(movement_id,campaign_id,timeline_id,parent_kingdom_id,rebel_kingdom_id,
-leader_clan_id,leader_hero_id,ruler_hero_id,objective,stage,pressure,relationship_pressure,trait_pressure,factual_pressure,viability,readiness,
-demand_json,correlation_id,created_day,updated_day,cooldown_until_day,is_player_kingdom,payload_json)
-VALUES($id,$campaign,$timeline,$parent,$rebel,$clan,$hero,$ruler,$objective,$stage,$pressure,$relationship,$trait,$factual,$viability,$readiness,
-$demand,$correlation,COALESCE((SELECT created_day FROM rebellion_movements WHERE movement_id=$id),$day),$day,0,$player,$payload);",
-                new Dictionary<string, object>
+            RebellionStore.UpsertRebellionMovements2(connection, new Dictionary<string, object>
                 {
                     ["id"] = movementId, ["campaign"] = campaignId, ["timeline"] = timelineId, ["parent"] = ReadString(update, "parentKingdomId", ""),
                     ["rebel"] = ReadString(update, "rebelKingdomId", ""), ["clan"] = ReadString(update, "leaderClanId", ""),
@@ -1074,11 +983,10 @@ $demand,$correlation,COALESCE((SELECT created_day FROM rebellion_movements WHERE
                     ["correlation"] = ReadString(update, "correlationId", movementId), ["day"] = worldDay,
                     ["player"] = ReadBool(update, "isPlayerKingdom", false) ? 1 : 0, ["payload"] = Json.Serialize(update)
                 });
-            ExecuteSql(connection, "DELETE FROM rebellion_memberships WHERE movement_id=$id;", new Dictionary<string, object> { ["id"] = movementId });
+            RebellionStore.DeleteRebellionMemberships(connection, new Dictionary<string, object> { ["id"] = movementId });
             foreach (Dictionary<string, object> member in ReadDictionaryList(update, "memberships"))
             {
-                ExecuteSql(connection, @"INSERT INTO rebellion_memberships(movement_id,clan_id,leader_hero_id,side,support_score,switch_count,last_switch_day,reason_json)
-VALUES($movement,$clan,$hero,$side,$score,$switches,$last,$reason);", new Dictionary<string, object>
+                RebellionStore.InsertRebellionMemberships(connection, new Dictionary<string, object>
                 {
                     ["movement"] = movementId, ["clan"] = ReadString(member, "clanId", ""), ["hero"] = ReadString(member, "leaderHeroId", ""),
                     ["side"] = ReadString(member, "side", "loyalist"), ["score"] = ReadDouble(member, "supportScore", 0d),
@@ -1088,8 +996,7 @@ VALUES($movement,$clan,$hero,$side,$score,$switches,$last,$reason);", new Dictio
             string newStage = ReadString(update, "stage", "");
             if (!string.Equals(oldStage, newStage, StringComparison.OrdinalIgnoreCase))
             {
-                ExecuteSql(connection, @"INSERT INTO rebellion_transitions(transition_id,movement_id,world_day,from_stage,to_stage,kind,actor_id,payload_json,created_ts)
-VALUES($id,$movement,$day,$from,$to,'stage_changed',$actor,$payload,$ts);", new Dictionary<string, object>
+                RebellionStore.InsertRebellionTransitions2(connection, new Dictionary<string, object>
                 {
                     ["id"] = Guid.NewGuid().ToString("N"), ["movement"] = movementId, ["day"] = worldDay, ["from"] = oldStage,
                     ["to"] = newStage, ["actor"] = ReadString(update, "leaderHeroId", ""), ["payload"] = Json.Serialize(update),
@@ -1098,833 +1005,13 @@ VALUES($id,$movement,$day,$from,$to,'stage_changed',$actor,$payload,$ts);", new 
             }
         }
 
-        private static Dictionary<string, object> RebellionQueryApi(Dictionary<string, string> query)
-        {
-            string campaignId = RebellionQueryValue(query, "campaignId", "default");
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-            {
-                EnsureRebellionSchema(connection);
-                string movementId = RebellionQueryValue(query, "movementId", "");
-                List<Dictionary<string, object>> movements = string.IsNullOrWhiteSpace(movementId)
-                    ? QuerySql(connection, "SELECT * FROM rebellion_movements WHERE campaign_id=$campaign ORDER BY updated_day DESC LIMIT 200;", new Dictionary<string, object> { ["campaign"] = campaignId })
-                    : QuerySql(connection, "SELECT * FROM rebellion_movements WHERE movement_id=$id;", new Dictionary<string, object> { ["id"] = movementId });
-                foreach (Dictionary<string, object> movement in movements)
-                {
-                    movement["memberships"] = QuerySql(connection, "SELECT * FROM rebellion_memberships WHERE movement_id=$id ORDER BY support_score DESC;", new Dictionary<string, object> { ["id"] = ReadString(movement, "movement_id", "") });
-                    movement["transitions"] = QuerySql(connection, "SELECT * FROM rebellion_transitions WHERE movement_id=$id ORDER BY world_day;", new Dictionary<string, object> { ["id"] = ReadString(movement, "movement_id", "") });
-                    movement["backingRequest"] = QuerySql(connection, @"SELECT * FROM rebellion_backing_requests
-WHERE campaign_id=$campaign AND movement_id=$id ORDER BY world_day DESC LIMIT 1;",
-                        new Dictionary<string, object> { ["campaign"] = campaignId, ["id"] = ReadString(movement, "movement_id", "") }).FirstOrDefault();
-                    movement["recognitionAttempts"] = QuerySql(connection, @"SELECT * FROM rebellion_recognition_attempts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$id
-ORDER BY attempt_index DESC LIMIT 20;", new Dictionary<string, object>
-                    {
-                        ["campaign"] = campaignId,
-                        ["timeline"] = ReadString(movement, "timeline_id", "main"),
-                        ["id"] = ReadString(movement, "movement_id", "")
-                    });
-                }
-                return new Dictionary<string, object> { ["ok"] = true, ["movements"] = movements };
-            }
-        }
-
-        private static Dictionary<string, object> NegotiationDraftApi(Dictionary<string, object> payload)
-        {
-            payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", "default");
-            double day = ReadDouble(payload, "worldDay", 0d);
-            string id = ReadString(payload, "negotiationId", "");
-            if (string.IsNullOrWhiteSpace(id)) id = "neg_" + Guid.NewGuid().ToString("N");
-            Dictionary<string, object> terms = ReadDictionary(payload, "terms") ?? new Dictionary<string, object>();
-            string politicalResult = ReadString(payload, "politicalResult", ReadString(terms, "politicalResult", ""));
-            string command = ReadString(payload, "command", "diplomatic_package");
-            if (string.IsNullOrWhiteSpace(ReadString(payload, "firstKingdomId", "")) || string.IsNullOrWhiteSpace(ReadString(payload, "secondKingdomId", ""))
-                || string.IsNullOrWhiteSpace(ReadString(payload, "firstRulerId", "")) || string.IsNullOrWhiteSpace(ReadString(payload, "secondRulerId", "")))
-                return new Dictionary<string, object> { ["ok"] = false, ["error"] = "A negotiation requires two exact kingdoms and their current rulers." };
-            if (string.Equals(command, "resolve_civil_war", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(politicalResult, "recognized_independence",
-                    StringComparison.OrdinalIgnoreCase))
-                return new Dictionary<string, object>
-                {
-                    ["ok"] = false,
-                    ["error"] = "Civil wars may be negotiated only through safeguarded recognition of rebel independence; ordinary peace and reunification packages are disabled."
-                };
-            if (!string.IsNullOrWhiteSpace(politicalResult)) terms["politicalResult"] = politicalResult;
-            string termsJson = CanonicalTermsJson(terms);
-            string hash = StableSha256(command + "|" + termsJson);
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-            {
-                EnsureRebellionSchema(connection);
-                Dictionary<string, object> old = QuerySql(connection, "SELECT terms_hash FROM negotiated_action_drafts WHERE negotiation_id=$id;", new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
-                if (old != null && !string.Equals(ReadString(old, "terms_hash", ""), hash, StringComparison.OrdinalIgnoreCase))
-                    ExecuteSql(connection, "DELETE FROM negotiated_action_approvals WHERE negotiation_id=$id;", new Dictionary<string, object> { ["id"] = id });
-                ExecuteSql(connection, @"INSERT OR REPLACE INTO negotiated_action_drafts(negotiation_id,campaign_id,timeline_id,broker_hero_id,first_kingdom_id,
-second_kingdom_id,first_ruler_id,second_ruler_id,command,political_result,terms_json,terms_hash,status,created_day,updated_day,expires_day,queued_action_id,payload_json)
-VALUES($id,$campaign,$timeline,$broker,$firstKingdom,$secondKingdom,$firstRuler,$secondRuler,$command,$result,$terms,$hash,'draft',
-COALESCE((SELECT created_day FROM negotiated_action_drafts WHERE negotiation_id=$id),$day),$day,$expires,'',$payload);",
-                    new Dictionary<string, object>
-                    {
-                        ["id"] = id, ["campaign"] = campaignId, ["timeline"] = ReadString(payload, "timelineId", "main"),
-                        ["broker"] = ReadString(payload, "brokerHeroId", ""), ["firstKingdom"] = ReadString(payload, "firstKingdomId", ""),
-                        ["secondKingdom"] = ReadString(payload, "secondKingdomId", ""), ["firstRuler"] = ReadString(payload, "firstRulerId", ""),
-                        ["secondRuler"] = ReadString(payload, "secondRulerId", ""), ["command"] = command,
-                        ["result"] = politicalResult, ["terms"] = termsJson, ["hash"] = hash, ["day"] = day,
-                        ["expires"] = day + NegotiationLifetimeDays, ["payload"] = Json.Serialize(payload)
-                    });
-                return LoadNegotiation(connection, id, day);
-            }
-        }
-
-        private static Dictionary<string, object> NegotiationRespondApi(Dictionary<string, object> payload)
-        {
-            payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", "default");
-            string id = ReadString(payload, "negotiationId", "");
-            string rulerId = ReadString(payload, "rulerHeroId", "");
-            string kingdomId = ReadString(payload, "kingdomId", "");
-            string response = ReadString(payload, "response", "approve").ToLowerInvariant();
-            double day = ReadDouble(payload, "worldDay", 0d);
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-            {
-                EnsureRebellionSchema(connection);
-                Dictionary<string, object> draft = QuerySql(connection, "SELECT * FROM negotiated_action_drafts WHERE negotiation_id=$id AND campaign_id=$campaign;",
-                    new Dictionary<string, object> { ["id"] = id, ["campaign"] = campaignId }).FirstOrDefault();
-                if (draft == null) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Negotiation draft was not found." };
-                if (day > ReadDouble(draft, "expires_day", 0d))
-                {
-                    ExecuteSql(connection, "UPDATE negotiated_action_drafts SET status='expired',updated_day=$day WHERE negotiation_id=$id;", new Dictionary<string, object> { ["day"] = day, ["id"] = id });
-                    return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Negotiation approval expired." };
-                }
-                bool authorized = string.Equals(rulerId, ReadString(draft, "first_ruler_id", ""), StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(rulerId, ReadString(draft, "second_ruler_id", ""), StringComparison.OrdinalIgnoreCase);
-                if (!authorized) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Only a named current ruler may answer this draft." };
-                string status = response == "reject" ? "rejected" : "approved";
-                ExecuteSql(connection, @"INSERT OR REPLACE INTO negotiated_action_approvals(negotiation_id,ruler_hero_id,kingdom_id,terms_hash,status,approved_day,reason)
-VALUES($id,$ruler,$kingdom,$hash,$status,$day,$reason);", new Dictionary<string, object>
-                {
-                    ["id"] = id, ["ruler"] = rulerId, ["kingdom"] = kingdomId, ["hash"] = ReadString(draft, "terms_hash", ""),
-                    ["status"] = status, ["day"] = day, ["reason"] = ReadString(payload, "reason", "")
-                });
-                if (status == "rejected") ExecuteSql(connection, "UPDATE negotiated_action_drafts SET status='rejected',updated_day=$day WHERE negotiation_id=$id;", new Dictionary<string, object> { ["day"] = day, ["id"] = id });
-                else TryQueueApprovedNegotiation(connection, draft, day);
-                return LoadNegotiation(connection, id, day);
-            }
-        }
-
-        private static void TryQueueApprovedNegotiation(ReignDbConnection connection, Dictionary<string, object> draft, double day)
-        {
-            string id = ReadString(draft, "negotiation_id", "");
-            string hash = ReadString(draft, "terms_hash", "");
-            List<Dictionary<string, object>> approvals = QuerySql(connection,
-                "SELECT * FROM negotiated_action_approvals WHERE negotiation_id=$id AND status='approved' AND terms_hash=$hash;",
-                new Dictionary<string, object> { ["id"] = id, ["hash"] = hash });
-            HashSet<string> approved = new HashSet<string>(approvals.Select(x => ReadString(x, "ruler_hero_id", "")), StringComparer.OrdinalIgnoreCase);
-            if (!approved.Contains(ReadString(draft, "first_ruler_id", "")) || !approved.Contains(ReadString(draft, "second_ruler_id", "")))
-            {
-                ExecuteSql(connection, "UPDATE negotiated_action_drafts SET status='awaiting_approval',updated_day=$day WHERE negotiation_id=$id;", new Dictionary<string, object> { ["day"] = day, ["id"] = id });
-                return;
-            }
-            if (!string.IsNullOrWhiteSpace(ReadString(draft, "queued_action_id", ""))) return;
-            Dictionary<string, object> terms = Json.Deserialize<Dictionary<string, object>>(ReadString(draft, "terms_json", "{}")) ?? new Dictionary<string, object>();
-            terms["authorizationMode"] = "negotiated";
-            terms["negotiationId"] = id;
-            terms["termsHash"] = hash;
-            Dictionary<string, object> draftPayload = TryParseJsonObject(
-                ReadString(draft, "payload_json", "{}"))
-                ?? new Dictionary<string, object>();
-            string source = ReadString(draftPayload, "source",
-                "negotiated_player_broker");
-            if (string.IsNullOrWhiteSpace(source))
-                source = "negotiated_player_broker";
-            Dictionary<string, object> raw = new Dictionary<string, object>
-            {
-                ["command"] = ReadString(draft, "command", "diplomatic_package"), ["campaignId"] = ReadString(draft, "campaign_id", "default"),
-                ["actorKingdomId"] = ReadString(draft, "first_kingdom_id", ""), ["targetKingdomId"] = ReadString(draft, "second_kingdom_id", ""),
-                ["actorHeroId"] = ReadString(draft, "first_ruler_id", ""), ["targetHeroId"] = ReadString(draft, "second_ruler_id", ""),
-                ["source"] = source, ["reason"] = "Both rulers approved negotiated package " + id + ".",
-                ["requiresAcceptance"] = false, ["authorizationMode"] = "negotiated", ["negotiationId"] = id, ["termsHash"] = hash,
-                ["terms"] = terms
-            };
-            Dictionary<string, object> normalized = NormalizeActionCommand(raw, ReadString(draft, "campaign_id", "default"), out List<string> errors, raw);
-            if (errors.Count > 0 || normalized == null)
-            {
-                ExecuteSql(connection, "UPDATE negotiated_action_drafts SET status='failed',updated_day=$day,payload_json=$payload WHERE negotiation_id=$id;",
-                    new Dictionary<string, object> { ["day"] = day, ["payload"] = Json.Serialize(errors), ["id"] = id });
-                return;
-            }
-            Dictionary<string, object> queued = QueueAction(ReadString(draft, "campaign_id", "default"), normalized);
-            ExecuteSql(connection, "UPDATE negotiated_action_drafts SET status='queued',queued_action_id=$action,updated_day=$day WHERE negotiation_id=$id;",
-                new Dictionary<string, object> { ["action"] = ReadString(queued, "actionId", ReadString(normalized, "actionId", "")), ["day"] = day, ["id"] = id });
-        }
-
-        private static Dictionary<string, object> NegotiationQueryApi(Dictionary<string, string> query)
-        {
-            string campaignId = RebellionQueryValue(query, "campaignId", "default");
-            double day = double.TryParse(RebellionQueryValue(query, "worldDay", "0"), NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed) ? parsed : 0d;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-            {
-                EnsureRebellionSchema(connection);
-                string id = RebellionQueryValue(query, "negotiationId", "");
-                if (!string.IsNullOrWhiteSpace(id)) return LoadNegotiation(connection, id, day);
-                List<Dictionary<string, object>> rows = QuerySql(connection, "SELECT * FROM negotiated_action_drafts WHERE campaign_id=$campaign ORDER BY updated_day DESC LIMIT 200;", new Dictionary<string, object> { ["campaign"] = campaignId });
-                foreach (Dictionary<string, object> row in rows) row["approvals"] = QuerySql(connection, "SELECT * FROM negotiated_action_approvals WHERE negotiation_id=$id;", new Dictionary<string, object> { ["id"] = ReadString(row, "negotiation_id", "") });
-                return new Dictionary<string, object> { ["ok"] = true, ["negotiations"] = rows };
-            }
-        }
-
-        private static Dictionary<string, object> LoadNegotiation(ReignDbConnection connection, string id, double day)
-        {
-            Dictionary<string, object> row = QuerySql(connection, "SELECT * FROM negotiated_action_drafts WHERE negotiation_id=$id;", new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
-            if (row == null) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Negotiation draft was not found." };
-            if (day > ReadDouble(row, "expires_day", double.MaxValue) && !ContainsAny(NormalizeLookup(ReadString(row, "status", "")), "queued", "completed", "rejected", "failed"))
-            {
-                ExecuteSql(connection, "UPDATE negotiated_action_drafts SET status='expired',updated_day=$day WHERE negotiation_id=$id;", new Dictionary<string, object> { ["day"] = day, ["id"] = id });
-                row["status"] = "expired";
-            }
-            row["approvals"] = QuerySql(connection, "SELECT * FROM negotiated_action_approvals WHERE negotiation_id=$id ORDER BY approved_day;", new Dictionary<string, object> { ["id"] = id });
-            row["ok"] = true;
-            return row;
-        }
-
-        private static void UpdateNegotiationFromActionReport(string campaignId, string actionId, string status, Dictionary<string, object> payload)
-        {
-            if (string.IsNullOrWhiteSpace(campaignId) || string.IsNullOrWhiteSpace(actionId)) return;
-            try
-            {
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-                {
-                    EnsureRebellionSchema(connection);
-                    string normalized = (status ?? string.Empty).ToLowerInvariant();
-                    string draftStatus = normalized == "completed" ? "completed" : normalized == "failed" ? "failed" : normalized == "retry" ? "queued" : "executing";
-                    ExecuteSql(connection, @"UPDATE negotiated_action_drafts SET status=$status,updated_day=$day,payload_json=$payload
-WHERE campaign_id=$campaign AND queued_action_id=$action;", new Dictionary<string, object>
-                    {
-                        ["status"] = draftStatus, ["day"] = ReadDouble(payload, "worldDay", 0d), ["payload"] = Json.Serialize(payload),
-                        ["campaign"] = campaignId, ["action"] = actionId
-                    });
-                }
-            }
-            catch (Exception ex)
-            {
-                LogOperational("negotiation.action_report_update_failed", new Dictionary<string, object> { ["campaignId"] = campaignId, ["actionId"] = actionId, ["error"] = ex.Message });
-            }
-        }
-
-        private static void UpdateRebellionBackingFromActionReport(string campaignId,
-            string actionId, string status, Dictionary<string, object> payload)
-        {
-            if (string.IsNullOrWhiteSpace(campaignId) || string.IsNullOrWhiteSpace(actionId)) return;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-            {
-                EnsureRebellionSchema(connection);
-                string normalized = NormalizeLookup(status).Replace(' ', '_');
-                string backingStatus = normalized == "completed" ? "completed"
-                    : ContainsAny(normalized, "failed", "invalid", "expired", "cancel") ? "invalidated" : "accepted";
-                ExecuteSql(connection, @"UPDATE rebellion_backing_requests SET status=$status,
-reason=CASE WHEN $terminal=1 THEN $reason ELSE reason END,payload_json=$payload
-WHERE campaign_id=$campaign AND action_id=$action;", new Dictionary<string, object>
-                {
-                    ["status"] = backingStatus, ["terminal"] = backingStatus == "invalidated" ? 1 : 0,
-                    ["reason"] = ReadFirstString(payload, "message", "reason", "error"),
-                    ["payload"] = Json.Serialize(payload ?? new Dictionary<string, object>()),
-                    ["campaign"] = campaignId, ["action"] = actionId
-                });
-            }
-        }
-
-        private static bool LooksLikeRebellionPreparationRequest(string text)
-        {
-            string normalized = NormalizeLookup(text);
-            if (string.IsNullOrWhiteSpace(normalized)
-                || ContainsAny(normalized, "hypothetically", "someday", "what if"))
-                return false;
-            bool rebellion = ContainsAny(normalized, "rebellion", "rebel", "rise against",
-                "challenge the ruler", "overthrow the ruler", "depose the ruler");
-            bool support = ContainsAny(normalized, "pledge", "promise", "support me", "stand with me",
-                "support my rebellion", "support my planned rebellion", "join me", "loyalty",
-                "back me", "follow me", "refuse", "report this conspiracy", "report my",
-                "report me", "warn the ruler", "name me as the author", "name me as its author");
-            return rebellion && support;
-        }
-
-        private static string ClassifyRebellionPreparationReply(string text)
-        {
-            string normalized = NormalizeLookup(text);
-            if (string.IsNullOrWhiteSpace(normalized)) return string.Empty;
-            bool negatesReport = ContainsAny(normalized, "not report", "won't report",
-                "will not report", "never report", "no report");
-            if (!negatesReport && ContainsAny(normalized, "report this", "report it", "report you",
-                "report the plot", "report your plot", "report the conspiracy", "report the rebellion",
-                "tell the ruler", "inform the ruler", "warn the ruler", "warning the ruler",
-                "send word to the ruler",
-                "expose your plot", "expose this plot", "name you as the author",
-                "name you as its author", "treason must be reported"))
-                return "report";
-            bool negatesPledge = ContainsAny(normalized, "not pledge", "won't pledge",
-                "wont pledge", "won t pledge", "will not pledge", "cannot pledge", "can't pledge",
-                "cant pledge", "can t pledge", "do not pledge", "don't pledge", "dont pledge",
-                "don t pledge",
-                "never pledge", "no pledge", "not stand with you",
-                "not support your rebellion", "will not join your rebellion");
-            if (!negatesPledge
-                && ContainsAny(normalized, "pledge", "stand with you", "stands with you",
-                    "rides with you",
-                    "support your rebellion", "join your rebellion", "my clan stands",
-                    "you have my loyalty", "back your claim"))
-                return "pledge";
-            if (normalized == "no" || normalized.StartsWith("no ", StringComparison.Ordinal)
-                || ContainsAny(normalized, "i refuse", "we refuse", "no pledge",
-                "cannot pledge", "can't pledge", "cant pledge", "can t pledge",
-                "no support", "cannot support",
-                "will not support", "won't support",
-                "will not join", "won't join", "will not throw my",
-                "stands aside", "stand aside", "decline"))
-                return "refuse";
-            return string.Empty;
-        }
-
-        private static string ClassifyRebellionSummonsReply(string text)
-        {
-            string normalized = NormalizeLookup(text);
-            if (string.IsNullOrWhiteSpace(normalized)) return string.Empty;
-            if (ContainsAny(normalized, "renounce", "recant", "abandon the plot",
-                "submit to your judgment", "submit to your judgement")) return "renounce";
-            if (ContainsAny(normalized, "defy", "declare rebellion", "rebel against you",
-                "challenge your rule", "take the throne")) return "defy";
-            return string.Empty;
-        }
-
-        private static string ClassifyRebellionRulerVerdict(string text)
-        {
-            string normalized = NormalizeLookup(text);
-            if (string.IsNullOrWhiteSpace(normalized)) return string.Empty;
-            if (ContainsAny(normalized, "execute", "execution", "put you to death", "death sentence"))
-                return "execution";
-            if (ContainsAny(normalized, "banish", "exile", "leave my realm")) return "exile";
-            if (ContainsAny(normalized, "imprison", "prison", "dungeon")) return "imprisonment";
-            if (ContainsAny(normalized, "pardon", "forgive", "grant mercy", "go free")) return "pardon";
-            return string.Empty;
-        }
-
-        private static List<Dictionary<string, object>> BuildRebellionPreparationDialogueCandidates(
-            Dictionary<string, object> payload, Dictionary<string, object> hero,
-            string playerText, string npcText, Dictionary<string, object> actionGate)
-        {
-            List<Dictionary<string, object>> candidates = new List<Dictionary<string, object>>();
-            if (!LooksLikeRebellionPreparationRequest(playerText)) return candidates;
-            string commitment = NormalizeLookup(ReadString(actionGate, "commitment", ""));
-            bool actionNeeded = ReadBool(actionGate, "needed", false);
-            string visibleDecision = ClassifyRebellionPreparationReply(npcText ?? string.Empty);
-            // A concealed report may arrive either as the dedicated structured commitment or
-            // as explicit private intent alongside a visible refusal. The latter is a normal
-            // provider encoding: the reply refuses support while the unshown action reports it.
-            // Never infer it from a negated private intent, and always apply eligibility below.
-            string privateIntent = NormalizeLookup(ReadString(actionGate, "intent", ""));
-            bool privateIntentNegated = ContainsAny(privateIntent,
-                "not privately report", "does not privately report", "will not privately report",
-                "never privately report", "no private report");
-            bool explicitPrivateReport = !privateIntentNegated && ContainsAny(privateIntent,
-                "privately report", "privately reports", "private report");
-            string privateDecision = commitment == "final private report" || explicitPrivateReport
-                ? "report"
-                : ClassifyRebellionPreparationReply(privateIntent);
-            Dictionary<string, object> reportEvidence =
-                BuildRebellionPrivateReportEvidence(payload, hero);
-            bool privateReport = privateDecision == "report"
-                && ReadBool(reportEvidence, "eligible", false)
-                && (explicitPrivateReport
-                    ? actionNeeded
-                    : ActionGateShouldPlan(actionGate));
-            bool visibleReport = visibleDecision == "report"
-                && ReadBool(reportEvidence, "eligible", false)
-                && ActionGateShouldPlan(actionGate);
-            string decision = privateReport || visibleReport
-                ? "report"
-                : commitment == "refused" || visibleDecision == "refuse"
-                    || privateDecision == "report" || visibleDecision == "report"
-                    ? "refuse"
-                    : visibleDecision;
-            if (string.IsNullOrWhiteSpace(decision)) return candidates;
-            bool finalDecision = decision == "refuse"
-                ? actionNeeded && commitment == "refused"
-                : decision == "report" && explicitPrivateReport
-                    ? actionNeeded
-                : ActionGateShouldPlan(actionGate);
-            if (!finalDecision) return candidates;
-            string actorId = ReadFirstString(payload, "playerHeroStringId", "playerId", "actorHeroId");
-            string targetId = ReadFirstString(hero, "heroStringId", "heroId", "id");
-            string clanId = ReadFirstString(hero, "clanId", "clanStringId");
-            candidates.Add(new Dictionary<string, object>
-            {
-                ["command"] = "resolve_rebellion_pledge",
-                ["actorHeroId"] = actorId,
-                ["actorKingdomId"] = ReadFirstString(payload, "playerKingdomId", "actorKingdomId"),
-                ["actorClanId"] = ReadFirstString(payload, "playerClanId", "actorClanId"),
-                ["targetHeroId"] = targetId,
-                ["targetClanId"] = clanId,
-                ["reason"] = "Character-authored secret rebellion preparation decision.",
-                ["terms"] = new Dictionary<string, object>
-                {
-                    ["decision"] = decision,
-                    ["decisionReason"] = npcText ?? string.Empty,
-                    ["requestChannel"] = NormalizeRebellionPreparationChannel(payload),
-                    ["privateReport"] = decision == "report",
-                    ["reportEligibility"] = reportEvidence
-                }
-            });
-            return candidates;
-        }
-
-        private static Dictionary<string, object> BuildRebellionPrivateReportEvidence(
-            Dictionary<string, object> payload,
-            Dictionary<string, object> hero)
-        {
-            payload = payload ?? new Dictionary<string, object>();
-            hero = hero ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", "default");
-            string heroId = ReadFirstString(hero, "heroStringId", "heroId", "id");
-            Dictionary<string, object> characteristics = string.IsNullOrWhiteSpace(heroId)
-                ? new Dictionary<string, object>()
-                : LoadCharacterStack(campaignId, heroId);
-            Dictionary<string, object> reignTraits = TraitPercentageSnapshot(
-                ReadDictionary(characteristics, "traits") ?? new Dictionary<string, object>());
-            Dictionary<string, object> nativeTraits =
-                ReadDictionary(hero, "traits") ?? new Dictionary<string, object>();
-            bool sameSovereign = ReadBool(hero, "sharesPlayerSovereign", false);
-            int sovereignRelation = ReadInt(hero, "relationToSovereign", 0);
-            int playerRelation = ReadInt(hero, "relationToPlayer", 0);
-            int loyalty = ReadInt(reignTraits, "loyalty", 50);
-            int honor = ReadInt(nativeTraits, "honor", 0);
-            bool eligible = RebellionPrivateReportEligible(
-                sameSovereign, sovereignRelation, loyalty, honor);
-            return new Dictionary<string, object>
-            {
-                ["eligible"] = eligible,
-                ["sharesPlayerSovereign"] = sameSovereign,
-                ["sovereignHeroStringId"] = ReadString(hero, "sovereignHeroStringId", ""),
-                ["sovereignName"] = ReadString(hero, "sovereignName", ""),
-                ["relationToSovereign"] = sovereignRelation,
-                ["relationToPlayer"] = playerRelation,
-                ["loyalty"] = loyalty,
-                ["honor"] = honor,
-                ["minimumSovereignRelation"] = 10,
-                ["minimumLoyaltyWithoutPositiveHonor"] = 61
-            };
-        }
-
-        private static bool RebellionPrivateReportEligible(bool sameSovereign,
-            int sovereignRelation, int loyalty, int honor)
-        {
-            return sameSovereign && sovereignRelation >= 10
-                && (loyalty >= 61 || honor >= 1);
-        }
-
-        private static string NormalizeRebellionPreparationChannel(Dictionary<string, object> payload)
-        {
-            string channel = NormalizeLookup(ReadFirstString(payload,
-                "interactionMode", "conversationMode", "channel", "mode"));
-            if (ContainsAny(channel, "correspondence", "letter", "mail"))
-                return "correspondence";
-            if (string.IsNullOrWhiteSpace(channel)
-                || ContainsAny(channel, "individual_chat", "individual chat", "in_person",
-                    "in person", "conversation", "dialogue"))
-                return "individual_chat";
-            return channel.Replace(' ', '_');
-        }
-
-        private static Dictionary<string, object> RunRebellionSelfTests()
-        {
-            List<Dictionary<string, object>> tests = new List<Dictionary<string, object>>();
-            Action<string, bool, string> add = (name, passed, detail) => tests.Add(new Dictionary<string, object> { ["name"] = name, ["passed"] = passed, ["detail"] = detail });
-            add("inclusive_relation_threshold",
-                RebellionRelationshipThreshold == -35
-                    && -36 <= RebellionRelationshipThreshold
-                    && -35 <= RebellionRelationshipThreshold
-                    && !(-34 <= RebellionRelationshipThreshold),
-                "the clan leader's directional effective attitude toward the ruler qualifies at -35 and below");
-            Dictionary<string, object> lockedGrace = BuildAutonomousWorldStartupGrace(
-                new Dictionary<string, object> { ["worldDay"] = 104d,
-                    ["campaignStartDay"] = 100d });
-            Dictionary<string, object> openGrace = BuildAutonomousWorldStartupGrace(
-                new Dictionary<string, object> { ["worldDay"] = 105d,
-                    ["campaignStartDay"] = 100d });
-            add("startup_grace_boundary",
-                ReadBool(lockedGrace, "locked", false)
-                    && !ReadBool(openGrace, "locked", true),
-                "Reign autonomous kingdom systems are locked through campaign day 4 and unlock exactly at day 5");
-            add("weekly_interval", RebellionEvaluationIntervalDays == 7, "one authoritative roll per seven campaign days");
-            add("five_percent_boundary", Enumerable.Range(1, 100).Count(x => x <= RebellionWeeklyOutbreakPercent) == 5, "rolls 1 through 5 succeed");
-            List<Tuple<string, int>> simultaneous = new List<Tuple<string, int>>
-            {
-                Tuple.Create("clan_b", -35), Tuple.Create("clan_a", -35), Tuple.Create("clan_c", -30)
-            };
-            string selected = simultaneous.OrderBy(x => x.Item2).ThenBy(x => x.Item1, StringComparer.Ordinal).First().Item1;
-            add("simultaneous_outbreak_tiebreak", selected == "clan_a", "lowest ruler relation, then stable clan id");
-            add("supporter_strict_comparison", 5 > -10 && !(-10 > -10), "supporter joins only when rebel relation is strictly higher than ruler relation");
-            add("realm_cooldown", RebellionAcceptedCooldownDays == 63 && RebellionResolvedCooldownDays == 63, "63-day cooldown after every resolution");
-            add("recognition_hard_roll_limits",
-                RebellionRecognitionMinimumWarDays == 14
-                && RebellionRecognitionAttemptIntervalDays == 30
-                && RebellionRecognitionMaximumChancePercent == 30
-                && RebellionRecognitionPeaceDays == 63,
-                "recognition waits 14 days, retries at most every 30 days, caps acceptance at 30 percent, and records 63 days of peace");
-            add("recognition_chance_clamps",
-                CalculateRebellionRecognitionChance(-20, 0, 0, -2, -2) == 1
-                && CalculateRebellionRecognitionChance(5, 3, 2, 2, 4) == 30,
-                "recognition probability is always bounded to the hard 1-30 percent range");
-            add("declaration_phrase", LooksLikeExplicitPlayerRebellionDeclaration("I challenge your rule and I declare a rebellion."), "explicit first-person ruler challenge maps deterministically");
-            add("declaration_not_question", !LooksLikeExplicitPlayerRebellionDeclaration("Should I declare a rebellion someday?"), "questions and future hypotheticals do not declare");
-            add("recruitment_phrase", LooksLikeRebellionRecruitmentRequest("Join my rebellion against the ruler."), "post-declaration recruitment request maps");
-            add("join_phrase", LooksLikePlayerJoinRebellionRequest("I ask to join your rebellion."), "player request to join NPC rebellion maps");
-            add("acceptance_fail_closed", IsUnambiguousActionAcceptance("I accept. My clan stands with you.")
-                && !IsUnambiguousActionAcceptance("No. I will not join you."), "NPC recruitment requires unambiguous acceptance and blocks refusal");
-            add("surrender_phrases", LooksLikeExplicitPlayerRebellionSurrender("I surrender this rebellion and yield the throne.")
-                && LooksLikeExplicitNpcRebellionSurrender("I relinquish my claim. I surrender."), "player and NPC surrender are explicit");
-            add("action_type_mapping", MapCommandToActionType("start_ruling_clan_rebellion") == "PoliticsStartRulingClanRebellion"
-                && MapCommandToActionType("recruit_lord_to_rebellion") == "PoliticsRecruitLordToRebellion"
-                && MapCommandToActionType("join_rebellion") == "PoliticsJoinRebellion"
-                && MapCommandToActionType("surrender_rebellion") == "PoliticsSurrenderRebellion"
-                && MapCommandToActionType("resolve_rebellion_pledge") == "PoliticsResolveRebellionPledge"
-                && MapCommandToActionType("resolve_rebellion_summons") == "PoliticsResolveRebellionSummons"
-                && MapCommandToActionType("back_rebellion") == "DiplomacyBackRebellion", "rebellion actions, including foreign backing, map to client enum names");
-            List<Dictionary<string, object>> backingKingdoms = new List<Dictionary<string, object>>
-            {
-                new Dictionary<string, object> { ["kingdomId"] = "rebel", ["strength"] = 100d, ["enemies"] = new ArrayList { "parent", "ally" } },
-                new Dictionary<string, object> { ["kingdomId"] = "asked", ["strength"] = 200d, ["enemies"] = new ArrayList { "parent", "ally" } },
-                new Dictionary<string, object> { ["kingdomId"] = "parent", ["strength"] = 250d, ["enemies"] = new ArrayList { "rebel", "asked" } },
-                new Dictionary<string, object> { ["kingdomId"] = "ally", ["strength"] = 50d, ["enemies"] = new ArrayList { "rebel", "asked" } }
-            };
-            Dictionary<string, object> coalition = BuildBackingMilitaryEvidence(backingKingdoms, "asked", "rebel", "parent");
-            add("backing_coalition_deduplication", ReadStringList(coalition, "oppositionCoalition").Count == 2
-                && Math.Abs(ReadDouble(coalition, "oppositionPower", 0d) - 300d) < 0.01d,
-                "shared enemies are counted once in opposition power");
-            add("backing_power_chance", ReadInt(coalition, "chance", 0) == 50,
-                "300 support versus 300 opposition produces a 50 percent military chance");
-            Dictionary<string, object> lowClamp = BuildBackingMilitaryEvidence(new List<Dictionary<string, object>>
-            {
-                new Dictionary<string, object> { ["kingdomId"] = "rebel", ["strength"] = 0d, ["enemies"] = new ArrayList { "parent" } },
-                new Dictionary<string, object> { ["kingdomId"] = "asked", ["strength"] = 1d, ["enemies"] = new ArrayList { "parent" } },
-                new Dictionary<string, object> { ["kingdomId"] = "parent", ["strength"] = 999d, ["enemies"] = new ArrayList() }
-            }, "asked", "rebel", "parent");
-            Dictionary<string, object> highClamp = BuildBackingMilitaryEvidence(new List<Dictionary<string, object>>
-            {
-                new Dictionary<string, object> { ["kingdomId"] = "rebel", ["strength"] = 999d, ["enemies"] = new ArrayList { "parent" } },
-                new Dictionary<string, object> { ["kingdomId"] = "asked", ["strength"] = 1d, ["enemies"] = new ArrayList { "parent" } },
-                new Dictionary<string, object> { ["kingdomId"] = "parent", ["strength"] = 0d, ["enemies"] = new ArrayList() }
-            }, "asked", "rebel", "parent");
-            add("backing_chance_clamps", ReadInt(lowClamp, "chance", 0) == 5 && ReadInt(highClamp, "chance", 0) == 95,
-                "military safety chance clamps exactly to 5 and 95 percent");
-            add("backing_opposed_tie_refuses", !(75 + 10 > 65 + 20),
-                "strict comparison refuses equal opposed relationship scores");
-            Dictionary<string, object> dialoguePayload = new Dictionary<string, object>
-            {
-                ["playerHeroStringId"] = "player", ["playerKingdomId"] = "realm", ["playerClanId"] = "player_clan",
-                ["speakerHeroStringId"] = "ruler", ["speakerKingdomId"] = "realm", ["speakerClanId"] = "ruler_clan",
-                ["conversationMode"] = "in_person"
-            };
-            Dictionary<string, object> dialogueHero = new Dictionary<string, object>
-            {
-                ["heroStringId"] = "ruler", ["kingdomId"] = "realm", ["clanId"] = "ruler_clan",
-                ["sovereignHeroStringId"] = "realm_sovereign", ["sovereignName"] = "the sovereign",
-                ["sharesPlayerSovereign"] = true, ["relationToSovereign"] = 35,
-                ["relationToPlayer"] = -10,
-                ["traits"] = new Dictionary<string, object> { ["honor"] = 1 }
-            };
-            Dictionary<string, object> acceptedActionGate = new Dictionary<string, object>
-            {
-                ["needed"] = true, ["commitment"] = "accepted"
-            };
-            Dictionary<string, object> acceptedReportActionGate = new Dictionary<string, object>
-            {
-                ["needed"] = true, ["commitment"] = "final_private_report",
-                ["intent"] = "The lord privately reports the player's planned rebellion to the named sovereign."
-            };
-            Dictionary<string, object> refusedPrivateReportActionGate = new Dictionary<string, object>
-            {
-                ["needed"] = true, ["commitment"] = "refused",
-                ["intent"] = "The lord privately reports the player's planned rebellion to the named sovereign."
-            };
-            Dictionary<string, object> refusedActionGate = new Dictionary<string, object>
-            {
-                ["needed"] = false, ["commitment"] = "refused"
-            };
-            Dictionary<string, object> conditionalActionGate = new Dictionary<string, object>
-            {
-                ["needed"] = false, ["commitment"] = "conditional"
-            };
-            Dictionary<string, object> finalRefusalActionGate = new Dictionary<string, object>
-            {
-                ["needed"] = true, ["commitment"] = "refused"
-            };
-            List<Dictionary<string, object>> unilateral = BuildRebellionDialogueCandidates(dialoguePayload, dialogueHero,
-                "I challenge your rule and I declare a rebellion.", "No. I reject your challenge.", refusedActionGate);
-            add("unilateral_dialogue_declaration", unilateral.Count == 1
-                && ReadString(unilateral[0], "command", "") == "start_ruling_clan_rebellion",
-                "ruler refusal cannot block an explicit player declaration");
-            List<Dictionary<string, object>> acceptedRecruitment = BuildRebellionDialogueCandidates(dialoguePayload, dialogueHero,
-                "Join my rebellion against the ruler.", "I accept. My clan stands with you.", acceptedActionGate);
-            add("accepted_dialogue_recruitment", acceptedRecruitment.Count == 1
-                && ReadString(acceptedRecruitment[0], "command", "") == "recruit_lord_to_rebellion",
-                "unambiguous visible acceptance queues recruitment");
-            List<Dictionary<string, object>> refusedRecruitment = BuildRebellionDialogueCandidates(dialoguePayload, dialogueHero,
-                "Join my rebellion against the ruler.", "No. I will not join.", refusedActionGate);
-            add("refused_dialogue_recruitment", refusedRecruitment.Count == 0,
-                "refused recruitment fails closed");
-            add("preparation_request_phrase",
-                LooksLikeRebellionPreparationRequest("When I rebel against the ruler, pledge that your clan will stand with me."),
-                "an explicit present request for a future rebellion pledge is recognized");
-            add("preparation_hypothetical_rejected",
-                !LooksLikeRebellionPreparationRequest("What if someday I asked you to support a rebellion?"),
-                "questions and hypothetical rebellion talk do not create a secret approach");
-            add("preparation_three_way_decision",
-                ClassifyRebellionPreparationReply("I pledge that my clan stands with you.") == "pledge"
-                    && ClassifyRebellionPreparationReply("I'll pledge. Wyreglen rides with you.") == "pledge"
-                    && ClassifyRebellionPreparationReply("Wyreglen stands with you. That's my pledge.") == "pledge"
-                    && ClassifyRebellionPreparationReply("I can't pledge my clan.") == "refuse"
-                    && ClassifyRebellionPreparationReply("No. I refuse and will not join.") == "refuse"
-                    && ClassifyRebellionPreparationReply("No. I will not throw my children's future into a fire with no visible shape.") == "refuse"
-                    && ClassifyRebellionPreparationReply("You ask for my final answer. No. I will not throw my clan into this rebellion. Wyreglen stands aside.") == "refuse"
-                    && ClassifyRebellionPreparationReply("I refuse, and I will report this treason to the ruler.") == "report"
-                    && ClassifyRebellionPreparationReply("Yes. I'll report it. I'll name you as the author.") == "report",
-                "pledge, refusal, and dangerous report outcomes are distinct and fail closed");
-            add("private_report_plausibility_boundaries",
-                !RebellionPrivateReportEligible(false, 100, 100, 2)
-                    && !RebellionPrivateReportEligible(true, 9, 100, 2)
-                    && !RebellionPrivateReportEligible(true, 35, 60, 0)
-                    && RebellionPrivateReportEligible(true, 10, 61, 0)
-                    && RebellionPrivateReportEligible(true, 10, 0, 1),
-                "private reporting requires the NPC's own sovereign, relation +10, and either Loyalty 61 or positive Honor");
-            Dictionary<string, object> mergedMailProfile = MergeCorrespondenceRecipientProfile(
-                new Dictionary<string, object>
-                {
-                    ["heroStringId"] = "mail_lord", ["name"] = "stale name",
-                    ["backgroundMarker"] = "preserved",
-                    ["sharesPlayerSovereign"] = false,
-                    ["relationToSovereign"] = 0
-                },
-                new Dictionary<string, object>
-                {
-                    ["payload_json"] = Json.Serialize(new Dictionary<string, object>
-                    {
-                        ["recipient"] = new Dictionary<string, object>
-                        {
-                            ["heroStringId"] = "mail_lord", ["name"] = "Current Lord",
-                            ["clanId"] = "current_clan", ["kingdomId"] = "current_realm",
-                            ["sovereignHeroStringId"] = "current_ruler",
-                            ["sharesPlayerSovereign"] = true,
-                            ["relationToSovereign"] = 35,
-                            ["relationToPlayer"] = -10,
-                            ["traits"] = new Dictionary<string, object> { ["honor"] = 1 }
-                        }
-                    })
-                }, "mail_lord");
-            Dictionary<string, object> rejectedMailProfile = MergeCorrespondenceRecipientProfile(
-                new Dictionary<string, object>
-                {
-                    ["heroStringId"] = "mail_lord", ["name"] = "Persisted Lord"
-                },
-                new Dictionary<string, object>
-                {
-                    ["payload_json"] = Json.Serialize(new Dictionary<string, object>
-                    {
-                        ["recipient"] = new Dictionary<string, object>
-                        {
-                            ["heroStringId"] = "different_lord", ["name"] = "Wrong Lord"
-                        }
-                    })
-                }, "mail_lord");
-            add("correspondence_runtime_profile_authority",
-                ReadString(mergedMailProfile, "name", "") == "Current Lord"
-                    && ReadString(mergedMailProfile, "backgroundMarker", "") == "preserved"
-                    && ReadString(mergedMailProfile, "clanId", "") == "current_clan"
-                    && ReadString(mergedMailProfile, "kingdomId", "") == "current_realm"
-                    && ReadBool(mergedMailProfile, "sharesPlayerSovereign", false)
-                    && ReadInt(mergedMailProfile, "relationToSovereign", 0) == 35
-                    && ReadInt(ReadDictionary(mergedMailProfile, "traits"), "honor", 0) == 1
-                    && ReadString(rejectedMailProfile, "name", "") == "Persisted Lord",
-                "delayed correspondence overlays the exact matching dispatch-time native recipient profile while rejecting mismatched identities");
-            List<Dictionary<string, object>> conversationalPledge = BuildRebellionDialogueCandidates(
-                dialoguePayload, dialogueHero,
-                "Give me your final answer: will you pledge your clan to my rebellion against our ruler without further condition?",
-                "I'll pledge. Wyreglen rides with you.", acceptedActionGate);
-            add("preparation_conversational_pledge_candidate",
-                conversationalPledge.Count == 1
-                    && ReadString(conversationalPledge[0], "command", "") == "resolve_rebellion_pledge"
-                    && ReadString(ReadDictionary(conversationalPledge[0], "terms"), "decision", "") == "pledge",
-                "a natural future-tense pledge routes to secret preparation rather than immediate declaration");
-            List<Dictionary<string, object>> conditionalPreparation = BuildRebellionDialogueCandidates(
-                dialoguePayload, dialogueHero,
-                "Will you pledge your clan to my rebellion against our ruler?",
-                "Give me land and a seat, and you'll have my axe and my clan's banners. Until then I stand aside.",
-                conditionalActionGate);
-            List<Dictionary<string, object>> finalRefusal = BuildRebellionDialogueCandidates(
-                dialoguePayload, dialogueHero,
-                "Give me your final answer: do you refuse to support my rebellion against our ruler?",
-                "My answer is no, and it stays no.",
-                finalRefusalActionGate);
-            List<Dictionary<string, object>> deferredRefusal = BuildRebellionDialogueCandidates(
-                dialoguePayload, dialogueHero,
-                "Will you pledge your clan to my rebellion against our ruler?",
-                "I won't pledge today, but I'll listen. Give me something real to weigh.",
-                refusedActionGate);
-            add("preparation_commitment_gate",
-                conditionalPreparation.Count == 0
-                    && deferredRefusal.Count == 0
-                    && finalRefusal.Count == 1
-                    && ReadString(ReadDictionary(finalRefusal[0], "terms"), "decision", "") == "refuse",
-                "conditional negotiation and a non-actionable refusal cannot persist, while an actionable final refusal can");
-            add("preparation_visible_channel_normalization",
-                ReadString(ReadDictionary(conversationalPledge[0], "terms"), "requestChannel", "") == "individual_chat"
-                    && NormalizeRebellionPreparationChannel(new Dictionary<string, object>
-                    {
-                        ["channel"] = "correspondence"
-                    }) == "correspondence",
-                "direct and mail decisions persist the actual visible production channel");
-            Dictionary<string, object> correspondencePayload = new Dictionary<string, object>(
-                dialoguePayload, StringComparer.OrdinalIgnoreCase)
-            {
-                ["interactionMode"] = "correspondence",
-                ["sender"] = new Dictionary<string, object>
-                {
-                    ["heroStringId"] = "player", ["kingdomId"] = "player_kingdom",
-                    ["clanId"] = "player_clan"
-                },
-                ["recipient"] = dialogueHero
-            };
-            List<Dictionary<string, object>> correspondencePledge =
-                BuildRebellionLetterReplyCandidates(correspondencePayload,
-                    new Dictionary<string, object>
-                    {
-                        ["body"] = "Give me your final pledge by letter to support my planned rebellion against our ruler."
-                    },
-                    new Dictionary<string, object>
-                    {
-                        ["body"] = "I pledge my clan to your planned rebellion.",
-                        ["actionGate"] = acceptedActionGate
-                    }, "player", "ruler");
-            List<Dictionary<string, object>> correspondenceRefusal =
-                BuildRebellionLetterReplyCandidates(correspondencePayload,
-                    new Dictionary<string, object>
-                    {
-                        ["body"] = "Give me your final answer by letter: will your clan support my planned rebellion against our ruler, or refuse me?"
-                    },
-                    new Dictionary<string, object>
-                    {
-                        ["body"] = "No. My clan will not support your planned rebellion.",
-                        ["actionGate"] = finalRefusalActionGate
-                    }, "player", "ruler");
-            List<Dictionary<string, object>> correspondenceReport =
-                BuildRebellionLetterReplyCandidates(correspondencePayload,
-                    new Dictionary<string, object>
-                    {
-                        ["body"] = "Give me your final answer by letter: will your clan support my planned rebellion against our ruler, or refuse me?"
-                    },
-                    new Dictionary<string, object>
-                    {
-                        ["body"] = "No. My clan will not support your planned rebellion.",
-                        ["actionGate"] = acceptedReportActionGate
-                    }, "player", "ruler");
-            add("preparation_correspondence_decision_candidates",
-                correspondencePledge.Count == 1
-                    && ReadString(correspondencePledge[0], "command", "") == "resolve_rebellion_pledge"
-                    && ReadString(ReadDictionary(correspondencePledge[0], "terms"), "decision", "") == "pledge"
-                    && ReadString(ReadDictionary(correspondencePledge[0], "terms"), "requestChannel", "") == "correspondence"
-                    && correspondenceRefusal.Count == 1
-                    && ReadString(ReadDictionary(correspondenceRefusal[0], "terms"), "decision", "") == "refuse"
-                    && correspondenceReport.Count == 1
-                    && ReadString(ReadDictionary(correspondenceReport[0], "terms"), "decision", "") == "report",
-                "delayed natural letter replies route pledge, refusal, and concealed report through the production preparation action while preserving the mail channel");
-            var languageCases = new[]
-            {
-                new { Id = "RB-LANG-001", Mode = "conversation", Player = "When I rise against our ruler, will you pledge that your clan will stand with me?", Npc = "I pledge that my clan stands with you.", Expected = "pledge" },
-                new { Id = "RB-LANG-002", Mode = "conversation", Player = "I am preparing to challenge our ruler. Tell me plainly if your clan refuses to support my rebellion.", Npc = "No. I refuse and will not join.", Expected = "refuse" },
-                new { Id = "RB-LANG-003", Mode = "conversation", Player = "I intend to rebel against our ruler. Will your clan support me?", Npc = "I refuse, and I will report this treason to the ruler.", Expected = "report" },
-                new { Id = "RB-LANG-004", Mode = "correspondence", Player = "By this private letter, I ask whether your clan will pledge to stand with me when I rebel against our ruler.", Npc = "I accept. My clan stands with you and pledges its support.", Expected = "pledge" },
-                new { Id = "RB-LANG-005", Mode = "correspondence", Player = "Reply by letter and refuse plainly if your clan will not support my planned rebellion against our ruler.", Npc = "I decline. My clan will not join your rebellion.", Expected = "refuse" },
-                new { Id = "RB-LANG-006", Mode = "correspondence", Player = "This private letter asks your clan to support my rebellion against our ruler.", Npc = "I will send word to the ruler and expose this plot.", Expected = "report" },
-                new { Id = "RB-LANG-007", Mode = "conversation", Player = "What if someday someone considered a rebellion?", Npc = "Perhaps.", Expected = "" },
-                new { Id = "RB-LANG-008", Mode = "conversation", Player = "Pledge to support my rebellion against our ruler.", Npc = "I will not report this plot. I pledge that my clan stands with you.", Expected = "pledge" },
-                new { Id = "RB-LANG-009", Mode = "conversation", Player = "Pledge to support my rebellion against our ruler.", Npc = "I spoke too quickly. I correct myself: I refuse and will not join.", Expected = "refuse" },
-                new { Id = "RB-LANG-010", Mode = "conversation", Player = "Pledge to support my rebellion against our ruler.", Npc = "I need time and make no decision today.", Expected = "" },
-                new { Id = "RB-LANG-011", Mode = "conversation", Player = "Pledge to support my rebellion against our ruler.", Npc = "I will not pledge. I will report this conspiracy to the ruler.", Expected = "report" }
-            };
-            bool languagePassed = true;
-            foreach (var languageCase in languageCases)
-            {
-                bool request = LooksLikeRebellionPreparationRequest(languageCase.Player);
-                string actual = request ? ClassifyRebellionPreparationReply(languageCase.Npc) : string.Empty;
-                bool casePassed = string.Equals(actual, languageCase.Expected,
-                    StringComparison.OrdinalIgnoreCase);
-                languagePassed &= casePassed;
-                add(languageCase.Id.ToLowerInvariant().Replace('-', '_'), casePassed,
-                    languageCase.Mode + " expected " + languageCase.Expected + " and resolved " + actual);
-            }
-            add("compact_language_corpus", languagePassed && languageCases.Length == 11,
-                "exactly eleven natural-language cases cover direct/mail decisions, ambiguity, negation, and correction");
-            List<Dictionary<string, object>> reportedPreparation =
-                BuildRebellionPreparationDialogueCandidates(dialoguePayload, dialogueHero,
-                    "Pledge to support my rebellion against the ruler.",
-                    "I refuse, and I will report this treason to the ruler.", acceptedActionGate);
-            add("preparation_report_candidate",
-                reportedPreparation.Count == 1
-                    && ReadString(reportedPreparation[0], "command", "") == "resolve_rebellion_pledge"
-                    && ReadString(ReadDictionary(reportedPreparation[0], "terms"), "decision", "") == "report",
-                "a named lord's report queues the durable preparation decision action");
-            List<Dictionary<string, object>> structuredReport =
-                BuildRebellionPreparationDialogueCandidates(dialoguePayload, dialogueHero,
-                    "Give me your final answer: will your clan support my planned rebellion against our ruler?",
-                    "No. My clan will not join your rebellion.",
-                    acceptedReportActionGate);
-            List<Dictionary<string, object>> refusedVisiblePrivateReport =
-                BuildRebellionPreparationDialogueCandidates(dialoguePayload, dialogueHero,
-                    "Give me your final answer: will your clan support my planned rebellion against our ruler?",
-                    "No. My clan will not join your rebellion.",
-                    refusedPrivateReportActionGate);
-            add("preparation_structured_report_orientation",
-                structuredReport.Count == 1
-                    && refusedVisiblePrivateReport.Count == 1
-                    && ReadString(ReadDictionary(structuredReport[0], "terms"), "decision", "") == "report"
-                    && ReadString(ReadDictionary(refusedVisiblePrivateReport[0], "terms"), "decision", "") == "report"
-                    && ReadString(structuredReport[0], "actorHeroId", "") == "player"
-                    && ReadString(structuredReport[0], "actorClanId", "") == "player_clan"
-                    && ReadString(structuredReport[0], "targetHeroId", "") == "ruler"
-                    && ReadString(structuredReport[0], "targetClanId", "") == "ruler_clan",
-                "a concealed report uses grounded private intent while preserving player-to-NPC pledge action orientation"
-                    + (structuredReport.Count == 1
-                        ? "; actual decision=" + ReadString(ReadDictionary(structuredReport[0], "terms"), "decision", "")
-                            + ", actorHeroId=" + ReadString(structuredReport[0], "actorHeroId", "")
-                            + ", actorClanId=" + ReadString(structuredReport[0], "actorClanId", "")
-                            + ", targetHeroId=" + ReadString(structuredReport[0], "targetHeroId", "")
-                            + ", targetClanId=" + ReadString(structuredReport[0], "targetClanId", "")
-                        : "; actual candidateCount=" + structuredReport.Count));
-            add("summons_response_contract",
-                ClassifyRebellionSummonsReply("I renounce the conspiracy and submit to your judgment.") == "renounce"
-                    && ClassifyRebellionSummonsReply("I defy you and declare rebellion.") == "defy",
-                "the hearing requires explicit renunciation or defiance");
-            add("ruler_verdict_contract",
-                ClassifyRebellionRulerVerdict("I pardon you.") == "pardon"
-                    && ClassifyRebellionRulerVerdict("You will be imprisoned in my dungeon.") == "imprisonment"
-                    && ClassifyRebellionRulerVerdict("I exile you from my realm.") == "exile"
-                    && ClassifyRebellionRulerVerdict("Your treason merits execution.") == "execution",
-                "the ruler has exactly the four planned judgment outcomes");
-            add("summons_deadline_from_delivery", Math.Abs((101d + 7d) - 108d) < 0.001d,
-                "the seven-day response window begins at summons delivery, not dispatch");
-            add("mercy_bands", 33 <= 33 && 34 >= 34 && 66 < 67 && 67 >= 67,
-                "neutral mercy scores preserve execution 1-33, imprisonment 34-66, freedom 67-100");
-            int mercifulScore = 50 + 15 * 2 + (int)Math.Round(50 / 5d, MidpointRounding.AwayFromZero);
-            int cruelScore = 50 + 15 * -2 + (int)Math.Round(-50 / 5d, MidpointRounding.AwayFromZero);
-            add("mercy_relation_modifiers", mercifulScore == 90 && cruelScore == 10,
-                "d100 + 15*Mercy + round(native relation/5)");
-            return new Dictionary<string, object> { ["ok"] = tests.All(x => ReadBool(x, "passed", false)), ["passed"] = tests.Count(x => ReadBool(x, "passed", false)), ["total"] = tests.Count, ["languageCaseCount"] = languageCases.Length, ["tests"] = tests };
-        }
-
-        private static double Trait100(Dictionary<string, object> traits, string key) => Clamp(0d, 100d, 50d + 25d * ReadDouble(traits, key, 0d));
+        internal static double Trait100(Dictionary<string, object> traits, string key) => Clamp(0d, 100d, 50d + 25d * ReadDouble(traits, key, 0d));
 
         private static double RelationshipAlignment(ReignDbConnection connection,
             string campaignId, string timelineId, string subjectId,
             string targetId, int nativeRelation)
         {
-            Dictionary<string, object> attitude = ResolveEffectiveAttitude(connection,
+            Dictionary<string, object> attitude = RelationshipsService.ResolveEffectiveAttitude(connection,
                 campaignId, timelineId, subjectId, targetId,
                 "rebellion_alignment");
             int directional = ReadBool(attitude, "hasPair", false)

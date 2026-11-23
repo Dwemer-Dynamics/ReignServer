@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class GovernmentService
     {
         private static void AddGovernmentPaymentOwnershipSelfTests(Action<string, bool, string, object> add)
         {
@@ -146,7 +146,7 @@ namespace ReignBetaServer
                             ["fromHeroStringId"] = "ruler", ["toHeroStringId"] = "member"
                         }
                     };
-                    var record = NormalizeActionCommand(raw, "government_self_test", out List<string> errors);
+                    var record = ActionPipelineService.NormalizeActionCommand(raw, "government_self_test", out List<string> errors);
                     bool owned = errors.Any(x => x.StartsWith("government_payment_", StringComparison.Ordinal));
                     normalizedCorrect &= owned;
                     normalizedCases.Add(new { alias, owned, recordReturned = record != null, errors });

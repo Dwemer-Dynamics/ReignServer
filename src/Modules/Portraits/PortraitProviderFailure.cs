@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
         private static bool PortraitContentRefusal(string error)
         {
@@ -14,7 +14,7 @@ namespace ReignBetaServer
 
         // Retain bounded failure fields, never an entire response with image/reference bytes.
         private static string PortraitProviderFailureDetail(Dictionary<string, object> failure)
-            => LimitText(string.Join(" ", new[] { ReadString(failure, "type", ""), ReadString(failure, "code", ""),
+            => DialogueService.LimitText(string.Join(" ", new[] { ReadString(failure, "type", ""), ReadString(failure, "code", ""),
                 ReadString(failure, "message", "") }.Where(value => !string.IsNullOrWhiteSpace(value))), 1000);
     }
 }

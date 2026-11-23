@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CourtService
     {
         // Keep native execution evidence apart from LLM-authored plans and dialogue.
         // This existing timeline-scoped table participates in campaign Save Sync.
@@ -13,15 +13,14 @@ namespace ReignBetaServer
             var facts = NormalizeCourtLifeResolutionFacts(payload);
             if (facts == null) return;
             string matter = ReadString(payload, "matterId", "");
-            using (ReignDbConnection connection = OpenCampaignConnection(campaign))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsureCourtLifeSceneStore(connection);
-                foreach (string actor in ObjectsFromValue(payload.TryGetValue("witnessHeroIds", out object witnesses) ? witnesses : null)
+                foreach (string actor in ActionPipelineService.ObjectsFromValue(payload.TryGetValue("witnessHeroIds", out object witnesses) ? witnesses : null)
                     .OfType<string>().Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().Take(4))
                 {
                     string id = "court_resolution:" + CourtHash(timeline + "|" + matter + "|" + actor);
-                    ExecuteSql(connection, "INSERT OR IGNORE INTO court_life_turns(turn_id,timeline_id,matter_id,actor_id,phase,player_text,reply_text,created_ts) VALUES($id,$timeline,$matter,$actor,'resolution','',$facts,$ts);",
-                        new Dictionary<string, object> { ["id"] = id, ["timeline"] = timeline, ["matter"] = matter,
+                    CourtStore.InsertOrIgnoreCourtLifeTurns2(connection, new Dictionary<string, object> { ["id"] = id, ["timeline"] = timeline, ["matter"] = matter,
                             ["actor"] = actor, ["facts"] = Json.Serialize(facts), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                 }
             }
@@ -35,9 +34,9 @@ namespace ReignBetaServer
             if (!new[] { "favor_domestic", "favor_foreign", "compensate", "compromise", "accept", "refuse" }.Contains(outcome)) return null;
             var result = new Dictionary<string, object> { ["schema"] = "reign-court-resolution-knowledge-v1",
                 ["matterId"] = ReadString(payload, "matterId", ""), ["receiptId"] = ReadString(payload, "receiptId", ""),
-                ["title"] = LimitText(ReadString(payload, "title", "Court audience"), 200),
+                ["title"] = DialogueService.LimitText(ReadString(payload, "title", "Court audience"), 200),
                 ["outcome"] = outcome, ["completed"] = true, ["extortion"] = ReadBool(payload, "extortion", false),
-                ["summary"] = LimitText(ReadString(payload, "summary", "The court decision completed."), 700) };
+                ["summary"] = DialogueService.LimitText(ReadString(payload, "summary", "The court decision completed."), 700) };
             var receipt = ReadDictionary(payload, "nativeReceipt");
             if (ReadString(receipt, "type", "") == "DiplomacySignTradeAgreement")
             {
@@ -67,15 +66,14 @@ namespace ReignBetaServer
             return result;
         }
 
-        private static string BuildCourtLifeResolutionContinuityPrompt(string campaign, string hero, Dictionary<string, object> payload)
+        internal static string BuildCourtLifeResolutionContinuityPrompt(string campaign, string hero, Dictionary<string, object> payload)
         {
             string timeline = ReadString(payload, "timelineId", "");
             if (string.IsNullOrWhiteSpace(timeline) || string.IsNullOrWhiteSpace(hero)) return "";
-            using (ReignDbConnection connection = OpenCampaignConnection(campaign))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsureCourtLifeSceneStore(connection);
-                var rows = QuerySql(connection, "SELECT reply_text FROM court_life_turns WHERE timeline_id=$timeline AND actor_id=$actor AND phase='resolution' ORDER BY created_ts DESC,turn_id DESC LIMIT 6;",
-                    new Dictionary<string, object> { ["timeline"] = timeline, ["actor"] = hero });
+                var rows = CourtStore.SelectCourtLifeTurns2(connection, new Dictionary<string, object> { ["timeline"] = timeline, ["actor"] = hero });
                 if (rows.Count == 0) return "";
                 return "\n\nAUTHORITATIVE COMPLETED COURT MATTERS YOU WITNESSED\n"
                     + "These native execution receipts supersede conflicting old dialogue, summaries, plans and crises about these exact matters. A confirmed payment is already received by the named recipient; do not demand coins in your own hands, proof of transfer or a second payment. Acceptance alone would not establish execution, but these records do. Update any obsolete plan/crisis accordingly while retaining unrelated concerns. Completion does not prove an original allegation or imply forgiveness. Only an explicit completed agreement record below establishes a treaty: acknowledge that agreement and its exact duration without asking for another authorization or proof of signing. An ordinary completed judgment does not establish a treaty. For an extortion demand, do not invent an injury whose proof remains outstanding. You can discuss feelings or the political consequences without reopening the completed demand. Do not recite internal IDs or balances.\n"

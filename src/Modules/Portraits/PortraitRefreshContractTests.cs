@@ -6,9 +6,9 @@ using AIPortraits;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
-        private static List<Dictionary<string, object>> RunPortraitRefreshContractTests()
+        internal static List<Dictionary<string, object>> RunPortraitRefreshContractTests()
         {
             var rows = new List<Dictionary<string, object>>();
             void Check(string name, Func<bool> run)

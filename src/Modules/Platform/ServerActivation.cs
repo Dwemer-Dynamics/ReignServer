@@ -7,7 +7,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static int ActiveServerPort;
+        internal static int ActiveServerPort;
 
         private static int ActivateExistingServerFromLauncher(int port, string[] args)
         {
@@ -54,15 +54,10 @@ namespace ReignBetaServer
             return fallback;
         }
 
-        private static int ReadIntArgument(string[] args, string name, int fallback)
+        internal static int ReadIntArgument(string[] args, string name, int fallback)
         {
             string value = ReadArgument(args, name, "");
             return int.TryParse(value, out int parsed) ? parsed : fallback;
-        }
-
-        private static string QuoteCommandLineArgument(string value)
-        {
-            return "\"" + (value ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
         }
 
     }

@@ -4,12 +4,12 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class WorldSimulationService
     {
-        private static Dictionary<string, object> SocialEventApproachRollApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> SocialEventApproachRollApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
             string eventId = ReadString(payload, "eventId", "");
             if (string.IsNullOrWhiteSpace(eventId))
             {
@@ -27,18 +27,18 @@ namespace ReignBetaServer
             {
                 Dictionary<string, object> hero = candidates[index];
                 string heroId = ReadFirstString(hero, "heroStringId", "heroId");
-                Dictionary<string, object> traits = ReadJsonObject(CharacterFile(campaignId, heroId, "traits.json"));
-                if (!TraitPercentageDocumentReady(traits))
+                Dictionary<string, object> traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"));
+                if (!CharactersService.TraitPercentageDocumentReady(traits))
                 {
                     // Approaches must never trigger LLM construction. A deterministic
                     // native-fact profile supplies the same percentage model until a
                     // richer character profile is available.
-                    traits = BuildTraitDocument(hero);
+                    traits = CharactersService.BuildTraitDocument(hero);
                 }
                 else
                 {
-                    if (EnsureTraitPercentageData(traits, heroId))
-                        WriteJsonObject(CharacterFile(campaignId, heroId, "traits.json"), traits);
+                    if (CharactersService.EnsureTraitPercentageData(traits, heroId))
+                        CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"), traits);
                 }
 
                 Dictionary<string, object> virtues = ReadDictionary(traits, "courtVirtues") ?? new Dictionary<string, object>();
@@ -81,15 +81,15 @@ namespace ReignBetaServer
                 ["passedCandidates"] = passed,
                 ["relationshipRule"] = "adjustedBoldness = clamp(baseBoldness + round(relationToPlayer * 0.30), 0, 100)"
             };
-            WriteAudit(campaignId, EnsureCorrelationId(payload), "server", "social_event", "social_event.approach_roll", "", "", eventId, "completed", 0, "Social-event approaches resolved from boldness plus the signed player-relationship modifier and a d4 approach quota.", result);
+            OperationsService.WriteAudit(campaignId, OperationsService.EnsureCorrelationId(payload), "server", "social_event", "social_event.approach_roll", "", "", eventId, "completed", 0, "Social-event approaches resolved from boldness plus the signed player-relationship modifier and a d4 approach quota.", result);
             return result;
         }
 
-        private static Dictionary<string, object> SocialEventApproachScore(int boldnessPercentage, int relationToPlayer)
+        internal static Dictionary<string, object> SocialEventApproachScore(int boldnessPercentage, int relationToPlayer)
         {
             int boldness = Math.Max(0, Math.Min(100, boldnessPercentage));
             int relation = Math.Max(-100, Math.Min(100, relationToPlayer));
-            int modifier = RoundAwayFromZero(relation * 0.30d);
+            int modifier = RelationshipsService.RoundAwayFromZero(relation * 0.30d);
             return new Dictionary<string, object>
             {
                 ["baseBoldness"] = boldness,
@@ -99,7 +99,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static List<string> SelectSocialEventApproachIds(IEnumerable<Dictionary<string, object>> passedCandidates, int approachQuota)
+        internal static List<string> SelectSocialEventApproachIds(IEnumerable<Dictionary<string, object>> passedCandidates, int approachQuota)
         {
             int quota = Math.Max(1, Math.Min(4, approachQuota));
             return (passedCandidates ?? Enumerable.Empty<Dictionary<string, object>>())
@@ -112,7 +112,7 @@ namespace ReignBetaServer
                 .ToList();
         }
 
-        private static Dictionary<string, object> EvaluateSocialEventApproach(int boldnessPercentage, int? forcedRoll, int thresholdOffset = 60)
+        internal static Dictionary<string, object> EvaluateSocialEventApproach(int boldnessPercentage, int? forcedRoll, int thresholdOffset = 60)
         {
             int boldness = Math.Max(0, Math.Min(100, boldnessPercentage));
             int threshold = Math.Max(0, Math.Min(100, thresholdOffset));
@@ -129,7 +129,7 @@ namespace ReignBetaServer
                 };
             }
 
-            int roll = Math.Max(1, Math.Min(100, forcedRoll ?? RollCourtD100()));
+            int roll = Math.Max(1, Math.Min(100, forcedRoll ?? CharactersService.RollCourtD100()));
             return new Dictionary<string, object>
             {
                 ["boldness"] = boldness,
@@ -140,7 +140,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> EvaluateSocialEventJoin(int boldnessPercentage, int thresholdOffset, int? forcedFirstRoll, int? forcedSecondRoll)
+        internal static Dictionary<string, object> EvaluateSocialEventJoin(int boldnessPercentage, int thresholdOffset, int? forcedFirstRoll, int? forcedSecondRoll)
         {
             Dictionary<string, object> first = EvaluateSocialEventApproach(boldnessPercentage, forcedFirstRoll, thresholdOffset);
             Dictionary<string, object> second = ReadBool(first, "passed", false)
@@ -156,14 +156,14 @@ namespace ReignBetaServer
             };
         }
 
-        private static int RollSocialEventD4(int? forcedRoll)
+        internal static int RollSocialEventD4(int? forcedRoll)
         {
             if (forcedRoll.HasValue)
             {
                 return Math.Max(1, Math.Min(4, forcedRoll.Value));
             }
 
-            return 1 + ((RollCourtD100() - 1) % 4);
+            return 1 + ((CharactersService.RollCourtD100() - 1) % 4);
         }
     }
 }

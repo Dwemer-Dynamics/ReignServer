@@ -9,7 +9,7 @@ using ReignPortraits;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
         private const string PortraitFocusModelName = "version-RFB-320";
         private const string PortraitFocusModelSha256 = "34cd7e60aeff28744c657de7a3dc64e872d506741de66987f3426f2b79f88017";
@@ -26,7 +26,7 @@ namespace ReignBetaServer
             public double Y2;
         }
 
-        private static PortraitFaceFocus DetectPortraitFaceFocus(byte[] sourceRgba, int sourceWidth, int sourceHeight)
+        internal static PortraitFaceFocus DetectPortraitFaceFocus(byte[] sourceRgba, int sourceWidth, int sourceHeight)
         {
             if (sourceRgba == null || sourceWidth <= 0 || sourceHeight <= 0
                 || sourceRgba.Length < sourceWidth * sourceHeight * 4)

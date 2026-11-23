@@ -7,11 +7,11 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class ConversationResponseService
     {
         private const int ConversationResponseRecoveryCharacterLimit = 1024 * 1024;
-        private const string DialogueActionQueuedNoticePrefix = "[Bannerlord Reign action queued:";
-        private const string DialogueActionFailureNotice = "[Reign could not carry out the agreed action. No game action was queued.]";
+        internal const string DialogueActionQueuedNoticePrefix = "[Bannerlord Reign action queued:";
+        internal const string DialogueActionFailureNotice = "[Reign could not carry out the agreed action. No game action was queued.]";
         private static readonly Regex EmbeddedProviderDialogueMetadata = new Regex(
             @"\{\s*""(?:decision_?brief|structuredActionDecision|stateUpdates|suggestedActions|drinkActions|(?:memory|belief|obligation|comprehension|continuity|dynamicCharacteristic)Writes)""\s*:\s*[\[{]",
             RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
@@ -21,12 +21,12 @@ namespace ReignBetaServer
             reply ??= "";
             return reply.Contains(DialogueActionQueuedNoticePrefix, StringComparison.OrdinalIgnoreCase)
                 || reply.Contains(DialogueActionFailureNotice, StringComparison.OrdinalIgnoreCase)
-                || TechnicalConversationNoticePrefixes.Any(notice => reply.Contains(notice, StringComparison.OrdinalIgnoreCase));
+                || DialogueService.TechnicalConversationNoticePrefixes.Any(notice => reply.Contains(notice, StringComparison.OrdinalIgnoreCase));
         }
 
         // Engine notices and structured metadata belong outside authored speech.
         // Check the provider text before any effects are accepted.
-        private static Dictionary<string, object> RejectProviderReservedSpeech(Dictionary<string, object> response,
+        internal static Dictionary<string, object> RejectProviderReservedSpeech(Dictionary<string, object> response,
             Dictionary<string, object> parsed)
         {
             string reply = ReadFirstString(parsed, "reply", "response", "text", "content");
@@ -43,7 +43,7 @@ namespace ReignBetaServer
             return rejected;
         }
 
-        private sealed class ConversationResponseEnvelope
+        internal sealed class ConversationResponseEnvelope
         {
             internal Dictionary<string, object> Fields = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             internal bool Complete;
@@ -54,47 +54,10 @@ namespace ReignBetaServer
             internal int ReplyEnd = -1;
         }
 
-        private static string UnwrapJsonResponse(string text) => UnwrapJsonResponse(text, out _);
-
-        private static string UnwrapJsonResponse(string text, out int sourceOffset)
-        {
-            string original = text ?? "";
-            sourceOffset = original.Length - original.TrimStart().Length;
-            string source = original.Trim();
-            if (!source.StartsWith("```", StringComparison.Ordinal)) return source;
-            int line = source.IndexOf('\n');
-            if (line < 0 || !source.EndsWith("```", StringComparison.Ordinal)) return source;
-            string language = source.Substring(3, line - 3).Trim();
-            if (language.Length != 0 && !language.Equals("json", StringComparison.OrdinalIgnoreCase)) return source;
-            string body = source.Substring(line + 1, source.Length - line - 4);
-            sourceOffset += line + 1 + body.Length - body.TrimStart().Length;
-            return body.Trim();
-        }
-
-        // Generic storage/configuration parsing never searches nested values or
-        // quoted JSON for a replacement document. Recovery belongs to the caller.
-        private static Dictionary<string, object> TryParseStrictJsonObject(string text)
-        {
-            string source = UnwrapJsonResponse(text);
-            if (!source.StartsWith("{", StringComparison.Ordinal)) return null;
-            try
-            {
-                using var document = JsonDocument.Parse(source);
-                if (document.RootElement.ValueKind != JsonValueKind.Object) return null;
-                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                if (document.RootElement.EnumerateObject().Any(property => !names.Add(property.Name))) return null;
-                return Json.Deserialize<Dictionary<string, object>>(source);
-            }
-            catch (Exception ex) when (ex is JsonException || ex is ArgumentException || ex is InvalidOperationException)
-            {
-                return null;
-            }
-        }
-
         // Read one outer object in source order. TryParseValue consumes a whole
         // value or nothing, so an unfinished array cannot contribute its earlier
         // entries, and nested/quoted objects never become replacement envelopes.
-        private static ConversationResponseEnvelope ReadConversationResponseEnvelope(string text)
+        internal static ConversationResponseEnvelope ReadConversationResponseEnvelope(string text)
         {
             var result = new ConversationResponseEnvelope();
             if ((text?.Length ?? 0) > ConversationResponseRecoveryCharacterLimit)
@@ -179,7 +142,7 @@ namespace ReignBetaServer
             Dictionary<string, object> llm, Dictionary<string, object> request, string auditMode,
             string campaignId, string correlationId, string heroId, string eventId)
         {
-            if (!ReadBool(llm, "ok", false) || !IsConversationStructuredMode(NormalizeLookup(auditMode).Replace(' ', '_')))
+            if (!ReadBool(llm, "ok", false) || !IsConversationStructuredMode(ActionPipelineService.NormalizeLookup(auditMode).Replace(' ', '_')))
                 return llm;
             string original = ReadString(llm, "content", "");
             var parsed = TryParseStrictJsonObject(original);
@@ -192,9 +155,9 @@ namespace ReignBetaServer
             bool missingDrinks = ConversationResponseNeedsDrinkActions(request) && !envelope.Fields.ContainsKey("drinkActions");
             bool recovered = envelope.Truncated && envelope.Error.Length == 0 && hasReply && !incompleteEffect && !missingDrinks;
             var evidence = TestDict("schema", "reign-conversation-response-recovery-v1",
-                "originalContentSha256", ConversationExactTextHash(original), "originalCharacters", original.Length,
+                "originalContentSha256", DialogueService.ConversationExactTextHash(original), "originalCharacters", original.Length,
                 "sourceStage", "sanitized_assistant_content",
-                "providerAssistantContentSha256", ReadString(llm, "providerAssistantContentSha256", ConversationExactTextHash(original)),
+                "providerAssistantContentSha256", ReadString(llm, "providerAssistantContentSha256", DialogueService.ConversationExactTextHash(original)),
                 "providerFinishReason", ReadString(llm, "finishReason", ""), "complete", envelope.Complete,
                 "truncated", envelope.Truncated, "replyPath", hasReply ? "$.reply" : "",
                 "replyStartUtf8", envelope.ReplyStart, "replyEndUtf8", envelope.ReplyEnd,
@@ -205,12 +168,12 @@ namespace ReignBetaServer
             llm["responseRecovery"] = evidence;
             if (recovered)
             {
-                RemovePrivateReasoningFields(envelope.Fields);
+                DialogueService.RemovePrivateReasoningFields(envelope.Fields);
                 envelope.Fields["conversationResponseRecovery"] = evidence;
                 llm["content"] = Json.Serialize(envelope.Fields);
             }
             else llm["responseRecoveryRequiresRegeneration"] = true;
-            WriteAudit(campaignId, correlationId, "server", auditMode, "llm.response_recovery", heroId, "", eventId,
+            OperationsService.WriteAudit(campaignId, correlationId, "server", auditMode, "llm.response_recovery", heroId, "", eventId,
                 recovered ? "completed" : "rejected", 0,
                 recovered ? "Recovered complete outer response fields without promoting private nested data."
                     : "The response envelope is incomplete or ambiguous; no partial effects may be accepted.", evidence);

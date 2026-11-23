@@ -8,7 +8,7 @@ using EconomyOptions = Reign.Core.Contracts.Economy.WarEconomyOptions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class SettingsService
     {
         private static EconomyOptions ReadWarEconomyOptions(Dictionary<string, object> settings)
         {

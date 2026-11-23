@@ -6,7 +6,7 @@ using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class ReputationService
     {
         private const string WhoremongerOutOfOrderError =
             "Whoremonger events must be processed in campaign order within their timeline.";
@@ -15,40 +15,21 @@ namespace ReignBetaServer
 
         private static void EnsureWhoremongerSchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS whoremonger_activity (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,subject_id TEXT NOT NULL,
-is_player INTEGER NOT NULL,visit_count INTEGER NOT NULL DEFAULT 0,
-last_activity_day REAL NOT NULL DEFAULT -1,last_event_day REAL NOT NULL DEFAULT -1,
-updated_ts INTEGER NOT NULL,
-PRIMARY KEY(campaign_id,timeline_id,subject_id));");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS whoremonger_event_receipts (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,event_id TEXT NOT NULL,
-subject_id TEXT NOT NULL,town_id TEXT NOT NULL,world_day REAL NOT NULL,
-input_json TEXT NOT NULL,result_json TEXT NOT NULL,created_ts INTEGER NOT NULL,
-PRIMARY KEY(campaign_id,timeline_id,event_id));");
-            ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_whoremonger_inactivity
-ON whoremonger_activity(campaign_id,timeline_id,last_activity_day);");
-            if (TableExists(connection, "social_outcome_receipts"))
+            ReputationSchema.CreateWhoremongerActivity(connection);
+            ReputationSchema.CreateWhoremongerEventReceipts(connection);
+            ReputationSchema.CreateIndexWhoremongerInactivity(connection);
+            if (WorldSimulationService.TableExists(connection, "social_outcome_receipts"))
             {
                 List<Dictionary<string, object>> recoveryScopes =
-                    TableExists(connection, "world_history_events")
-                    && TableExists(connection, "social_subject_work_queue")
-                        ? QuerySql(connection, @"SELECT DISTINCT r.campaign_id,r.timeline_id
-FROM social_outcome_receipts r
-JOIN world_history_events e ON e.event_id=r.event_id
-WHERE ((r.completed=-1 AND r.last_error IN ($orderingError,$identityError))
- OR (r.completed=0 AND r.attempt_count=0 AND r.last_error=''
-  AND r.subject_id='' AND r.archetype_id='' AND r.result_json='{}'
-  AND e.correlation_id LIKE 'whoremonger_town_entry|%'))
-AND e.subject_id<>'';", new Dictionary<string, object>
+                    WorldSimulationService.TableExists(connection, "world_history_events")
+                    && WorldSimulationService.TableExists(connection, "social_subject_work_queue")
+                        ? ReputationStore.SelectSocialOutcomeReceipts6(connection, new Dictionary<string, object>
                         {
                             ["orderingError"] = WhoremongerOutOfOrderError,
                             ["identityError"] = WhoremongerTemporalIdentityError
                         })
                         : new List<Dictionary<string, object>>();
-                ExecuteSql(connection, @"UPDATE social_outcome_receipts SET
-completed=0,attempt_count=0,last_error='',result_json='{}',updated_ts=$ts
-WHERE completed=-1 AND last_error IN ($orderingError,$identityError);", new Dictionary<string, object>
+                ReputationStore.UpdateSocialOutcomeReceipts4(connection, new Dictionary<string, object>
                 {
                     ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                     ["orderingError"] = WhoremongerOutOfOrderError,
@@ -62,25 +43,7 @@ WHERE completed=-1 AND last_error IN ($orderingError,$identityError);", new Dict
                         ["timeline"] = ReadString(scope, "timeline_id", ""),
                         ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                     };
-                    ExecuteSql(connection, @"INSERT INTO social_subject_work_queue(
-campaign_id,timeline_id,subject_id,status,first_sequence,pending_count,
-claim_owner,claim_expires_ts,updated_ts,last_error)
-SELECT $campaign,$timeline,e.subject_id,'pending',MIN(e.sequence),COUNT(*),'',0,$ts,''
-FROM world_history_events e
-WHERE e.campaign_id=$campaign AND e.timeline_id=$timeline
-AND e.event_type='social_outcome' AND e.subject_id<>''
-AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
- WHERE r.event_id=e.event_id AND (r.completed<>0 OR r.attempt_count>=3))
-GROUP BY e.subject_id
-ON CONFLICT(campaign_id,timeline_id,subject_id) DO UPDATE SET
-first_sequence=excluded.first_sequence,pending_count=excluded.pending_count,
-status=CASE WHEN social_subject_work_queue.status='processing'
- AND social_subject_work_queue.claim_expires_ts>$ts THEN 'processing'
- ELSE 'pending' END,claim_owner=CASE WHEN social_subject_work_queue.status='processing'
- AND social_subject_work_queue.claim_expires_ts>$ts THEN social_subject_work_queue.claim_owner
- ELSE '' END,claim_expires_ts=CASE WHEN social_subject_work_queue.status='processing'
- AND social_subject_work_queue.claim_expires_ts>$ts THEN social_subject_work_queue.claim_expires_ts
- ELSE 0 END,updated_ts=$ts,last_error='';", queueArgs);
+                    ReputationStore.UpsertSocialSubjectWorkQueue2(connection, queueArgs);
                     SchedulePendingSocialWorldHistoryOutcomes(
                         ReadString(scope, "campaign_id", ""),
                         ReadString(scope, "timeline_id", ""));
@@ -90,7 +53,7 @@ status=CASE WHEN social_subject_work_queue.status='processing'
 
         // Called inside the authoritative visit-confirmation transaction. The caller must
         // first validate the payment receipt and initialize the social schema.
-        private static Dictionary<string, object> RegisterWhoremongerVisit(
+        internal static Dictionary<string, object> RegisterWhoremongerVisit(
             ReignDbConnection connection, string campaignId, string timelineId,
             string subjectId, string visitReceiptId, string townId, double worldDay,
             bool useExistingTransaction = false)
@@ -118,7 +81,7 @@ status=CASE WHEN social_subject_work_queue.status='processing'
             // Traits are read from the authoritative character document, never inferred
             // from native trait levels or treated as low when the document is missing.
             Dictionary<string, object> virtues = ReadDictionary(
-                ReadJsonObject(CharacterFile(campaignId, subjectId, "traits.json")), "courtVirtues")
+                CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, subjectId, "traits.json")), "courtVirtues")
                 ?? new Dictionary<string, object>();
             double? honor = virtues.ContainsKey("honor") ? ReadDouble(virtues, "honor", double.NaN) : (double?)null;
             double? judgment = virtues.ContainsKey("judgment") ? ReadDouble(virtues, "judgment", double.NaN) : (double?)null;
@@ -148,19 +111,14 @@ status=CASE WHEN social_subject_work_queue.status='processing'
             // after personality changes must retain its original probability and roll.
             string inputJson = Json.Serialize(new Dictionary<string, object>
             { ["subjectId"] = subjectId, ["townId"] = townId, ["worldDay"] = worldDay, ["isPlayer"] = isPlayer });
-            if (!useExistingTransaction) ExecuteSql(connection, "BEGIN IMMEDIATE;");
+            if (!useExistingTransaction) ReputationStore.Begin(connection);
             try
             {
                 // A row update is also the PostgreSQL serialization point for two
                 // concurrent confirmations concerning the same subject.
                 args["player"] = isPlayer ? 1 : 0;
-                ExecuteSql(connection, @"INSERT INTO whoremonger_activity(
-campaign_id,timeline_id,subject_id,is_player,updated_ts)
-VALUES($campaign,$timeline,$subject,$player,$ts) ON CONFLICT(campaign_id,timeline_id,subject_id) DO NOTHING;
-UPDATE whoremonger_activity SET updated_ts=updated_ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;", args);
-                var prior = QuerySql(connection, @"SELECT input_json,result_json FROM whoremonger_event_receipts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND event_id=$event LIMIT 1;", args).FirstOrDefault();
+                ReputationStore.InsertOrIgnoreWhoremongerActivity(connection, args);
+                var prior = ReputationStore.SelectWhoremongerEventReceipts(connection, args).FirstOrDefault();
                 if (prior != null)
                 {
                     string originalInput = ReadString(prior, "input_json", "");
@@ -176,10 +134,10 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND event_id=$event LIMIT 
                     if (!string.Equals(originalInput, inputJson, StringComparison.Ordinal) && !laterPlayerConfirmation)
                         throw new InvalidDataException("The Whoremonger receipt was reused with different visit or entry details.");
                     var replay = TryParseJsonObject(ReadString(prior, "result_json", "{}"));
-                    if (!useExistingTransaction) ExecuteSql(connection, "COMMIT;");
+                    if (!useExistingTransaction) ReputationStore.Commit(connection);
                     return replay;
                 }
-                var roster = QuerySql(connection, "SELECT is_player,is_alive,is_adult FROM identity_roster WHERE hero_id=$subject LIMIT 1;", args).FirstOrDefault();
+                var roster = ReputationStore.SelectIdentityRoster14(connection, args).FirstOrDefault();
                 bool roleMismatch = roster != null
                     && (ReadInt(roster, "is_player", 0) != 0) != isPlayer;
                 bool noLongerEligible = roster == null || ReadInt(roster, "is_alive", 0) == 0
@@ -197,15 +155,12 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND event_id=$event LIMIT 
                     };
                     args["input"] = inputJson;
                     args["result"] = Json.Serialize(obsolete);
-                    ExecuteSql(connection, @"INSERT INTO whoremonger_event_receipts(campaign_id,timeline_id,event_id,
-subject_id,town_id,world_day,input_json,result_json,created_ts)
-VALUES($campaign,$timeline,$event,$subject,$town,$day,$input,$result,$ts);", args);
-                    if (!useExistingTransaction) ExecuteSql(connection, "COMMIT;");
+                    ReputationStore.InsertWhoremongerEventReceipts(connection, args);
+                    if (!useExistingTransaction) ReputationStore.Commit(connection);
                     return obsolete;
                 }
 
-                var state = QuerySql(connection, @"SELECT * FROM whoremonger_activity
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject LIMIT 1;", args).FirstOrDefault();
+                var state = ReputationStore.SelectWhoremongerActivity(connection, args).FirstOrDefault();
                 if (worldDay < ReadDouble(state, "last_event_day", -1d))
                 {
                     if (isPlayer) throw new InvalidDataException(WhoremongerOutOfOrderError);
@@ -219,10 +174,8 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject LI
                     };
                     args["input"] = inputJson;
                     args["result"] = Json.Serialize(obsolete);
-                    ExecuteSql(connection, @"INSERT INTO whoremonger_event_receipts(campaign_id,timeline_id,event_id,
-subject_id,town_id,world_day,input_json,result_json,created_ts)
-VALUES($campaign,$timeline,$event,$subject,$town,$day,$input,$result,$ts);", args);
-                    if (!useExistingTransaction) ExecuteSql(connection, "COMMIT;");
+                    ReputationStore.InsertWhoremongerEventReceipts(connection, args);
+                    if (!useExistingTransaction) ReputationStore.Commit(connection);
                     return obsolete;
                 }
                 bool reset = WhoremongerRules.InactivityElapsed(ReadDouble(state, "last_activity_day", -1d), worldDay);
@@ -250,31 +203,19 @@ VALUES($campaign,$timeline,$event,$subject,$town,$day,$input,$result,$ts);", arg
                 args["player"] = isPlayer ? 1 : 0;
                 args["count"] = count;
                 args["activity"] = activityDay;
-                ExecuteSql(connection, @"INSERT INTO whoremonger_activity(campaign_id,timeline_id,subject_id,
-is_player,visit_count,last_activity_day,last_event_day,updated_ts)
-VALUES($campaign,$timeline,$subject,$player,$count,$activity,$day,$ts)
-ON CONFLICT(campaign_id,timeline_id,subject_id) DO UPDATE SET
-is_player=$player,visit_count=$count,last_activity_day=$activity,last_event_day=$day,updated_ts=$ts;", args);
+                ReputationStore.UpsertWhoremongerActivity(connection, args);
 
                 if (isPlayer || exposed)
                 {
                     args["expires"] = worldDay + WhoremongerRules.InactivityDays;
-                    ExecuteSql(connection, @"UPDATE rumor_occurrences SET expires_day=$expires,updated_ts=$ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND archetype_id='whoremonger'
-AND thread_key=$subject||'|whoremonger' AND status='active';", args);
+                    ReputationStore.UpdateRumorOccurrences6(connection, args);
                 }
                 // Historical exposures remain available, but exactly one rumor can be
                 // active; an established reputation always replaces that rumor.
                 if (exposed)
                 {
                     args["occurrence"] = ReadString(result, "occurrenceId", "");
-                    ExecuteSql(connection, @"UPDATE rumor_subject_tags SET status='superseded',updated_ts=$ts
-WHERE subject_id=$subject AND tag_id='whoremonger' AND status='active'
-AND occurrence_id IN (SELECT occurrence_id FROM rumor_occurrences
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND archetype_id='whoremonger')
-AND (occurrence_id<>$occurrence OR EXISTS (SELECT 1 FROM character_reputations
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject
-AND tag_id='whoremonger' AND status='active'));", args);
+                    ReputationStore.UpdateRumorSubjectTags7(connection, args);
                 }
                 result["eventId"] = eventId;
                 result["subjectId"] = subjectId;
@@ -287,16 +228,14 @@ AND tag_id='whoremonger' AND status='active'));", args);
                 result["judgment"] = judgment.HasValue && !double.IsNaN(judgment.Value) && !double.IsInfinity(judgment.Value) ? (object)judgment.Value : null;
                 args["input"] = inputJson;
                 args["result"] = Json.Serialize(result);
-                ExecuteSql(connection, @"INSERT INTO whoremonger_event_receipts(campaign_id,timeline_id,event_id,
-subject_id,town_id,world_day,input_json,result_json,created_ts)
-VALUES($campaign,$timeline,$event,$subject,$town,$day,$input,$result,$ts);", args);
+                ReputationStore.InsertWhoremongerEventReceipts(connection, args);
                 RecomputePublicStandingForSubjects(connection, campaignId, timelineId, new[] { subjectId }, worldDay);
-                if (!useExistingTransaction) ExecuteSql(connection, "COMMIT;");
+                if (!useExistingTransaction) ReputationStore.Commit(connection);
                 return result;
             }
             catch
             {
-                if (!useExistingTransaction) { try { ExecuteSql(connection, "ROLLBACK;"); } catch { } }
+                if (!useExistingTransaction) { try { ReputationStore.Rollback(connection); } catch { } }
                 throw;
             }
         }
@@ -307,27 +246,13 @@ VALUES($campaign,$timeline,$event,$subject,$town,$day,$input,$result,$ts);", arg
             var args = new Dictionary<string, object> { ["campaign"] = campaignId,
                 ["timeline"] = timelineId, ["subject"] = subjectId,
                 ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() };
-            ExecuteSql(connection, @"UPDATE rumor_subject_tags SET status='expired',updated_ts=$ts
-WHERE subject_id=$subject AND tag_id='whoremonger' AND status='active'
-AND occurrence_id IN (SELECT occurrence_id FROM rumor_occurrences
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND archetype_id='whoremonger');
-UPDATE rumor_occurrences SET status='expired',updated_ts=$ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND archetype_id='whoremonger'
-AND thread_key=$subject||'|whoremonger' AND status='active';
-DELETE FROM rumor_exposure_streaks WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND archetype_id='whoremonger' AND thread_key=$subject||'|whoremonger';
-DELETE FROM shared_tag_exposure_streaks WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND subject_id=$subject AND tag_id='whoremonger';
-UPDATE whoremonger_activity SET visit_count=0,last_activity_day=-1,updated_ts=$ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;", args);
+            ReputationStore.UpdateRumorSubjectTags8(connection, args);
         }
 
         private static int ExpireWhoremongerActivity(ReignDbConnection connection,
             string campaignId, string timelineId, double worldDay)
         {
-            var expired = QuerySql(connection, @"SELECT subject_id FROM whoremonger_activity
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND last_activity_day>=0
-AND last_activity_day+30<=$day;", new Dictionary<string, object>
+            var expired = ReputationStore.SelectWhoremongerActivity2(connection, new Dictionary<string, object>
             { ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = worldDay });
             var ids = expired.Select(row => ReadString(row, "subject_id", "")).ToList();
             foreach (string id in ids) ClearWhoremongerStreak(connection, campaignId, timelineId, id, worldDay);
@@ -351,16 +276,16 @@ AND last_activity_day+30<=$day;", new Dictionary<string, object>
 
         // With a file snapshot (terminal acceptance under row locks) both profiles come
         // only from it; a missing entry is refused rather than read under FileLock.
-        private static double WhoremongerSpouseStandingAdjustment(string campaignId,
+        internal static double WhoremongerSpouseStandingAdjustment(string campaignId,
             string observerId, string subjectId, List<Dictionary<string, object>> sources,
-            RelationshipFileSnapshot files = null)
+            RelationshipsService.RelationshipFileSnapshot files = null)
         {
             var entry = sources.FirstOrDefault(IsWhoremongerStandingSource);
             if (entry == null || string.IsNullOrWhiteSpace(observerId) || observerId == subjectId) return 0d;
             var profile = files != null ? files.Document(subjectId, "profile.json")
-                : ReadJsonObject(CharacterFile(campaignId, subjectId, "profile.json"));
+                : CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, subjectId, "profile.json"));
             var observerProfile = files != null ? files.Document(observerId, "profile.json")
-                : ReadJsonObject(CharacterFile(campaignId, observerId, "profile.json"));
+                : CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, observerId, "profile.json"));
             bool spouses = ReadString(profile, "spouseId", "").Equals(observerId, StringComparison.OrdinalIgnoreCase)
                 || ReadString(observerProfile, "spouseId", "").Equals(subjectId, StringComparison.OrdinalIgnoreCase);
             if (!spouses) return 0d;

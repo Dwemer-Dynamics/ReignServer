@@ -5,9 +5,9 @@ using ReignShared.Spymaster;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class SpymasterService
     {
-        private static List<Dictionary<string, object>> RunSpymasterSystemSelfTests()
+        internal static List<Dictionary<string, object>> RunSpymasterSystemSelfTests()
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
             Action<string, bool, string, object> add = (id, passed, summary, data) => rows.Add(new Dictionary<string, object>
@@ -147,11 +147,9 @@ namespace ReignBetaServer
                 Dictionary<string, object> exclusionStatus = SpymasterAgentsStatusApi(exclusionPayload);
                 SpymasterAgentsTickApi(exclusionPayload);
                 List<Dictionary<string, object>> excludedRows = ReadDictionaryList(exclusionStatus, "candidates");
-                using (ReignDbConnection connection = OpenCampaignConnection(exclusionCampaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(exclusionCampaign))
                 {
-                    int assignmentCount = QuerySql(connection,
-                        "SELECT agent_hero_id FROM foreign_agent_assignments WHERE campaign_id=$campaign AND timeline_id=$timeline;",
-                        new Dictionary<string, object> { ["campaign"] = exclusionCampaign, ["timeline"] = exclusionTimeline }).Count;
+                    int assignmentCount = SpymasterSelfTestStore.SelectForeignAgentAssignments(connection, new Dictionary<string, object> { ["campaign"] = exclusionCampaign, ["timeline"] = exclusionTimeline }).Count;
                     add("agent_candidate_exclusions",
                         ReadInt(exclusionStatus, "eligibleCandidateCount", -1) == 0
                         && excludedRows.Any(x => ReadString(x, "heroId", "") == exclusionPlayer
@@ -177,7 +175,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                TryDeleteDirectory(CampaignDirectory(exclusionCampaign));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(exclusionCampaign));
             }
             add("agent_activation_relation_boundaries",
                 ReignSpymasterCore.ForeignAgentCanDisrupt(-31d)
@@ -192,24 +190,15 @@ namespace ReignBetaServer
             {
                 const string activationTimeline = "main";
                 const string activationAgent = "threshold_agent";
-                using (ReignDbConnection connection = OpenCampaignConnection(activationCampaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign))
                 {
                     EnsureSpymasterSchema(connection);
-                    EnsureMbtiRelationshipSchema(connection);
-                    ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
-pair_key,hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,
-effective_affinity_a_to_b,effective_affinity_b_to_a,first_day,last_day,
-last_context_kind,last_context_id,state_revision,updated_ts)
-VALUES($pair,'enemy_ruler','player_ruler',-29,-80,-95,-95,0,0,
-'fixture_initialization','directional-outlook-fixture',1,0);",
-                        new Dictionary<string, object>
+                    RelationshipsService.EnsureMbtiRelationshipSchema(connection);
+                    SpymasterSelfTestStore.InsertRelationshipPairChemistry(connection, new Dictionary<string, object>
                         {
-                            ["pair"] = AmbientPairKey("enemy_ruler", "player_ruler")
+                            ["pair"] = RelationshipsService.AmbientPairKey("enemy_ruler", "player_ruler")
                         });
-                    ExecuteSql(connection, @"INSERT INTO foreign_agent_assignments(campaign_id,timeline_id,agent_hero_id,sponsor_kingdom_id,
-sponsor_ruler_id,settlement_id,is_notable,status,recruited_day,next_action_day,last_action_day,payload_json,updated_ts)
-VALUES($campaign,$timeline,$agent,'enemy_kingdom','enemy_ruler','player_town',0,'active',0,1000,-1,'{}',0);",
-                        new Dictionary<string, object>
+                    SpymasterSelfTestStore.InsertForeignAgentAssignments(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent
                         });
@@ -218,18 +207,13 @@ VALUES($campaign,$timeline,$agent,'enemy_kingdom','enemy_ruler','player_town',0,
                 Func<double, double, double, double, Dictionary<string, object>> tickAt =
                     (day, rulerOutlook, reverseOutlook, effectiveOutlook) =>
                 {
-                    using (ReignDbConnection connection = OpenCampaignConnection(activationCampaign))
+                    using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign))
                     {
-                        ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
-affinity_a_to_b=$outlook,affinity_b_to_a=$reverse,
-effective_affinity_a_to_b=$effective,last_day=$day,
-last_context_kind='fixture_explicit_player_incident',
-last_context_id='directional-outlook-fixture',state_revision=state_revision+1
-WHERE pair_key=$pair;", new Dictionary<string, object>
+                        SpymasterSelfTestStore.UpdateRelationshipPairChemistry(connection, new Dictionary<string, object>
                         {
                             ["outlook"] = rulerOutlook, ["reverse"] = reverseOutlook,
                             ["effective"] = effectiveOutlook, ["day"] = day,
-                            ["pair"] = AmbientPairKey("enemy_ruler", "player_ruler")
+                            ["pair"] = RelationshipsService.AmbientPairKey("enemy_ruler", "player_ruler")
                         });
                     }
                     return SpymasterAgentsTickApi(new Dictionary<string, object>
@@ -251,15 +235,13 @@ WHERE pair_key=$pair;", new Dictionary<string, object>
 
                 Dictionary<string, object> suspended = tickAt(10d, -29d, -100d, -100d);
                 Dictionary<string, object> suspendedRow;
-                using (ReignDbConnection connection = OpenCampaignConnection(activationCampaign))
-                    suspendedRow = QuerySql(connection, "SELECT status,last_action_day FROM foreign_agent_assignments WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;",
-                        new Dictionary<string, object> { ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent }).FirstOrDefault();
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign))
+                    suspendedRow = SpymasterSelfTestStore.SelectForeignAgentAssignments2(connection, new Dictionary<string, object> { ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent }).FirstOrDefault();
 
                 Dictionary<string, object> activated = tickAt(11d, -30d, 100d, 100d);
                 Dictionary<string, object> activatedRow;
-                using (ReignDbConnection connection = OpenCampaignConnection(activationCampaign))
-                    activatedRow = QuerySql(connection, "SELECT status,last_action_day FROM foreign_agent_assignments WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;",
-                        new Dictionary<string, object> { ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent }).FirstOrDefault();
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign))
+                    activatedRow = SpymasterSelfTestStore.SelectForeignAgentAssignments2(connection, new Dictionary<string, object> { ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent }).FirstOrDefault();
 
                 Dictionary<string, object> effectiveChangedOnly = tickAt(12d, -30d, 100d, -100d);
                 Dictionary<string, object> effectiveChangedRow;
@@ -277,15 +259,13 @@ WHERE pair_key=$pair;", new Dictionary<string, object>
                         }
                     }
                 });
-                using (ReignDbConnection connection = OpenCampaignConnection(activationCampaign))
-                    effectiveChangedRow = QuerySql(connection, "SELECT status,last_action_day FROM foreign_agent_assignments WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;",
-                        new Dictionary<string, object> { ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent }).FirstOrDefault();
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign))
+                    effectiveChangedRow = SpymasterSelfTestStore.SelectForeignAgentAssignments2(connection, new Dictionary<string, object> { ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent }).FirstOrDefault();
 
                 Dictionary<string, object> resuspended = tickAt(13d, -29d, -100d, -100d);
                 Dictionary<string, object> resuspendedRow;
-                using (ReignDbConnection connection = OpenCampaignConnection(activationCampaign))
-                    resuspendedRow = QuerySql(connection, "SELECT status,last_action_day FROM foreign_agent_assignments WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;",
-                        new Dictionary<string, object> { ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent }).FirstOrDefault();
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign))
+                    resuspendedRow = SpymasterSelfTestStore.SelectForeignAgentAssignments2(connection, new Dictionary<string, object> { ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent }).FirstOrDefault();
 
                 add("agent_activation_suspension_transition",
                     ReadString(suspendedRow, "status", "") == "dormant"
@@ -314,13 +294,10 @@ WHERE pair_key=$pair;", new Dictionary<string, object>
                     && ReadString(outlook, "lastContextKind", "") == "fixture_explicit_player_incident",
                     "Status identifies the canonical ruler-to-player direction and exposes the last recorded incident while keeping effective and reverse values diagnostic-only.", status);
 
-                using (ReignDbConnection connection = OpenCampaignConnection(activationCampaign))
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign))
                 {
-                    ExecuteSql(connection, "UPDATE relationship_pair_chemistry SET affinity_a_to_b=-30 WHERE pair_key=$pair;",
-                        new Dictionary<string, object> { ["pair"] = AmbientPairKey("enemy_ruler", "player_ruler") });
-                    ExecuteSql(connection, @"UPDATE foreign_agent_assignments SET status='active',next_action_day=14,last_action_day=-1
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;",
-                        new Dictionary<string, object>
+                    SpymasterSelfTestStore.UpdateRelationshipPairChemistry2(connection, new Dictionary<string, object> { ["pair"] = RelationshipsService.AmbientPairKey("enemy_ruler", "player_ruler") });
+                    SpymasterSelfTestStore.UpdateForeignAgentAssignments(connection, new Dictionary<string, object>
                         {
                             ["campaign"] = activationCampaign,
                             ["timeline"] = activationTimeline, ["agent"] = activationAgent
@@ -353,7 +330,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;"
             }
             finally
             {
-                TryDeleteDirectory(CampaignDirectory(activationCampaign));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(activationCampaign));
             }
 
             string fallbackCampaign = "_spymaster_relationship_fallback_" + Guid.NewGuid().ToString("N");
@@ -398,7 +375,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;"
             }
             finally
             {
-                TryDeleteDirectory(CampaignDirectory(fallbackCampaign));
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(fallbackCampaign));
             }
 
             add("social_rumor_outcomes", ReignSpymasterCore.SocialMitigationOutcome("mitigate_own_rumor", 0.819999d) == "disproven"
@@ -408,6 +385,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;"
                     && ReignSpymasterCore.SocialMitigationOutcome("mitigate_own_reputation", 0.15d) == "greatly_mitigated"
                     && Math.Abs(ReignSpymasterCore.SocialMitigationFactor - 0.35d) < 0.0001d,
                 "Reputation mitigation has a 15% total-removal boundary and otherwise leaves 35% of the prior value.", null);
+            RunSpymasterMitigationSelfTests(add);
 
             add("breakout_bounds_and_scaling", Math.Abs(ReignSpymasterCore.BreakoutChance(0, 100d, 6) - 5d) < 0.0001d
                     && Math.Abs(ReignSpymasterCore.BreakoutChance(500, 0d, 0) - 85d) < 0.0001d
@@ -436,6 +414,176 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;"
                 add("coverage_" + coverage.Substring(0, 2), true,
                     "Executable contract registered; the live in-game profile emits assertions and snapshots for this requirement.", coverage);
             return rows;
+        }
+
+        private static void RunSpymasterMitigationSelfTests(Action<string, bool, string, object> add)
+        {
+            string campaign = "_spymaster_mitigation_" + Guid.NewGuid().ToString("N");
+            const string timeline = "main_fixture";
+            const string type = "mitigate_own_rumor";
+            const double day = 30d;
+            string PartialId(string prefix, double threshold) => Enumerable.Range(0, 512)
+                .Select(i => prefix + i)
+                .First(id => RelationshipsService.StableUnit(string.Join("|", campaign, timeline, id, "social_apply")) >= threshold);
+            Dictionary<string, object> Payload(string id, string tag = "claim", string subject = "hero",
+                string branch = timeline, string operation = type) => new Dictionary<string, object>
+            {
+                ["campaignId"] = campaign, ["timelineId"] = branch, ["sessionId"] = "capital_" + branch,
+                ["mission"] = new Dictionary<string, object>
+                {
+                    ["MissionId"] = id, ["MissionType"] = operation, ["TargetStringId"] = subject,
+                    ["SocialItemId"] = tag, ["StartedDay"] = 24d, ["DueDay"] = day, ["ResolvedDay"] = day
+                }
+            };
+            Dictionary<string, object> Apply(Dictionary<string, object> request)
+                => CourtService.CapitalCourtApi(request, SpymasterSocialApplyApi);
+            Dictionary<string, object> Status(Dictionary<string, object> request)
+                => CourtService.CapitalCourtApi(
+                    new Dictionary<string, object>(request) { ["readMitigationReceipt"] = true }, SpymasterSocialStatusApi);
+            try
+            {
+                using var fixture = ReignDatabase.OpenCampaignConnection(campaign);
+                ReputationService.EnsureSocialReputationSchema(fixture);
+                void OpenTimeline(string branch) => WorldSimulationService.WorldHistoryOpenTimelineApi(
+                    new Dictionary<string, object> { ["campaignId"] = campaign, ["timelineId"] = branch });
+                void OpenCourt(string branch)
+                {
+                    var opened = CourtService.CourtSessionOpenApi(new Dictionary<string, object>
+                    {
+                        ["campaignId"] = campaign, ["timelineId"] = branch, ["commandId"] = "open_" + branch,
+                        ["expectedRevision"] = 0L, ["sessionId"] = "capital_" + branch, ["authority"] = "royal",
+                        ["playerIsKingdomRuler"] = true, ["playerHeroStringId"] = "player",
+                        ["hostSettlementStringId"] = "town_capital", ["capitalSettlementStringId"] = "town_capital",
+                        ["scope"] = "capital", ["worldDay"] = day
+                    });
+                    if (!ReadBool(opened, "ok", false)) throw new InvalidOperationException("The mitigation fixture could not open capital court.");
+                }
+                OpenTimeline(timeline);
+                OpenCourt(timeline);
+                OpenCourt("other_fixture");
+                void Seed(string occurrence, string branch, double started, double expires,
+                    string tag = "claim", string subject = "hero", int value = -20, string owner = null)
+                {
+                    var fields = new Dictionary<string, object>
+                    {
+                        ["occurrence"] = occurrence, ["campaign"] = owner ?? campaign, ["timeline"] = branch,
+                        ["thread"] = "fixture", ["day"] = started, ["expires"] = expires, ["participants"] = "[]",
+                        ["snapshot"] = "{}", ["ts"] = 0L, ["subject"] = subject, ["tag"] = tag,
+                        ["description"] = "Fixture claim", ["value"] = value
+                    };
+                    SpymasterStore.UpsertRumorOccurrences(fixture, fields);
+                    SpymasterStore.UpsertRumorSubjectTags(fixture, fields);
+                }
+                int Value(string id) => SpymasterSelfTestStore.ReadMitigationFixtureValue(fixture, id);
+                Seed("older_live", timeline, 19d, 40d);
+                Seed("latest_live", timeline, 28d, 40d, value: 0);
+                Seed("expired_at_resolution", timeline, 23d, day);
+                Seed("foreign_timeline", "other_fixture", 24d, 40d);
+                Seed("foreign_campaign", timeline, 24d, 40d, owner: "other_campaign_fixture");
+                Seed("later_occurrence", timeline, day + 1d, 60d);
+                Seed("different_subject", timeline, 24d, 40d, subject: "other_hero");
+                Seed("different_tag", timeline, 24d, 40d, tag: "other_claim");
+
+                string id = PartialId("scoped_partial_", 0.82d);
+                var request = Payload(id);
+                request["restoreGeneration"] = ReadString(DialogueService.ReadMemoryPrecisionState(fixture), "restore_generation", "");
+                add("mitigation_missing_id_or_receipt",
+                    ReadString(Apply(Payload("")), "error", "") == "invalid_mitigation_terms"
+                    && ReadString(Status(request), "error", "") == "mitigation_receipt_missing" && Value("older_live") == -20,
+                    "A missing stable ID is rejected, and a status lookup alone leaves rumor rows untouched.", null);
+                var result = Apply(request);
+                string original = Json.Serialize(result);
+                Seed("later_backfilled", timeline, 29d, 50d);
+                var replay = Apply(request);
+                var recovered = Status(request);
+                add("mitigation_frozen_tag_scope_and_exact_replay",
+                    ReadString(result, "outcome", "") == "mitigated" && ReadInt(result, "matchedCount", -1) == 2
+                    && ReadInt(result, "changedCount", -1) == 1
+                    && Json.Serialize(result["matchedOccurrenceIds"]) == "[\"latest_live\",\"older_live\"]"
+                    && Json.Serialize(result["changedOccurrenceIds"]) == "[\"older_live\"]"
+                    && Json.Serialize(replay) == original && Json.Serialize(recovered) == original
+                    && Value("older_live") == -7 && Value("latest_live") == 0 && Value("later_backfilled") == -20,
+                    "Partial mitigation changes a live score once and returns the same frozen scope after a lost response.", result);
+                add("mitigation_delayed_and_cross_timeline_guards",
+                    Value("expired_at_resolution") == -20 && Value("foreign_timeline") == -20
+                    && Value("foreign_campaign") == -20 && Value("later_occurrence") == -20
+                    && Value("different_subject") == -20 && Value("different_tag") == -20
+                    && ReadString(Apply(Payload(id, branch: "other_fixture")), "error", "") == "mitigation_terms_conflict"
+                    && ReadString(Status(Payload(id, branch: "other_fixture")), "error", "") == "mitigation_terms_conflict"
+                    && ReadString(Apply(Payload(id, tag: "other_claim")), "error", "") == "mitigation_terms_conflict",
+                    "The first apply ignores expired, future, unrelated, and foreign rows. A conflicting replay cannot mutate or recover someone else's scope.", null);
+
+                var missingRequest = Payload("no_match", "missing_claim");
+                var missing = Apply(missingRequest);
+                Seed("missing_claim_added_later", timeline, 26d, 40d, tag: "missing_claim");
+                Seed("already_zero", timeline, 26d, 40d, tag: "zero_claim", value: 0);
+                var zero = Apply(Payload(PartialId("zero_", 0.82d), "zero_claim"));
+                add("mitigation_missing_and_valid_zero_distinguished",
+                    ReadString(missing, "disposition", "") == "no_match"
+                    && ReadString(Apply(missingRequest), "disposition", "") == "no_match"
+                    && Value("missing_claim_added_later") == -20
+                    && ReadString(zero, "disposition", "") == "no_change" && ReadInt(zero, "matchedCount", -1) == 1,
+                    "A missing record and a real zero-value record get different durable dispositions.", null);
+
+                Seed("rollback_rumor", timeline, 26d, 40d, subject: "blocked_fixture");
+                var failure = Payload(PartialId("rollback_", 0.82d), subject: "blocked_fixture");
+                SpymasterSelfTestStore.SetMitigationProjectionFailure(fixture, true);
+                bool rejected = false;
+                try { Apply(failure); }
+                catch (Npgsql.PostgresException ex) when (ex.SqlState == Npgsql.PostgresErrorCodes.CheckViolation) { rejected = true; }
+                finally { SpymasterSelfTestStore.SetMitigationProjectionFailure(fixture, false); }
+                bool rolledBack = Value("rollback_rumor") == -20
+                    && ReadString(Status(failure), "error", "") == "mitigation_receipt_missing";
+                var repaired = Apply(failure);
+                add("mitigation_projection_failure_rolls_back_effect_and_receipt",
+                    rejected && rolledBack && ReadString(repaired, "disposition", "") == "applied" && Value("rollback_rumor") == -7,
+                    "A failed standing reconciliation leaves no committed rumor change or receipt. A fresh identical apply then changes the value once.", repaired);
+
+                SpymasterStore.UpsertCharacterReputations(fixture, new Dictionary<string, object>
+                {
+                    ["campaign"] = campaign, ["timeline"] = timeline, ["subject"] = "hero", ["tag"] = "reputation",
+                    ["archetype"] = "fixture", ["description"] = "Fixture reputation", ["value"] = -20,
+                    ["day"] = 25d, ["snapshot"] = "{}", ["ts"] = 0L
+                });
+                var reputation = Payload(PartialId("reputation_", 0.15d), "reputation", operation: "mitigate_target_reputation");
+                var reputationTasks = new[]
+                {
+                    System.Threading.Tasks.Task.Run(() => Apply(reputation)),
+                    System.Threading.Tasks.Task.Run(() => Apply(reputation))
+                };
+                System.Threading.Tasks.Task.WaitAll(reputationTasks);
+                var projected = ReputationService.ReadPublicStandingTrait(fixture, campaign, timeline, "hero", day);
+                var projectedReputation = ReadDictionaryList(projected, "sources")
+                    .FirstOrDefault(source => ReadString(source, "tagId", "") == "reputation");
+                add("mitigation_concurrent_reputation_applies_once",
+                    ReadString(reputationTasks[0].Result, "outcome", "") == "greatly_mitigated"
+                    && ReadInt(reputationTasks[0].Result, "changedCount", -1) == 1
+                    && Json.Serialize(reputationTasks[0].Result) == Json.Serialize(reputationTasks[1].Result)
+                    && ReadInt(projectedReputation, "rawValue", 0) == -7,
+                    "Concurrent partial reputation mitigation returns one original receipt and publishes one standing change.", projectedReputation);
+
+                var staleGeneration = Payload("first_apply_from_replaced_generation");
+                staleGeneration["restoreGeneration"] = ReadString(DialogueService.ReadMemoryPrecisionState(fixture), "restore_generation", "");
+                DialogueService.AdvanceMemoryRestoreGeneration(campaign);
+                var generationRejected = Apply(staleGeneration);
+                add("mitigation_first_apply_fenced_after_same_timeline_restore",
+                    ReadString(generationRejected, "error", "") == "mitigation_generation_changed"
+                    && Value("older_live") == -7 && Json.Serialize(Status(request)) == original,
+                    "A new-client request from a replaced generation cannot mutate the same timeline. Receipt lookup still returns the original result.", generationRejected);
+
+                OpenTimeline("other_fixture");
+                var stale = Apply(Payload("first_apply_after_switch"));
+                add("mitigation_first_apply_fenced_after_timeline_switch",
+                    ReadString(stale, "error", "") == "mitigation_inactive_timeline"
+                    && Value("older_live") == -7
+                    && Json.Serialize(Status(request)) == original,
+                    "A request first reaching the old branch after a switch cannot mutate it. A committed receipt remains readable.", stale);
+            }
+            finally
+            {
+                ReignPostgreSqlStorage.DropCampaign(campaign);
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaign));
+            }
         }
     }
 }

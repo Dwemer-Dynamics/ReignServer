@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-set "ROOT=C:\Users\speed\Documents\Bannerlord Events\NativeCharacterImageGenerator"
+set "ROOT=%~dp0.."
 set "STUDIO=%ROOT%\publish\app\Bannerlord.NativeCharacterImageGenerator.App.exe"
 
 if not exist "%STUDIO%" (

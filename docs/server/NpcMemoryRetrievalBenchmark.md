@@ -93,7 +93,7 @@ could not be read; the public primary release is the supporting source.
 ## Reign's actual baseline and candidate approaches
 
 Current source: `services/vector-worker/worker.py`,
-`src/Modules/Dialogue/SemanticMemory.cs`, `MemoryContextV2.cs`,
+`src/Modules/Dialogue/Memory/SemanticMemory.cs`, `MemoryContextV2.cs`,
 `docs/server/MemoryPrecision.md`, and `release/embedding-model.lock.json`.
 Reign uses BGE-small-en-v1.5, a pinned quantized ONNX model through FastEmbed,
 384-dimensional cosine vectors, persistent local Qdrant with a compact float32
@@ -217,7 +217,7 @@ the release lock. Downloading public files is a separate preparation step;
 the benchmark has no downloader, credentials or inference endpoint. For example:
 
 ```powershell
-$modelRoot = 'D:/Projects/Reign/.codex-build/my-memory-comparison/models'
+$modelRoot = Join-Path $PWD '.codex-build/my-memory-comparison/models'
 $modelLock = Get-Content ReignServer/scripts/npc_memory_benchmark/models.json -Raw | ConvertFrom-Json
 foreach ($candidate in $modelLock.models) {
     $target = Join-Path $modelRoot $candidate.name

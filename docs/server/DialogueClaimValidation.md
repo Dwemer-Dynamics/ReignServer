@@ -1,6 +1,8 @@
 # Local dialogue claim validation
 
-The shared integrity stage compares explicit recalled speech with observer-visible original turns. Individual, group and event dialogue already use this stage; route adapters (including child/court callers) and correspondence now use the same contract. Route-specific source eligibility remains authoritative. A letter's authored, sent or received status still comes from its record; a native action still requires its execution receipt.
+This document records the earlier semantic claim-validation and repair design and its qualification evidence. Ordinary individual and group/event dialogue now use [single-pass delivery](ConversationResponseRecovery.md). These semantic gates and repair passes are outside that delivery path. Local model comparison scores remain advisory when used.
+
+Under the earlier design, the shared integrity stage compared explicit recalled speech with observer-visible original turns across individual, group and event dialogue, route adapters (including child/court callers) and correspondence. Route-specific source eligibility remains authoritative. A letter's authored, sent or received status still comes from its record. A native action still requires its execution receipt.
 
 ## Authority and correction
 

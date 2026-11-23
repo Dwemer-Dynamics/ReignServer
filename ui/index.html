@@ -865,13 +865,18 @@
               <option value='llm-log.jsonl'>llm-log.jsonl</option>
             </select>
           </label>
-          <label>Limit <input id='logLimit' type='number' min='1' max='5000' value='250'></label>
+          <label>Limit <input id='logLimit' type='number' min='1' max='500' value='250'></label>
+          <label>Search full redacted text <input id='logSearch' type='search' maxlength='200'></label>
+          <label>Event type <input id='logEventType' maxlength='160'></label>
+          <label>Severity <input id='logSeverity' maxlength='32'></label>
         </div>
         <div class='actions'>
-          <button onclick='loadLogs()'>Load Logs</button>
+          <button onclick='loadLogs()'>Load Latest</button>
+          <button id='olderLogs' onclick='loadLogs(true)' disabled>Older Matches</button>
           <button onclick='downloadLogs()'>Download Raw Log</button>
           <button class='danger' onclick='clearLogs()'>Clear Selected Log</button>
         </div>
+        <p id='logPageStatus' role='status'></p>
         <pre id='logOutput'>No logs loaded yet.</pre>
       </div>
     </section>
@@ -2113,12 +2118,14 @@
       document.getElementById('characterRosterList').innerHTML=rows.map(x=>`<button class='characterRosterItem ${x.heroStringId===characterEditorState.heroId?'active':''}' onclick='loadCharacterEditor("${editorEscape(x.heroStringId)}")'><span class='characterRosterName'>${editorEscape(x.name)}</span><span class='characterRosterMeta'>${editorEscape(x.title||x.occupation||'')}</span><span class='characterRosterMeta'>${editorEscape(x.clanId||'No clan')} | ${editorEscape(x.kingdomId||'No kingdom')}</span>${x.pendingNativeChanges?`<span class='characterRosterMeta'>${x.pendingNativeChanges} pending change(s)</span>`:''}</button>`).join('')||'<div class="hint">No matching characters.</div>';
     }
 
-    async function loadCharacterEditor(heroId, force=false) {
+    async function loadCharacterEditor(heroId, force=false, saveResult=null) {
       if(characterEditorState.dirty.size&&!force&&!confirm('Discard unsaved character changes?'))return;
       editorStatus('Loading complete character record...'); const campaignId=editorCampaign();
       const j=await (await fetch('/character-editor/load',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId,heroStringId:heroId})})).json();
       if(!j.ok){editorStatus(j.error||'Character load failed.','error');return;}characterEditorState.heroId=heroId;characterEditorState.data=j;characterEditorState.original=editorClone(j);characterEditorState.dirty.clear();
-      document.getElementById('characterEditorEmpty').style.display='none';document.getElementById('characterEditorWorkspace').style.display='block';renderCharacterRoster();renderCharacterEditor();editorStatus('Character loaded.');
+      document.getElementById('characterEditorEmpty').style.display='none';document.getElementById('characterEditorWorkspace').style.display='block';renderCharacterRoster();renderCharacterEditor();
+      if(saveResult)editorStatus(saveResult.message,saveResult.historyProjectionIssues?.length?'error':'good');
+      else editorStatus('Character loaded.');
     }
 
     function renderCharacterEditor() {
@@ -2213,10 +2220,10 @@
     async function characterProfileAction(action){if(!characterEditorState.data)return;if(action==='reapply_canonical'&&!confirm('Replace automatic personality files with the shipped canonical profile? Character Editor revisions remain available for rollback.'))return;if(action==='reroll_hooks'&&!confirm('Select a new campaign-stable set of private hooks for this character?'))return;editorStatus('Updating the character foundation...');const j=await (await fetch('/characters/profile-library/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,action})})).json();editorStatus(j.ok?'Character foundation updated.':(j.error||'Profile update failed.'),j.ok?'good':'error');if(j.ok)await loadCharacterEditor(characterEditorState.heroId,true);}
     function nativeProfileChanges(){const now=characterEditorState.data?.documents?.profile||{},before=characterEditorState.original?.documents?.profile||{},changes={};Object.keys(now).forEach(k=>{if(['campaignId','heroStringId','characterObjectId','createdUtc','updatedUtc'].includes(k))return;if(JSON.stringify(now[k])!==JSON.stringify(before[k]))changes[k]=now[k];});const wealthNow=characterEditorState.data?.documents?.wealth||{},wealthBefore=characterEditorState.original?.documents?.wealth||{};if(JSON.stringify(wealthNow)!==JSON.stringify(wealthBefore))changes.wealth=wealthNow;return changes;}
     async function saveCharacterSection(all=false){if(!characterEditorState.data)return;const section=all?'all':characterEditorState.section,nativeChanges=nativeProfileChanges(),dangerKeys=['isAlive','isPregnant','spouseId','fatherId','motherId','clanId','kingdomId'];const dangerous=Object.keys(nativeChanges).some(k=>dangerKeys.includes(k));let confirmation='';if(dangerous){const name=characterEditorState.data.documents.profile?.name||characterEditorState.heroId;if(!confirm('These changes affect family, political, pregnancy, or life-state data. Review dependencies before continuing.'))return;confirmation=prompt(`Type ${name} to confirm dangerous native changes.`)||'';if(confirmation!==name){editorStatus('Confirmation did not match. Nothing was saved.','error');return;}}
-      editorStatus('Saving and rebuilding character projections...');const payload={campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,revisionToken:characterEditorState.data.revisionToken,section,description:`Character Editor ${section} save`,documents:characterEditorState.data.documents,history:characterEditorState.data.history,records:characterEditorState.data.records,nativeChanges,dangerous,confirmation};const j=await (await fetch('/character-editor/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();if(j.conflict){editorStatus(j.error,'error');return;}if(!j.ok){editorStatus(j.error||'Save failed.','error');return;}editorStatus(j.message,'good');characterEditorState.data.revisionToken=j.revisionToken;characterEditorState.dirty.clear();await loadCharacterEditor(characterEditorState.heroId,true);}
+      editorStatus('Saving and rebuilding character projections...');const payload={campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,revisionToken:characterEditorState.data.revisionToken,section,description:`Character Editor ${section} save`,documents:characterEditorState.data.documents,history:characterEditorState.data.history,records:characterEditorState.data.records,nativeChanges,dangerous,confirmation};const j=await (await fetch('/character-editor/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();if(j.conflict){editorStatus(j.error,'error');return;}if(!j.ok){editorStatus(j.error||'Save failed.','error');return;}editorStatus(j.message,'good');characterEditorState.data.revisionToken=j.revisionToken;characterEditorState.dirty.clear();await loadCharacterEditor(characterEditorState.heroId,true,j);}
     function saveAllCharacterSections(){return saveCharacterSection(true);}
     function revertCharacterDraft(){if(!characterEditorState.original)return;characterEditorState.data=editorClone(characterEditorState.original);characterEditorState.dirty.clear();renderCharacterEditor();editorStatus('Unsaved changes reverted.');}
-    async function rollbackCharacterRevision(revisionId){if(!confirm('Restore this revision? A new rollback revision will preserve the current state.'))return;const j=await (await fetch('/character-editor/rollback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,revisionId})})).json();editorStatus(j.message||j.error,j.ok?'good':'error');if(j.ok)await loadCharacterEditor(characterEditorState.heroId,true);}
+    async function rollbackCharacterRevision(revisionId){if(!confirm('Restore this revision? A new rollback revision will preserve the current state.'))return;const j=await (await fetch('/character-editor/rollback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,revisionId})})).json();editorStatus(j.message||j.error,j.ok?'good':'error');if(j.ok)await loadCharacterEditor(characterEditorState.heroId,true,j);}
 
     async function uploadCharacterPortrait(file){if(!file)return;const reader=new FileReader();reader.onload=async()=>{editorStatus('Uploading portrait...');const j=await (await fetch('/character-editor/portrait/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,fileName:file.name,dataUrl:reader.result})})).json();if(j.ok){characterEditorState.data.portraits=j.portraits;renderCharacterEditorPanel();editorStatus('Portrait uploaded. Select it to make it active.','good');}else editorStatus(j.error,'error');};reader.readAsDataURL(file);}
     async function selectCharacterPortrait(variant){const j=await (await fetch('/character-editor/portrait/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,variant})})).json();if(j.ok){editorStatus('Active portrait updated. The game cache will refresh on the next savegame load.','good');await loadCharacterEditor(characterEditorState.heroId,true);}else editorStatus(j.error,'error');}
@@ -2957,16 +2964,51 @@
       try{const j=await (await fetch('/api/campaigns/delete-all',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmation})})).json();if(!j.ok)throw new Error(j.error||'Delete all failed.');status.className='editorStatus good';status.textContent=j.message;if(j.serverStopping)return;await loadCampaignManager();await loadCampaigns();}catch(e){status.className='editorStatus error';status.textContent=e.message;}
     }
 
-    async function loadLogs() {
-      const file = encodeURIComponent(document.getElementById('logFile').value);
-      const limit = encodeURIComponent(document.getElementById('logLimit').value || '250');
-      const campaign = encodeURIComponent(document.getElementById('logCampaignId')?.value || '');
-      const r = await fetch(`/api/logs?file=${file}&limit=${limit}&campaignId=${campaign}`);
-      const j = await r.json();
-      const output = document.getElementById('logOutput');
-      output.textContent = j.entries && j.entries.length
-        ? `Campaign: ${j.campaignId || 'global'}\n\n` + j.entries.map(x => JSON.stringify(x, null, 2)).join('\n\n')
-        : `No entries in ${j.file} for ${j.campaignId || 'global'}.`;
+    let logContinuation = null, logQueryKey = '', viewingOlderLogs = false, logLoadPending = false, logLoadVersion = 0;
+    function logQuery() {
+      return new URLSearchParams({
+        file: document.getElementById('logFile').value, limit: document.getElementById('logLimit').value || '250',
+        campaignId: document.getElementById('logCampaignId')?.value || '', search: document.getElementById('logSearch').value,
+        eventType: document.getElementById('logEventType').value, severity: document.getElementById('logSeverity').value
+      });
+    }
+    async function loadLogs(older = false, live = false) {
+      const query = logQuery(), key = query.toString();
+      if (live && (viewingOlderLogs || logLoadPending || (logQueryKey && key !== logQueryKey))) return;
+      const continuation = older && key === logQueryKey ? logContinuation : null;
+      const version = ++logLoadVersion, more = document.getElementById('olderLogs');
+      const status = document.getElementById('logPageStatus'), output = document.getElementById('logOutput');
+      if (continuation) {
+        query.set('cursor', continuation.cursor);
+        query.set('campaignId', continuation.campaignId);
+      }
+      logLoadPending = true;
+      more.disabled = true;
+      try {
+        const r = await fetch('/api/logs?' + query), j = await r.json();
+        if (version !== logLoadVersion || key !== logQuery().toString()) return;
+        if (!r.ok || !j.ok) throw new Error(j.error || 'Could not load logs.');
+        viewingOlderLogs = !!continuation;
+        logQueryKey = key;
+        logContinuation = j.hasMore && j.nextCursor ? { cursor: j.nextCursor, campaignId: j.campaignId || query.get('campaignId') } : null;
+        more.disabled = !logContinuation;
+        const notes = [];
+        if (j.elidedCount) notes.push(`Payload omitted for ${j.elidedCount} ${j.elidedCount === 1 ? 'entry' : 'entries'}.`);
+        if (j.responseLimitReached) notes.push('Response size limit reached.');
+        if (logContinuation) notes.push('Older matches are available.');
+        if (viewingOlderLogs) notes.push('Load Latest to resume live refresh.');
+        status.textContent = notes.join(' ');
+        output.textContent = j.entries && j.entries.length
+          ? `Campaign: ${j.campaignId || 'global'}\n\n` + j.entries.map(x => JSON.stringify(x, null, 2)).join('\n\n')
+          : `No matches in ${j.file} for ${j.campaignId || 'global'}.`;
+      } catch (error) {
+        if (version !== logLoadVersion || key !== logQuery().toString()) return;
+        logContinuation = null;
+        status.textContent = error.message;
+        output.textContent = '';
+      } finally {
+        if (version === logLoadVersion) logLoadPending = false;
+      }
     }
 
     function downloadLogs() {
@@ -4121,7 +4163,7 @@
       const live = document.getElementById('enableLiveLog');
       const logsOpen = document.getElementById('logs').classList.contains('active');
       const auditOpen = document.getElementById('audit').classList.contains('active');
-      if (live && live.checked && logsOpen) loadLogs();
+      if (live && live.checked && logsOpen) loadLogs(false, true);
       if (live && live.checked && auditOpen) loadAudit();
     }, 5000);
 

@@ -7,58 +7,30 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class SettingsService
     {
         private static readonly object SettingsSecretVaultLock = new object();
         private static readonly byte[] SettingsSecretVaultEntropy =
             Encoding.UTF8.GetBytes("BannerlordReign.SettingsSecrets.v1");
 
-        private static string SettingsSecretVaultPath()
-        {
-            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            return Path.Combine(localAppData, "Bannerlord Reign", "ReignBetaServer", "settings-secrets.dpapi");
-        }
-
-        private static bool ShouldUseInstalledSettingsSecretVault()
-        {
-            return IsSettingsSecretVaultDeploymentPath(
-                AppDomain.CurrentDomain.BaseDirectory ?? "");
-        }
-
-        private static bool IsSettingsSecretVaultDeploymentPath(string baseDirectory)
-        {
-            if (string.IsNullOrWhiteSpace(baseDirectory))
-            {
-                return false;
-            }
-
-            string normalized = Path.GetFullPath(baseDirectory)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            return normalized.EndsWith(
-                Path.Combine("ReignBeta", "server", "app"),
-                StringComparison.OrdinalIgnoreCase);
-        }
-
         private static bool RecoverInstalledSettingsSecrets(
             Dictionary<string, object> settings,
             bool restoreFullSettingsState)
         {
-            if (!ShouldUseInstalledSettingsSecretVault())
-            {
-                return false;
-            }
-
             try
             {
+                string vaultPath = InstalledSettingsSecretVaultPath();
+                if (vaultPath == null) return false;
+
                 int restoredSettingCount;
                 List<string> recoveredKeys = RecoverSettingsSecretsFromVault(
-                    SettingsSecretVaultPath(),
+                    vaultPath,
                     settings,
                     restoreFullSettingsState,
                     out restoredSettingCount);
                 if (restoredSettingCount > 0)
                 {
-                    LogOperational("settings.secrets_recovered", new Dictionary<string, object>
+                    OperationsService.LogOperational("settings.secrets_recovered", new Dictionary<string, object>
                     {
                         ["keyCount"] = recoveredKeys.Count,
                         ["keys"] = recoveredKeys,
@@ -70,7 +42,7 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                LogOperational("settings.secrets_recovery_failed", new Dictionary<string, object>
+                OperationsService.LogOperational("settings.secrets_recovery_failed", new Dictionary<string, object>
                 {
                     ["errorType"] = ex.GetType().Name,
                     ["error"] = ex.Message
@@ -83,20 +55,16 @@ namespace ReignBetaServer
             Dictionary<string, object> settings,
             bool allowEmptySecretOverwrite = false)
         {
-            if (!ShouldUseInstalledSettingsSecretVault())
-            {
-                return;
-            }
-
             try
             {
-                string vaultPath = SettingsSecretVaultPath();
+                string vaultPath = InstalledSettingsSecretVaultPath();
+                if (vaultPath == null) return;
                 if (!CanSafelyPersistSettingsSecretVault(
                     vaultPath,
                     settings,
                     allowEmptySecretOverwrite))
                 {
-                    LogOperational("settings.secrets_persist_skipped_empty", new Dictionary<string, object>
+                    OperationsService.LogOperational("settings.secrets_persist_skipped_empty", new Dictionary<string, object>
                     {
                         ["vaultExists"] = File.Exists(vaultPath),
                         ["explicitClear"] = allowEmptySecretOverwrite
@@ -108,7 +76,7 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                LogOperational("settings.secrets_persist_failed", new Dictionary<string, object>
+                OperationsService.LogOperational("settings.secrets_persist_failed", new Dictionary<string, object>
                 {
                     ["errorType"] = ex.GetType().Name,
                     ["error"] = ex.Message
@@ -187,9 +155,20 @@ namespace ReignBetaServer
                 byte[] clearText = Encoding.UTF8.GetBytes(Json.Serialize(protectedState));
                 byte[] protectedBytes = LinuxVaultTransform(vaultPath, clearText, true);
                 string temporaryPath = vaultPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                bool ownsTemporaryPath = false;
                 try
                 {
-                    File.WriteAllBytes(temporaryPath, protectedBytes);
+                    using (var file = new FileStream(temporaryPath, new FileStreamOptions
+                    {
+                        Mode = FileMode.CreateNew,
+                        Access = FileAccess.Write,
+                        Share = FileShare.None,
+                        UnixCreateMode = VaultPrivateFileMode
+                    }))
+                    {
+                        ownsTemporaryPath = true;
+                        file.Write(protectedBytes);
+                    }
                     if (File.Exists(vaultPath))
                     {
                         File.Replace(temporaryPath, vaultPath, null, true);
@@ -201,7 +180,7 @@ namespace ReignBetaServer
                 }
                 finally
                 {
-                    if (File.Exists(temporaryPath))
+                    if (ownsTemporaryPath && File.Exists(temporaryPath))
                     {
                         File.Delete(temporaryPath);
                     }
@@ -290,7 +269,57 @@ namespace ReignBetaServer
             return vaultKeyId.Length > 0 && vaultKeyId == BoundKeyId(settings, slot);
         }
 
-        private static Dictionary<string, object> RunSettingsSecretVaultSelfTest()
+        private static bool RunManagedSettingsVaultLayoutSelfTest(string root)
+        {
+            string install = Path.Combine(root, "installed");
+            string runtime = Path.Combine(install, "runtime");
+            string current = Path.Combine(runtime, "current");
+            string versions = Path.Combine(runtime, "versions");
+            string selected = Path.Combine(versions, "20261122000000-42");
+            string retired = Path.Combine(versions, "20261121000000-43");
+            string data = Path.Combine(install, "data");
+            const UnixFileMode privateDirectory = VaultPrivateFileMode | UnixFileMode.UserExecute;
+            Directory.CreateDirectory(current, privateDirectory);
+            Directory.CreateDirectory(data, privateDirectory);
+            Directory.CreateDirectory(selected, privateDirectory);
+            Directory.CreateDirectory(retired, privateDirectory);
+            uint uid = SettingsVaultEffectiveUserId();
+            string expected = Path.Combine(data, SettingsSecretVaultFileName);
+            string exe(string directory) => Path.Combine(directory, "ReignServer");
+            string select(string folder, string process, string dataRoot = null) =>
+                ManagedSettingsSecretVaultPath(install, dataRoot ?? data, folder, process, uid);
+
+            File.WriteAllText(exe(current), "synthetic active image");
+            File.WriteAllText(exe(selected), "synthetic previous layout");
+            File.WriteAllText(exe(retired), "synthetic inactive image");
+            bool modern = select(current, exe(current)) == expected
+                && select(current, exe(retired)) == null
+                && select(retired, exe(retired)) == null
+                && select(current, exe(current), Path.Combine(install, "test-data")) == null;
+            File.SetUnixFileMode(data, privateDirectory | UnixFileMode.OtherExecute);
+            bool broadDirectoryDenied = select(current, exe(current)) == null;
+            File.SetUnixFileMode(data, privateDirectory);
+            File.CreateSymbolicLink(expected, "absent-vault");
+            bool redirectedVaultDenied = select(current, exe(current)) == null;
+            File.Delete(expected);
+            File.CreateSymbolicLink(expected + ".key", "absent-key");
+            bool redirectedKeyDenied = select(current, exe(current)) == null;
+            File.Delete(expected + ".key");
+
+            File.Delete(exe(current));
+            Directory.Delete(current);
+            Directory.CreateSymbolicLink(current, Path.Combine("versions", Path.GetFileName(selected)));
+            bool legacyCurrent = select(current, exe(current)) == expected
+                && select(selected, exe(selected)) == expected
+                && select(retired, exe(retired)) == null;
+            Directory.Delete(current);
+            Directory.CreateSymbolicLink(current, root);
+            bool escapingCurrentDenied = select(current, exe(current)) == null;
+            return modern && broadDirectoryDenied && redirectedVaultDenied && redirectedKeyDenied
+                && legacyCurrent && escapingCurrentDenied;
+        }
+
+        internal static Dictionary<string, object> RunSettingsSecretVaultSelfTest()
         {
             string root = Path.Combine(Path.GetTempPath(), "reign-settings-vault-" + Guid.NewGuid().ToString("N"));
             string path = Path.Combine(root, "settings-secrets.dpapi");
@@ -367,13 +396,9 @@ namespace ReignBetaServer
                     && string.IsNullOrWhiteSpace(ReadString(afterClear, "apiKey", ""))
                     && string.IsNullOrWhiteSpace(ReadString(afterClear, "portraitNanoGptApiKey", ""))
                     && ReadString(afterClear, "dialogueModel", "") == "diagnostic-model";
-                bool deploymentPathsRecognized =
-                    IsSettingsSecretVaultDeploymentPath(Path.Combine(
-                        "C:\\", "workspace", "ReignBeta", "server", "app"))
-                    && IsSettingsSecretVaultDeploymentPath(Path.Combine(
-                        "D:\\", "Games", "Modules", "ReignBeta", "server", "app"))
-                    && !IsSettingsSecretVaultDeploymentPath(Path.Combine(
-                        "C:\\", "workspace", ".codex-build", "server", "out"));
+                bool deploymentPathsRecognized = RunManagedSettingsVaultLayoutSelfTest(root);
+                bool privateModes = File.GetUnixFileMode(path) == VaultPrivateFileMode
+                    && File.GetUnixFileMode(path + ".key") == VaultPrivateFileMode;
 
                 return new Dictionary<string, object>
                 {
@@ -382,13 +407,15 @@ namespace ReignBetaServer
                         && protectedFromAccidentalClear
                         && explicitClearAllowed
                         && cleared
-                        && deploymentPathsRecognized,
+                        && deploymentPathsRecognized
+                        && privateModes,
                     ["roundTrip"] = roundTrip,
                     ["emptyOverwriteBlocked"] = emptyOverwriteBlocked,
                     ["protectedFromAccidentalClear"] = protectedFromAccidentalClear,
                     ["explicitClearAllowed"] = explicitClearAllowed,
                     ["clearPersistsWithoutSecretResurrection"] = cleared,
                     ["deploymentPathsRecognized"] = deploymentPathsRecognized,
+                    ["privateVaultAndKeyModes"] = privateModes,
                     ["recoveredKeyCount"] = recovered.Count,
                     ["restoredSettingCount"] = restoredSettingCount
                 };

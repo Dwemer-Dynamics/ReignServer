@@ -6,12 +6,12 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
-        private const string PortraitBodyPromptFile = "portrait_body_appearance.txt";
+        internal const string PortraitBodyPromptFile = "portrait_body_appearance.txt";
         private static bool IsCharacterPortraitProfile(string name) => string.Equals(name, "portrait", StringComparison.OrdinalIgnoreCase)
             || string.Equals(name, "adultPortrait", StringComparison.OrdinalIgnoreCase);
-        private const string PortraitBodyPromptDefault = @"NATIVE BODY APPEARANCE — AUTHORITATIVE PHYSIQUE
+        internal const string PortraitBodyPromptDefault = @"NATIVE BODY APPEARANCE — AUTHORITATIVE PHYSIQUE
 Native weight: [NATIVE WEIGHT] on a 0–1 scale: [WEIGHT DESCRIPTION].
 Native build: [NATIVE BUILD] on a 0–1 scale: [BUILD DESCRIPTION].
 These are independent native appearance sliders, not kilograms, BMI, clinical classifications or body-fat percentages. Respect the exact position within each range, without abrupt changes at descriptive boundaries.

@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RelationshipsService
     {
         private static bool RelationshipNativeObservationRequired(
             Dictionary<string, object> pair, Dictionary<string, object> target)
@@ -13,7 +13,7 @@ namespace ReignBetaServer
                 || target == null && ReadInt(pair, "native_action_pending", 0) == 1;
         }
 
-        private static Dictionary<string, object> RelationshipNativeTargetPullApi(
+        internal static Dictionary<string, object> RelationshipNativeTargetPullApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -22,75 +22,23 @@ namespace ReignBetaServer
             const int maxBatchSize = 1024;
             int limit = Clamp(ReadInt(payload, "limit", maxBatchSize), 1, maxBatchSize);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureMbtiRelationshipSchema(connection);
                 List<Dictionary<string, object>> rows;
                 int prunedAlignedCount;
-                ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                RelationshipsStore.Begin(connection);
                 try
                 {
-                    ExecuteSql(connection, @"UPDATE relationship_native_targets target SET
-target_relation=pair.projected_native_relation,requires_observation=1,status='pending',
-revision=target.revision+1,claimed_ts=0,last_error='projection_changed_requires_observation',updated_ts=$ts
-FROM relationship_pair_chemistry pair WHERE pair.pair_key=target.pair_key
-AND pair.native_action_pending=1 AND pair.projected_native_relation<>target.target_relation;",
-                        new Dictionary<string, object> { ["ts"] = ts });
+                    RelationshipsStore.UpdateRelationshipNativeTargets6(connection, new Dictionary<string, object> { ["ts"] = ts });
                     // An old successful receipt can remove its target after the pair
                     // projection has changed. Orphan flags require a real native read;
                     // equality here is deliberately NOT evidence of alignment.
-                    ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
-pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,status,world_day,last_sync_day,
-attempt_count,claimed_ts,last_error,revision,updated_ts,requires_observation)
-SELECT pair.pair_key,pair.hero_a_id,pair.hero_b_id,pair.projected_native_relation,pair.projected_native_relation,
-'pending',pair.last_day,-1000,0,0,'native_observation_required',1,$ts,1
-FROM relationship_pair_chemistry pair
-WHERE pair.native_action_pending=1 AND NOT EXISTS (
- SELECT 1 FROM relationship_native_targets target WHERE target.pair_key=pair.pair_key)
-ON CONFLICT(pair_key) DO NOTHING;", new Dictionary<string, object> { ["ts"] = ts });
-                    prunedAlignedCount = ReadInt(QuerySql(connection, @"
-SELECT COUNT(*) AS count FROM relationship_native_targets
-WHERE target_relation=observed_relation AND requires_observation=0;").FirstOrDefault(), "count", 0);
-                    ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
-native_action_pending=0,native_action_id='',updated_ts=$ts
-WHERE pair_key IN (
-    SELECT pair_key FROM relationship_native_targets
-    WHERE target_relation=observed_relation AND requires_observation=0
-);", new Dictionary<string, object> { ["ts"] = ts });
-                    ExecuteSql(connection, @"
-DELETE FROM relationship_native_targets
-WHERE target_relation=observed_relation AND requires_observation=0;");
-                    rows = QuerySql(connection, @"
-SELECT pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,world_day,revision
-FROM relationship_native_targets n
-WHERE (target_relation<>observed_relation OR requires_observation=1)
-AND (status='pending' OR (status='claimed' AND claimed_ts<$expired))
-ORDER BY
-CASE
-  WHEN EXISTS (
-    SELECT 1 FROM relationship_pair_provenance p
-    WHERE p.pair_key=n.pair_key AND p.active=1 AND p.required=1
-    AND p.source IN ('kingdom_leadership','ruler_network')
-  ) THEN 0
-  WHEN EXISTS (
-    SELECT 1 FROM relationship_pair_provenance p
-    WHERE p.pair_key=n.pair_key AND p.active=1
-    AND p.source IN ('family','marriage','romance')
-  ) OR EXISTS (
-    SELECT 1 FROM relationship_pair_lifecycle l
-    WHERE l.pair_key=n.pair_key
-    AND (l.married=1 OR l.lover_active=1 OR l.affair_active=1)
-  ) THEN 1
-  WHEN EXISTS (
-    SELECT 1 FROM relationship_director_actions a
-    WHERE a.status IN ('pending','claimed')
-    AND ((a.actor_id=n.hero_a_id AND a.target_id=n.hero_b_id)
-      OR (a.actor_id=n.hero_b_id AND a.target_id=n.hero_a_id))
-  ) THEN 2
-  ELSE 3
-END,
-world_day,pair_key LIMIT " + limit + ";",
-                        new Dictionary<string, object> { ["expired"] = ts - 15 });
+                    RelationshipsStore.InsertOrIgnoreRelationshipNativeTargets(connection, new Dictionary<string, object> { ["ts"] = ts });
+                    prunedAlignedCount = ReadInt(RelationshipsStore.CountRelationshipNativeTargets3(connection).FirstOrDefault(), "count", 0);
+                    RelationshipsStore.UpdateRelationshipPairChemistry23(connection, new Dictionary<string, object> { ["ts"] = ts });
+                    RelationshipsStore.DeleteRelationshipNativeTargets5(connection);
+                    rows = RelationshipsStore.SelectRelationshipNativeTargets9(connection, limit,                        new Dictionary<string, object> { ["expired"] = ts - 15 });
                     if (ReignPostgreSqlDialect.IsPostgreSql(connection)
                         && rows.Count > 0)
                     {
@@ -100,27 +48,13 @@ world_day,pair_key LIMIT " + limit + ";",
                                 ["pair"] = ReadString(row, "pair_key", ""),
                                 ["revision"] = ReadInt(row, "revision", 1)
                             }).ToList());
-                        ExecutePostgreSqlJsonCommand(connection, @"
-UPDATE relationship_native_targets AS target SET
-status='claimed',claimed_ts=" + ts + @",updated_ts=" + ts + @"
-FROM jsonb_to_recordset(@rows) AS x(pair text,revision integer)
-WHERE target.pair_key=x.pair
-AND target.revision=x.revision
-AND (target.target_relation<>target.observed_relation OR target.requires_observation=1)
-AND (target.status='pending'
- OR (target.status='claimed' AND target.claimed_ts<"
-                            + (ts - 15) + "));", claimRows);
+                        ExecutePostgreSqlJsonCommand(connection, RelationshipsStore.UpdateRelationshipNativeTargetsSql(ts, ts, ts - 15), claimRows);
                     }
                     else
                     {
                         foreach (Dictionary<string, object> row in rows)
                         {
-                            ExecuteSql(connection, @"UPDATE relationship_native_targets
-SET status='claimed',claimed_ts=$ts,updated_ts=$ts
-WHERE pair_key=$pair AND revision=$revision
-AND (target_relation<>observed_relation OR requires_observation=1)
-AND (status='pending' OR (status='claimed' AND claimed_ts<$expired));",
-                                new Dictionary<string, object>
+                            RelationshipsStore.UpdateRelationshipNativeTargets7(connection, new Dictionary<string, object>
                                 {
                                     ["ts"] = ts,
                                     ["expired"] = ts - 15,
@@ -129,11 +63,11 @@ AND (status='pending' OR (status='claimed' AND claimed_ts<$expired));",
                                 });
                         }
                     }
-                    ExecuteSql(connection, "COMMIT;");
+                    RelationshipsStore.Commit(connection);
                 }
                 catch
                 {
-                    try { ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { RelationshipsStore.Rollback(connection); } catch { }
                     throw;
                 }
                 return new Dictionary<string, object>
@@ -158,7 +92,7 @@ AND (status='pending' OR (status='claimed' AND claimed_ts<$expired));",
             }
         }
 
-        private static Dictionary<string, object> RelationshipNativeTargetReceiptsApi(
+        internal static Dictionary<string, object> RelationshipNativeTargetReceiptsApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -167,10 +101,10 @@ AND (status='pending' OR (status='claimed' AND claimed_ts<$expired));",
             List<Dictionary<string, object>> receipts = ReadDictionaryList(payload, "receipts");
             int accepted = 0, stale = 0, failed = 0;
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureMbtiRelationshipSchema(connection);
-                ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                RelationshipsStore.Begin(connection);
                 try
                 {
                     if (ReignPostgreSqlDialect.IsPostgreSql(connection))
@@ -181,12 +115,12 @@ AND (status='pending' OR (status='claimed' AND claimed_ts<$expired));",
                                 {
                                     ["pair"] = ReadString(receipt, "pairKey", ""),
                                     ["revision"] = ReadInt(receipt, "revision", 0),
-                                    ["status"] = NormalizeLookup(ReadString(
+                                    ["status"] = ActionPipelineService.NormalizeLookup(ReadString(
                                             receipt, "status", "failed"))
                                         .Replace(' ', '_'),
                                     ["observed"] = ReadInt(receipt,
                                         "observedRelation", 0),
-                                    ["error"] = LimitText(ReadString(receipt,
+                                    ["error"] = DialogueService.LimitText(ReadString(receipt,
                                         "error", "Native application failed."), 800)
                                 })
                             .Where(row => !string.IsNullOrWhiteSpace(
@@ -194,13 +128,7 @@ AND (status='pending' OR (status='claimed' AND claimed_ts<$expired));",
                             .ToList();
                         string normalizedJson = Json.Serialize(normalized);
                         HashSet<string> currentKeys = new HashSet<string>(
-                            QuerySql(connection, @"
-SELECT target.pair_key,target.revision
-FROM relationship_native_targets AS target
-JOIN jsonb_to_recordset(CAST($rows AS jsonb))
- AS x(pair text,revision integer)
-ON target.pair_key=x.pair AND target.revision=x.revision;",
-                                new Dictionary<string, object>
+                            RelationshipsStore.SelectRelationshipNativeTargets10(connection, new Dictionary<string, object>
                                 {
                                     ["rows"] = normalizedJson
                                 }).Select(row => ReadString(row, "pair_key", "")
@@ -233,52 +161,21 @@ ON target.pair_key=x.pair AND target.revision=x.revision;",
                         if (acceptedRows.Count > 0)
                         {
                             string rowsJson = Json.Serialize(acceptedRows);
-                            ExecutePostgreSqlJsonCommand(connection, @"
-UPDATE relationship_pair_chemistry AS pair SET
-native_action_pending=0,native_action_id='',
-last_native_sync_day=" + worldDay.ToString(
-                                System.Globalization.CultureInfo.InvariantCulture)
-                                + ",updated_ts=" + ts + @"
-FROM jsonb_to_recordset(@rows)
- AS x(pair text,revision integer,status text,observed integer,error text)
-WHERE pair.pair_key=x.pair
-AND pair.projected_native_relation=x.observed;", rowsJson);
-                            ExecutePostgreSqlJsonCommand(connection, @"
-DELETE FROM relationship_native_targets AS target
-USING jsonb_to_recordset(@rows)
- AS x(pair text,revision integer,status text,observed integer,error text)
-WHERE target.pair_key=x.pair
-AND target.revision=x.revision;", rowsJson);
+                            ExecutePostgreSqlJsonCommand(connection, RelationshipsStore.UpdateRelationshipPairChemistrySql(worldDay.ToString(
+                                System.Globalization.CultureInfo.InvariantCulture), ts), rowsJson);
+                            ExecutePostgreSqlJsonCommand(connection, RelationshipsStore.DeleteRelationshipNativeTargetsSql3, rowsJson);
                             accepted += acceptedRows.Count;
                         }
                         if (obsoleteRows.Count > 0)
                         {
                             string rowsJson = Json.Serialize(obsoleteRows);
-                            ExecutePostgreSqlJsonCommand(connection, @"
-UPDATE relationship_pair_chemistry AS pair SET
-native_action_pending=0,native_action_id='',updated_ts=" + ts + @"
-FROM jsonb_to_recordset(@rows)
- AS x(pair text,revision integer,status text,observed integer,error text)
-WHERE pair.pair_key=x.pair;", rowsJson);
-                            ExecutePostgreSqlJsonCommand(connection, @"
-DELETE FROM relationship_native_targets AS target
-USING jsonb_to_recordset(@rows)
- AS x(pair text,revision integer,status text,observed integer,error text)
-WHERE target.pair_key=x.pair
-AND target.revision=x.revision;", rowsJson);
+                            ExecutePostgreSqlJsonCommand(connection, RelationshipsStore.UpdateRelationshipPairChemistrySql2(ts), rowsJson);
+                            ExecutePostgreSqlJsonCommand(connection, RelationshipsStore.DeleteRelationshipNativeTargetsSql3, rowsJson);
                             accepted += obsoleteRows.Count;
                         }
                         if (failedRows.Count > 0)
                         {
-                            ExecutePostgreSqlJsonCommand(connection, @"
-UPDATE relationship_native_targets AS target SET
-status='pending',observed_relation=x.observed,
-attempt_count=target.attempt_count+1,claimed_ts=0,
-last_error=x.error,updated_ts=" + ts + @"
-FROM jsonb_to_recordset(@rows)
- AS x(pair text,revision integer,status text,observed integer,error text)
-WHERE target.pair_key=x.pair
-AND target.revision=x.revision;",
+                            ExecutePostgreSqlJsonCommand(connection, RelationshipsStore.UpdateRelationshipNativeTargetsSql2(ts),
                                 Json.Serialize(failedRows));
                             failed += failedRows.Count;
                         }
@@ -289,11 +186,11 @@ AND target.revision=x.revision;",
                             receipts, worldDay, ts,
                             ref accepted, ref stale, ref failed);
                     }
-                    ExecuteSql(connection, "COMMIT;");
+                    RelationshipsStore.Commit(connection);
                 }
                 catch
                 {
-                    try { ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { RelationshipsStore.Rollback(connection); } catch { }
                     throw;
                 }
             }
@@ -321,12 +218,10 @@ AND target.revision=x.revision;",
                 // result back to the protocol's underscore form before
                 // comparing it, otherwise "already_aligned" is treated as
                 // a failure and recycled forever.
-                string status = NormalizeLookup(ReadString(
+                string status = ActionPipelineService.NormalizeLookup(ReadString(
                         receipt, "status", "failed"))
                     .Replace(' ', '_');
-                Dictionary<string, object> current = QuerySql(connection,
-                    "SELECT * FROM relationship_native_targets WHERE pair_key=$pair LIMIT 1;",
-                    new Dictionary<string, object>
+                Dictionary<string, object> current = RelationshipsStore.SelectRelationshipNativeTargets8(connection, new Dictionary<string, object>
                     {
                         ["pair"] = pairKey
                     }).FirstOrDefault();
@@ -340,17 +235,12 @@ AND target.revision=x.revision;",
                     ReadInt(current, "observed_relation", 0));
                 if (status == "applied" || status == "already_aligned")
                 {
-                    ExecuteSql(connection,
-                        "DELETE FROM relationship_native_targets WHERE pair_key=$pair AND revision=$revision;",
-                        new Dictionary<string, object>
+                    RelationshipsStore.DeleteRelationshipNativeTargets6(connection, new Dictionary<string, object>
                         {
                             ["pair"] = pairKey,
                             ["revision"] = revision
                         });
-                    ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
-native_action_pending=0,native_action_id='',last_native_sync_day=$day,updated_ts=$ts
-WHERE pair_key=$pair AND projected_native_relation=$observed;",
-                        new Dictionary<string, object>
+                    RelationshipsStore.UpdateRelationshipPairChemistry24(connection, new Dictionary<string, object>
                         {
                             ["day"] = worldDay,
                             ["ts"] = ts,
@@ -361,17 +251,12 @@ WHERE pair_key=$pair AND projected_native_relation=$observed;",
                 }
                 else if (status == "obsolete")
                 {
-                    ExecuteSql(connection,
-                        "DELETE FROM relationship_native_targets WHERE pair_key=$pair AND revision=$revision;",
-                        new Dictionary<string, object>
+                    RelationshipsStore.DeleteRelationshipNativeTargets6(connection, new Dictionary<string, object>
                         {
                             ["pair"] = pairKey,
                             ["revision"] = revision
                         });
-                    ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
-native_action_pending=0,native_action_id='',updated_ts=$ts
-WHERE pair_key=$pair;",
-                        new Dictionary<string, object>
+                    RelationshipsStore.UpdateRelationshipPairChemistry25(connection, new Dictionary<string, object>
                         {
                             ["ts"] = ts,
                             ["pair"] = pairKey
@@ -380,14 +265,10 @@ WHERE pair_key=$pair;",
                 }
                 else
                 {
-                    ExecuteSql(connection, @"UPDATE relationship_native_targets SET
-status='pending',observed_relation=$observed,attempt_count=attempt_count+1,
-claimed_ts=0,last_error=$error,updated_ts=$ts
-WHERE pair_key=$pair AND revision=$revision;",
-                        new Dictionary<string, object>
+                    RelationshipsStore.UpdateRelationshipNativeTargets8(connection, new Dictionary<string, object>
                         {
                             ["observed"] = observed,
-                            ["error"] = LimitText(ReadString(receipt,
+                            ["error"] = DialogueService.LimitText(ReadString(receipt,
                                 "error", "Native application failed."), 800),
                             ["ts"] = ts,
                             ["pair"] = pairKey,

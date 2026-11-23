@@ -4,19 +4,19 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class WorldSimulationService
     {
-        private static void BindDialogueActionAuthority(
+        internal static void BindDialogueActionAuthority(
             Dictionary<string, object> record, Dictionary<string, object> terms,
             Dictionary<string, object> payload, string command, string mappedType,
             string correlationId, List<string> errors, Dictionary<string, object> raw = null)
         {
-            if (!IsDialogueActionSource(ReadString(record, "source", ""))) return;
+            if (!ActionPipelineService.IsDialogueActionSource(ReadString(record, "source", ""))) return;
             if ((command == "transfer_gold" || command == "transfer_item")
                 && ReadString(record, "actorHeroStringId", "") == ReadString(payload, "playerHeroStringId", "")
                 && ReignBeta.Shared.Dialogue.PlayerActionRules.IsNonActionContext(ReadFirstString(payload, "playerText", "text", "message")))
             { errors.Add("A quoted example or hypothetical does not authorize a player asset transfer."); return; }
-            if (BindPlayerTransferAuthority(record, terms, payload, command, errors)) return;
+            if (DialogueService.BindPlayerTransferAuthority(record, terms, payload, command, errors)) return;
             Dictionary<string, object> hero = ReadDictionary(payload, "hero") ?? new Dictionary<string, object>();
             string speakerId = FirstNonEmpty(
                 ReadFirstString(payload, "speakerHeroStringId", "heroStringId", "heroId"),
@@ -39,7 +39,7 @@ namespace ReignBetaServer
             var agencyAction = new Dictionary<string, object>(record);
             foreach (var field in raw ?? new Dictionary<string, object>())
                 if (!agencyAction.ContainsKey(field.Key)) agencyAction[field.Key] = field.Value;
-            if (!BindConversationAgencyAuthority(payload, command, terms, receipt, errors, agencyAction)) return;
+            if (!DialogueService.BindConversationAgencyAuthority(payload, command, terms, receipt, errors, agencyAction)) return;
             string policy;
             if (mappedType.StartsWith("Diplomacy", StringComparison.OrdinalIgnoreCase))
             {
@@ -68,7 +68,7 @@ namespace ReignBetaServer
             record["authorizationMode"] = "dialogue_acceptance";
             record["negotiationId"] = correlationId;
             record["termsJson"] = Json.Serialize(terms);
-            record["termsHash"] = ComputeActionTermsHash(command, terms);
+            record["termsHash"] = ActionPipelineService.ComputeActionTermsHash(command, terms);
         }
 
         private static string BindDialogueDiplomacyAuthority(
@@ -77,8 +77,8 @@ namespace ReignBetaServer
         {
             string actorKingdomId = ReadString(record, "actorKingdomStringId", "");
             string targetKingdomId = ReadString(record, "targetKingdomStringId", "");
-            Dictionary<string, object> actor = FindIndexedRow(index, "kingdoms", "kingdomId", actorKingdomId);
-            Dictionary<string, object> target = FindIndexedRow(index, "kingdoms", "kingdomId", targetKingdomId);
+            Dictionary<string, object> actor = ActionPipelineService.FindIndexedRow(index, "kingdoms", "kingdomId", actorKingdomId);
+            Dictionary<string, object> target = ActionPipelineService.FindIndexedRow(index, "kingdoms", "kingdomId", targetKingdomId);
             string actorLeader = ReadString(actor, "leaderHeroStringId", "");
             string targetLeader = ReadString(target, "leaderHeroStringId", "");
             string authorityKind = ReadString(receipt, "authorityKind", "");
@@ -86,7 +86,7 @@ namespace ReignBetaServer
             {
                 string representedKingdom = ReadString(receipt, "representedKingdomId", "");
                 string representedRuler = ReadString(receipt, "representedRulerHeroStringId", "");
-                Dictionary<string, object> represented = FindIndexedRow(index, "kingdoms", "kingdomId", representedKingdom);
+                Dictionary<string, object> represented = ActionPipelineService.FindIndexedRow(index, "kingdoms", "kingdomId", representedKingdom);
                 if (!ReadString(receipt, "acceptedByHeroStringId", "").Equals(speakerId, StringComparison.OrdinalIgnoreCase)
                     || string.IsNullOrWhiteSpace(ReadString(receipt, "postingId", ""))
                     || ReadLong(receipt, "authorityRevision", 0) < 1
@@ -133,12 +133,14 @@ namespace ReignBetaServer
                     ? "personal_command_consent" : "personal_or_owner_consent";
         }
 
-        private static List<Dictionary<string, object>> RunDialogueActionAuthorityAssertions()
+#if !REIGN_EXCLUDE_VERIFICATION
+        internal static List<Dictionary<string, object>> RunDialogueActionAuthorityAssertions()
         {
             var rows = RunDialogueMarriageActionAssertions();
             rows.AddRange(RunStructuredActionContinuityRepairAssertions());
             return rows;
         }
+#endif
 
         private static List<Dictionary<string, object>> RunStructuredActionContinuityRepairAssertions()
         {
@@ -164,20 +166,20 @@ namespace ReignBetaServer
                     TryParseJsonObject(Json.Serialize(agreement))));
             ReadDictionary(payload, "structuredActionContext")["termsHash"] = agreement.TermsHash();
             string premature = "I confirm receipt of one prisoner and two Imperial Elite Cataphracts.";
-            Check("pending_receipt_claim_blocked", StructuredActionReceiptContradictions(premature, payload).Any());
+            Check("pending_receipt_claim_blocked", DialogueService.StructuredActionReceiptContradictions(premature, payload).Any());
             foreach (string safe in new[] { "I accept both arrangements. The prisoner will pass into my custody.",
                 "I will confirm receipt of the troops when they arrive.", "I cannot confirm receipt of the prisoner yet.",
                 "I acknowledge receipt of your letter about the prisoner.", "If I confirm receipt of the prisoner, notify the guards." })
-                Check("pending_receipt_safe_" + rows.Count, !StructuredActionReceiptContradictions(safe, payload).Any());
+                Check("pending_receipt_safe_" + rows.Count, !DialogueService.StructuredActionReceiptContradictions(safe, payload).Any());
             var delivered = CloneDictionary(payload);
             ReadDictionary(delivered, "structuredActionContext")["nativeReceipt"] = TestDict("State", "Completed",
                 "OperationId", agreement.Id, "TermsHash", agreement.TermsHash());
-            Check("matching_completed_receipt_allowed", !StructuredActionReceiptContradictions(premature, delivered).Any());
+            Check("matching_completed_receipt_allowed", !DialogueService.StructuredActionReceiptContradictions(premature, delivered).Any());
             ReadDictionary(ReadDictionary(delivered, "structuredActionContext"), "nativeReceipt")["TermsHash"] = "different";
-            Check("other_terms_receipt_blocked", StructuredActionReceiptContradictions(premature, delivered).Any());
+            Check("other_terms_receipt_blocked", DialogueService.StructuredActionReceiptContradictions(premature, delivered).Any());
             ReadDictionary(ReadDictionary(delivered, "structuredActionContext"), "nativeReceipt")["TermsHash"] = agreement.TermsHash();
             ReadDictionary(ReadDictionary(delivered, "structuredActionContext"), "nativeReceipt")["State"] = "InTransit";
-            Check("in_transit_receipt_blocked", StructuredActionReceiptContradictions(premature, delivered).Any());
+            Check("in_transit_receipt_blocked", DialogueService.StructuredActionReceiptContradictions(premature, delivered).Any());
             Dictionary<string, object> Decision(string kind) => TestDict("kind", kind,
                 "proposalId", agreement.Id, "revision", agreement.Revision, "termsHash", agreement.TermsHash(),
                 "reason", "The original choice.", "clauses", new List<Dictionary<string, object>>());
@@ -193,24 +195,24 @@ namespace ReignBetaServer
             {
                 var original = Reply("Original answer.", Decision(kind));
                 var candidate = Reply("Corrected answer.", Decision(kind));
-                Check(kind + "_choice_preserved", StructuredActionContinuityDecisionPreserved(payload, original, candidate));
+                Check(kind + "_choice_preserved", DialogueService.StructuredActionContinuityDecisionPreserved(payload, original, candidate));
                 candidate.Remove("structuredActionDecision");
-                Check(kind + "_missing_decision_rejected", !StructuredActionContinuityDecisionPreserved(payload, original, candidate));
+                Check(kind + "_missing_decision_rejected", !DialogueService.StructuredActionContinuityDecisionPreserved(payload, original, candidate));
             }
             var accepted = Reply("Original answer.", Decision("accept"));
             var altered = Reply("Corrected answer.", Decision("reject"));
-            Check("accept_cannot_become_reject", !StructuredActionContinuityDecisionPreserved(payload, accepted, altered));
+            Check("accept_cannot_become_reject", !DialogueService.StructuredActionContinuityDecisionPreserved(payload, accepted, altered));
             altered["structuredActionDecision"] = Decision("accept");
             ReadDictionary(altered, "structuredActionDecision")["termsHash"] = "changed";
-            Check("terms_hash_cannot_change", !StructuredActionContinuityDecisionPreserved(payload, accepted, altered));
+            Check("terms_hash_cannot_change", !DialogueService.StructuredActionContinuityDecisionPreserved(payload, accepted, altered));
             var counter = Reply("A counteroffer.", Decision("counter"));
             ReadDictionary(counter, "structuredActionDecision")["clauses"] = new List<Dictionary<string, object>> {
                 TestDict("actionId", "give.gold", "actorId", "npc", "recipientId", "player",
                     "arguments", new List<Dictionary<string, object>> { TestDict("key", "quantity", "value", "5") }) };
             var changedCounter = TryParseJsonObject(Json.Serialize(counter));
             ReadDictionaryList(ReadDictionary(changedCounter, "structuredActionDecision"), "clauses")[0]["recipientId"] = "npc";
-            Check("counter_terms_cannot_change", !StructuredActionContinuityDecisionPreserved(payload, counter, changedCounter));
-            Check("legacy_repair_is_unchanged", StructuredActionContinuityDecisionPreserved(TestDict(), accepted, Reply("Legacy.", null)));
+            Check("counter_terms_cannot_change", !DialogueService.StructuredActionContinuityDecisionPreserved(payload, counter, changedCounter));
+            Check("legacy_repair_is_unchanged", DialogueService.StructuredActionContinuityDecisionPreserved(TestDict(), accepted, Reply("Legacy.", null)));
             foreach (string variant in new[] { "accept", "reject", "missing", "changed", "premature_receipt" })
             {
                 var originalDecision = Decision(variant == "reject" ? "reject" : "accept");
@@ -218,7 +220,7 @@ namespace ReignBetaServer
                 var candidate = Reply(variant == "reject" ? "I decline the gift." : "I agree to receive the gift.",
                     variant == "missing" ? null : Decision(variant == "changed" || variant == "reject" ? "reject" : "accept"));
                 int calls = 0; bool protocol = false; bool bounded = false;
-                var repaired = RetryRoleplayContinuityViolation(TestDict("ok", true, "content", Json.Serialize(original)),
+                var repaired = DialogueService.RetryRoleplayContinuityViolation(TestDict("ok", true, "content", Json.Serialize(original)),
                     TestDict("requestType", "dialogue", "maxTokens", 3000), payload, TestDict("knowsIdentity", true),
                     new List<Dictionary<string, object>>(), "structured_action_continuity_tests", "repair-" + variant,
                     "dialogue", "npc", "Speaker", "Player", "", request =>
@@ -226,19 +228,19 @@ namespace ReignBetaServer
                         calls++;
                         var messages = ReadDictionaryList(request, "messages");
                         string contract = ReadString(messages[0], "content", "");
-                        protocol = UsesStructuredActions(request) && contract.Contains("structuredActionDecision");
+                        protocol = DialogueService.UsesStructuredActions(request) && contract.Contains("structuredActionDecision");
                         bounded = !Json.Serialize(messages).Contains("REGISTERED INTERPERSONAL ACTIONS");
                         return TestDict("ok", true, "content", Json.Serialize(candidate));
                     });
                 var final = TryParseJsonObject(ReadString(repaired, "content", ""));
                 var captured = CloneDictionary(payload);
-                CaptureStructuredActionDecision(captured, final);
+                DialogueService.CaptureStructuredActionDecision(captured, final);
                 var decision = ReadDictionary(captured, "validatedStructuredActionDecision");
                 bool success = variant == "accept" || variant == "reject" || variant == "premature_receipt";
                 Check(variant + "_one_bounded_repair", calls == 1 && protocol && bounded);
                 Check(variant + "_native_authority", success
                     ? ReadBool(decision, "valid", false) && ReadString(decision, "kind", "") == (variant == "reject" ? "reject" : "accept")
-                    : !ReadBool(decision, "valid", true) && ConversationRepairFailed(final));
+                    : !ReadBool(decision, "valid", true) && DialogueService.ConversationRepairFailed(final));
             }
             return rows;
         }

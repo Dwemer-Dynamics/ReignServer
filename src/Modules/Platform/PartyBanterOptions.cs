@@ -5,14 +5,14 @@ using ReignBeta.Shared.Dialogue;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class SettingsService
     {
-        private static Dictionary<string, object> BanterOptions(Dictionary<string, object> settings) => TestDict(
+        internal static Dictionary<string, object> BanterOptions(Dictionary<string, object> settings) => TestDict(
             "enabled", ReadBool(settings, "banterEnabled", true),
             "maxResponses", Clamp(ReadInt(settings, "banterMaxResponses", PartyBanterPolicy.DefaultResponses), 2, 12),
             "maxCharacters", Clamp(ReadInt(settings, "banterMaxCharacters", PartyBanterPolicy.DefaultCharacters), 80, 1000));
 
-        private static string ValidateBanterOptions(Dictionary<string, object> incoming)
+        internal static string ValidateBanterOptions(Dictionary<string, object> incoming)
         {
             if (incoming == null) return "";
             if (incoming.TryGetValue("banterEnabled", out var enabled) && !(enabled is bool)) return "Party banter must be on or off.";
@@ -25,22 +25,22 @@ namespace ReignBetaServer
                     return bounds[0] + " must be a whole number from " + bounds[1] + " to " + bounds[2] + ".";
             }
             if (incoming.ContainsKey("banterProvider") && !string.IsNullOrWhiteSpace(ReadString(incoming, "banterProvider", ""))
-                && Array.IndexOf(ChatProviders, ReadString(incoming, "banterProvider", "")) < 0) return "Select a supported banter provider.";
+                && Array.IndexOf(LlmProviderService.ChatProviders, ReadString(incoming, "banterProvider", "")) < 0) return "Select a supported banter provider.";
             return "";
         }
 
-        private static Dictionary<string, object> BanterProviderSettings(Dictionary<string, object> payload, Dictionary<string, object> settings)
+        internal static Dictionary<string, object> BanterProviderSettings(Dictionary<string, object> payload, Dictionary<string, object> settings)
         {
             string route = ReadString(payload, "requestType", "");
             bool approach = route == "npc_approach" || route.StartsWith("npc_approach_", StringComparison.Ordinal);
             if (route != "party_banter" && !approach) return settings;
-            var result = DeepCloneProfileDictionary(settings);
+            var result = CharactersService.DeepCloneProfileDictionary(settings);
             string provider = approach ? FirstNonEmpty(ReadString(settings, "npcLivesApproachProvider", ""), ReadString(settings, "banterProvider", "")) : ReadString(settings, "banterProvider", "");
             if (!string.IsNullOrWhiteSpace(provider))
             {
                 result["llmProvider"] = provider;
                 var bank = ReadDictionary(ReadDictionary(settings, "llmModelProfiles"), provider);
-                foreach (string key in ChatModelKeys) result[key] = ReadString(bank, key, "");
+                foreach (string key in LlmProviderService.ChatModelKeys) result[key] = ReadString(bank, key, "");
             }
             bool inheritBanterModel = !approach || string.IsNullOrWhiteSpace(ReadString(settings, "npcLivesApproachProvider", ""))
                 || provider == ReadString(settings, "banterProvider", "");

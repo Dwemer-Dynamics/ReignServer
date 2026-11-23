@@ -7,11 +7,11 @@ using System.Threading;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PersistenceService
     {
         private static void RunCampaignSchemaLockSelfTests(Action<string, bool, string> add)
         {
-            if (!HasArg(Environment.GetCommandLineArgs(), "--run-verification") || ActiveServerPort > 0)
+            if (!Program.HasArg(Environment.GetCommandLineArgs(), "--run-verification") || Program.ActiveServerPort > 0)
                 throw new InvalidOperationException("Schema lock contracts require isolated Verification Lab state.");
             string campaign = "__schema_lock_" + Guid.NewGuid().ToString("N");
             bool workersJoined = true;
@@ -19,8 +19,8 @@ namespace ReignBetaServer
             {
                 RunCampaignColdSchemaOrderCase(campaign, false, add, ref workersJoined);
                 if (!workersJoined) return;
-                using (var connection = OpenCampaignConnection(campaign))
-                    ExecuteSql(connection, "UPDATE schema_meta SET value='4' WHERE key='version';");
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                    PersistenceSelfTestStore.UpdateSchemaMeta(connection);
                 RunCampaignColdSchemaOrderCase(campaign, true, add, ref workersJoined);
                 if (!workersJoined) return;
 
@@ -31,16 +31,16 @@ namespace ReignBetaServer
                 {
                     try
                     {
-                        CampaignSchemaSettingsReadObserverForTests = _ => Interlocked.Increment(ref settingsReads);
-                        CampaignSchemaColdWaitObserverForTests = _ => Interlocked.Increment(ref coldWaits);
-                        CampaignSchemaInitializingForTests = () => Interlocked.Increment(ref initializations);
-                        using var connection = OpenCampaignConnection(campaign);
+                        ReignDatabase.CampaignSchemaSettingsReadObserverForTests = _ => Interlocked.Increment(ref settingsReads);
+                        ReignDatabase.CampaignSchemaColdWaitObserverForTests = _ => Interlocked.Increment(ref coldWaits);
+                        ReignDatabase.CampaignSchemaInitializingForTests = () => Interlocked.Increment(ref initializations);
+                        using var connection = ReignDatabase.OpenCampaignConnection(campaign);
                         if (connection.State != ConnectionState.Open) throw new Exception("Successful connection was closed.");
                     }
                     catch (Exception ex) { warmError = ex; }
                     finally { ClearCampaignSchemaTestHooks(); }
                 }) { IsBackground = true };
-                lock (FileLock)
+                lock (Program.FileLock)
                 {
                     warm.Start();
                     warmJoined = warm.Join(5000);
@@ -57,25 +57,25 @@ namespace ReignBetaServer
                 {
                     try
                     {
-                        lock (CampaignSchemaLock)
+                        lock (Program.CampaignSchemaLock)
                         {
                             invertedWaiting.Set();
                             // Bypass the production guard to demonstrate the old monitor cycle.
-                            lock (FileLock) { }
+                            lock (Program.FileLock) { }
                         }
                     }
                     catch (Exception ex) { invertedError = ex; }
                     finally { ClearCampaignSchemaTestHooks(); }
                 }) { IsBackground = true };
                 bool observed, probeAcquired = false;
-                lock (FileLock)
+                lock (Program.FileLock)
                 {
                     inverted.Start();
                     observed = invertedWaiting.Wait(5000);
                     if (observed)
                     {
-                        probeAcquired = Monitor.TryEnter(CampaignSchemaLock, 100);
-                        if (probeAcquired) Monitor.Exit(CampaignSchemaLock);
+                        probeAcquired = Monitor.TryEnter(Program.CampaignSchemaLock, 100);
+                        if (probeAcquired) Monitor.Exit(Program.CampaignSchemaLock);
                     }
                 }
                 workersJoined &= inverted.Join(10000);
@@ -85,13 +85,13 @@ namespace ReignBetaServer
                 if (!workersJoined) return;
 
                 bool nestedRejected = false, semanticRejected = false, settingsRejected = false;
-                lock (CampaignSchemaLock)
+                lock (Program.CampaignSchemaLock)
                 {
-                    try { using var connection = OpenCampaignConnection(campaign); }
+                    try { using var connection = ReignDatabase.OpenCampaignConnection(campaign); }
                     catch (InvalidOperationException) { nestedRejected = true; }
-                    try { EnsureSemanticMemorySchema(null); }
+                    try { DialogueService.EnsureSemanticMemorySchema(null); }
                     catch (InvalidOperationException) { semanticRejected = true; }
-                    try { LoadSettings(); }
+                    try { SettingsService.LoadSettings(); }
                     catch (InvalidOperationException) { settingsRejected = true; }
                 }
                 add("schema_reverse_nested_entry_rejected", nestedRejected && semanticRejected && settingsRejected,
@@ -110,8 +110,8 @@ namespace ReignBetaServer
                 if (workersJoined)
                 {
                     ReignPostgreSqlStorage.DropCampaign(campaign);
-                    string directory = Path.GetFullPath(CampaignDirectory(campaign));
-                    string root = Path.GetFullPath(CampaignsRoot()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                    string directory = Path.GetFullPath(CampaignFileService.CampaignDirectory(campaign));
+                    string root = Path.GetFullPath(CampaignFileService.CampaignsRoot()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
                     if (directory.StartsWith(root, StringComparison.OrdinalIgnoreCase)
                         && Path.GetFileName(directory) == campaign && Directory.Exists(directory)) Directory.Delete(directory, true);
                 }
@@ -120,11 +120,11 @@ namespace ReignBetaServer
 
         private static void ClearCampaignSchemaTestHooks()
         {
-            CampaignSchemaSettingsReadObserverForTests = null;
-            CampaignSchemaConnectionOpenedForTests = null;
-            CampaignSchemaColdWaitObserverForTests = null;
-            CampaignSchemaInitializingForTests = null;
-            CampaignSchemaAfterMemoryForTests = null;
+            ReignDatabase.CampaignSchemaSettingsReadObserverForTests = null;
+            ReignDatabase.CampaignSchemaConnectionOpenedForTests = null;
+            ReignDatabase.CampaignSchemaColdWaitObserverForTests = null;
+            ReignDatabase.CampaignSchemaInitializingForTests = null;
+            ReignDatabase.CampaignSchemaAfterMemoryForTests = null;
         }
 
         private static void RunCampaignColdSchemaOrderCase(string campaign, bool stale,
@@ -138,39 +138,38 @@ namespace ReignBetaServer
             {
                 try
                 {
-                    CampaignSchemaColdWaitObserverForTests = held =>
+                    ReignDatabase.CampaignSchemaColdWaitObserverForTests = held =>
                     {
                         if (held) Interlocked.Increment(ref unsafeReads);
                         waiting.Set();
                     };
-                    CampaignSchemaSettingsReadObserverForTests = held =>
+                    ReignDatabase.CampaignSchemaSettingsReadObserverForTests = held =>
                     {
-                        if (held && !Monitor.IsEntered(FileLock)) Interlocked.Increment(ref unsafeReads);
+                        if (held && !Monitor.IsEntered(Program.FileLock)) Interlocked.Increment(ref unsafeReads);
                     };
-                    CampaignSchemaInitializingForTests = () => Interlocked.Increment(ref initialized);
-                    using var connection = OpenCampaignConnection(campaign);
+                    ReignDatabase.CampaignSchemaInitializingForTests = () => Interlocked.Increment(ref initialized);
+                    using var connection = ReignDatabase.OpenCampaignConnection(campaign);
                 }
                 catch (Exception ex) { workerError = ex; }
                 finally { ClearCampaignSchemaTestHooks(); }
             }) { IsBackground = true };
-            lock (FileLock)
+            lock (Program.FileLock)
             {
-                CampaignSchemaInitializingForTests = () => Interlocked.Increment(ref initialized);
+                ReignDatabase.CampaignSchemaInitializingForTests = () => Interlocked.Increment(ref initialized);
                 try
                 {
                     worker.Start();
                     observed = waiting.Wait(5000);
                     if (observed)
                     {
-                        probeAcquired = Monitor.TryEnter(CampaignSchemaLock, 1000);
+                        probeAcquired = Monitor.TryEnter(Program.CampaignSchemaLock, 1000);
                         if (probeAcquired)
                         {
-                            Monitor.Exit(CampaignSchemaLock);
-                            using var connection = OpenCampaignConnection(campaign);
-                            string generation = ReadString(QuerySql(connection,
-                                "SELECT value FROM schema_meta WHERE key='semantic_memory_provider_generation';").FirstOrDefault(), "value", "");
+                            Monitor.Exit(Program.CampaignSchemaLock);
+                            using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                            string generation = ReadString(PersistenceSelfTestStore.SelectSchemaMeta(connection).FirstOrDefault(), "value", "");
                             mainOpened = connection.State == ConnectionState.Open && generation ==
-                                ReadString(LoadSettings(), "vectorProvider", "local").ToLowerInvariant() + "|" + SemanticModelVersion;
+                                ReadString(SettingsService.LoadSettings(), "vectorProvider", "local").ToLowerInvariant() + "|" + DialogueService.SemanticModelVersion;
                         }
                     }
                 }
@@ -189,45 +188,45 @@ namespace ReignBetaServer
             Action<string, bool, string> add)
         {
             campaign += "_" + stage;
-            InvalidateCampaignSchemaCaches(campaign);
+            ReignDatabase.InvalidateCampaignSchemaCaches(campaign);
             ReignDbConnection opened = null;
             var sentinel = new OperationCanceledException("schema fixture " + stage);
             Exception actual = null;
-            CampaignSchemaConnectionOpenedForTests = connection =>
+            ReignDatabase.CampaignSchemaConnectionOpenedForTests = connection =>
             {
                 opened = connection;
                 if (stage == "opened") throw sentinel;
             };
-            CampaignSchemaSettingsReadObserverForTests = _ => { if (stage == "settings") throw sentinel; };
-            CampaignSchemaInitializingForTests = () => { if (stage == "initializing") throw sentinel; };
-            CampaignSchemaAfterMemoryForTests = () => { if (stage == "after_memory") throw sentinel; };
-            try { using var connection = OpenCampaignConnection(campaign); }
+            ReignDatabase.CampaignSchemaSettingsReadObserverForTests = _ => { if (stage == "settings") throw sentinel; };
+            ReignDatabase.CampaignSchemaInitializingForTests = () => { if (stage == "initializing") throw sentinel; };
+            ReignDatabase.CampaignSchemaAfterMemoryForTests = () => { if (stage == "after_memory") throw sentinel; };
+            try { using var connection = ReignDatabase.OpenCampaignConnection(campaign); }
             catch (Exception ex) { actual = ex; }
             finally { ClearCampaignSchemaTestHooks(); }
             bool closed = opened != null && opened.State == ConnectionState.Closed;
             bool ready;
-            lock (CampaignSchemaLock) ready = CampaignSchemaReady.Contains(ReignPostgreSqlStorage.CampaignSchemaName(campaign));
+            lock (Program.CampaignSchemaLock) ready = Program.CampaignSchemaReady.Contains(ReignPostgreSqlStorage.CampaignSchemaName(campaign));
             bool locksFree = false;
             var probe = new Thread(() =>
             {
-                if (!Monitor.TryEnter(FileLock, 1000)) return;
+                if (!Monitor.TryEnter(Program.FileLock, 1000)) return;
                 try
                 {
-                    if (!Monitor.TryEnter(CampaignSchemaLock, 1000)) return;
+                    if (!Monitor.TryEnter(Program.CampaignSchemaLock, 1000)) return;
                     try { locksFree = true; }
-                    finally { Monitor.Exit(CampaignSchemaLock); }
+                    finally { Monitor.Exit(Program.CampaignSchemaLock); }
                 }
-                finally { Monitor.Exit(FileLock); }
+                finally { Monitor.Exit(Program.FileLock); }
             }) { IsBackground = true };
             probe.Start();
             bool joined = probe.Join(5000);
-            using (var retry = OpenCampaignConnection(campaign))
+            using (var retry = ReignDatabase.OpenCampaignConnection(campaign))
                 add("schema_failure_" + stage + "_disposes_and_retries", ReferenceEquals(actual, sentinel)
                     && closed && !ready && joined && locksFree && retry.State == ConnectionState.Open,
                     "Original cancellation propagates, raw connection closes, both locks release and retry succeeds.");
             ReignPostgreSqlStorage.DropCampaign(campaign);
-            string directory = Path.GetFullPath(CampaignDirectory(campaign));
-            string root = Path.GetFullPath(CampaignsRoot()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            string directory = Path.GetFullPath(CampaignFileService.CampaignDirectory(campaign));
+            string root = Path.GetFullPath(CampaignFileService.CampaignsRoot()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             if (directory.StartsWith(root, StringComparison.OrdinalIgnoreCase)
                 && Path.GetFileName(directory) == campaign && Directory.Exists(directory)) Directory.Delete(directory, true);
         }

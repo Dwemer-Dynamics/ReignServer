@@ -10,7 +10,7 @@ using ReignPortraits;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CourtService
     {
         private static string FamilyStableId(string value)
         {
@@ -72,46 +72,36 @@ namespace ReignBetaServer
         }
         private static void EnsureFamilyChambersSchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS childhood_experiences (
-experience_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,hero_id TEXT NOT NULL,
-session_id TEXT NOT NULL,world_day REAL NOT NULL DEFAULT 0,experienced_age REAL NOT NULL DEFAULT 0,
-summary TEXT NOT NULL DEFAULT '',participants_json TEXT NOT NULL DEFAULT '[]',status TEXT NOT NULL DEFAULT 'active_child',
-created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);" );
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_childhood_experiences_hero ON childhood_experiences(campaign_id,timeline_id,hero_id,world_day DESC);");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS childhood_maturity_receipts (
-receipt_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,hero_id TEXT NOT NULL,
-retained_count INTEGER NOT NULL DEFAULT 0,archived_count INTEGER NOT NULL DEFAULT 0,created_ts INTEGER NOT NULL,
-UNIQUE(campaign_id,timeline_id,hero_id));");
+            CourtSchema.CreateChildhoodExperiences(connection);
+            CourtSchema.CreateIndexChildhoodExperiencesHero(connection);
+            CourtSchema.CreateChildhoodMaturityReceipts(connection);
         }
 
-        private static Dictionary<string, object> FamilyChambersChildRespond(Dictionary<string, object> payload,
+        internal static Dictionary<string, object> FamilyChambersChildRespond(Dictionary<string, object> payload,
             Dictionary<string, object> settingsOverride = null, Func<Dictionary<string, object>, Dictionary<string, object>> responder = null)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
             string timelineId = ReadString(payload, "timelineId", "main");
             Dictionary<string, object> speaker = ReadDictionary(payload, "speaker");
-            string heroId = CharacterIdFrom(speaker);
-            ApplyPlayerInputAudienceToPayload(payload, heroId);
+            string heroId = CampaignFileService.CharacterIdFrom(speaker);
+            DialogueService.ApplyPlayerInputAudienceToPayload(payload, heroId);
             string name = ReadString(speaker, "name", heroId);
             double age = ReadDouble(speaker, "age", 0d);
             string turnId = ReadString(payload, "turnId", Guid.NewGuid().ToString("N"));
             string sessionId = FirstNonEmpty(ReadFirstString(payload, "conversationSessionId", "eventId"), "child_turn_" + turnId);
-            var memoryContext = PrepareRouteConversationMemory(payload, heroId, "family_chambers_child", sessionId, turnId,
+            var memoryContext = DialogueService.PrepareRouteConversationMemory(payload, heroId, "family_chambers_child", sessionId, turnId,
                 ReadStringList(payload, "participants"), childhoodOnly: true, settingsOverride: settingsOverride);
             payload = memoryContext.Payload;
             List<Dictionary<string, object>> prior;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureFamilyChambersSchema(connection);
-                prior = QuerySql(connection, @"SELECT experience_id,summary,experienced_age,world_day FROM childhood_experiences
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND hero_id=$hero AND status='active_child' AND world_day<=$day
-ORDER BY ts_rank_cd(to_tsvector('simple',summary),plainto_tsquery('simple',$query)) DESC,world_day DESC,experience_id LIMIT 12;",
-                    new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId,
+                prior = CourtStore.SelectChildhoodExperiences(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId,
                         ["day"] = ReadDouble(payload, "worldDay", 0d), ["query"] = ReadString(payload, "playerText", "") });
             }
             var prompt = new StringBuilder();
-            using (ReignDbConnection attentionConnection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection attentionConnection = ReignDatabase.OpenCampaignConnection(campaignId))
                 prompt.AppendLine(BuildFamilyAttentionContext(attentionConnection, campaignId, timelineId, heroId,
                     ReadFirstString(payload, "playerHeroStringId", "playerId"), ReadDouble(payload, "worldDay", 0d)));
             prompt.AppendLine("Write only valid JSON with reply, emotion and intent. Lasting memories are derived from the actual accepted exchange.");
@@ -124,18 +114,18 @@ ORDER BY ts_rank_cd(to_tsvector('simple',summary),plainto_tsquery('simple',$quer
             prompt.AppendLine("Time-aware scene contract: " + ReadString(payload, "castleDialoguePrompt", ""));
             prompt.AppendLine("Latest player text (empty means the ruler has just arrived): " + ReadString(payload, "playerText", ""));
             foreach (var experience in prior)
-                prompt.AppendLine(RenderContinuityRecord(ReadString(experience, "experience_id", ""), "childhood_experience", heroId, "",
+                prompt.AppendLine(DialogueService.RenderContinuityRecord(ReadString(experience, "experience_id", ""), "childhood_experience", heroId, "",
                     ReadDouble(experience, "world_day", 0d), 100, true, "Childhood account at age "
                     + ReadDouble(experience, "experienced_age", 0d).ToString("0.00", CultureInfo.InvariantCulture) + ": " + ReadString(experience, "summary", "")));
             Dictionary<string, object> request = new Dictionary<string, object>
             {
                 ["requestType"] = "family_chambers_child", ["campaignId"] = campaignId,
-                ["correlationId"] = EnsureCorrelationId(payload),
-                ["messages"] = BuildSimplePromptEnvelope("family_chambers_child", "respond",
+                ["correlationId"] = OperationsService.EnsureCorrelationId(payload),
+                ["messages"] = DialogueService.BuildSimplePromptEnvelope("family_chambers_child", "respond",
                     "You portray a child safely and return only valid JSON.", prompt.ToString()).Messages,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
             };
-            Dictionary<string, object> llm = GenerateRouteConversation(memoryContext, request,
+            Dictionary<string, object> llm = DialogueService.GenerateRouteConversation(memoryContext, request,
                 "Child family scene; exact age " + age.ToString("0.00", CultureInfo.InvariantCulture)
                 + ". Match development. No adult romance, politics, punishment, coercion, combat or campaign actions. Do not speak for another participant. Use only observed scene and supplied childhood sources.", 1200, responder);
             if (!ReadBool(llm, "ok", false)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = ReadString(llm, "error", "Child response failed.") };
@@ -149,14 +139,12 @@ ORDER BY ts_rank_cd(to_tsvector('simple',summary),plainto_tsquery('simple',$quer
                 + name + " said or visibly did: " + reply;
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             string experienceId = "childhood_" + FamilyStableId(campaignId + "|" + timelineId + "|" + heroId + "|" + sessionId + "|" + turnId);
-            bool failedDraft = ReadBool(llm, "visibleRepairFailure", false) || ConversationRepairFailed(parsed);
-            PublishRouteConversation(memoryContext, reply, name, connection =>
+            bool failedDraft = ReadBool(llm, "visibleRepairFailure", false) || DialogueService.ConversationRepairFailed(parsed);
+            DialogueService.PublishRouteConversation(memoryContext, reply, name, connection =>
             {
                 if (failedDraft) return;
                 EnsureFamilyChambersSchema(connection);
-                ExecuteSql(connection, @"INSERT INTO childhood_experiences(experience_id,campaign_id,timeline_id,hero_id,session_id,world_day,experienced_age,summary,participants_json,status,created_ts,updated_ts)
-VALUES($id,$campaign,$timeline,$hero,$session,$day,$age,$summary,$participants,'active_child',$ts,$ts)
-ON CONFLICT(experience_id) DO NOTHING;", new Dictionary<string, object>
+                CourtStore.InsertOrIgnoreChildhoodExperiences(connection, new Dictionary<string, object>
                 {
                     ["id"] = experienceId, ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId,
                     ["session"] = sessionId, ["day"] = ReadDouble(payload, "worldDay", 0d), ["age"] = age,
@@ -167,8 +155,8 @@ ON CONFLICT(experience_id) DO NOTHING;", new Dictionary<string, object>
             {
                 ["ok"] = true, ["mode"] = "family_chambers", ["reply"] = reply,
                 ["privateAudienceHeroStringId"] = ReadBool(payload, "privatePlayerInputForSpeaker", false) ? heroId : "",
-                ["emotion"] = LimitText(ReadString(parsed, "emotion", "engaged"), 40),
-                ["intent"] = LimitText(ReadString(parsed, "intent", "participate"), 80),
+                ["emotion"] = DialogueService.LimitText(ReadString(parsed, "emotion", "engaged"), 40),
+                ["intent"] = DialogueService.LimitText(ReadString(parsed, "intent", "participate"), 80),
                 ["participation"] = "speak", ["relationshipSignal"] = "neutral",
                 ["relationshipAssessments"] = new List<object>(), ["queuedActions"] = new List<object>(),
                 ["memoryWrites"] = new List<object>(),
@@ -177,54 +165,48 @@ ON CONFLICT(experience_id) DO NOTHING;", new Dictionary<string, object>
                 ["providerCallCount"] = memoryContext.ProviderCalls,
             };
             if (!failedDraft) ProcessFamilyReconciliationReply(payload, childResponse);
-            return CompleteRouteConversationDelivery(memoryContext, childResponse);
+            return DialogueService.CompleteRouteConversationDelivery(memoryContext, childResponse);
         }
 
-        private static Dictionary<string, object> FamilyChambersMatureChildhood(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> FamilyChambersMatureChildhood(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
             string timelineId = ReadString(payload, "timelineId", "main");
             Dictionary<string, object> hero = ReadDictionary(payload, "hero");
-            string heroId = CharacterIdFrom(hero);
+            string heroId = CampaignFileService.CharacterIdFrom(hero);
             if (string.IsNullOrWhiteSpace(heroId) || ReadBool(hero, "isChild", true))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "An adult hero profile is required." };
-            UpsertCharacterProfile(campaignId, hero);
-            Dictionary<string, object> construction = EnsureCharacterConstructed(campaignId, heroId, hero, "childhood_maturity");
-            if (!IsCharacterConstructionReady(construction))
+            CharactersService.UpsertCharacterProfile(campaignId, hero);
+            Dictionary<string, object> construction = CharactersService.EnsureCharacterConstructed(campaignId, heroId, hero, "childhood_maturity");
+            if (!CharactersService.IsCharacterConstructionReady(construction))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Normal adult character construction is not ready.", ["construction"] = construction };
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureFamilyChambersSchema(connection);
                 MigrateFamilyChildAttentionRelation(connection, campaignId, timelineId, heroId, ReadDouble(payload, "worldDay", 0d));
-                Dictionary<string, object> receipt = QuerySql(connection, "SELECT * FROM childhood_maturity_receipts WHERE campaign_id=$campaign AND timeline_id=$timeline AND hero_id=$hero LIMIT 1;",
-                    new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId }).FirstOrDefault();
+                Dictionary<string, object> receipt = CourtStore.SelectChildhoodMaturityReceipts(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId }).FirstOrDefault();
                 if (receipt != null) return new Dictionary<string, object> { ["ok"] = true, ["idempotent"] = true, ["retainedCount"] = ReadInt(receipt, "retained_count", 0), ["archivedCount"] = ReadInt(receipt, "archived_count", 0) };
-                List<Dictionary<string, object>> rows = QuerySql(connection, "SELECT * FROM childhood_experiences WHERE campaign_id=$campaign AND timeline_id=$timeline AND hero_id=$hero AND status='active_child' ORDER BY world_day;",
-                    new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId });
+                List<Dictionary<string, object>> rows = CourtStore.SelectChildhoodExperiences2(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId });
                 int retained = rows.Count(row => FamilyChildhoodRetainedAtAdulthood(ReadDouble(row, "experienced_age", 0d)));
                 int archived = rows.Count - retained;
                 foreach (Dictionary<string, object> row in rows.Where(row => FamilyChildhoodRetainedAtAdulthood(ReadDouble(row, "experienced_age", 0d))))
                 {
                     string experienceId = ReadString(row, "experience_id", "");
-                    ExecuteSql(connection, @"INSERT OR IGNORE INTO summaries(summary_id,scope,owner_id,summary_type,summary,source_events_json,start_ts,end_ts,event_count,participants_json,known_by_json,visibility,importance,confidence,tags_json,status,source,embedding_status,updated_ts,payload_json,memory_lane)
-VALUES($id,$scope,$hero,'middle_term',$summary,$events,$ts,$ts,1,$participants,$known,'private',0.65,1.0,$tags,'active','childhood_migration','pending',$ts,$payload,'personal_state');",
-                        new Dictionary<string, object> { ["id"] = "childhood_memory_" + experienceId, ["scope"] = "childhood:" + heroId,
+                    CourtStore.InsertOrIgnoreSummaries(connection, new Dictionary<string, object> { ["id"] = "childhood_memory_" + experienceId, ["scope"] = "childhood:" + heroId,
                             ["hero"] = heroId, ["summary"] = ReadString(row, "summary", ""), ["events"] = Json.Serialize(new[] { experienceId }),
                             ["participants"] = ReadString(row, "participants_json", "[]"), ["known"] = Json.Serialize(new[] { heroId }),
                             ["tags"] = Json.Serialize(new[] { "childhood_memory", "retained_at_adulthood" }), ["ts"] = ts,
                             ["payload"] = Json.Serialize(new Dictionary<string, object> { ["experiencedAge"] = ReadDouble(row, "experienced_age", 0d), ["sourceExperienceId"] = experienceId }) });
                 }
-                ExecuteSql(connection, "UPDATE childhood_experiences SET status=CASE WHEN experienced_age>=5 THEN 'adult_retained' ELSE 'adult_archived' END,updated_ts=$ts WHERE campaign_id=$campaign AND timeline_id=$timeline AND hero_id=$hero AND status='active_child';",
-                    new Dictionary<string, object> { ["ts"] = ts, ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId });
-                ExecuteSql(connection, "INSERT INTO childhood_maturity_receipts(receipt_id,campaign_id,timeline_id,hero_id,retained_count,archived_count,created_ts) VALUES($id,$campaign,$timeline,$hero,$retained,$archived,$ts);",
-                    new Dictionary<string, object> { ["id"] = "childhood_maturity_" + FamilyStableId(campaignId + "|" + timelineId + "|" + heroId), ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId, ["retained"] = retained, ["archived"] = archived, ["ts"] = ts });
+                CourtStore.UpdateChildhoodExperiences(connection, new Dictionary<string, object> { ["ts"] = ts, ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId });
+                CourtStore.InsertChildhoodMaturityReceipts(connection, new Dictionary<string, object> { ["id"] = "childhood_maturity_" + FamilyStableId(campaignId + "|" + timelineId + "|" + heroId), ["campaign"] = campaignId, ["timeline"] = timelineId, ["hero"] = heroId, ["retained"] = retained, ["archived"] = archived, ["ts"] = ts });
                 return new Dictionary<string, object> { ["ok"] = true, ["retainedCount"] = retained, ["archivedCount"] = archived };
             }
         }
 
-        private static Dictionary<string, object> FamilyChambersSceneGenerate(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> FamilyChambersSceneGenerate(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -232,13 +214,13 @@ VALUES($id,$scope,$hero,'middle_term',$summary,$events,$ts,$ts,1,$participants,$
             string cacheKey = ReadString(payload, "cacheKey", "");
             List<Dictionary<string, object>> profiles = ReadDictionaryList(payload, "participantProfiles").Take(4).ToList();
             if (string.IsNullOrWhiteSpace(cacheKey) || !FamilySceneParticipantCountValid(profiles.Count)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "A cache key and one to four participants are required." };
-            string folder = Path.Combine(CampaignDirectory(campaignId), "family_chambers", SafePathSegment(timelineId, "main"));
+            string folder = Path.Combine(CampaignFileService.CampaignDirectory(campaignId), "family_chambers", CampaignFileService.SafePathSegment(timelineId, "main"));
             string refsFolder = Path.Combine(folder, "child_references"); Directory.CreateDirectory(refsFolder);
-            string imagePath = Path.Combine(folder, SafePathSegment(cacheKey, "scene") + ".png");
+            string imagePath = Path.Combine(folder, CampaignFileService.SafePathSegment(cacheKey, "scene") + ".png");
             if (File.Exists(imagePath)) return new Dictionary<string, object> { ["ok"] = true, ["cached"] = true, ["imageBase64"] = Convert.ToBase64String(File.ReadAllBytes(imagePath)) };
             Dictionary<string, string> suppliedReferences = ReadDictionaryList(payload, "participantReferences")
-                .Where(item => !string.IsNullOrWhiteSpace(CharacterIdFrom(item)) && !string.IsNullOrWhiteSpace(ReadString(item, "imageBase64", "")))
-                .GroupBy(CharacterIdFrom, StringComparer.OrdinalIgnoreCase)
+                .Where(item => !string.IsNullOrWhiteSpace(CampaignFileService.CharacterIdFrom(item)) && !string.IsNullOrWhiteSpace(ReadString(item, "imageBase64", "")))
+                .GroupBy(CampaignFileService.CharacterIdFrom, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => ReadString(group.First(), "imageBase64", ""), StringComparer.OrdinalIgnoreCase);
             List<byte[]> references = new List<byte[]>();
             List<string> referenceMappings = new List<string>();
@@ -247,7 +229,7 @@ VALUES($id,$scope,$hero,'middle_term',$summary,$events,$ts,$ts,1,$participants,$
             var prompt = new StringBuilder(FamilyImageSafetyContract(profiles.Count, timeBlock));
             for (int i = 0; i < profiles.Count; i++)
             {
-                Dictionary<string, object> profile = profiles[i]; string id = CharacterIdFrom(profile); double age = ReadDouble(profile, "age", 0d);
+                Dictionary<string, object> profile = profiles[i]; string id = CampaignFileService.CharacterIdFrom(profile); double age = ReadDouble(profile, "age", 0d);
                 bool isChild = ReadBool(profile, "isChild", false);
                 prompt.AppendLine("In the " + FamilyPositionWords(i, profiles.Count) + " zone, show a "
                     + FamilyAgeWords(age) + " " + (ReadBool(profile, "isFemale", false) ? (isChild ? "girl" : "woman") : (isChild ? "boy" : "man"))
@@ -262,14 +244,14 @@ VALUES($id,$scope,$hero,'middle_term',$summary,$events,$ts,$ts,1,$participants,$
                 }
                 if (isChild)
                 {
-                    string refPath = Path.Combine(refsFolder, SafePathSegment(id, "child") + ".png");
+                    string refPath = Path.Combine(refsFolder, CampaignFileService.SafePathSegment(id, "child") + ".png");
                     string manifestPath = refPath + ".json";
                     if (File.Exists(refPath))
                     {
                         references.Add(File.ReadAllBytes(refPath));
                         referenceMappings.Add("the " + FamilyOrdinalWords(references.Count - 1) + " reference cell depicts the person in the " + FamilyPositionWords(i, profiles.Count) + " zone");
                     }
-                    Dictionary<string, object> manifest = ReadJsonObject(manifestPath) ?? new Dictionary<string, object>();
+                    Dictionary<string, object> manifest = CampaignFileService.ReadJsonObject(manifestPath) ?? new Dictionary<string, object>();
                     double oldAge = ReadDouble(manifest, "age", age);
                     if (age - oldAge >= 2d) prompt.AppendLine("Advance the person in the " + FamilyPositionWords(i, profiles.Count) + " zone from " + FamilyAgeWords(oldAge) + " to " + FamilyAgeWords(age) + " in this single image-to-image pass while preserving identity.");
                 }
@@ -281,14 +263,14 @@ VALUES($id,$scope,$hero,'middle_term',$summary,$events,$ts,$ts,1,$participants,$
             Dictionary<string, object> imagePayload = new Dictionary<string, object>(payload, StringComparer.OrdinalIgnoreCase)
             {
                 ["promptPurpose"] = "family_chambers_scene", ["prompt"] = prompt.ToString(), ["outputSize"] = "1536x864",
-                ["sharedCacheOutput"] = false, ["cacheKey"] = "family_chambers_" + SafePathSegment(cacheKey, "scene"), ["heroStringId"] = "family_chambers"
+                ["sharedCacheOutput"] = false, ["cacheKey"] = "family_chambers_" + CampaignFileService.SafePathSegment(cacheKey, "scene"), ["heroStringId"] = "family_chambers"
             };
             if (sheet != null) imagePayload["sourceImageBase64"] = Convert.ToBase64String(sheet);
-            Dictionary<string, object> generated = PortraitGenerate(imagePayload);
+            Dictionary<string, object> generated = PortraitsService.PortraitGenerate(imagePayload);
             if (!ReadBool(generated, "ok", false)) return generated;
             byte[] scene = NormalizeCastleScene16By9(Convert.FromBase64String(ReadString(generated, "imageBase64", "")), out _, out _);
             if (scene == null) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Generated scene could not be normalized." };
-            WriteSharedPortraitAtomic(imagePath, scene);
+            PortraitsService.WriteSharedPortraitAtomic(imagePath, scene);
             SaveFamilyChildReferences(scene, profiles, refsFolder, ReadDouble(payload, "worldDay", 0d));
             generated["imageBase64"] = Convert.ToBase64String(scene); generated["cached"] = false;
             return generated;
@@ -321,7 +303,7 @@ VALUES($id,$scope,$hero,'middle_term',$summary,$events,$ts,$ts,1,$participants,$
                 for (int y = 0; y < height; y++) Buffer.BlockCopy(rgba, (y * width + x0) * 4, slot, y * actualWidth * 4, actualWidth * 4);
                 try
                 {
-                    PortraitFaceFocus face = DetectPortraitFaceFocus(slot, actualWidth, height);
+                    PortraitFaceFocus face = PortraitsService.DetectPortraitFaceFocus(slot, actualWidth, height);
                     if (face.Confidence < 0.70d || face.CandidateCount != 1) continue;
                     int fw = Math.Max(1, (int)(face.Width * actualWidth)), fh = Math.Max(1, (int)(face.Height * height));
                     int cx = (int)((face.X + face.Width / 2d) * actualWidth), cy = (int)((face.Y + face.Height / 2d) * height);
@@ -329,12 +311,12 @@ VALUES($id,$scope,$hero,'middle_term',$summary,$events,$ts,$ts,1,$participants,$
                     int sx = Math.Max(0, Math.Min(actualWidth - crop, cx - crop / 2)); int sy = Math.Max(0, Math.Min(height - crop, cy - crop / 2));
                     byte[] cut = new byte[crop * crop * 4]; for (int y = 0; y < crop; y++) Buffer.BlockCopy(slot, ((sy + y) * actualWidth + sx) * 4, cut, y * crop * 4, crop * 4);
                     byte[] resized = PortraitDerivativeCore.ResizeBilinear(cut, crop, crop, 512, 512);
-                    string id = CharacterIdFrom(profile); string path = Path.Combine(folder, SafePathSegment(id, "child") + ".png");
-                    WriteSharedPortraitAtomic(path, PngEncoder.EncodeRgba(resized, 512, 512));
-                    WriteSharedPortraitAtomic(path + ".json", Encoding.UTF8.GetBytes(Json.Serialize(new Dictionary<string, object>
+                    string id = CampaignFileService.CharacterIdFrom(profile); string path = Path.Combine(folder, CampaignFileService.SafePathSegment(id, "child") + ".png");
+                    PortraitsService.WriteSharedPortraitAtomic(path, PngEncoder.EncodeRgba(resized, 512, 512));
+                    PortraitsService.WriteSharedPortraitAtomic(path + ".json", Encoding.UTF8.GetBytes(Json.Serialize(new Dictionary<string, object>
                     { ["heroId"] = id, ["age"] = ReadDouble(profile, "age", 0d), ["worldDay"] = worldDay, ["confidence"] = face.Confidence, ["method"] = "ultraface_fixed_participant_slot", ["updatedUtc"] = DateTime.UtcNow.ToString("O") })));
                 }
-                catch (Exception ex) { LogOperational("family_chambers.child_reference_skipped", new Dictionary<string, object> { ["heroId"] = CharacterIdFrom(profile), ["error"] = LimitText(ex.Message, 300) }); }
+                catch (Exception ex) { OperationsService.LogOperational("family_chambers.child_reference_skipped", new Dictionary<string, object> { ["heroId"] = CampaignFileService.CharacterIdFrom(profile), ["error"] = DialogueService.LimitText(ex.Message, 300) }); }
             }
         }
     }

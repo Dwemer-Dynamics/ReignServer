@@ -11,13 +11,13 @@ using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
         private const string PreparedTavernSourceSchema = "reign-prepared-tavern-native-source-v1";
         private const string PreparedTavernPackSchema = "reign-prepared-tavern-native-pack-v1";
         private const int PreparedTavernMaximumSourceBytes = 10 * 1024 * 1024;
         private static readonly object PreparedTavernImportLock = new object();
-        private static string PreparedTavernStore => Path.Combine(DataDir, "native_portrait_sources", "tavern");
+        private static string PreparedTavernStore => Path.Combine(Program.DataDir, "native_portrait_sources", "tavern");
 
         private sealed class PreparedTavernSource
         {
@@ -27,9 +27,9 @@ namespace ReignBetaServer
             public Dictionary<string, object> Request;
         }
 
-        private static bool TryRunPreparedTavernSourceCommand(string[] args)
+        internal static bool TryRunPreparedTavernSourceCommand(string[] args)
         {
-            if (!HasArg(args, "--import-tavern-native-sources")) return false;
+            if (!Program.HasArg(args, "--import-tavern-native-sources")) return false;
             try
             {
                 string manifest = ArgValue(args, "--import-tavern-native-sources", "");
@@ -40,7 +40,12 @@ namespace ReignBetaServer
                     Console.WriteLine("Provider-free, non-listening import of a completed authored native batch. Validates all inputs before atomic publication. REIGN_DATA_ROOT selects the server-local source store; no shared portraits are changed. See docs/agent/TAVERN_PORTRAIT_SOURCE_PACK.md.");
                     return true;
                 }
-                string catalog = Path.Combine(FindVerificationSourceRoot(), "ReignBeta", "ModuleData", "reign_tavern_cast.json");
+#if !REIGN_EXCLUDE_VERIFICATION
+                string catalog = Path.Combine(VerificationService.FindVerificationSourceRoot(), "ReignBeta", "ModuleData", "reign_tavern_cast.json");
+#else
+                string catalog = null;
+                throw new InvalidOperationException("--import-tavern-native-sources needs the source checkout locator, which this build excludes.");
+#endif
                 Console.WriteLine(Json.Serialize(ImportPreparedTavernSources(manifest, campaign, catalog, PreparedTavernStore)));
             }
             catch (Exception ex)
@@ -82,7 +87,7 @@ namespace ReignBetaServer
                 || requests.Select(r => ReadString(r, "characterId", "")).Distinct(StringComparer.Ordinal).Count() != cast.Count)
                 throw new InvalidDataException("Every authored character must have exactly one completed native batch result.");
             string batchHash = Sha256Hex(File.ReadAllBytes(batchPath));
-            string packId = TavernHouseHash(campaign + "|" + catalogHash + "|" + batchHash);
+            string packId = CharactersService.TavernHouseHash(campaign + "|" + catalogHash + "|" + batchHash);
             var sources = new List<PreparedTavernSource>();
             long totalBytes = 0;
             foreach (var row in rows.OrderBy(r => ReadString(r, "castId", ""), StringComparer.Ordinal))
@@ -269,8 +274,8 @@ namespace ReignBetaServer
             return source;
         }
 
-        private static string PreparedTavernFrameHash() => TavernHouseHash(ResidentOutfitRenderContract + "|1536|2048|768|1024|1|0.5|0|preserve_native_outfit|native_authored|v4");
-        private static string PreparedTavernJsonHash(object value) => TavernHouseHash(Json.Serialize(CanonicalPreparedTavernJson(value)));
+        private static string PreparedTavernFrameHash() => CharactersService.TavernHouseHash(ResidentOutfitRenderContract + "|1536|2048|768|1024|1|0.5|0|preserve_native_outfit|native_authored|v4");
+        private static string PreparedTavernJsonHash(object value) => CharactersService.TavernHouseHash(Json.Serialize(CanonicalPreparedTavernJson(value)));
         private static object CanonicalPreparedTavernJson(object value)
         {
             if (value is IDictionary dictionary)
