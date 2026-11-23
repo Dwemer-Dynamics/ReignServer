@@ -16,11 +16,11 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> rows=new List<Dictionary<string, object>>();
             Action<string,bool,string> add=(id,passed,summary)=>rows.Add(new Dictionary<string, object>{{"ok",true},{"passed",passed},{"suite","pregnancy_choice"},{"caseId",id},{"name",id},{"summary",summary},{"durationMs",0}});
             string previousRoot=Program.CampaignsRootOverride.Value;
-            string isolatedRoot=Path.Combine(Program.DataDir,"test_runs","pregnancy_choice_"+Guid.NewGuid().ToString("N"));
+            string campaign="pregnancy_choice_"+Guid.NewGuid().ToString("N");
+            string isolatedRoot=Path.Combine(Program.DataDir,"test_runs",campaign);
             Program.CampaignsRootOverride.Value=isolatedRoot;
             try
             {
-                string campaign="pregnancy_choice_campaign";
                 Func<string,string,Dictionary<string, object>> request=(attempt,decision)=>new Dictionary<string, object>
                 {
                     {"campaignId",campaign},{"attemptId",attempt},{"eventId",attempt},{"decision",decision},
@@ -76,6 +76,8 @@ namespace ReignBetaServer
             }
             finally
             {
+                try { ReignPostgreSqlStorage.DropCampaign(campaign); }
+                catch (Exception ex) { add("pregnancy_choice_fixture_cleanup", false, ex.Message); }
                 Program.CampaignsRootOverride.Value=previousRoot;
                 try{if(Directory.Exists(isolatedRoot))Directory.Delete(isolatedRoot,true);}catch{}
             }
