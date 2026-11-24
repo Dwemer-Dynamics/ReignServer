@@ -19,6 +19,7 @@ namespace ReignBetaServer
         {
             internal string Campaign, Hero, Player, Location, EventId, EventType, PlayerText, Reply, Generation;
             internal WorldSimulationService.PartyAgencySendOrigin PartyAgencySend;
+            internal LlmProviderService.ServingProviderAttempt PartyAgencyServingAttempt;
             internal long Timestamp;
             internal bool CommitEffects = true, RetrievalEligible = true, GroupConversation, PrivateWhisper;
             internal bool DelimitedSpeechOnly, CollectGroupHistoryObservation;
@@ -184,7 +185,12 @@ namespace ReignBetaServer
                             .SelectMany(id => DialogueStore.SelectConversationTurns6(connection, TestDict("id", id))))
                             .Any(row => ReadString(row, "role", "") == "npc" && ReadString(row, "speaker_id", "") == unit.Hero
                                 && ReadString(row, "text", "") == unit.Reply))
+                    {
                         receipt[WorldSimulationService.PartyAgencySendOriginField] = sendOrigin.AcceptedReceipt(unit.EventId, hash);
+                        receipt[LlmProviderService.ServingProviderAttempt.ReceiptField] =
+                            LlmProviderService.ServingProviderAttempt.BindAcceptedSpeech(unit.PartyAgencyServingAttempt,
+                                sendOrigin, unit.EventId, hash, unit.Reply);
+                    }
                     boundary?.Invoke("before_unit_receipt");
                     if (unit.DelimitedSpeechOnly) receipt["outputContract"] = OllamaDelimitedSpeechContract;
                     receipt["politicalReflection"] = CharactersService.AcceptedPoliticalReflection(unit, suppressReplyEffects);

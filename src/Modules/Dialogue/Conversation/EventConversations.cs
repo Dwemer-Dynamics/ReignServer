@@ -394,7 +394,8 @@ namespace ReignBetaServer
                 ReadFirstString(payload, "conversationSessionId", "sessionId", "conversationId"), identityView, profile, state, relationships, summary,
                 conversationSceneState, null, contextBundles, eventLines, promptTurnText);
             DialogueService.AttachStructuredActionResponseContract(eventLlmRequest, payload);
-            Dictionary<string, object> llm = DialogueService.GenerateSinglePassConversation(eventLlmRequest, payload, auditMode, out bool delimitedSpeechOnly, allowQuiet: true);
+            Dictionary<string, object> llm = DialogueService.GenerateSinglePassConversation(eventLlmRequest, payload, auditMode, sendOrigin,
+                out bool delimitedSpeechOnly, out var servingAttempt, allowQuiet: true);
             if (ReadBool(ReadDictionary(llm, "conversationAgency"), "replayed", false)) return DialogueService.ConversationAgencyReplayResponse(llm, heroId);
             DialogueService.PreserveConversationVerification(payload, llm);
             LlmProviderService.RecordCodexFinalRepairEvidence(llm);
@@ -657,6 +658,7 @@ namespace ReignBetaServer
                 SceneMode = ReadString(payload, "mode", "social_event"),
                 GroupConversation = partyChatTurn, PrivateWhisper = privatePlayerInputForSpeaker,
                 PartyAgencySend = partyChatTurn ? sendOrigin : null,
+                PartyAgencyServingAttempt = partyChatTurn ? servingAttempt : null,
                 CollectGroupHistoryObservation = !approachOpening && !recallOnlyTurn };
             Dictionary<string, object> conversationExchange = DialogueService.PublishAcceptedConversationUnit(acceptedUnit,
                 accept => partyChatTurn

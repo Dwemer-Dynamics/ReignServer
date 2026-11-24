@@ -399,7 +399,8 @@ namespace ReignBetaServer
                 identityView, profile, state, relationships, summary, conversationSceneState, memories, contextBundles, priorLines, promptPlayerText);
             DialogueService.AttachStructuredActionResponseContract(dialogueLlmRequest, payload);
             CharactersService.ConfigureNpcApproachGeneration(dialogueLlmRequest, payload);
-            Dictionary<string, object> llm = DialogueService.GenerateSinglePassConversation(dialogueLlmRequest, payload, "dialogue", out bool delimitedSpeechOnly);
+            Dictionary<string, object> llm = DialogueService.GenerateSinglePassConversation(dialogueLlmRequest, payload, "dialogue", sendOrigin,
+                out bool delimitedSpeechOnly, out var servingAttempt);
             if (ReadBool(ReadDictionary(llm, "conversationAgency"), "replayed", false)) return DialogueService.ConversationAgencyReplayResponse(llm, heroId);
             DialogueService.PreserveConversationVerification(payload, llm);
             LlmProviderService.RecordCodexFinalRepairEvidence(llm);
@@ -752,7 +753,7 @@ namespace ReignBetaServer
                 Location = FirstNonEmpty(ReadFirstString(payload, "locationId", "currentSettlementId", "settlementId"), ReadFirstString(profile, "currentSettlementId", "settlementId")),
                 EventId = decisionId, EventType = "dialogue_turn", PlayerText = playerText, Reply = reply, Timestamp = ts,
                 Generation = DialogueService._playerActionGeneration, Payload = payload, Motive = motiveDecision, Profile = profile,
-                PartyAgencySend = sendOrigin,
+                PartyAgencySend = sendOrigin, PartyAgencyServingAttempt = servingAttempt,
                 Characteristics = characteristics, Parsed = parsed, Memories = memoryWrites, Beliefs = beliefWrites,
                 Relationships = relationshipUpdates, Obligations = obligationWrites, Comprehensions = comprehensionWrites,
                 Continuity = actionAcceptanceCooperation ? null : ReadDictionaryList(parsed, "continuityWrites"),

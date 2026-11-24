@@ -400,6 +400,7 @@ namespace ReignBetaServer
             bool succeeded = false;
             string threadId = lease == null ? "" : lease.ThreadId;
             string turnId = "";
+            string servingTurnDigest = "";
             CodexTurnWaiter waiter = null;
             CodexTurnAssembly assembly = null;
             Dictionary<string, object> response = null;
@@ -559,6 +560,8 @@ namespace ReignBetaServer
                 }
                 turnId = ReadNestedId(turn, "turn");
                 if (string.IsNullOrWhiteSpace(turnId)) throw new InvalidOperationException("Codex app-server did not return a turn id.");
+                if (ReadBool(codexContext, "captureServingTurnDigest", false) && CodexRpcTransportOverride == null)
+                    servingTurnDigest = DialogueService.ConversationExactTextHash(Json.Serialize(turnParameters));
                 turnStarted = true;
                 RegisterCodexTurn(turnId, threadId);
                 waiter = GetOrCreateCodexTurn(turnId, threadId);
@@ -643,21 +646,18 @@ namespace ReignBetaServer
             if (pendingException != null) throw pendingException;
             if (response == null) throw new InvalidOperationException("Codex app-server did not produce a completed response.");
             DrainCodexThreadEvictions(settings, ref cleanupFallback);
-            response["codexDiagnostics"] = CodexRuntimeDiagnostics(context, timings, assembly, cleanupFallback);
+            var diagnostics = CodexRuntimeDiagnostics(context, timings, assembly, cleanupFallback);
+            if (servingTurnDigest.Length > 0) diagnostics["servingTurnRequestSha256"] = servingTurnDigest;
+            response["codexDiagnostics"] = diagnostics;
             return Json.Serialize(response);
         }
 
-        private static string PostLlmProviderJson(string apiUrl, string apiKey, string outboundJson, Dictionary<string, object> requestBody,
-            Dictionary<string, object> settings, Dictionary<string, object> cacheRouting, string correlationId, string requestType, string model)
+        private static string PostLlmProviderJson(ILlmProvider selectedAdapter, string apiUrl, string apiKey, string outboundJson,
+            Dictionary<string, object> requestBody, Dictionary<string, object> settings, Dictionary<string, object> cacheRouting,
+            string correlationId, string requestType, string model, Dictionary<string, object> codexContext,
+            Action<string> contentDelta = null, Func<bool> canceled = null)
         {
-            return PostLlmProviderJson(apiUrl, apiKey, outboundJson, requestBody, settings, cacheRouting, correlationId, requestType, model, null);
-        }
-
-        private static string PostLlmProviderJson(string apiUrl, string apiKey, string outboundJson, Dictionary<string, object> requestBody,
-            Dictionary<string, object> settings, Dictionary<string, object> cacheRouting, string correlationId, string requestType, string model,
-            Dictionary<string, object> codexContext, Action<string> contentDelta = null, Func<bool> canceled = null)
-        {
-            return LlmProviders.Select(settings, apiUrl).PostChat(new LlmProviderRequest
+            return selectedAdapter.PostChat(new LlmProviderRequest
             {
                 ApiUrl = apiUrl, ApiKey = apiKey, OutboundJson = outboundJson, RequestBody = requestBody, Settings = settings,
                 CacheRouting = cacheRouting, CorrelationId = correlationId, RequestType = requestType, Model = model,
