@@ -369,6 +369,7 @@ namespace ReignBetaServer
             Check("confirmation_requires_matching_restored_profile", VerifyOutfitConfirmationProfileReadback);
             Check("retained_projection_requires_final_marker", VerifyRetainedOutfitProjectionPrefixes);
             Check("retained_projection_preserves_refresh_and_formal_scans", VerifyRetainedOutfitProjectionCompatibility);
+            Check("admitted_render_snapshot_preserves_committed_outfit_across_restore", VerifyAdmittedPortraitRenderSnapshot);
             Check("confirmation_marker_failure_rolls_back", VerifyOutfitConfirmationRollback);
             Check("confirmation_denied_marker_preserves_preimages", VerifyOutfitDeniedMarker);
             Check("confirmation_rollback_continues_after_restore_error", VerifyOutfitRollbackContinues);
@@ -653,6 +654,58 @@ namespace ReignBetaServer
                     { ["status"] = "completed", ["description"] = "Independent formal portrait scan." });
                 return retainedAcrossRefreshAndRestore && mismatchWithheld && versionedFormalRequiresVersionedOutfit
                     && legacyAccepted && FormalDescription() == "Independent formal portrait scan.";
+            });
+
+        private static bool VerifyAdmittedPortraitRenderSnapshot()
+            => WithOutfitConfirmationFixture((fixture, op, request) =>
+            {
+                string root = Path.Combine(fixture, "campaigns");
+                string characterRoot = OutfitCharacterRoot(root, op.Campaign, op.Hero);
+                string portraits = Path.Combine(characterRoot, "portraits");
+                Directory.CreateDirectory(portraits);
+                try
+                {
+                    CampaignPortraitSnapshot Read() => ReadCampaignPortraitSnapshot(root, op.Campaign, op.Hero);
+                    bool RejectsIncomplete()
+                    {
+                        try { Read(); return false; }
+                        catch (InvalidDataException) { return true; }
+                    }
+
+                    if (Read() != null) return false;
+                    CommitOutfitInDirectory(op, characterRoot);
+                    WriteSharedPortraitAtomic(Path.Combine(characterRoot, "profile.json"), Encoding.UTF8.GetBytes("{}"));
+                    var restored = Read();
+                    if (restored?.Custom != true || !restored.Image.SequenceEqual(op.After)
+                        || CommittedOutfitResponse(request, characterRoot) != null) return false;
+
+                    string confirmation = Path.Combine(portraits, OutfitConfirmationFileName);
+                    byte[] accepted = File.ReadAllBytes(confirmation);
+                    File.Delete(confirmation);
+                    if (!RejectsIncomplete()) return false;
+                    WriteSharedPortraitAtomic(confirmation, accepted);
+
+                    byte[] refreshed = { 7, 8, 9 };
+                    var receipt = OutfitContractReceipt(refreshed, 768, 1024);
+                    string masterPath = Path.Combine(portraits, "portrait.png");
+                    PublishPortraitRefresh(CapturePortraitRefreshBaseline(portraits), refreshed, receipt, publication =>
+                    {
+                        WriteSharedPortraitAtomic(masterPath, refreshed);
+                        var metadata = TestDict("productReceipt", receipt, PortraitRefreshPublicationKey, publication);
+                        WriteSharedPortraitAtomic(Path.Combine(portraits, "portrait.json"), Encoding.UTF8.GetBytes(Json.Serialize(metadata)));
+                        return masterPath;
+                    });
+                    var afterRefresh = Read();
+                    if (afterRefresh?.Custom != true || !afterRefresh.Image.SequenceEqual(refreshed)) return false;
+
+                    WriteSharedPortraitAtomic(masterPath, new byte[] { 3, 2, 1 });
+                    if (!RejectsIncomplete()) return false;
+                    var later = MakeLaterOutfitFixture(op);
+                    CommitOutfitInDirectory(later, characterRoot);
+                    var superseding = Read();
+                    return superseding?.Custom == true && superseding.Image.SequenceEqual(later.After);
+                }
+                finally { Directory.Delete(root, recursive: true); }
             });
 
         private static bool VerifyOutfitConfirmationRollback()
