@@ -2307,9 +2307,17 @@
     }
     async function saveCharacterSection(all=false){if(!characterEditorState.data)return;const section=all?'all':characterEditorState.section,profileChanges=editorProfileChanges(),nativeChanges=nativeProfileChanges(profileChanges),dangerKeys=['isalive','ispregnant','spouseid','fatherid','motherid','clanid','kingdomid'];const dangerous=Object.keys(nativeChanges).some(k=>dangerKeys.includes(k.toLowerCase()));let confirmation='';if(dangerous){const name=characterEditorState.data.documents.profile?.name||characterEditorState.heroId;if(!confirm('These changes affect family, political, pregnancy, or life-state data. Review dependencies before continuing.'))return;confirmation=prompt(`Type ${name} to confirm dangerous native changes.`)||'';if(confirmation!==name){editorStatus('Confirmation did not match. Nothing was saved.','error');return;}}
       const {data,original,dirty,heroId}=characterEditorState;
-      const documents={...data.documents};
-      if(JSON.stringify(documents.narrative)===JSON.stringify(original?.documents?.narrative))
-        delete documents.narrative;
+      const documents={...data.documents},narrative=documents.narrative,loadedNarrative=original?.documents?.narrative;
+      delete documents.narrative;
+      const narrativeChanges={};
+      for(const group of ['life','voice']){
+        const changed=Object.fromEntries(Object.entries(narrative?.[group]||{}).filter(([key,value])=>
+          JSON.stringify(value)!==JSON.stringify(loadedNarrative?.[group]?.[key])));
+        if(Object.keys(changed).length)narrativeChanges[group]=changed;
+      }
+      if(narrative?.items&&JSON.stringify(narrative.items)!==JSON.stringify(loadedNarrative?.items))
+        narrativeChanges.items=narrative.items;
+      if(Object.keys(narrativeChanges).length)documents.narrative=narrativeChanges;
       const payload={campaignId:editorCampaign(),heroStringId:heroId,revisionToken:data.revisionToken,section,description:`Character Editor ${section} save`,documents,nativeChanges,dangerous,confirmation};
       if(documents.narrative)payload.narrativeEditBasis=original?.narrativeEditBasis;
       const basis=original?.profileEditBasis;

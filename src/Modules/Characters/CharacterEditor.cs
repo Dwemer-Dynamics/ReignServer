@@ -171,8 +171,7 @@ namespace ReignBetaServer
             };
             var narrative = ReadDictionary(documents, "narrative");
             if (NarrativeDocumentReady(narrative))
-                documents["narrative"] = ResolveEffectiveNarrative(new Dictionary<string, object> {
-                    ["narrative"] = narrative, ["dynamicCharacteristics"] = CampaignFileService.ReadJsonObject(Path.Combine(dir, "dynamic_characteristics.json")) });
+                documents["narrative"] = ReadEffectiveEditorNarrative(c, hero, narrative);
             List<Dictionary<string, object>> revisions=CharactersStore.SelectCharacterEditorRevisions(c, new Dictionary<string, object>{{"id",hero}});
             List<Dictionary<string, object>> commands=CharactersStore.SelectCharacterEditorNativeCommands2(c, new Dictionary<string, object>{{"id",hero}});
             Dictionary<string, object> mbtiProfile=RelationshipsService.ResolveCharacterMbtiProfile(campaign,hero,profileDocument,traitDocument);
@@ -271,7 +270,7 @@ namespace ReignBetaServer
                     };
                 var documents = ReadDictionary(payload, "documents");
                 var narrativeChanges = new Dictionary<string, object>(StringComparer.Ordinal);
-                if (documents?.ContainsKey("narrative") == true && !TryPrepareEditorNarrative(campaign, hero, current,
+                if (documents?.ContainsKey("narrative") == true && !TryPrepareEditorNarrative(c, campaign, hero, current,
                     EditorProfileRestoreGeneration(c), ReadString(payload, "narrativeEditBasis", ""), documents, narrativeChanges))
                     return TestDict("ok", false, "conflict", true, "currentRevisionToken", current,
                         "error", "This narrative changed after it was loaded. Reload to compare before saving.");
@@ -476,7 +475,7 @@ namespace ReignBetaServer
             var before = BuildCharacterEditorSnapshot(campaign, hero, c);
             var recordIssues = new List<Dictionary<string, object>>();
             var documents = ReadDictionary(snapshot, "documents");
-            var narrativeChanges = PrepareEditorNarrativeRollback(campaign, hero, snapshot, revisionAfter, documents, recordIssues);
+            var narrativeChanges = PrepareEditorNarrativeRollback(c, campaign, hero, snapshot, revisionAfter, documents, recordIssues);
             ApplyEditorDocuments(campaign, hero, documents);
             var letterStatuses = ApplyEditorLetterStatusEdits(c, hero, letterStatusEdits, recordIssues, "letter_status_changed_after_revision");
             var summaryTexts = ApplyEditorSummaryTextEdits(c, hero, summaryTextEdits, recordIssues, "summary_text_changed_after_revision");
@@ -612,7 +611,42 @@ namespace ReignBetaServer
         private static string ComputeEditorToken(Dictionary<string, object> snapshot){using(SHA256 sha=SHA256.Create()){byte[] hash=sha.ComputeHash(Encoding.UTF8.GetBytes(Json.Serialize(snapshot??new Dictionary<string, object>())));return BitConverter.ToString(hash).Replace("-","").ToLowerInvariant();}}
         private static long DirectorySize(string path){try{return Directory.Exists(path)?Directory.GetFiles(path,"*",SearchOption.AllDirectories).Sum(x=>new FileInfo(x).Length):0;}catch{return 0;}}
 
-        private static void ApplyEditorDocuments(string campaign,string hero,Dictionary<string, object> documents,bool profileAlreadyPrepared=false){if(documents==null)return;Dictionary<string,object> incomingProfile=(profileAlreadyPrepared?null:ReadDictionary(documents,"profile"))??CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign,hero,"profile.json"));foreach(string name in EditorDocumentNames){if(profileAlreadyPrepared&&name=="profile")continue;Dictionary<string, object> value=ReadDictionary(documents,name);if(value==null)continue;if(name=="profile"){string id=ReadFirstString(value,"heroStringId","heroId");if(!string.IsNullOrWhiteSpace(id)&&!id.Equals(hero,StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("Canonical heroStringId cannot be changed.");value["heroStringId"]=hero;}if(name=="traits"){MarkEditorFoundationTraitsCurrent(value);EnsureTraitPercentageData(value,hero);CourtService.EnsureCourtCharacterData(value,incomingProfile,hero);EnsurePersonalityPortraitData(value,ReadString(incomingProfile,"name",hero),false);}CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign,hero,name+".json"),value);}Dictionary<string, object> profile=CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign,hero,"profile.json"));if(profile.Count>0)CampaignFileService.UpdateCharacterIndex(campaign,profile);ReconcileEditedNarrative(campaign,hero);DialogueService.InvalidatePromptRuntimeCache();}
+        private static void ApplyEditorDocuments(string campaign, string hero, Dictionary<string, object> documents,
+            bool profileAlreadyPrepared = false)
+        {
+            if (documents == null) return;
+            var incomingProfile = (profileAlreadyPrepared ? null : ReadDictionary(documents, "profile"))
+                ?? CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "profile.json"));
+            var narrative = ReadDictionary(documents, "narrative");
+            var editedItems = narrative == null ? new HashSet<string>(StringComparer.Ordinal)
+                : NarrativeChangedItemIds(ReadEditorNarrative(campaign, hero), narrative);
+
+            foreach (string name in EditorDocumentNames)
+            {
+                if (profileAlreadyPrepared && name == "profile") continue;
+                var value = ReadDictionary(documents, name);
+                if (value == null) continue;
+                if (name == "profile")
+                {
+                    string id = ReadFirstString(value, "heroStringId", "heroId");
+                    if (!string.IsNullOrWhiteSpace(id) && !id.Equals(hero, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("Canonical heroStringId cannot be changed.");
+                    value["heroStringId"] = hero;
+                }
+                if (name == "traits")
+                {
+                    MarkEditorFoundationTraitsCurrent(value);
+                    EnsureTraitPercentageData(value, hero);
+                    CourtService.EnsureCourtCharacterData(value, incomingProfile, hero);
+                    EnsurePersonalityPortraitData(value, ReadString(incomingProfile, "name", hero), false);
+                }
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, hero, name + ".json"), value);
+            }
+            var profile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "profile.json"));
+            if (profile.Count > 0) CampaignFileService.UpdateCharacterIndex(campaign, profile);
+            ReconcileEditedNarrative(campaign, hero, editedItems);
+            DialogueService.InvalidatePromptRuntimeCache();
+        }
         private static void ApplyEditorRecords(ReignDbConnection c, Dictionary<string, object> records,
             Dictionary<string, object> baseline, List<Dictionary<string, object>> recordIssues = null)
         {

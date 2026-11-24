@@ -115,7 +115,7 @@ namespace ReignBetaServer
 
             var loaded = CharacterEditorLoadApi(target);
             string originalSummary = Value("life.summary");
-            var generationBasis = ReadEditorNarrative(campaign, hero);
+            string generationBasis = NarrativeConstructionVersion(path);
             Change("life.privateBackstory", external);
             var beforeConflict = File.ReadAllBytes(path);
             var stale = Save(loaded, "life.privateBackstory", editing);
@@ -146,6 +146,40 @@ namespace ReignBetaServer
                 && ReadDictionaryList(undone, "recordEditIssues").Any(x => ReadString(x, "reason", "") == "narrative_cell_undo_unverified")
                 && Value("life.summary") == external,
                 "Undo reports a conflict and leaves a newer value on the same field intact.");
+
+            var interest = ReadDictionaryList(initial, "items").First();
+            string interestId = ReadString(interest, "id", "");
+            int projectedInfluence = ReadInt(interest, "influence", 5) == 8 ? 9 : 8;
+            string projectionPath = CampaignFileService.CharacterFile(campaign, hero, "dynamic_characteristics.json");
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+            {
+                CharactersStore.InsertOrIgnoreDynamicCharacteristics(connection, TestDict("id", "legacy_editor_overlay",
+                    "hero", hero, "topic", "narrative/" + interestId, "text", "The interest has grown over time.",
+                    "state", "active", "decision", "accepted", "reason", "", "event", "legacy_event",
+                    "session", "legacy_session", "exchange", "legacy_exchange", "day", 10, "ts", 100,
+                    "payload", Json.Serialize(TestDict("narrativeDevelopment", TestDict("itemId", interestId,
+                        "decision", "accepted", "influence", projectedInfluence)))));
+            }
+            bool displayWasStale = ReadDictionaryList(CampaignFileService.ReadJsonObject(projectionPath), "active").Count == 0;
+            loaded = CharacterEditorLoadApi(target);
+            var effective = ReadDictionary(ReadDictionary(loaded, "documents"), "narrative");
+            var shown = ReadDictionaryList(effective, "items").Single(x => ReadString(x, "id", "") == interestId);
+            saved = Save(loaded, "life.summary", editing);
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+            {
+                var overlay = CharactersStore.SelectDynamicCharacteristics9(connection, TestDict("owner", hero));
+                check("editor_narrative_uses_unprojected_sql_and_preserves_legacy_overlay", displayWasStale
+                    && ReadInt(shown, "influence", 0) == projectedInfluence && ReadBool(saved, "ok", false)
+                    && overlay.Any(row => ReadString(row, "characteristic_id", "") == "legacy_editor_overlay"),
+                    "Load and save use the active SQL evidence even if its display write was interrupted. An unrelated story edit keeps that evidence active.");
+            }
+
+            var oldItem = TestDict("id", "test", "title", "Keepsake", "description", "Passed down\nKept close", "influence", 5.0m);
+            var movedLine = TestDict("id", "test", "title", "Keepsake\nPassed down", "description", "Kept close", "influence", 5);
+            var roundTripped = TestDict("id", "test", "title", "Keepsake", "description", "Passed down\nKept close", "influence", 5);
+            check("editor_narrative_items_use_structured_field_comparison",
+                !SameEditableNarrativeItem(movedLine, oldItem) && SameEditableNarrativeItem(roundTripped, oldItem),
+                "Moving a line across fields is recognized, while a browser round-trip of a whole number is unchanged.");
         }
 
         private static void CheckNarrativePublication(string campaign, string heroId, Dictionary<string, object> narrative, Action<string, bool, string> check)

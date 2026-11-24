@@ -242,22 +242,44 @@ namespace ReignBetaServer
             return errors;
         }
 
-        private static bool NarrativeConstructionBasisCurrent(string path, Dictionary<string, object> basis) =>
-            CanonicalJson(basis) == CanonicalJson(CampaignFileService.ReadJsonObject(path));
+        private static string NarrativeConstructionVersion(string path)
+        {
+            try
+            {
+                using var source = File.OpenRead(path);
+                return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(source));
+            }
+            catch (FileNotFoundException) { return null; }
+            catch (DirectoryNotFoundException) { return null; }
+        }
+
+        private static bool NarrativeConstructionBasisCurrent(string path, string basis)
+        {
+            try { return NarrativeConstructionVersion(path) == basis; }
+            catch (IOException) { return false; }
+            catch (UnauthorizedAccessException) { return false; }
+        }
 
         internal static Dictionary<string, object> ConstructNarrativeCharacter(string campaignId, string heroId,
             Dictionary<string, object> hero, bool force, string source)
         {
             string path = CampaignFileService.CharacterFile(campaignId, heroId, "narrative.json");
-            Dictionary<string, object> existing;
-            lock (NarrativeStateLock)
-                existing = CampaignFileService.ReadJsonObject(path);
-            var traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"));
-            if (!CharactersService.TraitDocumentReady(traits)) traits = BuildTraitDocument(hero);
             string stagedPath = CampaignFileService.CharacterFile(campaignId, heroId, "narrative_authoring.json");
             var settings = SettingsService.LoadSettings();
+            string originalVersion = null;
+            bool mayRecordFailure = false;
             try
             {
+                Dictionary<string, object> existing;
+                lock (NarrativeStateLock)
+                {
+                    originalVersion = NarrativeConstructionVersion(path);
+                    existing = CampaignFileService.ReadJsonObject(path);
+                    mayRecordFailure = !NarrativeDocumentReady(existing);
+                }
+                var traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"));
+                if (!CharactersService.TraitDocumentReady(traits)) traits = BuildTraitDocument(hero);
+
                 var narrative = !force && NarrativeDocumentReady(existing) ? existing :
                     AuthorCharacterNarrative(hero, traits, "dynamic/" + campaignId + "/" + heroId,
                         LlmProviderService.ChatWithLlm, force && NarrativeDocumentReady(existing) ? null : CampaignFileService.ReadJsonObject(stagedPath), value => CampaignFileService.WriteJsonObject(stagedPath, value),
@@ -268,8 +290,9 @@ namespace ReignBetaServer
                 {
                     if (source == TownNotableProfileSource && !TownProfilePublicationAllowed(campaignId, heroId))
                         return TestDict("ok", false, "status", "speculative_superseded");
-                    if (!NarrativeConstructionBasisCurrent(path, existing))
+                    if (!NarrativeConstructionBasisCurrent(path, originalVersion))
                         return TestDict("ok", false, "status", "narrative_changed");
+                    mayRecordFailure = false;
                     CampaignFileService.WriteJsonObject(path, narrative);
                     CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"), traits);
                     var projection = new Dictionary<string, object> { ["narrative"] = narrative,
@@ -294,7 +317,17 @@ namespace ReignBetaServer
                         : ex.Message.StartsWith("Narrative provider request failed") ? CharactersService.CharacterFailureKindFromText(ex.Message) : "parse",
                     ["settingsRevision"] = ReadString(settings, "settingsRevision", ""), ["settingsFingerprint"] = SettingsService.SettingsFingerprint(settings),
                     ["constructionEngineVersion"] = Program.CharacterConstructionEngineVersion, ["failedUtc"] = DateTime.UtcNow.ToString("o") };
-                if (ReadString(existing, "status", "") != "ready") CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "constructed.json"), failure);
+                if (mayRecordFailure)
+                {
+                    lock (NarrativeStateLock)
+                    {
+                        if (source == TownNotableProfileSource && !TownProfilePublicationAllowed(campaignId, heroId))
+                            return TestDict("ok", false, "status", "speculative_superseded");
+                        if (!NarrativeConstructionBasisCurrent(path, originalVersion))
+                            return TestDict("ok", false, "status", "narrative_changed");
+                        CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "constructed.json"), failure);
+                    }
+                }
                 return failure;
             }
         }
