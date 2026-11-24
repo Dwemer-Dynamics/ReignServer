@@ -344,6 +344,9 @@ namespace ReignBetaServer
 
         internal static void RequireOfflineOutfitCampaignAvailable(string campaignsRoot, string campaign)
         {
+            // Live campaigns and local recovery work may be on mounts with different casing rules.
+            // Reject aliases at the live root before treating a missing journal spelling as absence.
+            RequireOutfitPhysicalPath(campaignsRoot, Path.Combine(campaignsRoot, campaign), directory: true);
             string path = OutfitCampaignJournalRoot(campaignsRoot, campaign);
             if (RequireOutfitPhysicalPath(campaignsRoot, path, directory: true)
                 && ReadOutfitCampaignFences(campaignsRoot, path).Any())
