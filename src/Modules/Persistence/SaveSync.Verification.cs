@@ -1998,8 +1998,11 @@ WHERE ns.nspname = $schema AND relation.relname = 'conversation_accepted_units')
 
         private static void VerifyOwnedWorldHistoryEventProof(Action<string, bool, string> add)
         {
-            string campaign = "history_proof_" + Guid.NewGuid().ToString("N");
-            string absent = "history_proof_absent_" + Guid.NewGuid().ToString("N");
+            string campaign = "world_history_selftest_" + Guid.NewGuid().ToString("N");
+            string absent = "world_history_selftest_absent_" + Guid.NewGuid().ToString("N");
+            // Ordinary ingest queues reputation work unless this uses a recognized synchronous fixture ID.
+            if (!CampaignFileService.IsInternalCampaignId(campaign) || !CampaignFileService.IsInternalCampaignId(absent))
+                throw new InvalidOperationException("History proof fixtures must remain isolated from ordinary background work.");
             string[] roots = { StrictCampaignDirectory(campaign), SaveSyncCampaignRoot(campaign),
                 StrictCampaignDirectory(absent), SaveSyncCampaignRoot(absent) };
             const string timeline = "main", eventId = "history_proof_evidence", ephemeralId = "history_proof_ephemeral";
@@ -2131,10 +2134,15 @@ WHERE ns.nspname = $schema AND relation.relname = 'conversation_accepted_units')
                     var active = ReadSaveSyncActiveStateLocked(campaign);
                     clean = active?.SavePointId == "history_proof_active" && !active.Dirty;
                 }
-                add("owned_history_event_proof_does_not_advance_or_dirty_history",
-                    clean && File.ReadAllBytes(sidecar).SequenceEqual(cleanSidecar) && TimelineState() == timelineBefore
-                    && ReadBool(repeated, "ok", false) && Json.Serialize(ReadDictionary(repeated, "event")) == Json.Serialize(row),
-                    "Repeated exact proof leaves the timeline head, persisted event and active checkpoint sidecar unchanged.");
+                bool sidecarUnchanged = File.ReadAllBytes(sidecar).SequenceEqual(cleanSidecar);
+                bool timelineUnchanged = TimelineState() == timelineBefore;
+                bool repeatedProofSucceeded = ReadBool(repeated, "ok", false);
+                bool eventUnchanged = Json.Serialize(ReadDictionary(repeated, "event")) == Json.Serialize(row);
+                bool proofReadOnly = clean && sidecarUnchanged && timelineUnchanged && repeatedProofSucceeded && eventUnchanged;
+                const string readOnlySummary = "Repeated exact proof leaves the timeline head, persisted event and active checkpoint sidecar unchanged.";
+                add("owned_history_event_proof_does_not_advance_or_dirty_history", proofReadOnly,
+                    proofReadOnly ? readOnlySummary : $"{readOnlySummary} Clean checkpoint {clean}, sidecar unchanged {sidecarUnchanged}, "
+                        + $"timeline unchanged {timelineUnchanged}, repeated proof succeeded {repeatedProofSucceeded}, event unchanged {eventUnchanged}.");
 
                 var legacy = WorldSimulationService.WorldHistoryEventApi(
                     new Dictionary<string, string> { ["campaignId"] = campaign }, eventId);
