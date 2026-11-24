@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace ReignBetaServer
 {
@@ -141,8 +142,8 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;", parameters, transaction
         internal static void InsertForeignAgentAssignments(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             ReignDatabase.ExecuteSql(connection, @"INSERT INTO foreign_agent_assignments(campaign_id,timeline_id,agent_hero_id,sponsor_kingdom_id,
-sponsor_ruler_id,settlement_id,is_notable,status,recruited_day,next_action_day,last_action_day,payload_json,updated_ts)
-VALUES($campaign,$timeline,$agent,$sponsor,$ruler,$settlement,$notable,'dormant',$day,$next,-1,$payload,$ts);", parameters, transaction);
+sponsor_ruler_id,settlement_id,is_notable,status,recruited_day,next_action_day,last_action_day,payload_json,updated_ts,assignment_id)
+VALUES($campaign,$timeline,$agent,$sponsor,$ruler,$settlement,$notable,'dormant',$day,$next,-1,$payload,$ts,$assignment);", parameters, transaction);
         }
 
         internal static List<Dictionary<string, object>> SelectForeignAgentAssignments4(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
@@ -171,8 +172,8 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;"
 
         internal static List<Dictionary<string, object>> SelectForeignAgentAssignments5(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
-            return ReignDatabase.QuerySql(connection, @"SELECT agent_hero_id,sponsor_kingdom_id,settlement_id,is_notable,status,recruited_day,next_action_day
-FROM foreign_agent_assignments WHERE campaign_id=$campaign AND timeline_id=$timeline AND status IN ('dormant','active');", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, @"SELECT agent_hero_id,sponsor_kingdom_id,settlement_id,is_notable,status,recruited_day,next_action_day,payload_json,assignment_id
+FROM foreign_agent_assignments WHERE campaign_id=$campaign AND timeline_id=$timeline;", parameters, transaction);
         }
 
         internal static List<Dictionary<string, object>> SelectRelationshipPairChemistry(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
@@ -186,10 +187,17 @@ WHERE (hero_a_id=$sponsor AND hero_b_id=$player)
 LIMIT 1;", parameters, transaction);
         }
 
-        internal static void UpdateForeignAgentAssignments4(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static Dictionary<string, object> ReadForeignAgentAssignment(ReignDbConnection connection, Dictionary<string, object> parameters, ReignDbTransaction transaction)
         {
-            ReignDatabase.ExecuteSql(connection, @"UPDATE foreign_agent_assignments SET status='exposed',payload_json=$payload,updated_ts=$ts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, @"SELECT * FROM foreign_agent_assignments
+WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent FOR UPDATE;", parameters, transaction).SingleOrDefault();
+        }
+
+        internal static bool ExposeForeignAgentAssignment(ReignDbConnection connection, Dictionary<string, object> parameters, ReignDbTransaction transaction)
+        {
+            return ReignDatabase.QuerySql(connection, @"UPDATE foreign_agent_assignments SET status='exposed',payload_json=$payload,updated_ts=$ts
+WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent AND status IN ('dormant','active')
+RETURNING agent_hero_id;", parameters, transaction).Count == 1;
         }
     }
 }

@@ -465,7 +465,8 @@ namespace ReignBetaServer
 #endif
             Program.ReignRouteTable table = Program.ServerRoutes.Value;
             List<(Program.ReignRoute Route, string Gate)> expected = new List<(Program.ReignRoute, string)>();
-            foreach (string row in PreTableRouteInventory)
+            // Versioned exposure is an intentional addition after the router cutover.
+            foreach (string row in PreTableRouteInventory.Append("POST exact Ordinal /court/spymaster/agents/expose/v1 read court"))
             {
                 string[] parts = row.Split(' ');
                 if (parts.Length > 5 && parts[5] == "court" && !courtCompiled) continue;
@@ -484,7 +485,7 @@ namespace ReignBetaServer
             List<string> added = actualKeys.Except(expectedKeys, StringComparer.Ordinal).ToList();
             add("route_table_inventory_matches_former_router",
                 expectedKeys.SequenceEqual(actualKeys, StringComparer.Ordinal),
-                "The registered route table declares exactly the former router's methods, paths and match kinds.",
+                "The registered route table preserves the former router and explicitly approved additions.",
                 new Dictionary<string, object>
                 {
                     ["expected"] = expectedKeys.Count,
