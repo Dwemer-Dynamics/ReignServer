@@ -43,7 +43,7 @@ namespace ReignLiveTest
             return PassiveWorldCheckpointPolicy.NpcLivesBlocker(String(native, "schema"), scopeCurrent,
                 native.TryGetValue("snapshotReady", out object snapshot) && snapshot is bool ready ? ready : (bool?)null,
                 native.TryGetValue("mutationInFlight", out object mutation) && mutation is bool active ? active : (bool?)null,
-                Count("pendingReceipts"), Count("dueNativeRewards"));
+                Count("pendingReceipts"), Count("dueNativeRewards"), Count("dueNativePersonalTravel"));
         }
         private static bool _observeGovernmentNewsForPassiveWorldControl;
         private static string _checkpointPeriodicPollToken;
