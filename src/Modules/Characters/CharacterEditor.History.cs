@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace ReignBetaServer
@@ -12,6 +13,17 @@ namespace ReignBetaServer
         private const string EditorHistoryProjectionSource = "character_editor_rebuild";
         private static readonly string[] EditorHistoryGroups = { "dialogue", "events", "decisions" };
         private static readonly UTF8Encoding EditorHistoryUtf8 = new UTF8Encoding(false, true);
+
+        private const string EditorHistoryDeltaKey = "historyMutationV1";
+
+        private sealed record EditorHistoryEdit(string Group, string Id, string Basis, bool Delete, string Text);
+        private sealed record EditorHistoryEditBasis(string Campaign, string Hero, string Revision, string Generation);
+
+        private sealed class EditorHistoryDelta
+        {
+            internal Dictionary<string, object> Before { get; } = new(StringComparer.Ordinal);
+            internal Dictionary<string, object> After { get; } = new(StringComparer.Ordinal);
+        }
 
         private sealed record EditorHistoryLine(int Start, int TextEnd, int End, Dictionary<string, object> Row);
         private sealed record EditorHistorySource(string Event, string Turn, string Session, string Exchange,
@@ -51,14 +63,103 @@ namespace ReignBetaServer
         private static bool SameEditorHistoryRow(Dictionary<string, object> left, Dictionary<string, object> right) =>
             CanonicalJson(left) == CanonicalJson(right);
 
+        private static Dictionary<string, object> IssueEditorHistoryBasis(Dictionary<string, object> history, EditorHistoryEditBasis basis)
+            => EditorHistoryGroups.ToDictionary(group => group, group => (object)ReadDictionaryList(history, group)
+                .GroupBy(EditorHistoryRowId, StringComparer.Ordinal)
+                .Where(rows => !string.IsNullOrWhiteSpace(rows.Key) && rows.Count() == 1)
+                .ToDictionary(rows => rows.Key, rows => (object)Convert.ToHexString(SignEditorHistoryRow(basis, group, rows.Key, rows.Single())),
+                    StringComparer.Ordinal), StringComparer.Ordinal);
+
+        private static byte[] SignEditorHistoryRow(EditorHistoryEditBasis basis, string group, string id, Dictionary<string, object> row)
+            => HMACSHA256.HashData(EditorProfileBasisKey, Encoding.UTF8.GetBytes(Json.Serialize(new[]
+                { "history-edit-v1", basis.Campaign, basis.Hero, basis.Revision, basis.Generation, group, id, EditorProfileValueHash(row) })));
+
+        private static bool MatchesEditorHistoryBasis(EditorHistoryEditBasis basis, EditorHistoryEdit edit, Dictionary<string, object> row)
+        {
+            try
+            {
+                return CryptographicOperations.FixedTimeEquals(Convert.FromHexString(edit.Basis),
+                    SignEditorHistoryRow(basis, edit.Group, edit.Id, row));
+            }
+            catch (FormatException) { return false; }
+        }
+
+        private static bool TryReadEditorHistoryEdits(Dictionary<string, object> payload, out List<EditorHistoryEdit> edits)
+        {
+            edits = new List<EditorHistoryEdit>();
+            if (payload.ContainsKey("history")) return false;
+            if (!payload.TryGetValue("historyEdits", out object value)) return true;
+            if (value is not IList rows) return false;
+            var ids = new HashSet<(string Group, string Id)>();
+            foreach (object entry in rows)
+            {
+                if (entry is not Dictionary<string, object> row || row.Count != 4
+                    || !row.TryGetValue("group", out object groupValue) || groupValue is not string group
+                    || !EditorHistoryGroups.Contains(group, StringComparer.Ordinal)
+                    || !row.TryGetValue("id", out object idValue) || idValue is not string id || string.IsNullOrWhiteSpace(id)
+                    || !row.TryGetValue("basis", out object basisValue) || basisValue is not string basis || basis.Length != 64
+                    || !ids.Add((group, id))) return false;
+                if (row.TryGetValue("delete", out object deleteValue) && deleteValue is true)
+                    edits.Add(new EditorHistoryEdit(group, id, basis, true, null));
+                else if (row.TryGetValue("text", out object textValue) && textValue is string text)
+                    edits.Add(new EditorHistoryEdit(group, id, basis, false, text));
+                else return false;
+            }
+            return true;
+        }
+
+        private static bool TryReadEditorHistoryRevision(Dictionary<string, object> before, Dictionary<string, object> after,
+            out Dictionary<string, object> history, out Dictionary<string, object> postimage, out bool scoped)
+        {
+            scoped = before?.ContainsKey(EditorHistoryDeltaKey) == true || after?.ContainsKey(EditorHistoryDeltaKey) == true;
+            string key = scoped ? EditorHistoryDeltaKey : "history";
+            history = ReadDictionary(before, key);
+            postimage = ReadDictionary(after, key);
+            if (!scoped)
+            {
+                postimage ??= new Dictionary<string, object>();
+                return true;
+            }
+
+            return ValidEditorHistoryDelta(history) && ValidEditorHistoryDelta(postimage)
+                && history.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(postimage.Keys);
+        }
+
+        private static bool ValidEditorHistoryDelta(Dictionary<string, object> groups)
+        {
+            if (groups == null) return false;
+            foreach (var group in groups)
+            {
+                if (!EditorHistoryGroups.Contains(group.Key, StringComparer.Ordinal) || group.Value is not IList rows) return false;
+                var ids = new HashSet<string>(StringComparer.Ordinal);
+                foreach (object entry in rows)
+                {
+                    if (entry is not Dictionary<string, object> row) return false;
+                    string id = EditorHistoryRowId(row);
+                    if (string.IsNullOrWhiteSpace(id) || !ids.Add(id)) return false;
+                }
+            }
+            return true;
+        }
+
+        private static string EditorHistoryTextKey(Dictionary<string, object> row) =>
+            new[] { "text", "content", "message", "reply", "body" }
+                .FirstOrDefault(key => row.TryGetValue(key, out object value) && value != null) ?? "text";
+
         private static string EditorHistoryIssueMessage(List<Dictionary<string, object>> issues) =>
             issues.Count == 0 ? "" : " Some history edits or memory updates were skipped because their source or current version could not be verified.";
 
         internal static List<Dictionary<string, object>> ApplyEditorHistory(string campaign, string hero,
             ReignDbConnection connection, Dictionary<string, object> history, Dictionary<string, object> revisionAfter = null)
+            => ApplyEditorHistory(campaign, hero, connection, history, revisionAfter, null, null, null);
+
+        private static List<Dictionary<string, object>> ApplyEditorHistory(string campaign, string hero,
+            ReignDbConnection connection, Dictionary<string, object> history, Dictionary<string, object> revisionAfter,
+            List<EditorHistoryEdit> edits, EditorHistoryEditBasis basis, EditorHistoryDelta delta, bool scopedUndo = false)
         {
             var issues = new List<Dictionary<string, object>>();
-            if (history == null) return issues;
+            if ((edits?.Count ?? 0) == 0 && (history?.Count ?? 0) == 0) return issues;
+            var editsByGroup = edits?.ToLookup(edit => edit.Group, StringComparer.Ordinal);
 
             using var transaction = connection.BeginTransaction();
             string timeline = WorldSimulationService.ActiveWorldHistoryTimeline(connection);
@@ -67,44 +168,70 @@ namespace ReignBetaServer
             {
                 foreach (string group in EditorHistoryGroups)
                 {
-                    if (!history.TryGetValue(group, out object groupValue) || (revisionAfter != null && !revisionAfter.ContainsKey(group))) continue;
-                    if (groupValue is not IList rowList || rowList.Cast<object>().Any(row => row is not Dictionary<string, object>))
+                    if (editsByGroup != null)
                     {
-                        issues.Add(new Dictionary<string, object> { ["group"] = group, ["rowId"] = "", ["reason"] = "invalid_history_collection" });
-                        continue;
+                        if (!editsByGroup.Contains(group)) continue;
+                    }
+                    else
+                    {
+                        if (!history.TryGetValue(group, out object groupValue) || (revisionAfter != null && !revisionAfter.ContainsKey(group))) continue;
+                        if (groupValue is not IList rowList || rowList.Cast<object>().Any(row => row is not Dictionary<string, object>))
+                        {
+                            issues.Add(new Dictionary<string, object> { ["group"] = group, ["rowId"] = "", ["reason"] = "invalid_history_collection" });
+                            continue;
+                        }
                     }
                     string path = CampaignFileService.CharacterFile(campaign, hero, "history", group + ".jsonl");
                     var lines = ReadEditorHistoryLines(path, out byte[] bytes, out int preamble);
                     var current = lines.Where(line => line.Row != null).ToLookup(line => EditorHistoryRowId(line.Row), StringComparer.Ordinal);
-                    var incoming = ReadDictionaryList(history, group).ToLookup(EditorHistoryRowId, StringComparer.Ordinal);
-                    var expected = revisionAfter == null
+                    var requested = editsByGroup?[group].ToDictionary(edit => edit.Id, StringComparer.Ordinal);
+                    var incoming = requested == null ? ReadDictionaryList(history, group).ToLookup(EditorHistoryRowId, StringComparer.Ordinal) : null;
+                    var expected = requested != null ? null : revisionAfter == null
                         ? current.SelectMany(rows => rows.Select(line => line.Row)).ToLookup(EditorHistoryRowId, StringComparer.Ordinal)
                         : ReadDictionaryList(revisionAfter, group).ToLookup(EditorHistoryRowId, StringComparer.Ordinal);
                     var patches = new Dictionary<int, Dictionary<string, object>>();
                     var restored = new List<Dictionary<string, object>>();
+                    var appliedBefore = new List<Dictionary<string, object>>();
+                    var appliedAfter = new List<Dictionary<string, object>>();
                     void Issue(string id, string reason) => issues.Add(new Dictionary<string, object>
                         { ["group"] = group, ["rowId"] = id, ["reason"] = reason });
 
-                    foreach (string id in expected.Select(rows => rows.Key).Union(incoming.Select(rows => rows.Key), StringComparer.Ordinal))
+                    var ids = requested != null ? requested.Keys.AsEnumerable()
+                        : expected.Select(rows => rows.Key).Union(incoming.Select(rows => rows.Key), StringComparer.Ordinal);
+                    foreach (string id in ids)
                     {
-                        var oldRows = expected[id].ToList();
-                        var newRows = incoming[id].ToList();
-                        if (oldRows.Count == newRows.Count && oldRows.Zip(newRows, SameEditorHistoryRow).All(equal => equal)) continue;
-                        if (string.IsNullOrWhiteSpace(id) || oldRows.Count > 1 || newRows.Count > 1 || current[id].Count() > 1)
+                        var oldRows = expected?[id].ToList();
+                        var newRows = incoming?[id].ToList();
+                        if (oldRows != null && oldRows.Count == newRows.Count && oldRows.Zip(newRows, SameEditorHistoryRow).All(equal => equal)) continue;
+                        if (string.IsNullOrWhiteSpace(id) || oldRows?.Count > 1 || newRows?.Count > 1 || current[id].Count() > 1)
                         {
                             Issue(id, "ambiguous_history_row_id");
                             continue;
                         }
 
-                        var oldRow = oldRows.SingleOrDefault();
-                        var desired = newRows.SingleOrDefault();
+                        var desired = newRows?.SingleOrDefault();
                         var line = current[id].SingleOrDefault();
-                        if (revisionAfter != null && !SameEditorHistoryRow(line?.Row, oldRow))
+                        if (requested != null)
+                        {
+                            var edit = requested[id];
+                            if (line == null || !MatchesEditorHistoryBasis(basis, edit, line.Row))
+                            {
+                                Issue(id, "history_row_changed_after_load");
+                                continue;
+                            }
+                            if (!edit.Delete)
+                            {
+                                desired = new Dictionary<string, object>(line.Row, line.Row.Comparer) { [EditorHistoryTextKey(line.Row)] = edit.Text };
+                                if (SameEditorHistoryRow(line.Row, desired)) continue;
+                            }
+                        }
+                        else if (revisionAfter != null && !SameEditorHistoryRow(line?.Row, oldRows.SingleOrDefault()))
                         {
                             Issue(id, "history_row_changed_after_revision");
                             continue;
                         }
-                        // A new row can only come from a retained server revision.
+
+                        // Ordinary edits always start from a still-current row. Only rollback can restore one.
                         var original = line?.Row ?? (revisionAfter != null ? desired : null);
                         if (original == null)
                         {
@@ -112,11 +239,11 @@ namespace ReignBetaServer
                             continue;
                         }
 
-                        string textKey = new[] { "text", "content", "message", "reply", "body" }
-                            .FirstOrDefault(key => original.TryGetValue(key, out object value) && value != null) ?? "text";
-                        Dictionary<string, object> replacement = null;
-                        if (desired != null)
+                        string textKey = EditorHistoryTextKey(desired ?? original);
+                        Dictionary<string, object> replacement = desired;
+                        if (desired != null && requested == null && !scopedUndo)
                         {
+                            textKey = EditorHistoryTextKey(original);
                             replacement = new Dictionary<string, object>(original, original.Comparer);
                             if (desired.TryGetValue(textKey, out object value) && value is string text) replacement[textKey] = text;
                             if (!SameEditorHistoryRow(replacement, desired))
@@ -141,9 +268,21 @@ namespace ReignBetaServer
 
                         if (line != null) patches.Add(line.Start, replacement);
                         else restored.Add(replacement);
+                        if (delta != null)
+                        {
+                            if (line != null) appliedBefore.Add(line.Row);
+                            if (replacement != null) appliedAfter.Add(replacement);
+                        }
                     }
                     if (patches.Count > 0 || restored.Count > 0)
+                    {
                         WriteEditorHistoryLines(path, bytes, preamble, lines, patches, restored);
+                        if (delta != null)
+                        {
+                            delta.Before[group] = appliedBefore;
+                            delta.After[group] = appliedAfter;
+                        }
+                    }
                 }
             }
             transaction.Commit();

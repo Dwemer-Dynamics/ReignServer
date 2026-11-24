@@ -2227,8 +2227,49 @@
       return changes;
     }
     function nativeProfileChanges(profileChanges){const changes={...profileChanges};const wealthNow=characterEditorState.data?.documents?.wealth||{},wealthBefore=characterEditorState.original?.documents?.wealth||{};if(JSON.stringify(wealthNow)!==JSON.stringify(wealthBefore))changes.wealth=wealthNow;return changes;}
+    function editorHistoryEdits(original,draft){
+      const edits=[];
+      const index=rows=>{
+        const groups=new Map();
+        for(const row of rows){
+          if(!groups.has(row.id))groups.set(row.id,[]);
+          groups.get(row.id).push(row);
+        }
+        return groups;
+      };
+      for(const group of ['dialogue','events','decisions']){
+        const before=index(original.history?.[group]||[]),after=index(draft.history?.[group]||[]);
+        const tokens=original.historyEditBasis[group]||{};
+        for(const id of new Set([...before.keys(),...after.keys()])){
+          const old=before.get(id)||[],next=after.get(id)||[];
+          if(JSON.stringify(old)===JSON.stringify(next))continue;
+          if(typeof id!=='string'||old.length!==1||next.length>1||!Object.prototype.hasOwnProperty.call(tokens,id))
+            throw new Error('This history entry cannot be changed safely. Reload the Character Editor.');
+          const basis=tokens[id];
+          if(next.length===0)edits.push({group,id,basis,delete:true});
+          else{
+            const key=['text','content','message','reply','body'].find(k=>old[0][k]!=null)||'text';
+            if(typeof next[0][key]!=='string')throw new Error('Enter replacement text for this history entry.');
+            edits.push({group,id,basis,text:next[0][key]});
+          }
+        }
+      }
+      return edits;
+    }
     async function saveCharacterSection(all=false){if(!characterEditorState.data)return;const section=all?'all':characterEditorState.section,profileChanges=editorProfileChanges(),nativeChanges=nativeProfileChanges(profileChanges),dangerKeys=['isalive','ispregnant','spouseid','fatherid','motherid','clanid','kingdomid'];const dangerous=Object.keys(nativeChanges).some(k=>dangerKeys.includes(k.toLowerCase()));let confirmation='';if(dangerous){const name=characterEditorState.data.documents.profile?.name||characterEditorState.heroId;if(!confirm('These changes affect family, political, pregnancy, or life-state data. Review dependencies before continuing.'))return;confirmation=prompt(`Type ${name} to confirm dangerous native changes.`)||'';if(confirmation!==name){editorStatus('Confirmation did not match. Nothing was saved.','error');return;}}
-      editorStatus('Saving and rebuilding character projections...');const payload={campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,revisionToken:characterEditorState.data.revisionToken,section,description:`Character Editor ${section} save`,documents:characterEditorState.data.documents,history:characterEditorState.data.history,records:characterEditorState.data.records,nativeChanges,dangerous,confirmation};const basis=characterEditorState.original?.profileEditBasis;if(basis)payload.profileEdit={basis,fields:profileChanges};const j=await (await fetch('/character-editor/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();if(j.conflict){editorStatus(j.error,'error');return;}if(!j.ok){editorStatus(j.error||'Save failed.','error');return;}editorStatus(j.message,'good');characterEditorState.data.revisionToken=j.revisionToken;characterEditorState.dirty.clear();await loadCharacterEditor(characterEditorState.heroId,true,j);}
+      const {data,original,dirty,heroId}=characterEditorState;
+      const payload={campaignId:editorCampaign(),heroStringId:heroId,revisionToken:data.revisionToken,section,description:`Character Editor ${section} save`,documents:data.documents,records:data.records,nativeChanges,dangerous,confirmation};
+      const basis=original?.profileEditBasis;
+      if(basis)payload.profileEdit={basis,fields:profileChanges};
+      try{
+        if(original?.historyEditBasis)payload.historyEdits=dirty.has('history')?editorHistoryEdits(original,data):[];
+        else if(dirty.has('history'))payload.history=data.history;
+      }catch(error){editorStatus(error.message,'error');return;}
+      editorStatus('Saving and rebuilding character projections...');
+      const j=await (await fetch('/character-editor/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
+      if(j.conflict||!j.ok){editorStatus(j.error||'Save failed.','error');return;}
+      editorStatus(j.message,j.historyProjectionIssues?.length?'error':'good');
+      data.revisionToken=j.revisionToken;dirty.clear();await loadCharacterEditor(heroId,true,j);}
     function saveAllCharacterSections(){return saveCharacterSection(true);}
     function revertCharacterDraft(){if(!characterEditorState.original)return;characterEditorState.data=editorClone(characterEditorState.original);characterEditorState.dirty.clear();renderCharacterEditor();editorStatus('Unsaved changes reverted.');}
     async function rollbackCharacterRevision(revisionId){if(!confirm('Restore this revision? A new rollback revision will preserve the current state.'))return;const j=await (await fetch('/character-editor/rollback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,revisionId})})).json();editorStatus(j.message||j.error,j.ok?'good':'error');if(j.ok)await loadCharacterEditor(characterEditorState.heroId,true,j);}
