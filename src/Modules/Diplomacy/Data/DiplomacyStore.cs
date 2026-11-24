@@ -516,6 +516,24 @@ VALUES($campaign,$timeline,$actor,$target,$incident,$delta,$day)
 ON CONFLICT(campaign_id,timeline_id,actor_kingdom_id,target_kingdom_id,incident_id) DO NOTHING RETURNING incident_id;", parameters, transaction);
         }
 
+        internal static void EnsurePoliticalPressureDirection(ReignDbConnection connection, Dictionary<string, object> parameters,
+            ReignDbTransaction transaction)
+        {
+            ReignDatabase.QuerySql(connection, @"INSERT INTO political_pressure_state(
+campaign_id,timeline_id,actor_kingdom_id,target_kingdom_id,revision) VALUES($campaign,$timeline,$actor,$target,0)
+ON CONFLICT(campaign_id,timeline_id,actor_kingdom_id,target_kingdom_id) DO NOTHING;", parameters, transaction);
+        }
+
+        internal static int LockPoliticalPressureDirection(ReignDbConnection connection, Dictionary<string, object> parameters,
+            ReignDbTransaction transaction)
+        {
+            var rows = ReignDatabase.QuerySql(connection, @"SELECT pressure_value FROM political_pressure_state
+WHERE campaign_id=$campaign AND timeline_id=$timeline AND actor_kingdom_id=$actor AND target_kingdom_id=$target
+FOR UPDATE;", parameters, transaction);
+            if (rows.Count != 1) throw new InvalidOperationException("The exact political pressure direction disappeared.");
+            return (int)rows[0]["pressure_value"];
+        }
+
         internal static List<Dictionary<string, object>> UpsertPoliticalPressureState(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             return ReignDatabase.QuerySql(connection, @"INSERT INTO political_pressure_state(campaign_id,timeline_id,actor_kingdom_id,target_kingdom_id,
@@ -523,7 +541,7 @@ actor_kingdom_name,target_kingdom_name,actor_ruler_id,target_ruler_id,pressure_v
 VALUES($campaign,$timeline,$actor,$target,$actorName,$targetName,$actorRuler,$targetRuler,$value,$channel,$day,$incident,1)
 ON CONFLICT(campaign_id,timeline_id,actor_kingdom_id,target_kingdom_id) DO UPDATE SET
 actor_kingdom_name=$actorName,target_kingdom_name=$targetName,actor_ruler_id=$actorRuler,target_ruler_id=$targetRuler,
-pressure_value=MAX(-100,MIN(100,political_pressure_state.pressure_value+$delta)),dominant_channel=$channel,updated_day=$day,last_incident_id=$incident,revision=political_pressure_state.revision+1 RETURNING pressure_value;", parameters, transaction);
+pressure_value=$value,dominant_channel=$channel,updated_day=$day,last_incident_id=$incident,revision=political_pressure_state.revision+1 RETURNING pressure_value;", parameters, transaction);
         }
 
         internal static List<Dictionary<string, object>> SelectPoliticalPressureState2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)

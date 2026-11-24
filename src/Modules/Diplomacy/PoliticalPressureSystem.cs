@@ -196,24 +196,22 @@ namespace ReignBetaServer
                 incidentId, "target", target, ReadDictionary(routes, "target"), traitRolls);
 
             int signedAmount = polarity == "hostile" ? pressureAmount : -pressureAmount;
-            int originBefore = ReadPoliticalPressureValue(campaignId, timelineId,
-                ReadString(origin, "kingdomId", ""), ReadString(target, "kingdomId", ""));
-            int targetBefore = ReadPoliticalPressureValue(campaignId, timelineId,
-                ReadString(target, "kingdomId", ""), ReadString(origin, "kingdomId", ""));
-            int originAfter = originBefore;
-            int targetAfter = targetBefore;
-            if (originStance == "support_lords")
-                originAfter = ApplyPoliticalPressureDelta(campaignId, timelineId, worldDay,
-                    origin, target, signedAmount, channel, incidentId);
-            else if (originStance == "preserve_relations" && ReadBool(target, "isPlayerKingdom", false))
-                originAfter = ApplyPoliticalPressureDelta(campaignId, timelineId, worldDay,
-                    origin, target, -pressureAmount, channel, incidentId);
-            if (targetStance == "support_lords")
-                targetAfter = ApplyPoliticalPressureDelta(campaignId, timelineId, worldDay,
-                    target, origin, signedAmount, channel, incidentId);
-            else if (targetStance == "preserve_relations" && ReadBool(origin, "isPlayerKingdom", false))
-                targetAfter = ApplyPoliticalPressureDelta(campaignId, timelineId, worldDay,
-                    target, origin, -pressureAmount, channel, incidentId);
+            PoliticalPressureMovement MeasureDirection(Dictionary<string, object> actor, Dictionary<string, object> counterpart, string stance)
+            {
+                if (stance == "support_lords")
+                    return ApplyMeasuredPoliticalPressureDelta(campaignId, timelineId, worldDay,
+                        actor, counterpart, signedAmount, channel, incidentId);
+                if (stance == "preserve_relations" && ReadBool(counterpart, "isPlayerKingdom", false))
+                    return ApplyMeasuredPoliticalPressureDelta(campaignId, timelineId, worldDay,
+                        actor, counterpart, -pressureAmount, channel, incidentId);
+                int value = ReadPoliticalPressureValue(campaignId, timelineId,
+                    ReadString(actor, "kingdomId", ""), ReadString(counterpart, "kingdomId", ""));
+                return new PoliticalPressureMovement(value, value, false);
+            }
+            var originMovement = MeasureDirection(origin, target, originStance);
+            var targetMovement = MeasureDirection(target, origin, targetStance);
+            int originBefore = originMovement.Before, originAfter = originMovement.After;
+            int targetBefore = targetMovement.Before, targetAfter = targetMovement.After;
 
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
@@ -783,46 +781,76 @@ namespace ReignBetaServer
                     ["actor"] = actorId, ["target"] = targetId }).FirstOrDefault(), "pressure_value", 0);
         }
 
+        private sealed record PoliticalPressureMovement(int Before, int After, bool Applied);
+
         internal static int ApplyPoliticalPressureDelta(string campaignId, string timelineId, double worldDay,
             Dictionary<string, object> actor, Dictionary<string, object> target, int delta, string channel, string incidentId)
+        {
+            return ApplyMeasuredPoliticalPressureDelta(campaignId, timelineId, worldDay, actor, target,
+                delta, channel, incidentId).After;
+        }
+
+        private static PoliticalPressureMovement ApplyMeasuredPoliticalPressureDelta(string campaignId, string timelineId,
+            double worldDay, Dictionary<string, object> actor, Dictionary<string, object> target, int delta,
+            string channel, string incidentId)
         {
             string actorId = ReadString(actor, "kingdomId", "");
             string targetId = ReadString(target, "kingdomId", "");
             if (ReadBool(actor, "isPlayerKingdom", false) || string.IsNullOrWhiteSpace(actorId)
-                || string.IsNullOrWhiteSpace(targetId) || actorId.Equals(targetId, StringComparison.OrdinalIgnoreCase)) return 0;
-            long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+                || string.IsNullOrWhiteSpace(targetId) || actorId.Equals(targetId, StringComparison.OrdinalIgnoreCase))
+                return new PoliticalPressureMovement(0, 0, false);
+
+            using var connection = ReignDatabase.OpenCampaignConnection(campaignId);
+            string ownedCampaign = ReignPostgreSqlStorage.CampaignIdForConnection(connection);
+            if (string.IsNullOrEmpty(ownedCampaign))
+                throw new InvalidOperationException("The pressure direction needs an owned campaign connection.");
+            EnsurePoliticalPressureSchema(connection);
+            WorldSimulationService.EnsureWorldTestTelemetrySchema(connection);
+            using var suppressRetries = new ReignDatabase.SqlStatementRetrySuppression(connection);
+            using var transaction = connection.BeginTransaction(System.Data.IsolationLevel.ReadCommitted);
+            var movement = ApplyPoliticalPressureDeltaInTransaction(connection, transaction, campaignId, timelineId,
+                worldDay, actor, target, delta, channel, incidentId);
+            if (movement.Applied) PersistenceService.MarkSaveSyncActiveStateDirty(ownedCampaign);
+            transaction.Commit();
+            if (movement.Applied) WorldSimulationService.SignalWorldTestRollupWorker();
+            return movement;
+        }
+
+        // The caller owns the campaign connection and transaction. Each direction is locked before measurement.
+        private static PoliticalPressureMovement ApplyPoliticalPressureDeltaInTransaction(ReignDbConnection connection,
+            ReignDbTransaction transaction, string campaignId, string timelineId, double worldDay,
+            Dictionary<string, object> actor, Dictionary<string, object> target, int delta, string channel, string incidentId)
+        {
+            string actorId = ReadString(actor, "kingdomId", "");
+            string targetId = ReadString(target, "kingdomId", "");
+            var direction = TestDict("campaign", campaignId, "timeline", timelineId, "actor", actorId, "target", targetId,
+                "incident", incidentId ?? "", "day", worldDay, "delta", delta);
+            if (!string.IsNullOrWhiteSpace(incidentId)
+                && DiplomacyStore.InsertOrIgnorePoliticalPressureDeltaReceipts(connection, direction, transaction).Count == 0)
             {
-                EnsurePoliticalPressureSchema(connection);
-                using (ReignDbTransaction transaction = connection.BeginTransaction())
-                {
-                if (!string.IsNullOrWhiteSpace(incidentId) && DiplomacyStore.InsertOrIgnorePoliticalPressureDeltaReceipts(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId,
-                        ["actor"] = actorId, ["target"] = targetId, ["incident"] = incidentId, ["delta"] = delta, ["day"] = worldDay }).Count == 0)
-                {
-                    transaction.Commit();
-                    return ReadPoliticalPressureValue(connection, campaignId, timelineId, actorId, targetId);
-                }
-                int before = ReadPoliticalPressureValue(connection, campaignId, timelineId, actorId, targetId);
-                int after = Clamp(before + delta, -100, 100);
-                string dominant = after == 0 ? "" : channel ?? "";
-                Dictionary<string, object> changed = DiplomacyStore.UpsertPoliticalPressureState(connection, new Dictionary<string, object>
-                    {
-                        ["campaign"] = campaignId, ["timeline"] = timelineId, ["actor"] = actorId, ["target"] = targetId,
-                        ["actorName"] = ReadString(actor, "name", ""), ["targetName"] = ReadString(target, "name", ""),
-                        ["actorRuler"] = ReadString(actor, "leaderHeroId", ""), ["targetRuler"] = ReadString(target, "leaderHeroId", ""),
-                        ["value"] = after, ["delta"] = delta, ["channel"] = dominant, ["day"] = worldDay, ["incident"] = incidentId ?? ""
-                    }).FirstOrDefault();
-                after = ReadInt(changed, "pressure_value", after);
-                transaction.Commit();
-                WorldSimulationService.RecordWorldTestCounter(connection, campaignId, timelineId, (int)Math.Floor(worldDay),
-                    "political_pressures", incidentId + ":pressure:" + actorId, new Dictionary<string, object>
-                    {
-                        ["pressureMovement"] = Math.Abs(after - before), [after > before ? "hostilePressureAdded" : "peacefulPressureAdded"] = Math.Abs(after - before),
-                        ["rulersSupportingLords"] = 1
-                    });
-                return after;
-                }
+                int current = ReadPoliticalPressureValue(connection, campaignId, timelineId, actorId, targetId);
+                return new PoliticalPressureMovement(current, current, false);
             }
+
+            DiplomacyStore.EnsurePoliticalPressureDirection(connection, direction, transaction);
+            int before = DiplomacyStore.LockPoliticalPressureDirection(connection, direction, transaction);
+            int after = (int)Math.Clamp((long)before + delta, -100, 100);
+            direction["actorName"] = ReadString(actor, "name", "");
+            direction["targetName"] = ReadString(target, "name", "");
+            direction["actorRuler"] = ReadString(actor, "leaderHeroId", "");
+            direction["targetRuler"] = ReadString(target, "leaderHeroId", "");
+            direction["value"] = after;
+            direction["channel"] = after == 0 ? "" : channel ?? "";
+            var row = DiplomacyStore.UpsertPoliticalPressureState(connection, direction, transaction).Single();
+            if (ReadInt(row, "pressure_value", int.MinValue) != after)
+                throw new InvalidOperationException("The stored pressure update does not match the measured movement.");
+
+            int magnitude = Math.Abs(after - before);
+            WorldSimulationService.WriteWorldTestCounterSchemaReady(connection, campaignId, timelineId, (int)Math.Floor(worldDay),
+                "political_pressures", incidentId + ":pressure:" + actorId,
+                TestDict("pressureMovement", magnitude, after > before ? "hostilePressureAdded" : "peacefulPressureAdded", magnitude,
+                    "rulersSupportingLords", 1), transaction);
+            return new PoliticalPressureMovement(before, after, true);
         }
 
         private static Dictionary<string, object> SelectPoliticalPressureOpportunity(string campaignId,
@@ -1254,6 +1282,59 @@ namespace ReignBetaServer
             return result;
         }
 
+        private static void CheckMeasuredPoliticalPressure(string campaignId, Action<string, bool, string> add)
+        {
+            const string timeline = "measured_pressure";
+            var actor = TestDict("kingdomId", "actor");
+            var target = TestDict("kingdomId", "target");
+            PoliticalPressureMovement Apply(int delta, string incident) =>
+                ApplyMeasuredPoliticalPressureDelta(campaignId, timeline, 12, actor, target, delta, "coercion", incident);
+
+            var initial = Apply(95, "initial");
+            var first = System.Threading.Tasks.Task.Run(() => Apply(10, "first"));
+            var second = System.Threading.Tasks.Task.Run(() => Apply(10, "second"));
+            System.Threading.Tasks.Task.WaitAll(first, second);
+            var moves = new[] { first.Result, second.Result };
+            var replay = Apply(-100, "first");
+            using var reader = ReignDatabase.OpenCampaignConnection(campaignId);
+            List<int> CounterMagnitudes(string branch, int day) => WorldSimulationStore.SelectWorldTestChunkCounters4(reader,
+                TestDict("campaign", campaignId, "timeline", branch, "day", day, "subsystem", "political_pressures"))
+                .Select(row => ReadInt(TryParseJsonObject(ReadString(row, "counters_json", "")), "pressureMovement", -1))
+                .OrderBy(value => value).ToList();
+            add("pressure_clamp_and_telemetry_measure_locked_preimage", initial.Before == 0 && initial.After == 95
+                && moves.All(move => move.Applied && move.After == 100)
+                && moves.Select(move => move.Before).OrderBy(value => value).SequenceEqual(new[] { 95, 100 })
+                && !replay.Applied && replay.Before == 100 && replay.After == 100
+                && CounterMagnitudes(timeline, 12).SequenceEqual(new[] { 0, 5, 95 }),
+                "Concurrent writes measure the clamped movement, and replay adds neither a movement nor a counter.");
+
+            const string newDirection = "new_pressure_direction";
+            PoliticalPressureMovement Start(int delta, string incident) =>
+                ApplyMeasuredPoliticalPressureDelta(campaignId, newDirection, 12, actor, target, delta, "coercion", incident);
+            var createA = System.Threading.Tasks.Task.Run(() => Start(4, "create_a"));
+            var createB = System.Threading.Tasks.Task.Run(() => Start(7, "create_b"));
+            System.Threading.Tasks.Task.WaitAll(createA, createB);
+            var ordered = new[] { createA.Result, createB.Result }.OrderBy(move => move.Before).ToArray();
+            add("pressure_first_writers_serialize_an_absent_direction", ordered.All(move => move.Applied)
+                && ordered[0].Before == 0 && ordered[1].Before == ordered[0].After && ordered[1].After == 11
+                && CounterMagnitudes(newDirection, 12).SequenceEqual(new[] { 4, 7 }),
+                "The first two independent writers share one initialized directed row and both counters measure their own changes.");
+
+            const string rollback = "rolled_back_pressure";
+            using (var writer = ReignDatabase.OpenCampaignConnection(campaignId))
+            using (var transaction = writer.BeginTransaction())
+            {
+                ApplyPoliticalPressureDeltaInTransaction(writer, transaction, campaignId, rollback,
+                    12, actor, target, 7, "coercion", "retry");
+            }
+            bool unchanged = ReadPoliticalPressureValue(reader, campaignId, rollback, "actor", "target") == 0
+                && CounterMagnitudes(rollback, 12).Count == 0;
+            var retry = ApplyMeasuredPoliticalPressureDelta(campaignId, rollback, 12, actor, target, 7, "coercion", "retry");
+            add("pressure_rollback_keeps_receipt_and_telemetry_uncommitted", unchanged && retry.Applied
+                && retry.Before == 0 && retry.After == 7 && CounterMagnitudes(rollback, 12).SequenceEqual(new[] { 7 }),
+                "Disposing the surrounding transaction rolls back state, idempotency receipt, and counter together.");
+        }
+
         internal static List<Dictionary<string, object>> RunPoliticalPressureSelfTests()
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
@@ -1289,7 +1370,7 @@ namespace ReignBetaServer
                 && PoliticalPressureCatchUpDayKeys(7, 7)
                     .SequenceEqual(new[] { 7 }),
                 "The independent pressure producer processes every elapsed campaign day and remains idempotent on the current day.");
-            string campaignId = "pressure_claim_"
+            string campaignId = "world_test_selftest_pressure_"
                 + Guid.NewGuid().ToString("N").Substring(0, 10);
             try
             {
@@ -1316,6 +1397,7 @@ namespace ReignBetaServer
                         && readinessPairs.Any(x => ReadString(x, "target_kingdom_id", "") == "resolved" && ReadInt(x, "pressure_value", -1) == 0),
                         "Readiness polling sees current hostile and consumed-zero directions from only the selected campaign timeline, without replaying incident effects.");
                 }
+                CheckMeasuredPoliticalPressure(campaignId, add);
             }
             finally
             {
