@@ -701,6 +701,11 @@ namespace ReignBetaServer
                     WriteSharedPortraitAtomic(masterPath, new byte[] { 3, 2, 1 });
                     if (!RejectsIncomplete()) return false;
                     var later = MakeLaterOutfitFixture(op);
+                    // Confirmation takes the exact current custom image as its source,
+                    // even when an earlier refresh's fallback witness is invalid.
+                    later.StoredSourceHash = Sha256Hex(refreshed);
+                    later.After = new byte[] { 10, 11, 12 };
+                    later.PortraitReceipt = OutfitContractReceipt(later.After, 768, 1024);
                     CommitOutfitInDirectory(later, characterRoot);
                     var superseding = Read();
                     return superseding?.Custom == true && superseding.Image.SequenceEqual(later.After);
