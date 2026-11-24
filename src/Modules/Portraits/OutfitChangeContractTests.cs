@@ -162,6 +162,7 @@ namespace ReignBetaServer
             });
             Check("confirmation_requires_final_marker_after_reseal", VerifyOutfitConfirmationPrefixes);
             Check("confirmation_marker_preserves_legacy_and_refresh", VerifyOutfitConfirmationCompatibility);
+            Check("confirmation_requires_matching_restored_profile", VerifyOutfitConfirmationProfileReadback);
             Check("confirmation_marker_failure_rolls_back", VerifyOutfitConfirmationRollback);
             Check("confirmation_denied_marker_preserves_preimages", VerifyOutfitDeniedMarker);
             Check("confirmation_rollback_continues_after_restore_error", VerifyOutfitRollbackContinues);
@@ -288,6 +289,82 @@ namespace ReignBetaServer
                     && CommittedOutfitResponse(request, root) == null
                     && ReadString(refreshedProfile, "clothingDescription", "") == op.Description
                     && File.ReadAllBytes(markerPath).SequenceEqual(marker);
+            });
+
+        private static bool VerifyOutfitConfirmationProfileReadback()
+            => WithOutfitConfirmationFixture((root, op, request) =>
+            {
+                string profilePath = Path.Combine(root, "profile.json");
+                byte[] priorProfile = Encoding.UTF8.GetBytes(Json.Serialize(
+                    new Dictionary<string, object> { ["name"] = "Earlier checkpoint profile" }));
+                WriteSharedPortraitAtomic(profilePath, priorProfile);
+                CommitOutfitInDirectory(op, root);
+
+                string portraits = Path.Combine(root, "portraits");
+                string outfitPath = Path.Combine(portraits, "outfit.json");
+                string markerPath = Path.Combine(portraits, OutfitConfirmationFileName);
+                byte[] completedProfile = File.ReadAllBytes(profilePath);
+                byte[] completedOutfit = File.ReadAllBytes(outfitPath);
+                byte[] marker = File.ReadAllBytes(markerPath);
+                byte[] image = File.ReadAllBytes(Path.Combine(portraits, "custom.png"));
+                byte[] crop = File.ReadAllBytes(Path.Combine(portraits, OutfitPortraitReceiptFileName));
+                bool completeV2Accepted = CommittedOutfitResponse(request, root) != null;
+
+                // This has the same split as the retained portrait overlay: all
+                // appearance files are complete, but the snapshot profile is older.
+                WriteSharedPortraitAtomic(profilePath, priorProfile);
+                bool restoredV2MismatchRejected = CommittedOutfitResponse(request, root) == null;
+                bool rejectedWithoutWriting = File.ReadAllBytes(profilePath).SequenceEqual(priorProfile)
+                    && File.ReadAllBytes(outfitPath).SequenceEqual(completedOutfit)
+                    && File.ReadAllBytes(markerPath).SequenceEqual(marker)
+                    && File.ReadAllBytes(Path.Combine(portraits, "custom.png")).SequenceEqual(image)
+                    && File.ReadAllBytes(Path.Combine(portraits, OutfitPortraitReceiptFileName)).SequenceEqual(crop);
+
+                var legacy = CampaignFileService.ReadJsonObject(outfitPath);
+                legacy.Remove(OutfitConfirmationFormatKey);
+                WriteSharedPortraitAtomic(outfitPath, Encoding.UTF8.GetBytes(Json.Serialize(legacy)));
+                File.Delete(markerPath);
+                bool legacyTearRejected = CommittedOutfitResponse(request, root) == null;
+                WriteSharedPortraitAtomic(profilePath, completedProfile);
+                bool completeLegacyAccepted = CommittedOutfitResponse(request, root) != null;
+
+                bool wrongTupleRejected = true;
+                foreach (string field in new[] { "operationId", "playerHeroId", "timelineId", "sourceSha256", "portraitSha256", "description", "updatedUtc" })
+                {
+                    var mismatched = CampaignFileService.ReadJsonObject(profilePath);
+                    ReadDictionary(mismatched, "currentOutfit")[field] = "different";
+                    WriteSharedPortraitAtomic(profilePath, Encoding.UTF8.GetBytes(Json.Serialize(mismatched)));
+                    wrongTupleRejected &= CommittedOutfitResponse(request, root) == null;
+                    WriteSharedPortraitAtomic(profilePath, completedProfile);
+                }
+                var differentClothing = CampaignFileService.ReadJsonObject(profilePath);
+                differentClothing["clothingDescription"] = "Different clothing.";
+                WriteSharedPortraitAtomic(profilePath, Encoding.UTF8.GetBytes(Json.Serialize(differentClothing)));
+                bool wrongClothingRejected = CommittedOutfitResponse(request, root) == null;
+
+                var incomplete = new Dictionary<string, object>(legacy);
+                incomplete.Remove("updatedUtc");
+                var incompleteProfile = new Dictionary<string, object>();
+                ApplyConfirmedOutfit(incomplete, incompleteProfile);
+                WriteSharedPortraitAtomic(outfitPath, Encoding.UTF8.GetBytes(Json.Serialize(incomplete)));
+                WriteSharedPortraitAtomic(profilePath, Encoding.UTF8.GetBytes(Json.Serialize(incompleteProfile)));
+                bool bothMissingTimestampRejected = CommittedOutfitResponse(request, root) == null;
+
+                // A successful native profile projection and an independent formal scan
+                // are still compatible with a complete legacy receipt.
+                var native = new Dictionary<string, object> { ["name"] = "Fresh native profile" };
+                ApplyConfirmedOutfit(legacy, native);
+                WriteSharedPortraitAtomic(outfitPath, Encoding.UTF8.GetBytes(Json.Serialize(legacy)));
+                WriteSharedPortraitAtomic(profilePath, Encoding.UTF8.GetBytes(Json.Serialize(native)));
+                string formalPath = Path.Combine(portraits, "formal_outfit.json");
+                var rescanned = new Dictionary<string, object> { ["status"] = "completed",
+                    ["imageSha256"] = Sha256Hex(image), ["description"] = "Independent formal vision description." };
+                byte[] formal = Encoding.UTF8.GetBytes(Json.Serialize(rescanned));
+                WriteSharedPortraitAtomic(formalPath, formal);
+                return completeV2Accepted && restoredV2MismatchRejected && rejectedWithoutWriting
+                    && legacyTearRejected && completeLegacyAccepted && wrongTupleRejected && wrongClothingRejected
+                    && bothMissingTimestampRejected && CommittedOutfitResponse(request, root) != null
+                    && File.ReadAllBytes(formalPath).SequenceEqual(formal) && !File.Exists(markerPath);
             });
 
         private static bool VerifyOutfitConfirmationRollback()

@@ -352,6 +352,11 @@ namespace ReignBetaServer
                     || ReadString(outfit, "sourceSha256", "") != ReadString(payload, "sourceSha256", "")) return null;
                 string directory = Path.Combine(characterDirectory, "portraits");
                 if (!OutfitConfirmationMatches(directory, payload, outfit)) return null;
+                // The legacy write sequence and the retained-assets overlay can leave
+                // image evidence ahead of the profile. Read the stored projection;
+                // the independently scanned formal outfit has its own lifecycle.
+                var profile = CampaignFileService.ReadJsonObject(Path.Combine(characterDirectory, "profile.json"));
+                if (!OutfitCommitProfileMatches(outfit, profile)) return null;
                 string image = Path.Combine(directory, "custom.png");
                 if (!File.Exists(image)) return null;
                 byte[] bytes = File.ReadAllBytes(image);
@@ -362,6 +367,21 @@ namespace ReignBetaServer
                 return new Dictionary<string, object> { ["ok"] = true, ["status"] = "committed",
                     ["operationId"] = ReadString(outfit, "operationId", ""), ["imageBase64"] = Convert.ToBase64String(bytes), ["portraitReceipt"] = receipt };
             }
+        }
+
+        private static bool OutfitCommitProfileMatches(Dictionary<string, object> outfit,
+            Dictionary<string, object> profile)
+        {
+            var projected = ReadDictionary(profile, "currentOutfit");
+            if (projected == null || !outfit.TryGetValue("description", out object value)
+                || value is not string description || string.IsNullOrWhiteSpace(description)
+                || !profile.TryGetValue("clothingDescription", out object clothing)
+                || clothing is not string text || text != description) return false;
+
+            return new[] { "operationId", "playerHeroId", "timelineId", "sourceSha256", "portraitSha256", "description", "updatedUtc" }
+                .All(field => outfit.TryGetValue(field, out object original) && original is string expected
+                    && !string.IsNullOrWhiteSpace(expected)
+                    && projected.TryGetValue(field, out object copy) && copy is string actual && actual == expected);
         }
 
         // Failure-injectable transaction. No preview writes occur in character or shared folders.

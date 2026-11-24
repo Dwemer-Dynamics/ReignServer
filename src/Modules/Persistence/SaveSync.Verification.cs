@@ -28,6 +28,7 @@ namespace ReignBetaServer
             string token = Guid.NewGuid().ToString("N").Substring(0, 8);
             // Save Sync restores older schemas; they must reach the latest campaign migration.
             RunCampaignMigrationSelfTests(add, token);
+            VerifyRegisteredPartyAgencyAcceptedReceiptProjection(add, token);
             VerifyActiveStatePublicationRetry(add);
             var loadedReceiptLedger = TestDict("lastLoadedSavePoint", TestDict("savePointId", "cached_point", "status", "ready"));
             var registeredLoadedPoint = TestDict("savePointId", "cached_point", "snapshotStorageId", "actual_retained_storage");
@@ -1747,6 +1748,179 @@ namespace ReignBetaServer
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
+        private static void VerifyRegisteredPartyAgencyAcceptedReceiptProjection(Action<string, bool, string> add, string token)
+        {
+            if (!ReignPostgreSqlStorage.Options.IsValidation)
+            {
+                add("party_agency_postgres_requires_isolation", false, "The fixture requires the isolated ReignValidation database.");
+                return;
+            }
+
+            const string generation = "fixture-current";
+            const string oldGeneration = "fixture-prior";
+            string ownedCampaign = "__postgres_pa_owned_" + token;
+            string otherCampaign = "__postgres_pa_other_" + token;
+            string bareCampaign = "__postgres_pa_bare_" + token;
+            string missingCampaign = "__postgres_pa_missing_" + token;
+            const string selectedUnit = "accepted_selected";
+            const string otherSpeakerUnit = "accepted_other_speaker";
+            const string oldUnit = "accepted_old_generation";
+            const string otherCampaignUnit = "accepted_other_campaign";
+            const string missingUnit = "accepted_missing";
+            const string malformedUnit = "accepted_malformed";
+            const string oversizedUnit = "accepted_oversized";
+            const string oversizedProofUnit = "accepted_oversized_proof";
+            string responseHash = DialogueService.PromptHash("synthetic response");
+            string speechHash = DialogueService.ConversationExactTextHash("synthetic speech");
+            var claim = new WorldSimulationService.PartyAgencySendClaim(
+                "fixture-live", "fixture-command", "fixture-game", "fixture-process", "fixture-lease", 1);
+
+            void Insert(ReignDbConnection connection, string campaign, string unit, string speaker, string restored,
+                string receiptPadding = "", string originPadding = "")
+            {
+                var origin = new WorldSimulationService.PartyAgencySendOrigin(claim, campaign, "fixture-test",
+                    "fixture-certification", "party_chat", speaker, "fixture-party-beat", speechHash)
+                    .AcceptedReceipt(unit, responseHash);
+                if (originPadding.Length > 0) origin["fixturePadding"] = originPadding;
+                var provider = TestDict("schema", "reign-party-agency-serving-provider-attempt-v1",
+                    "status", "serving_transport_matches_accepted_speech", "acceptedUnitId", unit,
+                    "acceptedResponseHash", responseHash, "acceptedSpeechSha256", speechHash,
+                    "providerAuthoredSpeechSha256", speechHash, "adapter", LlmProviderService.OpenRouterProvider,
+                    "requestedModel", "fixture/requested", "servedModel", "fixture/served",
+                    "servedModelEvidence", "http_response_model", "requestKind", "http_post_body",
+                    "requestSha256", speechHash, "responseSha256", speechHash, "responseIdentitySha256", speechHash,
+                    "providerAssistantContentSha256", speechHash, "fallbackDisposition", "none",
+                    "httpRetriesInServingRound", 0, "codexTerminalAttempts", 0);
+                var receipt = TestDict("ok", true, "status", "committed", "unitId", unit,
+                    "responseHash", responseHash, "acceptedReplyHash", speechHash, "restoreGeneration", restored,
+                    WorldSimulationService.PartyAgencySendOriginField, origin,
+                    LlmProviderService.ServingProviderAttempt.ReceiptField, provider,
+                    "fixtureUnprojectedSpeech", "fixture raw speech", "fixturePadding", receiptPadding);
+                DialogueStore.InsertConversationAcceptedUnits(connection, TestDict("unit", unit, "hash", responseHash,
+                    "generation", restored, "receipt", Json.Serialize(receipt), "ts", 1L));
+            }
+
+            void Initialize(ReignDbConnection connection)
+            {
+                DialogueSchema.CreateMemoryPrecisionState(connection);
+                DialogueStore.InsertOrIgnoreMemoryPrecisionState(connection, TestDict("generation", generation, "ts", 1L));
+                DialogueService.EnsureAcceptedConversationUnitSchema(connection);
+            }
+
+            bool RegistryHasSchema(ReignDbConnection connection, string campaign)
+            {
+                var row = ReignDatabase.QuerySql(connection, @"
+SELECT EXISTS (SELECT 1 FROM reign_meta.campaign_registry WHERE campaign_id = $campaign)
+    OR EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = $schema) AS present;",
+                    TestDict("campaign", campaign, "schema", ReignPostgreSqlStorage.CampaignSchemaName(campaign))).Single();
+                return ReadBool(row, "present", false);
+            }
+
+            string Snapshot(ReignDbConnection connection, string campaign) => Json.Serialize(ReignDatabase.QuerySql(connection, @"
+SELECT r.xmin::text AS registry_version, s.xmin::text AS generation_version, s.restore_generation,
+    (SELECT jsonb_agg(jsonb_build_array(u.xmin::text, to_jsonb(u)) ORDER BY u.unit_id)::text
+        FROM conversation_accepted_units u) AS accepted_state
+FROM reign_meta.campaign_registry r CROSS JOIN memory_precision_state s
+WHERE r.campaign_id = $campaign AND s.state_id = 'current';", TestDict("campaign", campaign)).Single());
+
+            try
+            {
+                using var owned = ReignPostgreSqlStorage.OpenCampaignConnection(ownedCampaign);
+                using var other = ReignPostgreSqlStorage.OpenCampaignConnection(otherCampaign);
+                using var bare = ReignPostgreSqlStorage.OpenCampaignConnection(bareCampaign);
+                Initialize(owned);
+                Initialize(other);
+                Insert(owned, ownedCampaign, selectedUnit, "fixture-selected-speaker", generation);
+                Insert(owned, ownedCampaign, otherSpeakerUnit, "fixture-other-speaker", generation);
+                Insert(owned, ownedCampaign, oldUnit, "fixture-selected-speaker", oldGeneration);
+                Insert(owned, ownedCampaign, oversizedUnit, "fixture-selected-speaker", generation,
+                    receiptPadding: new string('x', 262144));
+                Insert(owned, ownedCampaign, oversizedProofUnit, "fixture-selected-speaker", generation,
+                    originPadding: new string('x', 8192));
+                Insert(other, otherCampaign, otherCampaignUnit, "fixture-other-campaign-speaker", generation);
+                DialogueStore.InsertConversationAcceptedUnits(owned, TestDict("unit", malformedUnit, "hash", responseHash,
+                    "generation", generation, "receipt", "fixture malformed JSON", "ts", 1L));
+                string ownedBefore = Snapshot(owned, ownedCampaign);
+                string otherBefore = Snapshot(other, otherCampaign);
+
+                var selected = ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(ownedCampaign,
+                    new[] { selectedUnit, oldUnit, missingUnit, "invalid-fixture-selector" }).SingleOrDefault();
+                var proof = selected == null ? TestDict() : Json.Deserialize<Dictionary<string, object>>(selected.ProofJson);
+                var origin = ReadDictionary(proof, WorldSimulationService.PartyAgencySendOriginField);
+                var provider = ReadDictionary(proof, LlmProviderService.ServingProviderAttempt.ReceiptField);
+                add("party_agency_postgres_projects_exact_saved_receipt", selected?.UnitId == selectedUnit
+                    && selected.ResponseHash == responseHash && selected.RestoreGeneration == generation
+                    && ReadString(proof, "unitId", "") == selectedUnit && ReadString(proof, "restoreGeneration", "") == generation
+                    && ReadString(origin, "campaignId", "") == ownedCampaign
+                    && ReadString(origin, "speakerHeroStringId", "") == "fixture-selected-speaker"
+                    && ReadString(origin, "correlationId", "") == "fixture-party-beat"
+                    && ReadString(provider, "acceptedUnitId", "") == selectedUnit
+                    && ReadString(provider, "servedModel", "") == "fixture/served"
+                    && !proof.ContainsKey("fixtureUnprojectedSpeech") && !proof.ContainsKey("fixturePadding"),
+                    "The exact selected speaker's current receipt is projected without extra saved fields or another speaker's receipt.");
+
+                add("party_agency_postgres_excludes_foreign_or_missing_authority",
+                    ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(ownedCampaign,
+                        new[] { oldUnit, missingUnit, otherCampaignUnit }).Count == 0
+                    && ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(otherCampaign,
+                        new[] { selectedUnit }).Count == 0
+                    && ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(otherCampaign,
+                        new[] { otherCampaignUnit }).SingleOrDefault()?.UnitId == otherCampaignUnit,
+                    "An old restore generation, an absent unit and a different registered campaign cannot supply a matching receipt.");
+
+                add("party_agency_postgres_bounds_selector_and_projection",
+                    ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(ownedCampaign,
+                        new[] { oversizedUnit, oversizedProofUnit }).Count == 0
+                    && ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(ownedCampaign,
+                        new[] { selectedUnit }.Concat(Enumerable.Range(0, ReignPostgreSqlStorage.PartyAgencyAcceptedReceiptReadLimit)
+                            .Select(number => "accepted_unused_" + number)).ToArray()).Count == 0
+                    && ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(ownedCampaign + " ",
+                        new[] { selectedUnit }).Count == 0,
+                    "Over-limit selectors, a non-exact campaign identity and oversized receipt or proof JSON cannot contribute evidence.");
+
+                bool malformedRejected = false;
+                try { ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(ownedCampaign, new[] { malformedUnit }); }
+                catch (Npgsql.PostgresException exception) when (exception.SqlState == "22P02") { malformedRejected = true; }
+                add("party_agency_postgres_malformed_saved_receipt_fails_closed", malformedRejected,
+                    "Invalid selected saved JSON fails the database projection before any receipt can be returned.");
+
+                bool MissingReceiptTable() => ReignDatabase.QuerySql(bare,
+                    @"SELECT NOT EXISTS (SELECT 1 FROM pg_catalog.pg_class relation
+INNER JOIN pg_catalog.pg_namespace ns ON ns.oid = relation.relnamespace
+WHERE ns.nspname = $schema AND relation.relname = 'conversation_accepted_units') AS missing;",
+                    TestDict("schema", ReignPostgreSqlStorage.CampaignSchemaName(bareCampaign)))
+                    .Any(row => ReadBool(row, "missing", false));
+                bool tableMissingBefore = MissingReceiptTable();
+                bool noSetup = false;
+                try { ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(bareCampaign, new[] { selectedUnit }); }
+                catch (Npgsql.PostgresException exception) when (exception.SqlState == "42P01") { noSetup = true; }
+                add("party_agency_postgres_reader_never_sets_up_or_updates_campaign",
+                    !RegistryHasSchema(owned, missingCampaign)
+                    && ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(missingCampaign, new[] { selectedUnit }).Count == 0
+                    && !RegistryHasSchema(owned, missingCampaign)
+                    && tableMissingBefore && noSetup && MissingReceiptTable()
+                    && Snapshot(owned, ownedCampaign) == ownedBefore && Snapshot(other, otherCampaign) == otherBefore,
+                    "The reader leaves both registered row versions and saved evidence intact and does not register or initialize a schema.");
+            }
+            catch (Exception exception)
+            {
+                add("party_agency_postgres_fixture_exception", false,
+                    "The disposable PostgreSQL fixture failed with " + exception.GetType().Name + ".");
+            }
+            finally
+            {
+                foreach (string campaign in new[] { bareCampaign, otherCampaign, ownedCampaign })
+                {
+                    try { ReignPostgreSqlStorage.DropCampaign(campaign); }
+                    catch (Exception exception)
+                    {
+                        add("party_agency_postgres_fixture_cleanup", false,
+                            "Could not retire disposable fixture " + campaign + " (" + exception.GetType().Name + ").");
+                    }
+                }
+            }
+        }
+
         private static void VerifyActiveStatePublicationRetry(Action<string, bool, string> add)
         {
             string campaignId = "save_state_" + Guid.NewGuid().ToString("N");
