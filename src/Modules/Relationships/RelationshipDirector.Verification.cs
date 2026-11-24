@@ -61,6 +61,7 @@ namespace ReignBetaServer
 
                 VerifyPlayerConceptionAtomicity(campaign, request, add);
                 VerifyFamilyBirthReceipts(campaign, add);
+                VerifyOwnedDirectorNativeReceipts(add);
 
                 Dictionary<string, object> gate=ActionPipelineService.NormalizeConceptionGate(new Dictionary<string, object>{{"needed",true},{"completed",true},{"confidence",0.95d}},"",false);
                 Dictionary<string, object> suppressed=ActionPipelineService.NormalizeConceptionGate(new Dictionary<string, object>{{"needed",true},{"completed",true},{"confidence",0.95d}},"*She inseminates him.*",true);
@@ -308,6 +309,123 @@ namespace ReignBetaServer
             !ReadBool(result, "ok", true) && !ReadBool(result, "success", true) && ReadBool(result, "idempotent", false)
             && ReadBool(result, "rollSucceeded", false) && ReadDouble(result, "roll", -1d) == roll
             && ReadString(result, "followUpStatus", "") == status;
+
+
+        private static void VerifyOwnedDirectorNativeReceipts(Action<string, bool, string> add)
+        {
+            string previousRoot = Program.CampaignsRootOverride.Value;
+            string campaign = "d4_director_owner_" + Guid.NewGuid().ToString("N");
+            string isolatedRoot = Path.Combine(Program.DataDir, "test_runs", campaign);
+            Program.CampaignsRootOverride.Value = isolatedRoot;
+            try
+            {
+                using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                EnsureRelationshipDirectorSchema(connection);
+                WorldSimulationService.EnsureWorldHistorySchema(connection);
+                DialogueService.EnsureMemoryPrecisionSchema(connection);
+                if (WorldSimulationStore.SelectWorldHistoryTimelines2(connection).Count == 0)
+                {
+                    WorldSimulationStore.InsertWorldHistoryTimelines(connection, TestDict(
+                        "timeline", "d4_fixture_timeline", "campaign", campaign, "head", 0,
+                        "now", DateTime.UtcNow.ToString("o")));
+                }
+                string timeline = WorldSimulationService.ActiveWorldHistoryTimeline(connection);
+                string generation = ReadString(DialogueStore.SelectMemoryPrecisionState4(connection).Single(),
+                    "restore_generation", "");
+
+                const string current = "d4_current";
+                const string foreign = "d4_foreign";
+                const string legacy = "d4_untagged";
+                void Seed(string id, string ownedTimeline)
+                {
+                    var metadata = TestDict("source", "d4_fixture");
+                    if (ownedTimeline != null) metadata["timelineId"] = ownedTimeline;
+                    RelationshipsStore.InsertRelationshipDirectorActions2(connection, TestDict(
+                        "id", id, "type", "divorce", "day", 42d, "actor", "fixture_a", "target", "fixture_b",
+                        "payload", Json.Serialize(metadata), "ts", 1L));
+                }
+                Dictionary<string, object> Row(string id) =>
+                    RelationshipsStore.SelectRelationshipDirectorActions6(connection, TestDict("id", id)).Single();
+                string Status(string id) => ReadString(Row(id), "status", "");
+                Dictionary<string, object> Owner(string stamp) =>
+                    TestDict("campaignId", campaign, "timelineId", timeline, "sharedActivityGeneration", stamp);
+                bool EchoesOwner(Dictionary<string, object> result) =>
+                    ReadDictionary(result, "ownership") is Dictionary<string, object> owner
+                    && ReadString(owner, "campaignId", "") == campaign && ReadString(owner, "timelineId", "") == timeline
+                    && owner.TryGetValue("sharedActivityGeneration", out object echoed)
+                    && echoed is string echoedGeneration && echoedGeneration == generation;
+                Dictionary<string, object> Poll(string stamp) => RelationshipDirectorPollActionsApi(
+                    TestDict("campaignId", campaign, "ownership", Owner(stamp)));
+                Dictionary<string, object> Report(string stamp, params Dictionary<string, object>[] receipts) =>
+                    RelationshipDirectorReportActionsApi(TestDict("campaignId", campaign,
+                        "ownership", Owner(stamp), "receipts", receipts));
+                Dictionary<string, object> Receipt(string id, string ownedTimeline = null, double day = 42d) =>
+                    TestDict("directorActionId", id, "timelineId", ownedTimeline ?? timeline, "status", "completed", "worldDay", day);
+                string[] Ids(Dictionary<string, object> result) => ReadDictionaryList(result, "actions")
+                    .Select(action => ReadString(action, "director_action_id", "")).ToArray();
+                bool Ok(Dictionary<string, object> result) => ReadBool(result, "ok", false);
+
+                Seed(current, timeline);
+                Seed(foreign, timeline + "_stale");
+                Seed(legacy, null);
+                string staleGeneration = generation + "_stale";
+                add("director_owner_stale_generation_cannot_claim",
+                    !Ok(Poll(staleGeneration)) && Status(current) == "pending"
+                    && Status(foreign) == "pending" && Status(legacy) == "pending",
+                    "A stale save owner cannot claim any persisted native action.");
+
+                Dictionary<string, object> first = null, second = null;
+                System.Threading.Tasks.Parallel.Invoke(
+                    () => first = Poll(generation), () => second = Poll(generation));
+                string[] claimed = Ids(first).Concat(Ids(second)).OrderBy(id => id, StringComparer.Ordinal).ToArray();
+                add("director_owner_concurrent_claims_exclude_foreign_timeline",
+                    Ok(first) && Ok(second) && EchoesOwner(first) && EchoesOwner(second)
+                    && claimed.SequenceEqual(new[] { current, legacy }) && Status(current) == "claimed"
+                    && Status(legacy) == "claimed" && Status(foreign) == "pending",
+                    "Competing polls claim each eligible action once while leaving a foreign timeline untouched.");
+
+                string[] activeClaim = Ids(Poll(generation));
+                ReignDatabase.ExecuteSql(connection,
+                    "UPDATE relationship_director_actions SET claimed_ts=$ts WHERE director_action_id=$id;",
+                    TestDict("ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds() - 301, "id", current));
+                var reclaimed = Poll(generation);
+                add("director_owner_preserves_five_minute_reclaim",
+                    activeClaim.Length == 0 && Ok(reclaimed) && EchoesOwner(reclaimed)
+                    && Ids(reclaimed).SequenceEqual(new[] { current }),
+                    "A fresh claim remains exclusive and becomes eligible again after five minutes.");
+
+                var stale = Report(staleGeneration, Receipt(current));
+                var wrongTimeline = Report(generation, Receipt(current, timeline + "_stale"));
+                add("director_owner_rejects_stale_receipts_without_writes",
+                    !Ok(stale) && !Ok(wrongTimeline) && Status(current) == "claimed"
+                    && string.IsNullOrEmpty(ReadString(Row(current), "result_json", "")),
+                    "A stale generation or mismatched receipt timeline cannot complete an active claim.");
+
+                var mixed = Report(generation, Receipt(foreign), Receipt(current));
+                var results = ReadDictionaryList(mixed, "results");
+                var savedResult = ReadString(Row(current), "result_json", "");
+                var retry = Report(generation, Receipt(current, day: 43d));
+                var repeated = ReadDictionaryList(retry, "results").SingleOrDefault();
+                add("director_owner_exact_terminal_receipt_is_idempotent",
+                    !Ok(mixed) && EchoesOwner(mixed) && results.Count == 2
+                    && ReadString(results[0], "directorActionId", "") == foreign && !Ok(results[0])
+                    && ReadString(results[1], "directorActionId", "") == current && Ok(results[1])
+                    && Status(foreign) == "pending" && Status(current) == "completed"
+                    && ReadDouble(TryParseStrictJsonObject(savedResult), "worldDay", -1d) == 42d
+                    && Ok(retry) && EchoesOwner(retry) && ReadBool(repeated, "idempotent", false)
+                    && ReadString(repeated, "directorActionId", "") == current
+                    && ReadString(Row(current), "result_json", "") == savedResult,
+                    "The exact accepted receipt is stored once and a repeat returns its ID without rewriting the terminal row.");
+            }
+            finally
+            {
+                try { ReignPostgreSqlStorage.DropCampaign(campaign); }
+                catch (Exception ex) { add("director_owner_fixture_cleanup", false, ex.Message); }
+                Program.CampaignsRootOverride.Value = previousRoot;
+                try { if (Directory.Exists(isolatedRoot)) Directory.Delete(isolatedRoot, true); }
+                catch (Exception ex) { add("director_owner_fixture_files_cleanup", false, ex.Message); }
+            }
+        }
 
         private static List<Dictionary<string, object>> RunRelationshipSubsystemSelfTests()
         {

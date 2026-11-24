@@ -1067,26 +1067,88 @@ namespace ReignBetaServer
             }, transaction);
         }
 
+        private static Dictionary<string, object> ReadRelationshipDirectorOwner(Dictionary<string, object> payload)
+        {
+            if (payload == null || !payload.TryGetValue("ownership", out object raw)
+                || !(raw is Dictionary<string, object> scope)
+                || !scope.TryGetValue("campaignId", out object campaignValue) || !(campaignValue is string campaign)
+                || string.IsNullOrWhiteSpace(campaign) || !payload.TryGetValue("campaignId", out object envelope)
+                || !(envelope is string outerCampaign) || outerCampaign != campaign
+                || !scope.TryGetValue("timelineId", out object timelineValue) || !(timelineValue is string timeline)
+                || string.IsNullOrWhiteSpace(timeline)
+                || !scope.TryGetValue("sharedActivityGeneration", out object generation) || !(generation is string))
+                return null;
+            return TestDict("campaignId", campaign, "timelineId", timeline, "sharedActivityGeneration", generation);
+        }
+
+        private static Dictionary<string, object> RelationshipDirectorOwnerError() =>
+            TestDict("ok", false, "error", "The relationship director save owner did not match.");
+
+        private static bool RelationshipDirectorTimelineMatches(Dictionary<string, object> actionPayload, string timeline) =>
+            actionPayload != null && (!actionPayload.TryGetValue("timelineId", out object tagged)
+                || tagged is string rowTimeline && rowTimeline == timeline);
+
         internal static Dictionary<string, object> RelationshipDirectorPollActionsApi(Dictionary<string, object> payload)
         {
-            string campaignId = ReadString(payload, "campaignId", "default");
-            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
-            using (ReignDbTransaction transaction = connection.BeginTransaction())
-            {
-                EnsureRelationshipDirectorSchema(connection);
-                long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                long stale = ts - 300;
-                List<Dictionary<string, object>> rows = RelationshipsStore.SelectRelationshipDirectorActions10(connection, new Dictionary<string, object> { ["stale"] = stale });
-                foreach (Dictionary<string, object> row in rows)
-                {
-                    RelationshipsStore.UpdateRelationshipDirectorActions11(connection, new Dictionary<string, object> { ["ts"] = ts, ["id"] = ReadString(row, "director_action_id", "") });
-                    row["payload"] = TryParseJsonObject(ReadString(row, "payload_json", "{}"))
-                        ?? new Dictionary<string, object>();
-                }
+            bool typed = payload?.ContainsKey("ownership") == true;
+            var owner = typed ? ReadRelationshipDirectorOwner(payload) : null;
+            if (typed && owner == null) return RelationshipDirectorOwnerError();
 
-                transaction.Commit();
-                return new Dictionary<string, object> { ["ok"] = true, ["actions"] = rows };
+            string campaign = typed ? (string)owner["campaignId"] : ReadString(payload, "campaignId", "default");
+            string timeline = typed ? (string)owner["timelineId"] : "";
+            using var timelineScope = typed ? WorldSimulationService.EnterWorldHistoryTimelineScope(campaign) : null;
+            using var connection = typed
+                ? ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign, trackCampaignMutations: true)
+                : ReignDatabase.OpenCampaignConnection(campaign);
+            if (connection == null) return RelationshipDirectorOwnerError();
+            using var transaction = connection.BeginTransaction();
+            if (typed)
+            {
+                AcquirePostgreSqlTransactionMutationLock(connection, transaction);
+                if (!WorldSimulationService.NoticeAcknowledgementOwnerMatches(connection, transaction, owner, campaign, timeline))
+                    return RelationshipDirectorOwnerError();
+                if (!WorldSimulationService.TableExists(connection, "relationship_director_actions"))
+                    return TestDict("ok", true, "actions", new List<Dictionary<string, object>>(), "ownership", owner);
             }
+            else
+                EnsureRelationshipDirectorSchema(connection);
+
+            long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var candidates = new List<Dictionary<string, object>>();
+            const int limit = 50;
+            int offset = 0;
+            while (candidates.Count < limit)
+            {
+                var page = RelationshipsStore.SelectRelationshipDirectorActions10(connection,
+                    TestDict("stale", ts - 300, "offset", offset), transaction);
+                foreach (var row in page)
+                {
+                    string json = ReadString(row, "payload_json", "{}");
+                    var actionPayload = typed ? TryParseStrictJsonObject(json)
+                        : TryParseJsonObject(json) ?? new Dictionary<string, object>();
+                    string id = ReadString(row, "director_action_id", "");
+                    if (typed && (string.IsNullOrWhiteSpace(id) || IsRelationshipNativeTargetId(id)
+                        || !RelationshipDirectorTimelineMatches(actionPayload, timeline))) continue;
+                    row["payload"] = actionPayload;
+                    candidates.Add(row);
+                    if (candidates.Count == limit) break;
+                }
+                if (!typed || page.Count < limit) break;
+                offset += page.Count;
+            }
+
+            var rows = new List<Dictionary<string, object>>(candidates.Count);
+            foreach (var row in candidates)
+            {
+                if (RelationshipsStore.TryClaimRelationshipDirectorAction(connection,
+                    TestDict("ts", ts, "stale", ts - 300, "id", ReadString(row, "director_action_id", "")), transaction))
+                    rows.Add(row);
+            }
+            transaction.Commit();
+            var result = TestDict("ok", true, "actions", rows);
+            if (typed) result["ownership"] = owner;
+            return result;
         }
+
     }
 }

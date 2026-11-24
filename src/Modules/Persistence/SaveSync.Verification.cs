@@ -28,6 +28,7 @@ namespace ReignBetaServer
             string token = Guid.NewGuid().ToString("N").Substring(0, 8);
             // Save Sync restores older schemas; they must reach the latest campaign migration.
             RunCampaignMigrationSelfTests(add, token);
+            VerifyActiveStatePublicationRetry(add);
             var loadedReceiptLedger = TestDict("lastLoadedSavePoint", TestDict("savePointId", "cached_point", "status", "ready"));
             var registeredLoadedPoint = TestDict("savePointId", "cached_point", "snapshotStorageId", "actual_retained_storage");
             add("loaded_receipt_uses_registered_storage_metadata",
@@ -1745,6 +1746,80 @@ namespace ReignBetaServer
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
+        private static void VerifyActiveStatePublicationRetry(Action<string, bool, string> add)
+        {
+            string campaignId = "save_state_" + Guid.NewGuid().ToString("N");
+            string fixtureRoot = SaveSyncCampaignRoot(campaignId);
+            if (File.Exists(fixtureRoot) || Directory.Exists(fixtureRoot))
+            {
+                add("active_state_publication_fixture_isolated", false, "The disposable active-state root is already occupied.");
+                return;
+            }
+
+            string path = SaveSyncActiveStatePath(campaignId);
+            string campaignPath = Path.Combine(StrictCampaignDirectory(campaignId), "world", "fixture.json");
+            const string oldPoint = "before_write", newPoint = "after_write";
+            bool FailPublication(Action publish)
+            {
+                string savedSidecar = path + ".fixture_previous";
+                File.Move(path, savedSidecar);
+                try
+                {
+                    Directory.CreateDirectory(path);
+                    try { publish(); }
+                    catch (IOException) { return true; }
+                    catch (UnauthorizedAccessException) { return true; }
+                    return false;
+                }
+                finally
+                {
+                    if (Directory.Exists(path))
+                        Directory.Move(path, path + ".fixture_obstruction_" + Guid.NewGuid().ToString("N"));
+                    File.Move(savedSidecar, path);
+                }
+            }
+
+            bool CachedStateMatches(string point, bool dirty)
+            {
+                lock (SaveSyncActiveStateLock)
+                {
+                    SaveSyncActiveState cached = ReadSaveSyncActiveStateLocked(campaignId);
+                    return cached.SavePointId == point && cached.Dirty == dirty;
+                }
+            }
+
+            try
+            {
+                MarkSaveSyncActiveStateClean(campaignId, TestDict("savePointId", oldPoint));
+                byte[] clean = File.ReadAllBytes(path);
+                bool directFailed = FailPublication(() => MarkSaveSyncActiveStateDirty(campaignId));
+                bool pathFailed = FailPublication(() => MarkSaveSyncActiveStateDirtyForPath(campaignPath));
+                bool cleanSurvived = CachedStateMatches(oldPoint, false) && clean.SequenceEqual(File.ReadAllBytes(path));
+                MarkSaveSyncActiveStateDirtyForPath(campaignPath);
+                var dirtySidecar = CampaignFileService.ReadAtomicallyReplacedJsonObject(path);
+                add("failed_active_state_dirty_publication_can_retry",
+                    directFailed && pathFailed && cleanSurvived && CachedStateMatches(oldPoint, true)
+                    && ReadBool(dirtySidecar, "dirty", false) && ReadString(dirtySidecar, "savePointId", "") == oldPoint,
+                    "Both dirty entry points propagate a real sidecar write failure, preserve the last published state, and can persist the retry.");
+
+                byte[] dirty = File.ReadAllBytes(path);
+                var nextPoint = TestDict("savePointId", newPoint);
+                bool cleanFailed = FailPublication(() => MarkSaveSyncActiveStateClean(campaignId, nextPoint));
+                bool dirtySurvived = CachedStateMatches(oldPoint, true) && dirty.SequenceEqual(File.ReadAllBytes(path));
+                MarkSaveSyncActiveStateClean(campaignId, nextPoint);
+                var cleanSidecar = CampaignFileService.ReadAtomicallyReplacedJsonObject(path);
+                add("failed_active_state_clean_publication_preserves_cache",
+                    cleanFailed && dirtySurvived && CachedStateMatches(newPoint, false)
+                    && !ReadBool(cleanSidecar, "dirty", true) && ReadString(cleanSidecar, "savePointId", "") == newPoint,
+                    "A failed clean publication retains the last persisted dirty point until the clean retry is written.");
+            }
+            finally
+            {
+                lock (SaveSyncActiveStateLock) SaveSyncActiveStates.Remove(campaignId);
+                if (Directory.Exists(fixtureRoot)) Directory.Delete(fixtureRoot, true);
+            }
+        }
+
         private static void RunSaveSyncFencedRecoveryTests(Action<string, bool, string> add, string token, string sibling)
         {
             string campaign = "save_recovery_" + token;
