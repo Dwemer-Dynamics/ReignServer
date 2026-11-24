@@ -54,7 +54,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> ReadOwnedWorldHistorySnapshot(Dictionary<string, string> query,
             Func<ReignDbConnection, ReignDbTransaction, string, string, Dictionary<string, object>> read,
-            System.Data.IsolationLevel isolationLevel = System.Data.IsolationLevel.Unspecified)
+            bool initializeInfrastructure = true)
         {
             if (!query.TryGetValue("campaignId", out string campaignId) || string.IsNullOrWhiteSpace(campaignId)
                 || !query.TryGetValue("timelineId", out string timelineId) || string.IsNullOrWhiteSpace(timelineId)
@@ -65,9 +65,10 @@ namespace ReignBetaServer
                 ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["sharedActivityGeneration"] = generation
             };
             using var timelineScope = EnterWorldHistoryTimelineScope(campaignId);
-            using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaignId, trackCampaignMutations: true);
+            using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaignId,
+                trackCampaignMutations: true, initializeInfrastructure: initializeInfrastructure);
             if (connection == null) return null;
-            using var transaction = connection.BeginTransaction(isolationLevel);
+            using var transaction = connection.BeginTransaction();
             AcquirePostgreSqlTransactionMutationLock(connection, transaction);
             if (!NoticeAcknowledgementOwnerMatches(connection, transaction, ownership, campaignId, timelineId))
                 return null;
@@ -692,29 +693,28 @@ namespace ReignBetaServer
         private static Dictionary<string, object> ReadOwnedWorldHistoryEventProof(
             Dictionary<string, string> query, string eventId)
         {
-            // Retention compaction can remove event children independently of the timeline monitor.
             return ReadOwnedWorldHistorySnapshot(query, (connection, transaction, campaign, timeline) =>
             {
-                if (!TableExists(connection, "world_history_events") || !TableExists(connection, "world_history_entities")
-                    || !TableExists(connection, "world_history_knowledge_rules"))
+                if (!TableExists(connection, "world_history_events") || !TableExists(connection, "world_history_entities"))
                     return WorldHistoryEventProofFailure("unavailable", "Persisted event proof is unavailable for this timeline.");
 
-                var key = TestDict("id", eventId, "timeline", timeline);
-                var row = WorldSimulationStore.SelectWorldHistoryEvents4(connection, key, transaction).SingleOrDefault();
+                // Read Committed sees the owner after any predecessor holding the advisory lock.
+                // Recheck it with the complete projection in one statement, including the children compaction can remove.
+                var key = TestDict("id", eventId, "campaign", campaign, "timeline", timeline,
+                    "generation", query["sharedActivityGeneration"]);
+                var row = WorldSimulationStore.SelectOwnedWorldHistoryEventProof(connection, key, transaction);
+                if (row == null) return null;
                 if (ReadString(row, "event_id", "") != eventId || ReadString(row, "campaign_id", "") != campaign
                     || ReadString(row, "timeline_id", "") != timeline)
-                    return WorldHistoryEventProofFailure("not_found", "The event is absent from the current timeline.");
+                    return WorldHistoryEventProofFailure("not_found", "The complete justice event is absent from the current timeline.");
 
-                // Producers supply the checksum. A reader must compare the observed material to its own expected event.
-                row.Remove("checksum");
-                var eventKey = TestDict("id", eventId);
-                row["entities"] = WorldSimulationStore.SelectWorldHistoryEntities2(connection, eventKey, transaction);
-                row["knowledgeRules"] = WorldSimulationStore.SelectWorldHistoryKnowledgeRules(connection, eventKey, transaction);
+                row["entities"] = Json.DeserializeObject(ReadString(row, "entities_json", "[]"));
+                row.Remove("entities_json");
                 return new Dictionary<string, object>
                 {
                     ["ok"] = true, ["eventProofVersion"] = 1, ["result"] = "observed", ["event"] = row
                 };
-            }, System.Data.IsolationLevel.RepeatableRead) ?? WorldHistoryEventProofFailure("owner_mismatch", "The requested event scope is no longer current.");
+            }, initializeInfrastructure: false) ?? WorldHistoryEventProofFailure("owner_mismatch", "The requested event scope is no longer current.");
         }
 
         private static Dictionary<string, object> WorldHistoryEventProofFailure(string result, string error) =>

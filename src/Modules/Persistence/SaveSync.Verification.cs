@@ -2034,7 +2034,8 @@ WHERE ns.nspname = $schema AND relation.relname = 'conversation_accepted_units')
             {
                 var original = TestDict("eventId", eventId, "eventType", "arrest_evidence_reclassified", "sequence", 1L,
                     "worldDay", 18.25d, "locationId", "history_proof_town", "locationName", "Proof Town",
-                    "source", "reign_system", "phase", "evidence_established", "summary", summary, "checksum", "fixture-checksum",
+                    "source", "reign_system", "category", "justice", "phase", "evidence_established",
+                    "summary", summary, "checksum", "fixture-checksum",
                     "payload", TestDict("caseId", "fixture_case", "priorStatus", "suspicion"),
                     "entities", new List<Dictionary<string, object>>
                     {
@@ -2045,12 +2046,17 @@ WHERE ns.nspname = $schema AND relation.relname = 'conversation_accepted_units')
                 {
                     ["eventId"] = ephemeralId, ["sequence"] = 2L, ["summary"] = "Disposable polling receipt"
                 };
-                var initial = Upload(original, ephemeral);
+                const string unrelatedId = "history_proof_unrelated";
+                var unrelated = new Dictionary<string, object>(original)
+                {
+                    ["eventId"] = unrelatedId, ["sequence"] = 3L, ["category"] = "diplomacy"
+                };
+                var initial = Upload(original, ephemeral, unrelated);
                 string beforeRestore = Generation();
                 DialogueService.AdvanceMemoryRestoreGeneration(campaign);
                 string generation = Generation();
                 if (beforeRestore == generation || generation == "<missing>" || !ReadBool(initial, "ok", false)
-                    || ReadInt(initial, "accepted", -1) != 1 || ReadInt(initial, "ephemeral", -1) != 1)
+                    || ReadInt(initial, "accepted", -1) != 2 || ReadInt(initial, "ephemeral", -1) != 1)
                     throw new InvalidOperationException("The proof fixture could not establish its owner and two upload outcomes.");
 
                 var conflicting = new Dictionary<string, object>(original)
@@ -2082,6 +2088,7 @@ WHERE ns.nspname = $schema AND relation.relname = 'conversation_accepted_units')
                 add("owned_history_event_proof_observes_actual_persisted_material",
                     ReadBool(observed, "ok", false) && ReadString(observed, "result", "") == "observed"
                     && ReadInt(observed, "eventProofVersion", -1) == 1 && row != null && !row.ContainsKey("checksum")
+                    && !row.ContainsKey("knowledgeRules") && !row.ContainsKey("semantic_text") && !row.ContainsKey("entities_json")
                     && ReadString(owner, "campaignId", "") == campaign && ReadString(owner, "timelineId", "") == timeline
                     && ReadString(owner, "sharedActivityGeneration", "") == generation
                     && ReadString(row, "event_id", "") == eventId && ReadLong(row, "sequence", -1) == 1
@@ -2096,10 +2103,12 @@ WHERE ns.nspname = $schema AND relation.relname = 'conversation_accepted_units')
 
                 var discarded = Proof(ephemeralId, ownerGeneration: generation);
                 var wrongId = Proof(eventId.ToUpperInvariant(), ownerGeneration: generation);
+                var unrelatedProof = Proof(unrelatedId, ownerGeneration: generation);
                 add("owned_history_event_proof_requires_an_exact_durable_row",
                     !ReadBool(discarded, "ok", true) && ReadString(discarded, "result", "") == "not_found"
-                    && !discarded.ContainsKey("event") && ReadString(wrongId, "result", "") == "not_found",
-                    "A successful ephemeral ingest and a different ID spelling cannot prove a persisted event.");
+                    && !discarded.ContainsKey("event") && ReadString(wrongId, "result", "") == "not_found"
+                    && ReadString(unrelatedProof, "result", "") == "not_found" && !unrelatedProof.ContainsKey("event"),
+                    "Ephemeral ingest, a different spelling and an unrelated category cannot prove the exact justice event.");
 
                 var stale = Proof(ownerGeneration: beforeRestore);
                 var wrongTimeline = Proof(ownerTimeline: "elsewhere", ownerGeneration: generation);
@@ -2131,8 +2140,37 @@ WHERE ns.nspname = $schema AND relation.relname = 'conversation_accepted_units')
                     new Dictionary<string, string> { ["campaignId"] = campaign }, eventId);
                 add("owned_history_event_proof_preserves_legacy_event_read",
                     ReadBool(legacy, "ok", false) && legacy.Count == 2
-                    && ReadString(ReadDictionary(legacy, "event"), "checksum", "") == "fixture-checksum",
-                    "The unversioned event read retains its legacy result shape and checksum.");
+                    && ReadString(ReadDictionary(legacy, "event"), "checksum", "") == "fixture-checksum"
+                    && ReadDictionary(legacy, "event").ContainsKey("knowledgeRules"),
+                    "The unversioned event read retains its legacy result shape, checksum and knowledge rules.");
+
+                // Queue the proof behind a different PostgreSQL backend holding the campaign advisory lock.
+                // Commit only after PostgreSQL confirms the reader is actually waiting.
+                const string nextGeneration = "fixture_predecessor_committed";
+                using var predecessor = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                using var predecessorTransaction = predecessor.BeginTransaction();
+                AcquirePostgreSqlTransactionMutationLock(predecessor, predecessorTransaction);
+                DialogueStore.UpdateMemoryPrecisionState2(predecessor,
+                    TestDict("generation", nextGeneration, "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()), predecessorTransaction);
+                var reading = Task.Run(() => Proof(ownerGeneration: generation));
+                bool queued;
+                try
+                {
+                    queued = SpinWait.SpinUntil(() =>
+                        ReignDatabase.QuerySql(predecessor, @"SELECT pid FROM pg_locks
+WHERE locktype='advisory' AND NOT granted AND pg_backend_pid()=ANY(pg_blocking_pids(pid));",
+                            transaction: predecessorTransaction).Count > 0, TimeSpan.FromSeconds(5));
+                }
+                finally
+                {
+                    predecessorTransaction.Commit();
+                }
+                var superseded = reading.GetAwaiter().GetResult();
+                var newOwner = Proof(ownerGeneration: nextGeneration);
+                add("owned_history_event_proof_observes_predecessor_commit_after_lock_wait",
+                    queued && ReadString(superseded, "result", "") == "owner_mismatch"
+                    && !superseded.ContainsKey("event") && ReadString(newOwner, "result", "") == "observed",
+                    "A proof blocked by a prior PostgreSQL connection refuses the obsolete generation after that connection commits.");
             }
             finally
             {

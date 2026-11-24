@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace ReignBetaServer
 {
@@ -185,6 +186,26 @@ VALUES($client,$timeline,$sequence,$event,$now) ON CONFLICT(client_id,timeline_i
         internal static List<Dictionary<string, object>> SelectWorldHistoryEvents4(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             return ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_events WHERE event_id=$id AND timeline_id=$timeline;", parameters, transaction);
+        }
+
+        internal static Dictionary<string, object> SelectOwnedWorldHistoryEventProof(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
+        {
+            return ReignDatabase.QuerySql(connection, @"WITH current_owner AS (
+    SELECT 1 WHERE
+        (SELECT restore_generation FROM memory_precision_state WHERE state_id='current')=$generation
+        AND EXISTS (SELECT 1 FROM world_history_timelines WHERE timeline_id=$timeline AND campaign_id=$campaign AND is_active=1)
+        AND (SELECT timeline_id FROM world_history_timelines WHERE is_active=1 ORDER BY updated_utc DESC LIMIT 1)=$timeline
+)
+SELECT e.event_id,e.campaign_id,e.timeline_id,e.sequence,e.world_day,e.event_type,e.category,e.phase,e.correlation_id,
+    e.location_id,e.location_name,e.dissemination_class,e.summary,e.source,e.is_complete,e.payload_json,
+    COALESCE((SELECT json_agg(json_build_object('event_id',child.event_id,'ordinal',child.ordinal,
+        'entity_id',child.entity_id,'entity_type',child.entity_type,'role',child.role,'payload_json',child.payload_json)
+        ORDER BY child.ordinal)::text FROM world_history_entities child WHERE child.event_id=e.event_id),'[]') AS entities_json
+FROM current_owner
+LEFT JOIN world_history_events e ON e.event_id=$id AND e.campaign_id=$campaign AND e.timeline_id=$timeline
+    AND e.source='reign_system' AND e.dissemination_class='ordinary' AND e.category='justice' AND e.is_complete=1;",
+                parameters, transaction).SingleOrDefault();
         }
 
         internal static List<Dictionary<string, object>> SelectWorldHistoryEvents5(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
