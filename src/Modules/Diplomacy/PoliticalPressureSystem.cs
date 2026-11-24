@@ -1036,6 +1036,8 @@ namespace ReignBetaServer
                         string.IsNullOrWhiteSpace(receipt.EffectId) || !effects.Remove(receipt.EffectId)))
                         return PoliticalPressureAcknowledgeResponse.NotFound().ToDictionary();
                 }
+                if (!WorldSimulationService.TableExists(connection, "world_test_chunk_counters"))
+                    WorldSimulationSchema.CreateWorldTestChunkCounters(connection, transaction: transaction);
                 foreach (PoliticalPressureEffectReceipt receipt in request.EffectReceipts)
                 {
                     DiplomacyStore.UpdatePoliticalPressureNativeEffects(connection, new Dictionary<string, object>(scope)
@@ -1051,6 +1053,7 @@ namespace ReignBetaServer
                     "Game message displayed and native effects reported.", payload, connection, transaction);
                 transaction.Commit();
             }
+            WorldSimulationService.SignalWorldTestRollupWorker();
             WorldSimulationService.InvalidateWorldTestOverviewCache(campaignId, timelineId);
             return PoliticalPressureAcknowledgeResponse.Acknowledged(incidentId).ToDictionary();
         }
