@@ -297,7 +297,7 @@ compatibility_status,source_event_id,world_day,known_by_json,first_ts,last_ts,pa
 VALUES($id,$owner,'life_transition',$topic,$text,$id,'active',1,1,'source_backed_life_transition',
 'verified_source_projection',$source,$day,$known,$ts,$ts,$payload)
 ON CONFLICT(owner_id,normalized_key) DO UPDATE SET text=$text,payload_json=$payload,last_ts=$ts
-WHERE dynamic_characteristics.payload_json<>excluded.payload_json;", parameters, transaction);
+WHERE dynamic_characteristics.payload_json<>excluded.payload_json;", parameters, transaction, skipSaveSyncDirtyIfNoRowsAffected: true);
         }
 
         internal static List<Dictionary<string, object>> SelectConversationNegotiationTurns(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
@@ -336,12 +336,12 @@ OR (k.audience_type='kingdom' AND k.audience_id=$kingdom))) ORDER BY e.world_day
         {
             ReignDatabase.ExecuteSql(connection, @"UPDATE dynamic_characteristics SET status='source_unavailable'
 WHERE owner_id=$owner AND category='life_transition' AND status IS DISTINCT FROM 'source_unavailable'
-AND characteristic_id NOT IN (SELECT jsonb_array_elements_text(CAST($observed AS jsonb)));", parameters, transaction);
+AND characteristic_id NOT IN (SELECT jsonb_array_elements_text(CAST($observed AS jsonb)));", parameters, transaction, skipSaveSyncDirtyIfNoRowsAffected: true);
         }
 
         internal static void UpdateDynamicCharacteristics2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
-            ReignDatabase.ExecuteSql(connection, "UPDATE dynamic_characteristics SET status=$status WHERE characteristic_id=$id AND status IS DISTINCT FROM $status;", parameters, transaction);
+            ReignDatabase.ExecuteSql(connection, "UPDATE dynamic_characteristics SET status=$status WHERE characteristic_id=$id AND status IS DISTINCT FROM $status;", parameters, transaction, skipSaveSyncDirtyIfNoRowsAffected: true);
         }
 
         internal static List<Dictionary<string, object>> SelectDynamicCharacteristics2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
