@@ -481,14 +481,18 @@ namespace ReignBetaServer
         }
 
         internal static List<Dictionary<string, object>> ReadJsonLinesFromPath(string path)
-        {
-            if (!File.Exists(path))
-            {
-                return new List<Dictionary<string, object>>();
-            }
+            => EnumerateJsonLinesFromPath(path).ToList();
 
+        // The writer lock is held through enumeration. Keep consumption local
+        // and avoid database work while visiting the file.
+        internal static IEnumerable<Dictionary<string, object>> EnumerateJsonLinesFromPath(string path)
+        {
+            if (!File.Exists(path)) yield break;
             lock (FileLock)
-                return ReadJsonLineRowsLocked(path).ToList();
+            {
+                foreach (var row in ReadJsonLineRowsLocked(path))
+                    yield return row;
+            }
         }
 
         internal static List<Dictionary<string, object>> ReadDialogueHistoryTail(string path, int limit)
