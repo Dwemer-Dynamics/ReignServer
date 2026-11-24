@@ -242,11 +242,16 @@ namespace ReignBetaServer
             return errors;
         }
 
+        private static bool NarrativeConstructionBasisCurrent(string path, Dictionary<string, object> basis) =>
+            CanonicalJson(basis) == CanonicalJson(CampaignFileService.ReadJsonObject(path));
+
         internal static Dictionary<string, object> ConstructNarrativeCharacter(string campaignId, string heroId,
             Dictionary<string, object> hero, bool force, string source)
         {
             string path = CampaignFileService.CharacterFile(campaignId, heroId, "narrative.json");
-            var existing = CampaignFileService.ReadJsonObject(path);
+            Dictionary<string, object> existing;
+            lock (NarrativeStateLock)
+                existing = CampaignFileService.ReadJsonObject(path);
             var traits = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"));
             if (!CharactersService.TraitDocumentReady(traits)) traits = BuildTraitDocument(hero);
             string stagedPath = CampaignFileService.CharacterFile(campaignId, heroId, "narrative_authoring.json");
@@ -263,6 +268,8 @@ namespace ReignBetaServer
                 {
                     if (source == TownNotableProfileSource && !TownProfilePublicationAllowed(campaignId, heroId))
                         return TestDict("ok", false, "status", "speculative_superseded");
+                    if (!NarrativeConstructionBasisCurrent(path, existing))
+                        return TestDict("ok", false, "status", "narrative_changed");
                     CampaignFileService.WriteJsonObject(path, narrative);
                     CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"), traits);
                     var projection = new Dictionary<string, object> { ["narrative"] = narrative,

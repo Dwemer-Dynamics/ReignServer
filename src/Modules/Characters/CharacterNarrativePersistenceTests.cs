@@ -24,6 +24,7 @@ namespace ReignBetaServer
                 CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, hero, "narrative.json"), basis);
                 CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, hero, "profile.json"), new Dictionary<string, object> { ["heroStringId"] = hero, ["narrativeVersion"] = 5 });
                 CheckNarrativePublication(campaign, hero, basis, check);
+                VerifyNarrativeEditorOwnership(campaign, fixture, check);
                 var target = ReadDictionaryList(basis, "items").First(x => ReadString(x, "category", "") == "fear");
                 var proposal = new Dictionary<string, object> { ["itemId"] = ReadString(target, "id", ""), ["influence"] = 8,
                     ["description"] = "Approaches the familiar concern with deliberate calm and careful preparation.",
@@ -75,6 +76,76 @@ namespace ReignBetaServer
                 ReignPostgreSqlStorage.DropCampaign(campaign);
                 if (Directory.Exists(directory)) Directory.Delete(directory, true);
             }
+        }
+
+        private static void VerifyNarrativeEditorOwnership(string campaign, Dictionary<string, object> fixture, Action<string, bool, string> check)
+        {
+            const string hero = "editor_narrative_fixture";
+            const string external = "Neighbors now describe a quieter childhood.";
+            const string editing = "Her family taught her to keep farm accounts.";
+            var target = TestDict("campaignId", campaign, "heroStringId", hero);
+            var path = CampaignFileService.CharacterFile(campaign, hero, "narrative.json");
+            var initial = DeepCloneProfileDictionary(fixture);
+            initial["heroStringId"] = hero;
+            CampaignFileService.WriteJsonObject(path, initial);
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, hero, "profile.json"),
+                TestDict("heroStringId", hero, "name", "Mira", "narrativeVersion", 5));
+            string Value(string cell) => ReadString(NarrativeEditableValues(ReadEditorNarrative(campaign, hero)), cell, "");
+            Dictionary<string, object> Change(string cell, string text)
+            {
+                var raw = ReadEditorNarrative(campaign, hero);
+                SetNarrativeCell(raw, cell, text);
+                CampaignFileService.WriteJsonObject(path, raw);
+                return raw;
+            }
+
+            Dictionary<string, object> Save(Dictionary<string, object> loaded, string cell, string text, string suppliedBasis = null)
+            {
+                var narrative = DeepCloneProfileDictionary(ReadDictionary(ReadDictionary(loaded, "documents"), "narrative"));
+                SetNarrativeCell(narrative, cell, text);
+                var request = TestDict("campaignId", campaign, "heroStringId", hero, "section", "narrative",
+                    "revisionToken", ReadString(loaded, "revisionToken", ""),
+                    "narrativeEditBasis", suppliedBasis ?? ReadString(loaded, "narrativeEditBasis", ""),
+                    "documents", TestDict("narrative", narrative));
+                return CharacterEditorSaveApi(TryParseStrictJsonObject(Json.Serialize(request)));
+            }
+
+            Dictionary<string, object> Undo(Dictionary<string, object> saved) => CharacterEditorRollbackApi(
+                TestDict("campaignId", campaign, "heroStringId", hero, "revisionId", ReadString(saved, "revisionId", "")));
+
+            var loaded = CharacterEditorLoadApi(target);
+            string originalSummary = Value("life.summary");
+            var generationBasis = ReadEditorNarrative(campaign, hero);
+            Change("life.privateBackstory", external);
+            var beforeConflict = File.ReadAllBytes(path);
+            var stale = Save(loaded, "life.privateBackstory", editing);
+            var signedForProfile = Save(loaded, "life.summary", editing, ReadString(loaded, "profileEditBasis", ""));
+            check("editor_narrative_same_cell_and_wrong_basis_refused", ReadBool(stale, "conflict", false)
+                && ReadBool(signedForProfile, "conflict", false) && File.ReadAllBytes(path).SequenceEqual(beforeConflict),
+                "Same-cell drift and a profile basis both reject the narrative save before writing any narrative bytes.");
+            check("editor_narrative_blocks_stale_construction_publication", !NarrativeConstructionBasisCurrent(path, generationBasis),
+                "A generated publication based on the old source cannot overwrite a newer narrative.");
+
+            var saved = Save(loaded, "life.summary", editing);
+            check("editor_narrative_disjoint_story_changes_preserved", ReadBool(saved, "ok", false)
+                && Value("life.summary") == editing && Value("life.privateBackstory") == external,
+                "The ordinary editor accepts the changed story field without overwriting another changed field.");
+            const string newerVoice = "She pauses before speaking of family.";
+            Change("voice.nativeVoice", newerVoice);
+            var undone = Undo(saved);
+            check("editor_narrative_undo_restores_only_owned_fields", ReadBool(undone, "ok", false)
+                && Value("life.summary") == originalSummary && Value("life.privateBackstory") == external
+                && Value("voice.nativeVoice") == newerVoice,
+                "Undo restores the exact owned story field and preserves later private and voice changes.");
+
+            loaded = CharacterEditorLoadApi(target);
+            saved = Save(loaded, "life.summary", editing);
+            Change("life.summary", external);
+            undone = Undo(saved);
+            check("editor_narrative_undo_skips_replaced_postimage", ReadBool(undone, "ok", false)
+                && ReadDictionaryList(undone, "recordEditIssues").Any(x => ReadString(x, "reason", "") == "narrative_cell_undo_unverified")
+                && Value("life.summary") == external,
+                "Undo reports a conflict and leaves a newer value on the same field intact.");
         }
 
         private static void CheckNarrativePublication(string campaign, string heroId, Dictionary<string, object> narrative, Action<string, bool, string> check)

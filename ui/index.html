@@ -2311,6 +2311,7 @@
       if(JSON.stringify(documents.narrative)===JSON.stringify(original?.documents?.narrative))
         delete documents.narrative;
       const payload={campaignId:editorCampaign(),heroStringId:heroId,revisionToken:data.revisionToken,section,description:`Character Editor ${section} save`,documents,nativeChanges,dangerous,confirmation};
+      if(documents.narrative)payload.narrativeEditBasis=original?.narrativeEditBasis;
       const basis=original?.profileEditBasis;
       if(basis)payload.profileEdit={basis,fields:profileChanges};
       try{
