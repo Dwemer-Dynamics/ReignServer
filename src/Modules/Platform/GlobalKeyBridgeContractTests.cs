@@ -615,6 +615,18 @@ namespace ReignBetaServer
                     finally { Program.ReleaseIngressReservations(uploadHolder); }
                     check("ingress_single_staged_upload", slotTaken && secondUpload == "429:upload_busy" && uploadHolder.HoldsUploadSlot == 0
                         && System.Threading.Volatile.Read(ref Program.ActiveCampaignUploads) == 0);
+
+                    // A disconnected normal upload must leave neither a partial archive nor an occupied slot.
+                    string uploadRoot = Path.Combine(Program.DataDir, "backups", "uploads");
+                    string[] StagedUploads() => Directory.Exists(uploadRoot)
+                        ? Directory.GetFiles(uploadRoot, "*.reignbackup") : Array.Empty<string>();
+                    var beforeInterruptedUpload = new HashSet<string>(StagedUploads(), StringComparer.Ordinal);
+                    string interruptedUpload = ingressFrom("127.0.0.1",
+                        "POST /api/campaigns/import HTTP/1.1\r\nHost: 127.0.0.1:5101\r\n"
+                        + "Content-Type: application/zip\r\nContent-Length: 5\r\n\r\nAB") as string;
+                    check("ingress_interrupted_upload_cleans_partial_file_and_slot",
+                        interruptedUpload == "400:body_eof" && beforeInterruptedUpload.SetEquals(StagedUploads())
+                        && System.Threading.Volatile.Read(ref Program.ActiveCampaignUploads) == 0);
                 }
 
                 // A stored custom or named-chat key follows only its configured origin; a payload key goes where it is sent.
