@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using ReignShared.Spymaster;
 
@@ -202,6 +203,26 @@ namespace ReignBetaServer
                         {
                             ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent
                         });
+                    // Recreate a pre-v4 fixture schema around the existing assignment.
+                    ReignDatabase.ExecuteSql(connection, "ALTER TABLE foreign_agent_assignments DROP COLUMN assignment_id;");
+                    ReignDatabase.ExecuteSql(connection, "UPDATE schema_meta SET value=$value WHERE key=$key;",
+                        new Dictionary<string, object>
+                        {
+                            ["key"] = PersistenceService.CampaignMigrationVersionKey,
+                            ["value"] = PersistenceService.CorrespondenceArrivalHistoryMigrationVersion.ToString(CultureInfo.InvariantCulture)
+                        });
+                }
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign))
+                {
+                    var migrated = SpymasterStore.SelectForeignAgentAssignments5(connection, new Dictionary<string, object>
+                    {
+                        ["campaign"] = activationCampaign, ["timeline"] = activationTimeline
+                    }).Single();
+                    add("agent_occurrence_migration_preserves_existing_assignment",
+                        ReadString(migrated, "agent_hero_id", "") == activationAgent
+                        && ReadString(migrated, "status", "") == "active"
+                        && ReadString(migrated, "assignment_id", "missing") == "",
+                        "Opening an older campaign upgrades its real assignment table without replacing its existing rows.", null);
                 }
 
                 Func<double, double, double, double, Dictionary<string, object>> tickAt =
@@ -327,6 +348,72 @@ namespace ReignBetaServer
                     && ReadDictionaryList(controlledTick, "actions").Count == 1,
                     "The guarded exact-agent control crosses the real 58% action branch once and reports both production and applied rolls.",
                     controlledTick);
+
+                var initiallyActive = ReadDictionaryList(controlledTick, "agents").Single();
+                string occurrence = ReadString(initiallyActive, "assignmentId", "");
+                string generation;
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign))
+                    generation = ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "");
+                var exposure = new Dictionary<string, object>
+                {
+                    ["campaignId"] = activationCampaign, ["timelineId"] = activationTimeline,
+                    ["agentHeroId"] = activationAgent, ["assignmentId"] = occurrence,
+                    ["restoreGeneration"] = generation, ["exposureRevision"] = 0,
+                    ["worldDay"] = 14d, ["reason"] = "fixture_confirmed"
+                };
+                var wrongOccurrence = new Dictionary<string, object>(exposure) { ["assignmentId"] = "other" };
+                var missing = new Dictionary<string, object>(exposure) { ["agentHeroId"] = "not_present" };
+                var replaced = new Dictionary<string, object>(exposure) { ["restoreGeneration"] = generation + "_stale" };
+                add("agent_exposure_requires_exact_occurrence_and_scope",
+                    !string.IsNullOrEmpty(occurrence)
+                    && ReadInt(initiallyActive, "exposureRevision", -1) == 0
+                    && ReadString(SpymasterAgentExposeApi(wrongOccurrence), "error", "") == "assignment_not_found"
+                    && ReadString(SpymasterAgentExposeApi(missing), "error", "") == "assignment_not_found"
+                    && ReadString(SpymasterAgentExposeApi(replaced), "error", "") == "assignment_scope_changed",
+                    "Exposure rejects a missing row, another occurrence, or a replaced restore generation.", null);
+
+                var oldExposure = new Dictionary<string, object>
+                {
+                    ["campaignId"] = activationCampaign, ["timelineId"] = activationTimeline,
+                    ["agentHeroId"] = activationAgent, ["reason"] = "legacy_unversioned"
+                };
+                var oldExposeResponse = RejectLegacyForeignAgentMutation(oldExposure);
+                var oldTickResponse = SpymasterAgentsTickForClientApi(oldExposure);
+                var typedTickResponse = SpymasterAgentsTickForClientApi(new Dictionary<string, object>
+                {
+                    ["campaignId"] = activationCampaign, ["timelineId"] = activationTimeline,
+                    ["worldDay"] = 14d, ["restoreGeneration"] = generation
+                });
+                add("agent_legacy_mutation_pauses_without_reviving_exposure",
+                    ReadString(oldExposeResponse, "error", "") == "paired_spymaster_update_required"
+                    && ReadString(oldTickResponse, "error", "") == "paired_spymaster_update_required"
+                    && !ReadBool(oldExposeResponse, "ok", true) && !ReadBool(oldTickResponse, "ok", true)
+                    && ReadDictionaryList(oldTickResponse, "agents").Count == 0
+                    && ReadDictionaryList(oldTickResponse, "actions").Count == 0
+                    && ReadBool(typedTickResponse, "ok", false)
+                    && ReadString(ReadDictionaryList(typedTickResponse, "agents").Single(), "assignmentId", "") == occurrence,
+                    "An unversioned client gets an explicit pause and no active rows or effects, while the exact typed tick still admits the legacy assignment.",
+                    typedTickResponse);
+
+                var receipt = SpymasterAgentExposeApi(exposure);
+                var retry = new Dictionary<string, object>(exposure) { ["worldDay"] = 15d, ["reason"] = "fixture_retry" };
+                var replay = SpymasterAgentExposeApi(retry);
+                var nextTick = tickAt(16d, -30d, 100d, 100d);
+                var terminal = ReadDictionaryList(nextTick, "exposedAgents").SingleOrDefault();
+                add("agent_exposure_receipt_is_terminal_and_replayable",
+                    ReadBool(receipt, "ok", false) && Json.Serialize(receipt) == Json.Serialize(replay)
+                    && ReadString(receipt, "campaignId", "") == activationCampaign
+                    && ReadString(receipt, "timelineId", "") == activationTimeline
+                    && ReadString(receipt, "restoreGeneration", "") == generation
+                    && ReadString(receipt, "assignmentId", "") == occurrence
+                    && ReadInt(receipt, "exposureRevision", -1) == 1
+                    && ReadDictionaryList(nextTick, "agents").Count == 0
+                    && ReadDictionaryList(nextTick, "actions").Count == 0
+                    && ReadString(terminal, "assignmentId", "") == occurrence
+                    && ReadInt(terminal, "exposureRevision", -1) == 1
+                    && ReadDouble(terminal, "exposedDay", -1d) == 14d,
+                    "A real legacy SQL assignment gives the same exact exposure receipt on retry, stays exposed on the next hostile tick and retains its original exposure day.",
+                    nextTick);
             }
             finally
             {

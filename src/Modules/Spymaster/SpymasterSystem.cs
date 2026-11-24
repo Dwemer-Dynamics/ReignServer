@@ -12,8 +12,6 @@ namespace ReignBetaServer
         {
             SpymasterSchema.CreateSpymasterMissionMemory(connection);
             SpymasterSchema.CreateIndexSpymasterMemoryOwner(connection);
-            SpymasterSchema.CreateForeignAgentAssignments(connection);
-            SpymasterSchema.CreateIndexForeignAgentsSponsor(connection);
         }
 
         internal static void AppendSpymasterRelevantMemoryBundle(
@@ -350,7 +348,15 @@ namespace ReignBetaServer
             }
         }
 
-        internal static Dictionary<string, object> SpymasterAgentsTickApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> SpymasterAgentsTickForClientApi(Dictionary<string, object> payload)
+            => payload?.TryGetValue("restoreGeneration", out object generation) == true && generation is string
+                ? SpymasterAgentsTickApi(payload)
+                : RejectLegacyForeignAgentMutation(payload);
+
+        internal static Dictionary<string, object> RejectLegacyForeignAgentMutation(Dictionary<string, object> _)
+            => ForeignAgentAssignmentError("paired_spymaster_update_required");
+
+        private static Dictionary<string, object> SpymasterAgentsTickApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -364,16 +370,21 @@ namespace ReignBetaServer
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureSpymasterSchema(connection);
+                using var transaction = connection.BeginTransaction();
+                // Serialize assignment selection, transitions, actions and exposure.
+                AcquirePostgreSqlTransactionMutationLock(connection, transaction);
+                if (!ForeignAgentScopeIsCurrent(connection, transaction, payload, campaignId, timelineId, out string generation))
+                    return ForeignAgentAssignmentError("assignment_scope_changed");
                 bool hasRelationshipTable = WorldSimulationService.TableExists(connection, "relationships");
                 foreach (Dictionary<string, object> enemy in enemies)
                 {
                     string sponsor = ReadString(enemy, "kingdomId", "");
                     string sponsorRuler = ReadString(enemy, "rulerId", "");
                     if (string.IsNullOrWhiteSpace(sponsor) || sponsor == playerKingdom) continue;
-                    bool already = SpymasterStore.SelectForeignAgentAssignments2(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["sponsor"] = sponsor }).Any();
+                    bool already = SpymasterStore.SelectForeignAgentAssignments2(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["sponsor"] = sponsor }, transaction).Any();
                     if (!already)
                     {
-                        HashSet<string> assigned = new HashSet<string>(SpymasterStore.SelectForeignAgentAssignments3(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
+                        HashSet<string> assigned = new HashSet<string>(SpymasterStore.SelectForeignAgentAssignments3(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId }, transaction)
                             .Select(x => ReadString(x, "agent_hero_id", "")), StringComparer.OrdinalIgnoreCase);
                         List<Dictionary<string, object>> eligible = candidates.Where(x => !assigned.Contains(ReadString(x, "heroId", ""))
                                 && string.IsNullOrWhiteSpace(ForeignAgentCandidateExclusionReason(x, playerRuler)))
@@ -401,14 +412,15 @@ namespace ReignBetaServer
                                     ["ruler"] = sponsorRuler, ["settlement"] = ReadString(candidate, "settlementId", ""),
                                     ["notable"] = ReadBool(candidate, "isNotable", false) ? 1 : 0, ["day"] = day,
                                     ["next"] = day + 1d + Math.Floor(RelationshipsService.StableUnit(heroId + "|first_action") * 20d),
+                                    ["assignment"] = Guid.NewGuid().ToString("N"),
                                     ["payload"] = Json.Serialize(new Dictionary<string, object> { ["hiddenAffiliation"] = sponsor, ["loyaltyAtRecruitment"] = loyalty }),
                                     ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
-                                });
+                                }, transaction);
                             break;
                         }
                     }
 
-                    Dictionary<string, object> agent = SpymasterStore.SelectForeignAgentAssignments4(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["sponsor"] = sponsor }).FirstOrDefault();
+                    Dictionary<string, object> agent = SpymasterStore.SelectForeignAgentAssignments4(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["sponsor"] = sponsor }, transaction).FirstOrDefault();
                     if (agent == null) continue;
                     Dictionary<string, object> outlook = ForeignAgentSponsorOutlook(connection,
                         sponsorRuler, playerRuler);
@@ -419,13 +431,13 @@ namespace ReignBetaServer
                     if (canDisrupt && agentStatus == "dormant")
                     {
                         SpymasterStore.UpdateForeignAgentAssignments(connection, new Dictionary<string, object>
-                        { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["campaign"] = campaignId, ["timeline"] = timelineId, ["agent"] = ReadString(agent, "agent_hero_id", "") });
+                        { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["campaign"] = campaignId, ["timeline"] = timelineId, ["agent"] = ReadString(agent, "agent_hero_id", "") }, transaction);
                         agent["status"] = "active";
                     }
                     else if (!canDisrupt && agentStatus == "active")
                     {
                         SpymasterStore.UpdateForeignAgentAssignments2(connection, new Dictionary<string, object>
-                        { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["campaign"] = campaignId, ["timeline"] = timelineId, ["agent"] = ReadString(agent, "agent_hero_id", "") });
+                        { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["campaign"] = campaignId, ["timeline"] = timelineId, ["agent"] = ReadString(agent, "agent_hero_id", "") }, transaction);
                         agent["status"] = "dormant";
                     }
                     if (ReadString(agent, "status", "") != "active" || ReadDouble(agent, "next_action_day", day + 1d) > day) continue;
@@ -445,14 +457,18 @@ namespace ReignBetaServer
                         string[] types = { "food", "construction", "security", "loyalty" };
                         int index = Math.Min(types.Length - 1, (int)Math.Floor(RelationshipsService.StableUnit(agentId + "|" + day.ToString(CultureInfo.InvariantCulture) + "|type") * types.Length));
                         string effect = types[index];
-                        string actionId = "foreign-agent-" + agentId + "-" + Math.Floor(day).ToString("0", CultureInfo.InvariantCulture) + "-" + effect;
+                        string actionKey = "foreign-agent-" + agentId + "-" + Math.Floor(day).ToString("0", CultureInfo.InvariantCulture) + "-" + effect;
+                        string storedAssignmentId = ReadString(agent, "assignment_id", "");
+                        string actionId = string.IsNullOrEmpty(storedAssignmentId) ? actionKey : actionKey + "-" + storedAssignmentId;
                         createdActionId = actionId;
-                        double detectRoll = RelationshipsService.StableUnit(actionId + "|detect");
+                        double detectRoll = RelationshipsService.StableUnit(actionKey + "|detect");
                         bool detected = detectRoll < 0.25d;
-                        bool attributed = detected && RelationshipsService.StableUnit(actionId + "|attribute") < 0.35d;
+                        bool attributed = detected && RelationshipsService.StableUnit(actionKey + "|attribute") < 0.35d;
                         actions.Add(new Dictionary<string, object>
                         {
                             ["actionId"] = actionId,
+                            ["assignmentId"] = ForeignAgentOccurrenceId(campaignId, timelineId, agent),
+                            ["exposureRevision"] = 0,
                             ["agentHeroStringId"] = agentId, ["sponsorKingdomStringId"] = sponsor,
                             ["settlementStringId"] = ReadString(agent, "settlement_id", ""), ["effectType"] = effect,
                             ["durationDays"] = effect == "construction" ? 14d : 10d,
@@ -466,7 +482,7 @@ namespace ReignBetaServer
                     }
                     double next = day + 1d + Math.Floor(RelationshipsService.StableUnit(agentId + "|" + day.ToString(CultureInfo.InvariantCulture) + "|next") * 20d);
                     SpymasterStore.UpdateForeignAgentAssignments3(connection, new Dictionary<string, object>
-                    { ["day"] = day, ["next"] = next, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["campaign"] = campaignId, ["timeline"] = timelineId, ["agent"] = agentId });
+                    { ["day"] = day, ["next"] = next, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["campaign"] = campaignId, ["timeline"] = timelineId, ["agent"] = agentId }, transaction);
                     if (controlled)
                     {
                         payload["_controlledAgentActionReceipt"] = new Dictionary<string, object>
@@ -483,18 +499,17 @@ namespace ReignBetaServer
                     }
                 }
 
-                List<Dictionary<string, object>> agents = SpymasterStore.SelectForeignAgentAssignments5(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId });
+                var assignments = SpymasterStore.SelectForeignAgentAssignments5(connection,
+                    new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId }, transaction);
+                transaction.Commit();
                 return new Dictionary<string, object>
                 {
-                    ["ok"] = true,
-                    ["agents"] = agents.Select(x => new Dictionary<string, object>
-                    {
-                        ["agentHeroStringId"] = ReadString(x, "agent_hero_id", ""),
-                        ["sponsorKingdomStringId"] = ReadString(x, "sponsor_kingdom_id", ""),
-                        ["settlementStringId"] = ReadString(x, "settlement_id", ""), ["isNotable"] = ReadInt(x, "is_notable", 0) != 0,
-                        ["activated"] = ReadString(x, "status", "") == "active", ["recruitedDay"] = ReadDouble(x, "recruited_day", 0d),
-                        ["nextActionDay"] = ReadDouble(x, "next_action_day", 0d)
-                    }).ToList(),
+                    ["ok"] = true, ["schema"] = ForeignAgentAssignmentSchema,
+                    ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["restoreGeneration"] = generation,
+                    ["agents"] = assignments.Where(x => ReadString(x, "status", "") is "active" or "dormant")
+                        .Select(x => ForeignAgentSnapshot(campaignId, timelineId, x)).ToList(),
+                    ["exposedAgents"] = assignments.Where(x => ReadString(x, "status", "") == "exposed")
+                        .Select(x => ForeignAgentSnapshot(campaignId, timelineId, x)).ToList(),
                     ["actions"] = actions,
                     ["controlledAgentAction"] = payload.TryGetValue("_controlledAgentActionReceipt", out object controlledReceipt)
                         ? controlledReceipt : null
@@ -564,22 +579,109 @@ namespace ReignBetaServer
             return result;
         }
 
+        private const string ForeignAgentAssignmentSchema = "reign-spymaster-foreign-agent-v1";
+
+        private static bool ForeignAgentScopeIsCurrent(ReignDbConnection connection, ReignDbTransaction transaction,
+            Dictionary<string, object> payload, string campaignId, string timelineId, out string generation)
+        {
+            // Direct provider-free fixtures can use a campaign without a transport generation.
+            generation = "";
+            if (!payload.TryGetValue("restoreGeneration", out object requested))
+                return true;
+            generation = ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "");
+            if (requested is not string expected || expected != generation)
+                return false;
+            var scope = new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId };
+            var timelines = SpymasterStore.LockMitigationTimelines(connection, scope, transaction);
+            return timelines.Count == 0 ? timelineId == "main"
+                : timelines.Count == 1 && ReadString(timelines[0], "timeline_id", "") == timelineId
+                    && ReadInt(timelines[0], "is_active", 0) == 1;
+        }
+
+        private static string ForeignAgentOccurrenceId(string campaignId, string timelineId, Dictionary<string, object> row)
+        {
+            string stored = ReadString(row, "assignment_id", "");
+            string hero = ReadString(row, "agent_hero_id", "");
+            if (!string.IsNullOrEmpty(stored))
+                return Sha256Hex(Json.Serialize(new[] { "assigned", campaignId, timelineId, hero, stored }));
+
+            // Exposed heroes are never recycled on a timeline. Old rows have no stored UUID,
+            // so use the immutable recruitment record, independent of ticks and exposure.
+            string sponsor = ReadString(row, "sponsor_kingdom_id", "");
+            string recruited = ReadDouble(row, "recruited_day", 0d).ToString("R", CultureInfo.InvariantCulture);
+            return Sha256Hex(Json.Serialize(new[] { "legacy", campaignId, timelineId, hero, sponsor, recruited }));
+        }
+
+        private static Dictionary<string, object> ForeignAgentSnapshot(string campaignId, string timelineId, Dictionary<string, object> row)
+        {
+            string status = ReadString(row, "status", "");
+            var snapshot = new Dictionary<string, object>
+            {
+                ["assignmentId"] = ForeignAgentOccurrenceId(campaignId, timelineId, row),
+                ["legacyOccurrence"] = string.IsNullOrEmpty(ReadString(row, "assignment_id", "")),
+                ["exposureRevision"] = status == "exposed" ? 1 : 0,
+                ["agentHeroStringId"] = ReadString(row, "agent_hero_id", ""),
+                ["sponsorKingdomStringId"] = ReadString(row, "sponsor_kingdom_id", ""),
+                ["settlementStringId"] = ReadString(row, "settlement_id", ""),
+                ["isNotable"] = ReadInt(row, "is_notable", 0) != 0,
+                ["activated"] = status == "active",
+                ["recruitedDay"] = ReadDouble(row, "recruited_day", 0d),
+                ["nextActionDay"] = ReadDouble(row, "next_action_day", 0d)
+            };
+            if (status == "exposed")
+            {
+                var details = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
+                snapshot["exposedDay"] = details == null ? -1d : ReadDouble(details, "exposedDay", -1d);
+            }
+            return snapshot;
+        }
+
+        private static Dictionary<string, object> ForeignAgentAssignmentError(string error)
+            => new Dictionary<string, object> { ["ok"] = false, ["schema"] = ForeignAgentAssignmentSchema, ["error"] = error };
+
         internal static Dictionary<string, object> SpymasterAgentExposeApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", "default");
-            string timelineId = ReadString(payload, "timelineId", "main");
+            string campaignId = ReadString(payload, "campaignId", "");
+            string timelineId = ReadString(payload, "timelineId", "");
             string agentId = ReadString(payload, "agentHeroId", "");
-            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+            string assignmentId = ReadString(payload, "assignmentId", "");
+            if (string.IsNullOrWhiteSpace(campaignId) || string.IsNullOrWhiteSpace(timelineId)
+                || string.IsNullOrWhiteSpace(agentId) || string.IsNullOrWhiteSpace(assignmentId)
+                || !payload.ContainsKey("restoreGeneration")
+                || !payload.TryGetValue("exposureRevision", out object revision) || revision is not 0)
+                return ForeignAgentAssignmentError("invalid_assignment_exposure");
+
+            using var connection = ReignDatabase.OpenCampaignConnection(campaignId);
+            EnsureSpymasterSchema(connection);
+            using var transaction = connection.BeginTransaction();
+            AcquirePostgreSqlTransactionMutationLock(connection, transaction);
+            if (!ForeignAgentScopeIsCurrent(connection, transaction, payload, campaignId, timelineId, out string generation))
+                return ForeignAgentAssignmentError("assignment_scope_changed");
+            var parameters = new Dictionary<string, object>
             {
-                EnsureSpymasterSchema(connection);
-                SpymasterStore.UpdateForeignAgentAssignments4(connection, new Dictionary<string, object>
-                {
-                    ["payload"] = Json.Serialize(new Dictionary<string, object> { ["exposureReason"] = ReadString(payload, "reason", "exposed") }),
-                    ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["campaign"] = campaignId, ["timeline"] = timelineId, ["agent"] = agentId
-                });
+                ["campaign"] = campaignId, ["timeline"] = timelineId, ["agent"] = agentId
+            };
+            var assignment = SpymasterStore.ReadForeignAgentAssignment(connection, parameters, transaction);
+            if (assignment == null || ForeignAgentOccurrenceId(campaignId, timelineId, assignment) != assignmentId)
+                return ForeignAgentAssignmentError("assignment_not_found");
+            if (ReadString(assignment, "status", "") != "exposed")
+            {
+                var details = TryParseJsonObject(ReadString(assignment, "payload_json", "{}")) ?? new Dictionary<string, object>();
+                details["exposureReason"] = ReadString(payload, "reason", "exposed");
+                details["exposedDay"] = ReadDouble(payload, "worldDay", -1d);
+                parameters["payload"] = Json.Serialize(details);
+                parameters["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                if (!SpymasterStore.ExposeForeignAgentAssignment(connection, parameters, transaction))
+                    return ForeignAgentAssignmentError("assignment_exposure_not_applied");
             }
-            return new Dictionary<string, object> { ["ok"] = true, ["agentHeroId"] = agentId, ["status"] = "exposed" };
+            transaction.Commit();
+            return new Dictionary<string, object>
+            {
+                ["ok"] = true, ["schema"] = ForeignAgentAssignmentSchema, ["status"] = "exposed",
+                ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["restoreGeneration"] = generation,
+                ["agentHeroId"] = agentId, ["assignmentId"] = assignmentId, ["exposureRevision"] = 1
+            };
         }
     }
 }

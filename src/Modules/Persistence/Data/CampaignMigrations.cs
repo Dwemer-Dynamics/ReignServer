@@ -14,6 +14,7 @@ namespace ReignBetaServer
         internal const string CampaignMigrationVersionKey = "campaign_migration_version";
         internal const int PlayerApproachSchemaMigrationVersion = 2;
         internal const int CorrespondenceArrivalHistoryMigrationVersion = 3;
+        private const int ForeignAgentOccurrenceMigrationVersion = 4;
 
         private sealed class CampaignSchemaMigration
         {
@@ -41,6 +42,8 @@ namespace ReignBetaServer
                 "player_approach_tables", RelationshipsService.ApplyPlayerApproachSchemaDdl),
             new CampaignSchemaMigration(CorrespondenceArrivalHistoryMigrationVersion,
                 "correspondence_arrival_history", RelationshipsSchema.ApplyCorrespondenceArrivalHistoryDdl),
+            new CampaignSchemaMigration(ForeignAgentOccurrenceMigrationVersion,
+                "foreign_agent_occurrence", ApplyForeignAgentOccurrenceDdl),
         };
 
         internal static int LatestCampaignMigrationVersion =>
@@ -63,6 +66,21 @@ namespace ReignBetaServer
             ReignDatabase.ExecuteSql(connection, @"DELETE FROM memories
 WHERE source='dialogue_llm'
   AND lower(trim(summary)) IN ('0','1','true','false','null','undefined');");
+        }
+
+        private static void ApplyForeignAgentOccurrenceDdl(ReignDbConnection connection)
+        {
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS foreign_agent_assignments (
+campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,agent_hero_id TEXT NOT NULL,sponsor_kingdom_id TEXT NOT NULL,
+sponsor_ruler_id TEXT NOT NULL DEFAULT '',settlement_id TEXT NOT NULL DEFAULT '',is_notable INTEGER NOT NULL DEFAULT 0,
+status TEXT NOT NULL DEFAULT 'dormant',recruited_day REAL NOT NULL,next_action_day REAL NOT NULL DEFAULT -1,
+last_action_day REAL NOT NULL DEFAULT -1,payload_json TEXT NOT NULL DEFAULT '{}',updated_ts INTEGER NOT NULL,
+assignment_id TEXT NOT NULL DEFAULT '',
+PRIMARY KEY(campaign_id,timeline_id,agent_hero_id));");
+            // Existing backups retain their rows and get an empty identifier. A server
+            // rollback preserves the column and old inserts take the same default.
+            ReignDatabase.ExecuteSql(connection, "ALTER TABLE foreign_agent_assignments ADD COLUMN IF NOT EXISTS assignment_id TEXT NOT NULL DEFAULT '';");
+            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_foreign_agents_sponsor ON foreign_agent_assignments(campaign_id,timeline_id,sponsor_kingdom_id,status);");
         }
 
         // Applies every numbered migration above the schema's recorded version.

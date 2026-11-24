@@ -56,8 +56,56 @@ namespace Reign.Core.Contracts.Actions
         }
     }
 
+    public enum ActionBrowseCategory
+    {
+        PrivateVisit,
+        Give,
+        Government,
+        Court,
+        Campaign,
+        Diplomacy,
+        Politics,
+        Personal,
+        Other
+    }
+
     public static class ReignActionLanguage
     {
+        public static ActionBrowseCategory BrowseCategory(ActionDefinition definition)
+        {
+            if (definition.Id == TavernHouseVisitAction.Id) return ActionBrowseCategory.PrivateVisit;
+            if (definition.Id.StartsWith("give.", StringComparison.Ordinal)) return ActionBrowseCategory.Give;
+            if (definition.NativeObjective.Length > 0 || definition.Family == "strategy"
+                || definition.Id.EndsWith("campaign_order", StringComparison.Ordinal)) return ActionBrowseCategory.Campaign;
+            if (definition.Id is "hire_player_as_mercenary" or "dismiss_player_mercenary" or "offer_player_vassalage" or "dismiss_player_vassal"
+                or "join_clan" or "leave_clan" or "join_kingdom" or "leave_kingdom" or "hire_mercenary_clan" or "create_clan_accord" or "cancel_clan_accord")
+                return ActionBrowseCategory.Politics;
+
+            return definition.Family switch
+            {
+                "government" => ActionBrowseCategory.Government,
+                "court" => ActionBrowseCategory.Court,
+                "campaign" => ActionBrowseCategory.Campaign,
+                "diplomacy" => ActionBrowseCategory.Diplomacy,
+                "politics" => ActionBrowseCategory.Politics,
+                "personal" or "regular" => ActionBrowseCategory.Personal,
+                _ => ActionBrowseCategory.Other
+            };
+        }
+
+        public static string BrowseCategoryLabel(ActionBrowseCategory category) => category switch
+        {
+            ActionBrowseCategory.PrivateVisit => "Arrange a private visit",
+            ActionBrowseCategory.Give => "Give",
+            ActionBrowseCategory.Government => "Government decisions",
+            ActionBrowseCategory.Court => "Court and intelligence",
+            ActionBrowseCategory.Campaign => "Party and military orders",
+            ActionBrowseCategory.Diplomacy => "Diplomacy",
+            ActionBrowseCategory.Politics => "Clan and kingdom",
+            ActionBrowseCategory.Personal => "Personal requests",
+            _ => "Other actions"
+        };
+
         public static string Subject(bool playerActs, int termIndex) => termIndex == 0
             ? playerActs ? "I wish to " : "I would like you to "
             : playerActs ? "and I will " : "and you will ";

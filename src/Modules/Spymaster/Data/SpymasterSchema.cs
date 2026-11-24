@@ -28,19 +28,5 @@ PRIMARY KEY(campaign_id,timeline_id,mission_id));", parameters, transaction);
             ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_spymaster_memory_owner ON spymaster_mission_memory(campaign_id,timeline_id,spymaster_hero_id,started_day DESC);", parameters, transaction);
         }
 
-        internal static void CreateForeignAgentAssignments(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
-        {
-            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS foreign_agent_assignments (
-campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,agent_hero_id TEXT NOT NULL,sponsor_kingdom_id TEXT NOT NULL,
-sponsor_ruler_id TEXT NOT NULL DEFAULT '',settlement_id TEXT NOT NULL DEFAULT '',is_notable INTEGER NOT NULL DEFAULT 0,
-status TEXT NOT NULL DEFAULT 'dormant',recruited_day REAL NOT NULL,next_action_day REAL NOT NULL DEFAULT -1,
-last_action_day REAL NOT NULL DEFAULT -1,payload_json TEXT NOT NULL DEFAULT '{}',updated_ts INTEGER NOT NULL,
-PRIMARY KEY(campaign_id,timeline_id,agent_hero_id));", parameters, transaction);
-        }
-
-        internal static void CreateIndexForeignAgentsSponsor(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
-        {
-            ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_foreign_agents_sponsor ON foreign_agent_assignments(campaign_id,timeline_id,sponsor_kingdom_id,status);", parameters, transaction);
-        }
     }
 }

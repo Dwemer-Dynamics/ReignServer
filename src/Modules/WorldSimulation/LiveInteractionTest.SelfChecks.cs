@@ -1718,8 +1718,9 @@ namespace ReignBetaServer
             add("passive_world_save_receipt_projects_completed_command_result",
                 passiveWorldControlSource.Contains("LastCompletedCommandResult(value)")
                 && passiveWorldControlSource.Contains("return CompactPassiveWorldStatus(runtime, campaignId, timelineId);")
-                && passiveWorldControlSource.Contains("WaitForPassiveWorldPostSaveRuntime(campaignId, saveName)")
-                && passiveWorldControlSource.Contains("PassiveWorldPostSaveRuntimeQuiesced(finalRuntime, saveName)")
+                && passiveWorldControlSource.Contains("WaitForPassiveWorldPostSaveRuntime(campaignId, timelineId, saveName)")
+                && passiveWorldControlSource.Contains("PassiveWorldPostSaveRuntimeQuiesced(finalRuntime, campaignId, timelineId, saveName)")
+                && passiveWorldControlSource.Contains("PassiveWorldNpcLivesBlocker(runtime, campaignId, timelineId).Length == 0")
                 && passiveWorldControlSource.Contains("DateTime.UtcNow.AddSeconds(45)")
                 && passiveWorldControlSource.Contains("TimeSpan.FromSeconds(5)")
                 && passiveWorldControlSource.Contains("ReadLong(relationshipClient, \"clientOutboxDays\", -1) == 0")
@@ -1731,7 +1732,7 @@ namespace ReignBetaServer
                 && passiveWorldControlSource.Contains("ReadObject(result, \"nativeSave\")")
                 && passiveWorldControlSource.Contains("ReadObject(result, \"saveFinalization\")")
                 && passiveWorldControlSource.Contains("CompactPassiveWorldSave(save, finalRuntime)"),
-                "Passive-world status and save receipts stay bounded. Save receipts project the completed save command's nested result and require five stable seconds of current post-save runtime telemetry with Save Sync, diplomacy, relationship input, World History, and native saving all idle, so a successful rolling checkpoint cannot report an empty save name, invalid day, offline placeholder runtime, stale in-flight save state, or a late final-day relationship outbox capture.");
+                "Passive-world status and save receipts stay bounded. Save receipts project the completed save command's nested result and require five stable seconds of current post-save runtime telemetry with NPC Lives, Save Sync, diplomacy, relationship input, World History, and native saving all idle, so a successful rolling checkpoint cannot report an empty save name, invalid day, offline placeholder runtime, stale in-flight save state, or a late final-day relationship outbox capture.");
             add("save_sync_background_writer_barrier_and_bounded_manifest",
                 continuousRelationshipSource.Contains("TryProcessNextRelationshipDayUnderCampaignGate()")
                 && continuousRelationshipSource.Contains("CampaignDataGate.EnterReadLock()")
