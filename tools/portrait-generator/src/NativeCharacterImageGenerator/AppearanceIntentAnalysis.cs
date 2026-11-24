@@ -8,10 +8,10 @@ namespace Bannerlord.NativeCharacterImageGenerator;
 
 internal sealed partial class RuleBasedAppearanceIntentAnalyzer : IAppearanceIntentAnalyzer
 {
-    private static readonly string[] Cultures =
-        ["aserai", "battania", "empire", "khuzait", "nord", "sturgia", "vlandia"];
+    internal const string SuggestionNotice =
+        "Written descriptions provide editable appearance suggestions without a confidence score.";
 
-    public string Name => "Built-in description analyzer";
+    public string Name => "Built-in text suggestions";
     public bool CanAnalyzeImages => false;
 
     public Task<AppearanceIntentV1> AnalyzeAsync(
@@ -27,103 +27,54 @@ internal sealed partial class RuleBasedAppearanceIntentAnalyzer : IAppearanceInt
 
         var text = request.Description.Trim();
         var lower = text.ToLowerInvariant();
-        var confidence = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
-        string Pick(string field, params string[] values)
-        {
-            var match = values.FirstOrDefault(value => lower.Contains(value, StringComparison.Ordinal));
-            if (match is not null)
-            {
-                confidence[field] = 0.72f;
-                return match;
-            }
-            return "unspecified";
-        }
-
-        string PickNear(string field, string nounPattern, params string[] values)
-        {
-            var match = values.FirstOrDefault(value => IsNearFeature(lower, value, nounPattern));
-            if (match is not null)
-            {
-                confidence[field] = 0.82f;
-                return match;
-            }
-            return "unspecified";
-        }
-
-        var age = ReadAge(lower);
-        if (age.HasValue)
-        {
-            confidence["age"] = 0.9f;
-        }
-
-        var sex = lower.Contains("woman", StringComparison.Ordinal)
-            || lower.Contains("female", StringComparison.Ordinal)
-            || lower.Contains(" lady", StringComparison.Ordinal)
-            ? "female"
-            : lower.Contains("man", StringComparison.Ordinal)
-                || lower.Contains("male", StringComparison.Ordinal)
-                || lower.Contains(" gentleman", StringComparison.Ordinal)
-                ? "male"
-                : "unspecified";
-        if (sex != "unspecified")
-        {
-            confidence["sex"] = 0.92f;
-        }
-
-        var culture = Cultures.FirstOrDefault(value => lower.Contains(value, StringComparison.Ordinal))
+        string Pick(params string[] values) =>
+            values.FirstOrDefault(value => lower.Contains(value, StringComparison.Ordinal))
             ?? "unspecified";
-        if (culture != "unspecified")
-        {
-            confidence["culture"] = 0.9f;
-        }
+        string PickNear(string nounPattern, params string[] values) =>
+            values.FirstOrDefault(value => IsNearFeature(lower, value, nounPattern))
+            ?? "unspecified";
 
-        var hairLength = PickNear("hairLength", "hair", "bald", "shaved", "cropped", "short", "shoulder-length", "long");
+        var hairLength = PickNear("hair", "bald", "shaved", "cropped", "short", "shoulder-length", "long");
         if (hairLength == "unspecified" && (ContainsWord(lower, "bald") || ContainsWord(lower, "shaved")))
         {
             hairLength = ContainsWord(lower, "bald") ? "bald" : "shaved";
-            confidence["hairLength"] = 0.82f;
         }
-        var facialHair = Pick("facialHair", "clean-shaven", "clean shaven", "stubble", "mustache", "moustache", "goatee", "full beard", "beard");
-        var faceShape = PickNear("faceShape", "face", "round", "oval", "square", "heart-shaped", "narrow", "long", "angular");
-        var eyeShape = PickNear("eyeShape", "eyes?", "almond-shaped", "almond", "hooded", "deep-set", "deep set", "round", "upturned", "downturned");
+        var sexHints = PositiveHints(SexHintRegex(), lower)
+            .Select(match => match.Groups["female"].Success ? "female" : "male");
+        var cultureHints = PositiveHints(CultureHintRegex(), lower)
+            .Select(match => match.Groups["culture"].Value);
         var marks = new[] { "scar", "freckles", "mole", "birthmark", "weathered", "wrinkles" }
             .Where(value => lower.Contains(value, StringComparison.Ordinal))
             .ToArray();
-        if (marks.Length > 0)
-        {
-            confidence["distinguishingMarks"] = 0.75f;
-        }
 
         var intent = new AppearanceIntentV1
         {
-            Sex = sex,
-            Age = age,
-            Culture = culture,
-            Complexion = PickNear("complexion", "(?:skin|complexion|skin tone)", "very fair", "light olive", "fair", "pale", "porcelain", "alabaster", "olive", "tanned", "tan", "medium", "deep", "dark", "brown"),
-            HairColor = PickNear("hairColor", "hair", "black", "dark brown", "brown", "auburn", "red", "ginger", "strawberry blond", "strawberry blonde", "blond", "blonde", "platinum", "gray", "grey", "white"),
+            Sex = SingleHint(sexHints),
+            Age = ReadAge(lower),
+            Culture = SingleHint(cultureHints),
+            Complexion = PickNear("(?:skin|complexion|skin tone)", "very fair", "light olive", "fair", "pale", "porcelain", "alabaster", "olive", "tanned", "tan", "medium", "deep", "dark", "brown"),
+            HairColor = PickNear("hair", "black", "dark brown", "brown", "auburn", "red", "ginger", "strawberry blond", "strawberry blonde", "blond", "blonde", "platinum", "gray", "grey", "white"),
             HairLength = hairLength,
-            HairTexture = PickNear("hairTexture", "hair", "straight", "wavy", "curly", "coarse"),
-            FacialHair = facialHair,
-            FaceShape = faceShape,
+            HairTexture = PickNear("hair", "straight", "wavy", "curly", "coarse"),
+            FacialHair = Pick("clean-shaven", "clean shaven", "stubble", "mustache", "moustache", "goatee", "full beard", "beard"),
+            FaceShape = PickNear("face", "round", "oval", "square", "heart-shaped", "narrow", "long", "angular"),
             CheekboneProminence = Scale(lower, "high cheekbones", "prominent cheekbones", "soft cheekbones"),
-            EyeColor = PickNear("eyeColor", "eyes?", "blue", "green", "gray", "grey", "hazel", "brown", "dark"),
+            EyeColor = PickNear("eyes?", "blue", "green", "gray", "grey", "hazel", "brown", "dark"),
             EyeSize = Scale(lower, "large eyes", "big eyes", "small eyes"),
             EyeSpacing = Scale(lower, "wide-set eyes", "wide set eyes", "close-set eyes", "close set eyes"),
-            EyeShape = eyeShape,
-            BrowShape = PickNear("browShape", "(?:brows?|eyebrows?)", "thick", "thin", "arched", "straight", "heavy"),
+            EyeShape = PickNear("eyes?", "almond-shaped", "almond", "hooded", "deep-set", "deep set", "round", "upturned", "downturned"),
+            BrowShape = PickNear("(?:brows?|eyebrows?)", "thick", "thin", "arched", "straight", "heavy"),
             NoseLength = Scale(lower, "long nose", "prominent nose", "short nose"),
             NoseWidth = Scale(lower, "broad nose", "wide nose", "narrow nose"),
-            NoseShape = Pick("noseShape", "hooked nose", "aquiline nose", "straight nose", "button nose", "crooked nose", "upturned nose"),
+            NoseShape = Pick("hooked nose", "aquiline nose", "straight nose", "button nose", "crooked nose", "upturned nose"),
             MouthWidth = Scale(lower, "wide mouth", "broad mouth", "small mouth", "narrow mouth"),
             LipFullness = Scale(lower, "full lips", "thick lips", "thin lips"),
-            JawShape = Pick("jawShape", "square jaw", "strong jaw", "broad jaw", "narrow jaw", "soft jaw", "angular jaw"),
-            ChinShape = Pick("chinShape", "strong chin", "prominent chin", "pointed chin", "round chin", "receding chin"),
+            JawShape = Pick("square jaw", "strong jaw", "broad jaw", "narrow jaw", "soft jaw", "angular jaw"),
+            ChinShape = Pick("strong chin", "prominent chin", "pointed chin", "round chin", "receding chin"),
             Weight = ScaleAny(lower, ["heavyset", "stocky", "plump"], ["thin", "slender", "lean"]),
             Build = ScaleAny(lower, ["muscular", "athletic", "broad-shouldered", "broad shouldered", "powerful build"], ["slight build", "slender", "frail"]),
             Height = Scale(lower, "very tall", "tall", "short", "small stature"),
             DistinguishingMarks = marks,
-            Confidence = confidence,
-            OverallConfidence = Math.Clamp(0.35f + confidence.Count * 0.035f, 0.35f, 0.82f),
             SourceSummary = text
         };
         return Task.FromResult(intent);
@@ -131,17 +82,47 @@ internal sealed partial class RuleBasedAppearanceIntentAnalyzer : IAppearanceInt
 
     private static float? ReadAge(string text)
     {
-        var match = AgeRegex().Match(text);
-        if (match.Success
-            && float.TryParse(match.Groups[1].Value, NumberStyles.Number, CultureInfo.InvariantCulture, out var age))
+        var explicitAges = new HashSet<float>();
+        var categoryAges = new HashSet<float>();
+        foreach (Match match in AgeHintRegex().Matches(text))
         {
-            return age;
+            var prefix = text.AsSpan(0, match.Index);
+            if (AmbiguousAgePrefixRegex().IsMatch(prefix)
+                || AmbiguousAgeSuffixRegex().IsMatch(text.AsSpan(match.Index + match.Length)))
+            {
+                return null;
+            }
+            if (NegatedHintPrefixRegex().IsMatch(prefix))
+            {
+                continue;
+            }
+
+            var ageGroup = match.Groups["age"];
+            if (ageGroup.Success)
+            {
+                var age = int.Parse(ageGroup.Value, CultureInfo.InvariantCulture);
+                if (age is < 1 or > 125) return null;
+                explicitAges.Add(age);
+            }
+            else
+            {
+                categoryAges.Add(match.Groups["young"].Success ? 22f
+                    : match.Groups["middle"].Success ? 45f : 68f);
+            }
         }
-        if (text.Contains("young adult", StringComparison.Ordinal)) return 22f;
-        if (text.Contains("middle-aged", StringComparison.Ordinal) || text.Contains("middle aged", StringComparison.Ordinal)) return 45f;
-        if (text.Contains("elderly", StringComparison.Ordinal) || text.Contains("old woman", StringComparison.Ordinal) || text.Contains("old man", StringComparison.Ordinal)) return 68f;
-        return null;
+        var ages = explicitAges.Count > 0 ? explicitAges : categoryAges;
+        return ages.Count == 1 ? ages.Single() : null;
     }
+
+    private static string SingleHint(IEnumerable<string> hints)
+    {
+        var choices = hints.Distinct(StringComparer.Ordinal).Take(2).ToArray();
+        return choices.Length == 1 ? choices[0] : "unspecified";
+    }
+
+    private static IEnumerable<Match> PositiveHints(Regex pattern, string text) =>
+        pattern.Matches(text).Where(match =>
+            !NegatedHintPrefixRegex().IsMatch(text.AsSpan(0, match.Index)));
 
     private static float? Scale(string text, string high, string alternateHigh, string low) =>
         text.Contains(high, StringComparison.Ordinal) || text.Contains(alternateHigh, StringComparison.Ordinal)
@@ -173,8 +154,23 @@ internal sealed partial class RuleBasedAppearanceIntentAnalyzer : IAppearanceInt
     private static bool ContainsWord(string text, string value) =>
         Regex.IsMatch(text, $@"\b{Regex.Escape(value)}\b", RegexOptions.IgnoreCase);
 
-    [GeneratedRegex(@"\b(?:age(?:d)?\s*)?(\d{1,2})(?:\s*years?\s*old)?\b", RegexOptions.IgnoreCase)]
-    private static partial Regex AgeRegex();
+    [GeneratedRegex(@"\b(?:(?:age\s+is\s+|aged?\s*[:=]?\s*)(?<age>[0-9]{1,3})(?![.,][0-9])(?:[\s-]+years?[\s-]+old)?|(?<![0-9][.,])(?<age>[0-9]{1,3})[\s-]+years?[\s-]+old|(?<young>young[\s-]+adult)|(?<middle>middle[\s-]+aged)|elderly|old[\s-]+(?:woman|man))\b")]
+    private static partial Regex AgeHintRegex();
+
+    [GeneratedRegex(@"\b(?:not|never|no|isn['’]t|wasn['’]t|aren['’]t|rather than|instead of)(?:\s+(?:an?|the|actually|quite|really|yet|exactly)){0,3}\s+$", RegexOptions.RightToLeft)]
+    private static partial Regex NegatedHintPrefixRegex();
+
+    [GeneratedRegex(@"(?:\b(?:under|over|at least|at most|(?:younger|older|more|less) than)\s+|\b[0-9]+\s*(?:[-–—/]|\b(?:to|or|and)\b)\s*)$", RegexOptions.RightToLeft)]
+    private static partial Regex AmbiguousAgePrefixRegex();
+
+    [GeneratedRegex(@"^\s*(?:\?|,?\s*(?:[-–—/]|\b(?:to|or|and)\b)\s*(?:an?\s+)?(?:[0-9]|young[\s-]+adult|middle[\s-]+aged|elderly|old[\s-]+(?:woman|man)))")]
+    private static partial Regex AmbiguousAgeSuffixRegex();
+
+    [GeneratedRegex(@"\b(?:(?<female>wom[ae]n|female|lady)|m[ae]n|male|gentleman)\b")]
+    private static partial Regex SexHintRegex();
+
+    [GeneratedRegex(@"\b(?:(?<culture>aserai|empire|khuzait)|(?<culture>battania|sturgia|vlandia)n?|(?<culture>nord)(?:ic)?)\b")]
+    private static partial Regex CultureHintRegex();
 }
 
 internal sealed record AppearanceProviderSettings(string Endpoint, string Model, string ApiKey)
@@ -313,7 +309,8 @@ internal sealed class AppearanceIntentExtractionService(
                     fallback.Name,
                     true,
                     false,
-                    "Provider analysis was unavailable; candidates use the written description only.");
+                    "Provider analysis was unavailable; candidates use the written description only. " +
+                    RuleBasedAppearanceIntentAnalyzer.SuggestionNotice);
             }
         }
 
@@ -329,7 +326,9 @@ internal sealed class AppearanceIntentExtractionService(
             fallback.Name,
             true,
             false,
-            hasImage ? "Vision is unavailable; the reference image was not analyzed." : string.Empty);
+            hasImage ? "Vision is unavailable; the reference image was not analyzed. " +
+                RuleBasedAppearanceIntentAnalyzer.SuggestionNotice
+                : RuleBasedAppearanceIntentAnalyzer.SuggestionNotice);
     }
 }
 
@@ -409,7 +408,7 @@ internal static class AppearanceIntentParser
             Height = Unit(root, "height"),
             DistinguishingMarks = Strings(root, "distinguishingMarks"),
             Confidence = confidence,
-            OverallConfidence = Unit(root, "overallConfidence") ?? 0.5f,
+            OverallConfidence = Unit(root, "overallConfidence"),
             SourceSummary = "Provider-extracted appearance intent"
         };
     }

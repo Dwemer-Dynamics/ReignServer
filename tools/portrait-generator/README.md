@@ -35,7 +35,9 @@ The first startup indexes the relevant native asset packages and may take a few 
 
 ### Appearance Lab analysis providers
 
-Written descriptions always work through the Studio's built-in deterministic analyzer and require no network or Reign server. Optional model-assisted text and portrait analysis uses a provider-neutral OpenAI-compatible adapter. Configure it through process or user environment variables:
+Written descriptions work through the Studio's built-in deterministic analyzer and require no network or Reign server. The analyzer suggests editable traits from words and phrases in the description. A single explicit age or a clear age category can inform a preview. Negated ages, ranges, and unresolved alternatives leave the age hint unspecified. Built-in suggestions carry no confidence scores. Provider or pasted intent scores are supplied by that source and represent its assessment.
+
+Optional model-assisted text and portrait analysis uses a provider-neutral OpenAI-compatible adapter. Configure it through process or user environment variables:
 
 ```text
 NATIVE_CHARACTER_AI_API_KEY=...
