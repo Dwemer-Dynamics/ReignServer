@@ -43,6 +43,7 @@ namespace ReignBetaServer
         {
             lock (Program.FileLock)
             {
+                PersistenceService.RequireSaveSyncPathAvailable(baseline.Directory);
                 // Check the current campaign bytes before either the fallback master or the custom pair can change.
                 // The v2 marker also distinguishes a newer outfit confirmation with identical image bytes.
                 if (CapturePortraitRefreshBaseline(baseline.Directory) != baseline)

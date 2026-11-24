@@ -72,11 +72,13 @@ namespace ReignBetaServer
             string campaign = ReadString(payload, "campaignId", ""), hero = ReadString(payload, "heroStringId", ""),
                 player = ReadString(payload, "playerHeroId", ""), timeline = ReadString(payload, "timelineId", ""),
                 id = ReadString(payload, "operationId", "");
-            if (!OutfitSafeId(campaign) || campaign == "_shared" || !OutfitSafeId(hero) || !OutfitSafeId(player)
+            if (!IsOutfitStorageId(campaign) || !IsOutfitStorageId(hero) || !OutfitSafeId(player)
                 || !OutfitSafeId(timeline) || !Guid.TryParseExact(id, "N", out _)) return OutfitFailure("Invalid outfit request identity.");
             string key = campaign + "|" + timeline + "|" + hero + "|" + player + "|" + id;
             lock (OutfitChangeGate)
             {
+                var pending = TryAdmitOutfitRequest(action, campaign, hero, id, payload);
+                if (pending != null) return pending;
                 foreach (var expired in OutfitChanges.Where(p => p.Value.Expires < DateTime.UtcNow).ToArray())
                 {
                     expired.Value.Status = "cancelled";
@@ -145,12 +147,16 @@ namespace ReignBetaServer
                 try
                 {
                     CommitOutfit(op);
-                    DialogueService.InvalidatePromptRuntimeCache();
-                    op.Status = "committed";
-                    op.Before = null;
-                    return OutfitResponse(op, true);
+                }
+                catch (OutfitRecoveryPendingException)
+                {
+                    return OutfitRecoveryStatus(campaign);
                 }
                 catch (Exception ex) { return OutfitFailure("The outfit could not be saved: " + ex.Message); }
+                op.Status = "committed";
+                op.Before = null;
+                DialogueService.InvalidatePromptRuntimeCache();
+                return OutfitResponse(op, true);
             }
         }
 
@@ -256,16 +262,17 @@ namespace ReignBetaServer
             Action<string> markProfileDirty = string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)
                 && !op.Campaign.Contains('.') ? PersistenceService.MarkSaveSyncActiveStateDirtyForPath : null;
             CommitOutfitInDirectory(op, CampaignFileService.CharacterDirectory(op.Campaign, op.Hero),
-                markProfileDirty: markProfileDirty);
+                markProfileDirty: markProfileDirty, durable: true);
         }
 
         // The production path is campaign-owned; contracts supply a disposable directory.
         private static void CommitOutfitInDirectory(OutfitChangeOperation op, string characterDirectory,
             Action<string, byte[]> write = null, Action<string, byte[]> restore = null,
-            Action<string> markProfileDirty = null)
+            Action<string> markProfileDirty = null, bool durable = false)
         {
             lock (Program.FileLock)
             {
+                if (durable) PersistenceService.RequireSaveSyncCampaignAvailable(op.Campaign);
                 if (OutfitStoredPortraitHashInDirectory(characterDirectory) != op.StoredSourceHash)
                     throw new InvalidOperationException("The portrait changed while the preview was open. Cancel and try again.");
                 if (!ReadBool(op.PortraitReceipt, "accepted", false)
@@ -298,8 +305,9 @@ namespace ReignBetaServer
                     new(markerPath, Encoding.UTF8.GetBytes(Json.Serialize(BuildOutfitConfirmation(op.Campaign, op.Hero, outfit))))
                 };
                 // profile.json is temporal Save Sync state. Publish dirty before any outfit file can change.
-                CommitOutfitFiles(writes, write ?? WriteSharedPortraitAtomic, restore,
-                    markProfileDirty == null ? null : () => markProfileDirty(profilePath));
+                Action markDirty = markProfileDirty == null ? null : () => markProfileDirty(profilePath);
+                if (durable) CommitOutfitWithJournal(op, characterDirectory, writes, markDirty);
+                else CommitOutfitFiles(writes, write ?? WriteSharedPortraitAtomic, restore, markDirty);
             }
         }
 

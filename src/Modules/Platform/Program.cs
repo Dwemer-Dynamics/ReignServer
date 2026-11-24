@@ -257,6 +257,8 @@ namespace ReignBetaServer
                 if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("ReignServer runs inside its own Linux WSL distro.");
                 if (HasArg(args, "--continuity-repair"))
                 {
+                    using var ownership = HasArg(args, "--apply") ? PortraitsService.AcquireOutfitRuntimeOwnership(
+                        ReignPostgreSqlStorage.Options.IsValidation ? DataDir : "/var/www/html/ReignServer/data") : null;
                     var repair = DialogueService.RunConversationContinuityRepairCli(args);
                     Console.WriteLine(Json.Serialize(repair));
                     Environment.ExitCode = ReadBool(repair, "ok", false) ? 0 : 1;
@@ -315,6 +317,10 @@ namespace ReignBetaServer
                 Console.WriteLine(Json.Serialize(CharactersService.GenerateCharacterProfileLibrary(args ?? new string[0])));
                 return;
             }
+#if !REIGN_EXCLUDE_VERIFICATION
+            if (PortraitsService.TryRunOutfitRecoveryFixtureCommand(args)) return;
+#endif
+            using var ownership = PortraitsService.AcquireOutfitRuntimeOwnership(DataDir);
             SettingsService.MigrateLegacyRuntimeDataIfNeeded();
             Directory.CreateDirectory(DataDir);
             Directory.CreateDirectory(LogsDir);
@@ -323,7 +329,9 @@ namespace ReignBetaServer
             Directory.CreateDirectory(TestsDir);
             CampaignFileService.CompactOperationalLogsAtStartup();
             PersistenceService.PurgeLegacySaveSyncSnapshotsAtStartup();
+            PortraitsService.DiscoverOutfitPublicationsAtStartup();
             PersistenceService.CleanupAllSaveSyncRecoveryAtStartup();
+            PortraitsService.RecoverOutfitPublicationsAtStartup();
             CampaignFileService.CleanupInternalCampaignArtifactsAtStartup();
             VerificationService.PruneTestRuns(100);
             PromptService.EnsurePromptTemplates();

@@ -11,6 +11,147 @@ namespace ReignBetaServer
 {
     internal static partial class PortraitsService
     {
+        private const string OutfitRecoveryFixtureCampaign = "outfit_recovery_selftest";
+        private const string OutfitRecoveryFixtureHero = "hero";
+        private const string OutfitRecoveryFixtureFlag = "--run-outfit-recovery-fixture";
+
+        private static string OutfitRecoveryFixtureHome => Path.Combine(Program.DataDir, "tests", "outfit-recovery-fixtures");
+
+        internal static bool TryRunOutfitRecoveryFixtureCommand(string[] args)
+        {
+            if (!args.Contains(OutfitRecoveryFixtureFlag, StringComparer.Ordinal)) return false;
+            if (Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") != "1"
+                || Environment.GetEnvironmentVariable("REIGN_DB_NAME") != ReignPostgreSqlOptions.ValidationDatabaseName
+                || args.Length != 3 || args[0] != OutfitRecoveryFixtureFlag
+                || !Guid.TryParseExact(args[1], "N", out Guid id) || args[1] != id.ToString("N"))
+                throw new InvalidOperationException("An outfit restart fixture needs canonical validation ownership.");
+
+            string fixtureRoot = Path.Combine(OutfitRecoveryFixtureHome, args[1]);
+            string owner = Path.Combine(fixtureRoot, "fixture-owner");
+            if (!RequireOutfitPhysicalPath(OutfitRecoveryFixtureHome, owner, directory: false) || File.ReadAllText(owner) != args[1])
+                throw new InvalidOperationException("The outfit restart fixture has no exact owner marker.");
+
+            string root = Path.Combine(fixtureRoot, "campaigns");
+            string journalRoot = Path.Combine(OutfitCampaignJournalRoot(root, OutfitRecoveryFixtureCampaign), OutfitRecoveryFixtureHero);
+            string characterRoot = OutfitCharacterRoot(root, OutfitRecoveryFixtureCampaign, OutfitRecoveryFixtureHero);
+            using var lease = AcquireOutfitRuntimeOwnership(fixtureRoot);
+            if (args[2] == "recover")
+            {
+                Program.CampaignsRootOverride.Value = root;
+                DiscoverOutfitPublicationsAtStartup();
+                var initial = OutfitRecoveryStatus(OutfitRecoveryFixtureCampaign);
+                if (ReadString(initial, "journalKind", "") != "outfit")
+                    throw new InvalidDataException("Startup did not discover an outfit ownership fence.");
+                try
+                {
+                    CampaignFileService.CharacterDirectory(OutfitRecoveryFixtureCampaign, OutfitRecoveryFixtureHero);
+                    throw new InvalidDataException("The discovered outfit journal did not fence campaign reads.");
+                }
+                catch (PersistenceService.SaveSyncCampaignFencedException ex)
+                    when (ReadString(ex.Status, "journalKind", "") == "outfit") { }
+                RecoverOutfitPublicationsAtStartup();
+                Environment.ExitCode = OutfitRecoveryStatus(OutfitRecoveryFixtureCampaign) == null ? 0 : 87;
+                return true;
+            }
+
+            if (!int.TryParse(args[2], out int prefix) || prefix < 0 || prefix > OutfitFileRoles.Length + 1)
+                throw new InvalidDataException("The outfit test publication boundary was invalid.");
+            var writes = OutfitFileRoles.Select((role, i) => new KeyValuePair<string, byte[]>(
+                OutfitRolePath(characterRoot, role), new byte[] { (byte)(80 + i), 127 })).ToArray();
+            var journal = StageOutfitFileJournal(journalRoot, characterRoot, OutfitRecoveryFixtureCampaign,
+                OutfitRecoveryFixtureHero, args[1], writes);
+            for (int i = 0; i < Math.Min(prefix, writes.Length); i++)
+                PersistenceService.WriteRecoveryFile(writes[i].Key, writes[i].Value, mode: journal.Entries[i].BeforeMode);
+            if (prefix > writes.Length) CommitOutfitFileJournal(journalRoot, characterRoot, journal);
+            // Terminate without running recovery or managed lock disposal. The OS owns the
+            // release; a separate invocation has to reconstruct the result from disk.
+            Environment.Exit(86);
+            return true;
+        }
+
+        private static void RunOutfitRestartChild(string id, string phase, int expectedExit)
+        {
+            string executable = Environment.ProcessPath;
+            var start = new System.Diagnostics.ProcessStartInfo(executable)
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            if (Path.GetFileNameWithoutExtension(executable).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+                start.ArgumentList.Add(typeof(PortraitsService).Assembly.Location);
+            start.ArgumentList.Add(OutfitRecoveryFixtureFlag);
+            start.ArgumentList.Add(id);
+            start.ArgumentList.Add(phase);
+            using var child = System.Diagnostics.Process.Start(start);
+            var output = child.StandardOutput.ReadToEndAsync();
+            var error = child.StandardError.ReadToEndAsync();
+            if (!child.WaitForExit(30000))
+            {
+                child.Kill();
+                child.WaitForExit(5000);
+                throw new IOException("The isolated outfit restart child did not exit.");
+            }
+            if (child.ExitCode != expectedExit)
+                throw new IOException("Outfit restart child returned " + child.ExitCode + ": " + output.Result + error.Result);
+        }
+
+        private static bool VerifyOutfitProcessRecovery(int prefix, bool tamper = false, bool omitOptionalBefore = false)
+        {
+            if (Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") != "1"
+                || Environment.GetEnvironmentVariable("REIGN_DB_NAME") != ReignPostgreSqlOptions.ValidationDatabaseName)
+                throw new InvalidOperationException("Outfit process verification requires the isolated canonical validation database.");
+            string id = Guid.NewGuid().ToString("N");
+            string fixtureRoot = Path.Combine(OutfitRecoveryFixtureHome, id);
+            Directory.CreateDirectory(fixtureRoot);
+            string root = Path.Combine(fixtureRoot, "campaigns");
+            string characterRoot = OutfitCharacterRoot(root, OutfitRecoveryFixtureCampaign, OutfitRecoveryFixtureHero);
+            string[] files = OutfitFileRoles.Select(role => OutfitRolePath(characterRoot, role)).ToArray();
+            string active = Path.Combine(OutfitCampaignJournalRoot(root, OutfitRecoveryFixtureCampaign), OutfitRecoveryFixtureHero, OutfitFileJournalName);
+            var before = files.Select((_, i) => i % 3 == 0 ? null : i % 3 == 1 ? Array.Empty<byte>() : new byte[] { (byte)i }).ToArray();
+            try
+            {
+                File.WriteAllText(Path.Combine(fixtureRoot, "fixture-owner"), id);
+                for (int i = 0; i < files.Length; i++)
+                    if (before[i] != null) PersistenceService.WriteRecoveryFile(files[i], before[i],
+                        mode: UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead);
+                RunOutfitRestartChild(id, prefix.ToString(System.Globalization.CultureInfo.InvariantCulture), 86);
+                bool offlineFenced;
+                try { RequireOfflineOutfitCampaignAvailable(root, OutfitRecoveryFixtureCampaign); offlineFenced = false; }
+                catch (InvalidOperationException) { offlineFenced = true; }
+                if (!offlineFenced) return false;
+
+                if (tamper) PersistenceService.WriteRecoveryFile(files[0], new byte[] { 6, 7, 8 });
+                if (omitOptionalBefore)
+                {
+                    var corrupt = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(active));
+                    corrupt["Entries"][0].AsObject().Remove("BeforeSha256");
+                    File.WriteAllText(active, corrupt.ToJsonString());
+                }
+                bool refused = tamper || omitOptionalBefore;
+                bool committed = prefix > files.Length;
+                string[] hashes = files.Select(path => OutfitHashOrAbsent(ReadOutfitFileOrAbsent(path))).ToArray();
+                RunOutfitRestartChild(id, "recover", refused ? 87 : 0);
+                if (refused)
+                    return File.Exists(active) && hashes.SequenceEqual(files.Select(path => OutfitHashOrAbsent(ReadOutfitFileOrAbsent(path))));
+                if (File.Exists(active)) return false;
+                RequireOfflineOutfitCampaignAvailable(root, OutfitRecoveryFixtureCampaign);
+                for (int i = 0; i < files.Length; i++)
+                {
+                    byte[] expected = committed ? new byte[] { (byte)(80 + i), 127 } : before[i];
+                    if (OutfitHashOrAbsent(ReadOutfitFileOrAbsent(files[i])) != OutfitHashOrAbsent(expected)) return false;
+                    if (before[i] != null && OperatingSystem.IsLinux() && File.GetUnixFileMode(files[i])
+                        != (UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead)) return false;
+                }
+                return true;
+            }
+            finally
+            {
+                if (RequireOutfitPhysicalPath(OutfitRecoveryFixtureHome, fixtureRoot, directory: true))
+                    Directory.Delete(fixtureRoot, recursive: true);
+            }
+        }
+
         internal static List<Dictionary<string, object>> RunOutfitChangeContractTests()
         {
             var rows = new List<Dictionary<string, object>>();
@@ -19,6 +160,11 @@ namespace ReignBetaServer
                 try { AddSharedPortraitSelfTest(rows, "outfit_" + name, run(), "Provider-free outfit contract."); }
                 catch (Exception ex) { AddSharedPortraitSelfTest(rows, "outfit_" + name, false, ex.Message); }
             }
+            Check("interrupted_publication_recovers_each_prefix", () =>
+                Enumerable.Range(0, OutfitFileRoles.Length + 1).All(prefix => VerifyOutfitProcessRecovery(prefix)));
+            Check("durable_commit_survives_hard_exit_before_cleanup", () => VerifyOutfitProcessRecovery(OutfitFileRoles.Length + 1));
+            Check("restart_refuses_unowned_live_bytes", () => VerifyOutfitProcessRecovery(1, tamper: true));
+            Check("restart_rejects_omitted_authoritative_absence", () => VerifyOutfitProcessRecovery(1, omitOptionalBefore: true));
             var player = new Dictionary<string, object> { ["heroStringId"] = "player", ["clanId"] = "clan_a", ["kingdomId"] = "realm_a", ["isRuler"] = false, ["sovereignHeroStringId"] = "other" };
             var npc = new Dictionary<string, object> { ["heroStringId"] = "npc", ["clanId"] = "clan_a", ["kingdomId"] = "realm_a", ["age"] = 25, ["isAlive"] = true };
             Check("own_clan", () => OutfitEligible(npc, player));
