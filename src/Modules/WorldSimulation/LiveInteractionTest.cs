@@ -535,7 +535,13 @@ namespace ReignBetaServer
             if (run == null || run.Count == 0) return new Dictionary<string, object> { ["ok"] = true, ["found"] = false, ["campaignId"] = campaignId };
             Dictionary<string, object> response = LiveTestRunSummary(run, true);
             response["found"] = true;
-            if (includeEvidence) response["auditEvidence"] = CollectLiveTestAuditEvidence(run);
+            if (includeEvidence)
+            {
+                response["auditEvidence"] = CollectLiveTestAuditEvidence(run);
+                if (IsLiveTestExecutionEvidenceRun(run) && ReadString(run, "campaignId", "") == campaignId
+                    && (string.IsNullOrWhiteSpace(runId) || ReadString(run, "runId", "") == runId))
+                    response["partyAgencyCompletedSendEvidence"] = ReadCompletedPartyAgencySendEvidence(run);
+            }
             return response;
         }
 

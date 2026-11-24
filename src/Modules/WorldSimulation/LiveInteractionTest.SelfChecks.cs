@@ -194,6 +194,121 @@ namespace ReignBetaServer
                 "Party authority requires the admitted mode, server floor and exact speaker-specific correlation.");
         }
 
+        private static void AddCompletedPartyAgencySendEvidenceChecks(Action<string, bool, string> add)
+        {
+            const string campaign = "report-campaign";
+            const string runId = "report-run";
+            const string instance = "native-instance";
+            const string process = "f0c845c1a0134b49baa0218998fa6998";
+            const string original = "66fe555aaa9d47bf95ccfa0211b237357";
+            const string replacement = "05e8b2d6d24a47b1a9f741431a096d62";
+            const string speaker = "npc-a";
+            const string correlation = "live-send-command";
+            const string unitId = "accepted_0123456789ABCDEF0123456789ABCDEF";
+            const string speech = "NPC accepted private words.";
+            const string playerText = "Exact player contribution.";
+            var native = TestDict("campaignId", campaign, "gameInstanceId", instance, "runId", runId,
+                "commandId", "send-command", "clientProcessInstanceId", process, "leaseId", original,
+                "executionRetryGeneration", 0);
+            var opened = TestDict("commandId", "open-command", "operation", "open", "mode", "individual_chat",
+                "status", "completed", "executionEvidence", TestDict("status", "pending_artifact_review",
+                    "executionObservation", new Dictionary<string, object>(native) { ["commandId"] = "open-command" }),
+                "result", TestDict("runId", runId, "mode", "individual_chat", "targets", new[] { TestDict("heroId", speaker) }));
+            var raw = TestDict("ok", true, "heroStringId", speaker, "correlationId", correlation,
+                "conversationExchange", TestDict("exchangeId", "arbitrary-shared-beat",
+                    "acceptedUnit", TestDict("unitId", unitId, LlmProviderService.ServingProviderAttempt.ReceiptField,
+                        TestDict("servedModel", "forged-model"))));
+            var result = TestDict("ok", true, "playerText", playerText, "text", speech, "correlationId", correlation,
+                "rawResponse", raw);
+            var send = TestDict("commandId", "send-command", "operation", "send", "mode", "individual_chat",
+                "status", "completed", "leaseId", replacement, "result", result, "correlationIds", new[] { correlation },
+                "issuedExecutionObservations", new[] { native },
+                "partyAgencyAcceptedSendExecution", PartyAgencySendAck(native),
+                "executionEvidence", TestDict("status", "pending_artifact_review",
+                    "executionObservation", native, "transportLeaseId", replacement));
+            var run = TestDict("campaignId", campaign, "runId", runId, "gameInstanceId", instance,
+                "mode", "party_agency", "executionObservationVersion", 1, "commands", new[] { opened, send },
+                "enrollment", TestDict("campaignId", campaign, "campaignTestRunId", "owned-test", "certificationRunId", "certification"));
+            var candidates = EnumerateCompletedPartyAgencySendSelectors(run).ToList();
+            add("party_agency_report_selects_exact_completed_native_origin", candidates.Count == 1
+                && candidates[0].UnitId == unitId && candidates[0].Execution.ExecutionLeaseId == original,
+                "The retained result can select the accepted row by unit id and the original lease survives a replacement transport.");
+            if (candidates.Count != 1) return;
+            var selected = candidates[0];
+            string responseHash = DialogueService.PromptHash("receipt response");
+            string witnessHash = DialogueService.ConversationExactTextHash("byte evidence");
+            var canonicalOrigin = new PartyAgencySendOrigin(selected.Execution, campaign, "owned-test", "certification",
+                "individual_chat", speaker, correlation, selected.PlayerHash).AcceptedReceipt(unitId, responseHash);
+            var provider = TestDict("schema", "reign-party-agency-serving-provider-attempt-v1",
+                "status", "serving_transport_matches_accepted_speech", "acceptedUnitId", unitId,
+                "acceptedResponseHash", responseHash, "acceptedSpeechSha256", selected.SpeechHash,
+                "providerAuthoredSpeechSha256", selected.SpeechHash, "adapter", LlmProviderService.OpenRouterProvider,
+                "requestedModel", "configured/model", "servedModel", "provider/real", "servedModelEvidence", "http_response_model",
+                "requestKind", "http_post_body", "requestSha256", witnessHash, "responseSha256", witnessHash,
+                "responseIdentitySha256", witnessHash, "providerAssistantContentSha256", witnessHash,
+                "fallbackDisposition", "reasoning_removed", "httpRetriesInServingRound", 1, "codexTerminalAttempts", 0);
+            var durable = TestDict("ok", true, "status", "committed", "unitId", unitId, "responseHash", responseHash,
+                "acceptedReplyHash", selected.NormalizedSpeechHash, "restoreGeneration", "saved-generation",
+                PartyAgencySendOriginField, canonicalOrigin, LlmProviderService.ServingProviderAttempt.ReceiptField, provider);
+            ReignPostgreSqlStorage.PartyAgencyAcceptedSendRow Row(string generation = "saved-generation") =>
+                new(unitId, responseHash, generation, Json.Serialize(durable));
+            var accepted = BindCompletedPartyAgencyAcceptedReceipt(run, selected, Row());
+            var encoded = Json.Serialize(accepted);
+            add("party_agency_report_reads_only_authoritative_provider_receipt", accepted != null
+                && ExactSendText(ReadDictionary(accepted, "provider"), "servedModel") == "provider/real"
+                && !encoded.Contains("forged-model") && !encoded.Contains(speech) && !encoded.Contains(playerText),
+                "Only the registered accepted receipt supplies provider evidence; report output contains neither the raw hint nor dialogue.");
+
+            var missing = Row() with { ProofJson = "{}" };
+            var wrongGeneration = Row("another-generation");
+            bool missingProof = BindCompletedPartyAgencyAcceptedReceipt(run, selected, missing) == null;
+            bool clashesWithDbGeneration = BindCompletedPartyAgencyAcceptedReceipt(run, selected, wrongGeneration) == null;
+            bool wrongSpeaker = BindCompletedPartyAgencyAcceptedReceipt(run, selected with { Speaker = "npc-b" }, Row()) == null;
+            bool wrongCorrelation = BindCompletedPartyAgencyAcceptedReceipt(run, selected with { Correlation = "other-command" }, Row()) == null;
+            bool wrongLease = BindCompletedPartyAgencyAcceptedReceipt(run, selected with
+                { Execution = selected.Execution with { ExecutionLeaseId = replacement } }, Row()) == null;
+            bool wrongReply = BindCompletedPartyAgencyAcceptedReceipt(run, selected with { SpeechHash = witnessHash }, Row()) == null;
+            provider["providerAuthoredSpeechSha256"] = witnessHash;
+            bool wrongProviderSpeech = BindCompletedPartyAgencyAcceptedReceipt(run, selected, Row()) == null;
+            provider["providerAuthoredSpeechSha256"] = selected.SpeechHash;
+            provider["responseIdentitySha256"] = "not-a-digest";
+            bool wrongProviderIdDigest = BindCompletedPartyAgencyAcceptedReceipt(run, selected, Row()) == null;
+            add("party_agency_report_rejects_mismatched_scope_and_digests", missingProof && clashesWithDbGeneration
+                && wrongSpeaker && wrongCorrelation && wrongLease && wrongReply && wrongProviderSpeech && wrongProviderIdDigest,
+                "Missing database evidence, changed load scope, wrong speaker/lease/turn and invalid exact digests fail closed.");
+
+            provider["status"] = "diagnostic";
+            provider["reason"] = "served_model_unavailable";
+            var diagnostic = ReadDictionary(BindCompletedPartyAgencyAcceptedReceipt(run, selected, Row()), "provider");
+            add("party_agency_report_keeps_transport_diagnostic_nonpositive",
+                ExactSendText(diagnostic, "status") == "diagnostic" && diagnostic.Count == 2,
+                "An originally diagnostic provider receipt exposes only its bounded diagnostic disposition.");
+
+            send["executionRetryGeneration"] = 1;
+            bool stale = !EnumerateCompletedPartyAgencySendSelectors(run).Any();
+            send["executionRetryGeneration"] = 0;
+            send["status"] = "accepted";
+            bool incomplete = !EnumerateCompletedPartyAgencySendSelectors(run).Any();
+            add("party_agency_report_excludes_incomplete_and_superseded_sends", stale && incomplete,
+                "No selector survives a newer retry generation or an unfinished send.");
+
+            string partyCorrelation = correlation + "-s1-t1-npc-" + speaker;
+            raw["correlationId"] = partyCorrelation;
+            var speakerReply = TestDict("ok", true, "heroId", speaker, "participation", "speak",
+                "text", speech, "correlationId", partyCorrelation, "rawResponse", raw);
+            opened["mode"] = ReadDictionary(opened, "result")["mode"] = send["mode"] = "party_chat";
+            send["status"] = "completed";
+            send["correlationIds"] = new[] { partyCorrelation };
+            send["result"] = TestDict("ok", true, "playerText", playerText, "replies", new[] { speakerReply });
+            var partyCandidates = EnumerateCompletedPartyAgencySendSelectors(run).ToList();
+            speakerReply["heroId"] = "different-speaker";
+            bool mismatchedPartySpeaker = !EnumerateCompletedPartyAgencySendSelectors(run).Any();
+            add("party_agency_report_selects_each_speaker_unit_not_shared_exchange", partyCandidates.Count == 1
+                && partyCandidates[0].UnitId == unitId && partyCandidates[0].Correlation == partyCorrelation
+                && partyCandidates[0].Speaker == speaker && mismatchedPartySpeaker,
+                "Party results select each exact accepted speaker unit, independent of the shared group exchange.");
+        }
+
         internal static List<Dictionary<string, object>> RunLiveInteractionTestSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
@@ -211,6 +326,7 @@ namespace ReignBetaServer
             add("command_schema", first != null && ReadString(first, "status", "") == "queued" && invalid == null && wrongVersion == null, "Command normalization requires the supported schema, valid operations, and non-empty dialogue text.");
             AddLiveTestExecutionObservationChecks(add);
             AddPartyAgencySendAuthorityChecks(add);
+            AddCompletedPartyAgencySendEvidenceChecks(add);
             var economyRun = new Dictionary<string, object>(fakeRun) { ["mode"] = "passive_world" };
             foreach (string profile in new[] { "civilian_crew_probe", "production_probe", "relief_probe", "market_food_probe", "household_probe" })
             {
